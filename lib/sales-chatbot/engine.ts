@@ -1075,8 +1075,7 @@ async function chatTurnCore(
       // chữ bot; khách chưa từng tự gọi tên món đó) ⇒ người ngay lần đầu (#855); món đó đã nằm trong
       // đơn nháp ⇒ cờ CẦN NGƯỜI KIỂM «món khách chưa đồng ý» trên đơn (tuyến giao giữ REVIEW_OPEN nếu đơn đã được xác nhận).
       // Chỉ tin khách của LƯỢT MUA HIỆN TẠI: sau mốc chốt đơn của lượt mua trước (khách cũ cùng luồng Messenger).
-      const roundAt = Math.max(...(st0.pastOrders ?? []).map((o) => Date.parse(o.at)).filter((n) => Number.isFinite(n)), -Infinity);
-      const customerEarlier = customerTextsSince(msgs.map((m) => ({ role: m.role, at: m.at, text: textOf(m.content), toolResult: m.content.some((b) => b.type === "tool_result") })), Number.isFinite(roundAt) ? new Date(roundAt) : null);
+      const customerEarlier = customerTextsSince(customerMsgsOf(msgs), purchaseRoundStart(st0));
       const denied = botProposedDenial(text, cartBefore, st0.proposedItems ?? [], Boolean(st0.draft?.orderId), customerEarlier);
       const wants = customerHandoffVerdict({ text, objections: tally?.n ?? 0, objectionNow, onCustomerRequest: cfg.handoff.onCustomerRequest, deniedBotItem: denied !== null });
       if (wants) {
@@ -1270,7 +1269,11 @@ async function chatTurnCore(
     // Tin KHÁCH thô (cũ ⇒ mới) trong cùng cửa sổ — căn cứ đọc ĐỊA CHỈ KHÁCH TỰ GÕ (P0 15/10/2026: dòng model chép vào công cụ có thể mất
     // phường khách đã ghi rõ) và hàng rào «địa chỉ đã biết không hỏi lại» (`address-memory.ts`).
     const customerTexts = [...msgs.slice(Math.max(0, msgs.length - SALES_CHATBOT_LIMITS.historyMessages)).filter((m) => m.role === "user" && !m.content.some((b) => b.type === "tool_result")).map((m) => textOf(m.content)), text];
-    const customerSaid = buyingText(customerTexts);
+    // CĂN CỨ «khách đã gọi tên món» chỉ lấy chữ khách của LƯỢT MUA HIỆN TẠI (review PR #873): khách cũ cùng luồng Messenger — «Cho chị 1kg
+    // chả cá thu» của lượt mua TRƯỚC không phải căn cứ cho chả cá bot tự thêm ở lượt này. Cùng mốc với đường phủ nhận (`purchaseRoundStart`),
+    // tính MỘT lần, dùng cho cả báo giá (calculate_cart) lẫn lên / sửa / chốt đơn (`lineBasisViolation`).
+    const roundCustomerTexts = [...customerTextsSince(customerMsgsOf(msgs), purchaseRoundStart(st0)), text];
+    const customerSaid = buyingText(roundCustomerTexts);
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
     let deliveredText: string | null = null;
@@ -1464,7 +1467,7 @@ async function chatTurnCore(
         const results: AiBlock[] = [];
         for (const u of uses) {
           const confirmedBefore = Boolean(state.confirmed);
-          const r = await executeTool(u.name, u.input, { autoConfirm, prevTurn, conversationId: conv.id, customerSaid, customerTexts, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
+          const r = await executeTool(u.name, u.input, { autoConfirm, prevTurn, conversationId: conv.id, customerSaid, customerTexts, roundCustomerTexts, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
           // Tổng máy chủ vừa tính vào sổ `seenTotals` — hàng rào chặn nói lại tổng của giỏ CŨ (review vòng 3).
           state = r.state;
           state = noteSeenTotals(state);
@@ -1692,6 +1695,17 @@ export async function appendContextMessages(conversationId: string, items: reado
       }
     }
   }
+}
+
+/** Mốc bắt đầu LƯỢT MUA HIỆN TẠI: lúc chốt của đơn gần nhất đã sang `pastOrders`; chưa có ⇒ `null` (cả hội thoại). HÀM THUẦN. */
+export function purchaseRoundStart(st: Pick<ChatState, "pastOrders">): Date | null {
+  const at = Math.max(...(st.pastOrders ?? []).map((o) => Date.parse(o.at)).filter((n) => Number.isFinite(n)), -Infinity);
+  return Number.isFinite(at) ? new Date(at) : null;
+}
+
+/** Tin lưu trữ ⇒ dạng `customerTextsSince` đọc (chữ thô, mốc, cờ kết quả công cụ). HÀM THUẦN. */
+function customerMsgsOf(msgs: readonly { role: "user" | "assistant"; content: AiBlock[]; at: Date }[]): { role: "user" | "assistant"; at: Date; text: string; toolResult: boolean }[] {
+  return msgs.map((m) => ({ role: m.role, at: m.at, text: textOf(m.content), toolResult: m.content.some((b) => b.type === "tool_result") }));
 }
 
 /** Khách nhắn quá chừng này sau khi bot chốt đơn ⇒ lượt mua mới (đơn cũ sang `pastOrders`). Trong khoảng này AI vẫn trả lời (12/10/2026). */

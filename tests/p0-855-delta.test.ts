@@ -16,11 +16,11 @@ import { and, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { orderReviewOf, reviewCodes } from "@/lib/constants/order-review";
 import { createProductCore } from "@/lib/records/product-create";
-import { botProposedDenial, buyingText, customerTextsSince, deniedItemLabel, mentionText, unrequestedProducts, type AskedLine, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
+import { applyCustomerCartMessage, botProposedDenial, buyingText, customerTextsSince, deniedItemLabel, mentionText, unrequestedProducts, type AskedLine, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
 import { CLAIM_SAFE_TEXT, guardClaims } from "@/lib/sales-chatbot/claim-guard";
 import { CUSTOMER_HANDOFF_REASON, customerHandoffVerdict } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { classifyHandoffReason } from "@/lib/sales-chatbot/events-shared";
-import { appendContextMessages } from "@/lib/sales-chatbot/engine";
+import { appendContextMessages, purchaseRoundStart } from "@/lib/sales-chatbot/engine";
 import { returningCustomerPrompt, type ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { decideShippingRoute, orderReviewOpenOf, type RouteOrderInput } from "@/lib/shipping/route";
@@ -47,7 +47,29 @@ function testQuoteBasis() {
   assert.deepEqual(unrequestedProducts(undefined, asked, mentionText(["Ship chị 1 mực giã tay"])), ["Chả cá thu"]);
   assert.deepEqual(unrequestedProducts(undefined, asked, mentionText(["Ship chị 1 mực giã tay", "Kg có order chả cá thu nha"])), ["Chả cá thu"], "phủ nhận không mở căn cứ");
   assert.deepEqual(unrequestedProducts(undefined, asked, mentionText(["chả cá thu với chả mực giã tay bao nhiêu em?"])), [], "khách hỏi giá cả hai ⇒ tính được");
-  console.log("  ✓ #855 báo giá có căn cứ: phủ nhận không phải chữ mua / căn cứ tính giỏ · câu hỏi giá vẫn là căn cứ tính giá · món đơn cũ là món lạ");
+  // REVIEW PR #873 vòng 3 — khách cũ cùng luồng Messenger: «Cho chị 1kg chả cá thu» của LƯỢT MUA TRƯỚC còn trong cửa sổ 40 tin. Căn cứ phải
+  // lấy chữ khách SAU mốc chốt của đơn gần nhất (`purchaseRoundStart` + `customerTextsSince`, cùng mốc với đường phủ nhận) — không thì chả cá
+  // bot tự thêm «có căn cứ» và báo giá 680.000 ₫ lọt.
+  const cat = ["Chả cá thu (1kg)", "Chả mực giã tay (1kg)"];
+  const cart = applyCustomerCartMessage(undefined, "Ship chị 1 mực giã tay", 3, new Date(), { catalog: cat });
+  assert.ok(cart?.selectedItems.some((x) => x.customerExplicit && /mực/i.test(x.label)), JSON.stringify(cart));
+  const windowTexts = ["Cho chị 1kg chả cá thu", "ok em", "Ship chị 1 mực giã tay"];
+  assert.deepEqual(unrequestedProducts(cart, asked, mentionText(windowTexts)), [], "cửa sổ 40 tin (lỗi cũ): lượt mua trước mở căn cứ");
+  const t0 = Date.now() - 5 * 24 * 3_600_000;
+  const msgs = [
+    { role: "user" as const, at: new Date(t0), text: "Cho chị 1kg chả cá thu" },
+    { role: "assistant" as const, at: new Date(t0 + 60_000), text: "Dạ em chốt 1kg chả cá thu ạ" },
+    { role: "user" as const, at: new Date(t0 + 120_000), text: "ok em" },
+  ];
+  const round = purchaseRoundStart({ pastOrders: [{ orderId: null, simulated: true, total: 280_000, at: new Date(t0 + 180_000).toISOString() }] });
+  assert.equal(round?.getTime(), t0 + 180_000);
+  const roundTexts = [...customerTextsSince(msgs, round), "Ship chị 1 mực giã tay"];
+  assert.deepEqual(roundTexts, ["Ship chị 1 mực giã tay"]);
+  assert.deepEqual(unrequestedProducts(cart, asked, mentionText(roundTexts)), ["Chả cá thu"], "chữ lượt mua trước KHÔNG là căn cứ báo giá");
+  assert.deepEqual(unrequestedProducts(cart, asked, buyingText(roundTexts)), ["Chả cá thu"], "… cũng không là căn cứ lên / chốt đơn");
+  assert.deepEqual(unrequestedProducts(cart, asked, mentionText([...roundTexts, "lấy thêm 1kg chả cá thu nữa em"])), [], "khách gọi tên trong lượt HIỆN TẠI ⇒ có căn cứ");
+  assert.equal(purchaseRoundStart({}), null, "chưa có đơn cũ ⇒ cả hội thoại");
+  console.log("  ✓ #855 báo giá có căn cứ: phủ nhận không phải chữ mua / căn cứ tính giỏ · câu hỏi giá vẫn là căn cứ tính giá · món đơn cũ là món lạ · chữ lượt mua TRƯỚC không là căn cứ");
 }
 
 function testClaim() {
@@ -163,6 +185,39 @@ const CASES: GoldenCase[] = [
         before: (ctx) => seedReturningThread(ctx, { address: OLD_ADDR, orderId: "p855d-don-cu-1", threadId: "pg-vang_psid-p855d-1" }),
         say: "Ship chị 1 mực giã tay",
         ai: [({ v }) => [tool("calculate_cart", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ 1kg chả cá thu + 1kg chả mực tổng 680.000 ₫ ạ, em gửi về địa chỉ cũ nhé?")]],
+      },
+    ],
+  },
+  {
+    key: "p855d-luot-mua-truoc-khong-la-can-cu",
+    title: "Review PR #873 vòng 3: «Cho chị 1kg chả cá thu» của LƯỢT MUA TRƯỚC nằm trong luồng ⇒ giỏ 680.000 ₫ có chả cá vẫn bị từ chối; «lấy thêm 1kg chả cá» ở lượt NÀY thì tính được",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      {
+        before: async (ctx) => {
+          await seedReturningThread(ctx, { address: OLD_ADDR, orderId: "p855d-don-cu-3", threadId: "pg-vang_psid-p855d-3" });
+          // Lượt mua trước THẬT trong luồng: tin khách + tin shop 5 ngày trước, đơn chốt 4 ngày trước (> 3 ngày ⇒ lượt mua mới khi khách nhắn).
+          await appendContextMessages(ctx.conversationId, [
+            { role: "user", text: "Cho chị 1kg chả cá thu" },
+            { role: "assistant", text: "Dạ em lên đơn 1kg chả cá thu cho chị ạ" },
+            { role: "user", text: "ok em" },
+          ]);
+          const db = await getDb();
+          await db.update(schema.salesChatMessages).set({ createdAt: new Date(Date.now() - 5 * 24 * 3_600_000) }).where(eq(schema.salesChatMessages.conversationId, ctx.conversationId));
+          const st: ChatState = { confirmed: { orderId: null, simulated: true, total: 280_000, at: OLD_AT() } };
+          await db.update(schema.salesChatConversations).set({ state: st as Record<string, unknown> }).where(eq(schema.salesChatConversations.id, ctx.conversationId));
+        },
+        say: "Ship chị 1 mực giã tay",
+        ai: [
+          ({ v }) => [tool("calculate_cart", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })],
+          ({ v }) => [tool("calculate_cart", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })],
+          ({ results }) => [say(`Dạ 1kg chả mực giã tay ${String(results[0]?.subtotal_text)} ạ.`)],
+        ],
+      },
+      {
+        say: "lấy thêm 1kg chả cá",
+        ai: [({ v }) => [tool("calculate_cart", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em thêm 1kg chả cá thu vào giỏ cho chị ạ.")]],
       },
     ],
   },
@@ -328,6 +383,16 @@ async function testGolden() {
           assert.ok(!state.quote || state.quote.subtotal !== 680_000, "báo giá 680k không được lưu");
           assert.ok(state.rejectedTotals?.includes(680_000), JSON.stringify(state.rejectedTotals));
           assert.equal(t.final.status, "HANDOFF", "câu tổng sai ⇒ người");
+          assert.deepEqual(orders, []);
+          return;
+        case "p855d-luot-mua-truoc-khong-la-can-cu":
+          assert.equal(state.pastOrders?.length, 1, "đơn cũ đã sang lượt mua trước");
+          assert.match(JSON.stringify(t.turns[0].rounds[0].results), /KHÔNG tính giỏ có «Chả cá thu»/, "chữ lượt mua trước không mở căn cứ");
+          assert.match(shownAll(t), /400\.000 ₫/);
+          assert.ok(state.rejectedTotals?.includes(680_000), JSON.stringify(state.rejectedTotals));
+          assert.ok(!/KHÔNG tính giỏ/.test(resultsOf(t, 1)), `khách gọi tên ở lượt HIỆN TẠI ⇒ tính được: ${resultsOf(t, 1).slice(0, 600)}`);
+          assert.equal(state.quote?.subtotal, 680_000, "báo giá đúng giỏ khách vừa chọn");
+          assert.notEqual(t.final.status, "HANDOFF", `không chuyển người: ${t.final.handoffReason}`);
           assert.deepEqual(orders, []);
           return;
         case "p855d-tin-shop-khong-phai-khach":

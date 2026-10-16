@@ -194,6 +194,11 @@ export type ToolContext = {
    * công cụ mất phần xã / phường (`wardFromCustomerWords`) và căn cứ «khách đã nói tên xã» (`acceptCustomerWard`).
    */
   customerTexts?: readonly string[];
+  /**
+   * Tin KHÁCH thô (cũ ⇒ mới) của LƯỢT MUA HIỆN TẠI (sau mốc chốt của đơn gần nhất trong `pastOrders`, kèm tin đang trả lời) — căn cứ «khách đã
+   * gọi tên món» khi BÁO GIÁ (calculate_cart). Khác `customerTexts` (cửa sổ lịch sử, có thể chứa lượt mua trước của khách cũ — review PR #873).
+   */
+  roundCustomerTexts?: readonly string[];
   /** CHỮ MUA của khách trong lượt mua hiện tại (`buyingText` — bỏ câu hỏi giá / câu từ chối) — căn cứ «khách đã gọi tên món» (`lineBasisViolation`). */
   customerSaid?: string;
   channel: ChatChannel;
@@ -951,7 +956,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // hàng rào số tiền coi là «tổng hiện tại». Nay: giỏ có món khách chưa gọi tên (kể cả trong câu hỏi giá) ⇒ KHÔNG tính, không lưu báo giá,
       // và tổng của giỏ đó vào sổ «đã từ chối» để chữ bot mang nó bị chặn.
       const groundedQ = state.draft ? new Set((await priceLines(state.draft.lines, ctx.config, verifiedCustomerId(state))).asked.map((l) => l.productId ?? l.variantId)) : new Set<string>();
-      const strangeQ = unrequestedProducts(state.cart, priced.asked, mentionText(ctx.customerTexts ?? [ctx.lastUserText]), groundedQ);
+      const strangeQ = unrequestedProducts(state.cart, priced.asked, mentionText(ctx.roundCustomerTexts ?? [ctx.lastUserText]), groundedQ);
       if (strangeQ.length) {
         const units = priced.asked.reduce((t, l) => t + l.quantity, 0);
         // Giỏ một món × 1 có tổng = giá một đơn vị — không ghi vào sổ (giá niêm yết của món đó vẫn phải nói được khi khách hỏi).
