@@ -68,6 +68,11 @@ function testClaim() {
   // Tổng của giỏ hiện tại / giá một đơn vị KHÔNG bị chặn dù trùng số đã từ chối.
   assert.equal(guardClaims("Dạ tổng 400.000 ₫ ạ", { ...facts, rejected: new Set([680_000]) }).ok, true);
   assert.equal(guardClaims("Dạ 680.000 ₫ ạ", { ...facts, rejected: new Set([680_000]), totals: { allowed: new Set([680_000]), current: { total: 680_000, shipping: null }, stale: false } }).ok, true, "khách thật sự đặt cả hai ⇒ tổng hợp lệ");
+  // Sổ «đã từ chối» sống suốt lượt mua (review #862 vòng 2): khách đổi số lượng, giỏ mới 800.000 ₫ ⇒ 680k vẫn chặn; giỏ mới có tổng
+  // hợp lệ TRÙNG 680k ⇒ qua (miễn trừ `tf.allowed`, đã khẳng định ở trên).
+  const after = { ...facts, allowedAmounts: new Set([...facts.allowedAmounts, 800_000]), rejected: new Set([680_000]), totals: { allowed: new Set([800_000]), current: { total: 800_000, shipping: null }, stale: false } };
+  assert.equal(guardClaims("Dạ chả cá thu với chả mực là 680.000 ₫ ạ", after).ok, false, "680k bị từ chối vẫn chặn sau khi giỏ đổi");
+  assert.equal(guardClaims("Dạ 2kg chả mực 800.000 ₫ ạ", after).ok, true, "tổng hợp lệ của giỏ mới qua");
   // Câu GỌI TÊN món rồi nói bội số của CHÍNH món đó («nem tôm 120k một hộp, 2 hộp 240k») KHÔNG bị chặn dù 240k từng là tổng bị từ chối —
   // cùng miễn trừ `explained` của nhánh bội số (review #862); không gọi tên món ⇒ vẫn chặn.
   const named = { ...facts, allowedAmounts: new Set([...facts.allowedAmounts, 120_000, 240_000]), rejected: new Set([240_000]), unitPrices: new Set([120_000]), namedAmounts: new Map([["Nem tôm", new Set([120_000, 240_000])]]) };
@@ -103,12 +108,17 @@ function testTypedAddress() {
   // Gõ A ⇒ model ghi địa chỉ đơn cũ ⇒ vướng, trả lại A.
   const t1 = [`Giao về ${A}`, "ok em"];
   assert.equal(typedAddressConflict({ written: SAVED, recipientAddress: SAVED, change: deliveryAddressDecision(st, t1), texts: t1 }), A);
-  // Gõ A → khách CHỌN địa chỉ đã lưu (Customer 360 «số 2») ở tin SAU ⇒ không áp, không đẩy model về A.
+  // Gõ A (seq 11) → khách CHỌN địa chỉ đã lưu (Customer 360 «số 2») ở tin SAU (seq 13, mốc `savedAt`) ⇒ không áp, không đẩy model về A.
   const t2 = [`Giao về ${A}`, "lấy địa chỉ số 2 nhé"];
-  assert.equal(typedAddressConflict({ written: SAVED, recipientAddress: SAVED, change: deliveryAddressDecision(st, t2), texts: t2, savedConfirm: "số 2 nhé" }), null, "chọn địa chỉ đã lưu sau khi gõ");
+  assert.equal(typedAddressConflict({ written: SAVED, recipientAddress: SAVED, change: deliveryAddressDecision(st, t2), texts: t2, seqs: [11, 13], savedAt: 13 }), null, "chọn địa chỉ đã lưu sau khi gõ");
   // … nhưng lời chọn đó ở TRƯỚC địa chỉ đã gõ ⇒ địa chỉ gõ mới nhất vẫn thắng.
   const t3 = ["lấy địa chỉ số 2 nhé", `à giao về ${A}`];
-  assert.equal(typedAddressConflict({ written: SAVED, recipientAddress: SAVED, change: deliveryAddressDecision(st, t3), texts: t3, savedConfirm: "số 2 nhé" }), A);
+  assert.equal(typedAddressConflict({ written: SAVED, recipientAddress: SAVED, change: deliveryAddressDecision(st, t3), texts: t3, seqs: [11, 13], savedAt: 11 }), A);
+  // Review #862 vòng 2: so MỐC, không so CHỮ — «ok em» chọn địa chỉ đã lưu (seq 1) → gõ A (seq 3) → lại «ok em» (seq 5), model ghi địa chỉ
+  // đã lưu ⇒ VẪN chặn (bản so chữ thấy «ok em» ở tin sau và tắt hàng rào). Thiếu seq / thiếu mốc ⇒ hàng rào đứng.
+  const t6 = ["ok em", `Giao về ${A}`, "ok em"];
+  assert.equal(typedAddressConflict({ written: SAVED, recipientAddress: SAVED, change: deliveryAddressDecision(st, t6), texts: t6, seqs: [1, 3, 5], savedAt: 1 }), A, "«ok em» lặp lại không phải lời chọn mới");
+  assert.equal(typedAddressConflict({ written: SAVED, recipientAddress: SAVED, change: deliveryAddressDecision(st, t2), texts: t2, savedAt: 13 }), A, "thiếu seq ⇒ không nới");
   // Tin cuối nói «địa chỉ cũ» ⇒ không áp.
   const t4 = [`Giao về ${A}`, "thôi giao địa chỉ cũ nhé"];
   assert.equal(typedAddressConflict({ written: SAVED, recipientAddress: SAVED, change: { status: "NEW_EXPLICIT", use: { source: "CUSTOMER_MESSAGE", raw: A, province: "", messageIndex: 0 }, previous: null, reason: "" }, texts: t4 }), null, "lời «địa chỉ cũ» ở tin cuối");
@@ -185,6 +195,20 @@ const CASES: GoldenCase[] = [
         say: "Không có order chả cá thu nha",
         ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [tool("confirm_order", { customer_confirmation: "Không có order chả cá thu nha" })], () => [say("Dạ em bỏ chả cá thu rồi ạ, đơn còn 1 gói chả mực. Chị xác nhận giúp em nhé?")]],
       },
+    ],
+  },
+  {
+    key: "p855-tu-choi-roi-doi-so-luong",
+    title: "Máy chủ từ chối giỏ 680.000 ₫ (món đơn cũ) → khách đổi số lượng («lấy 2 mực giã tay nhé», giỏ đổi) → model nói 680.000 ₫ ⇒ vẫn chặn: sổ «đã từ chối» sống suốt lượt mua",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      {
+        before: (ctx) => seedReturningThread(ctx, { address: OLD_ADDR, orderId: "p855-don-cu-4", threadId: "pg-vang_psid-p855-4" }),
+        say: "Ship chị 1 mực giã tay",
+        ai: [({ v }) => [tool("calculate_cart", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ chị lấy mấy gói chả mực ạ?")]],
+      },
+      { say: "lấy 2 mực giã tay nhé", ai: [() => [say("Dạ 1kg chả cá thu + 1kg chả mực tổng 680.000 ₫ ạ")]] },
     ],
   },
   {
@@ -427,6 +451,12 @@ async function testGolden() {
           assert.equal(orders.length, 1);
           assert.notEqual(orders[0].stage, "CONFIRMED");
           assert.deepEqual(t.final.draft?.lines.map((l) => [l.sku, l.quantity]), [["CHA-MUC", 1]], "món bị phủ nhận đã bỏ khỏi đơn");
+          return;
+        }
+        case "p855-tu-choi-roi-doi-so-luong": {
+          assert.ok(state.rejectedTotals?.includes(680_000), `sổ «đã từ chối» còn sau khi giỏ đổi: ${JSON.stringify(state.rejectedTotals)}`);
+          assert.ok(state.cart?.selectedItems.some((x) => x.quantity === 2), `giỏ đã đổi theo lời khách: ${JSON.stringify(state.cart?.selectedItems)}`);
+          assert.equal(t.final.status, "HANDOFF", "câu 680k bị chặn ⇒ người");
           return;
         }
         case "p855-tu-chot-phan-doi": {

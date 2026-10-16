@@ -79,7 +79,7 @@ export type ChatState = {
    * (review bảo mật 08/10/2026). `savedAddress` = địa chỉ / tên do MÁY CHỦ điền từ
    * hồ sơ chủ SĐT — mọi màn đọc cho khách phải che.
    */
-  customer?: { id: string | null; name: string; phone: string; address: string; province: string; simulated: boolean; at?: string; savedAddress?: boolean; verifiedIdentity?: boolean; savedConfirm?: string };
+  customer?: { id: string | null; name: string; phone: string; address: string; province: string; simulated: boolean; at?: string; savedAddress?: boolean; verifiedIdentity?: boolean; savedAt?: number };
   /**
    * `shownTurn` = lượt (seq tin khách) bot lên / sửa đơn nháp và đọc tóm tắt; `firstShownTurn` = lượt khách thấy tóm tắt LẦN
    * ĐẦU. Chưa từng thấy tóm tắt ⇒ chốt chỉ ở lượt SAU; đã thấy ở lượt trước rồi đồng ý thêm / sửa món ⇒ sửa và chốt luôn.
@@ -175,6 +175,8 @@ export type ToolContext = {
    * công cụ mất phần xã / phường (`wardFromCustomerWords`) và căn cứ «khách đã nói tên xã» (`acceptCustomerWard`).
    */
   customerTexts?: readonly string[];
+  /** Seq của từng tin trong `customerTexts` (cùng thứ tự) — mốc so «khách chọn địa chỉ đã lưu SAU tin mang địa chỉ đã gõ». */
+  customerSeqs?: readonly number[];
   /** CHỮ MUA của khách trong lượt mua hiện tại (`buyingText` — bỏ câu hỏi giá / câu từ chối) — căn cứ «khách đã gọi tên món» (`lineBasisViolation`). */
   customerSaid?: string;
   channel: ChatChannel;
@@ -619,9 +621,10 @@ function noteRejectedTotals(state: ChatState, amounts: readonly (number | null)[
 
 /**
  * Tên món khách có thể đang PHẢN ĐỐI (#855): món của giỏ + dòng đơn nháp + dòng khách ĐÃ THẤY ở tóm tắt trước (`seenLines`) — món bị bỏ
- * khỏi giỏ / đơn ngay trước lời chốt vẫn là món khách vừa phủ nhận. Đọc tên lỗi ⇒ chỉ tên trong giỏ (bộ đọc trách bot vẫn chạy).
+ * khỏi giỏ / đơn ngay trước lời chốt vẫn là món khách vừa phủ nhận. Đọc tên lỗi ⇒ chỉ tên trong giỏ (bộ đọc trách bot vẫn chạy). Công cụ
+ * và khối «ĐƠN HIỆN TẠI» của engine (`cartPromptOf` / `silenceFallbackText`) dùng CÙNG nguồn này.
  */
-async function objectionLabels(state: ChatState, cfg: SalesChatbotConfig): Promise<string[]> {
+export async function objectionLabels(state: ChatState, cfg: SalesChatbotConfig): Promise<string[]> {
   const lines = [...(state.draft?.lines ?? []), ...(state.draft?.seenLines ?? [])];
   const names = lines.length ? await priceLines(lines, cfg, verifiedCustomerId(state)).then((p) => p.asked.map((l) => l.name), () => [] as string[]) : [];
   return [...new Set([...(state.cart?.selectedItems ?? []).map((x) => x.label), ...names].filter((x): x is string => Boolean(x)))];
@@ -630,18 +633,19 @@ async function objectionLabels(state: ChatState, cfg: SalesChatbotConfig): Promi
 /**
  * Địa chỉ model ghi vào đơn nháp KHÁC nơi giao khách tự gõ mới nhất (#855 ca «ThuyNgo») ⇒ trả lại dòng địa chỉ khách đã gõ (để model ghi
  * lại đúng nó); `null` = không vướng. Chỉ xét khi `deliveryAddressDecision` = NEW_EXPLICIT. KHÔNG áp khi lời khách mới hơn địa chỉ đã gõ
- * là lời CHỌN địa chỉ khác (review #862): tin cuối nói «địa chỉ cũ / như lần trước», hoặc lời khách chọn địa chỉ đã lưu
- * (`use_saved_address` / chọn số trong Customer 360 — `savedConfirm`) nằm ở chính tin mang địa chỉ đã gõ hoặc tin sau — đẩy model về
- * địa chỉ đã gõ lúc đó là ghi đè lựa chọn mới nhất của khách. Dòng model ghi nằm NGUYÊN VĂN trong một tin khách từ tin mang địa chỉ đó
+ * là lời CHỌN địa chỉ khác (review #862): tin cuối nói «địa chỉ cũ / như lần trước», hoặc MỐC lượt máy chủ nhận lời khách chọn địa chỉ
+ * đã lưu (`use_saved_address` / chọn số trong Customer 360 — `customer.savedAt`, mọi mức tin cậy) không sớm hơn seq của tin mang địa
+ * chỉ đã gõ (`seqs`) — đẩy model về địa chỉ đã gõ lúc đó là ghi đè lựa chọn mới nhất của khách. So MỐC, không so chữ: lời xác nhận chung
+ * («ok em») lặp lại ở tin sau không phải lời chọn mới. Thiếu mốc / thiếu seq ⇒ hàng rào vẫn đứng. Dòng model ghi nằm NGUYÊN VĂN trong một tin khách từ tin mang địa chỉ đó
  * trở đi (đặt hộ: «Chị ở <A>. Người nhận: <B>»), hay cùng nơi giao (model chuẩn hoá chữ khách) ⇒ vẫn là chữ khách. HÀM THUẦN.
  */
-export function typedAddressConflict(input: { written: string | undefined; recipientAddress: string; change: AddressDecision; texts: readonly string[]; savedConfirm?: string | null }): string | null {
+export function typedAddressConflict(input: { written: string | undefined; recipientAddress: string; change: AddressDecision; texts: readonly string[]; seqs?: readonly number[]; savedAt?: number | null }): string | null {
   const { written, change, texts } = input;
   const typedAt = change.use?.messageIndex ?? null;
   if (!written?.trim() || change.status !== "NEW_EXPLICIT" || !change.use || typedAt === null) return null;
   if (reuseIntentOf([texts[texts.length - 1] ?? ""]).address === "REUSE") return null;
-  const confirm = input.savedConfirm?.trim();
-  if (confirm && texts.some((t, i) => i >= typedAt && quotedInText(confirm, t))) return null;
+  const typedSeq = input.seqs?.[typedAt];
+  if (typeof input.savedAt === "number" && typeof typedSeq === "number" && input.savedAt >= typedSeq) return null;
   const key = foldVi(written).replace(/[^a-z0-9]+/g, " ").trim();
   const writtenByCustomer = key.length >= 6 && texts.slice(typedAt).some((t) => ` ${foldVi(t).replace(/[^a-z0-9]+/g, " ")} `.includes(` ${key} `));
   if (writtenByCustomer || sameDeliveryPlace(input.recipientAddress, change.use.raw)) return null;
@@ -961,8 +965,8 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (state.confirmed && !state.confirmed.auto) return { ...err("Đơn đã chốt", "Đơn của hội thoại này đã chốt — đổi SĐT / địa chỉ là sửa đơn: KHÔNG nói đã cập nhật; máy chủ đã chuyển nhân viên.", state), requireHuman: `Sửa đơn đã chốt — khách đổi thông tin nhận hàng: «${ctx.lastUserText.trim().slice(0, 120)}»` };
       // KHÁCH CŨ: máy chủ điền SĐT + địa chỉ của lần mua trước — chỉ khi khách VỪA xác nhận (luật 3.12: gợi ý, không tự điền).
       let saved = false;
-      // Nguyên văn lời khách CHỌN địa chỉ đã lưu — mốc «khách chọn địa chỉ đã lưu SAU địa chỉ đã gõ» của `typedAddressConflict`.
-      let savedConfirm: string | null = null;
+      // MỐC lượt khách CHỌN địa chỉ đã lưu (seq tin khách) — «khách chọn địa chỉ đã lưu SAU địa chỉ đã gõ» của `typedAddressConflict`.
+      let savedAt: number | null = null;
       let fields: Record<string, unknown> = input;
       if (input.use_saved_address === true) {
         // Nhiều địa chỉ cũ (Customer 360): khách chọn số mấy trong danh sách máy chủ đã đọc cho bot — sai số ⇒ hỏi lại, không đoán.
@@ -982,7 +986,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         const phone = c360.savedAddressPhone(r, input.phone, ctx.lastUserText);
         if ("error" in phone) return err("Lưu khách: SĐT mới chưa xác minh", phone.error, state);
         fields = { name: typed.length >= 2 ? typed : r.name, phone: phone.phone, address: r.address, province: r.province };
-        savedConfirm = quote.data.slice(0, 300);
+        savedAt = ctx.turn ?? null;
         // Mức PHONE — và THREAD mà chính nó đã là địa chỉ máy điền (`returning.ts` trả về mức PHONE) — đều là dữ liệu chủ SĐT.
         saved = r.trust === "PHONE";
       }
@@ -996,7 +1000,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // Giữ mốc lần đầu khi khách sửa tên / địa chỉ mà vẫn cùng SĐT — một SĐT chỉ «để lại» một lần.
       const firstAt = state.customer?.phone === v.data.phone && state.customer.at ? state.customer.at : new Date().toISOString();
       if (simulated) {
-        state.customer = { id: null, name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province ?? "", simulated: true, at: firstAt, ...(saved ? { savedAddress: true } : {}), ...(savedConfirm ? { savedConfirm } : {}) };
+        state.customer = { id: null, name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province ?? "", simulated: true, at: firstAt, ...(saved ? { savedAddress: true } : {}), ...(savedAt !== null ? { savedAt } : {}) };
         const chkSim = addressCheckOf({ address: v.data.address, province: v.data.province ?? "" }, addressOpts(state, ctx));
         markAddressAsked(state, chkSim, ctx.turn);
         return ok(`(Thử) lưu khách ${v.data.name}`, { customer_id: "thu-nghiem", simulated: true, note: "Khung thử: KHÔNG lưu khách thật.", address_check: chkSim.view }, state);
@@ -1012,8 +1016,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const verifiedIdentity = (ctx.returning?.trust === "FB_ID" && ctx.returning.customerId === r.id) || (state.customer?.verifiedIdentity === true && state.customer.id === r.id);
       // Địa chỉ máy điền giữ nhãn khi khách gọi lại công cụ với ĐÚNG thông tin đó — không để lượt sau bỏ che (review bảo mật H1).
       const keepSaved = saved || (state.customer?.savedAddress === true && state.customer.phone === v.data.phone && state.customer.address === v.data.address);
-      const keptConfirm = savedConfirm ?? (keepSaved && !saved ? state.customer?.savedConfirm : undefined);
-      state.customer = { id: r.id, name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province ?? "", simulated: false, at: firstAt, ...(keepSaved ? { savedAddress: true } : {}), ...(verifiedIdentity ? { verifiedIdentity: true } : {}), ...(keptConfirm ? { savedConfirm: keptConfirm } : {}) };
+      // Mốc chọn địa chỉ đã lưu giữ khi lượt sau ghi lại ĐÚNG SĐT + địa chỉ đó; địa chỉ khác ⇒ bỏ mốc.
+      const keptAt = savedAt ?? (state.customer?.phone === v.data.phone && state.customer.address === v.data.address ? state.customer.savedAt : undefined);
+      state.customer = { id: r.id, name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province ?? "", simulated: false, at: firstAt, ...(keepSaved ? { savedAddress: true } : {}), ...(verifiedIdentity ? { verifiedIdentity: true } : {}), ...(typeof keptAt === "number" ? { savedAt: keptAt } : {}) };
       const chk = addressCheckOf({ address: v.data.address, province: v.data.province ?? "" }, addressOpts(state, ctx));
       markAddressAsked(state, chk, ctx.turn);
       return ok(r.existing ? `Khách cũ (${v.data.phone})` : `Đã lưu khách ${v.data.name}`, { customer_id: r.id, existing_customer: r.existing, address_check: chk.view }, state);
@@ -1096,7 +1101,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // ở Thủ Đức): model gửi một `address` KHÁC nơi giao khách tự gõ gần nhất (`deliveryAddressDecision` = NEW_EXPLICIT) ⇒ không ghi; model
       // ghi lại đúng địa chỉ khách. Khách thật sự đổi / xin địa chỉ cũ thì quyết định đã khác NEW_EXPLICIT (đổi chờ xác minh · dùng lại).
       // Khách CHỌN địa chỉ đã lưu / nói «địa chỉ cũ» SAU khi gõ ⇒ lời chọn đó là lời mới nhất, không áp (`typedAddressConflict`).
-      const typedRaw = typedAddressConflict({ written: v.data.address, recipientAddress: recipient.address, change, texts, savedConfirm: state.customer?.savedAddress ? state.customer.savedConfirm : null });
+      const typedRaw = typedAddressConflict({ written: v.data.address, recipientAddress: recipient.address, change, texts, seqs: ctx.customerSeqs, savedAt: state.customer?.savedAt ?? null });
       if (typedRaw) {
         return err("Đơn nháp: khác địa chỉ khách vừa gõ", `Địa chỉ này KHÁC địa chỉ khách đã gõ: «${typedRaw.slice(0, 160)}». Địa chỉ khách nói MỚI NHẤT luôn thắng địa chỉ cũ / đã lưu — gọi lại với address = đúng dòng địa chỉ khách đã gõ (giữ nguyên chữ khách), hoặc bỏ trống address để giữ người nhận hiện tại. KHÔNG dùng địa chỉ đơn cũ, KHÔNG hỏi lại phần khách đã nói.`, state);
       }
