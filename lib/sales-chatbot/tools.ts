@@ -46,7 +46,7 @@ import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guar
 import type { ObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { bindCommitment, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, mentionText, unrequestedProducts, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
 import { acceptCustomerWard, addressQuestion, canAutoFill, legacyAddressUnmapped, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
-import { askedBefore, askMemoryFor, askMemoryParts, askParts, deliveryAddressDecision, hasChangeCue, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
+import { addressKnowledge, addressReaskVerdict, askedBefore, askMemoryFor, askMemoryParts, askParts, deliveryAddressDecision, hasChangeCue, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
 import { isMessagingChannel, type ChatChannel, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
@@ -1281,6 +1281,11 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (!pick && entry.upsell) state.upsellUnavailable = true;
       if (!pick) return err(`Câu mẫu ${entry.code}: thiếu số ERP`, "Câu mẫu này đang thiếu giá / tồn từ ERP — tự trả lời bằng công cụ giá / tồn, không dùng câu mẫu.", state);
       if (repeatsRecent(pick.text, ctx.recentSaid ?? [])) return err(`Câu mẫu ${entry.code}: vừa gửi`, "Câu mẫu này shop VỪA gửi — khách đang trả lời nó. Đọc câu khách và đi tiếp, không gửi lại.", state);
+      // #871: câu mẫu đi NGUYÊN VĂN tới khách, không qua hàng rào chữ của engine ⇒ cùng một phán quyết ở đây. Câu mẫu xin SĐT / địa chỉ
+      // khách đã cho («mình cho em xin SĐT + địa chỉ chính xác để em check tuyến giao») thì không gửi.
+      if (ctx.customerTexts && addressReaskVerdict(pick.text, addressKnowledge(state, ctx.customerTexts), ctx.turn ?? 0, { botTexts: ctx.recentSaid ?? [] })) {
+        return err(`Câu mẫu ${entry.code}: xin lại thông tin đã có`, "Câu mẫu này xin SĐT / địa chỉ mà khách ĐÃ cho — không gửi. Dùng thông tin đã có và đi tiếp (khách hẹn giờ giao ⇒ ghi nhận, không hứa giờ).", state);
+      }
       if (entry.upsell) {
         state.upsellSent = true;
         if (ctx.turn !== undefined) state.upsellTurn = ctx.turn;
