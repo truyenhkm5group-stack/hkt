@@ -404,6 +404,42 @@ export function foldCart(text: string): string {
  */
 const DENY_ORDER_RE = /(?:^| )(?:khong|ko|k|hong|hok|(?<!\d )kg)(?: co)? (?:order|dat)(?= |$)/;
 
+/**
+ * Chữ đứng sau «không đặt / không order» mà KHÔNG phải tên món (review độc lập PR #862): «không đặt THÊM gì nữa» (câu trả lời phổ biến nhất
+ * của lời mời thêm món máy chủ bắt bot gửi), «không đặt CỌC», «không đặt TRƯỚC được hả», «sao k đặt ĐƯỢC», «không đặt NHIỀU đâu», «ko đặt
+ * SHIP nhanh». Câu có những chữ này là lời nói thường, không phải lời phủ nhận một món.
+ */
+const DENY_NOT_ITEM = new Set("them coc truoc duoc dc nhieu it ship giao hang lai nua gi tiep luon ngay som ky the vay nhu sau gap".split(" "));
+
+/**
+ * Tên món khách PHỦ NHẬN («không có order chả cá thu», «kg có order chả cá», «ko đặt chả mực») — chữ đã gập, cắt ở từ dừng; `null` khi câu
+ * không phủ nhận món nào («không đặt thêm gì nữa em», «chị không đặt cọc đâu»). Chỉ là MÂU THUẪN khi tên này khớp một món bot / shop đã
+ * đưa ra (`botProposedDenial`). HÀM THUẦN.
+ */
+export function deniedItemLabel(text: string): string | null {
+  const m = foldCart(text).match(new RegExp(`${DENY_ORDER_RE.source}(?: mon)? ([a-z]+(?: [a-z]+){0,5})`));
+  if (!m) return null;
+  if (DENY_NOT_ITEM.has(m[1].split(" ")[0])) return null;
+  return leadingRun(m[1]) || null;
+}
+
+/**
+ * Khách phủ nhận ĐÚNG một món bot / shop ĐÃ ĐƯA RA (P0 #855 — chủ shop: phủ nhận món bot tự thêm ⇒ dừng tự chốt, người gọi lại ngay từ LẦN
+ * ĐẦU): món bot tự thêm vào giỏ TRƯỚC tin này (`customerExplicit = false`), hoặc nằm trong chữ đề nghị gần đây của bot / shop mà KHÔNG phải
+ * món khách đã tự nói tường minh
+ * (`offeredTexts` — tóm tắt, báo giá). `inDraft` = món đó đã gắn mã từ đơn nháp đang mở ⇒ cờ cần người kiểm lên đơn. `null` = không phải.
+ * HÀM THUẦN.
+ */
+export function botProposedDenial(text: string, before: CartCommitment | undefined, offeredTexts: readonly string[], hasDraft: boolean): { what: string; inDraft: boolean } | null {
+  const label = deniedItemLabel(text);
+  if (!label) return null;
+  const item = (before?.selectedItems ?? []).find((x) => labelsMatch(label, x.label || x.match));
+  // Món KHÁCH tự nói tường minh («cho chị 1kg chả cá thu…») rồi lại phủ nhận là khách đổi ý / tự mâu thuẫn — bộ đếm phản đối của #860 lo.
+  if (item?.customerExplicit) return null;
+  if (item) return { what: item.label || item.match, inDraft: hasDraft && Boolean(item.productId) };
+  return offeredTexts.some((t) => ` ${foldVi(t)} `.includes(` ${label} `)) ? { what: label, inDraft: false } : null;
+}
+
 /** Cả đơn: «thôi không lấy nữa», «hok lấy nữa», «khỏi lấy nữa», «thôi khỏi», «hủy giúp chị», «bỏ đơn đi», «cancel đơn», «không lấy nha em». */
 const CANCEL_RE = new RegExp(
   `(?:^| )(?:${NEG} (?:lay|mua|dat|can)(?! them)${PARTICLES}$|${NEG} (?:lay|mua|dat) (?:nua|gi)(?: |$)|(?:${THOI} )?khoi(?: (?:lay|mua|dat))?${PARTICLES}$|huy${PARTICLES}$|huy don(?: |$)|bo don(?: |$)|cancel(?: don)?(?: |$))`,
@@ -842,7 +878,28 @@ export function buyingText(texts: readonly string[]): string {
     for (const clause of t.split(/[\n,.;!]+|\s+(?:nhưng|nhung)\s+/i)) {
       if (!clause.trim() || clause.includes("?")) continue;
       const fc = foldVi(clause);
-      if (NOT_BUYING_RE.test(fc) || DEFER_OR_ASK_RE.test(fc) || NOT_BUYING_RAW_RE.test(clause.toLowerCase()) || ASK_TAIL_RAW_RE.test(clause.toLowerCase().trim())) continue;
+      if (NOT_BUYING_RE.test(fc) || DENY_ORDER_RE.test(fc) || DEFER_OR_ASK_RE.test(fc) || NOT_BUYING_RAW_RE.test(clause.toLowerCase()) || ASK_TAIL_RAW_RE.test(clause.toLowerCase().trim())) continue;
+      out.push(clause.trim());
+    }
+  }
+  return out.join("\n");
+}
+
+/** Phủ định / bỏ / huỷ (không gồm câu hỏi giá) — mệnh đề này gọi tên món để TỪ CHỐI nó. */
+const NEGATION_RE = /(?:^| )(?:khong|ko|k|chua|dung|hong|hok|chang) (?:lay|mua|can|dat|an|thich)(?: |$)/;
+
+/**
+ * CHỮ GỌI TÊN MÓN của khách cho một BÁO GIÁ (P0 #855, ca «ThuyNgo»): như `buyingText` nhưng GIỮ câu hỏi giá / giả định («chả cá bao nhiêu?»,
+ * «nếu lấy 2kg thì sao») — khách hỏi giá một món là căn cứ để TÍNH GIÁ món đó, dù chưa phải căn cứ để LÊN ĐƠN. Bỏ mệnh đề phủ định / phủ
+ * nhận («kg có order chả cá thu») / bỏ / huỷ: không bao giờ là căn cứ tính một giỏ có món đó. HÀM THUẦN.
+ */
+export function mentionText(texts: readonly string[]): string {
+  const out: string[] = [];
+  for (const t of texts) {
+    for (const clause of t.split(/[\n,.;!?]+|\s+(?:nhưng|nhung)\s+/i)) {
+      if (!clause.trim()) continue;
+      const fc = foldVi(clause);
+      if (NEGATION_RE.test(fc) || DENY_ORDER_RE.test(fc) || NOT_BUYING_RAW_RE.test(clause.toLowerCase())) continue;
       out.push(clause.trim());
     }
   }

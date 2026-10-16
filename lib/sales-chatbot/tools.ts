@@ -44,7 +44,7 @@ import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packi
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
 import type { ObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
-import { bindCommitment, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
+import { bindCommitment, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, mentionText, unrequestedProducts, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
 import { acceptCustomerWard, addressQuestion, canAutoFill, legacyAddressUnmapped, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
 import { askedBefore, askMemoryFor, askMemoryParts, askParts, deliveryAddressDecision, hasChangeCue, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
@@ -109,6 +109,12 @@ export type ChatState = {
   cartRev?: string;
   /** Mọi TỔNG / tiền hàng máy chủ đã tính cho các giỏ / đơn nháp trong hội thoại (`noteSeenTotals`) — hàng rào chặn nói lại tổng của giỏ CŨ. */
   seenTotals?: number[];
+  /**
+   * TỔNG của những giỏ máy chủ TỪ CHỐI tính vì có món khách không chọn (P0 #855, ca «ThuyNgo» — 680.000 ₫ cho «chả cá + chả mực» khi khách
+   * chỉ gọi chả mực). Máy chủ đã biết con số đó SAI cho khách này ⇒ chữ bot mang nó luôn bị chặn (`claim-guard.ts`), kể cả khi hội thoại chưa
+   * có báo giá hợp lệ nào để so. Tối đa `REJECTED_TOTALS_MAX`.
+   */
+  rejectedTotals?: number[];
   /** Giá ĐÃ XÁC THỰC công cụ đọc đã trả cho model trong hội thoại (search / get_product / get_current_price) — tối đa `PRICE_FACTS_MAX`. */
   priceFacts?: number[];
   /** Đơn đã chốt của các lượt mua TRƯỚC trong cùng hội thoại (khách mua lại sau `POST_ORDER_HANDOFF_MS`) — báo cáo vẫn đếm. */
@@ -600,6 +606,17 @@ function cartView(p: Priced) {
   };
 }
 
+/** Trần sổ tổng «đã từ chối» (`ChatState.rejectedTotals`). */
+export const REJECTED_TOTALS_MAX = 10;
+
+/** Ghi tổng của một giỏ máy chủ TỪ CHỐI tính (món khách chưa chọn) vào `state.rejectedTotals` — giữ `REJECTED_TOTALS_MAX` số mới nhất. */
+function noteRejectedTotals(state: ChatState, amounts: readonly (number | null)[]): void {
+  const add = amounts.filter((n): n is number => typeof n === "number" && n > 0);
+  const prev = state.rejectedTotals ?? [];
+  const fresh = add.filter((n, i) => !prev.includes(n) && add.indexOf(n) === i);
+  if (fresh.length) state.rejectedTotals = [...prev, ...fresh].slice(-REJECTED_TOTALS_MAX);
+}
+
 function orderInput(state: ChatState, draft: NonNullable<ChatState["draft"]>, priced: Priced, stage: "NEW" | "CONFIRMED", cfg: SalesChatbotConfig, channel: ChatChannel) {
   const notes = [
     draft.note,
@@ -886,6 +903,22 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (priced.addOnOnly) return err("Tính giỏ: chỉ có món bán kèm", ADD_ON_ONLY_ERROR, state);
       const choice = packChoiceMistake(priced, ctx.config, ctx.lastUserText);
       if (choice) return err("Tính giỏ: nhầm gói", choice, state);
+      // BÁO GIÁ CŨNG PHẢI CÓ CĂN CỨ (P0 #855, ca «ThuyNgo»): khách «Ship chị 1 mực giã tay», bot tính giỏ «1kg chả cá thu + 1kg chả mực» (món
+      // của đơn CŨ) và khách THẤY 680.000 ₫ — hàng rào căn cứ chỉ đứng ở lên / chốt đơn, còn báo giá thì không, và báo giá vừa tính lại được
+      // hàng rào số tiền coi là «tổng hiện tại». Nay: giỏ có món khách chưa gọi tên (kể cả trong câu hỏi giá) ⇒ KHÔNG tính, không lưu báo giá,
+      // và tổng của giỏ đó vào sổ «đã từ chối» để chữ bot mang nó bị chặn.
+      const groundedQ = state.draft ? new Set((await priceLines(state.draft.lines, ctx.config, verifiedCustomerId(state))).asked.map((l) => l.productId ?? l.variantId)) : new Set<string>();
+      const strangeQ = unrequestedProducts(state.cart, priced.asked, mentionText(ctx.customerTexts ?? [ctx.lastUserText]), groundedQ);
+      if (strangeQ.length) {
+        const units = priced.asked.reduce((t, l) => t + l.quantity, 0);
+        // Giỏ một món × 1 có tổng = giá một đơn vị — không ghi vào sổ (giá niêm yết của món đó vẫn phải nói được khi khách hỏi).
+        if (priced.lines.length > 1 || units > 1) noteRejectedTotals(state, [priced.subtotal, priced.total]);
+        return err(
+          "Tính giỏ: có món khách chưa chọn",
+          `KHÔNG tính giỏ có ${strangeQ.map((n) => `«${n}»`).join(", ")}: khách CHƯA gọi tên món này. Món của ĐƠN CŨ (khách cũ) là LỊCH SỬ, không phải giỏ hiện tại — chỉ tính khi khách nói rõ «như lần trước / lấy như cũ». KHÔNG báo số tiền nào của giỏ này cho khách. Tính lại ĐÚNG món khách đã chọn; chưa rõ khách muốn gì thì HỎI.`,
+          state,
+        );
+      }
       // BÁO GIÁ MÁY CHỦ (P0 11/10/2026): giỏ là một báo giá có mã; chưa xác thực (catalog mâu thuẫn) ⇒ không có số để báo, người xác minh.
       state.quote = quoteSnapshotOf(priced.quote, now);
       if (!priced.quote.verified) return { ...err("Tính giỏ: giá chưa xác thực", `${QUOTE_UNVERIFIED_INSTRUCTION} (${quoteReasons(priced.quote)})`, state), requireHuman: priceUnverifiedReason(quoteReasons(priced.quote)) };
@@ -919,6 +952,15 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         fields = { name: typed.length >= 2 ? typed : r.name, phone: phone.phone, address: r.address, province: r.province };
         // Mức PHONE — và THREAD mà chính nó đã là địa chỉ máy điền (`returning.ts` trả về mức PHONE) — đều là dữ liệu chủ SĐT.
         saved = r.trust === "PHONE";
+      }
+      // ĐỊA CHỈ KHÁCH GÕ MỚI NHẤT THẮNG (P0 #855, ca «ThuyNgo»: hồ sơ khách mang «Khương Đình» của đơn cũ sau khi khách đã gõ địa chỉ ở Thủ
+      // Đức). Đúng một luật với đơn nháp: `deliveryAddressDecision` (#861) xét địa chỉ SẮP LƯU như địa chỉ đang giữ. Khách gõ một địa chỉ
+      // KHÁC mới hơn ⇒ không lưu, model lưu đúng chữ khách; khách đang đổi nơi giao mà chưa gõ xong ⇒ không lưu, chuyển người. Xét TRƯỚC lời
+      // xác nhận địa chỉ cũ: khách đã gõ địa chỉ mới thì không được bảo model hỏi «dùng lại địa chỉ cũ không».
+      if (typeof fields.address === "string" && fields.address.trim()) {
+        const d = deliveryAddressDecision({ customer: { id: null, name: "", phone: "", address: fields.address, province: typeof fields.province === "string" ? fields.province : "", simulated: false, ...(input.use_saved_address === true ? { savedAddress: true } : {}) } }, ctx.customerTexts ?? []);
+        if (d.status === "CHANGE_PENDING_VERIFICATION" && d.use) return err("Lưu khách: khác địa chỉ khách vừa gõ", `Địa chỉ này KHÁC địa chỉ khách vừa gõ ở tin mới hơn: «${d.use.raw}». Địa chỉ khách nói MỚI NHẤT luôn thắng địa chỉ cũ / đã lưu — gọi lại create_customer với address = đúng dòng khách đã gõ (giữ nguyên chữ khách), KHÔNG dùng địa chỉ đơn cũ, KHÔNG hỏi lại phần khách đã nói.`, state);
+        if (d.status === "CHANGE_INCOMPLETE") return { ...err("Lưu khách: khách đang đổi địa chỉ", "Khách đang đổi nơi giao mà chưa gửi đủ địa chỉ mới — KHÔNG lưu địa chỉ cũ, KHÔNG nói đã cập nhật; máy chủ đã chuyển nhân viên.", state), requireHuman: d.reason };
       }
       // Địa chỉ ĐƠN CŨ (Customer 360) chỉ là gợi ý (AGENTS 3.12): gõ lại nó mà không qua use_saved_address ⇒ bỏ qua kiểm lời xác nhận.
       if (!saved && ctx.returning?.fromHistory && input.use_saved_address !== true && (await import("@/lib/sales-chatbot/customer-360")).historyAddressWithoutConsent(ctx.returning, input.address, ctx.lastUserText))

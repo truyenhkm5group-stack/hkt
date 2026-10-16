@@ -37,6 +37,12 @@ export type RouteOrderInput = {
    * chỉ chưa xác minh) ⇒ GIỮ, kể cả khi ô tỉnh + xã đã có. Bắt buộc khai: nơi gọi quên là lỗi biên dịch, không phải một vận đơn sai.
    */
   addressReviewOpen: boolean;
+  /**
+   * Đơn còn cờ CẦN NGƯỜI KIỂM về MÓN / GIÁ / KHÁCH HUỶ đang mở (`orderReviewOpenOf` — #855: khách phủ nhận món bot tự thêm, phản đối giá,
+   * báo huỷ) ⇒ GIỮ. Đơn «Đã xác nhận» (công tắc tự xác nhận / máy tự chốt) mà đẩy sang hãng trước khi người gọi khách là giao SAI hàng.
+   * Bắt buộc khai như `addressReviewOpen`.
+   */
+  orderReviewOpen: boolean;
 };
 
 /** Khoá so khớp tỉnh: tên tỉnh chuẩn (nhận cả tên cũ / viết tắt) ⇒ chữ đã gập; không nhận ra ⇒ chữ gập của chính nó. */
@@ -91,6 +97,21 @@ export function addressReviewOpenOf(raw: unknown): boolean {
   return entries.some((e) => !e || typeof e !== "object" || (e as { code?: unknown }).code === "ADDRESS_UNRESOLVED");
 }
 
+/** Mã cờ cần kiểm giữ đơn khỏi vận đơn ngoài ĐỊA CHỈ (#855) — món khách chưa đồng ý · giá · khách huỷ / máy không huỷ được. */
+export const ORDER_REVIEW_HOLD_CODES: readonly string[] = ["UPSELL_UNCONSENTED", "PRICE_DISPUTED", "PRICE_MISMATCH", "CUSTOMER_CANCELLED", "CANCEL_BLOCKED"];
+
+/**
+ * Đơn có cờ cần kiểm MÓN / GIÁ / KHÁCH HUỶ đang mở không (`ORDER_REVIEW_HOLD_CODES`) — cùng cách đọc `raw.review` với `addressReviewOpenOf`.
+ * Khoá `review` không đọc được đã được `addressReviewOpenOf` giữ (FAIL-CLOSED) ⇒ ở đây chỉ đọc mục hợp lệ. HÀM THUẦN.
+ */
+export function orderReviewOpenOf(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const review = (raw as Record<string, unknown>).review;
+  if (!review || typeof review !== "object" || Array.isArray(review)) return false;
+  const entries = (review as { entries?: unknown }).entries;
+  return Array.isArray(entries) && entries.some((e) => Boolean(e) && typeof e === "object" && ORDER_REVIEW_HOLD_CODES.includes(String((e as { code?: unknown }).code)));
+}
+
 function hold(code: RouteHoldCode, reason?: string): ShippingRoute {
   return { kind: "HOLD", code, reason: reason ?? ROUTE_HOLD_META[code].label };
 }
@@ -100,6 +121,7 @@ export function decideShippingRoute(o: RouteOrderInput, cfg: ShippingRoutingConf
   if (o.stage !== "CONFIRMED") return hold("NOT_CONFIRMED");
   if (o.hasLiveShipment) return { kind: "SHIPPED" };
   if (o.addressReviewOpen) return hold("ADDRESS_REVIEW");
+  if (o.orderReviewOpen) return hold("ORDER_REVIEW");
   if (!o.province.trim()) return hold("NO_PROVINCE");
   if (!o.ward.trim()) return hold("NO_WARD");
   const area = matchSelfArea(cfg.selfAreas, o.province, o.ward);
