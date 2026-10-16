@@ -24,14 +24,15 @@ import {
   amountsIn,
   applyCustomerCartMessage,
   buyingText,
-  countItemObjections,
   hasEditCue,
   itemObjectionCue,
   lineBasisViolation,
+  orderReadiness,
   type AskedLine,
   type CartCommitment,
 } from "@/lib/sales-chatbot/cart-commitment";
-import { CUSTOMER_HANDOFF_REASON, customerDemandsHuman, customerHandoffVerdict } from "@/lib/sales-chatbot/handoff-routing-shared";
+import { classifyHandoffReason } from "@/lib/sales-chatbot/events-shared";
+import { CUSTOMER_HANDOFF_REASON, customerDemandsHuman, customerHandoffVerdict, nextObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { runGoldenCases, say, tool, type GoldenCase, type GoldenHookCtx } from "./sales-agent-golden/harness";
 
@@ -117,28 +118,45 @@ function testDenyAndEdit() {
 }
 
 function testHandoffSignals() {
-  for (const t of ["Robot hả", "robot à", "Robot ha em", "máy à", "bot hả", "Đang nói chuyện với máy hả", "cho chị gặp nhân viên", "chị muốn nói chuyện với người thật", "trả lời tự động à"]) {
+  for (const t of ["Robot hả", "robot à", "Robot ha em", "máy à", "bot hả", "Đang nói chuyện với máy hả", "em là robot à", "cho chị gặp nhân viên", "chị muốn nói chuyện với người thật", "trả lời tự động à", "gọi chủ shop cho chị"]) {
     assert.equal(customerDemandsHuman(t), true, `«${t}» ⇒ đòi người`);
   }
-  for (const t of ["Chị order mực", "ship chị 1 mực giã tay", "máy xay thịt bao nhiêu em", "Địa chỉ cũ", "ok em", "người nhận là chị Thuỷ"]) {
+  // Review #855: «người» trần, «người nhận / người nhà», «người thật» không đi với gặp / nói chuyện, hỏi HÀNG có robot / máy.
+  for (const t of ["Chị order mực", "ship chị 1 mực giã tay", "máy xay thịt bao nhiêu em", "Địa chỉ cũ", "ok em", "người nhận là chị Thuỷ", "không gặp người nhận thì gửi bảo vệ giúp chị", "nhờ shipper gọi người nhà chị trước", "em chuyển cho người nhà chị nhé", "có ảnh người thật mặc không shop", "có bán robot không em", "bên em có máy không"]) {
     assert.equal(customerDemandsHuman(t), false, `«${t}» không phải đòi người`);
   }
-  for (const t of ["Kg có order chả cá thu nha", "Sao kg coi ở trên", "Khách cũ mà hỏi gì", "chị nói rồi mà", "sai rồi em", "chị đâu có đặt chả cá"]) {
-    assert.equal(itemObjectionCue(t), true, `«${t}» là phản đối`);
+  const labels = ["Chả cá thu", "Chả mực giã tay"];
+  for (const t of ["Kg có order chả cá thu nha", "Sao kg coi ở trên", "Khách cũ mà hỏi gì", "sai rồi em", "chị đâu có đặt chả cá", "chị chưa đặt chả cá thu bao giờ", "chả mực chị nói rồi mà"]) {
+    assert.equal(itemObjectionCue(t, labels), true, `«${t}» là phản đối`);
   }
-  for (const t of ["Chị order mực", "Ship chị 1 mực giã tay", "cho chị 2 kg đặt luôn", "ok", "Địa chỉ coi lại"]) {
-    assert.equal(itemObjectionCue(t), false, `«${t}» không phải phản đối món`);
+  // Phủ nhận / «nói rồi» KHÔNG gọi tên món trong giỏ ⇒ không phải phản đối món.
+  for (const t of ["Chị order mực", "Ship chị 1 mực giã tay", "cho chị 2 kg đặt luôn", "ok", "Địa chỉ coi lại", "chị chưa đặt bao giờ, ship HN mấy ngày?", "sao không đặt được trên web em", "chị không đặt cọc đâu", "như chị nói rồi, ship nhanh nha"]) {
+    assert.equal(itemObjectionCue(t, labels), false, `«${t}» không phải phản đối món`);
   }
-  // Ca ThuyNgo: lần phản đối đầu ⇒ AI vẫn sửa giỏ (không chuyển người); lần thứ hai ⇒ chuyển người, không xin lỗi thêm.
-  const thread = ["Ship chị 1 mực giã tay", "Kg có order chả cá thu nha", "Chị order mực", "Sao kg coi ở trên", "Khách cũ mà hỏi gì"];
-  assert.equal(countItemObjections(thread.slice(0, 2)), 1);
-  assert.equal(customerHandoffVerdict({ text: thread[1], objections: countItemObjections(thread.slice(0, 2)), objectionNow: itemObjectionCue(thread[1]) }), null, "một lần phản đối ⇒ AI sửa giỏ");
-  const v = customerHandoffVerdict({ text: thread[3], objections: countItemObjections(thread.slice(0, 4)), objectionNow: itemObjectionCue(thread[3]) });
-  assert.equal(v?.reason, CUSTOMER_HANDOFF_REASON.REPEATED_OBJECTION, "phản đối lần 2 ⇒ chuyển người");
+  assert.equal(itemObjectionCue("Kg có order chả cá thu nha", []), false, "giỏ trống ⇒ không có món để phản đối");
+
+  // Ca ThuyNgo qua bộ đếm: lần 1 ⇒ AI sửa giỏ; lần 2 ⇒ chuyển người.
+  const at = (m: number) => new Date(Date.now() - (60 - m) * 60_000);
+  let tally = nextObjectionTally(undefined, { objectionNow: itemObjectionCue("Kg có order chả cá thu nha", labels), cycle: 0, now: at(1), resumedAt: null });
+  assert.equal(tally?.n, 1);
+  assert.equal(customerHandoffVerdict({ text: "Kg có order chả cá thu nha", objections: tally?.n ?? 0, objectionNow: true }), null, "một lần phản đối ⇒ AI sửa giỏ");
+  tally = nextObjectionTally(tally, { objectionNow: false, cycle: 0, now: at(2), resumedAt: null });
+  assert.equal(tally?.n, 1, "«Chị order mực» không đổi bộ đếm");
+  tally = nextObjectionTally(tally, { objectionNow: itemObjectionCue("Sao kg coi ở trên", ["Chả mực giã tay"]), cycle: 0, now: at(3), resumedAt: null });
+  assert.equal(customerHandoffVerdict({ text: "Sao kg coi ở trên", objections: tally?.n ?? 0, objectionNow: true })?.reason, CUSTOMER_HANDOFF_REASON.REPEATED_OBJECTION, "phản đối lần 2 ⇒ chuyển người");
+  // Người trả lại cho AI SAU lần phản đối trước ⇒ đếm lại từ đầu; sang lượt mua khác ⇒ đếm lại.
+  assert.equal(nextObjectionTally(tally, { objectionNow: true, cycle: 0, now: at(10), resumedAt: at(5) })?.n, 1, "sau khi trả lại cho AI ⇒ đếm từ 1");
+  assert.equal(nextObjectionTally(tally, { objectionNow: true, cycle: 7, now: at(10), resumedAt: null })?.n, 1, "lượt mua mới ⇒ đếm từ 1");
   assert.equal(customerHandoffVerdict({ text: "ok em", objections: 3, objectionNow: false }), null, "tin không phản đối ⇒ không chuyển");
   const r = customerHandoffVerdict({ text: "Robot hả", objections: 0, objectionNow: false });
   assert.equal(r?.reason, CUSTOMER_HANDOFF_REASON.WANTS_HUMAN);
   assert.equal(r?.code, "WANTS_HUMAN");
+  // Công tắc của chủ shop «chuyển khi khách muốn gặp người» TẮT ⇒ vế đòi người không chạy; phản đối lặp vẫn chuyển.
+  assert.equal(customerHandoffVerdict({ text: "Robot hả", objections: 0, objectionNow: false, onCustomerRequest: false }), null);
+  assert.equal(customerHandoffVerdict({ text: "Sao kg coi ở trên", objections: 2, objectionNow: true, onCustomerRequest: false })?.code, "REPEATED_OBJECTION");
+  // Nhóm thống kê đúng (events-shared::classifyHandoffReason).
+  assert.equal(classifyHandoffReason(CUSTOMER_HANDOFF_REASON.WANTS_HUMAN), "CUSTOMER_REQUEST");
+  assert.equal(classifyHandoffReason(CUSTOMER_HANDOFF_REASON.REPEATED_OBJECTION), "PRODUCT_UNCLEAR");
   // Lý do chuyển người KHÔNG nằm trong tập tự hết hạn ⇒ AI không tự quay lại dù đã qua rất lâu (chỉ người trả lại).
   for (const reason of Object.values(CUSTOMER_HANDOFF_REASON)) {
     const longAgo = new Date(Date.now() - 7 * 24 * 3600_000);
@@ -146,6 +164,34 @@ function testHandoffSignals() {
     assert.equal(hold.state, "HUMAN_TAKEOVER", `«${reason}» ⇒ chờ người, không tự hết hạn`);
     assert.equal(hold.expired, null);
   }
+}
+
+function testReviewRound2() {
+  // (1) Số trần phải khớp TRỌN dãy chữ ngay sau nó.
+  const cat2 = [...CAT, "Chả trứng (500g)"];
+  const t1 = "Ship chị 1 mực giã tay, 5 ngõ Huế, quận Hai Bà Trưng";
+  assert.deepEqual(amountsIn(t1, cat2).map((a) => a.label), ["cha muc gia tay"], "không có chả trứng từ «Hai Bà Trưng»");
+  assert.deepEqual(amountsIn("nhà chị 2 đứa nhỏ thích mực lắm", cat2), [], "«2 đứa nhỏ thích mực» không phải món");
+  assert.deepEqual(amountsIn("cho chị 1 nem chua", cat2), [], "«nem chua» không phải nem hải sản");
+  // Địa chỉ không phải số lượng: «230/20 Phan Huy Ích», «12 Lò Đúc».
+  assert.deepEqual(amountsIn("lay 1 goi ruoc tom\n230/20 Phan Huy Ích, P An Hội Tây, TP.HCM", CAT).map((a) => a.label), ["ruoc tom"]);
+  assert.deepEqual(amountsIn("giao số 12 Lò Đúc nha", CAT), []);
+  assert.deepEqual(amountsIn("cho chị 2 hộp nem", CAT).map((a) => a.value), [2], "đơn vị thường vẫn đọc");
+  // (5) Giỏ đã có món; số đứng trước KHÔNG tên là chuyện kể ⇒ chỉ THÊM, món cũ giữ nguyên.
+  const base = applyCustomerCartMessage(undefined, "cho chị 1kg chả mực giã tay", 1, NOW(), { catalog: CAT });
+  const out = applyCustomerCartMessage(base, "hôm qua chị lấy 2 gói rồi, thêm 1 hộp nem nữa", 2, NOW(), { catalog: CAT });
+  assert.deepEqual(names(out), [["Chả mực giã tay", 1000, "g", true], ["Nem hải sản tôm bề bề", 1, "pack", true]], "chả mực giữ nguyên 1kg, thêm 1 hộp nem");
+  // (6) «1 chả cá thu 2kg» = 2kg, không hỏi lại.
+  for (const [t, g] of [["cho chị 1 chả cá thu 2kg", 2000], ["lấy 2 chả mực giã tay 1kg nha", 2000]] as const) {
+    const c = applyCustomerCartMessage(undefined, t, 1, NOW(), { catalog: CAT });
+    assert.equal(c?.clarify ?? null, null, `«${t}» không hỏi lại`);
+    assert.deepEqual(c?.selectedItems.map((x) => [x.quantity, x.unit]), [[g, "g"]], `«${t}» ⇒ ${g}g`);
+  }
+  // (7) Còn món KHÔNG tên ⇒ NEED_ITEMS kèm chỉ dẫn, không ORDER_READY trần.
+  const mixed = applyCustomerCartMessage(undefined, "Cho chị 2 gói, thêm 1 ruốc tôm.", 1, NOW(), { catalog: CAT });
+  const r = orderReadiness({ cart: mixed, customer: { phone: "0961000855", address: ADDR, province: "Thành phố Hà Nội" }, blocker: null, lastUserText: "", hesitating: false });
+  assert.equal(r.level, "NEED_ITEMS");
+  assert.match(r.missing ?? "", /không nêu tên món/);
 }
 
 // ─────────────── Golden qua chatTurn THẬT (model giả, PGlite, công cụ thật — không gửi tin thật) ───────────────
@@ -248,6 +294,7 @@ async function testGolden() {
 
 /** Chuyển người theo CHỮ KHÁCH qua `chatTurn` thật trên kênh NHẮN TIN (FANPAGE — chuyển người thì bot im). */
 const ASK = "Dạ mình lấy 1kg chả mực giã tay ạ, cho em xin SĐT và địa chỉ nhé.";
+const ASK2 = "Dạ mình lấy 1kg chả cá thu và 1kg chả mực giã tay ạ, cho em xin SĐT và địa chỉ nhé.";
 const HANDOFF_GOLDEN: GoldenCase[] = [
   {
     key: "gc-855-robot-ha",
@@ -263,15 +310,23 @@ const HANDOFF_GOLDEN: GoldenCase[] = [
   },
   {
     key: "gc-855-phan-doi-lap",
-    title: "#855: phản đối món lần 1 ⇒ AI vẫn sửa; lần 2 ⇒ chuyển người, không thêm câu xin lỗi",
+    title: "#855: phản đối món lần 1 (gọi tên món trong giỏ) ⇒ AI vẫn sửa; lần 2 ⇒ chuyển người, không thêm câu xin lỗi",
     shop: "food",
     channel: "FANPAGE",
     config: CFG,
     turns: [
-      { say: "Ship chị 1 mực giã tay", ai: [() => [say(ASK)]] },
+      { say: "Cho chị 1kg chả cá thu với 1 mực giã tay", ai: [() => [say(ASK2)]] },
       { say: "Kg có order chả cá thu nha", ai: [() => [say("Dạ đơn mình chỉ có 1kg chả mực giã tay ạ.")]] },
       { say: "Sao kg coi ở trên", ai: [] },
     ],
+  },
+  {
+    key: "gc-855-robot-cong-tac-tat",
+    title: "#855: chủ shop TẮT «chuyển khi khách muốn gặp người» ⇒ «Robot hả» vẫn do AI trả lời, không chuyển người",
+    shop: "food",
+    channel: "FANPAGE",
+    config: { ...CFG, handoff: { onCustomerRequest: false, onComplaint: true, message: "Em đã chuyển cho nhân viên, anh/chị đợi một chút nhé.", notifyGroup: false } },
+    turns: [{ say: "Robot hả", ai: [() => [say("Dạ em là trợ lý bán hàng của shop, chị cần em hỗ trợ gì ạ?")]] }],
   },
 ];
 
@@ -282,8 +337,13 @@ async function testHandoffGolden() {
     beforeCase: async (_c, ctx) => seedCct(ctx),
     afterCase: async (c, ctx, t) => {
       seen.add(c.key);
+      if (c.key === "gc-855-robot-cong-tac-tat") {
+        assert.equal(t.final.status, "OPEN", "công tắc tắt ⇒ không chuyển người");
+        assert.equal(t.turns[0].shown.length, 1, "AI trả lời");
+        return;
+      }
       assert.equal(t.turns[0].status, "OPEN", `[${c.key}] lượt đặt hàng AI trả lời`);
-      assert.deepEqual(t.turns[0].shown, [ASK]);
+      assert.deepEqual(t.turns[0].shown, [c.key === "gc-855-robot-ha" ? ASK : ASK2]);
       const db = await getDb();
       const [row] = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, ctx.conversationId));
       if (c.key === "gc-855-robot-ha") {
@@ -312,6 +372,7 @@ export async function testP0855Cart() {
   testBareNumberGuards();
   testDenyAndEdit();
   testHandoffSignals();
+  testReviewRound2();
   await testGolden();
   await testHandoffGolden();
   console.log("  ✓ P0 #855 (ThuyNgo): «1 mực giã tay» ⇒ giỏ 1 chả mực, đơn cá + mực bị máy chủ từ chối (0 SKU tự thêm, tiền = báo giá máy chủ); «kg có order chả cá» bỏ cá giữ mực; «2 kg đặt» không phải phủ định; «Robot hả» / phản đối lặp ⇒ chuyển người không tự hết hạn");

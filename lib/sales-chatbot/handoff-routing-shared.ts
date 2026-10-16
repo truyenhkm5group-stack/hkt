@@ -172,44 +172,64 @@ export function handoffFollowupKey(conversationId: string, queuedAt: Date, lastS
 /**
  * Lý do chuyển người do CHỮ KHÁCH (P0 #855, ca «ThuyNgo» 16/10/2026: khách phủ nhận món bot tự thêm bốn lần rồi hỏi «Robot hả» — bot gửi
  * thêm 2–3 câu xin lỗi / hỏi lại). Hai chuỗi này CỐ Ý không thuộc tập lý do tự hết hạn (`STAFF_COOLDOWN_REASONS` · AI hỏng —
- * `ai-hold-shared.ts`) ⇒ `aiHoldOf` đọc là CHỜ NGƯỜI, không cooldown nào trả hội thoại về AI; chỉ người bấm «Trả lại cho AI». Bài kiểm khoá.
+ * `ai-hold-shared.ts`) ⇒ `aiHoldOf` đọc là CHỜ NGƯỜI, không cooldown nào trả hội thoại về AI; chỉ người bấm «Trả lại cho AI». Câu mở đầu
+ * khớp nhóm thống kê có sẵn của `classifyHandoffReason` (events-shared.ts): «gặp người» ⇒ CUSTOMER_REQUEST · «Không xác định được sản
+ * phẩm» ⇒ PRODUCT_UNCLEAR. Bài kiểm khoá cả hai.
  */
 export const CUSTOMER_HANDOFF_REASON = {
-  WANTS_HUMAN: "Khách nghi đang nói chuyện với máy / đòi gặp người thật",
-  REPEATED_OBJECTION: "Khách phản đối món bot nhập sai từ 2 lần — cần người kiểm lại đơn",
+  WANTS_HUMAN: "Khách muốn gặp người thật (hỏi có phải máy / đòi nhân viên)",
+  REPEATED_OBJECTION: "Không xác định được sản phẩm — khách phản đối món bot nhập sai từ 2 lần, cần người kiểm lại đơn",
 } as const;
 export type CustomerHandoffCode = keyof typeof CUSTOMER_HANDOFF_REASON;
 
 /** Số lần phản đối món (tính cả tin hiện tại) từ đó máy chủ chuyển người thay vì để AI xin lỗi thêm. */
 export const OBJECTION_HANDOFF_AT = 2;
 
-const ASK_TAIL = "(?: (?:ha|a|ak|ah|ho|hoi|sao|vay|v|khong|ko|k|ne|day|the|em|e|shop|chi|c))*";
+/** Người mà khách đòi gặp: nhân viên / người thật / admin / chủ shop / quản lý — KHÔNG «người» trần («người nhận», «người nhà»). */
+const HUMAN_WHO = "(?:nhan vien|nguoi that|admin|chu shop|quan ly|tu van vien)";
+/** Đuôi hỏi «có phải máy không» — chữ CÓ DẤU; KHÔNG gồm «không / ko / k» («có bán robot không», «có máy không» là hỏi hàng). */
+const ASK_PARTICLE = "(?:hả|à|hở|hử|ha|ah|ak|sao|vậy|thế|đấy|đó|hông)";
+const ASK_FILL = "(?:em|e|shop|chị|c|anh|a|ạ|vậy|v|nè|đấy|đó|thế)";
+
 /**
- * Khách hỏi có phải MÁY không, hoặc đòi gặp NGƯỜI («Robot hả», «máy à», «bot hả», «đang nói chuyện với máy hả», «trả lời tự động à», «cho
- * chị gặp nhân viên», «người thật»). Đọc trên chữ CÓ DẤU cho «máy» / «à» / «hả» (bỏ dấu thì «mày», «may» cũng thành «may»). Câu hỏi về món
- * («máy xay thịt bao nhiêu») KHÔNG phải: từ chỉ máy phải đứng CUỐI câu, chỉ còn trợ từ hỏi phía sau. HÀM THUẦN.
+ * Khách hỏi có phải MÁY không, hoặc đòi gặp NGƯỜI. Đọc trên chữ CÓ DẤU (bỏ dấu thì «mày», «may» cũng thành «may»; «à» ≠ «a»):
+ *  · «robot / bot / chatbot / máy / trả lời tự động» đứng CUỐI câu, theo sau là ÍT NHẤT một trợ từ hỏi («Robot hả», «máy à», «bot hả em»),
+ *    hoặc đi sau «là / nói chuyện với / đang nói chuyện với» («em là robot à», «đang nói chuyện với máy hả»);
+ *  · «gặp / gọi / nói chuyện với / chuyển cho / cho chị gặp» + nhân viên · người thật · admin · chủ shop · quản lý.
+ * «không gặp người nhận thì gửi bảo vệ», «em chuyển cho người nhà chị», «có ảnh người thật mặc không», «có bán robot không em» KHÔNG phải.
+ * HÀM THUẦN.
  */
 export function customerDemandsHuman(text: string): boolean {
   const raw = text.toLowerCase().normalize("NFC").replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
   const f = foldVi(raw);
   if (!f) return false;
-  if (/(?:^| )(?:gap|goi|cho (?:chi|anh|em|minh|toi) (?:gap|noi chuyen voi)|noi chuyen voi|chuyen (?:cho|qua|sang)) (?:nhan vien|nguoi that|nguoi|admin|quan ly|chu shop|shop that)(?: |$)/.test(f)) return true;
-  if (/(?:^| )nguoi that(?: |$)/.test(f)) return true;
-  // «robot» / «bot» / «chatbot» / «trả lời tự động» ở cuối câu hỏi.
-  if (new RegExp(`(?:^| )(?:la |dang noi chuyen voi |noi chuyen voi |tra loi )?(?:robot|ro bot|bot|chatbot|tu dong)${ASK_TAIL}$`).test(f) && /(?:robot|bot|tự động|tu dong)/.test(raw)) return true;
-  // «máy» chỉ khi viết đúng dấu (không phải «mày» / «may») và đứng cuối câu hỏi.
-  if (/(?:^|\s)máy(?:\s+(?:hả|à|ạ|hở|sao|vậy|ha|a|không|ko|k|nè|đấy|đó|em|e|shop|chị|c))*$/u.test(raw)) return true;
+  if (new RegExp(`(?:^| )(?:gap|goi|noi chuyen voi|noi chuyen truc tiep voi|chuyen (?:cho|qua|sang)|xin gap|muon gap|can gap)(?: (?:chi|anh|em|minh|toi|c|a|e))?(?: (?:gap|voi))? ${HUMAN_WHO}(?: |$)`).test(f)) return true;
+  const machine = "(?:robot|ro bot|bot|chatbot|máy|trả lời tự động|tự động)";
+  if (new RegExp(`(?:^|\\s)${machine}(?:\\s+${ASK_FILL})*\\s+${ASK_PARTICLE}(?:\\s+${ASK_FILL})*$`, "u").test(raw)) return true;
+  if (new RegExp(`(?:^|\\s)(?:là|nói chuyện với|đang nói chuyện với|chat với)\\s+${machine}(?:\\s+(?:${ASK_PARTICLE}|${ASK_FILL}))*$`, "u").test(raw)) return true;
   return false;
 }
 
 /**
- * Quyết định chuyển người theo CHỮ KHÁCH, trước lượt AI (cùng chỗ với nhánh «khách báo đã chuyển khoản» / khiếu nại trong engine). `objections`
- * = số tin phản đối món của lượt mua hiện tại, GỒM tin này (`countItemObjections` — cart-commitment.ts); `objectionNow` = tin này là phản
- * đối (`itemObjectionCue`) — chỉ chuyển ĐÚNG lúc khách phản đối lần nữa, không phải ở một tin «ok» bất kỳ về sau. `null` = AI trả lời
- * tiếp. HÀM THUẦN.
+ * Bộ đếm phản đối món của LƯỢT MUA hiện tại, lưu trong trạng thái hội thoại (`state.objectionTally`). Phản đối đã nói ra thì món ấy thường đã
+ * bị bỏ khỏi giỏ, nên không thể đếm lại về sau bằng cách đọc lịch sử theo tên món — phải đếm ĐÚNG LÚC tin tới. Reset khi: sang lượt mua
+ * khác (`cycle`), có mốc «trả lại cho AI» (`ai.resumed`) mới hơn lần phản đối gần nhất, hoặc đã chuyển người vì phản đối. HÀM THUẦN.
  */
-export function customerHandoffVerdict(i: { text: string; objections: number; objectionNow: boolean }): { code: CustomerHandoffCode; reason: string } | null {
-  if (customerDemandsHuman(i.text)) return { code: "WANTS_HUMAN", reason: CUSTOMER_HANDOFF_REASON.WANTS_HUMAN };
+export type ObjectionTally = { n: number; at: string; cycle: number };
+export function nextObjectionTally(prev: ObjectionTally | undefined, i: { objectionNow: boolean; cycle: number; now: Date; resumedAt: Date | null }): ObjectionTally | undefined {
+  const fresh = prev && prev.cycle === i.cycle && !(i.resumedAt && Date.parse(prev.at) <= i.resumedAt.getTime()) ? prev : undefined;
+  if (!i.objectionNow) return fresh;
+  return { n: (fresh?.n ?? 0) + 1, at: i.now.toISOString(), cycle: i.cycle };
+}
+
+/**
+ * Quyết định chuyển người theo CHỮ KHÁCH, trước lượt AI. `objections` = số lần phản đối của lượt mua hiện tại GỒM tin này
+ * (`nextObjectionTally`); `objectionNow` = tin này là phản đối (`itemObjectionCue`) — chỉ chuyển ĐÚNG lúc khách phản đối lần nữa. `onCustomerRequest`
+ * = công tắc của chủ shop «chuyển khi khách muốn gặp người» (`cfg.handoff.onCustomerRequest`): tắt ⇒ vế đòi người không chạy (phản đối lặp
+ * vẫn chuyển — đó là bot đọc sai, không phải yêu cầu của khách). `null` = AI trả lời tiếp. HÀM THUẦN.
+ */
+export function customerHandoffVerdict(i: { text: string; objections: number; objectionNow: boolean; onCustomerRequest?: boolean }): { code: CustomerHandoffCode; reason: string } | null {
+  if (i.onCustomerRequest !== false && customerDemandsHuman(i.text)) return { code: "WANTS_HUMAN", reason: CUSTOMER_HANDOFF_REASON.WANTS_HUMAN };
   if (i.objectionNow && i.objections >= OBJECTION_HANDOFF_AT) return { code: "REPEATED_OBJECTION", reason: CUSTOMER_HANDOFF_REASON.REPEATED_OBJECTION };
   return null;
 }
