@@ -1,0 +1,8 @@
+{
+  "pr": 878,
+  "sha": "91bb52a1e7e026a3fb10b4e4fed0b968195a81e3",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-16T23:20:04.719Z",
+  "note": "review độc lập PASS các vòng; delta cuối = gợi ý của reviewer (gap ≤40, không «thêm»)"
+}
