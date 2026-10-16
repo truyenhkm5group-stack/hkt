@@ -1947,7 +1947,10 @@ async function testJourney() {
         complete: async (req: AiRequest) => {
           if (!req.tools.length) return { content: [{ type: "text", text: "NONE" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
           ctxSeen.push(req);
-          return { content: [{ type: "text", text: "Dạ chị cho em xin SĐT và địa chỉ nhận hàng ạ" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+          // Mỗi lượt một câu KHÁC nhau: từ #861 hàng rào «hỏi một lần» (phía máy chủ) bỏ câu xin SĐT / địa chỉ lặp lại khi khách chưa
+          // gửi gì mới — đúng luật; bài kiểm này đo «một câu AI mỗi lượt, ngữ cảnh không gửi lại», không đo câu xin lặp.
+          const ctxReply = ["Dạ chả cá thu 1kg 280.000đ ạ, chị lấy mấy kg ạ?", "Dạ chị cho em xin SĐT và địa chỉ nhận hàng ạ"][ctxSeen.length - 1] ?? "Dạ em ghi nhận ạ";
+          return { content: [{ type: "text", text: ctxReply }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
         },
       }));
       // «Báo giá chả cá thu?» là câu MẪU của quảng cáo (khách ở hội thoại khác bấm cùng câu). Từ 16/10/2026 (chủ shop, issue #856 «Cao
