@@ -1,4 +1,3 @@
-{"at":"2026-10-08T18:05:12.811Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"legal-registers","detail":"feat/legal-registers @ 69523ae2a70c · 1 lệnh kiểm thử"}
 {"at":"2026-10-08T18:05:36.802Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"legal-registers","detail":"#697 cho feat/legal-registers @ 69523ae2a70c"}
 {"at":"2026-10-08T18:05:49.481Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"master-mission-registry","detail":"docs/master-mission-registry @ 78504bbb0dee · 1 lệnh kiểm thử"}
 {"at":"2026-10-08T18:06:10.018Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"master-mission-registry","detail":"#698 cho docs/master-mission-registry @ 78504bbb0dee"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-16T16:07:53.205Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"token-budget","detail":"#875 cho claude/token-budget @ 2c5b996be853"}
 {"at":"2026-10-16T16:16:50.330Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"p0-868-smart-upsell","detail":"claude/p0-868-smart-upsell @ ab28775a96ab · 3 lệnh kiểm thử"}
 {"at":"2026-10-16T16:17:47.192Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"p0-868-smart-upsell","detail":"#876 cho claude/p0-868-smart-upsell @ ab28775a96ab"}
+{"at":"2026-10-16T16:32:21.635Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#869 @ aae410b34f2a · review độc lập PASS @c8650452 + delta aae410b3 (mệnh đề cuối quyết) PASS"}
