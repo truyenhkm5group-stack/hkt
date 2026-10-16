@@ -1,0 +1,8 @@
+{
+  "pr": 873,
+  "sha": "95d299192caa71c0f817e6043693a51784e2f658",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-16T19:58:55.803Z",
+  "note": "review độc lập: db32f25d PASS trừ (4); delta 9506c2c9 (căn cứ theo lượt mua) PASS; 95d29919 chỉ gộp #877"
+}

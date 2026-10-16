@@ -1,4 +1,3 @@
-{"at":"2026-10-08T18:22:53.171Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-customer-health","detail":"#683 @ 48ca07ac6ab1 → de2bc7bbef22 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-08T18:23:05.834Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"saas-shell-polish","detail":"#700 cho fix/saas-shell-polish @ 8f063effd7ae"}
 {"at":"2026-10-08T18:23:40.311Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"saas-ops-signals","detail":"feat/saas-ops-signals @ 9d41af49ca4d · 1 lệnh kiểm thử"}
 {"at":"2026-10-08T18:26:40.132Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#700 @ 8f063effd7ae · Review bảo mật PASS: x-forwarded-host chỉ cho thương hiệu (hostSlug/matchSite/hostOrganization vẫn đọc host), Caddy ghi đè header ở production, session/api-guard chỉ đổi câu, trang Nhân viên chỉ ẩn hiển thị, error.tsx không lộ lỗi; public-site + session-revocation + saas-shell + shell-gate-redirects + tsc + eslint đạt; merge-tree sạch. LOW theo sau: lời mời ở vỏ vẫn gán vai trò tuỳ chỉnh, miễn trừ"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-16T18:15:27.343Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"p0-871-contact-memory","detail":"claude/p0-871-contact-memory @ 4d8558b4b673 · 4 lệnh kiểm thử"}
 {"at":"2026-10-16T18:16:14.297Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"p0-871-contact-memory","detail":"#878 cho claude/p0-871-contact-memory @ 4d8558b4b673"}
 {"at":"2026-10-16T19:58:52.095Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"p0-855-delta","detail":"claude/p0-855-delta @ 95d299192caa · 2 lệnh kiểm thử"}
+{"at":"2026-10-16T19:59:12.934Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#873 @ 95d299192caa · review độc lập: db32f25d PASS trừ (4); delta 9506c2c9 (căn cứ theo lượt mua) PASS; 95d29919 chỉ gộp #877"}
