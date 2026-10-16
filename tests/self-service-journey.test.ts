@@ -1950,8 +1950,9 @@ async function testJourney() {
           return { content: [{ type: "text", text: "Dạ chị cho em xin SĐT và địa chỉ nhận hàng ạ" }], stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
         },
       }));
-      // «Báo giá chả cá thu?» là câu MẪU của quảng cáo (khách ở hội thoại khác bấm cùng câu) ⇒ trả lời tự động của page SAU nó là đúng
-      // việc tự động được cài để làm — bot không chen (response-ownership.ts · ca «Dư Thị Liên»). Câu khách TỰ GÕ thì khác (ca t-981).
+      // «Báo giá chả cá thu?» là câu MẪU của quảng cáo (khách ở hội thoại khác bấm cùng câu). Từ 16/10/2026 (chủ shop, issue #856 «Cao
+      // Hải Ninh») trả lời TỰ ĐỘNG của page SAU nó KHÔNG còn đóng lượt: lời chào / creative không phải câu báo giá ⇒ AI vẫn trả lời câu
+      // hỏi, và tin tự động vẫn nằm trong lịch sử AI như ngữ cảnh «[Shop đã nhắn]» (không gửi lại cho khách).
       for (const other of ["t-ctx-seed-1", "t-ctx-seed-2"]) await db.insert(schema.salesChatInbound).values({ pageId: PAGE, threadId: other, messageId: `${other}.q`, text: "Báo giá chả cá thu?", status: "DONE", processedAt: new Date() });
       await receiveFanpageEvent(ev("m-ctx-1", "Báo giá chả cá thu?", { id: "cust-ctx", name: "Thu Vân" }, "t-ctx"));
       await receiveFanpageEvent(ev("m-ctx-auto", "Dạ em chào anh/chị! Chả cá thu bên em hiện đang có giá 1kg / 2kg ạ", { id: PAGE }, "t-ctx"));
@@ -1963,21 +1964,22 @@ async function testJourney() {
         { id: "m-ctx-auto", inserted_at: ctxIso(1_000), from: { id: PAGE }, message: "Dạ em chào anh/chị! Chả cá thu bên em hiện đang có giá 1kg / 2kg ạ" },
       ];
       const ctxFetch = fakeFetchCalls((url, init) => (init?.method === "GET" && url.includes("/conversations/t-ctx/messages") ? { success: true, messages: ctxMsgs } : { success: true, id: `m-${Math.random().toString(36).slice(2)}` }));
-      assert.match((await processFanpageThread(PAGE, "t-ctx", { fetch: ctxFetch.fetch, now: in31s })).skipped ?? "", /Page đã trả lời/);
+      const fCtx = await processFanpageThread(PAGE, "t-ctx", { fetch: ctxFetch.fetch, now: in31s });
+      assert.ok(fCtx.replies >= 1 && !/Page đã trả lời/.test(fCtx.skipped ?? ""), `câu mẫu hỏi giá + tự động của page ⇒ AI VẪN trả lời (issue #856): ${JSON.stringify(fCtx)}`);
       await new Promise((r) => setTimeout(r, 5));
       await receiveFanpageEvent(ev("m-ctx-2", "Ship c 1kí", { id: "cust-ctx", name: "Thu Vân" }, "t-ctx"));
       await processFanpageThread(PAGE, "t-ctx", { fetch: ctxFetch.fetch, now: () => new Date(Date.now() + FOLLOWUP_WAIT_MS + 1000) });
-      const hist = JSON.stringify(ctxSeen[0]?.messages ?? []);
+      const hist = JSON.stringify(ctxSeen[1]?.messages ?? []);
       const iAsk = hist.indexOf("Báo giá chả cá thu?");
       const iAuto = hist.indexOf("[Shop đã nhắn] Dạ em chào anh/chị! Chả cá thu");
       const iShip = hist.indexOf("Ship c 1kí");
-      assert.ok(iAsk >= 0 && iAuto > iAsk && iShip > iAuto, `lịch sử AI: câu khách bị bỏ qua → trả lời tự động của page → câu mới, đúng thứ tự: ${hist.slice(0, 400)}`);
+      assert.ok(iAsk >= 0 && iAuto > iAsk && iShip > iAuto, `lịch sử AI: câu hỏi giá → trả lời tự động của page → câu mới, đúng thứ tự: ${hist.slice(0, 400)}`);
       const ctxPosts = ctxFetch.calls.filter((c) => c.init?.method === "POST").map((c) => String(c.init?.body));
-      assert.ok(ctxPosts.length === 1 && !ctxPosts.some((b) => b.includes("Shop đã nhắn") || b.includes("Báo giá chả cá thu")), `ngữ cảnh chép vào lịch sử KHÔNG gửi lại cho khách: ${ctxPosts.join(" | ")}`);
+      assert.ok(ctxPosts.length === 2 && !ctxPosts.some((b) => b.includes("Shop đã nhắn") || b.includes("Báo giá chả cá thu")), `MỘT câu AI mỗi lượt khách; ngữ cảnh KHÔNG gửi lại cho khách: ${ctxPosts.join(" | ")}`);
       // Lượt sau không chép lại lần hai.
       await receiveFanpageEvent(ev("m-ctx-3", "Phạm Văn Đồng, Bình Thạnh", { id: "cust-ctx", name: "Thu Vân" }, "t-ctx"));
       await processFanpageThread(PAGE, "t-ctx", { fetch: ctxFetch.fetch, now: () => new Date(Date.now() + FOLLOWUP_WAIT_MS + 1000) });
-      const hist2 = JSON.stringify(ctxSeen[1]?.messages ?? []);
+      const hist2 = JSON.stringify(ctxSeen[2]?.messages ?? []);
       assert.equal(hist2.split("[Shop đã nhắn] Dạ em chào").length - 1, 1, "trả lời tự động chỉ nằm MỘT lần trong lịch sử");
       // Mức suy nghĩ «Nhanh» ⇒ suy luận low; «Kỹ» (mặc định) ⇒ medium + ngân sách rộng.
       assert.equal(ctxSeen[0].reasoning, "medium");
@@ -2039,8 +2041,9 @@ async function testJourney() {
       const autoFetch = timed([{ id: "m-new2-q", at: "2026-10-03T12:47:00.000000" }, { id: "m-new2-auto", at: "2026-10-03T12:47:01.000000" }]);
       const fAuto = await processFanpageThread(PAGE, "t-987", { fetch: autoFetch.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
       assert.ok(fAuto.replies >= 1 && !/Page đã trả lời/.test(fAuto.skipped ?? ""), `trả lời tự động sau câu khách tự gõ ⇒ bot vẫn trả lời: ${JSON.stringify(fAuto)}`);
-      // (05/10/2026 · «Dư Thị Liên») khách bấm quảng cáo hỏi giá, page tự trả lời HAI tin (lời chào + bảng giá) ngay sau đó nhưng
-      // WEBHOOK của chúng chưa tới ⇒ Pancake đã có ⇒ bot KHÔNG gọi AI, không nhắn thêm bảng giá thứ hai.
+      // (05/10/2026 · «Dư Thị Liên») khách bấm quảng cáo hỏi giá, page tự trả lời HAI tin (lời chào + bảng giá) ngay sau đó, WEBHOOK của
+      // chúng chưa tới ⇒ Pancake đã có. HỢP ĐỒNG ĐỔI 16/10/2026 (issue #856 «Cao Hải Ninh»): tin TỰ ĐỘNG không đóng câu hỏi ⇒ bot trả lời
+      // ĐÚNG MỘT câu (giá máy chủ có thẩm quyền), không im như trước — im là mất khách hỏi giá từ quảng cáo.
       await receiveFanpageEvent(ev("m-lien-q", "Báo giá chả cá thu?", { id: "cust-lien", name: "Dư Thị Liên" }, "t-989"));
       const lienFetch = fakeFetchCalls((url, init) =>
         init?.method === "GET" && url.includes("/messages")
@@ -2055,9 +2058,8 @@ async function testJourney() {
           : { success: true, id: `m-${Math.random().toString(36).slice(2)}` },
       );
       const fLien = await processFanpageThread(PAGE, "t-989", { fetch: lienFetch.fetch, now: inMs(FIRST_CONTACT_WAIT_MS + 1000) });
-      assert.ok(fLien.replies === 0 && fLien.processed === 1 && /Page đã trả lời/.test(fLien.skipped ?? ""), `page đã trả lời theo Pancake ⇒ bot không chen: ${JSON.stringify(fLien)}`);
-      assert.equal(lienFetch.calls.filter((c) => c.init?.method === "POST").length, 0, "không gửi tin nào");
-      assert.equal((await db.select({ turns: schema.salesChatConversations.turns }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, "t-989"))))[0]?.turns ?? 0, 0, "bỏ qua TRƯỚC lượt AI — 0 token");
+      assert.ok(fLien.replies >= 1 && !/Page đã trả lời/.test(fLien.skipped ?? ""), `tự động của page không chặn AI trả lời câu hỏi giá: ${JSON.stringify(fLien)}`);
+      assert.equal(lienFetch.calls.filter((c) => c.init?.method === "POST").length, 1, "đúng MỘT câu trả lời, không gửi trùng");
       // (03/10/2026) Hội thoại chuyển người vì AI HỎNG (ô model sai) ⇒ khách nhắn lại sau thời gian nhường thì bot thử lại, không
       // bắt ai bấm «Trả lại cho AI» cho từng hội thoại. Chưa hết thời gian nhường ⇒ vẫn nhường.
       await receiveFanpageEvent(ev("m-down-1", "Shop ơi", { id: "cust-down", name: "Cham Duong" }, "t-988"));
@@ -2289,7 +2291,9 @@ async function testJourney() {
       const counts = await fanpageInboundCounts();
       assert.ok(counts.skipped >= 1 && counts.skippedReasons.some((r) => /nhân viên/i.test(r.reason) && r.count >= 1), JSON.stringify(counts));
       assert.ok(!counts.skippedReasons.some((r) => r.reason === "BOT_SENT" || r.reason === "PAGE_REPLY"), "tin bot tự gửi / tin phía page không phải tin bị bỏ qua");
-      assert.ok(counts.skippedReasons.some((r) => /Page đã trả lời/.test(r.reason)), JSON.stringify(counts));
+      // Dòng «Page đã trả lời» của bộ dữ liệu này trước đây sinh từ ngoại lệ «tự động của page trả lời câu mẫu» — đã bỏ 16/10/2026
+      // (issue #856). Nay tin tự động không chốt lượt nào ⇒ không lý do bỏ qua nào được là «Page đã trả lời» chỉ vì tự động.
+      assert.ok(!counts.skippedReasons.some((r) => /Page đã trả lời/.test(r.reason)), `tin tự động của page không còn chốt tin khách: ${JSON.stringify(counts)}`);
       // Nhà cung cấp OpenAI (BYOK) phải CHUYỂN mức suy luận + ngân sách của lượt gọi xuống Responses API — đo 01/10/2026: cứng
       // «medium» với ngân sách nhỏ ⇒ model suy nghĩ hết ngân sách, trả RỖNG. Thiếu `reasoning` ⇒ giữ «medium» như cũ.
       const oaBodies: Record<string, unknown>[] = [];

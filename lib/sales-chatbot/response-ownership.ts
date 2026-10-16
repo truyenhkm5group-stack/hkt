@@ -18,8 +18,10 @@
  *     META_SYSTEM · OTHER_APP · UNKNOWN — suy ra từ dữ kiện ĐÃ CÓ (`classifyOutbound`), không đoán theo «bot vừa nói».
  *  2. Một LƯỢT KHÁCH = các tin khách liên tiếp (tin tự động / hệ thống chen giữa KHÔNG cắt lượt). Lượt chỉ «đã trả lời» khi có tin
  *     ra HỢP LỆ có thứ tự SAU tin khách CUỐI của lượt (`buildCustomerTurns`). Tin tự động / chào quảng cáo / hệ thống KHÔNG BAO GIỜ
- *     trả lời một câu hỏi thật; ngoại lệ duy nhất: lượt CHỈ gồm câu mẫu của quảng cáo («Báo giá chả cá thu?») mà page tự trả lời
- *     SAU nó — đó đúng là việc tự động được cài để làm («Dư Thị Liên», 05/10).
+ *     trả lời một câu hỏi thật — KỂ CẢ lượt chỉ gồm câu mẫu của quảng cáo («Báo giá chả cá thu?»). Ngoại lệ cũ cho lượt toàn câu
+ *     mẫu («Dư Thị Liên», 05/10 — tránh báo giá đôi) đã BỎ theo quyết định chủ shop 16/10/2026 (issue #856, ca «Cao Hải Ninh»): lời
+ *     chào / creative tự động không phải câu giải đáp, câu báo giá của máy chủ là nguồn giá có thẩm quyền, và bỏ lỡ một khách hỏi
+ *     giá từ quảng cáo đắt hơn một câu chào trùng ý. Đường AI và hộp thư (`latestTurnState`) giờ nói CÙNG một điều.
  *  3. Thứ tự so theo MỐC NGUỒN (`source_at` của Pancake / Meta) + thứ tự nguồn, KHÔNG theo phút; thiếu mốc nguồn ⇒ chỉ tin ra tới
  *     sau ≥ `ORDER_AMBIGUITY_MS` mới chắc là «sau». Câu của BOT chỉ trả lời tin khách bot đã THẤY (tin còn PENDING thì chưa).
  *  4. NHƯỜNG NGƯỜI chỉ bật khi tin ra là VERIFIED_HUMAN (`originPausesAi`). UNKNOWN: không nhường mù, nhưng vẫn tính là đã trả lời
@@ -251,13 +253,11 @@ export function effectiveOrigins(ms: readonly LedgerMessage[]): Map<string, Send
 }
 
 /**
- * Tin ra `o` có TRẢ LỜI tin khách `c` (thuộc lượt `allTemplate`) không. Hợp lệ: bot ERP · người đã xác minh · ứng dụng khác · không rõ
- * (không trả lời đôi — luật 4); tự động của page chỉ trả lời lượt TOÀN câu mẫu quảng cáo; chữ hệ thống không bao giờ. HÀM THUẦN.
+ * Tin ra có TRẢ LỜI một lượt khách không. Hợp lệ: bot ERP · người đã xác minh · ứng dụng khác · không rõ (không trả lời đôi — luật 4).
+ * Tự động của page và chữ hệ thống KHÔNG BAO GIỜ — kể cả với lượt toàn câu mẫu quảng cáo (luật 2, issue #856). HÀM THUẦN.
  */
-export function answers(origin: SenderKind, allTemplate: boolean): boolean {
-  if (origin === "CUSTOMER" || origin === "META_SYSTEM") return false;
-  if (origin === "PANCAKE_AUTOMATION") return allTemplate;
-  return true;
+export function answers(origin: SenderKind): boolean {
+  return origin !== "CUSTOMER" && origin !== "META_SYSTEM" && origin !== "PANCAKE_AUTOMATION";
 }
 
 /**
@@ -290,8 +290,7 @@ export function buildCustomerTurns(ms: readonly LedgerMessage[], opts: { handled
       continue;
     }
     if (!open.length) continue;
-    const allTemplate = open.every((x) => x.template === true);
-    if (!answers(origin, allTemplate)) continue;
+    if (!answers(origin)) continue;
     let covered = 0;
     while (covered < open.length && definitelyAfter(m, open[covered])) covered++;
     if (!covered) continue;
@@ -324,8 +323,8 @@ export function buildCustomerTurns(ms: readonly LedgerMessage[], opts: { handled
  *  (4) một NGƯỜI mở / đọc tường minh lượt đó — con trỏ đọc của BẤT KỲ người dùng (`sales_chat_reads.read_through_at`), hoặc mốc mở
  *      cấp cửa hàng cũ `staff_seen_at` (trước con trỏ V3 10/10 — bằng chứng người mở), ≥ tin khách cuối.
  * Tin khách MEDIA_ONLY (nhãn dán / ghi âm) LÀ một lượt khách ở đây (người phải thấy) — chỉ đường AI mới không trả lời lượt toàn media.
- * Tin tự động của page (kể cả trả lời câu mẫu quảng cáo) và chữ hệ thống KHÔNG BAO GIỜ là xử lý — khác đường quyết định của AI (ở đó
- * tin tự động trả lời lượt TOÀN câu mẫu để bot không báo giá đôi), vì hàng đợi của NGƯỜI phải thấy khách mà chưa NGƯỜI / AI nào đáp.
+ * Tin tự động của page (kể cả trả lời câu mẫu quảng cáo) và chữ hệ thống KHÔNG BAO GIỜ là xử lý — CÙNG luật với đường quyết định của
+ * AI từ 16/10/2026 (issue #856), nên hộp thư và AI không còn chỗ «hộp thư báo chờ mà AI đã đóng lượt».
  * Không có tin khách nào ⇒ không có gì chưa xử lý. Dùng chung `effectiveOrigins` · `answers` · `definitelyAfter` với đường quyết định.
  */
 export type LatestTurnState = {
@@ -352,7 +351,7 @@ export function latestTurnHandled(ledger: readonly LedgerMessage[], opts: { read
   const base = { hasCustomer: true, turnId: buildCustomerTurns(ledger).at(-1)?.id ?? turnIdOf(c.id), lastCustomerId: c.id, lastCustomerAt: keyOf(c) };
   for (const o of ordered.slice(lastIdx + 1)) {
     const origin = origins.get(o.id) ?? o.sender;
-    if (origin === "CUSTOMER" || !answers(origin, false)) continue;
+    if (origin === "CUSTOMER" || !answers(origin)) continue;
     if (definitelyAfter(o, c)) return { ...base, handled: true, by: origin };
   }
   const h = opts.readThroughAt ?? null;

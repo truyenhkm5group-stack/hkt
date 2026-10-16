@@ -37,6 +37,7 @@ import {
   mergeSourceView,
   openTurnOf,
   originPausesAi,
+  answers,
   ownershipMetrics,
   PAGE_REPLY_NOTE,
   partitionPending,
@@ -121,10 +122,37 @@ function testPure() {
   // Ba tin khách liên tiếp ⇒ MỘT lượt.
   assert.equal(buildCustomerTurns([cust("a", T), cust("b", T + 1_000), cust("c", T + 2_000)]).length, 1);
 
-  // 4. «Dư Thị Liên»: lượt TOÀN câu mẫu quảng cáo, page tự trả lời SAU ⇒ đã trả lời (không báo giá lần hai). Câu tự gõ thì không.
-  assert.ok(buildCustomerTurns([cust("t", T, { template: true }), out("a1", "PANCAKE_AUTOMATION", T + 1_000), out("a2", "PANCAKE_AUTOMATION", T + 1_500)])[0].answered);
-  assert.ok(!buildCustomerTurns([cust("t", T), out("a1", "PANCAKE_AUTOMATION", T + 1_000)])[0].answered);
-  assert.ok(!buildCustomerTurns([cust("t", T, { template: true }), out("a1", "PANCAKE_AUTOMATION", T - 1_000)])[0].answered, "tự động gửi TRƯỚC không trả lời gì");
+  // 4. HỢP ĐỒNG ĐỔI 16/10/2026 (chủ shop, issue #856 «Cao Hải Ninh»): tin TỰ ĐỘNG của page KHÔNG BAO GIỜ đóng lượt khách — kể cả lượt
+  // toàn câu mẫu quảng cáo («Báo giá chả cá thu?»). Ngoại lệ cũ «Dư Thị Liên» (05/10 — tránh báo giá đôi) đã bỏ: lời chào / creative
+  // không phải câu giải đáp, giá máy chủ là nguồn có thẩm quyền. Mọi biến thể thứ tự đều phải để lượt MỞ cho AI.
+  const hoi = (id: string, at: number, o: Partial<LedgerMessage> = {}) => cust(id, at, { template: true, text: "Báo giá chả cá thu?", ...o });
+  const tuDong = (id: string, at: number, o: Partial<LedgerMessage> = {}) => out(id, "PANCAKE_AUTOMATION", at, { text: GREETING, ...o });
+  const moChoAi = (ms: LedgerMessage[], vi: string) => {
+    const ts = buildCustomerTurns(ms);
+    assert.ok(!ts.at(-1)!.answered, `${vi}: lượt hỏi giá phải còn MỞ cho AI — ${JSON.stringify(ts)}`);
+    assert.deepEqual(partitionPending(ms.filter((m) => m.sender === "CUSTOMER").map((m) => m.id), ts).answered, [], `${vi}: không tin khách nào bị chốt «page đã trả lời»`);
+  };
+  moChoAi([hoi("t", T), tuDong("a1", T + 1_000), tuDong("a2", T + 1_500)], "tự động tới SAU (khác giây)");
+  moChoAi([hoi("t", T, { sourceSeq: 1 }), tuDong("a1", T, { sourceSeq: 2 })], "tự động CÙNG GIÂY, đứng sau theo thứ tự nguồn");
+  moChoAi([tuDong("a1", T - 1_000), hoi("t", T)], "tự động gửi TRƯỚC");
+  moChoAi([hoi("t", T, { arrivedAt: T + 90_000 }), tuDong("a1", T + 2_000, { arrivedAt: T + 3_000 })], "webhook tin khách tới SAU tin tự động (đảo thứ tự)");
+  moChoAi([hoi("t", T, { sourceAt: null }), tuDong("a1", T + 120_000, { sourceAt: null })], "thiếu mốc nguồn, tự động tới sau ≥ 60 giây");
+  moChoAi([hoi("t", T), tuDong("a1", T + 1_000), tuDong("a1", T + 1_000)], "webhook tự động TRÙNG");
+  moChoAi([hoi("t", T), tuDong("a1", T + 1_000, { text: "Chả cá thu 1kg giá 199k (giá cũ) — inbox để được tư vấn" })], "tin mẫu có chữ giá (cũ / sai) — giá máy chủ có thẩm quyền");
+  moChoAi([hoi("t", T), out("u", "UNKNOWN", T + 2_000)], "chưa rõ người gửi ngay đầu phiên ⇒ coi là tin chào");
+  moChoAi([cust("q", T, { text: "1kg bao nhiêu vậy shop" }), tuDong("a1", T + 1_000)], "câu tự gõ + tự động");
+  // Khách hỏi thêm sau tin tự động ⇒ vẫn MỘT lượt mở (không nuốt câu mới, không tách hai câu trả lời).
+  const them = buildCustomerTurns([hoi("t", T), tuDong("a1", T + 1_000), cust("t2", T + 20_000, { text: "Ship HN mấy ngày?" })]);
+  assert.ok(them.length === 1 && !them[0].answered && them[0].messageIds.join() === "t,t2", JSON.stringify(them));
+  // Không nhầm tự động với NGƯỜI: nhân viên thật trả lời ⇒ đóng (AI không chen); bot ERP đã gửi ⇒ đóng (không lặp).
+  assert.ok(buildCustomerTurns([hoi("t", T), tuDong("a1", T + 1_000), out("s", "VERIFIED_HUMAN", T + 30_000)])[0].answeredBy?.origin === "VERIFIED_HUMAN");
+  assert.ok(buildCustomerTurns([hoi("t", T, { status: "DONE" }), tuDong("a1", T + 1_000), out("b", "AI_AGENT", T + 5_000)])[0].answeredBy?.origin === "AI_AGENT");
+  assert.ok(buildCustomerTurns([hoi("t", T), tuDong("a1", T + 1_000), out("o", "OTHER_APP", T + 9_000)])[0].answeredBy?.origin === "OTHER_APP", "ứng dụng khác thật sự trả lời ⇒ không trả lời đôi (luật 4)");
+  assert.equal(answers("PANCAKE_AUTOMATION"), false);
+  assert.equal(answers("META_SYSTEM"), false);
+  assert.deepEqual((["AI_AGENT", "VERIFIED_HUMAN", "OTHER_APP", "UNKNOWN"] as const).filter(answers), ["AI_AGENT", "VERIFIED_HUMAN", "OTHER_APP", "UNKNOWN"]);
+  // Hộp thư và AI nói CÙNG một điều: lượt ấy cũng «chưa xử lý» ở hộp thư.
+  assert.equal(latestTurnHandled([hoi("t", T), tuDong("a1", T + 1_000)]).handled, false);
   // Chữ hệ thống không bao giờ trả lời.
   assert.ok(!buildCustomerTurns([cust("t", T), out("m", "META_SYSTEM", T + 5 * MIN)])[0].answered);
 
