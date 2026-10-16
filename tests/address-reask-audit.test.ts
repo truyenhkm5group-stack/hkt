@@ -57,10 +57,36 @@ function testArgs() {
 }
 
 function testPure() {
-  // Bản sao bộ nhận câu hỏi phường = bản trong lib (cùng câu mẫu, cùng kết luận).
-  for (const s of [SIX_ASK, "Dạ phường nào ạ?", "Dạ mình cho em xin tên phường / xã mới của địa chỉ với ạ?", "Dạ phường Cổ Nhuế 2 cũ nay thuộc phường Thượng Cát hay phường Đông Ngạc theo địa giới mới ạ?", "Dạ em giao về phường An Hội Tây cho mình nhé.", "Dạ em lên đơn 1kg chả cá thu nhé?", "Mình xác nhận giúp em nhé."]) {
+  // Bản sao bộ nhận câu hỏi phường = bản trong lib. Hai lớp (#855 P0-A2 — lớp câu mẫu cũ để lọt một mẫu regex mới của lib):
+  //  (1) MÃ NGUỒN: các khối regex cùng tên ở hai tệp phải giống hệt từng ký tự — thêm một mẫu ở lib mà quên bản sao là đỏ ngay;
+  //  (2) CÙNG MỘT tập câu mẫu chạy qua cả hai, phủ mọi nhánh (câu tự thân là hỏi · câu xin không dấu hỏi · câu có dấu hiệu hỏi · câu kể).
+  const block = (src: string, name: string) => {
+    const m = new RegExp(`const ${name} = ([\\s\\S]*?);\\n`).exec(src);
+    assert.ok(m, `không thấy khối ${name}`);
+    return m[1].replace(/\s+/g, " ").trim();
+  };
+  const libSrc = readFileSync("lib/sales-chatbot/address-memory.ts", "utf8").replace(/\r\n/g, "\n");
+  const copySrc = readFileSync("scripts/address-reask-audit.ts", "utf8").replace(/\r\n/g, "\n");
+  const stripComments = (x: string) => x.replace(/^\s*\/\/.*$/gm, "");
+  for (const name of ["WARD_ASK", "WARD_ASK_Q", "FULL_ADDRESS_ASK", "NOT_A_REASK"]) assert.equal(block(stripComments(copySrc), name), block(stripComments(libSrc), name), `bản sao ${name} lệch lib`);
+  const WARD_SAMPLES = [
+    SIX_ASK,
+    "Dạ phường nào ạ?",
+    "Dạ mình cho em xin tên phường / xã mới của địa chỉ với ạ?",
+    "Dạ phường Cổ Nhuế 2 cũ nay thuộc phường Thượng Cát hay phường Đông Ngạc theo địa giới mới ạ?",
+    "Dạ phường Đại Kim cũ nay là phường / xã nào theo tên mới ạ? Mình cho em xin tên phường / xã mới để shop giao đúng nha.",
+    "Mình cho em xin tên phường nhé.",
+    "Cho em xin lại xã giúp em.",
+    "Mình xác nhận giúp em phường An Hội Tây đúng không ạ",
+    "Dạ em giao về phường An Hội Tây cho mình nhé.",
+    "Em xác nhận phường An Hội Tây cho mình nhé.",
+    "Dạ em lên đơn 1kg chả cá thu nhé?",
+    "Mình xác nhận giúp em nhé.",
+  ];
+  for (const s of WARD_SAMPLES) {
     for (const part of s.match(/[^.!?\n]+[.!?]*/g) ?? []) assert.equal(asksForWardCopy(part), asksForWard(part), `bản sao lệch bản lib: ${part}`);
   }
+  assert.ok(asksForWardCopy("Mình cho em xin tên phường / xã mới để shop giao đúng nha."), "câu xin không dấu hỏi vẫn là câu hỏi phường");
   assert.deepEqual(addressAsksIn(SIX_ASK), { ward: true, wardList: true, province: false, full: false });
   assert.deepEqual(addressAsksIn("Dạ mình cho em xin địa chỉ nhận hàng nhé?"), { ward: false, wardList: false, province: false, full: true });
   assert.equal(addressAsksIn("Dạ mình ở tỉnh nào ạ?").province, true);
@@ -82,6 +108,18 @@ function testPure() {
   assert.deepEqual([du.clear, du.causes], [false, ["REPEAT_WARD_ASK"]]);
   const once = auditAddressReask(convo([["user", txt("khu đô thị Xa La, Hà Đông, Hà Nội")], ["assistant", txt("Dạ mình cho em xin tên phường / xã mới của địa chỉ với ạ?")]]), start);
   assert.deepEqual([once.reasked, once.causes], [false, []], "câu hỏi phường đầu tiên cho địa chỉ mơ hồ thật không phải hỏi lại");
+  // #855 P0-A2, ca «ThivanNguyen» (đã thay số nhà / SĐT): phường Đại Kim CŨ (bị chia) + quận cũ ⇒ bot bắt khách quy đổi sang tên mới
+  // ⇒ OLD_WARD_CONVERT_ASK, kể cả câu hỏi ĐẦU TIÊN (chủ shop 16/10/2026 cấm hỏi khách tên phường mới). Trước bản này hội thoại không
+  // rơi vào nhóm nào vì phường cũ không «rõ».
+  const thivan = auditAddressReask(convo([
+    ["user", txt(`Số 25 khu Bắc Linh Đàm, phường Đại Kim (cũ), Hoàng Mai, Hà Nội\n${PHONE}`)],
+    ["assistant", txt("Dạ phường Đại Kim cũ nay là phường / xã nào theo tên mới ạ? Mình cho em xin tên phường / xã mới để shop giao đúng nha.")],
+  ]), start);
+  assert.deepEqual([thivan.clear, thivan.reasked, thivan.causes], [false, true, ["OLD_WARD_CONVERT_ASK"]], JSON.stringify(thivan));
+  const anhSon = auditAddressReask(convo([["user", txt("Khối 3, thị trấn Anh Sơn, huyện Anh Sơn, tỉnh Nghệ An")], ["assistant", txt("Dạ mình cho em xin tên phường / xã (theo địa giới mới) của địa chỉ nhận hàng với ạ?")]]), start);
+  assert.deepEqual(anhSon.causes, ["OLD_WARD_CONVERT_ASK"], "thị trấn + huyện cũ (tên cũ không có trong danh mục)");
+  // «Xa La» không phải «xã», «khu đô thị» không chứa «thị xã»: chỉ quận cũ ⇒ không phải nhóm này (vẫn như ca «Lê Văn Dụ» ở trên).
+  assert.equal(once.causes.includes("OLD_WARD_CONVERT_ASK"), false);
   // Không gửi địa chỉ ⇒ ngoài mẫu số; câu hỏi giá không phải địa chỉ.
   assert.equal(auditAddressReask(convo([["user", txt("chả cá bao nhiêu em?")], ["assistant", txt("Dạ mình cho em xin địa chỉ nhé?")]]), start).givenAt, null);
   // Cửa sổ: sự việc TRƯỚC mốc không đếm.
@@ -99,7 +137,7 @@ function testSource() {
   // TỰ CHỨA: mọi tệp script import phải CÓ trên main trước bản sửa — không kéo tệp lib mới của nhánh này.
   for (const m of code.matchAll(/from "@\/([^"]+)"/g)) assert.ok(existsSync(`${m[1]}.ts`) || existsSync(`${m[1]}/index.ts`), `import @/${m[1]} phải có sẵn`);
   assert.ok(!code.includes("address-memory"), "không import lib/sales-chatbot/address-memory (chưa có trên image)");
-  assert.ok(!/customerStatedAddresses|wardFromCustomerWords|MAX_WARDS_NAMED_IN_QUESTION/.test(code), "không dùng hàm lib mới của nhánh này");
+  assert.ok(!/customerStatedAddresses|wardFromCustomerWords|MAX_WARDS_NAMED_IN_QUESTION|legacyAddressUnmapped|addressGapOf/.test(code), "không dùng hàm lib mới của nhánh này");
   assert.ok(!/\(\?<[=!]/.test(code), "không nhìn-ngược");
   assert.match(src, /process\.stdout\.write\("", \(\) => done\(\)\)/, "xả stdout trước khi thoát");
   const ops = readFileSync(".github/workflows/ops-vps.yml", "utf8").replace(/\r\n/g, "\n");
@@ -165,7 +203,7 @@ export async function testAddressReaskAudit() {
   testPure();
   testSource();
   await testDb();
-  console.log("  ✓ ops address-reask-audit: ca «Tuyet Nguyen Thi» ⇒ WARD_ALREADY_CLEAR + TOOL_LINE_DEGRADED + WARD_LIST · «Lê Văn Dụ» hỏi lần hai ⇒ REPEAT_WARD_ASK · câu hỏi đầu cho địa chỉ mơ hồ không đếm · số câu hỏi tới đơn · bản sao bộ nhận khớp lib · tóm tắt không lọt PII; chỉ đọc, tự chứa, khai đủ bốn chỗ");
+  console.log("  ✓ ops address-reask-audit: ca «Tuyet Nguyen Thi» ⇒ WARD_ALREADY_CLEAR + TOOL_LINE_DEGRADED + WARD_LIST · «Lê Văn Dụ» hỏi lần hai ⇒ REPEAT_WARD_ASK · câu hỏi đầu cho địa chỉ mơ hồ không đếm · số câu hỏi tới đơn · bản sao bộ nhận khớp lib (mã nguồn + câu mẫu) · «Đại Kim cũ» ⇒ OLD_WARD_CONVERT_ASK · tóm tắt không lọt PII; chỉ đọc, tự chứa, khai đủ bốn chỗ");
 }
 
 if (process.argv[1] && /address-reask-audit\.test\.ts$/.test(process.argv[1])) {

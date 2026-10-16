@@ -532,16 +532,16 @@ export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, am
   // TỔNG của một giỏ KHÁC giỏ hiện tại ở BẤT KỲ đâu trong câu (review vòng 3 — cấu trúc, không phụ thuộc chữ «tổng» / «đơn» / nếu–thì).
   const cfgOk = (a: number) => a === facts.freeShipFrom || a === facts.shipFee;
   // TỔNG CỦA GIỎ MÁY CHỦ ĐÃ TỪ CHỐI (P0 16/10/2026, #855 ca «ThuyNgo» — 680.000 ₫ của «chả cá + chả mực» khi khách chỉ gọi chả mực):
-  // máy chủ đã biết số đó là tổng của một giỏ có món khách KHÔNG chọn ⇒ LUÔN chặn + người, kể cả khi hội thoại chưa có báo giá hợp lệ nào
-  // (`tf` vắng — trước đây số ấy lọt qua vì nằm trong tập tham chiếu của danh mục). Trừ khi nó cũng là tổng hợp lệ hiện tại / giá một đơn vị.
+  // máy chủ đã biết số đó là tổng của một giỏ có món khách KHÔNG chọn (`calculate_cart` từ chối) ⇒ LUÔN chặn + người, kể cả khi hội thoại
+  // chưa có báo giá hợp lệ nào (`tf` vắng — số ấy từng lọt qua vì nằm trong tập tham chiếu của danh mục). Trừ khi nó cũng là tổng hợp lệ
+  // hiện tại / giá một đơn vị / số của cấu hình ship.
   const rejectedBad = facts.rejected?.size ? [...new Set(amounts.filter((a) => facts.rejected!.has(a) && !(tf?.allowed.has(a) ?? false) && !cfgOk(a) && !(facts.unitPrices?.has(a) ?? false)))] : [];
   if (rejectedBad.length) {
     return { ok: false, claim: "PRICE_UNVERIFIED", safeText: CLAIM_SAFE_TEXT.PRICE, handoffReason: CLAIM_HANDOFF_REASON.PRICE_UNVERIFIED, note: `Đã chặn câu có số tiền ${rejectedBad.map((n) => formatVND(n)).join(", ")} — tổng của giỏ có món khách chưa chọn (máy chủ đã từ chối tính)`, handoff: true, amounts: rejectedBad };
   }
   // LUẬT B (review vòng 4): tổng máy chủ ĐÃ BÁO trước đó mà không phải tổng hiện tại ⇒ LUÔN chặn, ở bất kỳ đâu trong câu — kể cả khi nó là
   // bội số của món đang có trong giỏ (570k của báo giá 2kg cũ khi giỏ là 1kg). Báo giá máy chủ vừa tính trong lượt (giả định khách hỏi) nằm
-  // trong tập tổng hiện tại nên vẫn nói được — và từ #855 giả định đó chỉ tồn tại khi mọi món của nó có căn cứ từ khách (`calculate_cart`
-  // từ chối tính giỏ có món khách chưa gọi tên, nên không có báo giá «hiện tại» nào cho một giỏ như thế).
+  // trong tập tổng hiện tại nên vẫn nói được.
   const seenBad = tf && facts.seen ? [...new Set(amounts.filter((a) => facts.seen!.has(a) && !tf.allowed.has(a) && !cfgOk(a)))] : [];
   if (seenBad.length) {
     return { ok: false, claim: "PRICE_UNVERIFIED", safeText: CLAIM_SAFE_TEXT.PRICE, handoffReason: CLAIM_HANDOFF_REASON.PRICE_UNVERIFIED, note: `Đã chặn câu có số tiền ${seenBad.map((n) => formatVND(n)).join(", ")} — tổng máy chủ đã báo cho một giỏ trước, không phải giỏ hiện tại`, handoff: true, amounts: seenBad };

@@ -43,10 +43,10 @@ import { foldVi } from "@/lib/sales-chatbot/text";
 import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packingIssues, packingRequestOf, verifiedUnitPrices, type AgentQuoteClaim, type Priced, type PricingContext } from "@/lib/sales-chatbot/quote";
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
-import { addressProvenanceVerdict } from "@/lib/sales-chatbot/address-provenance";
-import { bindCommitment, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, mentionText, unrequestedProducts, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
-import { acceptCustomerWard, addressQuestion, canAutoFill, namesOtherWard, parseCustomerAddress, wardFromCustomerWords, oldWardSplit, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
-import { askedBefore, askMemoryFor, askMemoryParts, askParts, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
+import type { ObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
+import { bindCommitment, commitmentViolation, customerHesitates, declinesAddOnOnly, itemObjectionCue, lineBasisViolation, mentionText, unrequestedProducts, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
+import { acceptCustomerWard, addressQuestion, canAutoFill, legacyAddressUnmapped, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
+import { askedBefore, askMemoryFor, askMemoryParts, askParts, deliveryAddressDecision, hasChangeCue, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
 import { isMessagingChannel, type ChatChannel, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
@@ -54,6 +54,8 @@ import { renderQuickReplyForSend } from "@/lib/sales-chatbot/quick-replies";
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import type { OrderSyncThreadState } from "@/lib/sales-chatbot/order-sync-shared";
 import { customerOrderStatus } from "@/lib/sales-chatbot/order-status-shared";
+import { classifyDeliveryQuestion, deliveryTimeAnswer, pickDeliveryOrder, staffDeliveryCommitment } from "@/lib/sales-chatbot/delivery-intent";
+import { LIFECYCLE_ORDER_LOOKBACK_DAYS } from "@/lib/sales-chatbot/lifecycle";
 import { fanpageVisitorKeyMirror } from "@/lib/pricing/ai-customer-identity";
 import type { PromptStamp } from "@/lib/sales-chatbot/prompt-stamp";
 import type { PancakeThreadProfile, ReturningCustomer } from "@/lib/sales-chatbot/returning";
@@ -87,6 +89,8 @@ export type ChatState = {
    * `seenQuoteId` / `seenLines` = báo giá + dòng hàng khách ĐÃ THẤY ở lượt trước (đổi số lượng / quy cách trong lượt này ⇒ báo giá cũ hết
    * hiệu lực, phải xin xác nhận tổng mới). `packing` = NGUYÊN VĂN yêu cầu đóng gói riêng của khách — ghi vào ghi chú đơn cho kho.
    */
+  /** Bộ đếm phản đối món của lượt mua hiện tại (P0 #855 — `nextObjectionTally`, handoff-routing-shared.ts). */
+  objectionTally?: ObjectionTally;
   draft?: { orderId: string | null; lines: CartLine[]; unitPrices: Record<string, number>; recipient: Recipient; note: string; simulated: boolean; shownTurn?: number; firstShownTurn?: number; quote?: AgentQuoteClaim; seenQuoteId?: string; seenLines?: CartLine[]; seenTotal?: number; packing?: string | null };
   /** Khách PHẢN ĐỐI giá (PRICE_DISPUTED, 11/10/2026) — engine ghi khi phát hiện; chốt đơn bị chặn tới khi máy chủ báo lại và khách xác nhận. */
   priceDispute?: PriceDisputeState;
@@ -106,16 +110,11 @@ export type ChatState = {
   /** Mọi TỔNG / tiền hàng máy chủ đã tính cho các giỏ / đơn nháp trong hội thoại (`noteSeenTotals`) — hàng rào chặn nói lại tổng của giỏ CŨ. */
   seenTotals?: number[];
   /**
-   * TỔNG của những giỏ máy chủ TỪ CHỐI tính vì có món khách không chọn (P0 16/10/2026, #855 ca «ThuyNgo» — 680.000 ₫ cho «chả cá + chả
+   * TỔNG của những giỏ máy chủ TỪ CHỐI tính vì có món khách chưa gọi tên (P0 16/10/2026, #855 ca «ThuyNgo» — 680.000 ₫ cho «chả cá + chả
    * mực» khi khách chỉ gọi chả mực). Máy chủ đã biết con số đó SAI cho khách này ⇒ chữ bot mang nó luôn bị chặn (`claim-guard.ts`), kể cả
-   * khi hội thoại chưa có báo giá hợp lệ nào để so. Tối đa `REJECTED_TOTALS_MAX`.
+   * khi hội thoại chưa có báo giá hợp lệ nào để so. Tối đa `REJECTED_TOTALS_MAX`; xoá khi sang lượt mua mới.
    */
   rejectedTotals?: number[];
-  /**
-   * Lượt khách SỬA đơn bot đã đề nghị (bớt / bỏ / đổi số / chọn lại) trong lượt mua hiện tại — `frustration.ts` chuyển người khi đủ
-   * `CORRECTION_HANDOFF_AT` lần. Chỉ engine ghi.
-   */
-  corrections?: number[];
   /** Giá ĐÃ XÁC THỰC công cụ đọc đã trả cho model trong hội thoại (search / get_product / get_current_price) — tối đa `PRICE_FACTS_MAX`. */
   priceFacts?: number[];
   /** Đơn đã chốt của các lượt mua TRƯỚC trong cùng hội thoại (khách mua lại sau `POST_ORDER_HANDOFF_MS`) — báo cáo vẫn đếm. */
@@ -353,7 +352,7 @@ const PROCESS_DEFS: Record<ProcessTool, AiToolDef> = {
   get_order_status: {
     name: "get_order_status",
     description:
-      "Tra TRẠNG THÁI ĐƠN của CHÍNH hội thoại này (đơn đã lên / đã chốt trong hội thoại) khi khách hỏi «đơn của em tới đâu rồi», «bao giờ nhận hàng», «đã gửi chưa». Trả từng đơn: mã, ngày đặt, «status» theo LỜI KHAI của đơn vị vận chuyển, mã vận đơn, needs_staff. Không có tham số. Nói ĐÚNG «status», không hứa ngày giao, không nêu số tiền; needs_staff ⇒ hỏi khách có cần nhân viên shop hỗ trợ không. Không thấy đơn ⇒ máy chủ tự chuyển nhân viên — KHÔNG xin SĐT / mã đơn. Bình luận công khai ⇒ không đọc đơn.",
+      "Tra ĐƠN của CHÍNH hội thoại này (đơn đã lên / đã chốt trong hội thoại) khi khách hỏi «đơn của em tới đâu rồi», «đã gửi chưa» (TRẠNG THÁI) hoặc «hôm nào có hàng», «bao giờ nhận», «chiều nay giao được không», «giao gấp được không» (LỊCH GIAO) — CHỈ khi khách ĐÃ có đơn trong hội thoại; khách CHƯA đặt mà hỏi giao hôm nay / mai / gấp là câu BÁN HÀNG ⇒ KHÔNG gọi công cụ này, trả lời theo chính sách giao của shop, không hứa giờ cụ thể, ghi lời dặn vào delivery_note khi lên đơn. Trả từng đơn: mã, ngày đặt, «status» theo LỜI KHAI của đơn vị vận chuyển, mã vận đơn, needs_staff. Không có tham số. Câu hỏi LỊCH GIAO ⇒ máy chủ trả «delivery_answer»: làm ĐÚNG theo nó (nói nguyên câu «say», hoặc máy chủ đã chuyển nhân viên) — KHÔNG đọc «status» thay cho giờ giao, KHÔNG tự hứa hôm nay / ngày mai. Câu hỏi trạng thái ⇒ nói ĐÚNG «status», không hứa ngày giao, không nêu số tiền; needs_staff ⇒ hỏi khách có cần nhân viên shop hỗ trợ không. Không thấy đơn ⇒ máy chủ tự chuyển nhân viên — KHÔNG xin SĐT / mã đơn. Bình luận công khai ⇒ không đọc đơn.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     kind: "read",
   },
@@ -480,19 +479,6 @@ const ADD_ON_ONLY_ERROR = "Giỏ / đơn chỉ có mẫu mã CHỈ BÁN KÈM (vd
 function ok(summary: string, data: unknown, state: ChatState): ToolOutcome {
   return { content: JSON.stringify(data), isError: false, summary, state };
 }
-/**
- * ĐỊA CHỈ KHÁCH NÓI MỚI NHẤT THẮNG (P0 16/10/2026, #855 — `address-provenance.ts`): dòng địa chỉ sắp ghi vào khách / đơn khác địa chỉ khách
- * gõ ở tin MỚI HƠN ⇒ từ chối (model ghi lại đúng địa chỉ khách); khách gõ mới rồi lại xin địa chỉ cũ ⇒ từ chối + chuyển người. `null` = qua.
- */
-async function addressProvenanceBlock(address: string, province: string, ctx: ToolContext, state: ChatState, what: string): Promise<ToolOutcome | null> {
-  // Nạp động: customer-360.ts nạp tệp này (maskAddress) — nạp tĩnh là thành vòng (cùng cách create_customer nạp nó).
-  const c360 = await import("@/lib/sales-chatbot/customer-360");
-  const v = addressProvenanceVerdict({ writing: address, province, customerTexts: ctx.customerTexts, asksOld: (t) => c360.reuseIntentOf([t]).address === "REUSE" });
-  if (v.ok) return null;
-  if (v.kind === "CONFLICT") return { ...err(`${what}: địa chỉ mới / cũ mâu thuẫn`, v.error, state), requireHuman: v.reason };
-  return err(`${what}: khác địa chỉ khách vừa gõ`, v.error, state);
-}
-
 function err(summary: string, message: string, state: ChatState, orderSignal?: ToolOutcome["orderSignal"]): ToolOutcome {
   return { content: JSON.stringify({ error: message }), isError: true, summary, state, ...(orderSignal ? { orderSignal } : {}) };
 }
@@ -623,13 +609,19 @@ function cartView(p: Priced) {
 /** Trần sổ tổng «đã từ chối» (`ChatState.rejectedTotals`). */
 export const REJECTED_TOTALS_MAX = 10;
 
-/** Ghi tổng của một giỏ máy chủ TỪ CHỐI tính (món khách chưa chọn) vào `state.rejectedTotals` — giữ `REJECTED_TOTALS_MAX` số mới nhất. */
+/** Ghi tổng của một giỏ máy chủ TỪ CHỐI tính (món khách chưa gọi tên) vào `state.rejectedTotals` — giữ `REJECTED_TOTALS_MAX` số mới nhất. */
 function noteRejectedTotals(state: ChatState, amounts: readonly (number | null)[]): void {
   const add = amounts.filter((n): n is number => typeof n === "number" && n > 0);
   const prev = state.rejectedTotals ?? [];
   const fresh = add.filter((n, i) => !prev.includes(n) && add.indexOf(n) === i);
   if (fresh.length) state.rejectedTotals = [...prev, ...fresh].slice(-REJECTED_TOTALS_MAX);
 }
+
+/**
+ * Khách PHỦ NHẬN đã đặt một món («không có order chả cá thu», «kg có order chả cá») — đọc trên chữ đã gập. Câu như thế không bao giờ là
+ * lời đồng ý chốt đơn (#855), kể cả khi món ấy đã bị bỏ khỏi giỏ ngay trước lượt AI. «Không đặt thêm gì nữa» (không «có») không thuộc đây.
+ */
+const DENIED_ORDER_RE = /(?:^| )(?:khong|ko|k|hong|hok|kg) co (?:order|dat)(?: |$)/;
 
 function orderInput(state: ChatState, draft: NonNullable<ChatState["draft"]>, priced: Priced, stage: "NEW" | "CONFIRMED", cfg: SalesChatbotConfig, channel: ChatChannel) {
   const notes = [
@@ -659,8 +651,6 @@ export type AddressCheckView = { status: AddressConfidence | "CUSTOMER_CONFIRMED
 /** Ngữ cảnh của lượt cho `addressCheckOf`: tin khách (đọc địa chỉ khách tự gõ) + trí nhớ đã hỏi + lượt hiện tại. Bỏ trống ⇒ như cũ. */
 export type AddressCheckOpts = { customerTexts?: readonly string[]; asked?: AddressAskMemory; turn?: number };
 
-const OLD_WARD_REVIEW_NOTE = "Khách ĐÃ ghi xã / phường cũ — quy sang xã / phường mới là việc của SHOP: KHÔNG hỏi khách tên xã / phường mới, KHÔNG tự chọn. Đơn đi tiếp với ô xã trống + cờ cần kiểm địa chỉ; nhân viên chọn xã trước khi giao.";
-
 const ASKED_ONCE_NOTE = "Phần địa chỉ này ĐÃ hỏi khách ở lượt trước — KHÔNG hỏi lại (kể cả khi chép lại địa chỉ khác đi). Đơn đi tiếp: ô xã để trống, đơn mang cờ cần kiểm địa chỉ, nhân viên xác nhận với khách. KHÔNG tự chọn xã, KHÔNG nói địa chỉ đã đúng.";
 
 export function addressCheckOf(r: Pick<Recipient, "address" | "province" | "ward">, opts: AddressCheckOpts = {}): { key: string; view: AddressCheckView } {
@@ -669,6 +659,9 @@ export function addressCheckOf(r: Pick<Recipient, "address" | "province" | "ward
   if (out.view.ask_customer && askedBefore(askMemoryFor(opts.asked, r.address), askParts(out.view.missing), opts.turn)) return { key: out.key, view: { ...out.view, ask_customer: null, note: ASKED_ONCE_NOTE } };
   return out;
 }
+
+/** Ghi chú công cụ cho địa chỉ cũ chưa ghép — nội bộ, model không được hỏi khách. */
+export const LEGACY_UNMAPPED_NOTE = "Địa chỉ khách ghi ĐỦ theo địa giới CŨ; danh mục vận chuyển chưa ghép được một xã / phường mới — đây KHÔNG phải khách thiếu thông tin. KHÔNG hỏi khách tên phường / xã mới, KHÔNG chọn một ứng viên, KHÔNG sửa dòng địa chỉ. Ghi đúng nguyên văn; đơn đi với cờ cần kiểm địa chỉ, nhân viên đối chiếu nội bộ.";
 
 function addressCheckCore(r: Pick<Recipient, "address" | "province" | "ward">, opts: AddressCheckOpts): { key: string; view: AddressCheckView } {
   const key = [r.address, r.province, r.ward ?? ""].map((x) => x.trim()).join("|");
@@ -687,11 +680,11 @@ function addressCheckCore(r: Pick<Recipient, "address" | "province" | "ward">, o
     const ask = missing.includes("street") ? addressQuestion({ ...a, province: stated.province, provinceCode: stated.provinceCode, ward: stated.ward, confidence: "EXACT", candidates: [], legacy: null, provinceHint: null, missing }) : null;
     return { key, view: { status: "CUSTOMER_STATED", province: stated.province, ward: stated.ward, candidates: [], missing, ask_customer: ask, note: "Xã / phường đọc từ CHÍNH tin khách đã gửi — đã ghép theo địa giới mới. KHÔNG hỏi lại khách phường / xã." } };
   }
-  // KHÔNG BẮT KHÁCH TỰ QUY ĐỔI ĐỊA GIỚI (P0 16/10/2026, #855): khách ĐÃ ghi đủ xã / phường cũ + quận / huyện cũ mà danh mục chỉ cho biết xã
-  // cũ ấy bị CHIA cho vài xã mới (`legacy`) — chọn xã mới là việc của SHOP, không phải của khách. Không hỏi khách; đơn đi tiếp với ô xã
-  // trống + cờ cần kiểm địa chỉ (lõi đơn: ADDRESS_UNRESOLVED) và tuyến giao giữ lại (NO_WARD) tới khi nhân viên chọn xã.
-  if (oldWardSplit(a)) {
-    return { key, view: { status: a.confidence, province: a.province, ward: null, candidates: a.candidates, missing: a.missing, ask_customer: null, note: OLD_WARD_REVIEW_NOTE } };
+  // ĐỊA GIỚI CŨ ĐỦ MÀ DANH MỤC CHƯA GHÉP (#855 — chủ shop 16/10/2026: «không yêu cầu khách tự tìm hiểu tên phường mới», «không chọn ngẫu
+  // nhiên», «không chắc ⇒ chuyển nhân viên»): KHÔNG có câu hỏi khách; ô xã để trống, đơn đi với cờ ADDRESS_UNRESOLVED cho nhân viên kiểm
+  // nội bộ (không tạo vận đơn — lõi đơn giữ đơn ở hàng cần kiểm). Ứng viên chỉ nằm ở `candidates` cho người kiểm.
+  if (legacyAddressUnmapped(r.address, r.province)) {
+    return { key, view: { status: a.confidence, province: a.province, ward: null, candidates: a.candidates, missing: a.missing, ask_customer: null, note: LEGACY_UNMAPPED_NOTE } };
   }
   const ask = addressQuestion(a);
   const note = canAutoFill(a)
@@ -917,9 +910,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const choice = packChoiceMistake(priced, ctx.config, ctx.lastUserText);
       if (choice) return err("Tính giỏ: nhầm gói", choice, state);
       // BÁO GIÁ CŨNG PHẢI CÓ CĂN CỨ (P0 16/10/2026, #855 ca «ThuyNgo»): khách «Ship chị 1 mực giã tay», bot tính giỏ «1kg chả cá thu + 1kg
-      // chả mực» (món của đơn CŨ) và khách THẤY 680.000 ₫ — hàng rào căn cứ chỉ đứng ở lên / chốt đơn, còn báo giá thì không, và báo giá
-      // vừa tính lại được hàng rào số tiền coi là «tổng hiện tại». Nay: giỏ có món khách chưa gọi tên (kể cả trong câu hỏi giá) ⇒ KHÔNG
-      // tính, không lưu báo giá, và tổng của giỏ đó vào sổ «đã từ chối» để chữ bot mang nó bị chặn.
+      // chả mực» (món của đơn CŨ) và khách THẤY 680.000 ₫ — hàng rào căn cứ (`unrequestedProducts`) chỉ đứng ở lên / chốt đơn. Nay cùng
+      // hàng rào đứng ở báo giá: giỏ có món khách chưa gọi tên (kể cả trong câu hỏi giá — `mentionText`) ⇒ KHÔNG tính, không lưu báo giá,
+      // và tổng của giỏ đó vào sổ «đã từ chối» để chữ bot mang nó bị chặn (`claim-guard.ts`).
       const groundedQ = state.draft ? new Set((await priceLines(state.draft.lines, ctx.config, verifiedCustomerId(state))).asked.map((l) => l.productId ?? l.variantId)) : new Set<string>();
       const strangeQ = unrequestedProducts(state.cart, priced.asked, mentionText(ctx.customerTexts ?? [ctx.lastUserText]), groundedQ);
       if (strangeQ.length) {
@@ -927,7 +920,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         if (priced.lines.length > 1 || units > 1) noteRejectedTotals(state, [priced.subtotal, priced.total]);
         return err(
           "Tính giỏ: có món khách chưa chọn",
-          `KHÔNG tính giỏ có ${strangeQ.map((n) => `«${n}»`).join(", ")}: khách CHƯA gọi tên món này. Món của ĐƠN CŨ (khách cũ) là LỊCH SỬ, không phải giỏ hiện tại — chỉ tính khi khách nói rõ «như lần trước / lấy như cũ». KHÔNG báo số tiền nào của giỏ này cho khách. Tính lại ĐÚNG món khách đã chọn; chưa rõ khách muốn gì thì HỎI.`,
+          `KHÔNG tính giỏ có ${strangeQ.map((n) => `«${n}»`).join(", ")}: khách CHƯA gọi tên món này. Món của ĐƠN CŨ (khách cũ) là LỊCH SỬ, không phải giỏ hiện tại. KHÔNG báo số tiền nào của giỏ này cho khách. Tính lại ĐÚNG món khách đã chọn; chưa rõ khách muốn gì thì HỎI.`,
           state,
         );
       }
@@ -964,11 +957,6 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         fields = { name: typed.length >= 2 ? typed : r.name, phone: phone.phone, address: r.address, province: r.province };
         // Mức PHONE — và THREAD mà chính nó đã là địa chỉ máy điền (`returning.ts` trả về mức PHONE) — đều là dữ liệu chủ SĐT.
         saved = r.trust === "PHONE";
-      }
-      // Địa chỉ sắp lưu trái địa chỉ khách gõ ở tin MỚI HƠN (kể cả địa chỉ đơn cũ máy điền) ⇒ không lưu (#855) — xét TRƯỚC lời xác nhận địa chỉ cũ: khách đã gõ địa chỉ mới thì không được hỏi khách «dùng lại địa chỉ cũ không».
-      if (typeof fields.address === "string") {
-        const prov = await addressProvenanceBlock(fields.address, typeof fields.province === "string" ? fields.province : "", ctx, state, "Lưu khách");
-        if (prov) return prov;
       }
       // Địa chỉ ĐƠN CŨ (Customer 360) chỉ là gợi ý (AGENTS 3.12): gõ lại nó mà không qua use_saved_address ⇒ bỏ qua kiểm lời xác nhận.
       if (!saved && ctx.returning?.fromHistory && input.use_saved_address !== true && (await import("@/lib/sales-chatbot/customer-360")).historyAddressWithoutConsent(ctx.returning, input.address, ctx.lastUserText))
@@ -1056,10 +1044,44 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
           if (!parsed.province) recipient.province = stated.province;
         }
       }
-      // Người nhận của đơn (kể cả khi lượt sửa không gửi address — đơn nháp giữ người nhận cũ) trái địa chỉ khách gõ ở tin MỚI HƠN ⇒ không
-      // ghi (#855 ca «ThuyNgo»: đơn giữ «Khương Đình» của khách cũ sau khi khách đã gõ địa chỉ ở Thủ Đức).
-      const provBlock = await addressProvenanceBlock(recipient.address, recipient.province, ctx, state, "Đơn nháp");
-      if (provBlock) return provBlock;
+      // KHÁCH ĐỔI ĐỊA CHỈ (#855, ca «ThuyNgo»; review độc lập): máy chủ CHỈ tự ghi địa chỉ mới khi CHẮC — chính tin khách MỚI NHẤT mang một
+      // địa chỉ đọc được KHÁC địa chỉ đang giữ, kèm lời đổi TƯỜNG MINH («giao về …», «đổi địa chỉ», «chuyển nhà»…). Khi đó ghi NGUYÊN VĂN
+      // chữ khách, xã đọc lại từ chính địa chỉ đó, và cờ cần người đi CÙNG GIAO DỊCH ghi đơn (`AgentOrderOptions.review`) — đơn không bao giờ
+      // «có xã mà không cờ», kể cả đơn mới. Không chắc (khách đang gõ dở / không có lời đổi tường minh / model chép một địa chỉ KHÁC chữ
+      // khách) ⇒ KHÔNG ghi đè, gắn cờ đơn đang có + chuyển người. Chỉ sửa món / ghi chú ⇒ không đụng địa chỉ (không có địa chỉ khác mới hơn).
+      const texts = ctx.customerTexts ?? [];
+      const change = deliveryAddressDecision({ draft: existing, customer: state.customer }, texts);
+      const pending = change.status === "CHANGE_PENDING_VERIFICATION" && change.use ? change.use : null;
+      const explicitChange = pending !== null && pending.messageIndex === texts.length - 1 && hasChangeCue(texts[texts.length - 1] ?? "");
+      const modelWroteNew = pending !== null && Boolean(v.data.address?.trim()) && sameDeliveryPlace(recipient.address, pending.raw);
+      const changeFrom = (change.previous?.raw ?? "").slice(0, 120);
+      const unsure = change.status === "CHANGE_INCOMPLETE" || (pending !== null && !modelWroteNew && (!explicitChange || Boolean(v.data.address?.trim())));
+      if (unsure) {
+        // Gắn cờ hỏng (lỗi / ném) vẫn đi nhánh chuyển người — không bao giờ ghi đè khi không chắc.
+        if (existing?.orderId && !simulated) {
+          await flagOrderForReviewAsAgent(ctx.agent, existing.orderId, { code: "ADDRESS_UNRESOLVED", note: `Khách có thể đã đổi địa chỉ giao — máy KHÔNG tự ghi; địa chỉ đang giữ: «${changeFrom}»; cần người xác minh`, quote: (texts[texts.length - 1] ?? "").slice(0, 300) || null }, now).catch(() => null);
+        }
+        return { ...err("Đơn nháp: địa chỉ chưa chắc", "Khách có vẻ đổi nơi giao nhưng máy chủ chưa chắc địa chỉ mới — KHÔNG ghi đè địa chỉ, đã chuyển nhân viên xác minh. KHÔNG nói đã đổi địa chỉ, KHÔNG hỏi lại khách.", state), requireHuman: "Khách đổi địa chỉ giao chưa rõ — nhân viên xác minh địa chỉ (máy không tự ghi đè)" };
+      }
+      // ĐỊA CHỈ KHÁCH GÕ MỚI NHẤT THẮNG (P0 16/10/2026, #855 ca «ThuyNgo» — đơn quay về «Khương Đình» của đơn cũ sau khi khách đã gõ địa chỉ
+      // ở Thủ Đức): model gửi một `address` KHÁC nơi giao khách tự gõ gần nhất (`deliveryAddressDecision` = NEW_EXPLICIT) ⇒ không ghi; model
+      // ghi lại đúng địa chỉ khách. Khách thật sự đổi / xin địa chỉ cũ thì quyết định đã khác NEW_EXPLICIT (đổi chờ xác minh · dùng lại).
+      // Dòng model ghi nằm NGUYÊN VĂN trong một tin khách từ tin mang địa chỉ đó trở đi (đặt hộ: «Chị ở <A>. Người nhận: <B>») ⇒ vẫn là chữ khách.
+      const typedAt = change.use?.messageIndex ?? null;
+      const writtenKey = foldVi(v.data.address ?? "").replace(/[^a-z0-9]+/g, " ").trim();
+      const writtenByCustomer = typedAt !== null && writtenKey.length >= 6 && texts.slice(typedAt).some((t) => ` ${foldVi(t).replace(/[^a-z0-9]+/g, " ")} `.includes(` ${writtenKey} `));
+      if (v.data.address?.trim() && change.status === "NEW_EXPLICIT" && change.use && !writtenByCustomer && !sameDeliveryPlace(recipient.address, change.use.raw)) {
+        return err("Đơn nháp: khác địa chỉ khách vừa gõ", `Địa chỉ này KHÁC địa chỉ khách đã gõ: «${change.use.raw.slice(0, 160)}». Địa chỉ khách nói MỚI NHẤT luôn thắng địa chỉ cũ / đã lưu — gọi lại với address = đúng dòng địa chỉ khách đã gõ (giữ nguyên chữ khách), hoặc bỏ trống address để giữ người nhận hiện tại. KHÔNG dùng địa chỉ đơn cũ, KHÔNG hỏi lại phần khách đã nói.`, state);
+      }
+      const addressChange = pending && (explicitChange || modelWroteNew) ? { to: pending.raw, from: changeFrom } : null;
+      if (addressChange && !modelWroteNew && !sameDeliveryPlace(recipient.address, addressChange.to)) {
+        recipient.address = addressChange.to;
+        recipient.province = "";
+        delete recipient.ward;
+        const parsedNew = parseCustomerAddress(recipient.address);
+        if (canAutoFill(parsedNew) && parsedNew.ward) recipient.ward = parsedNew.ward;
+      }
+      const changeFlag = addressChange ? { code: "ADDRESS_UNRESOLVED" as const, note: `Khách đổi địa chỉ giao — địa chỉ trước: «${addressChange.from}»; cần người xác minh địa chỉ mới`, quote: addressChange.to.slice(0, 300) } : null;
       const priced = await priceLines(lines, ctx.config, verifiedCustomerId(state), [recipient.address, recipient.province].join(", "), { packing: Boolean(packing) });
       if (priced.missing.length) return err("Đơn nháp: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state, { reason: "UNKNOWN_SKU" });
       if (priced.unpriced.length) return { ...err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state, { reason: "UNPRICED_SKU" }), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
@@ -1095,9 +1117,11 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         // Đơn MỚI mang mã quảng cáo đã dẫn khách vào hội thoại (trong cửa sổ quy kết — máy chủ quyết); sửa đơn KHÔNG đổi nó.
         // Tổ chức tự chốt mà bot quyết CHƯA chốt (khách hoãn / phản đối giá / vừa mời thêm món) ⇒ lõi giữ «Mới» (`holdNew`).
         const holdNew = ctx.autoConfirm === true && autoConfirmBlocker({ ...state, draft }, ctx) !== null;
+        // Cờ «khách đổi địa chỉ» ghi CÙNG giao dịch với đơn (tạo / sửa) — hỏng thì cả lượt ghi hỏng, không có đơn «có xã mà không cờ».
+        const review = changeFlag ? { review: changeFlag } : {};
         const r = draft.orderId
-          ? await updateOrderAsAgent(ctx.agent, draft.orderId, payload, agentOrderOpts(ctx, state, false, quoteClaim, holdNew))
-          : await createOrderAsAgent(ctx.agent, payload, { ...agentOrderOpts(ctx, state, true, quoteClaim, holdNew), adId: await chatOrderAdId(ctx.conversationId, now) });
+          ? await updateOrderAsAgent(ctx.agent, draft.orderId, payload, { ...agentOrderOpts(ctx, state, false, quoteClaim, holdNew), ...review })
+          : await createOrderAsAgent(ctx.agent, payload, { ...agentOrderOpts(ctx, state, true, quoteClaim, holdNew), adId: await chatOrderAdId(ctx.conversationId, now), ...review });
         if (!r.ok) return err("Đơn nháp: lỗi", failureText(r), state, omsSignal(r));
         markOrderWritten(ctx.writeMark, r.id);
         draft.orderId = r.id;
@@ -1145,6 +1169,13 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (!state.draft) return err("Chốt: chưa có đơn nháp", "Chưa có đơn nháp để chốt.", state);
       if (!ctx.autoConfirming && (!quote.success || !quotedInText(quote.data, ctx.lastUserText))) {
         return err("Chốt: chưa có lời xác nhận của khách", "customer_confirmation phải là nguyên văn lời đồng ý trong câu CUỐI của khách. Khách chưa xác nhận ⇒ đọc lại tóm tắt và hỏi khách có đồng ý không.", state);
+      }
+      // LỜI PHẢN ĐỐI KHÔNG PHẢI LỜI ĐỒNG Ý (P0 16/10/2026, #855 ca «ThuyNgo»): «Không có order chả cá thu nha», «sai rồi», «sao không coi ở
+      // trên» là khách PHẢN ĐỐI đơn bot đề nghị (cùng bộ đọc `itemObjectionCue` của bộ đếm chuyển người) — bot sửa đơn được (luật #860: phản
+      // đối lần đầu ⇒ bot sửa giỏ), nhưng KHÔNG chốt bằng chính câu phản đối: gửi lại tóm tắt đã sửa, đợi khách đồng ý ở tin SAU. Khách TỰ
+      // sửa số lượng sau khi đã thấy tóm tắt («không phải 2kg, lấy 1kg») vẫn sửa và chốt luôn (luật 6).
+      if (DENIED_ORDER_RE.test(foldVi(ctx.lastUserText)) || itemObjectionCue(ctx.lastUserText, (state.cart?.selectedItems ?? []).map((x) => x.label).filter(Boolean))) {
+        return err("Chốt: khách đang phản đối / sửa đơn", "Tin cuối của khách là lời PHẢN ĐỐI / SỬA đơn, không phải lời đồng ý — KHÔNG chốt trong lượt này. Sửa đơn nháp cho đúng lời khách (nếu chưa), gửi lại tóm tắt và đợi khách đồng ý ở tin SAU mới gọi confirm_order.", state);
       }
       const d = state.draft;
       if (!d.recipient.name || !d.recipient.phone || !d.recipient.address) return err("Chốt: thiếu người nhận", "Thiếu tên / SĐT / địa chỉ người nhận.", state, { reason: "MISSING_CONTACT", fields: (["name", "phone", "address"] as const).filter((k) => !d.recipient[k]).map((k) => `recipient.${k}`) });
@@ -1286,9 +1317,10 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // và KHÔNG theo `state.customer.id` (id ấy có thể đến từ SĐT khách gõ — review độc lập 08/10/2026, CRITICAL). Câu trạng
       // thái theo thứ tự căn cứ ở `order-status-shared.ts`; giao lỗi / hoàn ⇒ việc của người.
       if (simulated) return ok("(Thử) Tra đơn", { orders: [], note: "Khung thử không có đơn thật — đơn mô phỏng không có vận chuyển." }, state);
-      const r = await orderStatusFor(ctx.conversationId, state, ctx.commentTurn === true);
+      const r = await orderStatusFor(ctx.conversationId, state, ctx.commentTurn === true, { text: ctx.lastUserText, shopTexts: ctx.recentSaid ?? [], now: ctx.now ?? new Date() });
       const out = ok(r.summary, r.data, state);
-      // CHỈ «không thấy đơn» mới chuyển người ngay (bot không tra thêm được). Đơn có vấn đề giao: bot nói đúng lời khai rồi hỏi khách.
+      // CHỈ «không thấy đơn» — và câu hỏi LỊCH GIAO mà ERP không có lịch đã xác minh (P0 #855) — mới chuyển người ngay. Đơn có vấn
+      // đề giao: bot nói đúng lời khai rồi hỏi khách.
       return r.needsHuman ? { ...out, requireHuman: r.needsHuman } : out;
     }
     case "mark_declined": {
@@ -1510,7 +1542,7 @@ async function orderLookupBlock(conversationId: string): Promise<"COMMENT" | "UN
 }
 
 /** Đơn của CHÍNH khách trong hội thoại + câu trạng thái (thứ tự căn cứ ở `order-status-shared.ts`). Chỉ đọc. */
-async function orderStatusFor(conversationId: string, state: ChatState, commentTurn: boolean): Promise<{ summary: string; data: unknown; needsHuman: string | null }> {
+async function orderStatusFor(conversationId: string, state: ChatState, commentTurn: boolean, ask: { text: string; shopTexts: readonly string[]; now: Date } = { text: "", shopTexts: [], now: new Date() }): Promise<{ summary: string; data: unknown; needsHuman: string | null }> {
   const block = commentTurn ? "COMMENT" : await orderLookupBlock(conversationId);
   if (block === "COMMENT") {
     return { summary: "Tra đơn: bình luận công khai", data: { orders: [], note: "Đây là luồng BÌNH LUẬN công khai — không đọc đơn ở đây. Mời khách nhắn tin riêng cho page để kiểm tra đơn." }, needsHuman: null };
@@ -1524,7 +1556,7 @@ async function orderStatusFor(conversationId: string, state: ChatState, commentT
   const ids = [state.confirmed?.orderId, ...(state.pastOrders ?? []).map((p) => p.orderId)].filter((x): x is string => typeof x === "string" && x.length > 0);
   const scope = [eq(o.salesConversationId, conversationId), ...(ids.length ? [inArray(o.id, ids)] : [])];
   const rows = await db
-    .select({ id: o.id, at: o.insertedAt, stage: o.stage, displayId: o.displayId })
+    .select({ id: o.id, at: o.insertedAt, stage: o.stage, displayId: o.displayId, promisedAt: o.customerPromisedAt })
     .from(o)
     .where(and(or(...scope), ne(o.stage, "DELETED")))
     .orderBy(desc(o.insertedAt), desc(o.id))
@@ -1538,7 +1570,7 @@ async function orderStatusFor(conversationId: string, state: ChatState, commentT
   }
   const sh = schema.shipments;
   const ships = await db
-    .select({ id: sh.id, orderId: sh.orderId, stage: sh.stage, statusName: sh.vtpStatusName, statusCode: sh.vtpStatus, statusAt: sh.vtpStatusDate, vtpOrderNumber: sh.vtpOrderNumber, trackingCode: sh.trackingCode, direction: sh.direction, attemptNo: sh.attemptNo, createdAt: sh.createdAt, syncSource: sh.vtpSyncSource })
+    .select({ id: sh.id, orderId: sh.orderId, stage: sh.stage, statusName: sh.vtpStatusName, statusCode: sh.vtpStatus, statusAt: sh.vtpStatusDate, vtpOrderNumber: sh.vtpOrderNumber, trackingCode: sh.trackingCode, direction: sh.direction, attemptNo: sh.attemptNo, createdAt: sh.createdAt, syncSource: sh.vtpSyncSource, expectedDelivery: sh.expectedDelivery })
     .from(sh)
     .where(inArray(sh.orderId, rows.map((r) => r.id)));
   const view = rows.map((r) => {
@@ -1547,6 +1579,11 @@ async function orderStatusFor(conversationId: string, state: ChatState, commentT
     const carrierEvidence = Boolean(s?.syncSource && (CARRIER_EVENT_SOURCES as readonly string[]).includes(s.syncSource));
     const st = customerOrderStatus({ orderStage: r.stage, manual: isManualOrderId(r.id), shipment: s ? { stage: s.stage, carrierEvidence, statusCode: s.statusCode, statusName: s.statusName } : null });
     return {
+      id: r.id,
+      stage: r.stage,
+      insertedAt: r.at,
+      promisedAt: r.promisedAt,
+      ship: s ? { stage: s.stage, carrierEvidence, expectedDelivery: s.expectedDelivery } : null,
       row: {
         // Đơn Pancake: mã HIỂN THỊ (khách thấy trên tin xác nhận / POS), không phải id nội bộ dài (review #645, L2).
         order_code: isManualOrderId(r.id) || r.displayId === null ? `#${manualOrderShortCode(r.id)}` : `#${r.displayId}`,
@@ -1561,6 +1598,52 @@ async function orderStatusFor(conversationId: string, state: ChatState, commentT
     };
   });
   const anyStaff = view.some((v) => v.row.needs_staff);
+  // HỎI LỊCH GIAO ≠ HỎI TRẠNG THÁI (P0 #855, ca 16/10/2026 «Hôm nào có hàng?» ⇒ AI đọc «Shop đã nhận đơn — chưa có thông tin vận
+  // chuyển»). Máy chủ quyết câu trả lời từ dữ kiện thật (`delivery-intent.ts`); không có lịch xác minh ⇒ chuyển nhân viên và KHÔNG
+  // đưa câu trạng thái cho model đọc thay giờ giao.
+  const question = classifyDeliveryQuestion(ask.text);
+  if (question?.intent === "DELIVERY_TIME") {
+    // Chỉ đơn của LƯỢT MUA HIỆN TẠI; có đơn nháp đang mở / chỉ có đơn cũ ⇒ không áp (luồng bán hàng / câu trạng thái như cũ).
+    const pick = pickDeliveryOrder(view, { confirmedId: state.confirmed?.orderId ?? null, pastIds: (state.pastOrders ?? []).map((p) => p.orderId).filter((x): x is string => typeof x === "string"), now: ask.now, windowDays: LIFECYCLE_ORDER_LOOKBACK_DAYS });
+    if (pick.kind === "TARGET") {
+      const target = pick.target;
+      const answer = deliveryTimeAnswer({
+        question,
+        customerText: ask.text,
+        orderStage: target.stage,
+        manual: isManualOrderId(target.id),
+        shipment: target.ship,
+        promisedAt: target.promisedAt ?? null,
+        // ERP chưa đọc phân bổ tồn cho từng đơn ở đây ⇒ CHƯA BIẾT (không phải «đủ hàng»).
+        stock: null,
+        staffSaid: staffDeliveryCommitment(ask.shopTexts),
+        liveOrders: pick.liveOrders,
+        now: ask.now,
+      });
+      if (answer.kind === "DIRECT") {
+        return {
+          summary: `Hỏi lịch giao: ${answer.basis}`,
+          data: {
+            orders: view.map((v) => v.row),
+            delivery_answer: { kind: "DIRECT", order_code: target.row.order_code, say: answer.text },
+            note: "Khách hỏi LỊCH GIAO: nói ĐÚNG câu «delivery_answer.say» (không thêm mốc giờ nào khác, không đọc «status» thay câu ấy). KHÔNG báo giá, KHÔNG hỏi lại địa chỉ / SĐT, KHÔNG mời mua thêm.",
+          },
+          needsHuman: null,
+        };
+      }
+      if (answer.kind === "HANDOFF") {
+        return {
+          summary: "Hỏi lịch giao: chưa có lịch xác minh — chuyển nhân viên",
+          data: {
+            orders: view.map((v) => ({ order_code: v.row.order_code, ordered_at: v.row.ordered_at, tracking_code: v.row.tracking_code })),
+            delivery_answer: { kind: "HANDOFF", say_to_customer: answer.text },
+            note: "Khách hỏi LỊCH GIAO mà ERP chưa có lịch giao xác minh — máy chủ đã chuyển nhân viên xác nhận giờ giao. KHÔNG đọc trạng thái đơn thay giờ giao, KHÔNG hứa hôm nay / ngày mai, KHÔNG báo giá / hỏi địa chỉ / mời mua thêm.",
+          },
+          needsHuman: answer.reason,
+        };
+      }
+    }
+  }
   return {
     summary: `Tra đơn: ${view.length}`,
     data: {

@@ -127,6 +127,8 @@ on:
           - pitr-pause          # PITR: PHANH — tạm dừng lưu WAL không cần khởi động lại (arg rỗng); arg "resume" = chạy lại (sau đó chụp bản nền mới)
           - restore-drill-org   # DIỄN TẬP khôi phục MỘT CSDL tổ chức erp_org_* (arg: mã tổ chức; rỗng = luân phiên) vào CSDL tạm tam_khoiphuc_<mã> trong container TẠM, đếm bảng lõi, xoá container — chạy tay; cron cũng tự chạy mỗi Chủ nhật qua drill-org-weekly (luân phiên)
           - migration-rehearsal # CHẠY THỬ migration còn thiếu trên BẢN SAO một CSDL tổ chức (cùng đường khôi phục với restore-drill-org, container TẠM) — thống kê bảng, bấm giờ từng câu, chẩn đoán hàm 0245, EXPLAIN; KHÔNG chạm erp-db; MÃ HOÁ, số qua kênh tóm tắt (arg: "<mã tổ chức> [--candidate-index] [--compare-jit] [--timeout=1200] [--budget=600] [--sample=20] [--explain=3] [--no-analyze] [--skip-diagnose] [--skip-migrate]")
+          - page-auto-skip-audit # P0 HSLC 16/10/2026 (issue #856 «Cao Hải Ninh»): tin khách bị chốt «Page đã trả lời» mà KHÔNG có câu trả lời hợp lệ nào (chỉ tin tự động / chữ hệ thống / tin chào sau nó) trên MỘT tổ chức — chốt nhầm · bỏ sót hiện tại · ≤ 2 giờ (tự cứu sau deploy) · có người giữ · có đơn — MÃ HOÁ, chỉ số đếm (CHỈ ĐỌC; arg: "<mã tổ chức> [--hours=1..336]")
+          - org-0245-index-preseed # NGOẠI LỆ CHỦ SHOP DUYỆT 16/10/2026: tạo TRƯỚC chỉ mục của migration 0247 trên CSDL tổ chức qa (chỉ qa) để 0245 hết quá trần — MẶC ĐỊNH CHẠY THỬ; "--apply" chỉ đi khi RAM ≥ 700 MB · ổ ≥ 2 GB · có bản sao lưu qa ≤ 120 phút · diễn tập khôi phục qa gần nhất ĐẠT ≤ 14 ngày; CONCURRENTLY, không đụng dữ liệu — MÃ HOÁ (arg: "qa [--apply]")
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
           - apply-ai-env        # ghi OPENAI_API_KEY / ANTHROPIC_API_KEY / AI_PROVIDER từ Secrets vào .env, khởi động lại, rồi kiểm tra AI
@@ -173,7 +175,7 @@ permissions:
 # Thao tác trong danh sách mà cần cho người vận hành thấy NGAY một con số ("đã đóng 12 case") thì
 # script tự in dòng ấy với tiền tố `[ops:tom-tat] ` — kênh tóm tắt duy nhất ra log (qua che_log).
 env:
-  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover org-catalog org-offboard identity-reconcile confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai saas-v1-migration ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit inbox-read-audit inbox-unread-dryrun org-migrate-probe pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause order-cancel-reconcile sales-lifecycle-audit sales-integrity-audit pancake-avatar-shape customer-360-probe saas-value-snapshot-check avatar-proxy-check sender-provenance-probe sales-stale-confirmed-repair price-mismatch-scan conv-money-trace cart-intent-audit address-reask-audit stuck-conversation-audit sales-postorder-handoff-release pancake-thread-diff upsell-basis-scan migration-rehearsal"
+  OPS_THAO_TAC_MA_HOA: "platform-secrets-verify db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover org-catalog org-offboard identity-reconcile confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai saas-v1-migration ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit inbox-read-audit inbox-unread-dryrun org-migrate-probe pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause order-cancel-reconcile sales-lifecycle-audit sales-integrity-audit pancake-avatar-shape customer-360-probe saas-value-snapshot-check avatar-proxy-check sender-provenance-probe sales-stale-confirmed-repair price-mismatch-scan conv-money-trace cart-intent-audit address-reask-audit stuck-conversation-audit sales-postorder-handoff-release pancake-thread-diff upsell-basis-scan migration-rehearsal org-0245-index-preseed page-auto-skip-audit"
 
 # ═══════════ HÀNG ĐỢI NẰM TRÊN MÁY CHỦ, KHÔNG NẰM Ở GITHUB ═══════════
 #
@@ -525,7 +527,7 @@ jobs:
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs chatbot-status db-query backup-status pitr-status"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe meta-ad-post-probe vtp-capability ads-level-probe"
-            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-catalog org-offboard org-prepaid-ai org-volume-discount saas-v1-migration identity-reconcile ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit inbox-read-audit inbox-unread-dryrun org-migrate-probe order-cancel-reconcile sales-lifecycle-audit sales-integrity-audit pancake-avatar-shape customer-360-probe saas-value-snapshot-check avatar-proxy-check sender-provenance-probe sales-stale-confirmed-repair price-mismatch-scan conv-money-trace cart-intent-audit address-reask-audit stuck-conversation-audit sales-postorder-handoff-release pancake-thread-diff upsell-basis-scan migration-rehearsal"
+            DOC_NANG="platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-catalog org-offboard org-prepaid-ai org-volume-discount saas-v1-migration identity-reconcile ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit inbox-read-audit inbox-unread-dryrun org-migrate-probe order-cancel-reconcile sales-lifecycle-audit sales-integrity-audit pancake-avatar-shape customer-360-probe saas-value-snapshot-check avatar-proxy-check sender-provenance-probe sales-stale-confirmed-repair price-mismatch-scan conv-money-trace cart-intent-audit address-reask-audit stuck-conversation-audit sales-postorder-handoff-release pancake-thread-diff upsell-basis-scan migration-rehearsal org-0245-index-preseed page-auto-skip-audit"
 
             LOP=GHI
             case "$ARG" in
@@ -1555,6 +1557,36 @@ jobs:
                 SB=/root/erp/scripts/erp-backup.sh
                 [ -f "$SB" ] || { SB="$(mktemp)"; fetch_script erp-backup.sh > "$SB"; }
                 ERP_DIR=/root/erp bash "$SB" restore-drill-org "$ARG" ;;
+              page-auto-skip-audit)
+                # TIN KHÁCH BỊ CHỐT «PAGE ĐÃ TRẢ LỜI» NHẦM (scripts/page-auto-skip-audit.ts — P0 HSLC 16/10/2026, issue #856) — CHỈ ĐỌC
+                # (script tự đặt ERP_READ_ONLY=1 và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection). Luật của image đang chạy
+                # với cờ câu mẫu TRỐNG = luật mới. Chỉ in SỐ ĐẾM; mã hội thoại bỏ sót chỉ ở phần MÃ HOÁ. arg: "<mã tổ chức> [--hours=1..336]".
+                fetch_script page-auto-skip-audit.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/page-auto-skip-audit.ts'
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/page-auto-skip-audit.ts ;;
+              org-0245-index-preseed)
+                # NGOẠI LỆ CÓ GIỚI HẠN (chủ shop duyệt 16/10/2026) — scripts/org-0245-index-preseed.ts: tạo TRƯỚC chỉ mục 0247 trên CSDL tổ
+                # chức `qa` để migration 0245 hết quá trần (drizzle chạy 0245 TRƯỚC 0247 trong cùng giao dịch nên migration chuẩn tới quá
+                # muộn cho đúng tổ chức cần nó). Script tự giới hạn: chỉ `qa`, chỉ khi 0245 chưa áp, đúng một câu CREATE INDEX CONCURRENTLY,
+                # không để lại bản INVALID. Không "--apply" ⇒ CHẠY THỬ (chỉ đọc). "--apply" (làn GHI — khoá vòng đời độc quyền, deploy chờ)
+                # chỉ đi tiếp khi CẢ BỐN tiền điều kiện ở máy chủ đạt — đo ở đây vì container không thấy /root/backups:
+                kiem_arg
+                case " $ARG " in
+                  *" --apply "*)
+                    _ram="$(free -m | awk '/^Mem:/ {print $7}')"
+                    _o="$(df -Pm / | awk 'NR==2 {print $4}')"
+                    _ban="$(find /root/backups/orgs/erp_org_qa -name 'erp_org_qa-*.dump' -mmin -120 2>/dev/null | head -1)"
+                    _dt="/root/backups/status/orgs/erp_org_qa/last-drill.json"
+                    _dt_ok="$(find "$_dt" -mtime -14 2>/dev/null | head -1)"
+                    _dt_kq="$(grep -o '"result":"[A-Z]*"' "$_dt" 2>/dev/null | head -1)"
+                    echo "[ops:tom-tat] tiền điều kiện: RAM dùng được ${_ram:-?} MB (≥ 700) · ổ trống ${_o:-?} MB (≥ 2048) · bản sao lưu qa ≤ 120 phút: $([ -n "$_ban" ] && echo có || echo KHÔNG) · diễn tập khôi phục qa: ${_dt_kq:-chưa có} $([ -n "$_dt_ok" ] && echo '(≤ 14 ngày)' || echo '(cũ / không có)')"
+                    if [ -z "$_ram" ] || [ "$_ram" -lt 700 ] || [ -z "$_o" ] || [ "$_o" -lt 2048 ] || [ -z "$_ban" ] || [ -z "$_dt_ok" ] || [ "$_dt_kq" != '"result":"OK"' ]; then
+                      echo "::error::org-0245-index-preseed --apply: tiền điều kiện CHƯA đạt — KHÔNG ghi. Chạy restore-drill-org qa / chờ máy rảnh rồi thử lại."
+                      exit 1
+                    fi ;;
+                esac
+                fetch_script org-0245-index-preseed.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/org-0245-index-preseed.ts'
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/org-0245-index-preseed.ts ;;
               migration-rehearsal)
                 # CHẠY THỬ MIGRATION TRÊN BẢN SAO (scripts/erp-migration-rehearsal.sh) — P0 0245 TIMEOUT trên tổ chức qa. Bản dump
                 # mới nhất của MỘT CSDL erp_org_* khôi phục bằng ĐÚNG đường của restore-drill-org (`dung_ban_sao_tam_to_chuc`:

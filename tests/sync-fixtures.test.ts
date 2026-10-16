@@ -185,6 +185,8 @@ import { testMigrationNumberUnique, testMigrationAppendOnly, testRepoIntegrity }
 import { testAiTechRoom } from "./ai-tech-room.test";
 import { testDeliveryV2 } from "./delivery-v2.test";
 import { testWorkflowHardening } from "./workflow-hardening.test";
+import { testPageAutoSkipAudit } from "./page-auto-skip-audit.test";
+import { testQa0245Index } from "./qa-0245-index.test";
 import { testAiVerifyWorkflow } from "./ai-verify-workflow.test";
 import { testChatbotDeployShape, testChatbotImportGuards, testChatbotNoSecretsInRepo } from "./chatbot.test";
 import { testChatbotAdBots } from "./chatbot-ad-bots.test";
@@ -377,6 +379,7 @@ import { testVnAddress } from "./vn-address.test";
 import { testAddressNormalizePure, testAddressNormalizeTools } from "./address-normalize.test";
 import { testAddressWardExplicitPure, testAddressWardExplicitTools } from "./address-ward-explicit.test";
 import { testAddressReaskAudit } from "./address-reask-audit.test";
+import { testP0855Address } from "./p0-855-address.test";
 import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
 import { testOutreachClearanceUnit } from "./outreach-clearance-unit.test";
 import { testPageUsageDb, testPageUsagePure, testPageUsageSource } from "./page-usage.test";
@@ -503,6 +506,7 @@ import { testSalesReplay } from "./sales-replay.test";
 import { testSalesOperatingMode } from "./sales-operating-mode.test";
 import { testSalesInbox } from "./sales-inbox.test";
 import { testInboxMessageSync } from "./inbox-message-sync.test";
+import { testP0856Images } from "./p0-856-images.test";
 import { testInboxAdvanced } from "./inbox-advanced.test";
 import { testInboxComposer } from "./inbox-composer.test";
 import { testInboxV2A } from "./inbox-v2-a.test";
@@ -566,6 +570,7 @@ import { testSalesClaimGuard } from "./sales-claim-guard.test";
 import { testSalesQuoteIntegrity } from "./sales-quote-integrity.test";
 import { testSalesCartCommitment } from "./sales-cart-commitment.test";
 import { testSalesP0855 } from "./sales-p0-855.test";
+import { testP0855Cart } from "./p0-855-cart.test";
 import { testConvMoneyTrace } from "./conv-money-trace.test";
 import { testSalesQuote640 } from "./sales-quote-640.test";
 import { testSalesIntegrityAudit } from "./sales-integrity-audit.test";
@@ -580,6 +585,7 @@ import { testSalesHumanTakeover } from "./sales-human-takeover.test";
 import { testResponseOwnership } from "./response-ownership.test";
 import { testSaasL3Inbox } from "./saas-l3-inbox.test";
 import { testBotOrderStatus } from "./bot-order-status.test";
+import { testP0855DeliveryIntent } from "./p0-855-delivery-intent.test";
 import { testOrderTruthStamp } from "./order-truth-stamp.test";
 import { testConversationTrace } from "./conversation-trace.test";
 import { testMessengerHealth } from "./messenger-health.test";
@@ -2393,6 +2399,7 @@ async function main() {
   testAddressWardExplicitPure();
   await testAddressWardExplicitTools();
   await testAddressReaskAudit();
+  await testP0855Address(); // #855: địa giới cũ / «như cũ» / địa chỉ mới thắng / không hỏi lại SĐT · tên · địa chỉ · phường
   // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
   testVelocityUnifyPure();
   testOutreachClearanceUnit();
@@ -2820,6 +2827,10 @@ async function main() {
   // Team Premium F7/F8: job chạm VPS chỉ chạy từ main + Environment production; checkout của workflow agent / có quyền GHI
   // không giữ credential; agent-run không dán đầu ra bước vào shell, token GHI chỉ ở bước đẩy nhánh.
   testWorkflowHardening();
+  // #856: đo tin khách bị chốt «Page đã trả lời» nhầm (chỉ đọc, luật buildCustomerTurns).
+  testPageAutoSkipAudit();
+  // qa × 0245: chỉ mục 0247 = công cụ tạo trước (chỉ qa, có tiền điều kiện) = ứng viên rehearsal.
+  testQa0245Index();
   // Hậu kiểm production chạy trên máy Actions (`ai-verify.yml`): chỉ main · chỉ lệnh verify · đỏ khi KHÔNG ĐẠT.
   testAiVerifyWorkflow();
   // Nền tảng đa tổ chức: máy quét cô lập mức tiến trình (thuần, không CSDL) — cạnh các bài quét mã nguồn khác.
@@ -2977,6 +2988,7 @@ async function main() {
   await testSalesInbox();
   // Đồng bộ tin Pancake → hộp thư (P0 HSLC 14/10/2026): câu nhân viên trên Pancake đẩy hội thoại lên đầu + phát sự kiện; trùng / chậm / sai thứ tự; sức khoẻ trễ webhook → sổ.
   await testInboxMessageSync();
+  await testP0856Images();
   // Hộp thư nâng cao: level khách · lọc · lịch sử giao · góp ý cho AI — tổ chức THẬT `hop-thu-nang-cao` (tự cấp, tự dọn).
   await testInboxAdvanced();
   // Ô soạn hộp thư: chèn câu mẫu / dòng sản phẩm (giá = giá bot, tồn chỉ khi đọc được), quyền ≡ «Gửi», cô lập — `o-soan-a` / `o-soan-b`.
@@ -3067,9 +3079,10 @@ async function main() {
   // P0 12/10/2026 — giỏ có thẩm quyền (cart-commitment.ts): số lượng khách nói tường minh DÍNH tới khi khách sửa tường minh; công cụ
   // ghi đơn hạ / bỏ món ⇒ máy chủ từ chối; ma trận G1–G6 qua chatTurn thật — tổ chức THẬT `gd-food-cc1` / `gd-food-cc2`.
   await testSalesCartCommitment();
-  // P0 #855 16/10/2026 (ca «ThuyNgo» · «Lieu Dau»): báo giá phải có căn cứ, tổng giỏ bị từ chối không tới khách, địa chỉ khách gõ mới nhất
-  // thắng địa chỉ cũ, «TT Anh Sơn» ⇒ Xã Anh Sơn, khách bực / phủ nhận món / sửa hai lần ⇒ người — tổ chức THẬT `gd-food-p855`.
+  // P0 #855 16/10/2026 (ca «ThuyNgo» · «Lieu Dau»): báo giá phải có căn cứ, tổng giỏ bị từ chối không tới khách, model không ghi địa chỉ
+  // khác địa chỉ khách gõ mới nhất, lời phản đối không thành lời chốt; còn lại theo luật main (#860 giỏ · #861 địa chỉ) — tổ chức `gd-food-p855`.
   await testSalesP0855();
+  await testP0855Cart();
   // P0 14/10/2026 — tổng tiền trong chữ bot = tổng máy chủ của giỏ hiện tại (ca «Châu Dương» 640k cho 1kg 280k) · lượt im không «nói rõ
   // hơn» (ca «Viet Nguyen Thi») · upsell chưa đồng ý không vào đơn · tin vọng lại / trùng không sinh tin — tổ chức THẬT `gd-food-q640`.
   await testSalesQuote640();
@@ -3122,6 +3135,8 @@ async function main() {
   await testSaasL3Inbox();
   // Bot tra trạng thái đơn (Commerce Truth): chỉ đơn của CHÍNH hội thoại, trạng thái = lời khai ĐVVC — tổ chức THẬT `bot-tra-don`.
   await testBotOrderStatus();
+  // P0 #855: hỏi lịch giao ≠ hỏi trạng thái — máy chủ quyết câu trả lời / chuyển người, không hứa giờ — tổ chức THẬT `p0-855-lich-giao`.
+  await testP0855DeliveryIntent();
   // Order Truth: đơn bot chốt mang dấu lời nhắc + cấu hình + model + bản mã; sổ chi phí AI của lượt chat mang mã hội thoại.
   testOrderTruthStamp();
   // Đơn ↔ hội thoại ↔ khách: link hội thoại của đơn mở Hộp thư ERP (mọi kênh); hồ sơ khách chỉ thấy hội thoại nối bằng

@@ -480,7 +480,7 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
     // nhân viên ⇒ bot nhường 30 phút ngay sau câu trả lời đầu tiên của nó.
     const echo = normalizeEcho(ev.text);
     const [own] = await db
-      .select({ id: t.id })
+      .select({ id: t.id, messageId: t.messageId, note: t.note })
       .from(t)
       .where(
         or(
@@ -504,7 +504,13 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
         ),
       )
       .limit(1);
-    if (own) return { queued: false, reason: "Tin của chính bot" };
+    if (own) {
+      // CHÍNH tin page này đã có dòng (lượt quét lại / nhập lịch sử / dòng cũ) mà thiếu ảnh ⇒ webhook tới sau bổ sung ảnh (P0-B #856).
+      // Dòng bot (BOT_SENT) KHÔNG: ảnh AI đã nằm ở dòng ghi sẵn qua tuyến có kiểm quyền — bổ sung là hiện hai lần.
+      const media = [...ev.imageUrls, ...(ev.stickerUrls ?? [])];
+      if (own.messageId === ev.messageId && own.note === PAGE_REPLY && media.length) await fillMissingImageUrls(ev.pageId, ev.messageId, media);
+      return { queued: false, reason: "Tin của chính bot" };
+    }
     // Tin phía page KHÔNG CÓ CHỮ (dòng hệ thống của Pancake tới qua webhook không kèm chữ, thẻ quảng cáo…) KHÔNG phải ai trả lời
     // khách (03/10/2026, «Nguyễn Loan»: gửi SĐT + địa chỉ, ngay sau đó Pancake chèn «Đã thêm nhãn tự động…», bot im). Nhân viên
     // chỉ gửi ảnh cũng rơi vào đây — bot có thể trả lời thêm một câu, vẫn tốt hơn để khách chờ.
@@ -520,6 +526,8 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
           .onConflictDoNothing({ target: t.messageId })
           .returning({ id: t.id });
         if (media.length) await notePageSideActivity(ev.pageId, ev.threadId);
+        // Dòng đã có (lượt quét lại / nhập lịch sử / dòng cũ) mà thiếu ảnh ⇒ bổ sung, không dòng thứ hai (P0-B #856).
+        else await fillMissingImageUrls(ev.pageId, ev.messageId, pageMedia);
       }
       return { queued: false, reason: "Tin phía page không có chữ — không tính là trả lời" };
     }
@@ -536,13 +544,14 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
       .returning({ id: t.id });
     // Hộp thư đang mở phải thấy câu này NGAY và xếp lại hội thoại (mốc hoạt động đọc dòng này — `PAGE_REPLY_ACTIVITY_SQL`).
     if (pageRow.length) await notePageSideActivity(ev.pageId, ev.threadId);
+    else if (pageMedia.length) await fillMissingImageUrls(ev.pageId, ev.messageId, pageMedia);
     // Chữ hệ thống (tiếng vọng tin riêng trả lời bình luận…) không phải ai lên tiếng ⇒ không dừng nhắc, không nhường.
     if (origin === "META_SYSTEM") return { queued: false, reason: META_SYSTEM_REASON };
     if (ev.inbox) await stopFollowups(ev.pageId, ev.threadId, now, false);
     if (ev.comment) return { queued: false, reason: "Page đã trả lời bình luận — bot không chen" };
     const c = schema.salesChatConversations;
-    // Tin tự động / tin mẫu: KHÔNG phải nhân viên, KHÔNG trả lời câu hỏi thật của khách (trừ lượt toàn câu mẫu quảng cáo — xem
-    // `buildCustomerTurns`), KHÔNG chuyển hội thoại sang người.
+    // Tin tự động / tin mẫu: KHÔNG phải nhân viên, KHÔNG trả lời câu hỏi thật của khách — kể cả lượt toàn câu mẫu quảng cáo (issue
+    // #856, `answers()` của response-ownership.ts), KHÔNG chuyển hội thoại sang người.
     if (origin === "PANCAKE_AUTOMATION") return { queued: false, reason: AUTOMATION_REASON };
     if (origin === "UNKNOWN") {
       // Hội thoại ĐANG do một người ĐÃ XÁC MINH cầm (nhường còn hạn có dấu VERIFIED_HUMAN / «Tiếp quản») ⇒ câu chưa rõ người gửi tới
@@ -587,6 +596,7 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
       const stickers = (ev.stickerUrls ?? []).slice(0, 3);
       const media = await insertCustomerInbound({ pageId: ev.pageId, threadId: ev.threadId, messageId: ev.messageId, text: stickers.length ? "" : MEDIA_ONLY_TEXT, ...(stickers.length ? { imageUrls: stickers } : {}), customerName: ev.customerName || null, status: "DONE", processedAt: now, note: MEDIA_ONLY_NOTE, transport: "PANCAKE", senderId: ev.senderId ?? null }, now, { canonical: verdict === "CANONICAL" });
       if (media.duplicate) return { queued: false, reason: DUPLICATE_SOURCE_REASON };
+      if (!media.inserted && stickers.length) await fillMissingImageUrls(ev.pageId, ev.messageId, stickers);
       await noteCustomerArrived(ev.pageId, ev.threadId, now, ev.avatar);
     }
     return { queued: false, reason: "Tin không có chữ hay ảnh (nhãn dán / ghi âm / video) — để nhân viên xem" };
@@ -611,6 +621,9 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
     { canonical: !skipped },
   );
   if (ins.duplicate) return { queued: false, reason: DUPLICATE_SOURCE_REASON };
+  // Tin đã có (lượt quét lại ghi trước, không ảnh) ⇒ webhook tới sau BỔ SUNG ảnh vào chính dòng đó — chỉ để người xem; trạng thái
+  // giữ nguyên nên bot không trả lời lần hai (P0-B #856).
+  if (!ins.inserted && images.length) await fillMissingImageUrls(ev.pageId, ev.messageId, images);
   if (ins.inserted) await noteCustomerArrived(ev.pageId, ev.threadId, now, ev.avatar);
   if (ins.inserted && skipped) return { queued: false, reason: NON_CANONICAL_NOTE };
   return ins.inserted ? { queued: true, reason: "Đã nhận" } : { queued: false, reason: "Tin trùng — đã nhận trước đó" };
@@ -623,14 +636,17 @@ export type FanpageDeps = { fetch?: typeof fetch; now?: () => Date; sleep?: (ms:
  * Tải ảnh câu mẫu lên page (Pancake `upload_contents`, multipart — Pancake không cần URL công khai) ⇒ mã nội dung. Mã đã tải
  * cho CHÍNH page này trong 12 giờ thì dùng lại. Ảnh hỏng / lỗi tải ⇒ bỏ ảnh đó, không chặn phần còn lại.
  */
-async function contentIdsFor(pageId: string, token: string, imageIds: readonly string[], fetchImpl: typeof fetch, now: Date): Promise<{ ids: string[]; errors: string[] }> {
+async function contentIdsFor(pageId: string, token: string, imageIds: readonly string[], fetchImpl: typeof fetch, now: Date): Promise<{ ids: string[]; errors: string[]; sourceIds: string[] }> {
   const ids: string[] = [];
   const errors: string[] = [];
+  // Mã ảnh câu mẫu ĐÃ có mã nội dung — để dòng ghi sẵn của bot mang đúng ảnh đã gửi (hộp thư hiện lại, P0-B #856).
+  const sourceIds: string[] = [];
   for (const id of imageIds) {
     const img = await readQuickReplyImage(id);
     if (!img) continue;
     if (img.pancakePageId === pageId && img.pancakeContentId && img.pancakeUploadedAt && now.getTime() - img.pancakeUploadedAt.getTime() < CONTENT_REUSE_MS) {
       ids.push(img.pancakeContentId);
+      sourceIds.push(id);
       continue;
     }
     const up = await uploadPancakeContent(pageId, token, img, fetchImpl);
@@ -639,9 +655,10 @@ async function contentIdsFor(pageId: string, token: string, imageIds: readonly s
       continue;
     }
     ids.push(up.id);
+    sourceIds.push(id);
     await rememberPancakeContent(id, pageId, up.id, now);
   }
-  return { ids, errors };
+  return { ids, errors, sourceIds };
 }
 
 /** Tải MỘT tệp ảnh lên page Pancake ⇒ mã nội dung (`upload_contents`). Không gửi gì cho khách. */
@@ -726,6 +743,44 @@ export async function noteCustomerAd(pageId: string, threadId: string, ref: AdRe
 export const STAFF_IMAGE_MARK = "[Ảnh]";
 
 /**
+ * Ảnh AI gửi (ảnh câu mẫu · `sales_chat_quick_reply_images`) mở lại trong hộp thư qua tuyến ĐÃ CÓ, đòi phiên + `ai_sales:view` của
+ * chính tổ chức — không lưu URL Pancake / CDN nào cho ảnh của chính shop. HÀM THUẦN.
+ */
+export function botImageHref(quickReplyImageId: string): string {
+  return `/api/ai-sales/quick-reply-images/${encodeURIComponent(quickReplyImageId)}`;
+}
+
+/**
+ * Ảnh của MỘT tin khách lấy từ CHÍNH trang tin Pancake lượt quét lại vừa đọc (không thêm lời gọi). Trước P0-B #856 lượt quét lại ghi
+ * `imageUrls: []` ⇒ tin chữ + ảnh tới qua đường này mất ảnh, và vì khoá `message_id` webhook tới sau bị bỏ qua ⇒ mất hẳn. HÀM THUẦN.
+ */
+export function catchUpImageUrls(raw: readonly Record<string, unknown>[], messageId: string): string[] {
+  const m = raw.find((x) => str(x.id) === messageId);
+  return m ? pancakeImageUrls(m) : [];
+}
+
+/**
+ * BỔ SUNG ảnh vào MỘT dòng tin ĐÃ CÓ mà chưa mang ảnh (P0-B #856). Mọi đường ghi dùng `onConflictDoNothing(message_id)`: dòng tới
+ * trước không ảnh (lượt quét lại · dòng cũ trước 08/10/2026 bị xoá địa chỉ ảnh sau khi bot đọc · tin page chỉ ảnh trước đó không
+ * được ghi) thì webhook tới sau / nhập lịch sử chạy lại đều bị bỏ qua và ảnh mất VĨNH VIỄN dù Pancake vẫn giữ. Chỉ ghi khi dòng
+ * CHƯA có ảnh — không bao giờ ghi đè ảnh đã có; không đổi trạng thái / chữ / ghi chú ⇒ không kích AI, không gửi gì. Trả có ghi không.
+ */
+export async function fillMissingImageUrls(pageId: string, messageId: string, urls: readonly string[]): Promise<boolean> {
+  const clean = [...new Set(urls.filter((u) => typeof u === "string" && /^https?:\/\//.test(u)))].slice(0, 6);
+  if (!clean.length || !messageId) return false;
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  const done = await db
+    .update(t)
+    .set({ imageUrls: clean })
+    // Dòng của bot (`BOT_SENT`, kể cả dòng mang mã kênh chữ rỗng) KHÔNG nhận ảnh CDN: ảnh AI đã nằm ở dòng ghi sẵn qua tuyến có
+    // kiểm quyền — đổ thêm là hiện HAI lần (tiếng vọng lệch cửa sổ khớp của nhập lịch sử).
+    .where(and(eq(t.messageId, messageId), eq(t.pageId, pageId), sql`${t.note} is distinct from 'BOT_SENT'`, sql`(${t.imageUrls} is null or ${t.imageUrls} = '[]'::jsonb or ${t.imageUrls} = 'null'::jsonb)`))
+    .returning({ id: t.id });
+  return done.length > 0;
+}
+
+/**
  * Nhân viên gửi ẢNH từ hộp thư ERP qua Pancake (0211): tải từng ảnh lên page ⇒ gửi theo nhóm `IMAGES_PER_MESSAGE`. Dòng ghi
  * sẵn `staff-out:<id>:img` (note PAGE_REPLY, chữ «[Ảnh]») — tiếng vọng ảnh không có chữ nên đường nhận đã bỏ qua nó. Hỏng ⇒ xoá
  * dòng ghi sẵn.
@@ -761,7 +816,7 @@ export async function sendFanpageImages(pageId: string, threadId: string, images
 type Sender = "BOT" | "STAFF";
 
 /** Gửi ảnh (đã có mã nội dung) vào hội thoại — mỗi tin tối đa `IMAGES_PER_MESSAGE` ảnh. */
-async function sendImages(pageId: string, threadId: string, token: string, contentIds: readonly string[], fetchImpl: typeof fetch, who: Sender): Promise<{ ok: true; ids: string[] } | { ok: false; error: string; ids: string[] }> {
+async function sendImages(pageId: string, threadId: string, token: string, contentIds: readonly string[], fetchImpl: typeof fetch, who: Sender, onGroupSent?: () => void): Promise<{ ok: true; ids: string[] } | { ok: false; error: string; ids: string[] }> {
   if (who === "BOT" && !(await botSendAllowed(pageId))) return { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR, ids: [] };
   const ids: string[] = [];
   const url = `${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(threadId)}/messages?page_access_token=${encodeURIComponent(token)}`;
@@ -770,12 +825,35 @@ async function sendImages(pageId: string, threadId: string, token: string, conte
       const res = await fetchImpl(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "reply_inbox", content_ids: contentIds.slice(i, i + IMAGES_PER_MESSAGE) }), redirect: "manual", signal: AbortSignal.timeout(15_000) });
       const body = (await res.json().catch(() => null)) as { success?: boolean; id?: unknown; message?: unknown } | null;
       if (!res.ok || body?.success === false) return { ok: false, error: scrubSecrets(`Pancake không gửi được ảnh: ${str(body?.message) || `HTTP ${res.status}`}`, [token]), ids };
+      // Một NHÓM (≤ IMAGES_PER_MESSAGE ảnh) Pancake đã nhận — có nhóm không trả mã tin, nên nơi gọi không suy từ `ids` (P0-B #856).
+      onGroupSent?.();
       if (str(body?.id)) ids.push(str(body?.id));
     }
     return { ok: true, ids };
   } catch (e) {
     return { ok: false, error: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Pancake: ${describeNetworkFailure(e, "pages.fm")}` : `Không gọi được Pancake: ${e instanceof Error ? e.message : String(e)}`, [token]), ids };
   }
+}
+
+/**
+ * BOT GỬI ẢNH CÂU MẪU + DÒNG GHI SẴN (P0-B #856 · review). Dòng `bot-out:` (chữ rỗng — tiếng vọng ảnh không có chữ) ghi TRƯỚC lời gọi
+ * gửi và mang địa chỉ ảnh qua tuyến có kiểm quyền để hộp thư hiện lại. Hộp thư KHÔNG được hiện «AI đã gửi ảnh» cho ảnh khách chưa
+ * nhận: hỏng toàn bộ (Pancake lỗi · page chưa LIVE) ⇒ XOÁ dòng ghi sẵn — cùng luật nhánh chữ và ảnh nhân viên; gửi được một phần
+ * ⇒ dòng chỉ giữ ảnh của các NHÓM Pancake đã nhận. `up.ids` / `up.sourceIds` cùng thứ tự (`contentIdsFor`).
+ */
+async function sendBotImagesRecorded(pageId: string, threadId: string, token: string, up: { ids: readonly string[]; sourceIds: readonly string[] }, fetchImpl: typeof fetch, now: Date): Promise<{ ok: true } | { ok: false; error: string }> {
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  const preId = `bot-out:${randomUUID()}`;
+  await db.insert(t).values({ pageId, threadId, messageId: preId, text: "", imageUrls: up.sourceIds.map(botImageHref), status: "DONE", processedAt: now, note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
+  let sentGroups = 0;
+  const sent = await sendImages(pageId, threadId, token, up.ids, fetchImpl, "BOT", () => (sentGroups += 1));
+  if (sent.ids.length) await db.insert(t).values(sent.ids.map((id) => ({ pageId, threadId, messageId: id, text: "", status: "DONE", processedAt: now, note: "BOT_SENT" }))).onConflictDoNothing({ target: t.messageId });
+  if (sent.ok) return { ok: true };
+  const delivered = up.sourceIds.slice(0, sentGroups * IMAGES_PER_MESSAGE);
+  if (!delivered.length) await db.delete(t).where(eq(t.messageId, preId));
+  else await db.update(t).set({ imageUrls: delivered.map(botImageHref) }).where(eq(t.messageId, preId));
+  return { ok: false, error: sent.error };
 }
 
 /**
@@ -903,11 +981,12 @@ export async function sendFanpageText(pageId: string, threadId: string, text: st
   return { ok: true };
 }
 
-/** Ba hàm gửi NỘI BỘ của đường bot — chỉ để bài kiểm gọi thẳng (tests/saas-page-gate.test.ts), không dùng ở mã chạy. */
+/** Các hàm gửi NỘI BỘ của đường bot — chỉ để bài kiểm gọi thẳng (tests/saas-page-gate.test.ts), không dùng ở mã chạy. */
 export const fanpageBotSendersForTests = {
   sendInbox: (pageId: string, threadId: string, text: string, fetchImpl: typeof fetch, who: Sender, sleep?: (ms: number) => Promise<void>) => sendInbox(pageId, threadId, PAGE_TOKEN_FOR_TESTS, text, fetchImpl, who, sleep),
   sendImages: (pageId: string, threadId: string, contentIds: readonly string[], fetchImpl: typeof fetch) => sendImages(pageId, threadId, PAGE_TOKEN_FOR_TESTS, contentIds, fetchImpl, "BOT"),
   deliverCommentReply: (input: Omit<CommentReplyInput, "token">, deps: FanpageDeps) => deliverCommentReply({ ...input, token: PAGE_TOKEN_FOR_TESTS }, deps),
+  sendBotImagesRecorded: (pageId: string, threadId: string, up: { ids: readonly string[]; sourceIds: readonly string[] }, fetchImpl: typeof fetch, now: Date) => sendBotImagesRecorded(pageId, threadId, PAGE_TOKEN_FOR_TESTS, up, fetchImpl, now),
 };
 const PAGE_TOKEN_FOR_TESTS = "token-bai-kiem";
 
@@ -979,9 +1058,7 @@ async function deliverCommentReply(input: CommentReplyInput, deps: FanpageDeps):
   if (input.imageIds.length) {
     const up = await contentIdsFor(pageId, token, input.imageIds, fetchImpl, now());
     if (up.ids.length) {
-      await db.insert(t).values({ pageId, threadId: inboxId, messageId: `bot-out:${randomUUID()}`, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
-      const sentImgs = await sendImages(pageId, inboxId, token, up.ids, fetchImpl, "BOT");
-      if (sentImgs.ids.length) await db.insert(t).values(sentImgs.ids.map((id) => ({ pageId, threadId: inboxId, messageId: id, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }))).onConflictDoNothing({ target: t.messageId });
+      const sentImgs = await sendBotImagesRecorded(pageId, inboxId, token, up, fetchImpl, now());
       if (!sentImgs.ok) warning = sentImgs.error;
     }
     warning = warning ?? up.errors[0] ?? null;
@@ -1375,9 +1452,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       }
       const up = await contentIdsFor(pageId, token, media, deps.fetch ?? fetch, now());
       if (up.ids.length) {
-        await db.insert(t).values({ pageId, threadId, messageId: `bot-out:${randomUUID()}`, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
-        const sentImgs = await sendImages(pageId, threadId, token, up.ids, deps.fetch ?? fetch, "BOT");
-        if (sentImgs.ids.length) await db.insert(t).values(sentImgs.ids.map((id) => ({ pageId, threadId, messageId: id, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }))).onConflictDoNothing({ target: t.messageId });
+        const sentImgs = await sendBotImagesRecorded(pageId, threadId, token, up, deps.fetch ?? fetch, now());
         if (!sentImgs.ok) sendError = sentImgs.error;
       }
       if (!sendError && up.errors.length) sendError = up.errors[0];
@@ -1626,7 +1701,8 @@ export async function resendPendingFanpageReplies(deps: FanpageDeps = {}): Promi
  */
 export const CATCH_UP_LIMITS = { maxAgeMinutes: 30, minAgeSeconds: 60, conversations: 60, threadsPerRun: 5 } as const;
 
-export type PancakeThreadMessage = { id: string; text: string; at: number; fromPage: boolean; autoNote: boolean };
+/** `automated`: Pancake / Meta gắn cờ tự động (`is_automated` / `ai_generated`) — tin tự động của page, KHÔNG phải câu trả lời (issue #856). */
+export type PancakeThreadMessage = { id: string; text: string; at: number; fromPage: boolean; autoNote: boolean; automated?: boolean };
 
 /** Tin của MỘT hội thoại Pancake ⇒ dạng chuẩn, theo thứ tự tạo. HÀM THUẦN. */
 export function normalizeThreadMessages(raw: readonly Record<string, unknown>[], pageId: string): PancakeThreadMessage[] {
@@ -1635,11 +1711,13 @@ export function normalizeThreadMessages(raw: readonly Record<string, unknown>[],
     const at = pancakeMs(m.inserted_at ?? m.created_at);
     const id = str(m.id);
     if (!id || at === null || m.is_removed === true) continue;
-    const from = (m.from ?? {}) as { id?: unknown; uid?: unknown; admin_id?: unknown };
+    const from = (m.from ?? {}) as { id?: unknown; uid?: unknown; admin_id?: unknown; ai_generated?: unknown; is_automated?: unknown };
     const text = stripHtml(str(m.original_message) || str(m.message)).slice(0, TEXT_MAX);
     const fromPage = str(from.id) === pageId || Boolean(from.uid) || Boolean(from.admin_id);
     // Tin phía page không chữ (dòng hệ thống / thẻ quảng cáo) đếm như ghi chú tự động — không phải trả lời.
-    out.push({ id, text, at, fromPage, autoNote: PANCAKE_AUTO_NOTE_RE.test(text) || (fromPage && !text.trim()) });
+    // Cùng nguồn cờ với đường nhận webhook (`from.ai_generated` / `from.is_automated`, dòng ~371).
+    const automated = fromPage && Boolean(from.ai_generated || from.is_automated);
+    out.push({ id, text, at, fromPage, autoNote: PANCAKE_AUTO_NOTE_RE.test(text) || (fromPage && !text.trim()), ...(automated ? { automated: true } : {}) });
   }
   return out.sort((a, b) => a.at - b.at);
 }
@@ -1651,7 +1729,8 @@ export function normalizeThreadMessages(raw: readonly Record<string, unknown>[],
 export function unansweredCustomerMessages(msgs: readonly PancakeThreadMessage[], nowMs: number, minAgeMs: number, maxAgeMs: number): PancakeThreadMessage[] {
   let lastReply = -1;
   msgs.forEach((m, i) => {
-    if (m.fromPage && !m.autoNote) lastReply = i;
+    // Tin TỰ ĐỘNG của page không trả lời câu hỏi thật (issue #856 — cùng luật `answers()` của response-ownership.ts).
+    if (m.fromPage && !m.autoNote && !m.automated) lastReply = i;
   });
   const pending = msgs.slice(lastReply + 1).filter((m) => !m.fromPage && !m.autoNote && m.text.trim());
   if (!pending.length || nowMs - pending[pending.length - 1].at < minAgeMs) return [];
@@ -1769,13 +1848,14 @@ export async function catchUpFanpage(deps: FanpageDeps = {}): Promise<CatchUpRes
     const threadId = str(c.id);
     if (!threadId) continue;
     const body = await get(`${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(threadId)}/messages?${q}`);
-    const msgs = normalizeThreadMessages((Array.isArray(body?.messages) ? body.messages : []) as Record<string, unknown>[], pageId);
+    const rawMsgs = (Array.isArray(body?.messages) ? body.messages : []) as Record<string, unknown>[];
+    const msgs = normalizeThreadMessages(rawMsgs, pageId);
     const waiting = unansweredCustomerMessages(msgs, nowMs, CATCH_UP_LIMITS.minAgeSeconds * 1000, maxAgeMs).filter((m) => routeSince === null || m.at > routeSince);
     if (!waiting.length) continue;
     const customerName = str((c.from as { name?: unknown } | undefined)?.name) || str(((c.customers as { name?: unknown }[] | undefined) ?? [])[0]?.name);
     let touched = 0;
     for (const m of waiting) {
-      const r = await receiveFanpageEvent({ pageId, threadId, messageId: m.id, text: m.text, customerName, fromPage: false, humanStaff: false, inbox: true, comment: null, imageUrls: [], avatar: pancakeAvatarFactsOf(c, "POLL", pageId) }, now());
+      const r = await receiveFanpageEvent({ pageId, threadId, messageId: m.id, text: m.text, customerName, fromPage: false, humanStaff: false, inbox: true, comment: null, imageUrls: catchUpImageUrls(rawMsgs, m.id), avatar: pancakeAvatarFactsOf(c, "POLL", pageId) }, now());
       if (r.queued) {
         out.queued += 1;
         touched += 1;

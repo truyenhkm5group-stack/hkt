@@ -194,6 +194,7 @@ const MOI = [
   "0244_sales_chat_inbound_sender",
   "0245_sales_chat_last_inbound",
   "0246_cogs_basis_marketer_price",
+  "0247_sales_chat_inbound_text_hash_idx",
 ] as const;
 
 /*

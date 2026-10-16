@@ -252,7 +252,12 @@ export const ORDER_GOLDEN_CASES: readonly OrderGoldenCase[] = [
       { say: `à em ơi đổi địa chỉ giao về cơ quan chị: ${HN_DONG_DA} nhé`, ai: [() => [tool("update_draft_order", { address: HN_DONG_DA })], summary] },
       consentTurn("đúng rồi em"),
     ],
-    label: withOrder(order([ln("CHA-CA-1KG", 1)], "0915000404", addr("Hà Nội", "Đống Đa", "10 đường Mẫu"), 370_000), agreed("Khách xác nhận «đúng rồi em» sau tóm tắt có địa chỉ mới")),
+    // Luật chủ shop 16/10/2026 (issue #855): khách đổi nơi giao = CHANGE_ADDRESS_PENDING_VERIFICATION — địa chỉ mới thắng (đơn ghi đúng
+    // địa chỉ mới) nhưng đơn mang cờ CẦN NGƯỜI KIỂM tới khi nhân viên xác minh; máy không tạo vận đơn trong lúc cờ còn mở.
+    label: {
+      ...withOrder(order([ln("CHA-CA-1KG", 1)], "0915000404", addr("Hà Nội", "Đống Đa", "10 đường Mẫu"), 370_000), agreed("Khách xác nhận «đúng rồi em» sau tóm tắt có địa chỉ mới")),
+      review: ["ADDRESS_UNRESOLVED"],
+    },
   },
   {
     key: "sua-sdt",

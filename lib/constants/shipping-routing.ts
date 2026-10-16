@@ -89,7 +89,7 @@ export function isServiceCode(v: string): boolean {
 
 // ─────────────────────────── KẾT QUẢ TUYẾN ───────────────────────────
 
-export const ROUTE_HOLD_CODES = ["NOT_ERP", "NOT_CONFIRMED", "REVIEW_OPEN", "NO_PROVINCE", "NO_WARD", "NO_CARRIER", "CARRIER_OFF", "NO_WEIGHT", "AUTO_FAILED"] as const;
+export const ROUTE_HOLD_CODES = ["NOT_ERP", "NOT_CONFIRMED", "ADDRESS_REVIEW", "NO_PROVINCE", "NO_WARD", "NO_CARRIER", "CARRIER_OFF", "NO_WEIGHT", "AUTO_FAILED"] as const;
 export type RouteHoldCode = (typeof ROUTE_HOLD_CODES)[number];
 
 /** Lối sửa của một lý do giữ lại — màn hình dựng link từ đây. */
@@ -98,7 +98,8 @@ export type RouteFix = "EDIT_ORDER" | "ROUTING" | "CONNECTIONS" | "PRODUCTS" | "
 export const ROUTE_HOLD_META: Record<RouteHoldCode, { label: string; fix: RouteFix; fixLabel: string }> = {
   NOT_ERP: { label: "Đơn đồng bộ từ nguồn khác", fix: "ORDER", fixLabel: "Nguồn của đơn đẩy sang hãng" },
   NOT_CONFIRMED: { label: "Đơn chưa «Đã xác nhận»", fix: "EDIT_ORDER", fixLabel: "Chốt đơn với khách" },
-  REVIEW_OPEN: { label: "Đơn còn lý do cần người kiểm (món / giá / khách huỷ)", fix: "ORDER", fixLabel: "Mở đơn — xử lý lý do cần kiểm rồi «Xác nhận đơn»" },
+  // #855: ô xã có thể do máy đọc lại từ một địa chỉ CHƯA ai xác minh (khách đổi địa chỉ, địa giới cũ chưa ghép) — người kiểm rồi gỡ cờ.
+  ADDRESS_REVIEW: { label: "Địa chỉ còn cờ cần kiểm (khách đổi địa chỉ / địa giới cũ chưa ghép)", fix: "ORDER", fixLabel: "Kiểm địa chỉ rồi bấm «Xác nhận đơn» ở trang đơn" },
   NO_PROVINCE: { label: "Chưa ghép được tỉnh / thành", fix: "EDIT_ORDER", fixLabel: "Sửa đơn — chọn tỉnh và xã" },
   NO_WARD: { label: "Chưa ghép được xã / phường", fix: "EDIT_ORDER", fixLabel: "Sửa đơn — chọn xã / phường" },
   NO_CARRIER: { label: "Ngoài khu tự giao, chưa chọn hãng mặc định", fix: "ROUTING", fixLabel: "Cấu hình tuyến giao" },
@@ -106,13 +107,6 @@ export const ROUTE_HOLD_META: Record<RouteHoldCode, { label: string; fix: RouteF
   NO_WEIGHT: { label: "Mẫu mã chưa khai cân nặng", fix: "ORDER", fixLabel: "Tạo vận đơn tay ở trang đơn (nhập cân) hoặc khai cân mẫu mã" },
   AUTO_FAILED: { label: "Máy tự tạo vận đơn không được", fix: "ORDER", fixLabel: "Xem lỗi, sửa đơn rồi tạo tay ở trang đơn" },
 };
-
-/**
- * Lý do CẦN NGƯỜI KIỂM (`order-review.ts`) giữ đơn lại khỏi tuyến giao (P0 16/10/2026, #855): đơn «Đã xác nhận» (công tắc tự xác nhận,
- * máy tự chốt) mà khách đã phủ nhận món / phản đối giá / báo huỷ thì đẩy sang hãng trước khi người gọi khách là giao SAI hàng. Địa chỉ
- * chưa ghép KHÔNG nằm ở đây — ô xã trống đã giữ đơn bằng `NO_WARD`, và nhân viên chọn xã xong thì đơn đi tiếp.
- */
-export const SHIP_HOLD_REVIEW_CODES: readonly string[] = ["UPSELL_UNCONSENTED", "CUSTOMER_CANCELLED", "CANCEL_BLOCKED", "PRICE_DISPUTED", "PRICE_MISMATCH"];
 
 export type ShippingRoute =
   /** Đơn đã có một lần gửi còn hiệu lực ở hãng — đã đi, không xếp tuyến nữa. */

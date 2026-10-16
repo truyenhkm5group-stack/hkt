@@ -148,6 +148,11 @@ export type AgentOrderOptions = {
    * tắc «đơn đủ thông tin = đã xác nhận» KHÔNG được nâng nó lên «Đã xác nhận» — nếu không ERP nói đã xác nhận còn bot nói chưa.
    */
   holdNew?: boolean;
+  /**
+   * CỜ CẦN NGƯỜI KIỂM do MÁY gắn, ghi trong CÙNG giao dịch tạo / sửa đơn (#855 — khách đổi địa chỉ chưa xác minh): đơn không bao giờ
+   * tồn tại ở trạng thái «có xã mà không cờ», kể cả một khoảnh khắc — job tạo vận đơn tự động không có khe hở để chen vào.
+   */
+  review?: Omit<OrderReviewEntry, "by" | "at">;
 };
 
 /** Người hay máy đang ghi — MỘT hình cho ba lượt ghi, để nhật ký / sự kiện / lời khai gốc nói cùng một điều. */
@@ -415,6 +420,14 @@ export type ManualOrderResult = { ok: true; id: string; reused?: boolean } | Met
  * MÁY chốt («Đã xác nhận») khi xã / phường CHƯA ghép được ⇒ cờ CẦN NGƯỜI KIỂM (chủ shop 08/10/2026: vẫn chốt như trước, người
  * kiểm lại địa chỉ rồi xác nhận). Người chốt tay thì không gắn — người đã nhìn thấy ô xã trống trên form. HÀM THUẦN.
  */
+/** `addressReview` + cờ máy khai qua `AgentOrderOptions.review` — một lượt, cùng giao dịch. HÀM THUẦN. */
+function reviewsOnWrite(w: Writer, p: Prepared, raw: Record<string, unknown>, now: Date, agentOpts?: AgentOrderOptions): { raw: Record<string, unknown>; changed: boolean } {
+  const a = addressReview(w, p, raw, now);
+  if (w.actorKind !== "AGENT" || !agentOpts?.review) return a;
+  const b = withReviewEntry(a.raw, { ...agentOpts.review, at: now.toISOString(), by: w.name });
+  return { raw: b.raw, changed: a.changed || b.changed };
+}
+
 function addressReview(w: Writer, p: Prepared, raw: Record<string, unknown>, now: Date): { raw: Record<string, unknown>; changed: boolean } {
   if (w.actorKind !== "AGENT" || p.stage !== "CONFIRMED" || (p.recipient.ward ?? "").trim()) return { raw, changed: false };
   const where = p.recipient.province ? `tỉnh ${p.recipient.province}, chưa có xã / phường${p.wardCandidates.length ? ` — có thể là ${p.wardCandidates.join(" / ")}, hỏi khách` : ""}` : `chưa nhận ra tỉnh / thành và xã / phường${p.provinceHint ? ` — ${p.provinceHint}, hỏi khách` : ""}`;
@@ -594,7 +607,7 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
       }
       if (agentOpts && !agentOpts.allowShortStock && p.stage === "CONFIRMED") await assertAgentStock(tx, p, []);
       const cols = orderColumns(p, w, { ...(key ? { agentKey: key } : {}), ...(quote ? { quote } : {}) });
-      const flagged = addressReview(w, p, cols.raw, now);
+      const flagged = reviewsOnWrite(w, p, cols.raw, now, agentOpts);
       createdReview = flagged.changed ? (orderReviewOf(flagged.raw)?.entries ?? []) : [];
       await tx.insert(schema.orders).values({ id, ...cols, raw: flagged.raw, ...(agentOpts?.adId ? { adId: agentOpts.adId } : {}), insertedAt: now, lastUpdateStatusAt: now, syncedAt: now });
     await tx.insert(schema.orderItems).values(itemRows(id, p));
@@ -728,7 +741,7 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
       // `quotePrev` (vết, không xoá) — tổng đơn không còn là tổng máy đã báo khách, giữ ở `quote` là để `orderValidityOf` báo «lệch» oan.
       const { quote: oldQuote, ...lockedRest } = lockedRaw;
       const baseRaw: Record<string, unknown> = { ...lockedRest, ...(manualOrderRaw(lockedRaw) as ManualOrderRaw), orderDiscount: p.orderDiscount, ...(quote ? { quote } : oldQuote ? { quotePrev: oldQuote } : {}) };
-      flagged = addressReview(w, p, baseRaw, now);
+      flagged = reviewsOnWrite(w, p, baseRaw, now, agentOpts);
       const r = opts.resolveReview && p.stage === "CONFIRMED" ? withReviewResolved(flagged.raw, { action: "CONFIRMED", at: now.toISOString(), byUserId: w.userId, byName: w.name }) : { raw: flagged.raw, changed: false, resolved: [] as OrderReviewEntry[] };
       resolved = r;
       // Máy chốt / sửa đơn đã chốt ⇒ kiểm phần hàng CẦN THÊM so với phần đơn này đang giữ (đơn đã chốt trước đó).

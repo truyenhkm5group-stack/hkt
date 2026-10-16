@@ -15,15 +15,17 @@ import { and, eq } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { saveConnection, setConnectionStatus, testOrgConnection } from "@/lib/connectors/service";
+import { ADDRESS_REVIEW_BLOCK, autoCreateShipmentCore, bulkCreateCore } from "@/lib/carriers/engine";
 import { GHN_API } from "@/lib/constants/carrier-ghn";
 import { carrierCreateOf } from "@/lib/constants/carrier-vtp";
-import { autoAttemptDue, nextFailedAttempts, parseShippingRoutingConfig, SHIPPING_ROUTING_LIMITS, type ShippingRoutingConfig } from "@/lib/constants/shipping-routing";
+import { autoAttemptDue, nextFailedAttempts, parseShippingRoutingConfig, ROUTE_HOLD_META, SHIPPING_ROUTING_LIMITS, type ShippingRoutingConfig } from "@/lib/constants/shipping-routing";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
-import { confirmManualDeliveryCore, createManualOrderCore, manualOrderFormValues, updateManualOrderCore } from "@/lib/records/order-create";
-import { decideShippingRoute, matchSelfArea, type RouteOrderInput } from "@/lib/shipping/route";
+import { orderReviewOf, reviewSeenOf } from "@/lib/constants/order-review";
+import { confirmManualDeliveryCore, confirmOrderReviewCore, createManualOrderCore, flagOrderForReviewAsAgent, manualOrderFormValues, updateManualOrderCore } from "@/lib/records/order-create";
+import { addressReviewOpenOf, decideShippingRoute, matchSelfArea, type RouteOrderInput } from "@/lib/shipping/route";
 import { assignCourierCore, routedOrders, runShippingRoutes, saveShippingRoutingCore } from "@/lib/shipping/routing";
 import { runJob } from "@/lib/sync/jobs";
 
@@ -57,7 +59,7 @@ function testPure() {
   const now = new Date("2026-10-06T12:00:00Z");
   const cfg: ShippingRoutingConfig = { selfAreas: [{ province: "Thành phố Hà Nội", wards: ["Phường Hoàn Kiếm"] }, { province: "Tỉnh Bắc Ninh", wards: [] }], defaultCarrier: "GHN", autoCreate: true, serviceCode: null, autoSince: since.toISOString() };
   const ready = new Set(["GHN"] as const);
-  const base: RouteOrderInput = { isErp: true, stage: "CONFIRMED", province: "Thành phố Hồ Chí Minh", ward: "Phường Sài Gòn", hasLiveShipment: false, weightGrams: 600, confirmedAt: new Date("2026-10-06T09:00:00Z"), updatedAt: new Date("2026-10-06T09:00:00Z"), auto: null };
+  const base: RouteOrderInput = { isErp: true, stage: "CONFIRMED", province: "Thành phố Hồ Chí Minh", ward: "Phường Sài Gòn", hasLiveShipment: false, weightGrams: 600, confirmedAt: new Date("2026-10-06T09:00:00Z"), updatedAt: new Date("2026-10-06T09:00:00Z"), auto: null, addressReviewOpen: false };
   const r = (o: Partial<RouteOrderInput>, c: Partial<ShippingRoutingConfig> = {}, rd: ReadonlySet<"VTP" | "GHN" | "GHTK"> = ready) => decideShippingRoute({ ...base, ...o }, { ...cfg, ...c }, rd, now);
 
   assert.deepEqual(r({ isErp: false }), { kind: "HOLD", code: "NOT_ERP", reason: "Đơn đồng bộ từ nguồn khác" });
@@ -72,6 +74,17 @@ function testPure() {
   assert.equal((r({}, {}, new Set()) as { code?: string }).code, "CARRIER_OFF", "hãng chưa bật ⇒ GIỮ");
   assert.equal((r({ weightGrams: null }) as { code?: string }).code, "NO_WEIGHT", "thiếu cân ⇒ GIỮ, không đoán cân");
   assert.deepEqual(r({}), { kind: "CARRIER", carrier: "GHN", weightGrams: 600, auto: { ok: true } });
+  // #855 (review độc lập): đơn ĐÃ có xã (máy tự điền / đọc lại từ địa chỉ khách vừa đổi) nhưng còn cờ cần kiểm địa chỉ ⇒ GIỮ, mọi tuyến.
+  assert.deepEqual(r({ addressReviewOpen: true }), { kind: "HOLD", code: "ADDRESS_REVIEW", reason: ROUTE_HOLD_META.ADDRESS_REVIEW.label });
+  assert.equal(r({ addressReviewOpen: true, province: "Hà Nội", ward: "Phường Hoàn Kiếm" }).kind, "HOLD", "cờ mở thắng cả khu tự giao");
+  assert.deepEqual(r({ addressReviewOpen: true, hasLiveShipment: true }), { kind: "SHIPPED" }, "đã có vận đơn thì vẫn là đã đi");
+  // Đọc cờ FAIL-CLOSED: không có ⇒ không giữ; có ADDRESS_UNRESOLVED / khoá review hỏng ⇒ giữ; cờ khác (khách huỷ) không phải địa chỉ.
+  assert.equal(addressReviewOpenOf({}), false);
+  assert.equal(addressReviewOpenOf({ review: null }), false, "đã gỡ cờ");
+  assert.equal(addressReviewOpenOf({ review: { entries: [{ code: "ADDRESS_UNRESOLVED", note: "x" }] } }), true);
+  assert.equal(addressReviewOpenOf({ review: { entries: [{ code: "CUSTOMER_CANCELLED", note: "x" }] } }), false);
+  assert.equal(addressReviewOpenOf({ review: "hỏng" }), true, "khoá review không đọc được ⇒ giữ");
+  assert.equal(addressReviewOpenOf({ review: { entries: [null] } }), true);
   const off = r({}, { autoCreate: false });
   assert.ok(off.kind === "CARRIER" && !off.auto.ok && off.auto.why.includes("tắt"));
   const old = r({ confirmedAt: new Date("2026-10-06T07:59:59Z") });
@@ -250,6 +263,26 @@ async function testFlow() {
       const fixed = await runShippingRoutes({}, { fetch: ghn.fetch });
       assert.ok(!fixed.skipped && fixed.created === 1, `sửa đơn ⇒ máy thử lại ngay: ${JSON.stringify(fixed)}`);
 
+      // ── #855: đơn có xã nhưng còn cờ cần kiểm địa chỉ ⇒ GIỮ, máy KHÔNG tạo vận đơn; người gỡ cờ («Xác nhận đơn») ⇒ đi tiếp ──
+      const flaggedId = await mk(cHcm);
+      const fl = await flagOrderForReviewAsAgent({ name: "Chatbot bán hàng", source: "tests/shipping-routing" }, flaggedId, { code: "ADDRESS_UNRESOLVED", note: "Khách đổi địa chỉ giao — cần người xác minh địa chỉ mới", quote: null });
+      assert.ok(fl.ok && fl.flagged, JSON.stringify(fl));
+      rt = await routes();
+      assert.deepEqual(rt[flaggedId]?.route, { kind: "HOLD", code: "ADDRESS_REVIEW", reason: ROUTE_HOLD_META.ADDRESS_REVIEW.label }, "ô xã đã có vẫn GIỮ khi cờ còn mở");
+      await runShippingRoutes({}, { fetch: ghn.fetch });
+      assert.equal((await db.select().from(schema.shipments).where(eq(schema.shipments.orderId, flaggedId))).length, 0, "cờ mở ⇒ không vận đơn");
+      // Chặn cứng ở lõi: gọi thẳng lõi tạo vận đơn tự động / tạo hàng loạt cũng không đi.
+      const direct = await autoCreateShipmentCore("job:kiem-thu", "GHN", flaggedId, { serviceCode: null }, { fetch: ghn.fetch });
+      assert.ok(!direct.ok && direct.error === ADDRESS_REVIEW_BLOCK, JSON.stringify(direct));
+      const bulk = await bulkCreateCore(admin, "GHN", [flaggedId], { serviceCode: "2" }, { fetch: ghn.fetch });
+      assert.ok(bulk.ok && bulk.rows[0]?.ok === false && bulk.rows[0].message === ADDRESS_REVIEW_BLOCK, JSON.stringify(bulk));
+      assert.equal((await db.select().from(schema.shipments).where(eq(schema.shipments.orderId, flaggedId))).length, 0);
+      const [fr] = await db.select({ raw: schema.orders.raw }).from(schema.orders).where(eq(schema.orders.id, flaggedId));
+      assert.ok((await confirmOrderReviewCore(admin, flaggedId, reviewSeenOf(orderReviewOf(fr!.raw)!.entries))).ok, "người gỡ cờ");
+      const go = await runShippingRoutes({}, { fetch: ghn.fetch });
+      assert.ok(!go.skipped && go.created === 1, JSON.stringify(go));
+      assert.equal((await db.select().from(schema.shipments).where(eq(schema.shipments.orderId, flaggedId))).length, 1, "gỡ cờ ⇒ đi hãng đúng một vận đơn");
+
       // ── Danh sách tự giao: gán người giao bằng KHOÁ tài khoản, «Đã giao» qua phiếu giao ──
       assert.equal((await assignCourierCore(admin, { orderIds: [selfId], courierUserId: "khong-co" })).ok, false);
       const asg = await assignCourierCore(admin, { orderIds: [selfId, hcmId + "-khong-co"], courierUserId: shipper!.id });
@@ -277,6 +310,6 @@ async function testFlow() {
 export async function testShippingRouting() {
   testPure();
   await testFlow();
-  console.log("  ✓ Tuyến giao tự động: cấu hình hỏng ⇒ TẮT; tuyến theo đúng thứ tự căn cứ, không đoán (thiếu xã / cân / hãng ⇒ giữ lại kèm lối sửa); khu tự giao thắng hãng; job tạo đúng một vận đơn bằng lõi chung (tác nhân máy), chạy lại / song song không đẻ thêm, đơn cũ không bị kéo; hãng từ chối ⇒ chờ 30 phút, bỏ cuộc sau 3 lần, sửa đơn ⇒ thử ngay; người giao là khoá tài khoản; «Đã giao» qua phiếu giao");
+  console.log("  ✓ Tuyến giao tự động: cấu hình hỏng ⇒ TẮT; tuyến theo đúng thứ tự căn cứ, không đoán (thiếu xã / cân / hãng ⇒ giữ lại kèm lối sửa; cờ cần kiểm địa chỉ mở ⇒ giữ, gỡ cờ ⇒ đi tiếp); khu tự giao thắng hãng; job tạo đúng một vận đơn bằng lõi chung (tác nhân máy), chạy lại / song song không đẻ thêm, đơn cũ không bị kéo; hãng từ chối ⇒ chờ 30 phút, bỏ cuộc sau 3 lần, sửa đơn ⇒ thử ngay; người giao là khoá tài khoản; «Đã giao» qua phiếu giao");
 }
 

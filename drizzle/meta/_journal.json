@@ -1723,6 +1723,13 @@
       "when": 1791401600000,
       "tag": "0246_cogs_basis_marketer_price",
       "breakpoints": true
+    },
+    {
+      "idx": 247,
+      "version": "7",
+      "when": 1791488000000,
+      "tag": "0247_sales_chat_inbound_text_hash_idx",
+      "breakpoints": true
     }
   ]
 }
