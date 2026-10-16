@@ -383,6 +383,11 @@ export function InboxThreadView({
                       toast.success(r.message);
                       router.refresh();
                     }
+                  } catch (e) {
+                    // Mất mạng / máy chủ lỗi giữa chừng: người bấm phải thấy, không im lặng (review P0-B #856).
+                    const msg = `Chưa bổ sung được từ Pancake: ${e instanceof Error ? e.message : "lỗi không rõ"} — thử lại sau.`;
+                    setError(msg);
+                    toast.error(msg);
                   } finally {
                     setPending(null);
                   }

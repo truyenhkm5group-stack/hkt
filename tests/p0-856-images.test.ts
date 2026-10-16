@@ -27,9 +27,13 @@ import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabi
 import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
-import { botImageHref, catchUpImageUrls, fanpageVisitorKey, fillMissingImageUrls, receiveFanpageEvent, type FanpageEvent } from "@/lib/sales-chatbot/fanpage";
+import type { AiBlock, AiProvider, AiResponse } from "@/lib/ai/provider";
+import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
+import { setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
+import { botImageHref, catchUpFanpage, catchUpImageUrls, fanpageBotSendersForTests, fanpageVisitorKey, fillMissingImageUrls, processFanpageThread, receiveFanpageEvent, type FanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { planHistoryMessages, resyncThreadFromPancake, writeThreadPage } from "@/lib/sales-chatbot/history";
-import { loadInboxThread } from "@/lib/sales-chatbot/inbox";
+import { listInbox, loadInboxThread } from "@/lib/sales-chatbot/inbox";
+import { setSettingJson } from "@/lib/settings";
 
 const ORG = "p0-856-anh";
 const PAGE = "8560000001";
@@ -48,6 +52,35 @@ async function cleanup() {
   invalidateOrganizations();
   invalidateCapabilities();
   rmSync(organizationDatabaseUrl({ code: ORG, isHome: false }).replace(/^pglite:\/\//, ""), { recursive: true, force: true });
+}
+
+const REPLY = "Dạ chả mực 250.000đ/kg ạ";
+function fakeProvider(onCall: () => void): AiProvider {
+  return {
+    name: "fake",
+    model: "claude-sonnet-5",
+    schemaDialect: "anthropic",
+    async complete(): Promise<AiResponse> {
+      onCall();
+      const content: AiBlock[] = [{ type: "text", text: REPLY }];
+      return { content, stopReason: "end_turn", usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
+    },
+  };
+}
+
+/** Pancake GIẢ: danh sách hội thoại / tin theo luồng; POST gửi tin trả mã; ảnh CDN ⇒ 404 (bot «chưa xem được ảnh», vẫn trả lời). */
+function fakePancake(threads: Record<string, Record<string, unknown>[]>, listed: Record<string, unknown>[] = []) {
+  const calls: { url: string; method: string }[] = [];
+  const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    calls.push({ url, method });
+    if (!url.includes("pages.fm") && !url.includes("pancake")) return new Response("", { status: 404 });
+    const thread = /\/conversations\/([^/?]+)\/messages/.exec(url)?.[1];
+    const body = method === "POST" ? { success: true, id: `m-bot-${calls.length}` } : url.includes("/conversations?") ? { success: true, conversations: listed } : thread ? { success: true, messages: threads[decodeURIComponent(thread)] ?? [] } : { success: true };
+    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  return { fetch: f, posts: (thread: string) => calls.filter((c) => c.method === "POST" && c.url.includes(`/conversations/${thread}/messages`)).length };
 }
 
 const okFetch = (async () => new Response(JSON.stringify({ success: true, conversations: [], messages: [] }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
@@ -135,8 +168,27 @@ export async function testP0856Images() {
       items = (await thread()).items;
       assert.equal(byImage(botImageHref("qr-menu"))?.side, "BOT", "ảnh AI gửi phải hiện");
       assert.equal(items.filter((i) => i.side === "BOT").length, 1, "dòng mang mã kênh của cùng tin ảnh (chữ rỗng, không ảnh) không thành bong bóng trống");
+
+      // ── 3b. Lượt bot GỬI ảnh: thành công ⇒ dòng ghi sẵn mang đủ ảnh; hỏng hết ⇒ xoá dòng; một phần ⇒ chỉ ảnh của nhóm đã nhận ──
+      const sendRows = async (thread: string) => db.select({ messageId: t.messageId, imageUrls: t.imageUrls }).from(t).where(and(eq(t.threadId, thread), eq(t.note, "BOT_SENT")));
+      const posted = (fail: (n: number) => boolean) => {
+        let n = 0;
+        return (async () => {
+          n += 1;
+          return fail(n) ? new Response(JSON.stringify({ success: false, message: "Pancake lỗi" }), { status: 500, headers: { "content-type": "application/json" } }) : new Response(JSON.stringify({ success: true, id: `img-msg-${n}` }), { status: 200, headers: { "content-type": "application/json" } });
+        }) as typeof fetch;
+      };
+      const seven = { ids: ["k1", "k2", "k3", "k4", "k5", "k6", "k7"], sourceIds: ["q1", "q2", "q3", "q4", "q5", "q6", "q7"] };
+      assert.ok((await fanpageBotSendersForTests.sendBotImagesRecorded(PAGE, "t-bot-ok", seven, posted(() => false), new Date())).ok);
+      const okRows = await sendRows("t-bot-ok");
+      assert.deepEqual(okRows.find((r) => r.messageId.startsWith("bot-out:"))?.imageUrls, seven.sourceIds.map(botImageHref), "gửi đủ ⇒ dòng ghi sẵn mang đủ 7 ảnh");
+      assert.equal(okRows.filter((r) => !r.messageId.startsWith("bot-out:")).length, 2, "mã tin Pancake của hai nhóm được ghi (nhận ra tiếng vọng)");
+      assert.ok(!(await fanpageBotSendersForTests.sendBotImagesRecorded(PAGE, "t-bot-fail", seven, posted(() => true), new Date())).ok);
+      assert.equal((await sendRows("t-bot-fail")).length, 0, "hỏng toàn bộ ⇒ KHÔNG còn dòng «AI đã gửi ảnh» nào");
+      assert.ok(!(await fanpageBotSendersForTests.sendBotImagesRecorded(PAGE, "t-bot-half", seven, posted((n) => n >= 2), new Date())).ok);
+      assert.deepEqual((await sendRows("t-bot-half")).find((r) => r.messageId.startsWith("bot-out:"))?.imageUrls, seven.sourceIds.slice(0, 6).map(botImageHref), "một phần ⇒ chỉ 6 ảnh của nhóm đầu đã tới khách");
       const src = readFileSync(path.join(process.cwd(), "lib/sales-chatbot/fanpage.ts"), "utf8");
-      assert.match(src, /imageUrls: up\.sourceIds\.map\(botImageHref\)/, "lượt bot gửi ảnh câu mẫu ghi địa chỉ ảnh vào dòng ghi sẵn");
+      assert.equal((src.match(/await sendBotImagesRecorded\(/g) ?? []).length, 2, "lượt trả lời VÀ nhắn riêng bình luận đều đi qua cùng một đường gửi ảnh có ghi / xoá dòng");
 
       // ── 4. Dòng có sẵn THIẾU ảnh (lượt quét lại / dòng cũ) ⇒ webhook trùng tới sau BỔ SUNG ảnh, không dòng thứ hai ──
       await db.insert(t).values({ pageId: PAGE, threadId: TH, messageId: "c-3", text: "Gửi shop ảnh chả mực", status: "DONE", processedAt: new Date(t0 + 5 * MIN), note: null, createdAt: new Date(t0 + 5 * MIN), transport: "PANCAKE" });
@@ -151,6 +203,27 @@ export async function testP0856Images() {
       // Không ghi đè ảnh đã có.
       assert.equal(await fillMissingImageUrls(PAGE, "c-1", [IMG("khac")]), false);
       assert.deepEqual((await row("c-1")).imageUrls, [IMG("cha-muc")], "ảnh đã có giữ nguyên");
+      // Dòng của bot (mã kênh, chữ rỗng) KHÔNG nhận ảnh CDN — kể cả khi nhập lịch sử lệch cửa sổ khớp tiếng vọng.
+      assert.equal(await fillMissingImageUrls(PAGE, "pancake-bot-img-id", [IMG("vong-bot")]), false, "dòng BOT_SENT bị từ chối");
+      const wBot = await writeThreadPage(PAGE, TH, [{ messageId: "pancake-bot-img-id", side: "PAGE", text: "[Ảnh]", at: new Date(t0 + 30 * MIN), imageUrls: [IMG("vong-bot")], customerName: null }], new Date());
+      assert.equal(wBot.imagesFilled + wBot.inserted, 0);
+      assert.equal((await row("pancake-bot-img-id")).imageUrls, null);
+      assert.equal((await thread()).items.filter((i) => i.side === "BOT").length, 1, "ảnh AI không hiện hai lần");
+
+      // Bổ sung ảnh KHÔNG đụng trạng thái hộp thư: chưa đọc / đã xem / mốc xếp / thứ tự danh sách giữ nguyên.
+      const convSnap = async () => (await db.select({ turnUnhandled: c.turnUnhandled, staffSeenAt: c.staffSeenAt, updatedAt: c.updatedAt, lastCustomerAt: c.lastCustomerAt, status: c.status }).from(c).where(eq(c.visitorKey, fanpageVisitorKey(PAGE, TH))))[0];
+      const orderOf = async () => {
+        const r = await listInbox(viewer, { filter: "ALL" });
+        assert.ok(r.ok);
+        return r.rows.map((x) => x.id);
+      };
+      await db.insert(t).values({ pageId: PAGE, threadId: TH, messageId: "c-6", text: "Thêm ảnh", status: "DONE", processedAt: new Date(t0 + 10 * MIN), createdAt: new Date(t0 + 10 * MIN), transport: "PANCAKE" });
+      const snap0 = await convSnap();
+      const order0 = await orderOf();
+      await receiveFanpageEvent(ev({ messageId: "c-6", text: "Thêm ảnh", imageUrls: [IMG("cha-muc-6")] }), new Date());
+      assert.deepEqual((await row("c-6")).imageUrls, [IMG("cha-muc-6")]);
+      assert.deepEqual(await convSnap(), snap0, "turn_unhandled · staff_seen_at · mốc hội thoại giữ nguyên khi bổ sung ảnh");
+      assert.deepEqual(await orderOf(), order0, "thứ tự hộp thư giữ nguyên");
 
       // ── 5. Nhập lịch sử / bổ sung từ Pancake theo mã tin: thiếu ⇒ ghi; có mà thiếu ảnh ⇒ bổ sung; chạy lại ⇒ 0 thay đổi ──
       await db.insert(t).values({ pageId: PAGE, threadId: TH, messageId: "c-4", text: "Ảnh nè", status: "DONE", processedAt: new Date(t0 + 7 * MIN), createdAt: new Date(t0 + 7 * MIN) });
@@ -176,7 +249,9 @@ export async function testP0856Images() {
       }) as typeof fetch;
       const conv = await thread();
       assert.ok("error" in (await resyncThreadFromPancake(viewer, conv.id, { fetch: pcFetch, sleep: async () => {} })), "chỉ người quản lý chatbot được bổ sung");
+      const seenBefore = (await convSnap()).staffSeenAt;
       const rs = await resyncThreadFromPancake(admin, conv.id, { fetch: pcFetch, sleep: async () => {} });
+      assert.equal((await convSnap()).staffSeenAt?.getTime(), seenBefore?.getTime(), "bổ sung từ Pancake KHÔNG đánh dấu đã đọc ngầm");
       assert.ok("ok" in rs, JSON.stringify(rs));
       assert.equal(calls.filter((x) => x.method !== "GET").length, 0, "KHÔNG gửi gì cho khách");
       const c5 = await row("c-5");
@@ -188,12 +263,47 @@ export async function testP0856Images() {
       items = (await thread()).items;
       for (const u of ["cha-muc-3", "dong-goi-3", "cha-muc-4", "dong-goi-4", "cha-muc-5"]) assert.ok(byImage(IMG(u)), `ảnh ${u} hiện sau khi bổ sung`);
 
+      // ── 7. Dòng PENDING được bổ sung ảnh ⇒ webhook trùng không vào hàng chờ lần hai, bot trả lời ĐÚNG MỘT lần ──
+      let aiCalls = 0;
+      setSalesChatProviderForTests(() => fakeProvider(() => (aiCalls += 1)));
+      await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok", enabled: true, shippingFee: 30_000 });
+      await db.insert(schema.products).values({ id: "p856-p", name: "Chả mực giã tay" }).onConflictDoNothing();
+      await db.insert(schema.productVariants).values({ id: "p856-v", productId: "p856-p", sku: "P856-1", retailPrice: 250_000 }).onConflictDoNothing();
+      const PT = "t-pending";
+      const later = () => new Date(Date.now() + 5 * MIN);
+      const pc = fakePancake({});
+      assert.ok((await receiveFanpageEvent(ev({ threadId: PT, messageId: "pd-1", text: "Chả mực bao nhiêu ạ?" }))).queued);
+      const dup = await receiveFanpageEvent(ev({ threadId: PT, messageId: "pd-1", text: "Chả mực bao nhiêu ạ?", imageUrls: [IMG("pending")] }));
+      assert.equal(dup.queued, false, "webhook trùng mã KHÔNG vào hàng chờ lần hai");
+      const pdRows = await db.select().from(t).where(and(eq(t.threadId, PT), eq(t.messageId, "pd-1")));
+      assert.equal(pdRows.length, 1);
+      assert.equal(pdRows[0].status, "PENDING", "bổ sung ảnh không đổi trạng thái hàng chờ");
+      assert.deepEqual(pdRows[0].imageUrls, [IMG("pending")]);
+      await processFanpageThread(PAGE, PT, { fetch: pc.fetch, now: later });
+      await processFanpageThread(PAGE, PT, { fetch: pc.fetch, now: later });
+      assert.equal(pc.posts(PT), 1, `bot trả lời đúng một lần (AI gọi ${aiCalls})`);
+      assert.deepEqual((await row("pd-1")).imageUrls, [IMG("pending")], "bot đọc xong vẫn giữ ảnh");
+
+      // ── 8. Lượt QUÉT LẠI thật (webhook rơi): tin khách chữ + ảnh ⇒ dòng mang ảnh ──
+      const CT = "t-catchup";
+      const at = Date.now() - 3 * MIN;
+      const cu = fakePancake(
+        { [CT]: [{ id: "cu-1", message: "Shop xem giúp chả mực này", from: { id: "cust-cu", name: "Sương" }, attachments: [{ type: "photo", url: IMG("catchup") }], inserted_at: naive(at) }] },
+        [{ id: CT, type: "INBOX", updated_at: naive(at), snippet: "Shop xem giúp chả mực này", last_sent_by: { id: "cust-cu" }, from: { name: "Sương" } }],
+      );
+      const cuRes = await catchUpFanpage({ fetch: cu.fetch, now: () => new Date() });
+      const cuRow = await row("cu-1");
+      assert.ok(cuRow, `lượt quét lại phải nhận tin: ${JSON.stringify(cuRes)}`);
+      assert.deepEqual(cuRow.imageUrls, [IMG("catchup")], "lượt quét lại KHÔNG vứt ảnh");
+      setSalesChatProviderForTests(null);
+
       // ── 6. Quyền: không có quyền xem AI bán hàng ⇒ không đọc được dòng thời gian (ảnh nằm trong đó) ──
       const denied = await loadInboxThread(stranger, conv.id);
       assert.ok(!denied.ok, "người ngoài không xem được ảnh hội thoại");
     });
     console.log("  ✓ đạt");
   } finally {
+    setSalesChatProviderForTests(null);
     if (savedKey === undefined) delete process.env.PLATFORM_SECRETS_KEY;
     else process.env.PLATFORM_SECRETS_KEY = savedKey;
     await cleanup();

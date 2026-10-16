@@ -773,7 +773,9 @@ export async function fillMissingImageUrls(pageId: string, messageId: string, ur
   const done = await db
     .update(t)
     .set({ imageUrls: clean })
-    .where(and(eq(t.messageId, messageId), eq(t.pageId, pageId), sql`(${t.imageUrls} is null or ${t.imageUrls} = '[]'::jsonb or ${t.imageUrls} = 'null'::jsonb)`))
+    // Dòng của bot (`BOT_SENT`, kể cả dòng mang mã kênh chữ rỗng) KHÔNG nhận ảnh CDN: ảnh AI đã nằm ở dòng ghi sẵn qua tuyến có
+    // kiểm quyền — đổ thêm là hiện HAI lần (tiếng vọng lệch cửa sổ khớp của nhập lịch sử).
+    .where(and(eq(t.messageId, messageId), eq(t.pageId, pageId), sql`${t.note} is distinct from 'BOT_SENT'`, sql`(${t.imageUrls} is null or ${t.imageUrls} = '[]'::jsonb or ${t.imageUrls} = 'null'::jsonb)`))
     .returning({ id: t.id });
   return done.length > 0;
 }
@@ -814,7 +816,7 @@ export async function sendFanpageImages(pageId: string, threadId: string, images
 type Sender = "BOT" | "STAFF";
 
 /** Gửi ảnh (đã có mã nội dung) vào hội thoại — mỗi tin tối đa `IMAGES_PER_MESSAGE` ảnh. */
-async function sendImages(pageId: string, threadId: string, token: string, contentIds: readonly string[], fetchImpl: typeof fetch, who: Sender): Promise<{ ok: true; ids: string[] } | { ok: false; error: string; ids: string[] }> {
+async function sendImages(pageId: string, threadId: string, token: string, contentIds: readonly string[], fetchImpl: typeof fetch, who: Sender, onGroupSent?: () => void): Promise<{ ok: true; ids: string[] } | { ok: false; error: string; ids: string[] }> {
   if (who === "BOT" && !(await botSendAllowed(pageId))) return { ok: false, error: PAGE_NOT_LIVE_SEND_ERROR, ids: [] };
   const ids: string[] = [];
   const url = `${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(threadId)}/messages?page_access_token=${encodeURIComponent(token)}`;
@@ -823,12 +825,35 @@ async function sendImages(pageId: string, threadId: string, token: string, conte
       const res = await fetchImpl(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "reply_inbox", content_ids: contentIds.slice(i, i + IMAGES_PER_MESSAGE) }), redirect: "manual", signal: AbortSignal.timeout(15_000) });
       const body = (await res.json().catch(() => null)) as { success?: boolean; id?: unknown; message?: unknown } | null;
       if (!res.ok || body?.success === false) return { ok: false, error: scrubSecrets(`Pancake không gửi được ảnh: ${str(body?.message) || `HTTP ${res.status}`}`, [token]), ids };
+      // Một NHÓM (≤ IMAGES_PER_MESSAGE ảnh) Pancake đã nhận — có nhóm không trả mã tin, nên nơi gọi không suy từ `ids` (P0-B #856).
+      onGroupSent?.();
       if (str(body?.id)) ids.push(str(body?.id));
     }
     return { ok: true, ids };
   } catch (e) {
     return { ok: false, error: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Pancake: ${describeNetworkFailure(e, "pages.fm")}` : `Không gọi được Pancake: ${e instanceof Error ? e.message : String(e)}`, [token]), ids };
   }
+}
+
+/**
+ * BOT GỬI ẢNH CÂU MẪU + DÒNG GHI SẴN (P0-B #856 · review). Dòng `bot-out:` (chữ rỗng — tiếng vọng ảnh không có chữ) ghi TRƯỚC lời gọi
+ * gửi và mang địa chỉ ảnh qua tuyến có kiểm quyền để hộp thư hiện lại. Hộp thư KHÔNG được hiện «AI đã gửi ảnh» cho ảnh khách chưa
+ * nhận: hỏng toàn bộ (Pancake lỗi · page chưa LIVE) ⇒ XOÁ dòng ghi sẵn — cùng luật nhánh chữ và ảnh nhân viên; gửi được một phần
+ * ⇒ dòng chỉ giữ ảnh của các NHÓM Pancake đã nhận. `up.ids` / `up.sourceIds` cùng thứ tự (`contentIdsFor`).
+ */
+async function sendBotImagesRecorded(pageId: string, threadId: string, token: string, up: { ids: readonly string[]; sourceIds: readonly string[] }, fetchImpl: typeof fetch, now: Date): Promise<{ ok: true } | { ok: false; error: string }> {
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  const preId = `bot-out:${randomUUID()}`;
+  await db.insert(t).values({ pageId, threadId, messageId: preId, text: "", imageUrls: up.sourceIds.map(botImageHref), status: "DONE", processedAt: now, note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
+  let sentGroups = 0;
+  const sent = await sendImages(pageId, threadId, token, up.ids, fetchImpl, "BOT", () => (sentGroups += 1));
+  if (sent.ids.length) await db.insert(t).values(sent.ids.map((id) => ({ pageId, threadId, messageId: id, text: "", status: "DONE", processedAt: now, note: "BOT_SENT" }))).onConflictDoNothing({ target: t.messageId });
+  if (sent.ok) return { ok: true };
+  const delivered = up.sourceIds.slice(0, sentGroups * IMAGES_PER_MESSAGE);
+  if (!delivered.length) await db.delete(t).where(eq(t.messageId, preId));
+  else await db.update(t).set({ imageUrls: delivered.map(botImageHref) }).where(eq(t.messageId, preId));
+  return { ok: false, error: sent.error };
 }
 
 /**
@@ -956,11 +981,12 @@ export async function sendFanpageText(pageId: string, threadId: string, text: st
   return { ok: true };
 }
 
-/** Ba hàm gửi NỘI BỘ của đường bot — chỉ để bài kiểm gọi thẳng (tests/saas-page-gate.test.ts), không dùng ở mã chạy. */
+/** Các hàm gửi NỘI BỘ của đường bot — chỉ để bài kiểm gọi thẳng (tests/saas-page-gate.test.ts), không dùng ở mã chạy. */
 export const fanpageBotSendersForTests = {
   sendInbox: (pageId: string, threadId: string, text: string, fetchImpl: typeof fetch, who: Sender, sleep?: (ms: number) => Promise<void>) => sendInbox(pageId, threadId, PAGE_TOKEN_FOR_TESTS, text, fetchImpl, who, sleep),
   sendImages: (pageId: string, threadId: string, contentIds: readonly string[], fetchImpl: typeof fetch) => sendImages(pageId, threadId, PAGE_TOKEN_FOR_TESTS, contentIds, fetchImpl, "BOT"),
   deliverCommentReply: (input: Omit<CommentReplyInput, "token">, deps: FanpageDeps) => deliverCommentReply({ ...input, token: PAGE_TOKEN_FOR_TESTS }, deps),
+  sendBotImagesRecorded: (pageId: string, threadId: string, up: { ids: readonly string[]; sourceIds: readonly string[] }, fetchImpl: typeof fetch, now: Date) => sendBotImagesRecorded(pageId, threadId, PAGE_TOKEN_FOR_TESTS, up, fetchImpl, now),
 };
 const PAGE_TOKEN_FOR_TESTS = "token-bai-kiem";
 
@@ -1032,9 +1058,7 @@ async function deliverCommentReply(input: CommentReplyInput, deps: FanpageDeps):
   if (input.imageIds.length) {
     const up = await contentIdsFor(pageId, token, input.imageIds, fetchImpl, now());
     if (up.ids.length) {
-      await db.insert(t).values({ pageId, threadId: inboxId, messageId: `bot-out:${randomUUID()}`, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
-      const sentImgs = await sendImages(pageId, inboxId, token, up.ids, fetchImpl, "BOT");
-      if (sentImgs.ids.length) await db.insert(t).values(sentImgs.ids.map((id) => ({ pageId, threadId: inboxId, messageId: id, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }))).onConflictDoNothing({ target: t.messageId });
+      const sentImgs = await sendBotImagesRecorded(pageId, inboxId, token, up, fetchImpl, now());
       if (!sentImgs.ok) warning = sentImgs.error;
     }
     warning = warning ?? up.errors[0] ?? null;
@@ -1428,9 +1452,7 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
       }
       const up = await contentIdsFor(pageId, token, media, deps.fetch ?? fetch, now());
       if (up.ids.length) {
-        await db.insert(t).values({ pageId, threadId, messageId: `bot-out:${randomUUID()}`, text: "", imageUrls: up.sourceIds.map(botImageHref), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
-        const sentImgs = await sendImages(pageId, threadId, token, up.ids, deps.fetch ?? fetch, "BOT");
-        if (sentImgs.ids.length) await db.insert(t).values(sentImgs.ids.map((id) => ({ pageId, threadId, messageId: id, text: "", status: "DONE", processedAt: now(), note: "BOT_SENT" }))).onConflictDoNothing({ target: t.messageId });
+        const sentImgs = await sendBotImagesRecorded(pageId, threadId, token, up, deps.fetch ?? fetch, now());
         if (!sentImgs.ok) sendError = sentImgs.error;
       }
       if (!sendError && up.errors.length) sendError = up.errors[0];

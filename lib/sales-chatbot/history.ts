@@ -232,7 +232,10 @@ async function ensureConversation(pageId: string, threadId: string, activityAt: 
 }
 
 /** Ghi MỘT trang tin đã lập kế hoạch của một luồng + đẩy mốc của hội thoại. Idempotent: khoá `message_id`. */
-export async function writeThreadPage(pageId: string, threadId: string, planned: readonly PlannedHistoryMessage[], now: Date): Promise<PageWrite> {
+export async function writeThreadPage(pageId: string, threadId: string, planned: readonly PlannedHistoryMessage[], now: Date, opts: { markSeen?: boolean } = {}): Promise<PageWrite> {
+  // `markSeen` (mặc định BẬT — lượt nhập lịch sử: tin cũ không phải việc chưa đọc). Bổ sung MỘT hội thoại đang sống thì TẮT: đẩy
+  // `staff_seen_at` là đánh dấu đã đọc ngầm tin khách mới mà chưa ai mở (review P0-B #856).
+  const markSeen = opts.markSeen !== false;
   const out: PageWrite = { inserted: 0, customer: 0, page: 0, duplicates: 0, created: false, imagesFilled: 0 };
   if (!planned.length) return out;
   const db = await getDb();
@@ -293,7 +296,7 @@ export async function writeThreadPage(pageId: string, threadId: string, planned:
     .set({
       ...(maxCust ? { lastCustomerAt: sql`greatest(coalesce(${c.lastCustomerAt}, ${maxCust}), ${maxCust})` } : {}),
       historyUntil: sql`greatest(coalesce(${c.historyUntil}, ${maxAny}), ${maxAny})`,
-      staffSeenAt: sql`greatest(coalesce(${c.staffSeenAt}, ${maxAny}), ${maxAny})`,
+      ...(markSeen ? { staffSeenAt: sql`greatest(coalesce(${c.staffSeenAt}, ${maxAny}), ${maxAny})` } : {}),
       // `updated_at` là đồng hồ «nhân viên đang trả lời» của bot — lượt nhập không được chạm.
       updatedAt: sql`${c.updatedAt}`,
     })
@@ -671,7 +674,7 @@ export async function resyncThreadFromPancake(user: SessionUser, conversationId:
     const fresh = msgs.filter((m) => !lastIds.includes(str((m as { id?: unknown } | null)?.id)));
     if (!fresh.length) break;
     const plan = planHistoryMessages(fresh, conv.pageId, { nowMs: now().getTime(), freshMs: HISTORY_LIMITS.freshMinutes * 60_000, fallbackName: "" });
-    const w = await writeThreadPage(conv.pageId, conv.threadId, plan.rows, now());
+    const w = await writeThreadPage(conv.pageId, conv.threadId, plan.rows, now(), { markSeen: false });
     totals.inserted += w.inserted;
     totals.filled += w.imagesFilled;
     totals.pages += 1;
