@@ -3,7 +3,7 @@
   "mission_id": "p0-855-thuyngo-lieudau",
   "title": "P0 #855 HSLC: bot tự thêm SKU, dùng sai địa chỉ cũ, hỏi lại phường, không nhường nhân viên (ThuyNgo + Lieu Dau)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "CANCELLED",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-16T03:03:50.370Z",
-  "updated_at": "2026-10-16T06:21:17.551Z",
-  "last_heartbeat": "2026-10-16T06:20:34.753Z",
+  "updated_at": "2026-10-16T13:48:15.476Z",
+  "last_heartbeat": "2026-10-16T13:48:15.476Z",
   "definition_of_done": [],
+  "evidence": {
+    "done": "thay bằng #860 + #861 (đã gộp) và p0-855-delta (#873)"
+  },
   "handoff": {
     "branch": "fix/p0-thuyngo-negative-order",
     "sha": "18b36dde8ae8982867a7ae15dbeb87afc615034a",
