@@ -3,7 +3,7 @@
   "mission_id": "p0-855-thuyngo-lieudau",
   "title": "P0 #855 HSLC: bot tự thêm SKU, dùng sai địa chỉ cũ, hỏi lại phường, không nhường nhân viên (ThuyNgo + Lieu Dau)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -21,7 +21,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-16T03:03:50.370Z",
-  "updated_at": "2026-10-16T03:03:50.370Z",
-  "last_heartbeat": "2026-10-16T03:03:50.370Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-16T06:20:34.753Z",
+  "last_heartbeat": "2026-10-16T06:20:34.753Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "fix/p0-thuyngo-negative-order",
+    "sha": "18b36dde8ae8982867a7ae15dbeb87afc615034a",
+    "at": "2026-10-16T06:20:34.753Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "P0 #855 HSLC: bot tự thêm SKU, dùng sai địa chỉ cũ, hỏi lại phường, không nhường nhân viên (ThuyNgo + Lieu Dau)",
+    "summary": "",
+    "tests": [
+      "npm test: TẤT CẢ KIỂM THỬ ĐẠT (1518 nhóm)",
+      "tsc + eslint sạch",
+      "sales-p0-855: 13 hội thoại vàng qua chatTurn thật",
+      "golden 23 + đơn vàng v2 khớp (9 ảnh chụp đổi có giải thích)"
+    ]
+  }
 }
