@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowLeft, Bot, ImagePlus, Loader2, Send, UserRound, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowDown, ArrowLeft, Bot, ImageOff, ImagePlus, Loader2, Send, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ChatOrderForm } from "@/components/orders/chat-order-form";
@@ -14,6 +15,7 @@ import { insertIntoDraft } from "@/lib/sales-chatbot/inbox-composer-shared";
 import { handoffQueueLine } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { avatarHrefOf, STAFF_IMAGE_MAX_BYTES, STAFF_IMAGES_MAX, STAFF_REPLY_MAX, type InboxOrder, type InboxThread, type TimelineItem } from "@/lib/sales-chatbot/inbox-shared";
 import { cn } from "@/lib/utils";
+import { resyncInboxThreadAction } from "./actions";
 import { AvatarLinkWrap, ChannelAvatar } from "./avatar";
 import { ComposerTools, type ComposerTab } from "./composer-tools";
 import { ConversationControlBar } from "./control-bar";
@@ -53,6 +55,52 @@ const SIDE_LABEL: Record<TimelineItem["side"], string> = { CUSTOMER: "Khách", B
 const SHELL_SIDE_LABEL: Record<TimelineItem["side"], string> = { ...SIDE_LABEL, PAGE: "Nhân viên / tự động (ngoài hệ thống)" };
 /** Tin cùng phía cách nhau ít hơn chừng này ⇒ gộp dưới một tên người gửi. */
 const GROUP_GAP_MS = 5 * 60_000;
+
+/**
+ * MỘT ẢNH TRONG DÒNG THỜI GIAN (P0-B #856): lazy-load; bấm ⇒ xem lớn ngay trong hộp thư (Esc / bấm nền để đóng — dùng được trên
+ * điện thoại). Ảnh CDN của kênh có hạn (Facebook / Pancake đổi khoá) hoặc tải lỗi ⇒ ô trạng thái RÕ «Ảnh không tải được», không
+ * để một khung vỡ trông như «không có ảnh». Ảnh của chính shop (nhân viên / AI) đi qua tuyến có kiểm quyền của tổ chức.
+ */
+function TimelineImage({ src, onOpen }: { src: string; onOpen: (src: string) => void }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <a href={src} target="_blank" rel="noopener noreferrer" className="flex h-32 w-32 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-foreground/20 bg-muted/60 p-2 text-center text-[11px] leading-snug text-muted-foreground" title="Ảnh có thể đã hết hạn trên kênh — mở trên Pancake / Messenger để xem">
+        <ImageOff className="size-5" aria-hidden />
+        Ảnh không tải được (có thể đã hết hạn)
+      </a>
+    );
+  }
+  return (
+    <button type="button" className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => onOpen(src)} aria-label="Xem ảnh lớn">
+      {/* eslint-disable-next-line @next/next/no-img-element -- ảnh khách (CDN của kênh) hoặc ảnh shop trong CSDL qua tuyến có kiểm quyền */}
+      <img src={src} alt="Ảnh trong hội thoại" className="h-32 w-32 rounded-lg border border-foreground/10 object-cover" loading="lazy" decoding="async" onError={() => setFailed(true)} />
+    </button>
+  );
+}
+
+/** Xem ảnh lớn: lớp phủ toàn màn hình, ảnh vừa khung (cả điện thoại), Esc / bấm nền / nút ✕ để đóng. */
+function ImageViewer({ src, onClose }: { src: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div role="dialog" aria-modal="true" aria-label="Ảnh trong hội thoại" data-testid="inbox-image-viewer" className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3" onClick={onClose}>
+      <button type="button" className="absolute right-3 top-3 rounded-full bg-black/60 p-2 text-white" onClick={onClose} aria-label="Đóng">
+        <X className="size-5" />
+      </button>
+      {/* eslint-disable-next-line @next/next/no-img-element -- cùng nguồn ảnh của dòng thời gian */}
+      <img src={src} alt="Ảnh trong hội thoại" className="max-h-full max-w-full rounded-md object-contain" onClick={(e) => e.stopPropagation()} />
+      <a href={src} target="_blank" rel="noopener noreferrer" className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-[12px] text-white" onClick={(e) => e.stopPropagation()}>
+        Mở ảnh gốc
+      </a>
+    </div>
+  );
+}
 
 function dayLabel(key: string): string {
   const today = vnDateKey(new Date());
@@ -106,7 +154,8 @@ export function InboxThreadView({
   const [text, setText] = useState("");
   const [requestKey, setRequestKey] = useState(newKey);
   const [confirmPaid, setConfirmPaid] = useState(false);
-  const [pending, setPending] = useState<null | "send" | "claim" | "release" | "assign">(null);
+  const [pending, setPending] = useState<null | "send" | "claim" | "release" | "assign" | "resync">(null);
+  const router = useRouter();
   // Bảng «Câu mẫu · Sản phẩm · AI gợi ý» của ô soạn (composer-tools.tsx) — ô soạn giữ để phím «/» mở được.
   const [tools, setTools] = useState<ComposerTab | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -117,6 +166,9 @@ export function InboxThreadView({
   const [files, setFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const [newBelow, setNewBelow] = useState(false);
+  // Ảnh đang xem lớn (P0-B #856) — `null` = không mở.
+  const [viewing, setViewing] = useState<string | null>(null);
+  const closeViewer = useCallback(() => setViewing(null), []);
   const fileInput = useRef<HTMLInputElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -315,6 +367,31 @@ export function InboxThreadView({
                 ))}
               </select>
             ) : null}
+            {thread.canManage && thread.channel === "FANPAGE" ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 text-[12px]"
+                disabled={!!pending}
+                title="Đọc lại tin của hội thoại này từ Pancake (chỉ đọc): ghi tin thiếu webhook và ảnh chưa hiện — không gửi gì cho khách"
+                onClick={async () => {
+                  setPending("resync");
+                  try {
+                    const r = await resyncInboxThreadAction(thread.id);
+                    if ("error" in r) toast.error(r.error);
+                    else {
+                      toast.success(r.message);
+                      router.refresh();
+                    }
+                  } finally {
+                    setPending(null);
+                  }
+                }}
+              >
+                {pending === "resync" ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                Bổ sung từ Pancake
+              </Button>
+            ) : null}
           </div>
         </header>
 
@@ -364,10 +441,7 @@ export function InboxThreadView({
                     {r.m.images.length ? (
                       <div className={cn("flex flex-wrap gap-1", r.m.text && "mt-1.5")}>
                         {r.m.images.slice(0, 6).map((src) => (
-                          <a key={src} href={src} target="_blank" rel="noopener noreferrer">
-                            {/* eslint-disable-next-line @next/next/no-img-element -- ảnh khách (CDN của kênh) hoặc ảnh nhân viên trong CSDL qua tuyến có kiểm quyền */}
-                            <img src={src} alt="Ảnh trong hội thoại" className="h-32 w-32 rounded-lg border border-foreground/10 object-cover" loading="lazy" />
-                          </a>
+                          <TimelineImage key={src} src={src} onOpen={setViewing} />
                         ))}
                       </div>
                     ) : null}
@@ -379,6 +453,7 @@ export function InboxThreadView({
               ),
             )}
           </div>
+          {viewing ? <ImageViewer src={viewing} onClose={closeViewer} /> : null}
           {newBelow ? (
             <button type="button" className="absolute bottom-3 left-1/2 inline-flex -translate-x-1/2 items-center gap-1 rounded-full bg-primary px-3 py-1.5 text-[12px] font-medium text-primary-foreground shadow-lg" onClick={toBottom}>
               <ArrowDown className="size-3.5" /> Có tin mới
