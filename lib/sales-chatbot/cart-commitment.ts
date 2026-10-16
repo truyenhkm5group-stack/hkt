@@ -67,7 +67,8 @@ export type CartIntentKind = "ORDER" | "SET" | "ADD" | "REDUCE" | "KEEP" | "REMO
 /** `bare` = số TRẦN không chữ đơn vị («1 mực giã tay» — #855); gộp được với khối lượng cùng món đứng ngay sau («1 chả cá thu 2kg»). */
 export type CartAmount = { value: number; unit: CartUnit; label: string; display: string; index: number; end: number; ambiguous?: boolean; hint?: string; pieces?: boolean; word?: string; unbound?: boolean; raw?: string; bare?: boolean };
 /** `tentative` = số lượng nói kèm câu hỏi giá («lấy 2kg bao nhiêu em») — chỉ THÊM món mới (không dính), không bao giờ sửa món đã có. */
-export type CartIntent = { kind: CartIntentKind; amounts: CartAmount[]; label: string | null; tentative?: boolean };
+/** `restate` = khách NHẮC LẠI CẢ GIỎ (nhiều món, mỗi món một số, kết bằng «thôi» / «chỉ lấy») — SET từng món, không phải «thêm» (P0 #863). */
+export type CartIntent = { kind: CartIntentKind; amounts: CartAmount[]; label: string | null; tentative?: boolean; restate?: boolean };
 
 // ─────────────────────────── ĐỌC SỐ LƯỢNG ───────────────────────────
 
@@ -520,6 +521,14 @@ export function classifyCartMessage(text: string, catalog?: readonly string[], o
   const last = amounts[amounts.length - 1];
   const leadOf = (a: CartAmount) => tail(text.slice(0, a.index));
   const trailOf = (a: CartAmount) => head(text.slice(a.end));
+  // KHÁCH NHẮC LẠI CẢ GIỎ (P0 #863, HSLC 16/10/2026): «Lấy thêm 1/2 kg chả mực, 1kg chả cá thu thôi» — ≥ 2 số lượng, mỗi số gọi tên một món KHÁC
+  // nhau, câu kết bằng «thôi» (hoặc mở bằng «chỉ lấy») ⇒ đó là GIỎ CUỐI khách muốn (1kg cá + 0,5kg mực), không phải «thêm 0,5kg mực nữa» (bản cũ
+  // cộng lần hai ⇒ 1kg mực) và không phải chỉ sửa món cuối (bản cũ bỏ rơi vế mực). ⇒ SET từng món đúng số khách nói.
+  {
+    const named = amounts.filter((a) => a.label && !a.ambiguous && !a.unbound);
+    const restateCue = new RegExp(`(?:^| )${THOI}${PARTICLES}$`).test(f) ||/chỉ\s+(?:lấy|mua|đặt)/.test(raw.slice(0, amounts[0].index));
+    if (!priceAsk && restateCue && amounts.length >= 2 && named.length === amounts.length && new Set(named.map((a) => a.label)).size === named.length) return { kind: "SET", amounts, label: null, restate: true };
+  }
   const addRe = /(?:^| )(?:them|cong them|lay them|them cho (?:chi|em|anh|minh))$/;
   const adds = amounts.filter((a) => addRe.test(leadOf(a)) || /^nua(?: |$)/.test(trailOf(a)));
   if (adds.length) {
@@ -697,7 +706,7 @@ function applyCart(cart: CartCommitment | undefined, text: string, turn: number 
   if (intent.kind !== "ADD" && [...hits.values()].some((n) => n > 1)) return cart ? relax("Khách nói nhiều số lượng cho cùng một món trong một câu — chưa chắc số nào, hỏi lại") : cart;
   // Giỏ ≥ 2 món + «chỉ» / «thôi» kèm số của MỘT món («chỉ lấy 1kg chả mực thôi») ⇒ GIỮ đúng món đó với số mới, bỏ món kia; không
   // chắc món nào ⇒ hỏi lại, không chặn (review vòng 3).
-  if (items.length >= 2 && (intent.kind === "SET" || intent.kind === "ORDER") && !intent.tentative && pickCueOf(text)) {
+  if (items.length >= 2 && (intent.kind === "SET" || intent.kind === "ORDER") && !intent.tentative && !intent.restate && pickCueOf(text)) {
     const t = targets[0];
     if (intent.amounts.length !== 1 || typeof t !== "number" || !intent.amounts[0].label) return relax("Khách chọn lại món («chỉ / thôi») nhưng chưa rõ giữ món nào — hỏi lại");
     const a = intent.amounts[0];

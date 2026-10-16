@@ -20,7 +20,7 @@ import { getDb, schema } from "@/db";
 import { CANCEL_BLOCK_LABEL, customerCancelPlan } from "@/lib/constants/order-cancel";
 import { orderReviewOf } from "@/lib/constants/order-review";
 import { formatVND } from "@/lib/format";
-import { loadCancelFacts } from "@/lib/records/order-cancel";
+import { loadCancelFacts, raiseCancelException } from "@/lib/records/order-cancel";
 import { flagOrderForReviewAsAgent, type OrderAgent } from "@/lib/records/order-create";
 import { botErrorFromReview, cartItemsText, explicitCancel, recoveryText, staffTotalConflict, cancelledText, DECLINE_NOTED_TEXT, type BotErrorKind } from "@/lib/sales-chatbot/cancel-recovery";
 import type { CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
@@ -132,6 +132,8 @@ export async function serverCancelStep(i: CancelStepInput): Promise<CancelStep |
   const st: ChatState = opened.state;
   if (!plan || plan.kind === "NEEDS_HUMAN") {
     const why = plan?.kind === "NEEDS_HUMAN" ? CANCEL_BLOCK_LABEL[plan.code] : "không đọc được vòng đời đơn";
+    // Đơn đã giao ĐVVC / đã thu tiền… ⇒ vào HÀNG NGOẠI LỆ huỷ (cờ + lời khai + cảnh báo người) — không đề nghị, không khẳng định gì với khách.
+    if (plan?.kind === "NEEDS_HUMAN") await raiseCancelException(orderId, plan.code, `Khách huỷ sau lỗi của bot (${kind})`, { agent: i.agent, actor: { kind: "AI", userId: null, name: i.agent.name }, conversationId: i.conversationId, quote: words || null, reason: `Khách huỷ vì đơn sai (${kind})`, rescue: "NOT_ATTEMPTED", now: i.now }).catch(() => undefined);
     const reason = `Khách huỷ đơn sau lỗi của bot — ${why}`.slice(0, 300);
     return { kind: "HANDOFF", reason, state: { ...st, handoff: { reason, at: i.now.toISOString() } }, note: reason };
   }

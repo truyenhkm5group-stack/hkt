@@ -89,7 +89,7 @@ export function isServiceCode(v: string): boolean {
 
 // ─────────────────────────── KẾT QUẢ TUYẾN ───────────────────────────
 
-export const ROUTE_HOLD_CODES = ["NOT_ERP", "NOT_CONFIRMED", "REVIEW", "ADDRESS_REVIEW", "NO_PROVINCE", "NO_WARD", "NO_CARRIER", "CARRIER_OFF", "NO_WEIGHT", "AUTO_FAILED"] as const;
+export const ROUTE_HOLD_CODES = ["NOT_ERP", "NOT_CONFIRMED", "ADDRESS_REVIEW", "NO_PROVINCE", "NO_WARD", "NO_CARRIER", "CARRIER_OFF", "NO_WEIGHT", "AUTO_FAILED"] as const;
 export type RouteHoldCode = (typeof ROUTE_HOLD_CODES)[number];
 
 /** Lối sửa của một lý do giữ lại — màn hình dựng link từ đây. */
@@ -98,7 +98,6 @@ export type RouteFix = "EDIT_ORDER" | "ROUTING" | "CONNECTIONS" | "PRODUCTS" | "
 export const ROUTE_HOLD_META: Record<RouteHoldCode, { label: string; fix: RouteFix; fixLabel: string }> = {
   NOT_ERP: { label: "Đơn đồng bộ từ nguồn khác", fix: "ORDER", fixLabel: "Nguồn của đơn đẩy sang hãng" },
   NOT_CONFIRMED: { label: "Đơn chưa «Đã xác nhận»", fix: "EDIT_ORDER", fixLabel: "Chốt đơn với khách" },
-  REVIEW: { label: "Đơn đang CẦN NGƯỜI KIỂM (khách báo huỷ / món chưa đồng ý / phản đối giá)", fix: "ORDER", fixLabel: "Mở đơn, gọi khách rồi «Xác nhận đơn» hoặc «Huỷ đơn»" },
   // #855: ô xã có thể do máy đọc lại từ một địa chỉ CHƯA ai xác minh (khách đổi địa chỉ, địa giới cũ chưa ghép) — người kiểm rồi gỡ cờ.
   ADDRESS_REVIEW: { label: "Địa chỉ còn cờ cần kiểm (khách đổi địa chỉ / địa giới cũ chưa ghép)", fix: "ORDER", fixLabel: "Kiểm địa chỉ rồi bấm «Xác nhận đơn» ở trang đơn" },
   NO_PROVINCE: { label: "Chưa ghép được tỉnh / thành", fix: "EDIT_ORDER", fixLabel: "Sửa đơn — chọn tỉnh và xã" },

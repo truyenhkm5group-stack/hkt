@@ -11,7 +11,7 @@ import { autoAttemptDue, ROUTE_HOLD_META, SHIPPING_ROUTING_LIMITS, type AutoAtte
  *
  * Thứ tự căn cứ (dừng ở điều đầu tiên đúng):
  *  1. Đơn không tạo trong ERP / chưa «Đã xác nhận» ⇒ GIỮ (không phải việc của tuyến giao).
- *  2. Đã có lần gửi còn hiệu lực ở hãng ⇒ ĐÃ ĐI. Đơn đang CẦN NGƯỜI KIỂM vì khách có thể không muốn đúng đơn này ⇒ GIỮ (P0 #863).
+ *  2. Đã có lần gửi còn hiệu lực ở hãng ⇒ ĐÃ ĐI.
  *  3. Đơn còn cờ cần kiểm địa chỉ đang mở (ADDRESS_UNRESOLVED — #855) ⇒ GIỮ: ô xã có thể do máy đọc lại từ một địa chỉ CHƯA ai xác
  *     minh (khách đổi địa chỉ, địa giới cũ chưa ghép); người gỡ cờ («Xác nhận đơn») thì đi tiếp.
  *  3b. Thiếu tỉnh / xã đã ghép ⇒ GIỮ — không đọc lại dòng địa chỉ ở đây: ô tỉnh + xã chỉ có giá trị khi lõi ghi đơn đã đối chiếu
@@ -37,11 +37,6 @@ export type RouteOrderInput = {
    * chỉ chưa xác minh) ⇒ GIỮ, kể cả khi ô tỉnh + xã đã có. Bắt buộc khai: nơi gọi quên là lỗi biên dịch, không phải một vận đơn sai.
    */
   addressReviewOpen: boolean;
-  /**
-   * Lý do CẦN NGƯỜI KIỂM đang chặn giao (`reviewHoldOf` — khách báo huỷ · món / số lượng khách chưa đồng ý · phản đối giá · máy không huỷ
-   * được); vắng / `null` = không có. P0 #863: đơn khách chưa đồng ý ĐÚNG món / số lượng không được đi giao, kể cả khi đã «Đã xác nhận».
-   */
-  reviewHold?: string | null;
 };
 
 /** Khoá so khớp tỉnh: tên tỉnh chuẩn (nhận cả tên cũ / viết tắt) ⇒ chữ đã gập; không nhận ra ⇒ chữ gập của chính nó. */
@@ -104,7 +99,6 @@ export function decideShippingRoute(o: RouteOrderInput, cfg: ShippingRoutingConf
   if (!o.isErp) return hold("NOT_ERP");
   if (o.stage !== "CONFIRMED") return hold("NOT_CONFIRMED");
   if (o.hasLiveShipment) return { kind: "SHIPPED" };
-  if (o.reviewHold) return hold("REVIEW", `${ROUTE_HOLD_META.REVIEW.label}: ${o.reviewHold}`);
   if (o.addressReviewOpen) return hold("ADDRESS_REVIEW");
   if (!o.province.trim()) return hold("NO_PROVINCE");
   if (!o.ward.trim()) return hold("NO_WARD");

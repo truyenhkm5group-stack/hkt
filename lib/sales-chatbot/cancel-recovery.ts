@@ -105,7 +105,12 @@ export type RecoveryOffer = { items: string; subtotal: number; total: number | n
  * duy nhất (đơn đã sửa) và để khách nói «không» dễ dàng. HÀM THUẦN.
  */
 export function recoveryText(kind: BotErrorKind, diffs: readonly CartDraftDiff[], offer: RecoveryOffer): string {
-  const money = offer.total !== null ? `tổng ${formatVND(offer.total)}${offer.shipFree ? " (miễn ship)" : ""}` : `tiền hàng ${formatVND(offer.subtotal)}, phí ship nhân viên báo sau`;
+  const money =
+    offer.total === null
+      ? `tiền hàng ${formatVND(offer.subtotal)}, phí ship nhân viên báo sau`
+      : offer.shipFree || offer.total === offer.subtotal
+        ? `tổng ${formatVND(offer.total)}${offer.shipFree ? " (miễn ship)" : ""}`
+        : `tiền hàng ${formatVND(offer.subtotal)} + ship ${formatVND(offer.total - offer.subtotal)} = tổng ${formatVND(offer.total)}`;
   return `Dạ em xin lỗi mình ạ, ${botErrorPhrase(kind, diffs)}. Đơn đúng như mình đặt là ${offer.items}, ${money}. Nếu mình vẫn muốn nhận đúng đơn này thì nhắn em «ok» để em sửa ngay ạ; còn không em huỷ đơn giúp mình.`;
 }
 

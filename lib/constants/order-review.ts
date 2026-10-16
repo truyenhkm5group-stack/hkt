@@ -33,13 +33,6 @@
 export const ORDER_REVIEW_CODES = ["CUSTOMER_CANCELLED", "ADDRESS_UNRESOLVED", "CANCEL_BLOCKED", "PRICE_DISPUTED", "PRICE_MISMATCH", "UPSELL_UNCONSENTED"] as const;
 export type OrderReviewCode = (typeof ORDER_REVIEW_CODES)[number];
 
-/**
- * Cờ nói rằng KHÁCH có thể không muốn ĐÚNG đơn này (khách báo huỷ · máy không huỷ được · món / số lượng khách chưa đồng ý · khách phản
- * đối giá) ⇒ đơn KHÔNG được công tắc «đơn đủ thông tin» tự xác nhận và KHÔNG được xếp tuyến giao cho tới khi người kiểm (P0 #863: đơn nháp
- * 2kg chả mực khách chưa từng đặt mà vẫn có thể đi giao). Cờ địa chỉ / giá lệch bảng không thuộc nhóm này — đơn vẫn là đơn khách muốn.
- */
-export const ORDER_REVIEW_HOLD_CODES: readonly OrderReviewCode[] = ["CUSTOMER_CANCELLED", "CANCEL_BLOCKED", "UPSELL_UNCONSENTED", "PRICE_DISPUTED"];
-
 export const ORDER_REVIEW_LABEL: Record<OrderReviewCode, string> = {
   CUSTOMER_CANCELLED: "Khách báo huỷ trong hội thoại",
   ADDRESS_UNRESOLVED: "Địa chỉ chưa ghép được xã / phường",
@@ -107,11 +100,6 @@ function parseEntry(v: unknown): OrderReviewEntry | null {
 export function orderReviewOf(raw: unknown): OrderReview | null {
   if (!raw || typeof raw !== "object") return null;
   return reviewFromValue((raw as Record<string, unknown>).review);
-}
-
-/** Lý do GIỮ ĐƠN đang mở đầu tiên (`ORDER_REVIEW_HOLD_CODES`) — `null` = không có cờ nào chặn xác nhận tự động / xếp giao. HÀM THUẦN. */
-export function reviewHoldOf(raw: unknown): OrderReviewEntry | null {
-  return orderReviewOf(raw)?.entries.find((e) => ORDER_REVIEW_HOLD_CODES.includes(e.code)) ?? null;
 }
 
 /** Đọc thẳng giá trị `raw->'review'` (truy vấn danh sách chỉ chọn khoá này). HÀM THUẦN. */
