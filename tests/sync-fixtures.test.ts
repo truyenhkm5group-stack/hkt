@@ -572,6 +572,8 @@ import { testSalesCartCommitment } from "./sales-cart-commitment.test";
 import { testP0855Cart } from "./p0-855-cart.test";
 import { testConvMoneyTrace } from "./conv-money-trace.test";
 import { testSalesQuote640 } from "./sales-quote-640.test";
+import { testSalesNextBestAction } from "./sales-next-best-action.test";
+import { testUpsellOfferAudit } from "./upsell-offer-audit.test";
 import { testSalesIntegrityAudit } from "./sales-integrity-audit.test";
 import { testCartIntentAudit } from "./cart-intent-audit.test";
 import { testFollowupLifecycle } from "./followup-lifecycle.test";
@@ -3082,6 +3084,9 @@ async function main() {
   // P0 14/10/2026 — tổng tiền trong chữ bot = tổng máy chủ của giỏ hiện tại (ca «Châu Dương» 640k cho 1kg 280k) · lượt im không «nói rõ
   // hơn» (ca «Viet Nguyen Thi») · upsell chưa đồng ý không vào đơn · tin vọng lại / trùng không sinh tin — tổ chức THẬT `gd-food-q640`.
   await testSalesQuote640();
+  // P0 #868 (chủ shop 16/10/2026) — lời mời mua thêm THÔNG MINH: không còn cổng «chưa mời thêm món», một lời mời mỗi lượt mua, không mời lúc
+  // khách gửi SĐT / địa chỉ / đã từ chối; khách đã chọn 2kg ⇒ không «1kg hay 2kg»; món kèm phải đủ điều kiện — thuần + chatTurn thật (`gd-food-nba`).
+  await testSalesNextBestAction();
   // P0 11/10/2026 — ops sales-integrity-audit: giá bot ≠ giá đơn · giá tự đổi · xác nhận giả · chuyển người không ai nhận ·
   // địa chỉ chưa ghép · nhắc sau đơn chốt — thuần + CSDL thật (mã `erp-ia-`, tự dọn), tóm tắt không lọt PII.
   await testSalesIntegrityAudit();
@@ -3091,6 +3096,9 @@ async function main() {
   // P0 14/10/2026 — ops conv-money-trace: số TỔNG trong tin bot ≠ báo giá giỏ (ca «Châu Dương» 640k cho 1kg 280k) · câu «nói rõ hơn»
   // của engine khi khách không nhắn gì (ca «Viet Nguyen Thi») — thuần + CSDL thật (tự dọn), tóm tắt không lọt PII, chỉ đọc.
   await testConvMoneyTrace();
+  // P0 #868 — ops upsell-offer-audit: phễu + upsell (sổ sự kiện) và lời mời đọc từ chữ đã gửi (mời lặp · sau từ chối · sau khi đã chọn) —
+  // thuần + CSDL thật (tự dọn), chỉ đọc, khai đủ bốn chỗ.
+  await testUpsellOfferAudit();
   // P0 11/10/2026 (KimThu Le) — vòng đời khách dùng chung + follow-up đọc lại ngay trước khi gửi (đơn thật · chứng từ thu ·
   // từ chối nhận tin · người / nguồn khác vừa nhắn), khoá gửi chống trùng, vết quyết định — tổ chức THẬT `fu-life` (tự cấp, tự dọn).
   await testFollowupLifecycle();

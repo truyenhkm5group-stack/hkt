@@ -55,7 +55,8 @@ import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import type { OrderSyncThreadState } from "@/lib/sales-chatbot/order-sync-shared";
 import { customerOrderStatus } from "@/lib/sales-chatbot/order-status-shared";
 import { classifyDeliveryQuestion, deliveryTimeAnswer, pickDeliveryOrder, staffDeliveryCommitment } from "@/lib/sales-chatbot/delivery-intent";
-import { LIFECYCLE_ORDER_LOOKBACK_DAYS } from "@/lib/sales-chatbot/lifecycle";
+import { customerComplaintSignal, LIFECYCLE_ORDER_LOOKBACK_DAYS } from "@/lib/sales-chatbot/lifecycle";
+import { OFFER_BLOCK_LABEL, offerWindow, withOfferDrops, type OfferBlock, type SentenceClass } from "@/lib/sales-chatbot/next-best-action";
 import { fanpageVisitorKeyMirror } from "@/lib/pricing/ai-customer-identity";
 import type { PromptStamp } from "@/lib/sales-chatbot/prompt-stamp";
 import type { PancakeThreadProfile, ReturningCustomer } from "@/lib/sales-chatbot/returning";
@@ -94,7 +95,10 @@ export type ChatState = {
   draft?: { orderId: string | null; lines: CartLine[]; unitPrices: Record<string, number>; recipient: Recipient; note: string; simulated: boolean; shownTurn?: number; firstShownTurn?: number; quote?: AgentQuoteClaim; seenQuoteId?: string; seenLines?: CartLine[]; seenTotal?: number; packing?: string | null };
   /** Khách PHẢN ĐỐI giá (PRICE_DISPUTED, 11/10/2026) — engine ghi khi phát hiện; chốt đơn bị chặn tới khi máy chủ báo lại và khách xác nhận. */
   priceDispute?: PriceDisputeState;
-  /** Lượt gửi câu mời thêm món — đơn nháp lên trong CHÍNH lượt đó không tự chốt (khách chưa kịp trả lời lời mời). */
+  /**
+   * Lượt gửi lời mời thêm món — lượt khách ngay sau đó nói «không lấy thêm» là từ chối lời mời, không phải hoãn đơn. Đơn nháp lên trong
+   * CHÍNH lượt đó không tự chốt; cửa sổ lời mời (#868) đóng ở mọi lượt lên đơn nên điều này không làm chậm đơn hợp lệ.
+   */
   upsellTurn?: number;
   /**
    * `stamp` = dấu lời nhắc / cấu hình / model / bản mã ĐÚNG lúc chốt (`prompt-stamp.ts`); đơn chốt trước 08/10/2026 không có.
@@ -115,10 +119,14 @@ export type ChatState = {
   pastOrders?: { orderId: string | null; simulated: boolean; total: number; at: string }[];
   handoff?: { reason: string; at: string };
   stage?: SalesStage;
-  /** Đã gửi câu upsell (chỉ MỘT lần mỗi hội thoại). */
+  /** Đã có MỘT lời mời mua thêm trong lượt mua này (câu mẫu UPSELL hoặc câu bot máy chủ nhận ra — #868); xoá khi sang lượt mua mới. */
   upsellSent?: boolean;
-  /** Câu upsell không gửi được (thiếu số ERP) — không chặn lên đơn mãi vì nó. */
+  /** Câu upsell không gửi được (thiếu số ERP) — chỉ để đo; từ 16/10/2026 câu upsell KHÔNG còn là điều kiện lên đơn (#868). */
   upsellUnavailable?: boolean;
+  /** Lượt khách TỪ CHỐI lời mời mua thêm của lượt mua này (`offerDeclinedBy`, next-best-action.ts) — không mời lại trong lượt mua. */
+  upsellDeclinedTurn?: number;
+  /** Lời mời máy chủ đã BỎ (sai lúc / không đủ căn cứ — `guardReply` / cửa sổ của câu mẫu UPSELL), có trần — để đo, không để bot đọc. */
+  offerDrops?: { turn: number | null; cls: SentenceClass; reason: OfferBlock; via: "TEXT" | "QUICK_REPLY" }[];
   declined?: { reason: string; at: string };
   /**
    * KHÁCH XIN HUỶ ĐƠN ĐÃ CÓ (chủ shop 10/10/2026 — `lib/constants/order-cancel.ts`): lượt GIỮ ĐƠN đang mở. `turn` = lượt khách xin huỷ
@@ -961,13 +969,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const existing = state.draft;
       if (name === "create_draft_order" && !v.data.items) return err("Đơn nháp: thiếu hàng", "Đơn nháp cần items.", state, { reason: "BAD_INPUT", fields: ["items"] });
       if (name === "update_draft_order" && !existing) return err("Sửa đơn: chưa có đơn nháp", "Chưa có đơn nháp — gọi create_draft_order.", state);
-      // MỜI THÊM MÓN TRƯỚC KHI LÊN ĐƠN (chủ shop 02/10/2026, ảnh «Nguyễn Nga» / «Xuantra Tâm An»): shop đã chọn câu upsell
-      // (kèm ảnh menu) ⇒ khách vừa gửi thông tin nhận hàng là lúc gửi nó, RỒI tóm tắt chốt đơn trong cùng lượt để khách nắm
-      // thông tin. Máy chủ chặn lên đơn khi chưa mời — lời dặn trong lời nhắc thôi thì AI hay nhảy thẳng sang tóm tắt.
-      const upsellEntry = ctx.quickReplies?.find((q) => q.upsell);
-      if (name === "create_draft_order" && !existing && upsellEntry && !state.upsellSent && !state.upsellUnavailable) {
-        return err("Đơn nháp: chưa mời thêm món", `Trước khi lên đơn phải mời thêm món ĐÚNG MỘT LẦN: gọi send_quick_reply với mã ${upsellEntry.code} (câu upsell kèm ảnh menu), rồi gọi lại create_draft_order và gửi tóm tắt chốt đơn trong cùng lượt.`, state);
-      }
+      // LỜI MỜI KHÔNG BAO GIỜ LÀ ĐIỀU KIỆN LÊN ĐƠN (chủ shop 16/10/2026, #868): cổng cũ (02/10/2026) từ chối lên đơn khi chưa gửi câu
+      // upsell — khách đã đủ món + SĐT + địa chỉ vẫn phải nghe menu trước. Lời mời nay là cơ hội do `next-best-action.ts` quyết, đơn hợp
+      // lệ lên ngay.
       // Đơn máy TỰ CHỐT (P0-A): khách sửa ngay sau đó ⇒ update_draft_order sửa chính đơn đã chốt (giữ «Đã xác nhận»). Còn lại như cũ.
       const editingConfirmed = Boolean(state.confirmed?.auto) && name === "update_draft_order" && Boolean(state.draft?.orderId || state.confirmed?.simulated);
       // Đơn chốt qua LỜI ĐỒNG Ý (không phải máy tự chốt) ⇒ sửa / thêm vào đơn là việc của NHÂN VIÊN — máy chủ ép chuyển người, không để tuỳ
@@ -1223,6 +1227,15 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const entry = code.success ? ctx.quickReplies?.find((q) => q.code.toLowerCase() === code.data.toLowerCase()) : undefined;
       if (!entry) return err("Câu mẫu: không có mã", "Không có câu mẫu với mã này — chỉ dùng mã trong danh sách CÂU MẪU.", state);
       if (entry.upsell && state.upsellSent) return err("Câu upsell đã gửi", "Câu upsell đã gửi trong hội thoại này — không gửi lại.", state);
+      // CỬA SỔ LỜI MỜI (#868): câu mẫu UPSELL chỉ đi khi máy chủ cho phép — không lúc khách gửi SĐT / địa chỉ, đơn đang lên, đã chốt,
+      // khách phàn nàn / từ chối / xin huỷ, đã chuyển người. Bị chặn ⇒ đi tiếp bước bán, không chặn đơn.
+      if (entry.upsell) {
+        const w = offerWindow({ state, lastUserText: ctx.lastUserText, complaint: customerComplaintSignal(ctx.lastUserText), returningPending: returningPendingOf(ctx.returning, state, ctx.turn) });
+        if (!w.open) {
+          state.offerDrops = withOfferDrops(state.offerDrops, ctx.turn, [{ cls: "CROSS_SELL", reason: w.reason }], "QUICK_REPLY");
+          return err("Câu upsell: chưa đúng lúc", `KHÔNG mời thêm món lúc này — ${OFFER_BLOCK_LABEL[w.reason]}. Đi tiếp bước bán (lên / chốt đơn, hoặc hỏi đúng phần còn thiếu); không nhắc tới lời mời.`, state);
+        }
+      }
       const pick = await renderQuickReplyForSend(entry.id, ctx.config);
       if (!pick && entry.upsell) state.upsellUnavailable = true;
       if (!pick) return err(`Câu mẫu ${entry.code}: thiếu số ERP`, "Câu mẫu này đang thiếu giá / tồn từ ERP — tự trả lời bằng công cụ giá / tồn, không dùng câu mẫu.", state);
@@ -1362,6 +1375,16 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
     }
   }
   return err(`${name}: không có`, `Không có công cụ «${name}».`, state);
+}
+
+/**
+ * Khách CŨ đang ở bước xác nhận địa chỉ lần trước (khối KHÁCH CŨ của lời nhắc): giỏ đã có món khách nói từ một lượt TRƯỚC, chưa lưu hồ
+ * sơ nhận hàng ⇒ lượt này là lượt LÊN ĐƠN, cửa sổ lời mời đóng (#868). Lượt khách VỪA chọn món (câu hỏi xác nhận địa chỉ gộp lời mời —
+ * khối KHÁCH CŨ) vẫn mở. HÀM THUẦN.
+ */
+export function returningPendingOf(returning: ReturningCustomer | null | undefined, state: Pick<ChatState, "customer" | "cart">, turn?: number): boolean {
+  const explicit = state.cart?.selectedItems.filter((x) => x.customerExplicit) ?? [];
+  return Boolean(returning) && !state.customer && explicit.length > 0 && !explicit.some((x) => turn !== undefined && x.sourceMessageId === turn);
 }
 
 /** Câu cuối khách đang hoãn / từ chối — một định nghĩa ở `cart-commitment.ts` (điều kiện (1) của tự chốt P0-A). */

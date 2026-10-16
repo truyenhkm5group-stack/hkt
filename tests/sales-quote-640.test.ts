@@ -702,24 +702,27 @@ const CASES: GoldenCase[] = [
   },
   {
     key: "q640-viet-nguyen",
-    title: "Ca «Viet Nguyen Thi»: đủ món + SĐT + địa chỉ ⇒ máy chủ đòi mời thêm món ⇒ câu upsell ⇒ model cố thêm chả mực (khách chưa đồng ý) bị từ chối ⇒ lên đơn 1kg ⇒ model im ⇒ tóm tắt máy chủ, KHÔNG «nói rõ hơn»; tin vọng lại / tin trùng không sinh tin; khách nhận lời ⇒ thêm món, tổng mới; đổi số lượng ⇒ tổng cũ bị thay",
+    // LUẬT CHỦ SHOP ĐỔI 16/10/2026 (#868): lời mời KHÔNG còn là điều kiện lên đơn — bản cũ của ca này mở đầu bằng «đủ món + SĐT + địa
+    // chỉ ⇒ máy chủ đòi mời thêm món» (cổng 02/10/2026 đã gỡ). Câu upsell nay đi ở lúc được phép (khách vừa chọn món, CHƯA gửi thông tin
+    // nhận hàng); mọi bảo vệ của ca giữ nguyên: món mời chưa đồng ý không vào đơn, model im ⇒ tóm tắt máy chủ, tin vọng lại không sinh tin,
+    // «ok» chung chung không thêm món, khách nói tên + số lượng ⇒ thêm đúng món, đổi số lượng ⇒ tổng cũ bị thay.
+    title: "Ca «Viet Nguyen Thi»: khách chọn 1kg ⇒ câu upsell (lúc được phép) ⇒ khách gửi SĐT + địa chỉ ⇒ model cố thêm chả mực (khách chưa đồng ý) bị từ chối ⇒ lên đơn 1kg ⇒ model im ⇒ tóm tắt máy chủ, KHÔNG «nói rõ hơn»; tin vọng lại / tin trùng không sinh tin; khách nhận lời ⇒ thêm món, tổng mới; đổi số lượng ⇒ tổng cũ bị thay",
     shop: "food",
     channel: "WEB",
     config: CFG,
     turns: [
+      { say: "1kg chả cá thu nhé em", ai: [() => [tool("send_quick_reply", { code: "Q1" })], () => [say("Dạ mình cho em xin SĐT và địa chỉ nhận hàng nhé.")]] },
+      // Chữ của chính shop vọng lại như tin khách ⇒ không ghi, không gọi AI, không gửi.
+      { say: UPSELL_TEXT, ai: [() => [say("KHÔNG ĐƯỢC GỌI MODEL")]] },
       {
-        say: `1kg chả cá thu, Việt 0961004962, ${ADDR}`,
+        say: `Việt 0961004962, ${ADDR}`,
         ai: [
           () => [tool("create_customer", { name: "Việt", phone: "0961004962", address: ADDR })],
-          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }] })],
-          () => [tool("send_quick_reply", { code: "Q1" })],
           ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })],
           ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }] })],
           () => [],
         ],
       },
-      // Chữ của chính shop vọng lại như tin khách ⇒ không ghi, không gọi AI, không gửi.
-      { say: UPSELL_TEXT, ai: [() => [say("KHÔNG ĐƯỢC GỌI MODEL")]] },
       // «ok» chung chung sau lời mời nhiều món KHÔNG phải đồng ý thêm món: model cố thêm chả mực × 3 ⇒ máy chủ từ chối, đơn vẫn 1kg.
       { say: "ok em", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 3 }] })], () => [say("Dạ mình cần thêm món gì cứ nhắn em ạ.")]] },
       { say: "lấy thêm 1kg chả mực nhé", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ đơn mới của mình tổng 710.000 ₫ ạ.")]] },
@@ -795,19 +798,19 @@ async function testChatTurn() {
         assert.deepEqual(t.turns[0].shown, ["Dạ đơn 2kg chả cá thu 540.000 ₫ + ship 30.000 ₫, tổng 570.000 ₫. Mình xác nhận giúp em nhé."], "tổng đúng đi qua nguyên văn");
         return;
       }
-      // Ca «Viet Nguyen Thi».
-      const r1 = JSON.stringify(t.turns[0].rounds.map((r) => r.results));
-      assert.match(r1, /chưa mời thêm món|mời thêm món ĐÚNG MỘT LẦN/, "máy chủ đòi mời thêm món trước khi lên đơn");
+      // Ca «Viet Nguyen Thi» (chỉ số lượt dời một vì câu upsell nay ở lượt chọn món — #868, xem ghi chú ở kịch bản).
+      const r1 = JSON.stringify(t.turns[2].rounds.map((r) => r.results));
+      assert.doesNotMatch(JSON.stringify(t.turns.map((x) => x.rounds.map((r) => r.results))), /chưa mời thêm món|mời thêm món ĐÚNG MỘT LẦN/, "không còn cổng «chưa mời thêm món» (#868)");
       assert.match(r1, /KHÔNG đưa «Chả mực giã tay» vào đơn: khách CHƯA nói lấy món này/, `món mời chưa đồng ý bị từ chối: ${r1.slice(0, 600)}`);
-      assert.equal(t.turns[0].shown[0], UPSELL_TEXT, "khách nhận câu upsell");
-      assert.match(t.turns[0].shown[1] ?? "", /^Dạ em tóm tắt đơn của mình: Chả cá thu.* × 1 = 280\.000 ₫.*Tổng 310\.000 ₫/, `model im sau khi lên đơn ⇒ tóm tắt máy chủ: ${JSON.stringify(t.turns[0].shown)}`);
-      assert.equal(t.turns[0].shown.length, 2, JSON.stringify(t.turns[0].shown));
+      assert.deepEqual(t.turns[0].shown, [UPSELL_TEXT, "Dạ mình cho em xin SĐT và địa chỉ nhận hàng nhé."], "khách nhận câu upsell lúc vừa chọn món");
+      assert.match(t.turns[2].shown[0] ?? "", /^Dạ em tóm tắt đơn của mình: Chả cá thu.* × 1 = 280\.000 ₫.*Tổng 310\.000 ₫/, `model im sau khi lên đơn ⇒ tóm tắt máy chủ: ${JSON.stringify(t.turns[2].shown)}`);
+      assert.equal(t.turns[2].shown.length, 1, JSON.stringify(t.turns[2].shown));
       assert.deepEqual(t.turns[1].shown, [], "tin vọng lại ⇒ không tin bot");
       assert.equal(t.turns[1].rounds.length, 0, "tin vọng lại ⇒ không gọi model");
-      assert.match(JSON.stringify(t.turns[2].rounds.map((r) => r.results)), /KHÔNG đưa «Chả mực giã tay» vào đơn/, "«ok» chung chung ⇒ món mời không vào đơn");
-      assert.deepEqual(t.turns[2].shown, ["Dạ mình cần thêm món gì cứ nhắn em ạ."]);
-      assert.deepEqual(t.turns[3].shown, ["Dạ đơn mới của mình tổng 710.000 ₫ ạ."], "khách nói tên + số lượng ⇒ thêm đúng 1kg, tổng máy chủ 280k + 400k + ship 30k");
-      assert.deepEqual(t.turns[4].shown, ["Dạ tổng đơn của mình là 970.000 ₫ (đã gồm 30.000 ₫ phí ship) ạ."], `đổi số lượng ⇒ tổng cũ 710.000 bị thay bằng tổng mới: ${JSON.stringify(t.turns[4].shown)}`);
+      assert.match(JSON.stringify(t.turns[3].rounds.map((r) => r.results)), /KHÔNG đưa «Chả mực giã tay» vào đơn/, "«ok» chung chung ⇒ món mời không vào đơn");
+      assert.deepEqual(t.turns[3].shown, ["Dạ mình cần thêm món gì cứ nhắn em ạ."]);
+      assert.deepEqual(t.turns[4].shown, ["Dạ đơn mới của mình tổng 710.000 ₫ ạ."], "khách nói tên + số lượng ⇒ thêm đúng 1kg, tổng máy chủ 280k + 400k + ship 30k");
+      assert.deepEqual(t.turns[5].shown, ["Dạ tổng đơn của mình là 970.000 ₫ (đã gồm 30.000 ₫ phí ship) ạ."], `đổi số lượng ⇒ tổng cũ 710.000 bị thay bằng tổng mới: ${JSON.stringify(t.turns[5].shown)}`);
       assert.equal(Number(orders[0].totalPriceAfterDiscount), 940_000, "đơn cập nhật: 540.000 + 400.000");
       assert.equal(items.length, 2);
     },
