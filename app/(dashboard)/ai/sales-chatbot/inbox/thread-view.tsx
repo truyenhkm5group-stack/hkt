@@ -373,7 +373,7 @@ export function InboxThreadView({
                 variant="ghost"
                 className="h-8 text-[12px]"
                 disabled={!!pending}
-                title="Đọc lại tin của hội thoại này từ Pancake (chỉ đọc): ghi tin thiếu webhook và ảnh chưa hiện — không gửi gì cho khách"
+                title="Đọc lại tin của hội thoại này từ Pancake (chỉ đọc): bổ sung tin còn thiếu và ảnh chưa hiện — không gửi gì cho khách"
                 onClick={async () => {
                   setPending("resync");
                   try {
