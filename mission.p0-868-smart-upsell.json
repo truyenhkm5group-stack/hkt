@@ -3,7 +3,7 @@
   "mission_id": "p0-868-smart-upsell",
   "title": "P0 #868 pha A: upsell/cross-sell thông minh — bỏ cổng bắt buộc mời trước khi lên đơn, mời một lần có lý do, không hỏi lại món đã chọn, đo attach/AOV",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -18,7 +18,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-16T09:37:22.052Z",
-  "updated_at": "2026-10-16T09:37:22.052Z",
-  "last_heartbeat": "2026-10-16T09:37:22.052Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-16T16:16:50.270Z",
+  "last_heartbeat": "2026-10-16T16:16:50.270Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/p0-868-smart-upsell",
+    "sha": "ab28775a96ab7cf69b0249958f47038c534cfc92",
+    "at": "2026-10-16T16:16:50.270Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "P0 #868 pha A: upsell/cross-sell thông minh — bỏ cổng bắt buộc mời trước khi lên đơn, mời một lần có lý do, không hỏi lại món đã chọn, đo attach/AOV",
+    "summary": "",
+    "tests": [
+      "npm test đầy đủ @3d4ba209: TẤT CẢ KIỂM THỬ ĐẠT",
+      "@ab28775a (sau gộp main): typecheck, lint, sales-next-best-action, upsell-offer-audit, golden, sales-quote-640, p0-855-address, conv-money-trace, claim-guard đạt",
+      "19-20 ảnh chụp golden chỉ đổi dòng lời nhắc hệ thống"
+    ]
+  }
 }
