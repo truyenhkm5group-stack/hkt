@@ -33,6 +33,12 @@
 
 
 
+
+## 16/10 ~18:00 VN — DESKTOP NHẬN #871 + ca Nguyễn Hà + CI đỏ #870
+- #870 (`fix/p0-855-district-address-no-ward-question`): Desktop-worker là NGƯỜI GHI DUY NHẤT từ giờ (Web đừng đẩy). Đỏ ở address-ward-explicit: W2 đổi theo luật 16/10 (không hỏi khách quy đổi phường); W3 (khách SỬA phường) là hồi quy thật của #870 ⇒ sửa mã, giữ kỳ vọng.
+- #871 (`claude/p0-871-contact-memory`, nối sau #870): gốc nghi `address-memory.ts` wardKnown/fullKnown phụ thuộc lastSettlesAddress ⇒ khách đổi chủ đề («giao 9h», «lấy 10 cái nem») là hỏi lại SĐT/địa chỉ; đơn không được tạo; hậu mãi (Nguyễn Hà) hỏi xác nhận lặp + upsell khi khách hỏi giao hàng.
+- Thứ tự gộp dự kiến: #869 (#863) → #870 → #862-delta → #871 → #868 pha A; mỗi PR review độc lập + gates; một deploy mỗi lô.
+
 ## 16/10 ~17:30 VN — PRODUCTION = 2982fafb (Desktop deploy run 38879230154)
 - Gồm #854 #857 #858 #859 #860 #861 #864 #866. Smoke 135/135 · 0 lỗi ứng dụng · health commit 2982fafb0783. «failure» chỉ vì qa DEGRADED (nay thiếu 0245 + 0246 + 0247 — 0247 không tự áp được ở qa; việc của Web/qa).
 - #867 đóng (trùng #866). Đang review/sửa: #869 (#863 luồng huỷ — review FAIL lần 1: «không hủy» bị đọc là huỷ; nhắc lại giỏ hạ món đang thêm), #855-delta (calculate_cart có căn cứ, REVIEW_OPEN, lời nhắc khách cũ), #868 pha A (bỏ cổng bắt buộc mời thêm món trước khi lên đơn). Ba PR này cùng chạm engine.ts/tools.ts ⇒ Desktop gộp TUẦN TỰ.
