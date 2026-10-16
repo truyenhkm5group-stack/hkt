@@ -3,7 +3,7 @@
   "mission_id": "fix-main-ssj",
   "title": "Sửa CI main đỏ: self-service-journey t-ctx sau #857+#861",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "vm:hkt",
@@ -17,10 +17,15 @@
   ],
   "dependencies": [],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    866
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-16T08:19:03.829Z",
-  "updated_at": "2026-10-16T08:19:03.829Z",
+  "updated_at": "2026-10-16T09:14:24.482Z",
   "last_heartbeat": "2026-10-16T08:19:03.829Z",
-  "definition_of_done": []
+  "definition_of_done": [],
+  "evidence": {
+    "merged": "#866 → 2982fafb078301f061c1d5fa3cc35075b1adad08"
+  }
 }
