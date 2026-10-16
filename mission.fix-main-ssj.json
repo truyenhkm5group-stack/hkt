@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "fix-main-ssj",
+  "title": "Sửa CI main đỏ: self-service-journey t-ctx sau #857+#861",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "vm:hkt",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/fix-main-ssj",
+  "base_sha": "c3194e5f3efceabfa4c581d76a9906e30f5ef806",
+  "domains": [],
+  "owned_paths": [
+    "tests/self-service-journey.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-16T08:19:03.829Z",
+  "updated_at": "2026-10-16T08:19:03.829Z",
+  "last_heartbeat": "2026-10-16T08:19:03.829Z",
+  "definition_of_done": []
+}
