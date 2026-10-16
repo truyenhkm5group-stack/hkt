@@ -322,7 +322,9 @@ const GOLDEN: GoldenCase[] = [
         say: `à chị chuyển nhà rồi, giao về ${NEW_THU_DUC} nhé`,
         ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em ghi nhận ạ.")]],
       },
-      { say: "2 nha", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 2 }] })], () => [say("Dạ em sửa rồi ạ.")]] },
+      // Lượt CHỈ sửa món. Gọi tên món tường minh: từ #860 «2 nha» trần không đủ căn cứ để đổi số lượng khách đã nói (1) — hàng rào giỏ
+      // hàng giữ nguyên, đúng luật «không đổi số lượng»; ca này chỉ kiểm địa chỉ mới không bị lượt sửa món ghi đè.
+      { say: "lấy 2 chả mực giã tay nha", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 2 }] })], () => [say("Dạ em sửa rồi ạ.")]] },
     ],
   },
   {

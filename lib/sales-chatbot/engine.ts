@@ -66,10 +66,13 @@ import { formatVND } from "@/lib/format";
 import { withTurnEvents } from "@/lib/sales-chatbot/events";
 import { FOOD_PACK, salesPackFor, type SalesPack } from "@/lib/sales-chatbot/packs";
 import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
-import { amountText, applyCustomerCartMessage, buyingText, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, invitedProductOf, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
+import { amountText, applyCustomerCartMessage, buyingText, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, invitedProductOf, itemObjectionCue, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
+import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
+import { customerHandoffVerdict, nextObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
 import { ADDRESS_KNOWN_TEXT, ADDRESS_STAFF_TEXT, addressKnowledge, addressReaskVerdict } from "@/lib/sales-chatbot/address-memory";
+import { DELIVERY_HANDOFF_TEXT, deliveryReplyViolation, turnDeliverySay } from "@/lib/sales-chatbot/delivery-intent";
 import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, noteSeenTotals, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
 import { flagOrderForReviewAsAgent, loadAutoConfirmComplete } from "@/lib/records/order-create";
 import type { PriceDisputeState } from "@/lib/sales-chatbot/quote-shared";
@@ -1006,6 +1009,8 @@ async function chatTurnCore(
     // GIỎ CÓ THẨM QUYỀN (P0 12/10/2026 — cart-commitment.ts): số lượng khách nói TƯỜNG MINH ghi vào giỏ NGAY khi tin tới (trước câu
     // mẫu / lượt AI); chỉ câu sửa tường minh mới đổi nó. Câu mơ hồ («ngon chị mới lấy nha em», «ok») ⇒ giỏ giữ nguyên, không ghi gì.
     // Lỗi bất kỳ ở bước này ⇒ giỏ giữ nguyên NHƯNG tắt kiểm cứng của lượt (không chặn khách), không ném ra ngoài lượt.
+    // Tên món trong giỏ TRƯỚC tin này — căn cứ nhận câu phản đối món (#855): «kg có order chả cá thu» vừa bỏ cá khỏi giỏ ở bước dưới.
+    const cartLabelsBefore = (st0.cart?.selectedItems ?? []).map((x) => x.label).filter(Boolean);
     let cartNext: ChatState["cart"];
     try {
       const catalog = await cartCatalogNames(text);
@@ -1051,6 +1056,30 @@ async function chatTurnCore(
       await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1 });
       if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey: `sales-chat:complaint:${conv.id}:${turnSeq}` }).catch(() => undefined);
       return { ok: true, view: (await conversationView(conv.id))! };
+    }
+    // KHÁCH ĐÒI NGƯỜI / PHẢN ĐỐI MÓN LẶP (P0 #855, ca «ThuyNgo»): «Robot hả», «gặp nhân viên» (khi chủ shop bật «chuyển khi khách muốn gặp
+    // người»), hoặc lần phản đối món thứ hai của LƯỢT MUA hiện tại ⇒ MÁY CHỦ chuyển người ngay như nhánh chuyển khoản — không lượt AI, không
+    // thêm câu xin lỗi / hỏi lại. Chạy SAU nhánh khiếu nại (giữ bối cảnh đơn). Lý do không tự hết hạn (`CUSTOMER_HANDOFF_REASON`). Nhân viên
+    // đang tiếp quản ⇒ không đè quyết định của người. Copilot chạy lượt này trên hội thoại BÓNG kênh TEST (`shadowTurn`) ⇒ không báo ai.
+    if (readConversationControl(st0)?.mode !== "HUMAN") {
+      const objectionNow = itemObjectionCue(text, cartLabelsBefore);
+      const prevTally = st0.objectionTally;
+      const resumedAt = objectionNow && prevTally ? await lastAiResumedAt(conv.id) : null;
+      const tally = nextObjectionTally(prevTally, { objectionNow, cycle: cycleStartTurns(st0, conv.turns, now), now, resumedAt });
+      const wants = customerHandoffVerdict({ text, objections: tally?.n ?? 0, objectionNow, onCustomerRequest: cfg.handoff.onCustomerRequest });
+      if (wants) {
+        const st = { ...st0, objectionTally: undefined, handoff: { reason: wants.reason, at: now.toISOString() } };
+        if (!isMessagingChannel(opts.channel)) await reply(conv, seq, cfg.handoff.message);
+        await bump({ status: "HANDOFF", handoffReason: wants.reason, state: st as Record<string, unknown>, turns: conv.turns + 1 });
+        if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, wants.reason, st.customer, now, { dedupeKey: `sales-chat:customer-handoff:${conv.id}:${turnSeq}` }).catch(() => undefined);
+        return { ok: true, view: (await conversationView(conv.id))! };
+      }
+      if (tally !== prevTally) {
+        const st: ChatState = { ...st0, objectionTally: tally };
+        await bump({ state: st as Record<string, unknown> });
+        conv.state = st as Record<string, unknown>;
+        st0 = st;
+      }
     }
     // HÀNG RÀO KHẲNG ĐỊNH (claim-guard.ts): MỌI chữ bot sắp gửi — câu mẫu, câu mẫu AI gửi qua công cụ, chữ model — qua
     // `guardOutgoing`. «Đã nhận tiền» khi chưa có chứng từ thu, «đã chốt đơn» khi chưa có đơn ERP ⇒ câu KHÔNG được ghi / gửi;
@@ -1298,6 +1327,25 @@ async function chatTurnCore(
               lastError = lastError ?? cartHold.note;
               if (!content.some((x) => x.type === "text" && x.text === cartHold.safeText)) {
                 content.push({ type: "text", text: cartHold.safeText });
+                spoke = true;
+                draftUnsaid = null;
+              }
+              continue;
+            }
+            // HỎI LỊCH GIAO (P0 #855, ca 16/10/2026 «Hôm nào có hàng?»): CHỈ khi khách ĐÃ CÓ ĐƠN (giai đoạn hậu mãi — trước chốt, «mai
+            // giao giúp em» là lời dặn ghi vào delivery_note). Bản nháp chỉ đọc câu trạng thái «chưa có thông tin vận chuyển» hoặc hứa
+            // «hôm nay / chiều nay / mai giao» mà máy chủ không quyết đúng mốc đó trong lượt ⇒ bỏ chữ, chuyển nhân viên (một lần — khoá
+            // theo lượt). Kênh nhắn tin giữ luật im khi chuyển người (01/10/2026); web nhận câu «em báo nhân viên xác nhận giờ giao».
+            const deliveryNote = verdict.ok && postSale ? deliveryReplyViolation(text, out, turnDeliverySay(history)) : null;
+            if (deliveryNote) {
+              lastError = lastError ?? deliveryNote;
+              if (!state.handoff) {
+                const reason = `Hỏi lịch giao — «${text.replace(/\s+/g, " ").trim().slice(0, 120)}» (${deliveryNote})`;
+                state = { ...state, handoff: { reason, at: now.toISOString() } };
+                if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, state.customer, now, { dedupeKey: `sales-chat:delivery-time:${conv.id}:${turnSeq}` }).catch(() => undefined);
+              }
+              if (!isMessagingChannel(opts.channel) && !content.some((x) => x.type === "text" && x.text === DELIVERY_HANDOFF_TEXT)) {
+                content.push({ type: "text", text: DELIVERY_HANDOFF_TEXT });
                 spoke = true;
                 draftUnsaid = null;
               }
@@ -1593,6 +1641,17 @@ export function cycleStartTurns(st: ChatState, turns: number, now: Date): number
   const at = st.confirmed ? Date.parse(st.confirmed.at) : NaN;
   if (Number.isFinite(at) && now.getTime() - at >= POST_ORDER_HANDOFF_MS) return turns;
   return st.cycleStartTurns ?? 0;
+}
+
+/** Mốc «trả lại cho AI» gần nhất của hội thoại (sổ sự kiện `ai.resumed` — mọi đường trả lại đều ghi) — bộ đếm phản đối #855 đếm lại từ đó. */
+async function lastAiResumedAt(conversationId: string): Promise<Date | null> {
+  try {
+    const e = schema.salesConversationEvents;
+    const [row] = await (await getDb()).select({ at: e.occurredAt }).from(e).where(and(eq(e.conversationId, conversationId), eq(e.type, "ai.resumed"))).orderBy(desc(e.occurredAt)).limit(1);
+    return row?.at ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** Tiền tố tin của page / nhân viên trong lịch sử của bot. */

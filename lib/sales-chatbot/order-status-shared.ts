@@ -44,6 +44,11 @@ const CARRIER_TEXT: Record<string, string> = {
 };
 
 export const NO_CARRIER_INFO = "Chưa có thông tin từ đơn vị vận chuyển";
+/**
+ * Câu của đơn KHÔNG vận đơn. Là câu TRẠNG THÁI, không phải lịch giao: khách hỏi «hôm nào có hàng / bao giờ nhận» thì câu này KHÔNG
+ * được dùng làm câu trả lời (P0 #855) — câu hỏi lịch giao đi đường riêng ở `delivery-intent.ts`.
+ */
+export const NO_SHIPMENT_YET = "Shop đã nhận đơn — chưa có thông tin vận chuyển";
 
 export function customerOrderStatus(i: OrderStatusInput): CustomerOrderStatus {
   const plain = (text: string): CustomerOrderStatus => ({ text, carrierSaid: false, needsStaff: null });
@@ -67,5 +72,5 @@ export function customerOrderStatus(i: OrderStatusInput): CustomerOrderStatus {
   }
   if (i.manual && i.orderStage === "DELIVERED") return plain("Shop đã giao đơn — có phiếu ký nhận");
   if (i.manual && i.orderStage === "RETURNED") return { text: "Lần giao vừa rồi chưa thành công", carrierSaid: false, needsStaff: "Giao không thành công" };
-  return plain("Shop đã nhận đơn — chưa có thông tin vận chuyển");
+  return plain(NO_SHIPMENT_YET);
 }

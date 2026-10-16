@@ -133,6 +133,8 @@ alter table "canonical_order_outcome" drop constraint if exists "canonical_cogs_
 alter table "canonical_order_outcome" add constraint "canonical_cogs_basis_check" check ("cogs_basis" is null or "cogs_basis" in ('RECEIPT_BEFORE', 'RECEIPT_AFTER', 'PROVISIONAL', 'NONE')) not valid;
 alter table "return_dispositions" drop constraint if exists "return_dispositions_value_check";
 alter table "return_dispositions" add constraint "return_dispositions_value_check" check (("disposition" = 'WRITE_OFF' or ("unit_cost_estimate" is null and "value_estimate" is null and "cost_basis" is null)) and ("value_estimate" is null or "value_estimate" >= 0) and ("cost_basis" is null or "cost_basis" in ('RECEIPT', 'ORDER_SNAPSHOT', 'VARIANT_DEFAULT', 'UNKNOWN'))) not valid;
+-- 0247: chỉ mục chữ chuẩn hoá của PAGE_REPLY.
+drop index if exists "sales_chat_inbound_page_reply_text_hash_idx";
 -- Gỡ dòng sổ của 0245 VÀ mọi migration sau nó (mốc của 0245 = mốc nhỏ nhất trong nhóm đã áp sau 0244).
 delete from "drizzle"."__drizzle_migrations" where created_at >= ${MOC_0245};
 `;
