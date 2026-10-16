@@ -43,7 +43,7 @@ import { PANCAKE_PAGES_API, scrubSecrets } from "@/lib/connectors/testers";
 import { bindOrganization } from "@/lib/platform/background";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { currentOrganization } from "@/lib/platform/context";
-import { conversationFor, FANPAGE_CONNECTOR, fanpageVisitorKey, MEDIA_ONLY_TEXT, normalizeEcho, PAGE_REPLY, PANCAKE_AUTO_NOTE_RE, STAFF_IMAGE_MARK, STAFF_OUT_PREFIX, stripHtml } from "@/lib/sales-chatbot/fanpage";
+import { conversationFor, FANPAGE_CONNECTOR, fanpageVisitorKey, fillMissingImageUrls, MEDIA_ONLY_TEXT, normalizeEcho, PAGE_REPLY, PANCAKE_AUTO_NOTE_RE, STAFF_IMAGE_MARK, STAFF_OUT_PREFIX, stripHtml } from "@/lib/sales-chatbot/fanpage";
 import {
   emptyHistoryRun,
   HISTORY_CREATED_BY,
@@ -208,7 +208,7 @@ async function pancakeGet(url: string, token: string, fetchImpl: typeof fetch): 
 
 // ─────────────────────────── GHI ───────────────────────────
 
-type PageWrite = { inserted: number; customer: number; page: number; duplicates: number; created: boolean };
+type PageWrite = { inserted: number; customer: number; page: number; duplicates: number; created: boolean; imagesFilled: number };
 
 /**
  * Hội thoại ERP của luồng — tạo khi chưa có, đánh dấu do lượt nhập tạo và lấy `updated_at` = mốc tin thật cuối (`activityAt`):
@@ -232,8 +232,11 @@ async function ensureConversation(pageId: string, threadId: string, activityAt: 
 }
 
 /** Ghi MỘT trang tin đã lập kế hoạch của một luồng + đẩy mốc của hội thoại. Idempotent: khoá `message_id`. */
-export async function writeThreadPage(pageId: string, threadId: string, planned: readonly PlannedHistoryMessage[], now: Date): Promise<PageWrite> {
-  const out: PageWrite = { inserted: 0, customer: 0, page: 0, duplicates: 0, created: false };
+export async function writeThreadPage(pageId: string, threadId: string, planned: readonly PlannedHistoryMessage[], now: Date, opts: { markSeen?: boolean } = {}): Promise<PageWrite> {
+  // `markSeen` (mặc định BẬT — lượt nhập lịch sử: tin cũ không phải việc chưa đọc). Bổ sung MỘT hội thoại đang sống thì TẮT: đẩy
+  // `staff_seen_at` là đánh dấu đã đọc ngầm tin khách mới mà chưa ai mở (review P0-B #856).
+  const markSeen = opts.markSeen !== false;
+  const out: PageWrite = { inserted: 0, customer: 0, page: 0, duplicates: 0, created: false, imagesFilled: 0 };
   if (!planned.length) return out;
   const db = await getDb();
   const t = schema.salesChatInbound;
@@ -273,6 +276,9 @@ export async function writeThreadPage(pageId: string, threadId: string, planned:
   const ids = new Set(inserted.map((r) => r.messageId));
   const done = rows.filter((p) => ids.has(p.messageId));
   out.duplicates += rows.length - done.length;
+  // Tin ĐÃ có (webhook / lượt quét lại / dòng cũ) mà THIẾU ảnh trong khi Pancake vẫn giữ ảnh ⇒ bổ sung vào chính dòng đó (P0-B #856).
+  // Trước bản này `onConflictDoNothing` bỏ qua nó ⇒ chạy lại nhập lịch sử cũng không bao giờ lấy lại được ảnh.
+  for (const p of rows) if (!ids.has(p.messageId) && p.imageUrls.length && (await fillMissingImageUrls(pageId, p.messageId, p.imageUrls))) out.imagesFilled += 1;
   out.inserted = done.length;
   out.customer = done.filter((p) => p.side === "CUSTOMER").length;
   out.page = out.inserted - out.customer;
@@ -290,7 +296,7 @@ export async function writeThreadPage(pageId: string, threadId: string, planned:
     .set({
       ...(maxCust ? { lastCustomerAt: sql`greatest(coalesce(${c.lastCustomerAt}, ${maxCust}), ${maxCust})` } : {}),
       historyUntil: sql`greatest(coalesce(${c.historyUntil}, ${maxAny}), ${maxAny})`,
-      staffSeenAt: sql`greatest(coalesce(${c.staffSeenAt}, ${maxAny}), ${maxAny})`,
+      ...(markSeen ? { staffSeenAt: sql`greatest(coalesce(${c.staffSeenAt}, ${maxAny}), ${maxAny})` } : {}),
       // `updated_at` là đồng hồ «nhân viên đang trả lời» của bot — lượt nhập không được chạm.
       updatedAt: sql`${c.updatedAt}`,
     })
@@ -627,6 +633,56 @@ export async function cancelInboxHistory(user: SessionUser, now: Date = new Date
   await setSettingJson(HISTORY_SETTING_KEY, { ...run, status: "CANCELLED", finishedAt: now.toISOString() } satisfies HistoryRun);
   await audit({ userId: user.id, userEmail: user.email, action: "SALES_INBOX_HISTORY_CANCEL", entity: "SETTINGS", entityId: HISTORY_SETTING_KEY, before: { status: "RUNNING" }, after: { status: "CANCELLED" }, reason: "Dừng đồng bộ lịch sử hộp thư" });
   return { ok: true, message: "Đã dừng — tin đã nhập giữ nguyên; bấm «Chạy tiếp» để đọc tiếp từ chỗ dừng." };
+}
+
+/** Trang tin tối đa một lần bổ sung MỘT hội thoại đọc (≈ 25 tin / trang của Pancake) — lời gọi chạy trong lượt bấm của người. */
+export const RESYNC_MAX_PAGES = 8;
+
+/**
+ * BỔ SUNG MỘT HỘI THOẠI TỪ PANCAKE THEO MÃ TIN (P0-B #856 — thiếu webhook / ảnh mất). Chỉ GET tin của luồng (đúng điểm cuối + luật lập
+ * kế hoạch của nhập lịch sử), ghi qua ĐÚNG `writeThreadPage`: tin thiếu ⇒ dòng mang dấu lịch sử (`imported_at`, DONE ⇒ bot KHÔNG
+ * trả lời, không nhắc), tin đã có mà thiếu ảnh ⇒ bổ sung ảnh; khoá `message_id` UNIQUE ⇒ bấm lại không ra dòng thứ hai. KHÔNG gửi gì
+ * cho khách, không gọi AI. Tin mới hơn `freshMinutes` để webhook / lượt quét lại lo (nhập sớm là cướp lượt trả lời của bot).
+ */
+export async function resyncThreadFromPancake(user: SessionUser, conversationId: unknown, deps: HistoryDeps = {}): Promise<Result> {
+  const g = await gate(user);
+  if (!g.ok) return { error: g.error };
+  if (typeof conversationId !== "string" || !conversationId || conversationId.length > 100) return { error: "Không có hội thoại này." };
+  const db = await getDb();
+  const c = schema.salesChatConversations;
+  const [conv] = await db.select({ id: c.id, channel: c.channel, pageId: c.pageId, threadId: c.threadId }).from(c).where(eq(c.id, conversationId)).limit(1);
+  if (!conv || conv.channel !== "FANPAGE" || !conv.pageId || !conv.threadId) return { error: "Chỉ hội thoại fanpage qua Pancake mới bổ sung được từ Pancake." };
+  const conn = await openActiveConnection(FANPAGE_CONNECTOR);
+  const token = conn.ok ? (conn.secrets.pageAccessToken ?? "").trim() : "";
+  if (!conn.ok || (conn.settings.pageId ?? "").trim() !== conv.pageId || !token) return { error: "Kết nối «Fanpage qua Pancake» của page này chưa bật." };
+  const now = deps.now ?? (() => new Date());
+  if (sendRecentlyLimited(conv.pageId, now().getTime())) return { error: YIELD_TO_BOT_NOTE };
+  const fetchImpl = deps.fetch ?? fetch;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const q = `page_access_token=${encodeURIComponent(token)}`;
+  const totals = { inserted: 0, filled: 0, pages: 0 };
+  let count = 0;
+  let lastIds: string[] = [];
+  for (let page = 0; page < RESYNC_MAX_PAGES; page++) {
+    if (page) await sleep(HISTORY_LIMITS.requestGapMs);
+    const r = await pancakeGet(`${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(conv.pageId)}/conversations/${encodeURIComponent(conv.threadId)}/messages?${q}${count ? `&current_count=${count}` : ""}`, token, fetchImpl);
+    if (!r.ok) {
+      if (!totals.pages) return { error: r.error };
+      break;
+    }
+    const msgs = (Array.isArray(r.body.messages) ? r.body.messages : []) as unknown[];
+    const fresh = msgs.filter((m) => !lastIds.includes(str((m as { id?: unknown } | null)?.id)));
+    if (!fresh.length) break;
+    const plan = planHistoryMessages(fresh, conv.pageId, { nowMs: now().getTime(), freshMs: HISTORY_LIMITS.freshMinutes * 60_000, fallbackName: "" });
+    const w = await writeThreadPage(conv.pageId, conv.threadId, plan.rows, now(), { markSeen: false });
+    totals.inserted += w.inserted;
+    totals.filled += w.imagesFilled;
+    totals.pages += 1;
+    count += msgs.length;
+    lastIds = msgs.map((m) => str((m as { id?: unknown } | null)?.id)).filter(Boolean).slice(0, 100);
+  }
+  await audit({ userId: user.id, userEmail: user.email, action: "SALES_INBOX_THREAD_RESYNC", entity: "SALES_CHAT_CONVERSATION", entityId: conv.id, before: null, after: { pages: totals.pages, inserted: totals.inserted, imagesFilled: totals.filled }, reason: "Bổ sung tin / ảnh của một hội thoại từ Pancake (chỉ đọc Pancake)" });
+  return { ok: true, message: `Đã đối chiếu ${totals.pages} trang tin Pancake: ${totals.inserted} tin mới · ${totals.filled} ảnh bổ sung. Không gửi gì cho khách.` };
 }
 
 /** Khối «Lịch sử hộp thư» của trang Chatbot bán hàng — chỉ cho người quản lý chatbot. */

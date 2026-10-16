@@ -728,16 +728,20 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       const side = inboundSide(r.note, r.messageId);
       // Tin nhân viên ERP có ở bảng của nó (có tên người gửi).
       if (side === "STAFF") continue;
+      const images = Array.isArray(r.imageUrls) ? (r.imageUrls as string[]).filter((x) => typeof x === "string") : [];
       if (side === "BOT") {
+        // Ảnh AI gửi (ảnh câu mẫu — dòng ghi sẵn chữ rỗng mang địa chỉ qua tuyến có kiểm quyền, P0-B #856) là MỘT tin. Dòng mang mã
+        // kênh của cùng tin ảnh (chữ rỗng, không ảnh) không thành bong bóng trống.
         const norm = r.text.replace(/\s+/g, " ").trim();
-        if (!norm) continue;
+        if (!norm && !images.length) continue;
         const at = r.createdAt.getTime();
-        if (botSeen.some((b) => b.text === norm && Math.abs(b.at - at) < 5 * 60_000)) continue;
-        botSeen.push({ text: norm, at });
-        items.push({ key: `i:${r.id}`, at: r.createdAt.toISOString(), side, text: r.text, images: [], author: null });
+        if (norm) {
+          if (botSeen.some((b) => b.text === norm && Math.abs(b.at - at) < 5 * 60_000)) continue;
+          botSeen.push({ text: norm, at });
+        }
+        items.push({ key: `i:${r.id}`, at: r.createdAt.toISOString(), side, text: r.text, images, author: null });
         continue;
       }
-      const images = Array.isArray(r.imageUrls) ? (r.imageUrls as string[]).filter((x) => typeof x === "string") : [];
       if (!r.text.trim() && !images.length) continue;
       const trace = side === "CUSTOMER" && !r.importedAt ? buildMessageTrace(r, traceEv, now) : null;
       if (trace) trace.ownership = ownershipNote(r.messageId, trace.code);
