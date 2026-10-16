@@ -75,7 +75,7 @@ import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
 import { ADDRESS_KNOWN_TEXT, ADDRESS_STAFF_TEXT, SCHEDULE_NOTED_TEXT, addressKnowledge, addressReaskVerdict, continuesSameOrder, isScheduleOnly, knownContactPrompt } from "@/lib/sales-chatbot/address-memory";
 import { DELIVERY_HANDOFF_TEXT, deliveryPreferenceOf, deliveryPromiseIn, deliveryReplyViolation, turnDeliverySay } from "@/lib/sales-chatbot/delivery-intent";
-import { asksOrderStatus, orderStatusSayOf, postSaleFallbackText, postSaleReplyGuard, turnOrderStatusSay } from "@/lib/sales-chatbot/post-sale-guard";
+import { asksOrderStatus, asksQuestion, orderStatusSayOf, postSaleFallbackText, postSaleReplyGuard, turnOrderStatusSay } from "@/lib/sales-chatbot/post-sale-guard";
 import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, noteSeenTotals, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
 import { flagOrderForReviewAsAgent, loadAutoConfirmComplete } from "@/lib/records/order-create";
 import type { PriceDisputeState } from "@/lib/sales-chatbot/quote-shared";
@@ -1675,6 +1675,12 @@ async function chatTurnCore(
           state = { ...state, handoff: { reason: `Cần người xử lý — ${r.requireHuman}`, at: now.toISOString() } };
           if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, state.handoff!.reason, state.customer, now).catch(() => undefined);
         } else if (!r.isError) statusSay = orderStatusSayOf(r.content);
+      }
+      // Khách hỏi một câu KHÁC trạng thái («shop ở đâu», «có xuất hoá đơn không») mà tin model chỉ còn lời mời ⇒ model không trả lời câu
+      // hỏi; câu trung tính «cần hỗ trợ gì cứ nhắn» là bỏ lơ khách (review PR #878 vòng 3) ⇒ chuyển người trả lời.
+      if (!state.handoff && !asksOrderStatus(text) && asksQuestion(text)) {
+        state = { ...state, handoff: { reason: "Cần người xử lý — khách hỏi sau chốt, AI chỉ trả lời bằng lời mời mua thêm / xin chốt lại", at: now.toISOString() } };
+        if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, state.handoff!.reason, state.customer, now).catch(() => undefined);
       }
       if (!state.handoff) postSaleSay = postSaleFallbackText(text, statusSay);
     }

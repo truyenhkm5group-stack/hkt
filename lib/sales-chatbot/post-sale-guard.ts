@@ -84,22 +84,57 @@ export function postSaleSentenceDrop(sentence: string, lastCustomerText = ""): P
 
 /** Mọi câu sẽ bị lọc (kể cả khi cả tin đều bị lọc) — cho câu mẫu: câu mẫu chỉ là một lời mời thì không gửi. HÀM THUẦN. */
 export function postSaleDropsIn(text: string, lastCustomerText = ""): PostSaleDrop[] {
-  return sentencesOf(text).flatMap((s) => postSaleSentenceDrop(s, lastCustomerText) ?? []);
+  return postSaleReplyGuard(text, lastCustomerText).dropped;
+}
+
+/** Vế chỉ là tiếng đệm («Dạ», «Dạ chị ơi», «vâng ạ») — đứng một mình thì không phải câu trả lời. Bản gập dấu. */
+const FILLER_ONLY_RE = /^ (?:(?:da|vang|a|oi|chi|anh|em|minh|ban|c|e|nhe|nha|ok|okie|uh|u) )*$/;
+
+/**
+ * Câu một hơi «trả lời, rồi mời» nối bằng dấu phẩy (review PR #878 vòng 3: «Dạ có ạ, bên em xuất hoá đơn được, mình muốn lấy thêm gì
+ * không ạ?») — bỏ CẢ câu là mất luôn câu trả lời. Tách câu bị lọc thành VẾ theo «,» «;» (có khoảng trắng sau, nên «300,000đ» không bị
+ * tách) rồi bỏ vế mang đề tài mua thêm / xin chốt lại, cùng vế hỏi / mời đứng NGAY SAU một vế đã bỏ («…combo nem, chị thử không ạ?»).
+ * Còn lại vế có nội dung ⇒ ghép lại (vế cuối gốc bị bỏ ⇒ kết bằng «.», chữ đầu viết hoa); chỉ còn tiếng đệm / không còn gì ⇒ `null`
+ * (bỏ cả câu). HÀM THUẦN.
+ */
+function keptClausesOf(sentence: string): string | null {
+  const parts = sentence.split(/\s*[,;]\s+/).map((x) => x.trim()).filter(Boolean);
+  if (parts.length < 2) return null;
+  const topic = (f: string) => UPSELL_RE.some((re) => re.test(f)) || RECONFIRM_RE.some((re) => re.test(f));
+  const keep: boolean[] = [];
+  parts.forEach((p, i) => {
+    const f = fold(p);
+    const afterDropped = i > 0 && !keep[i - 1];
+    keep.push(!(topic(f) || (afterDropped && (INVITING_RE.test(f) || ASKING_RE.test(f)))));
+  });
+  const kept = parts.filter((_, i) => keep[i]);
+  if (!kept.length || kept.every((p) => FILLER_ONLY_RE.test(fold(p)))) return null;
+  const lastKeptIsOriginalEnd = keep[keep.length - 1];
+  let out = kept.map((p) => p.replace(/[,;]+$/u, "")).join(", ");
+  if (!lastKeptIsOriginalEnd) out = `${out.replace(/[\s.!?…,;]+$/u, "")}.`;
+  return out.charAt(0).toLocaleUpperCase("vi") + out.slice(1);
 }
 
 /**
  * Chữ model gửi khách khi đơn ĐÃ CHỐT (hoặc khách ở giai đoạn sau bán): bỏ lời mời mua thêm không ai hỏi + câu hỏi xin xác nhận / chốt lại.
+ * Câu bị lọc mà có vế trả lời nối bằng dấu phẩy ⇒ chỉ bỏ VẾ mời / xin chốt lại, giữ vế trả lời (`keptClausesOf`).
  * Mọi câu đều bị lọc ⇒ `text: ""` + `emptied: true` — tin chỉ toàn lời mời / xin chốt lại KHÔNG tới khách (luật chủ shop: không bán tiếp
  * sau chốt). Câu kể / câu trả lời / xác nhận thay đổi không bao giờ bị lọc (`postSaleSentenceDrop`), nên «rỗng» chỉ xảy ra khi tin thật sự
- * không có gì khác; nơi gọi phải thay bằng `postSaleFallbackText` để khách không bị bỏ im. HÀM THUẦN.
+ * không có gì khác; nơi gọi phải thay bằng `postSaleFallbackText` (hay chuyển người khi khách hỏi một câu khác) để khách không bị bỏ im.
+ * HÀM THUẦN.
  */
 export function postSaleReplyGuard(text: string, lastCustomerText = ""): { text: string; dropped: PostSaleDrop[]; emptied?: true } {
   const kept: string[] = [];
   const dropped: PostSaleDrop[] = [];
   for (const s of sentencesOf(text)) {
     const d = postSaleSentenceDrop(s, lastCustomerText);
-    if (d) dropped.push(d);
-    else kept.push(s);
+    if (!d) {
+      kept.push(s);
+      continue;
+    }
+    dropped.push(d);
+    const part = keptClausesOf(s);
+    if (part) kept.push(part);
   }
   if (!dropped.length) return { text, dropped };
   if (!kept.length) return { text: "", dropped, emptied: true };
@@ -162,6 +197,26 @@ export function asksOrderStatus(lastCustomerText: string): boolean {
 export function postSaleFallbackText(lastCustomerText: string, statusSay: string | null): string | null {
   if (asksOrderStatus(lastCustomerText)) return statusSay;
   return THANKS_RE.test(fold(lastCustomerText)) ? POST_SALE_THANKS_TEXT : POST_SALE_NEUTRAL_TEXT;
+}
+
+/** Tiếng gọi / đệm đứng CUỐI tin khách («… không em», «… đâu vậy shop») — bỏ trước khi đọc tiểu từ hỏi cuối tin. */
+const TRAILING_ADDRESS_RE = /(?: (?:em|e|shop|sop|ad|a|vay|v|the|oi|chi|anh|ban|c|nhe|nha))+\s*$/;
+const QUESTION_END_RE = / (?:khong|ko|k|hong|chua|dau|sao|nao|gi|nhi|ha|bao gio|bao lau)\s*$/;
+const QUESTION_WORD_RE = / (?:bao nhieu|the nao|o dau|tai sao|vi sao|lam sao|bao gio|bao lau|duoc khong|co (?:[a-z0-9]+ ){1,6}(?:khong|ko|k|hong)) /;
+/** «không sao đâu», «không cần đâu», «không có gì» — câu đáp, không phải câu hỏi. */
+const NOT_QUESTION_RE = / khong (?:sao|can|co gi|van de gi) | thoi /;
+
+/**
+ * Khách vừa HỎI một câu (dấu «?», tiểu từ hỏi cuối tin, hay «bao nhiêu / ở đâu / có … không») — dùng khi bộ lọc hậu mãi bỏ HẾT tin model
+ * mà khách không hỏi trạng thái: câu trung tính «cần hỗ trợ gì cứ nhắn» là bỏ lơ câu hỏi, nên nơi gọi chuyển người (review PR #878 vòng 3).
+ * HÀM THUẦN.
+ */
+export function asksQuestion(lastCustomerText: string): boolean {
+  if (/\?/.test(lastCustomerText)) return true;
+  const f = fold(lastCustomerText);
+  if (NOT_QUESTION_RE.test(f)) return false;
+  if (QUESTION_WORD_RE.test(f)) return true;
+  return QUESTION_END_RE.test(` ${f.replace(TRAILING_ADDRESS_RE, "").trim()} `.replace(/\s+$/, ""));
 }
 
 /** Mốc TƯƠNG LAI không xác định («lần sau», «hôm khác», «dịp khác», «tháng sau»…). */

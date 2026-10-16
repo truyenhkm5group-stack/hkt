@@ -36,7 +36,7 @@ import { createProductCore } from "@/lib/records/product-create";
 import { ADDRESS_KNOWN_TEXT, SCHEDULE_NOTED_TEXT, addressKnowledge, addressReaskVerdict, continuesSameOrder, knownContactPrompt, placeOrRecipientSignal } from "@/lib/sales-chatbot/address-memory";
 import { deliveryPreferenceNote, deliveryPreferenceOf, deliveryPromiseIn } from "@/lib/sales-chatbot/delivery-intent";
 import { applyCustomerCartMessage, classifyCartMessage } from "@/lib/sales-chatbot/cart-commitment";
-import { POST_SALE_NEUTRAL_TEXT, POST_SALE_THANKS_TEXT, futurePurchaseOnly, orderStatusSayOf, postSaleDropsIn, postSaleFallbackText, postSaleReplyGuard } from "@/lib/sales-chatbot/post-sale-guard";
+import { POST_SALE_NEUTRAL_TEXT, POST_SALE_THANKS_TEXT, asksQuestion, futurePurchaseOnly, orderStatusSayOf, postSaleDropsIn, postSaleFallbackText, postSaleReplyGuard } from "@/lib/sales-chatbot/post-sale-guard";
 import { quickReplyByKeyword } from "@/lib/sales-chatbot/quick-replies";
 import { QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -188,6 +188,13 @@ function testReviewBlockers() {
   assert.deepEqual([r2.text, r2.emptied], ["", true], "khách cảm ơn + tin chỉ mời mua ⇒ lời mời không tới khách");
   assert.equal(postSaleFallbackText("ok em cảm ơn nha", null), POST_SALE_THANKS_TEXT);
   assert.equal(postSaleFallbackText("hàng giao rồi nhé em", null), POST_SALE_NEUTRAL_TEXT);
+  // Review PR #878 vòng 3: câu MỘT HƠI «trả lời, rồi mời» nối bằng dấu phẩy ⇒ chỉ bỏ VẾ mời, câu trả lời vẫn tới khách.
+  assert.deepEqual(postSaleReplyGuard("Dạ có ạ, bên em xuất hoá đơn được, mình muốn lấy thêm gì không ạ?", "shop có xuất hoá đơn không"), { text: "Dạ có ạ, bên em xuất hoá đơn được.", dropped: ["UPSELL"] }, "hoá đơn: giữ vế trả lời");
+  assert.deepEqual(postSaleReplyGuard("Dạ shop ở 12 Lê Lợi Q1, chị ghé mua thêm nhé.", "shop ở đâu vậy em"), { text: "Dạ shop ở 12 Lê Lợi Q1.", dropped: ["UPSELL"] }, "địa chỉ shop: giữ vế trả lời");
+  assert.deepEqual(postSaleReplyGuard("Dạ bên em đang có combo nem hải sản ưu đãi cho chị nè, chị lấy thêm không ạ?", "shop có xuất hoá đơn đỏ không em"), { text: "", dropped: ["UPSELL"], emptied: true }, "mọi vế đều là lời mời ⇒ vẫn rỗng");
+  assert.deepEqual(postSaleReplyGuard("Dạ chị ơi, bên em có combo nem hải sản, chị thử không ạ?"), { text: "", dropped: ["UPSELL"], emptied: true }, "chỉ còn tiếng đệm «Dạ chị ơi» ⇒ rỗng, vế hỏi ngay sau vế mời cũng bỏ");
+  for (const q of ["shop có xuất hoá đơn không", "shop ở đâu vậy em", "giá bao nhiêu", "vậy hả"]) assert.equal(asksQuestion(q), true, `câu hỏi: ${q}`);
+  for (const q of ["ok em cảm ơn nha", "hàng giao rồi nhé em", "không cần đâu em", "ok chốt em"]) assert.equal(asksQuestion(q), false, `không phải câu hỏi: ${q}`);
   for (const t of [POST_SALE_THANKS_TEXT, POST_SALE_NEUTRAL_TEXT]) assert.deepEqual(postSaleDropsIn(t), [], `câu thay không bị chính bộ lọc chặn: ${t}`);
   assert.equal(orderStatusSayOf(JSON.stringify({ orders: [{ order_code: "#A1", status: "Shop đã nhận đơn — chưa có thông tin vận chuyển.", needs_staff: false }] })), "Dạ đơn #A1 của mình: Shop đã nhận đơn — chưa có thông tin vận chuyển ạ.");
   assert.equal(orderStatusSayOf(JSON.stringify({ orders: [], delivery_answer: { kind: "DIRECT", say: "Dạ đơn của mình dự kiến giao ngày mai ạ." } })), "Dạ đơn của mình dự kiến giao ngày mai ạ.");
@@ -280,6 +287,11 @@ const GOLDEN: GoldenCase[] = [
       { say: "ok em cảm ơn nha", ai: [() => [say("Chị có muốn lấy thêm combo nem không ạ?")]] },
       // Model KHÔNG tra đơn, chỉ viết lời mời ⇒ máy chủ tự tra.
       { say: "đơn chị gửi chưa em", ai: [() => [say("Mình lấy thêm 1 hộp nem hải sản không ạ?")]] },
+      // Review PR #878 vòng 3: câu trả lời nối lời mời bằng dấu phẩy ⇒ khách nhận đúng vế trả lời.
+      { say: "shop có xuất hoá đơn không", ai: [() => [say("Dạ có ạ, bên em xuất hoá đơn được, mình muốn lấy thêm gì không ạ?")]] },
+      { say: "shop ở đâu vậy em", ai: [() => [say("Dạ shop ở 12 Lê Lợi Q1, chị ghé mua thêm nhé.")]] },
+      // Khách hỏi câu khác trạng thái mà tin model CHỈ là lời mời ⇒ không câu trung tính bỏ lơ câu hỏi — chuyển người.
+      { say: "shop có xuất hoá đơn đỏ không em", ai: [() => [say("Dạ bên em đang có combo nem hải sản ưu đãi cho chị nè, chị lấy thêm không ạ?")]] },
     ],
   },
 ];
@@ -331,8 +343,12 @@ export async function testP0871ContactMemoryGolden(): Promise<void> {
         assert.ok(s2 && shown[2].includes(s2), `hỏi trạng thái (model đã tra): câu trạng thái thật «${s2}» — ${shown[2]}`);
         assert.equal(shown[3], POST_SALE_THANKS_TEXT, `cảm ơn ⇒ câu cảm ơn — ${shown[3]}`);
         assert.ok(/^Dạ đơn .+ của mình: /.test(shown[4]) && shown[4].includes(s2), `hỏi trạng thái (model không tra): máy chủ tự tra — ${shown[4]}`);
+        assert.equal(shown[5], "Dạ có ạ, bên em xuất hoá đơn được.", `hoá đơn: chỉ bỏ vế mời — ${shown[5]}`);
+        assert.equal(shown[6], "Dạ shop ở 12 Lê Lợi Q1.", `địa chỉ shop: chỉ bỏ vế mời — ${shown[6]}`);
+        assert.ok(!/combo|ưu đãi|lấy thêm/.test(shown[7]) && shown[7] !== POST_SALE_NEUTRAL_TEXT, `câu hỏi + tin chỉ mời ⇒ không lời mời, không câu trung tính — ${shown[7]}`);
+        assert.equal(t.turns[7].status, "HANDOFF", "câu hỏi khác trạng thái mà AI chỉ mời mua ⇒ chuyển người");
         assert.equal(orders.length, 1);
-        assert.ok(t.turns.every((x) => x.status !== "HANDOFF"), "không chuyển người");
+        assert.ok(t.turns.slice(0, 7).every((x) => x.status !== "HANDOFF"), "không chuyển người ở các lượt trước");
         return;
       }
       // «Nguyễn Hà»
