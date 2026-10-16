@@ -63,7 +63,7 @@ const STATEMENT_RE = /(?:^|[\s,.(])(?:đã|em vừa|shop vừa|ghi nhận|cập 
  * Câu KỂ trạng thái của chính đơn khách («đơn combo 2kg của chị đang giao nhé») — có chữ món (combo) và đuôi «nhé» nhưng không phải lời
  * mời mua: review #878 bắt câu này bị bỏ, khách hỏi chuyện khác thì bị chuyển người oan.
  */
-const ORDER_STATUS_STATEMENT_RE = /(?:^|[\s,.(])đơn(?:[\s,][^.!?]*?)?\s(?:đang (?:giao|gửi|đóng|chuẩn bị|vận chuyển|trên đường|được giao)|sẽ (?:giao|gửi|tới|đến)|đã (?:giao|gửi|lên|xuất)|chờ (?:giao|lấy|xuất))(?=[\s,.!?)]|$)/u;
+const ORDER_STATUS_STATEMENT_RE = /(?:^|[\s,.(])đơn(?:[\s,](?:(?!thêm)[^.!?]){0,40}?)?\s(?:đang (?:giao|gửi|đóng|chuẩn bị|vận chuyển|trên đường|được giao)|sẽ (?:giao|gửi|tới|đến)|đã (?:giao|gửi|lên|xuất)|chờ (?:giao|lấy|xuất))(?=[\s,.!?)]|$)/u;
 /** Câu xác nhận một THAY ĐỔI khách vừa xin («địa chỉ MỚI», «ĐỔI sang 2 hộp», «huỷ đơn») — không phải xin chốt LẠI đơn cũ. Bản gập dấu. */
 const CHANGE_RE = / (?:moi|doi|thay doi|cap nhat|sua|huy|bot|them) /;
 /** Tin KHÁCH vừa hỏi về món / giá / đổi đơn / địa chỉ ⇒ câu trả lời về món / xác nhận là ĐÚNG lúc, không lọc gì. Bản gập dấu. */
