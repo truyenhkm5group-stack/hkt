@@ -47,6 +47,16 @@ function testPure() {
   }
   assert.equal(negatedCancel("hủy đơn"), false);
   assert.equal(negatedCancel("thôi không lấy nữa"), false, "«không lấy nữa» vẫn là huỷ");
+  for (const t of ["thôi khỏi hủy", "ko cần hủy đâu", "không phải hủy đâu", "không hủy nữa em ơi lấy như cũ"]) {
+    assert.equal(negatedCancel(t), true, `«${t}» là phủ định huỷ`);
+    assert.equal(explicitCancel(t), false, `«${t}» không phải huỷ`);
+  }
+  assert.equal(explicitCancel("thôi khỏi"), true, "«thôi khỏi» trơn vẫn là huỷ");
+  // Re-review #869: «không» TRẢ LỜI câu giữ đơn rồi một câu huỷ (mệnh đề khác) ⇒ HUỶ — phủ định chỉ tính trong CÙNG mệnh đề với «hủy».
+  for (const t of ["không, hủy đơn đi", "Không. Hủy đơn đi em", "k, huỷ đi", "không không, hủy giùm chị", "chưa, hủy đơn giúp chị", "ko lấy nữa, hủy đi", "không cần giữ, hủy luôn", "ko đâu em, hủy đi", "không nha, hủy đơn", "đừng giữ, hủy đi em", "hủy đi, không lấy nữa"]) {
+    assert.equal(negatedCancel(t), false, `«${t}» không phải phủ định huỷ`);
+    assert.equal(explicitCancel(t), true, `«${t}» là HUỶ`);
+  }
 
   // Chuỗi chữ khách của #863 ⇒ giỏ 1kg cá + 500g mực (câu nhắc lại cả giỏ không cộng lần hai, không bỏ rơi vế mực).
   const P = { catalog: CAT, products: PRODUCTS };
@@ -275,6 +285,14 @@ const CASES: GoldenCase[] = [
     ],
   },
   {
+    key: "gc-863-khong-huy-di",
+    title: "Re-review #869: sau lượt giữ đơn, khách «Không, hủy đi» (trả lời «không» rồi huỷ) ⇒ đơn ĐƯỢC huỷ qua vòng đời, «đã huỷ» sau khi ghi",
+    shop: "food",
+    channel: "FANPAGE",
+    config: CFG,
+    turns: [draftTurn("0961000870"), changeTurn, { say: CANCEL_1, ai: [] }, { say: "Không, hủy đi", ai: [] }],
+  },
+  {
     key: "gc-863-dung-huy-lan-dau",
     title: "Review #869: «đừng hủy nha em» sau lỗi bot ⇒ không phải câu huỷ: không xin lỗi / đề nghị huỷ, không mở yêu cầu huỷ",
     shop: "food",
@@ -386,6 +404,14 @@ async function testGolden() {
       assert.ok(!r.shown.some((x) => /đã huỷ/.test(x)), `không câu «đã huỷ»: ${JSON.stringify(r.shown)}`);
       const { order } = await orderOf(ctx.conversationId);
       assert.notEqual(order?.stage, "CANCELLED", "đơn KHÔNG bị huỷ");
+    },
+    "gc-863-khong-huy-di": async (t, ctx) => {
+      assert.match(t.turns[2].shown[0] ?? "", /xin lỗi/, "lượt huỷ đầu: máy chủ giữ đơn");
+      const r = t.turns[3];
+      assert.equal(r.rounds.length, 0, "huỷ lần hai do máy chủ quyết");
+      assert.match(r.shown[0] ?? "", /đã huỷ đơn #<MÃ ĐƠN>/);
+      const { order } = await orderOf(ctx.conversationId);
+      assert.equal(order?.stage, "CANCELLED", "đơn ĐÃ huỷ trong CSDL");
     },
     "gc-863-dung-huy-lan-dau": async (t, ctx) => {
       const r = t.turns[2];

@@ -371,7 +371,7 @@ const head = (s: string) => {
 
 const NEG = "(?:khong|ko|k|hok|hong|hem)";
 const THOI = "(?:thoi|thui|thoii+|thoy)";
-const PARTICLES = "(?: (?:nha|nhe|nhen|a|em|chi|anh|di|dau|day|luon|giup|cho|dum|don|ca|het|gi|nua))*";
+const PARTICLES = "(?: (?:nha|nhe|nhen|a|em|chi|anh|di|dau|day|luon|giup|gium|cho|dum|don|ca|het|gi|nua))*";
 
 /**
  * Bỏ dấu theo TỪNG chữ gốc cho luật giỏ: «bỏ» / «bo» ⇒ `bo` nhưng «bố» · «bộ» · «bò» · «bơ» ⇒ `box` (không phải động từ bỏ); «hủy» / «huỷ»
@@ -412,14 +412,28 @@ const CANCEL_RE = new RegExp(
 );
 
 /**
- * Câu PHỦ ĐỊNH việc huỷ (review #869 — «không hủy đâu em», «đừng hủy nha em», «khoan đã, chưa hủy nhé», «đâu có hủy»): phủ định đứng ngay
- * trước «hủy» / «bỏ đơn» (cách tối đa một từ «cần / phải / muốn»), hoặc «khoan» ở đầu câu. Đọc trên `foldCart`. HÀM THUẦN qua `negatedCancel`.
+ * Câu PHỦ ĐỊNH việc huỷ (review #869 — «không hủy đâu em», «đừng hủy nha em», «khoan đã, chưa hủy nhé», «đâu có hủy», «thôi khỏi hủy»): trong
+ * CÙNG một mệnh đề, phủ định đứng ngay trước «hủy» / «bỏ đơn» (cách tối đa một từ «cần / phải / muốn / được»), hoặc mệnh đề mở bằng «khoan».
+ * Đọc trên `foldCart` của TỪNG mệnh đề — «Không, hủy đơn đi» là câu TRẢ LỜI «không» rồi một câu huỷ, không phải «không hủy».
  */
-export const NEGATED_CANCEL_RE = /(?:^| )(?:khong|ko|k|hong|hok|dung|chua|dau co)(?: (?:can|phai|muon|duoc))? (?:huy|bo don)(?= |$)|^khoan(?= |$)/;
+export const NEGATED_CANCEL_RE = /(?:^| )(?:khong|ko|k|hong|hok|dung|chua|dau co|khoi)(?: (?:can|phai|muon|duoc))? (?:huy|bo don)(?= |$)|^khoan(?= |$)/;
+/** Từ huỷ trong một mệnh đề (đọc trên `foldCart`). */
+const CANCEL_WORD_RE = /(?:^| )(?:huy|bo don|cancel)(?= |$)/;
 
-/** Khách nói KHÔNG huỷ / chưa huỷ (đồng ý giữ đơn) — `true` thì không bao giờ là câu huỷ. HÀM THUẦN. */
+/**
+ * Khách nói KHÔNG huỷ / chưa huỷ (đồng ý giữ đơn) — `true` thì không bao giờ là câu huỷ. Tách mệnh đề trên chữ GỐC (`, . ; ! ? /` xuống dòng)
+ * trước khi bỏ dấu: phủ định chỉ khi có ít nhất một mệnh đề phủ định huỷ VÀ không mệnh đề nào là câu huỷ không phủ định («không không, hủy
+ * giùm chị» ⇒ huỷ). Bare «thôi khỏi» (không có «hủy») vẫn là câu huỷ. HÀM THUẦN.
+ */
 export function negatedCancel(text: string): boolean {
-  return NEGATED_CANCEL_RE.test(foldCart(text));
+  let negated = false;
+  for (const clause of text.split(/[,.;!?/\n]+/)) {
+    const f = foldCart(clause);
+    if (!f) continue;
+    if (NEGATED_CANCEL_RE.test(f)) negated = true;
+    else if (CANCEL_WORD_RE.test(f)) return false;
+  }
+  return negated;
 }
 
 /** Đoạn chữ cuối là tên món (dãy từ không thuộc STOP đứng ngay trước / sau một động từ). */
@@ -518,7 +532,7 @@ export function classifyCartMessage(text: string, catalog?: readonly string[], o
       if (label) return { kind: "REMOVE", amounts: [], label };
     }
     // «không hủy đâu em», «đừng hủy nha», «chưa hủy nhé» — câu PHỦ ĐỊNH việc huỷ, không phải câu huỷ (review #869).
-    if (CANCEL_RE.test(f) && !NEGATED_CANCEL_RE.test(f)) return none("CANCEL");
+    if (CANCEL_RE.test(f) && !negatedCancel(text)) return none("CANCEL");
   }
   if (/(?:^| )(?:neu|thi) /.test(` ${f} `)) return none("QUESTION");
   // «không phải 2kg», «không lấy 2kg đâu», «2kg nhiều quá» — số bị phủ định là số CŨ; «2kg, à không 1kg» — số đứng trước bị rút lại.
