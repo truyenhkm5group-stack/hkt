@@ -31,18 +31,29 @@ export const GENERIC_STATUS_PHRASE = NO_SHIPMENT_YET.slice(NO_SHIPMENT_YET.index
 export const DELIVERY_SHOP_SAID_PREFIX = "[Shop đã nhắn]";
 
 /**
- * Chuẩn hoá trước khi gấp dấu: các từ MẤT NGHĨA khi bỏ dấu được thay bằng một mã riêng để không lẫn với động từ giao hàng —
- * «nhắn» ≠ «nhận», «gặp» ≠ «gấp», «nhân viên» không phải «nhận». Bản không dấu vẫn mơ hồ ⇒ chỉ tách được khi khách gõ có dấu.
+ * Chuẩn hoá trước khi gấp dấu — SO KHỚP CÓ DẤU cho từ mơ hồ: các từ MẤT NGHĨA khi bỏ dấu được thay bằng một mã riêng để không lẫn
+ * với từ chỉ lịch giao: «nhắn» ≠ «nhận», «xác nhận» không phải «nhận hàng», «gặp» ≠ «gấp», «tôi» ≠ «tới», «tối» (buổi tối) ≠ «tới»,
+ * «đen» (màu) ≠ «đến», «mãi» / «khuyến mãi» / «khuyến mại» ≠ «mai» (ngày mai), «nhân viên» không phải «nhận». Câu gõ KHÔNG DẤU hoàn
+ * toàn vẫn mơ hồ ⇒ giữ cách cũ, chỉ loại thêm «khuyen mai» / «xac nhan». Dùng chung cho câu khách và chữ model (`deliveryReplyViolation`).
  */
 function normalizeAsk(text: string): string {
   const raw = text
     .normalize("NFC")
     .toLowerCase()
+    .replace(/khuyến (?:mãi|mại)/g, " khuyenmai ")
+    .replace(/mãi/g, " maimai ")
+    .replace(/xác nhận/g, " xacnhan ")
     .replace(/nhắn/g, " nhantin ")
     .replace(/gặp/g, " gapmat ")
     .replace(/nhân viên/g, " nhanvien ")
-    .replace(/tôi/g, " toiminh ");
+    .replace(/tôi/g, " toiminh ")
+    .replace(/tối/g, " buoitoi ")
+    .replace(/đen/g, " mauden ");
   return ` ${foldVi(raw)
+    .replace(/\bkhuyen mai\b/g, "khuyenmai")
+    // «đến / tới bao giờ» = «cho tới khi nào» (khuyến mãi đến bao giờ), không phải hỏi giờ giao.
+    .replace(/\b(?:den|toi) (?:bao gio|khi nao|luc nao)\b/g, "denkhinao")
+    .replace(/\bxac nhan\b/g, "xacnhan")
     .replace(/\bnhan vien\b/g, "nhanvien")
     .replace(/\bgui (?:tien|anh|hinh|so|dia chi|sdt|stk|lai so)\b/g, "guithongtin")
     .replace(/\bhnay\b/g, "hom nay")
@@ -53,8 +64,9 @@ const VERB = String.raw`(?:giao|ship|gui|nhan|co hang|toi|den|ve|phat|shipper|bu
 const has = (f: string, re: string) => new RegExp(String.raw`(?:^|\s)${re}(?=\s|$)`).test(f);
 
 const WHEN = String.raw`(?:hom nao|bao gio|khi nao|luc nao|ngay nao|may gio|may ngay|may hom|bao lau|thu may|bao nhieu ngay|bao nhieu lau)`;
-const TODAY = String.raw`(?:hom nay|trong ngay|chieu nay|sang nay|trua nay|toi nay|ngay hom nay)`;
-const TOMORROW = String.raw`(?:mai|ngay mai|sang mai|chieu mai|toi mai|trua mai|mot|ngay mot)`;
+// «toi nay» / «toi mai» chỉ còn ở câu không dấu (câu có dấu: «tối» đã thành «buoitoi»).
+const TODAY = String.raw`(?:hom nay|trong ngay|chieu nay|sang nay|trua nay|toi nay|buoitoi nay|ngay hom nay)`;
+const TOMORROW = String.raw`(?:mai|ngay mai|sang mai|chieu mai|toi mai|buoitoi mai|trua mai|mot|ngay mot)`;
 const URGENT_WORD = String.raw`(?:gap|hoa toc|nhanh|som|nhanh nhat|som nhat)`;
 const URGENT_ALONE = String.raw`(?:can gap|hoa toc|giao gap|ship gap|gui gap)`;
 const ARRIVED = String.raw`(?:co hang chua|hang (?:toi|den|ve) chua|nhan duoc hang chua|toi chua|den chua)`;
@@ -74,7 +86,8 @@ const STATUS = [
 export function classifyDeliveryQuestion(text: string): DeliveryQuestion | null {
   const f = normalizeAsk(text);
   if (!f.trim()) return null;
-  const verb = new RegExp(String.raw`\s${VERB}\s`).test(f);
+  // «toi» trong «toi nay / toi mai» (không dấu) là BUỔI TỐI, không phải «tới» — không tính làm động từ giao hàng.
+  const verb = new RegExp(String.raw`\s${VERB}\s`).test(f.replace(/\s(?:toi|buoitoi)\s(?=(?:nay|mai)\s)/g, " "));
   const urgent = has(f, URGENT_ALONE) || (verb && new RegExp(String.raw`\s${URGENT_WORD}\s`).test(f));
   const today = verb && new RegExp(String.raw`\s${TODAY}\s`).test(f);
   const tomorrow = verb && new RegExp(String.raw`\s${TOMORROW}\s`).test(f);
@@ -88,7 +101,10 @@ export function classifyDeliveryQuestion(text: string): DeliveryQuestion | null 
   return null;
 }
 
-/** Tin mới nhất phía SHOP (tiền tố `[Shop đã nhắn]`, tức NHÂN VIÊN — không phải chữ bot) có nói lịch giao. HÀM THUẦN. */
+/**
+ * Tin mới nhất phía SHOP (tiền tố `[Shop đã nhắn]` — nhân viên HOẶC trả lời tự động của page; lịch sử không phân biệt hai nguồn,
+ * không phải chữ bot) có nói lịch giao. HÀM THUẦN.
+ */
 export function staffDeliveryCommitment(shopTexts: readonly string[]): string | null {
   for (let i = shopTexts.length - 1; i >= 0; i--) {
     const t = shopTexts[i].trim();
@@ -113,7 +129,7 @@ export type DeliveryFacts = {
   promisedAt: Date | null;
   /** Tồn kho cho đơn: WAITING = đơn chờ hàng · READY = đủ hàng · `null` = ERP chưa đọc (CHƯA BIẾT, không phải «đủ»). */
   stock: "WAITING" | "READY" | null;
-  /** Câu NHÂN VIÊN đã nói về lịch giao trong hội thoại (`staffDeliveryCommitment`). */
+  /** Câu PHÍA SHOP (nhân viên / trả lời tự động) đã nói về lịch giao trong hội thoại (`staffDeliveryCommitment`). */
   staffSaid: string | null;
   /** Số đơn đang sống của hội thoại (không huỷ, đã chốt) — > 1 ⇒ không biết khách hỏi đơn nào. */
   liveOrders: number;
@@ -165,7 +181,8 @@ export function deliveryTimeAnswer(f: DeliveryFacts): DeliveryAnswer {
   const quote = f.customerText.replace(/\s+/g, " ").trim().slice(0, 120);
   const handoff = (why: string): DeliveryAnswer => ({ kind: "HANDOFF", text: DELIVERY_HANDOFF_TEXT, reason: `Hỏi lịch giao — «${quote}» (${why})` });
   if (f.orderStage === "NEW") return { kind: "NOT_APPLICABLE", why: "đơn chưa chốt" };
-  if (f.staffSaid) return handoff(`nhân viên đã hẹn «${f.staffSaid}» — AI không nói khác`);
+  // Tiền tố «[Shop đã nhắn]» gồm cả trả lời tự động ⇒ lý do TRUNG TÍNH, không khẳng định «nhân viên đã hẹn».
+  if (f.staffSaid) return handoff(`shop đã nhắn lịch giao trong hội thoại: «${f.staffSaid}» — AI không nói khác`);
   if (f.liveOrders > 1) return handoff(`hội thoại có ${f.liveOrders} đơn đang mở — cần biết khách hỏi đơn nào`);
   if (f.orderStage === "CANCELLED") return handoff("đơn trong hội thoại đã huỷ");
   const urgent = f.question.nuance === "URGENT";
@@ -187,15 +204,22 @@ export function deliveryTimeAnswer(f: DeliveryFacts): DeliveryAnswer {
   if (!s && f.manual && f.orderStage === "RETURNED") return handoff("lần giao trước không thành công");
   if (f.stock === "WAITING") return handoff("đơn đang chờ hàng về kho");
   if (!s && f.promisedAt) {
+    // `customer_promised_at` = ngày shop GỬI theo lời khách dặn — không phải giờ hàng tới tay. Hẹn đúng hôm nay mà khách hỏi «hôm nay»
+    // ⇒ giờ giao trong ngày là việc của người, không trả lời bằng ngày hẹn.
     const key = vnDayKey(f.promisedAt);
-    if (key >= vnDayKey(f.now) && !urgent) return { kind: "DIRECT", text: `Dạ đơn mình đang hẹn giao ngày ${ddmm(key)} ạ.`, basis: "ngày hẹn giao ghi trên đơn" };
-    if (urgent) return handoff("khách xin giao gấp — đơn đang có ngày hẹn giao");
-    return handoff("ngày hẹn giao trên đơn đã qua mà chưa có vận đơn");
+    const today = vnDayKey(f.now);
+    if (urgent) return handoff("khách xin giao gấp — đơn đang có ngày hẹn gửi");
+    if (key === today && f.question.nuance === "TODAY") return handoff("khách hỏi giao hôm nay — đơn hẹn gửi đúng hôm nay");
+    if (key >= today) return { kind: "DIRECT", text: `Dạ shop hẹn gửi hàng cho mình ngày ${ddmm(key)} theo lời mình dặn ạ.`, basis: "ngày hẹn gửi ghi trên đơn (theo lời khách dặn)" };
+    return handoff("ngày hẹn gửi trên đơn đã qua mà chưa có vận đơn");
   }
   return handoff(s ? "đã có vận đơn nhưng chưa có chứng từ ĐVVC về lịch giao" : "đơn chưa có vận đơn, chưa có lịch giao xác minh");
 }
 
-const PROMISE_RE = /(?:^|\s)(?:hom nay|trong ngay|chieu nay|sang nay|toi nay|trua nay|ngay mai|mai|sang mai|chieu mai)(?:\s\S+){0,3}\s(?:giao|toi|den|co hang|nhan|ship|phat)(?=\s|$)|(?:^|\s)(?:giao|ship|gui|toi|den|nhan duoc)(?:\s\S+){0,3}\s(?:hom nay|trong ngay|chieu nay|sang nay|toi nay|ngay mai|mai|sang mai|chieu mai)(?=\s|$)/;
+const PROMISE_TIME = String.raw`(?:hom nay|trong ngay|chieu nay|sang nay|toi nay|buoitoi nay|trua nay|ngay mai|mai|sang mai|chieu mai|buoitoi mai)`;
+const PROMISE_RE = new RegExp(String.raw`(?:^|\s)${PROMISE_TIME}(?:\s\S+){0,3}\s(?:giao|toi|den|co hang|nhan|ship|phat)(?=\s|$)|(?:^|\s)(?:giao|ship|gui|toi|den|nhan duoc)(?:\s\S+){0,3}\s${PROMISE_TIME}(?=\s|$)`);
+/** Các MỐC thời gian câu nói tới (đã chuẩn hoá) — để «đã có căn cứ» chỉ cho qua đúng mốc trùng. */
+const promiseTimes = (f: string): Set<string> => new Set([...f.matchAll(new RegExp(String.raw`(?<=\s)${PROMISE_TIME}(?=\s)`, "g"))].map((m) => m[0]));
 
 /**
  * CHỐT CHẶN CHỮ MODEL: tin khách cuối hỏi LỊCH GIAO mà bản nháp (a) chỉ đọc câu trạng thái «chưa có thông tin vận chuyển», hoặc
@@ -207,8 +231,11 @@ export function deliveryReplyViolation(lastCustomerText: string, reply: string, 
   if (classifyDeliveryQuestion(lastCustomerText)?.intent !== "DELIVERY_TIME") return null;
   const r = reply.normalize("NFC");
   if (r.includes(GENERIC_STATUS_PHRASE) || foldVi(r).includes(foldVi(GENERIC_STATUS_PHRASE))) return "Khách hỏi lịch giao — bản nháp chỉ đọc câu trạng thái «chưa có thông tin vận chuyển»";
-  const fr = ` ${foldVi(r)} `;
-  if (PROMISE_RE.test(fr) && !(verified && PROMISE_RE.test(` ${foldVi(verified)} `))) return "Khách hỏi lịch giao — bản nháp hứa mốc giao (hôm nay / ngày mai) mà máy chủ không có căn cứ";
+  const fr = normalizeAsk(r);
+  if (!PROMISE_RE.test(fr)) return null;
+  // Căn cứ chỉ cho qua ĐÚNG mốc máy chủ đã nói («dự kiến giao trong hôm nay» không bảo lãnh «chiều nay» hay «mai»).
+  const allowed = verified ? promiseTimes(normalizeAsk(verified)) : new Set<string>();
+  if ([...promiseTimes(fr)].some((t) => !allowed.has(t))) return "Khách hỏi lịch giao — bản nháp hứa mốc giao (hôm nay / ngày mai) mà máy chủ không có căn cứ";
   return null;
 }
 
@@ -234,4 +261,26 @@ export function turnDeliverySay(history: readonly { role: string; content: reado
     }
   }
   return null;
+}
+
+/** Đơn đã khép (giao xong / hoàn) — không đếm là «đơn đang mở» khi hỏi lịch giao. */
+const CLOSED_ORDER_STAGES = new Set(["DELIVERED", "PAID", "RETURNED", "PARTIAL_RETURN"]);
+
+export type DeliveryPick<T> = { kind: "TARGET"; target: T; liveOrders: number } | { kind: "NOT_APPLICABLE"; why: string };
+
+/**
+ * Đơn mà câu hỏi lịch giao nói tới — CHỈ đơn của LƯỢT MUA HIỆN TẠI: đơn bot vừa chốt (`confirmedId`), hoặc đơn không thuộc lượt mua
+ * cũ (`pastIds`) và tạo trong `windowDays` ngày (cùng cửa sổ của vòng đời khách). HÀM THUẦN. `rows` xếp mới ⇒ cũ.
+ *  · Có đơn NEW đang mở (đơn nháp / chưa chốt) ⇒ NOT_APPLICABLE: luồng bán hàng lo (khách dặn ngày giao ⇒ ghi chú giao hàng).
+ *  · Không có đơn sống của lượt hiện tại ⇒ NOT_APPLICABLE — không bao giờ trả lời lịch giao bằng đơn cũ đã giao / huỷ / hoàn.
+ *  · `liveOrders` chỉ đếm đơn còn mở (không đếm đơn đã khép).
+ */
+export function pickDeliveryOrder<T extends { id: string; stage: string; insertedAt: Date }>(rows: readonly T[], o: { confirmedId: string | null; pastIds: readonly string[]; now: Date; windowDays: number }): DeliveryPick<T> {
+  const since = o.now.getTime() - o.windowDays * 86_400_000;
+  const current = rows.filter((r) => r.id === o.confirmedId || (!o.pastIds.includes(r.id) && r.insertedAt.getTime() >= since));
+  if (current.some((r) => r.stage === "NEW")) return { kind: "NOT_APPLICABLE", why: "đơn nháp / chưa chốt đang mở — luồng bán hàng" };
+  const live = current.filter((r) => r.stage !== "CANCELLED" && r.stage !== "DELETED");
+  if (!live.length) return { kind: "NOT_APPLICABLE", why: "không có đơn sống của lượt mua hiện tại" };
+  const open = live.filter((r) => !CLOSED_ORDER_STAGES.has(r.stage));
+  return { kind: "TARGET", target: open[0] ?? live[0], liveOrders: open.length };
 }

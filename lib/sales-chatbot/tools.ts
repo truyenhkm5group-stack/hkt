@@ -53,7 +53,8 @@ import { renderQuickReplyForSend } from "@/lib/sales-chatbot/quick-replies";
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import type { OrderSyncThreadState } from "@/lib/sales-chatbot/order-sync-shared";
 import { customerOrderStatus } from "@/lib/sales-chatbot/order-status-shared";
-import { classifyDeliveryQuestion, deliveryTimeAnswer, staffDeliveryCommitment } from "@/lib/sales-chatbot/delivery-intent";
+import { classifyDeliveryQuestion, deliveryTimeAnswer, pickDeliveryOrder, staffDeliveryCommitment } from "@/lib/sales-chatbot/delivery-intent";
+import { LIFECYCLE_ORDER_LOOKBACK_DAYS } from "@/lib/sales-chatbot/lifecycle";
 import { fanpageVisitorKeyMirror } from "@/lib/pricing/ai-customer-identity";
 import type { PromptStamp } from "@/lib/sales-chatbot/prompt-stamp";
 import type { PancakeThreadProfile, ReturningCustomer } from "@/lib/sales-chatbot/returning";
@@ -1483,6 +1484,7 @@ async function orderStatusFor(conversationId: string, state: ChatState, commentT
     return {
       id: r.id,
       stage: r.stage,
+      insertedAt: r.at,
       promisedAt: r.promisedAt,
       ship: s ? { stage: s.stage, carrierEvidence, expectedDelivery: s.expectedDelivery } : null,
       row: {
@@ -1504,9 +1506,10 @@ async function orderStatusFor(conversationId: string, state: ChatState, commentT
   // đưa câu trạng thái cho model đọc thay giờ giao.
   const question = classifyDeliveryQuestion(ask.text);
   if (question?.intent === "DELIVERY_TIME") {
-    const live = view.filter((v) => v.stage !== "CANCELLED" && v.stage !== "NEW");
-    const target = live[0] ?? view.find((v) => v.stage !== "NEW");
-    if (target) {
+    // Chỉ đơn của LƯỢT MUA HIỆN TẠI; có đơn nháp đang mở / chỉ có đơn cũ ⇒ không áp (luồng bán hàng / câu trạng thái như cũ).
+    const pick = pickDeliveryOrder(view, { confirmedId: state.confirmed?.orderId ?? null, pastIds: (state.pastOrders ?? []).map((p) => p.orderId).filter((x): x is string => typeof x === "string"), now: ask.now, windowDays: LIFECYCLE_ORDER_LOOKBACK_DAYS });
+    if (pick.kind === "TARGET") {
+      const target = pick.target;
       const answer = deliveryTimeAnswer({
         question,
         customerText: ask.text,
@@ -1517,7 +1520,7 @@ async function orderStatusFor(conversationId: string, state: ChatState, commentT
         // ERP chưa đọc phân bổ tồn cho từng đơn ở đây ⇒ CHƯA BIẾT (không phải «đủ hàng»).
         stock: null,
         staffSaid: staffDeliveryCommitment(ask.shopTexts),
-        liveOrders: live.length,
+        liveOrders: pick.liveOrders,
         now: ask.now,
       });
       if (answer.kind === "DIRECT") {

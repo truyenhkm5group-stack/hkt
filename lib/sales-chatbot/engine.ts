@@ -1304,23 +1304,11 @@ async function chatTurnCore(
               }
               continue;
             }
-            // ĐỊA CHỈ ĐÃ BIẾT / ĐÃ HỎI KHÔNG HỎI LẠI (P0 15/10/2026, ca «Tuyet Nguyen Thi» · «Lê Văn Dụ»): câu hỏi phường / xã bị bỏ, phần
-            // còn lại vẫn gửi. Cả tin chỉ là câu hỏi lại ⇒ câu ghi nhận — trừ khi tóm tắt đơn của máy chủ còn nợ khách (nó sẽ được gửi).
-            const addrHold = verdict.ok ? addressReaskVerdict(out, addressKnowledge(state, customerTexts), turnSeq) : null;
-            if (addrHold) {
-              lastError = lastError ?? addrHold.note;
-              const said = addrHold.rest || (draftUnsaid ? "" : ADDRESS_KNOWN_TEXT);
-              if (said && !content.some((x) => x.type === "text" && x.text === said)) {
-                content.push({ type: "text", text: said });
-                spoke = true;
-                if (addrHold.rest) draftUnsaid = null;
-              }
-              continue;
-            }
-            // HỎI LỊCH GIAO (P0 #855, ca 16/10/2026 «Hôm nào có hàng?»): bản nháp chỉ đọc câu trạng thái «chưa có thông tin vận chuyển»
-            // hoặc hứa «hôm nay / chiều nay / mai giao» mà máy chủ không quyết câu đó trong lượt ⇒ bỏ chữ, chuyển nhân viên (một lần —
-            // khoá theo lượt). Kênh nhắn tin giữ luật im khi chuyển người (01/10/2026); web nhận câu «em báo nhân viên xác nhận giờ giao».
-            const deliveryNote = verdict.ok ? deliveryReplyViolation(text, out, turnDeliverySay(history)) : null;
+            // HỎI LỊCH GIAO (P0 #855, ca 16/10/2026 «Hôm nào có hàng?»): CHỈ khi khách ĐÃ CÓ ĐƠN (giai đoạn hậu mãi — trước chốt, «mai
+            // giao giúp em» là lời dặn ghi vào delivery_note). Bản nháp chỉ đọc câu trạng thái «chưa có thông tin vận chuyển» hoặc hứa
+            // «hôm nay / chiều nay / mai giao» mà máy chủ không quyết đúng mốc đó trong lượt ⇒ bỏ chữ, chuyển nhân viên (một lần — khoá
+            // theo lượt). Kênh nhắn tin giữ luật im khi chuyển người (01/10/2026); web nhận câu «em báo nhân viên xác nhận giờ giao».
+            const deliveryNote = verdict.ok && postSale ? deliveryReplyViolation(text, out, turnDeliverySay(history)) : null;
             if (deliveryNote) {
               lastError = lastError ?? deliveryNote;
               if (!state.handoff) {
@@ -1332,6 +1320,19 @@ async function chatTurnCore(
                 content.push({ type: "text", text: DELIVERY_HANDOFF_TEXT });
                 spoke = true;
                 draftUnsaid = null;
+              }
+              continue;
+            }
+            // ĐỊA CHỈ ĐÃ BIẾT / ĐÃ HỎI KHÔNG HỎI LẠI (P0 15/10/2026, ca «Tuyet Nguyen Thi» · «Lê Văn Dụ»): câu hỏi phường / xã bị bỏ, phần
+            // còn lại vẫn gửi. Cả tin chỉ là câu hỏi lại ⇒ câu ghi nhận — trừ khi tóm tắt đơn của máy chủ còn nợ khách (nó sẽ được gửi).
+            const addrHold = verdict.ok ? addressReaskVerdict(out, addressKnowledge(state, customerTexts), turnSeq) : null;
+            if (addrHold) {
+              lastError = lastError ?? addrHold.note;
+              const said = addrHold.rest || (draftUnsaid ? "" : ADDRESS_KNOWN_TEXT);
+              if (said && !content.some((x) => x.type === "text" && x.text === said)) {
+                content.push({ type: "text", text: said });
+                spoke = true;
+                if (addrHold.rest) draftUnsaid = null;
               }
               continue;
             }

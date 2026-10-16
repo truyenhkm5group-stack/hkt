@@ -28,6 +28,7 @@ import {
   deliveryReplyViolation,
   deliveryTimeAnswer,
   GENERIC_STATUS_PHRASE,
+  pickDeliveryOrder,
   staffDeliveryCommitment,
   turnDeliverySay,
   type DeliveryFacts,
@@ -76,7 +77,13 @@ const NUANCE: Record<string, string> = {
   "Hôm nào có hàng?": "GENERIC",
 };
 export const STATUS_GOLDEN = ["đơn của em sao rồi", "đã gửi chưa", "Đơn của em tới đâu rồi shop?", "shop gửi hàng cho em chưa", "kiểm tra giúp em đơn hàng", "đơn mình đã giao chưa ạ", "tình trạng đơn của em", "don cua e sao roi", "gui hang chua shop", "gửi cho tôi chưa"];
-export const UNRELATED_GOLDEN = ["Giá 1kg bao nhiêu vậy", "Mai em chuyển khoản nhé", "mai em nhắn lại shop", "cho em xem ảnh sản phẩm", "ship về Hà Nội mất phí bao nhiêu", "còn hàng không shop", "Cảm ơn shop", "bao giờ shop mở cửa", "cái này còn size M không", "em muốn gặp nhân viên", "bao giờ nhân viên gọi em", "khi nào tôi chuyển khoản", "Ok chốt đơn", "Hôm nay giá có giảm không"];
+export const UNRELATED_GOLDEN = ["Giá 1kg bao nhiêu vậy", "Mai em chuyển khoản nhé", "mai em nhắn lại shop", "cho em xem ảnh sản phẩm", "ship về Hà Nội mất phí bao nhiêu", "còn hàng không shop", "Cảm ơn shop", "bao giờ shop mở cửa", "cái này còn size M không", "em muốn gặp nhân viên", "bao giờ nhân viên gọi em", "khi nào tôi chuyển khoản", "Ok chốt đơn", "Hôm nay giá có giảm không",
+  // «tối» (buổi tối) ≠ «tới»: hẹn gọi lại, không phải lịch giao — có dấu lẫn không dấu.
+  "Tối nay em gọi lại", "toi nay em goi lai",
+  // «đen» (màu) ≠ «đến»; câu hỏi CÒN HÀNG màu đen (hỏi tồn kho trước khi mua), không phải hỏi lịch giao ngày mai ⇒ null.
+  "Màu đen mai còn không",
+  // «khuyến mãi» / «mãi mãi» / «xác nhận» không phải «mai» / «nhận hàng».
+  "Shop khuyến mãi đến bao giờ vậy", "khuyen mai den bao gio shop", "Dùng mãi mãi không chán", "Shop xác nhận đơn giúp em nhé"];
 
 const PROMISE_WORDS = /hôm nay|chiều nay|sáng nay|tối nay|ngày mai|sáng mai|chiều mai/i;
 
@@ -145,14 +152,17 @@ function testAnswer() {
   assert.equal(deliveryTimeAnswer(facts({ shipment: ship("DELIVERY_FAILED") })).kind, "HANDOFF");
   assert.equal(deliveryTimeAnswer(facts({ shipment: ship("PENDING", false) })).kind, "HANDOFF", "vận đơn chờ lấy ⇒ chưa có lịch giao");
   // Ngày hẹn giao ghi trên đơn.
+  // Ngày hẹn = ngày shop GỬI theo lời khách dặn (không phải giờ hàng tới tay).
   const promised = deliveryTimeAnswer(facts({ promisedAt: new Date(now.getTime() + 3 * 86_400_000) }));
-  assert.ok(promised.kind === "DIRECT" && /hẹn giao ngày/.test(promised.text), JSON.stringify(promised));
+  assert.ok(promised.kind === "DIRECT" && /shop hẹn gửi hàng cho mình ngày \d{2}\/\d{2} theo lời mình dặn/.test(promised.text), JSON.stringify(promised));
   assert.equal(deliveryTimeAnswer(facts({ promisedAt: new Date(now.getTime() - 3 * 86_400_000) })).kind, "HANDOFF", "hẹn đã qua ⇒ người");
+  assert.equal(deliveryTimeAnswer(facts({ promisedAt: now, question: { intent: "DELIVERY_TIME", nuance: "TODAY" }, customerText: "Chiều nay giao được không?" })).kind, "HANDOFF", "hẹn gửi hôm nay + khách hỏi giao hôm nay ⇒ người");
+  assert.equal(deliveryTimeAnswer(facts({ promisedAt: now })).kind, "DIRECT", "hẹn gửi hôm nay + hỏi chung ⇒ nói ngày hẹn gửi");
   // Phiếu ký nhận của đơn ERP.
   assert.equal(deliveryTimeAnswer(facts({ orderStage: "DELIVERED" })).kind, "DIRECT");
   // Không chen vào: nhân viên đã hẹn ⇒ người, kể cả khi ĐVVC có tin.
   const staff = deliveryTimeAnswer(facts({ staffSaid: "Chiều nay giao ạ", shipment: ship("IN_TRANSIT", true, vnDdmmyyyy(3)) }));
-  assert.ok(staff.kind === "HANDOFF" && /nhân viên đã hẹn «Chiều nay giao ạ»/.test(staff.reason) && !/ngày/.test(staff.text), JSON.stringify(staff));
+  assert.ok(staff.kind === "HANDOFF" && /shop đã nhắn lịch giao trong hội thoại: «Chiều nay giao ạ»/.test(staff.reason) && !/nhân viên đã hẹn/.test(staff.reason) && !/ngày/.test(staff.text), JSON.stringify(staff));
   assert.equal(deliveryTimeAnswer(facts({ liveOrders: 2, shipment: ship("OUT_FOR_DELIVERY") })).kind, "HANDOFF", "nhiều đơn ⇒ không đoán đơn nào");
   assert.equal(deliveryTimeAnswer(facts({ stock: "WAITING" })).kind, "HANDOFF");
   assert.equal(deliveryTimeAnswer(facts({ orderStage: "NEW" })).kind, "NOT_APPLICABLE", "đơn nháp ⇒ luồng bán hàng thường");
@@ -175,6 +185,18 @@ function testAnswer() {
   assert.ok(deliveryReplyViolation("Hôm nào có hàng?", "Dạ chiều nay giao chị nhé"), "hứa chiều nay không căn cứ ⇒ vi phạm");
   assert.equal(deliveryReplyViolation("Hôm nào có hàng?", "Dạ đơn mình đang trên đường, đơn vị vận chuyển dự kiến giao trong hôm nay ạ.", "Dạ đơn mình đang trên đường, đơn vị vận chuyển dự kiến giao trong hôm nay ạ."), null, "câu máy chủ đã quyết ⇒ không chặn");
   assert.equal(deliveryReplyViolation("Hôm nào có hàng?", DELIVERY_HANDOFF_TEXT), null);
+  assert.equal(deliveryReplyViolation("Hôm nào có hàng?", "Dạ shop đang khuyến mãi miễn phí giao hàng"), null, "«khuyến mãi» không phải «mai giao»");
+  assert.ok(deliveryReplyViolation("Hôm nào có hàng?", "Dạ chiều nay giao chị nhé", "Dạ đơn mình đang trên đường, đơn vị vận chuyển dự kiến giao trong hôm nay ạ."), "căn cứ «trong hôm nay» không bảo lãnh «chiều nay»");
+  assert.ok(deliveryReplyViolation("Hôm nào có hàng?", "Dạ mai giao chị nhé", "Dạ đơn mình đang trên đường, đơn vị vận chuyển dự kiến giao trong hôm nay ạ."), "căn cứ hôm nay không bảo lãnh «mai»");
+
+  // Đơn của LƯỢT MUA HIỆN TẠI.
+  const d = (days: number) => new Date(now.getTime() - days * 86_400_000);
+  const pickOpts = { confirmedId: null, pastIds: ["cu-1"], now, windowDays: 30 };
+  assert.equal(pickDeliveryOrder([{ id: "moi-1", stage: "NEW", insertedAt: d(0) }, { id: "cu-1", stage: "DELIVERED", insertedAt: d(40) }], pickOpts).kind, "NOT_APPLICABLE", "đơn cũ đã giao + đơn nháp mới ⇒ luồng bán hàng");
+  assert.equal(pickDeliveryOrder([{ id: "cu-1", stage: "DELIVERED", insertedAt: d(40) }], pickOpts).kind, "NOT_APPLICABLE", "chỉ có đơn cũ ⇒ không trả lời bằng đơn cũ");
+  assert.equal(pickDeliveryOrder([{ id: "cu-2", stage: "RETURNED", insertedAt: d(45) }], pickOpts).kind, "NOT_APPLICABLE", "đơn ngoài cửa sổ lượt mua ⇒ không phải đơn hiện tại");
+  const pk = pickDeliveryOrder([{ id: "moi-2", stage: "CONFIRMED", insertedAt: d(0) }, { id: "cu-1", stage: "DELIVERED", insertedAt: d(10) }, { id: "gan-1", stage: "DELIVERED", insertedAt: d(5) }], pickOpts);
+  assert.ok(pk.kind === "TARGET" && pk.target.id === "moi-2" && pk.liveOrders === 1, `đơn đã khép không đếm là đơn đang mở: ${JSON.stringify(pk)}`);
   assert.equal(deliveryReplyViolation("đơn của em sao rồi", statusReply), null, "câu hỏi trạng thái ⇒ câu trạng thái là đúng");
 
   // Căn cứ của lượt: chỉ kết quả công cụ SAU tin khách gần nhất.
@@ -201,7 +223,16 @@ const STATUS_REPLY = "Dạ đơn mình hiện đang ở trạng thái: Shop đã
 const withOrder = (id: string) => async ({ conversationId }: { conversationId: string }) => {
   const db = await getDb();
   await db.insert(schema.orders).values({ id, insertedAt: new Date(Date.now() - 30 * 60_000), salesConversationId: conversationId, totalPrice: 280_000, stage: "CONFIRMED" });
+  await db.update(schema.salesChatConversations).set({ orderId: id }).where(eq(schema.salesChatConversations.id, conversationId));
 };
+/** Đơn NHÁP của bot đang chờ khách xác nhận (giai đoạn đang chốt — chưa phải hậu mãi). */
+const withDraft = (id: string) => async ({ conversationId }: { conversationId: string }) => {
+  const db = await getDb();
+  await db.insert(schema.orders).values({ id, insertedAt: new Date(Date.now() - 10 * 60_000), salesConversationId: conversationId, totalPrice: 280_000, stage: "NEW" });
+  const state: ChatState = { draft: { orderId: id, lines: [], unitPrices: {}, recipient: { name: "Khách thử", phone: "0900000000", address: "1 Phố Thử", province: "Hà Nội" }, note: "", simulated: false } };
+  await db.update(schema.salesChatConversations).set({ draftOrderId: id, state: state as Record<string, unknown> }).where(eq(schema.salesChatConversations.id, conversationId));
+};
+const PRE_SALE_NOTE = "Dạ em ghi chú giao ngày mai cho mình ạ.";
 const ENGINE_CASES: GoldenCase[] = [
   {
     key: "p855-web-tu-viet-trang-thai",
@@ -223,6 +254,27 @@ const ENGINE_CASES: GoldenCase[] = [
     shop: "food",
     channel: "WEB",
     turns: [{ say: "đơn của em sao rồi", before: withOrder("7712345000000855003"), ai: [() => [say(STATUS_REPLY)]] }],
+  },
+  {
+    key: "p855-truoc-chot-dan-mai-giao",
+    title: "Chưa có đơn: «Mai giao giúp em nhé» là lời DẶN ⇒ không chặn, không chuyển người",
+    shop: "food",
+    channel: "WEB",
+    turns: [{ say: "Mai giao giúp em nhé", ai: [() => [say(PRE_SALE_NOTE)]] }],
+  },
+  {
+    key: "p855-truoc-mua-giao-trong-ngay",
+    title: "Trước khi mua hỏi «giao trong ngày được không» ⇒ chính sách shop, không chặn",
+    shop: "food",
+    channel: "WEB",
+    turns: [{ say: "giao trong ngày được không", ai: [() => [say("Dạ nội thành shop giao trong ngày ạ.")]] }],
+  },
+  {
+    key: "p855-don-nhap-dan-mai-giao",
+    title: "Đơn nháp đang chốt: «Mai giao giúp em nhé» ⇒ không chặn (ghi chú giao hàng là việc của luồng bán)",
+    shop: "food",
+    channel: "WEB",
+    turns: [{ say: "Mai giao giúp em nhé", before: withDraft("erp-p855-nhap-1"), ai: [() => [say(PRE_SALE_NOTE)]] }],
   },
 ];
 
@@ -249,6 +301,10 @@ async function runEngineCases() {
   const st = got.get("p855-web-hoi-trang-thai")!;
   assert.deepEqual(st.turns[0].shown, [STATUS_REPLY], "câu hỏi trạng thái ⇒ câu trạng thái gửi bình thường");
   assert.notEqual(st.final.status, "HANDOFF");
+  for (const [key, said] of [["p855-truoc-chot-dan-mai-giao", PRE_SALE_NOTE], ["p855-truoc-mua-giao-trong-ngay", "Dạ nội thành shop giao trong ngày ạ."], ["p855-don-nhap-dan-mai-giao", PRE_SALE_NOTE]] as const) {
+    const t = got.get(key)!;
+    assert.ok(t.turns[0].shown.some((x) => x.includes(said)) && t.final.status !== "HANDOFF" && notified.get(key) === 0, `${key}: trước chốt không chặn lịch giao — ${JSON.stringify({ shown: t.turns[0].shown, status: t.final.status, reason: t.final.handoffReason })}`);
+  }
 }
 
 // ─────────────────────────── TỔ CHỨC THẬT ───────────────────────────
@@ -312,14 +368,29 @@ async function run() {
     assert.ok(r2.v.delivery_answer?.kind === "DIRECT" && /dự kiến giao khoảng ngày/.test(r2.v.delivery_answer.say ?? ""), r2.content);
     // Nhân viên đã nhắn «Chiều nay giao ạ» ⇒ AI không nói khác (không đọc ETA trái lời nhân viên), chuyển về nhân viên.
     const r3 = await ask(c2, "Bao giờ nhận được?", [`${DELIVERY_SHOP_SAID_PREFIX} Chiều nay giao ạ`]);
-    assert.ok(r3.requireHuman && /nhân viên đã hẹn/.test(r3.requireHuman) && r3.v.delivery_answer?.kind === "HANDOFF", r3.content);
+    assert.ok(r3.requireHuman && /shop đã nhắn lịch giao/.test(r3.requireHuman) && r3.v.delivery_answer?.kind === "HANDOFF", r3.content);
     assert.ok(!r3.content.includes("dự kiến giao"), "không đưa ETA trái lời nhân viên");
+
+    // Đơn cũ đã giao (lượt mua trước) + đơn nháp mới ⇒ không áp lịch giao (luồng bán hàng), không trả lời bằng đơn cũ.
+    const c5 = await conv();
+    await order("erp-p855-cu5", c5, { stage: "DELIVERED", insertedAt: new Date(now - 40 * 86_400_000) });
+    await order("erp-p855-moi5", c5, { stage: "NEW" });
+    const past = { pastOrders: [{ orderId: "erp-p855-cu5", simulated: false, total: 280_000, at: new Date(now - 40 * 86_400_000).toISOString() }] } as ChatState;
+    const r5 = await executeTool("get_order_status", {}, { conversationId: c5, channel: "WEB", config: cfg, state: past, lastUserText: "Hôm nào có hàng?", agent: { name: "t", source: "t" } });
+    assert.equal((JSON.parse(r5.content) as Out).delivery_answer, undefined, `đơn nháp đang mở ⇒ không áp lịch giao: ${r5.content}`);
+    assert.equal(r5.requireHuman, undefined);
+    // Đơn cũ đã giao + đơn hiện tại đã chốt chưa vận đơn ⇒ hỏi về đơn hiện tại, không đếm đơn cũ là «đang mở».
+    const c6 = await conv();
+    await order("erp-p855-cu6", c6, { stage: "DELIVERED", insertedAt: new Date(now - 40 * 86_400_000) });
+    await order("erp-p855-moi6", c6);
+    const r6 = await executeTool("get_order_status", {}, { conversationId: c6, channel: "WEB", config: cfg, state: { pastOrders: [{ orderId: "erp-p855-cu6", simulated: false, total: 280_000, at: new Date(now - 40 * 86_400_000).toISOString() }] } as ChatState, lastUserText: "Hôm nào có hàng?", agent: { name: "t", source: "t" } });
+    assert.ok(r6.requireHuman && /chưa có vận đơn/.test(r6.requireHuman) && !/đơn đang mở/.test(r6.requireHuman), `đơn hiện tại, không đếm đơn cũ: ${r6.requireHuman}`);
 
     // Ngày hẹn giao đã ghi trên đơn ⇒ nói ngày hẹn.
     const c4 = await conv();
     await order("erp-p855-o4", c4, { customerPromisedAt: new Date(now + 3 * 86_400_000) });
     const r4 = await ask(c4, "hom nao co hang");
-    assert.ok(r4.v.delivery_answer?.kind === "DIRECT" && /hẹn giao ngày/.test(r4.v.delivery_answer.say ?? ""), r4.content);
+    assert.ok(r4.v.delivery_answer?.kind === "DIRECT" && /hẹn gửi hàng cho mình ngày/.test(r4.v.delivery_answer.say ?? ""), r4.content);
   });
 }
 
@@ -335,6 +406,6 @@ export async function testP0855DeliveryIntent() {
   }
   await runEngineCases();
   console.log(
-    `✓ P0 #855 hỏi lịch giao ≠ hỏi trạng thái: ${DELIVERY_GOLDEN.length}/${DELIVERY_GOLDEN.length} câu thời gian giao ⇒ DELIVERY_TIME · câu trạng thái ⇒ ORDER_STATUS · câu không liên quan ⇒ null · đơn chưa vận đơn hỏi «Hôm nào có hàng?» ⇒ máy chủ chuyển nhân viên, không câu trạng thái, không hứa giờ · hôm nay / ngày mai / giao gấp chưa có dữ liệu ⇒ không hứa · ETA ĐVVC đọc được / ngày hẹn ghi trên đơn ⇒ trả lời trực tiếp · nhân viên đã hẹn ⇒ AI không nói khác · chốt chặn chữ model qua chatTurn (web: câu chuyển nhân viên · fanpage: im · một lần báo)`,
+    `✓ P0 #855 hỏi lịch giao ≠ hỏi trạng thái: ${DELIVERY_GOLDEN.length}/${DELIVERY_GOLDEN.length} câu thời gian giao ⇒ DELIVERY_TIME · câu trạng thái ⇒ ORDER_STATUS · câu không liên quan ⇒ null · đơn chưa vận đơn hỏi «Hôm nào có hàng?» ⇒ máy chủ chuyển nhân viên, không câu trạng thái, không hứa giờ · hôm nay / ngày mai / giao gấp chưa có dữ liệu ⇒ không hứa · ETA ĐVVC đọc được / ngày hẹn ghi trên đơn ⇒ trả lời trực tiếp · shop đã nhắn lịch giao ⇒ AI không nói khác · chỉ đơn của lượt mua hiện tại · trước chốt không chặn · chốt chặn chữ model qua chatTurn (web: câu chuyển nhân viên · fanpage: im · một lần báo)`,
   );
 }
