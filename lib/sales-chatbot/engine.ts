@@ -66,7 +66,9 @@ import { formatVND } from "@/lib/format";
 import { withTurnEvents } from "@/lib/sales-chatbot/events";
 import { FOOD_PACK, salesPackFor, type SalesPack } from "@/lib/sales-chatbot/packs";
 import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
-import { amountText, applyCustomerCartMessage, buyingText, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, invitedProductOf, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
+import { amountText, applyCustomerCartMessage, buyingText, cartCommitmentPrompt, cartHoldVerdict, countItemObjections, customerHesitates, invitedProductOf, itemObjectionCue, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
+import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
+import { customerHandoffVerdict } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
 import { ADDRESS_KNOWN_TEXT, addressKnowledge, addressReaskVerdict } from "@/lib/sales-chatbot/address-memory";
@@ -1040,6 +1042,23 @@ async function chatTurnCore(
       await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1 });
       if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey: `sales-chat:payment-claim:${conv.id}:${turnSeq}` }).catch(() => undefined);
       return { ok: true, view: (await conversationView(conv.id))! };
+    }
+    // KHÁCH ĐÒI NGƯỜI / PHẢN ĐỐI MÓN LẶP (P0 #855, ca «ThuyNgo»): «Robot hả», «gặp nhân viên», hoặc lần phản đối món thứ hai trong LƯỢT MUA
+    // hiện tại ⇒ MÁY CHỦ chuyển người ngay như nhánh chuyển khoản — không lượt AI, không thêm câu xin lỗi / hỏi lại. Lý do không tự hết hạn
+    // (`CUSTOMER_HANDOFF_REASON`) ⇒ AI không tự quay lại sau cooldown. Nhân viên đang tiếp quản ⇒ không đè quyết định của người.
+    if (readConversationControl(st0)?.mode !== "HUMAN") {
+      const cycleTurns = Math.max(0, conv.turns - cycleStartTurns(st0, conv.turns, now));
+      // Tin khách của lượt mua hiện tại = `cycleTurns` tin khách gần nhất (tin chưa có lượt nào ⇒ chỉ tin này).
+      const customerMsgs = msgs.filter((m) => m.role === "user" && m.content.some((b) => b.type === "text") && !m.content.some((b) => b.type === "tool_result"));
+      const cycleTexts = cycleTurns > 0 ? customerMsgs.slice(-cycleTurns).map((m) => textOf(m.content)) : [];
+      const wants = customerHandoffVerdict({ text, objections: countItemObjections([...cycleTexts, text]), objectionNow: itemObjectionCue(text) });
+      if (wants) {
+        const st = { ...st0, handoff: { reason: wants.reason, at: now.toISOString() } };
+        if (!isMessagingChannel(opts.channel)) await reply(conv, seq, cfg.handoff.message);
+        await bump({ status: "HANDOFF", handoffReason: wants.reason, state: st as Record<string, unknown>, turns: conv.turns + 1 });
+        if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, wants.reason, st.customer, now, { dedupeKey: `sales-chat:customer-handoff:${conv.id}:${turnSeq}` }).catch(() => undefined);
+        return { ok: true, view: (await conversationView(conv.id))! };
+      }
     }
     // KHIẾU NẠI SAU KHI CÓ ĐƠN (review #821 F2): hàng lỗi / thiếu / sai / đau bụng / giao chậm / đòi đổi trả, hoàn tiền, hoặc ĐVVC báo đã
     // giao mà khách nói chưa nhận ⇒ MÁY CHỦ chuyển người ngay như nhánh khách báo chuyển khoản — không lượt AI, không câu mẫu, không để

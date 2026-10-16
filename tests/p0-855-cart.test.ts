@@ -246,12 +246,74 @@ async function testGolden() {
   assert.deepEqual([...seen].sort(), GOLDEN.map((c) => c.key).sort());
 }
 
+/** Chuyển người theo CHỮ KHÁCH qua `chatTurn` thật trên kênh NHẮN TIN (FANPAGE — chuyển người thì bot im). */
+const ASK = "Dạ mình lấy 1kg chả mực giã tay ạ, cho em xin SĐT và địa chỉ nhé.";
+const HANDOFF_GOLDEN: GoldenCase[] = [
+  {
+    key: "gc-855-robot-ha",
+    title: "#855: «Robot hả» ⇒ máy chủ chuyển người MỘT lần, không gọi model, không gửi tin; tin sau vẫn im",
+    shop: "food",
+    channel: "FANPAGE",
+    config: CFG,
+    turns: [
+      { say: "Ship chị 1 mực giã tay", ai: [() => [say(ASK)]] },
+      { say: "Robot hả", ai: [] },
+      { say: "alo", ai: [] },
+    ],
+  },
+  {
+    key: "gc-855-phan-doi-lap",
+    title: "#855: phản đối món lần 1 ⇒ AI vẫn sửa; lần 2 ⇒ chuyển người, không thêm câu xin lỗi",
+    shop: "food",
+    channel: "FANPAGE",
+    config: CFG,
+    turns: [
+      { say: "Ship chị 1 mực giã tay", ai: [() => [say(ASK)]] },
+      { say: "Kg có order chả cá thu nha", ai: [() => [say("Dạ đơn mình chỉ có 1kg chả mực giã tay ạ.")]] },
+      { say: "Sao kg coi ở trên", ai: [] },
+    ],
+  },
+];
+
+async function testHandoffGolden() {
+  const seen = new Set<string>();
+  await runGoldenCases(HANDOFF_GOLDEN, {
+    orgSuffix: "-p855h",
+    beforeCase: async (_c, ctx) => seedCct(ctx),
+    afterCase: async (c, ctx, t) => {
+      seen.add(c.key);
+      assert.equal(t.turns[0].status, "OPEN", `[${c.key}] lượt đặt hàng AI trả lời`);
+      assert.deepEqual(t.turns[0].shown, [ASK]);
+      const db = await getDb();
+      const [row] = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, ctx.conversationId));
+      if (c.key === "gc-855-robot-ha") {
+        assert.equal(t.turns[1].status, "HANDOFF", "«Robot hả» ⇒ chuyển người");
+        assert.equal(t.turns[1].rounds.length, 0, "không gọi model");
+        assert.deepEqual(t.turns[1].shown, [], "kênh nhắn tin: không gửi tin nào");
+        assert.deepEqual(t.turns[2].shown, [], "tin sau vẫn im");
+        assert.equal(t.turns[2].rounds.length, 0);
+        assert.equal(t.final.handoffReason, CUSTOMER_HANDOFF_REASON.WANTS_HUMAN);
+        assert.equal(row.handoffReason, CUSTOMER_HANDOFF_REASON.WANTS_HUMAN, "lý do không bị lượt sau đè");
+        return;
+      }
+      assert.equal(t.turns[1].status, "OPEN", "phản đối lần 1 ⇒ AI vẫn xử lý");
+      assert.equal(t.turns[1].shown.length, 1);
+      assert.equal(t.turns[2].status, "HANDOFF", "phản đối lần 2 ⇒ chuyển người");
+      assert.equal(t.turns[2].rounds.length, 0, "không gọi model");
+      assert.deepEqual(t.turns[2].shown, [], "không thêm câu xin lỗi");
+      assert.equal(t.final.handoffReason, CUSTOMER_HANDOFF_REASON.REPEATED_OBJECTION);
+    },
+  });
+  assert.deepEqual([...seen].sort(), HANDOFF_GOLDEN.map((c) => c.key).sort());
+}
+
 export async function testP0855Cart() {
   testRootCause();
   testBareNumberGuards();
   testDenyAndEdit();
   testHandoffSignals();
   await testGolden();
+  await testHandoffGolden();
   console.log("  ✓ P0 #855 (ThuyNgo): «1 mực giã tay» ⇒ giỏ 1 chả mực, đơn cá + mực bị máy chủ từ chối (0 SKU tự thêm, tiền = báo giá máy chủ); «kg có order chả cá» bỏ cá giữ mực; «2 kg đặt» không phải phủ định; «Robot hả» / phản đối lặp ⇒ chuyển người không tự hết hạn");
 }
 
