@@ -1,0 +1,8 @@
+{
+  "pr": 874,
+  "sha": "7d4485cf5e0d20ea5772a670e188ee9fc57adf9d",
+  "verdict": "PASS",
+  "actor": "vm:hkt",
+  "at": "2026-10-16T16:07:19.396Z",
+  "note": "Review độc lập đọc-chỉ 6 vòng: c869ac0e ĐẠT (2 TB) → 9fec8657 ĐẠT (1 TB Gò Vấp) → 142a6a70 CẦN SỬA (1 CAO quận cũ quá rộng) → 26f31924 ĐẠT (1 TB «/» hẻm) → e7c83b89 ĐẠT (1 TB lời sửa theo vế) → 7d4485cf ĐẠT, 1 THẤP an toàn"
+}
