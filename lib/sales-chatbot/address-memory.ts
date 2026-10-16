@@ -228,6 +228,8 @@ export type AddressKnowledge = {
   draftMismatch?: boolean;
   phoneKnown?: boolean;
   nameKnown?: boolean;
+  /** Tin khách mới nhất HẸN gửi thông tin sau — câu bot nhắc lại không phải hỏi lặp. */
+  deferred?: boolean;
   /** Tin khách mới nhất phàn nàn bị hỏi lại / bảo «ở trên», «robot hả», «khách cũ mà hỏi gì». */
   complained?: boolean;
 };
@@ -247,6 +249,8 @@ function settlesAddress(last: string, ward: string | null): boolean {
 
 /** Lời khách phàn nàn bị hỏi lại («ở trên», «nói rồi», «gửi rồi», «robot hả», «khách cũ mà hỏi gì», «hỏi hoài») — đã gập. */
 const COMPLAINT_RE = /(?:^| )(?:robot|ro bot|bot a|may a|o tren|coi o tren|xem o tren|doc lai|noi roi|gui roi|nhan roi|cho roi|khach cu ma|hoi gi|hoi hoai|hoi mai|hoi lai hoai|hoi nhieu)(?: |$)/;
+/** Khách hẹn gửi thông tin sau («tối chị gửi», «để sau», «lát gửi», «gửi sau nhé»). */
+const DEFER_RE = /(?:^| )(?:gui sau|de sau|lat (?:chi |anh |em )?gui|toi (?:chi |anh )?gui|chut (?:chi |anh )?gui|mai (?:chi |anh )?gui|sau (?:chi |anh )?gui)(?: |$)/;
 /** SĐT di động VN trong một câu (bỏ khoảng trắng / chấm / gạch giữa các cụm số). */
 const PHONE_IN_TEXT = /(?:\+?84|0)[35789]\d{8}(?!\d)/;
 const hasPhone = (t: string) => PHONE_IN_TEXT.test(t.replace(/(\d)[ .-](?=\d)/g, "$1"));
@@ -265,6 +269,7 @@ export function addressKnowledge(state: Pick<ChatState, "draft" | "customer" | "
     phoneKnown: Boolean(state.customer?.phone?.trim() || state.draft?.recipient.phone?.trim() || customerTexts.some(hasPhone)) && !PHONE_CHANGE.test(lastF),
     nameKnown: Boolean(state.customer?.name?.trim() || state.draft?.recipient.name?.trim()) && !PHONE_CHANGE.test(lastF),
     complained: COMPLAINT_RE.test(lastF),
+    deferred: DEFER_RE.test(lastF),
   };
   // Khách xin đổi địa chỉ ⇒ địa chỉ máy đang giữ KHÔNG còn là điều đã biết; câu hỏi phường / địa chỉ của bot đi qua.
   if (wantsAddressChange(last)) return { ward: null, wardAskedAt: null, province: false, street: false, changeRequested: true, ...contact, phoneKnown: false, nameKnown: false };
@@ -397,6 +402,11 @@ export const ADDRESS_REASK_NOTE: Record<AddressReaskCode, string> = {
   };
 
 
+/** Câu thật sự HỎI / XIN: dấu hiệu hỏi, hoặc lời xin («xin», «cho em», «gửi giúp em», «cung cấp»). */
+const isAsking = (sentence: string) => {
+  const f = foldVnText(sentence);
+  return isQuestion(sentence, f) || /(?:^| )(?:xin|cho em|gui giup|gui lai giup|cung cap|de lai)(?: |$)/.test(f);
+};
 const sentencesOf = (text: string) => (text.match(/[^.!?\n]+[.!?]*/g) ?? []).map((s) => s.trim()).filter(Boolean);
 
 /**
@@ -409,27 +419,31 @@ const sentencesOf = (text: string) => (text.match(/[^.!?\n]+[.!?]*/g) ?? []).map
 export function addressReaskVerdict(botText: string, k: AddressKnowledge, turn: number, opts: { botTexts?: readonly string[] } = {}): AddressReaskVerdict | null {
   const sentences = sentencesOf(botText);
   if (!sentences.length) return null;
-  const prior = (opts.botTexts ?? []).flatMap(sentencesOf);
+  // «Hỏi lần 2» chỉ tính câu THẬT SỰ hỏi / xin («… ạ?», «cho em xin …») — câu kể có điều kiện («chị gửi địa chỉ là em lên đơn ngay»)
+  // không phải câu hỏi lại; và khách đang HẸN gửi sau («tối chị gửi», «để sau») thì không phải hỏi lặp (order-golden «thieu-thong-tin»).
+  const prior = (opts.botTexts ?? []).flatMap(sentencesOf).filter(isAsking);
   const askedWardBefore = prior.some(asksForWard);
   const askedAddressBefore = prior.some(asksForFullAddress);
   const askedPhoneBefore = prior.some(asksForPhone);
   const askedNameBefore = prior.some(asksForName);
+  const asking = sentences.some(isAsking);
+  const repeatOk = asking && !k.deferred;
   const free = !k.corrected && !k.changeRequested;
   // Khách đang sửa phường ⇒ bot được hỏi / xác nhận lại — hàng rào không bỏ câu hỏi phường ở lượt đó.
   // Phường ĐÃ BIẾT chỉ chặn câu hỏi phường khi tin khách mới nhất xác nhận / mang chính địa chỉ đó — tin khác có thể là đổi người / nơi
   // nhận («gửi cho mẹ chị dưới quê»), bot phải hỏi được phường của nơi mới (review PR #848 lần 4).
   const wardKnown = free && k.ward !== null && Boolean(k.lastSettlesAddress);
-  const wardAsked = free && k.ward === null && ((k.wardAskedAt !== null && k.wardAskedAt < turn) || askedWardBefore);
+  const wardAsked = free && k.ward === null && ((k.wardAskedAt !== null && k.wardAskedAt < turn) || (askedWardBefore && repeatOk));
   const legacy = free && Boolean(k.legacyUnmapped) && (Boolean(k.lastSettlesAddress) || k.draftMismatch === true);
   const fullKnown = free && ((k.ward !== null && k.province && k.street) || Boolean(k.legacyUnmapped)) && Boolean(k.lastSettlesAddress);
   const reuse = free && Boolean(k.reuseUnresolved);
   const complaint = free && Boolean(k.complained);
   const wardDrop = wardKnown || wardAsked || legacy || reuse || complaint;
-  const fullDrop = fullKnown || reuse || complaint || (free && askedAddressBefore && !k.ward);
+  const fullDrop = fullKnown || reuse || complaint || (free && askedAddressBefore && repeatOk && !k.ward && !k.legacyUnmapped);
   const phoneDrop = Boolean(k.phoneKnown) && free;
   const nameDrop = Boolean(k.nameKnown) && free;
-  const phoneTwice = !k.phoneKnown && free && askedPhoneBefore;
-  const nameTwice = !k.nameKnown && free && askedNameBefore;
+  const phoneTwice = !k.phoneKnown && free && askedPhoneBefore && repeatOk;
+  const nameTwice = !k.nameKnown && free && askedNameBefore && repeatOk;
   const drop = (s: string) => (wardDrop && asksForWard(s)) || (fullDrop && asksForFullAddress(s)) || ((phoneDrop || phoneTwice) && asksForPhone(s)) || ((nameDrop || nameTwice) && asksForName(s));
   const dropped = sentences.filter(drop);
   if (!dropped.length) return null;
@@ -437,7 +451,7 @@ export function addressReaskVerdict(botText: string, k: AddressKnowledge, turn: 
   const addressAsk = dropped.some((s) => asksForWard(s) || asksForFullAddress(s));
   // Phải chuyển người: «như cũ» mà không có địa chỉ xác minh · khách phàn nàn bị hỏi lại · cùng một trường (địa chỉ / SĐT) đã hỏi rồi
   // mà vẫn chưa có — hỏi lần nữa chỉ là lặp, không thêm thông tin.
-  const twiceAddress = addressAsk && askedAddressBefore && !k.ward && !k.legacyUnmapped;
+  const twiceAddress = addressAsk && askedAddressBefore && repeatOk && !k.ward && !k.legacyUnmapped;
   const twicePhone = phoneTwice && dropped.some(asksForPhone);
   let code: AddressReaskCode;
   let handoff: string | undefined;

@@ -44,8 +44,8 @@ import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packi
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
 import { bindCommitment, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
-import { acceptCustomerWard, addressQuestion, canAutoFill, namesOtherWard, parseCustomerAddress, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
-import { askedBefore, askMemoryFor, askMemoryParts, askParts, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
+import { acceptCustomerWard, addressQuestion, canAutoFill, legacyAddressUnmapped, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
+import { askedBefore, askMemoryFor, askMemoryParts, askParts, deliveryAddressDecision, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
 import { isMessagingChannel, type ChatChannel, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
@@ -632,6 +632,9 @@ export function addressCheckOf(r: Pick<Recipient, "address" | "province" | "ward
   return out;
 }
 
+/** Ghi chú công cụ cho địa chỉ cũ chưa ghép — nội bộ, model không được hỏi khách. */
+export const LEGACY_UNMAPPED_NOTE = "Địa chỉ khách ghi ĐỦ theo địa giới CŨ; danh mục vận chuyển chưa ghép được một xã / phường mới — đây KHÔNG phải khách thiếu thông tin. KHÔNG hỏi khách tên phường / xã mới, KHÔNG chọn một ứng viên, KHÔNG sửa dòng địa chỉ. Ghi đúng nguyên văn; đơn đi với cờ cần kiểm địa chỉ, nhân viên đối chiếu nội bộ.";
+
 function addressCheckCore(r: Pick<Recipient, "address" | "province" | "ward">, opts: AddressCheckOpts): { key: string; view: AddressCheckView } {
   const key = [r.address, r.province, r.ward ?? ""].map((x) => x.trim()).join("|");
   const a = parseCustomerAddress(r.address, r.province);
@@ -648,6 +651,12 @@ function addressCheckCore(r: Pick<Recipient, "address" | "province" | "ward">, o
     const missing = a.missing.filter((m) => m !== "ward" && m !== "province");
     const ask = missing.includes("street") ? addressQuestion({ ...a, province: stated.province, provinceCode: stated.provinceCode, ward: stated.ward, confidence: "EXACT", candidates: [], legacy: null, provinceHint: null, missing }) : null;
     return { key, view: { status: "CUSTOMER_STATED", province: stated.province, ward: stated.ward, candidates: [], missing, ask_customer: ask, note: "Xã / phường đọc từ CHÍNH tin khách đã gửi — đã ghép theo địa giới mới. KHÔNG hỏi lại khách phường / xã." } };
+  }
+  // ĐỊA GIỚI CŨ ĐỦ MÀ DANH MỤC CHƯA GHÉP (#855 — chủ shop 16/10/2026: «không yêu cầu khách tự tìm hiểu tên phường mới», «không chọn ngẫu
+  // nhiên», «không chắc ⇒ chuyển nhân viên»): KHÔNG có câu hỏi khách; ô xã để trống, đơn đi với cờ ADDRESS_UNRESOLVED cho nhân viên kiểm
+  // nội bộ (không tạo vận đơn — lõi đơn giữ đơn ở hàng cần kiểm). Ứng viên chỉ nằm ở `candidates` cho người kiểm.
+  if (legacyAddressUnmapped(r.address, r.province)) {
+    return { key, view: { status: a.confidence, province: a.province, ward: null, candidates: a.candidates, missing: a.missing, ask_customer: null, note: LEGACY_UNMAPPED_NOTE } };
   }
   const ask = addressQuestion(a);
   const note = canAutoFill(a)
@@ -992,6 +1001,18 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
           if (!parsed.province) recipient.province = stated.province;
         }
       }
+      // KHÁCH ĐỔI ĐỊA CHỈ (#855, ca «ThuyNgo»): tin khách MỚI HƠN mang một địa chỉ giao khác địa chỉ đơn nháp / hồ sơ đang giữ ⇒ địa chỉ mới
+      // THẮNG — ghi đúng NGUYÊN VĂN chữ khách (không bịa phần nào), xã đặt lại theo chính địa chỉ đó, và đơn mang cờ cần người xác minh
+      // (`addressChange` bên dưới). Model chép lại đúng nơi giao ⇒ giữ bản model (đã có phường khách ghi).
+      const change = deliveryAddressDecision({ draft: existing, customer: state.customer }, ctx.customerTexts ?? []);
+      const addressChange = change.status === "CHANGE_PENDING_VERIFICATION" && change.use ? { to: change.use.raw, from: change.previous?.raw ?? "" } : null;
+      if (addressChange && !sameDeliveryPlace(recipient.address, addressChange.to)) {
+        recipient.address = addressChange.to;
+        recipient.province = "";
+        delete recipient.ward;
+        const parsedNew = parseCustomerAddress(recipient.address);
+        if (canAutoFill(parsedNew) && parsedNew.ward) recipient.ward = parsedNew.ward;
+      }
       const priced = await priceLines(lines, ctx.config, verifiedCustomerId(state), [recipient.address, recipient.province].join(", "), { packing: Boolean(packing) });
       if (priced.missing.length) return err("Đơn nháp: mã không có", `Không có mẫu mã: ${priced.missing.join(", ")}.`, state, { reason: "UNKNOWN_SKU" });
       if (priced.unpriced.length) return { ...err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state, { reason: "UNPRICED_SKU" }), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
@@ -1033,6 +1054,8 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         if (!r.ok) return err("Đơn nháp: lỗi", failureText(r), state, omsSignal(r));
         markOrderWritten(ctx.writeMark, r.id);
         draft.orderId = r.id;
+        // Đổi địa chỉ chưa xác minh ⇒ cờ cần người (một đường gắn cờ của lõi đơn; cờ trùng mã không nhân đôi).
+        if (addressChange) await flagOrderForReviewAsAgent(ctx.agent, r.id, { code: "ADDRESS_UNRESOLVED", note: `Khách đổi địa chỉ giao — địa chỉ trước: «${addressChange.from.slice(0, 120)}»; cần người xác minh địa chỉ mới`, quote: addressChange.to.slice(0, 300) }, now).catch(() => undefined);
       }
       state.draft = draft;
       state.cart = bindCommitment(state.cart, priced.asked, ctx.turn ?? null, now);

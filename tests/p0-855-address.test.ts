@@ -21,7 +21,10 @@ import { addressGapOf, addressQuestion, customerStatedAddresses, hasStreetDetail
 import { ADDRESS_HANDOFF_REASON, ADDRESS_KNOWN_TEXT, ADDRESS_REASK_NOTE, ADDRESS_STAFF_TEXT, addressKnowledge, addressReaskVerdict, asksForName, asksForPhone, deliveryAddressDecision, reuseIntentOf as reuseFromMemory } from "@/lib/sales-chatbot/address-memory";
 import { addressConfidence, assembleCustomer360, customer360Prompt, reuseIntentOf, type OrderFact } from "@/lib/sales-chatbot/customer-360";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
-import { runGoldenCases, say, type GoldenCase } from "./sales-agent-golden/harness";
+import { eq } from "drizzle-orm";
+import { getDb, schema } from "@/db";
+import { orderReviewOf } from "@/lib/constants/order-review";
+import { runGoldenCases, say, tool, type GoldenCase } from "./sales-agent-golden/harness";
 
 /** Ca B — địa giới CŨ, thị trấn cũ bị chia làm ba xã mới (danh mục không quy được về MỘT xã). */
 const OLD_SPLIT = "Tổ dân phố 5, thị trấn Đông Anh, huyện Đông Anh, Hà Nội";
@@ -156,6 +159,10 @@ export function testP0855AddressPure() {
   assert.ok(twice && twice.note.startsWith(ADDRESS_REASK_NOTE.REPEAT_ASK) && twice.handoff === ADDRESS_HANDOFF_REASON.REPEAT_ASK && twice.rest === ADDRESS_STAFF_TEXT, JSON.stringify(twice));
   assert.equal(addressReaskVerdict("Dạ chị cho em xin số điện thoại ạ?", empty, 3, { botTexts: ["Dạ chị cho em xin số điện thoại nhé?"] })?.note, ADDRESS_REASK_NOTE.REPEAT_ASK);
   assert.equal(addressReaskVerdict("Dạ mình ở phường nào ạ?", empty, 3, { botTexts: ["Dạ mình ở phường nào ạ?"] })?.note, ADDRESS_REASK_NOTE.WARD_ASKED, "phường đã hỏi ⇒ không hỏi lần 2, đơn đi với cờ cần kiểm");
+  // Câu kể có điều kiện / khách hẹn gửi sau KHÔNG phải hỏi lặp (đơn vàng «thieu-thong-tin»).
+  const later = addressKnowledge({}, ["lấy chị 1kg chả mực, sđt 0928000818", "để tối chị gửi địa chỉ sau nhé"]);
+  assert.equal(addressReaskVerdict("Dạ vâng ạ, chị gửi địa chỉ là em lên đơn ngay.", later, 3, { botTexts: ["Dạ chị cho em xin địa chỉ giao hàng ạ."] }), null);
+  assert.equal(addressReaskVerdict("Dạ chị cho em xin địa chỉ giao hàng ạ?", later, 3, { botTexts: ["Dạ chị cho em xin địa chỉ giao hàng ạ."] }), null, "khách hẹn gửi sau ⇒ không chuyển người");
 
   // ⑧ P0-A2 — bảng ca thật (dữ liệu giả): 0 câu bắt khách tự chuyển địa giới, 0 địa chỉ suy đoán, 0 hỏi lặp.
   //  · «ThivanNguyen»: Đại Kim cũ ⇒ bốn ứng viên THẬT trong danh mục, không chọn bừa; câu «Đại Kim cũ nay là phường nào theo tên mới» của
@@ -208,14 +215,44 @@ const GOLDEN: GoldenCase[] = [
     turns: [{ say: `${DAI_KIM}\n0900000222`, ai: [() => [say("Dạ phường Đại Kim cũ nay là phường / xã nào theo tên mới ạ? Mình cho em xin tên phường / xã mới để shop giao đúng nha.")]] }],
   },
   {
-    key: "p855-nhu-cu-roi-dia-chi-moi",
-    title: "Ca C: «địa chỉ cũ» không có địa chỉ xác minh ⇒ hỏi một lần; nhắc lại ⇒ nhân viên; gửi địa chỉ mới ⇒ không hỏi phường của nó",
+    key: "p855-nhu-cu-lap-lai",
+    title: "Ca C: «địa chỉ cũ» không có địa chỉ xác minh ⇒ hỏi MỘT lần; nhắc lại ⇒ câu nhân viên ĐÚNG MỘT lần + HANDOFF thật; lượt sau AI không chen",
     shop: "fashion",
     channel: "WEB",
     turns: [
       { say: "Địa chỉ cũ", ai: [() => [say("Dạ em chưa tìm thấy địa chỉ cũ của mình trên hệ thống ạ. Chị gửi lại giúp em địa chỉ nhận hàng nhé?")]] },
-      { say: "Khách cũ mà hỏi gì, địa chỉ cũ đó", ai: [() => [say(FULL_ASK)]] },
+      { say: "Khách cũ mà hỏi gì, địa chỉ cũ đó", ai: [() => [say(FULL_ASK), say("Dạ chị cho em xin lại địa chỉ giúp em ạ?")]] },
+      { say: NEW_THU_DUC, ai: [() => [say("Dạ địa chỉ mình thuộc phường nào theo địa giới mới ạ?")]] },
+    ],
+  },
+  {
+    key: "p855-nhu-cu-roi-dia-chi-moi",
+    title: "Ca C: «địa chỉ cũ» rồi gửi địa chỉ MỚI ⇒ không hỏi phường của nó, lời nhắc nói địa chỉ mới thắng",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      { say: "Địa chỉ cũ", ai: [() => [say("Dạ em chưa tìm thấy địa chỉ cũ của mình trên hệ thống ạ. Chị gửi lại giúp em địa chỉ nhận hàng nhé?")]] },
       { say: NEW_THU_DUC, ai: [() => [say("Dạ em ghi nhận ạ. Địa chỉ mình thuộc phường nào theo địa giới mới ạ?")]] },
+    ],
+  },
+  {
+    key: "p855-doi-dia-chi-sau-khi-dat",
+    title: "Đổi địa chỉ sau khi đặt: model không chép địa chỉ mới ⇒ máy chủ ghi NGUYÊN VĂN địa chỉ khách + cờ cần người; một đơn, 0 vận đơn",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      {
+        say: "cho chị 1 chả mực giã tay\nKhách Thử 0901234567, 12 Hàng Bạc, Hoàn Kiếm, Hà Nội",
+        ai: [
+          () => [tool("create_customer", { name: "Khách Thử", phone: "0901234567", address: "12 Hàng Bạc, Hoàn Kiếm, Hà Nội" })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })],
+          () => [say("Dạ em lên đơn nháp cho mình rồi ạ.")],
+        ],
+      },
+      {
+        say: `à chị chuyển nhà rồi, giao về ${NEW_THU_DUC} nhé`,
+        ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em ghi nhận ạ.")]],
+      },
     ],
   },
 ];
@@ -236,11 +273,33 @@ export async function testP0855AddressGolden() {
         assert.equal(shown[0], ADDRESS_KNOWN_TEXT);
         return;
       }
-      assert.ok(/gửi lại giúp em địa chỉ/.test(shown[0]), `lần đầu: hỏi MỘT lần — ${shown[0]}`);
-      assert.ok(shown[1].includes(ADDRESS_STAFF_TEXT) && !/xin lại địa chỉ/.test(shown[1]), `nhắc lại «địa chỉ cũ» ⇒ không hỏi lặp: ${shown[1]}`);
-      assert.ok(!/phường nào/.test(shown[2]) && shown[2].includes("Dạ em ghi nhận ạ."), `địa chỉ mới ⇒ không hỏi phường của nó: ${shown[2]}`);
-      const p2 = t.prompts[t.turns[2].rounds[0]?.prompt ?? -1] ?? "";
-      assert.ok(/VỪA GỬI MỘT ĐỊA CHỈ GIAO MỚI/.test(p2), "lời nhắc lượt 3: địa chỉ mới thắng địa chỉ cũ");
+      if (c.key === "p855-nhu-cu-lap-lai") {
+        assert.ok(/gửi lại giúp em địa chỉ/.test(shown[0]), `lần đầu: hỏi MỘT lần — ${shown[0]}`);
+        assert.equal(t.turns[1].shown.filter((x) => x.includes(ADDRESS_STAFF_TEXT)).length, 1, `câu nhân viên đúng một lần: ${shown[1]}`);
+        assert.ok(!/xin lại địa chỉ/.test(shown[1]), `không hỏi lặp: ${shown[1]}`);
+        assert.equal(t.turns[1].status, "HANDOFF", "chuyển người THẬT");
+        assert.equal(t.final.handoffReason, ADDRESS_HANDOFF_REASON.REUSE_UNVERIFIED);
+        assert.deepEqual([t.turns[2].shown, t.turns[2].rounds.length], [[], 0], "lượt sau AI không chen (nhân viên đang giữ)");
+        return;
+      }
+      if (c.key === "p855-nhu-cu-roi-dia-chi-moi") {
+        assert.ok(!/phường nào/.test(shown[1]) && shown[1].includes("Dạ em ghi nhận ạ."), `địa chỉ mới ⇒ không hỏi phường của nó: ${shown[1]}`);
+        const p1 = t.prompts[t.turns[1].rounds[0]?.prompt ?? -1] ?? "";
+        assert.ok(/VỪA GỬI MỘT ĐỊA CHỈ GIAO MỚI/.test(p1), "lời nhắc: địa chỉ mới thắng địa chỉ cũ");
+        return;
+      }
+      // Đổi địa chỉ sau khi đặt.
+      const db = await getDb();
+      const [conv] = await db.select({ state: schema.salesChatConversations.state }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, _ctx.conversationId));
+      const st = conv.state as ChatState;
+      assert.equal(st.draft?.recipient.address, NEW_THU_DUC, `nguyên văn địa chỉ khách vừa gửi: ${JSON.stringify(st.draft?.recipient)}`);
+      assert.equal(st.draft?.recipient.ward, "Phường Thủ Đức", "xã đọc từ chính địa chỉ mới (danh mục), không mượn của nơi cũ");
+      const orders = await db.select({ id: schema.orders.id, raw: schema.orders.raw }).from(schema.orders).where(eq(schema.orders.salesConversationId, _ctx.conversationId));
+      assert.equal(orders.length, 1, "không tạo đơn trùng");
+      const review = orderReviewOf(orders[0].raw);
+      assert.ok(review?.entries.some((e) => e.code === "ADDRESS_UNRESOLVED" && /đổi địa chỉ/.test(e.note ?? "")), `đơn mang cờ cần người: ${JSON.stringify(review)}`);
+      const ships = await db.select({ id: schema.shipments.id }).from(schema.shipments).where(eq(schema.shipments.orderId, orders[0].id));
+      assert.equal(ships.length, 0, "không tạo vận đơn khi địa chỉ chưa xác minh");
     },
   });
   assert.deepEqual([...seen].sort(), GOLDEN.map((c) => c.key).sort(), "chạy đủ các hội thoại vàng trên hai tổ chức thử");
