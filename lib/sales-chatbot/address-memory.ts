@@ -79,7 +79,9 @@ const DECLINE_ADDRESS_RE = /\b(dia chi|dc) (khac|moi)\b|\bdoi (dia chi|dc)\b|\bk
 const DECLINE_PHONE_RE = /\b(so|sdt|so dien thoai) (khac|moi)\b|\bdoi (so|sdt)\b|\bkhong (dung|dung nua|con dung) (so|sdt) (cu|do)\b/;
 
 /** Lời dẫn trước địa chỉ («giao về …», «gửi tới …», «ship qua …», «địa chỉ: …») — phần SAU nó mới là dòng địa chỉ. */
-const LEAD_IN = /(?:(?:giao|gửi|gui|ship|chuyển|chuyen)(?: hàng| hang)? (?:về|ve|tới|toi|đến|den|qua|sang)|địa chỉ(?: mới| moi)?\s*:|dia chi(?: moi)?\s*:)\s*/iu;
+// «địa chỉ:» có dấu hai chấm, HOẶC «địa chỉ» theo ngay sau là số nhà / ngõ / thôn / tổ / khu (ca Ngô Thùy Nga #870: «Cho tôi 2kg, địa chỉ
+// số 15 ngõ 7 … quận … Hà Nội SĐT …» — tin đặt hàng Messenger không có dấu hai chấm). «địa chỉ cũ», «địa chỉ như cũ» không khớp.
+const LEAD_IN = /(?:(?:giao|gửi|gui|ship|chuyển|chuyen)(?: hàng| hang)? (?:về|ve|tới|toi|đến|den|qua|sang)|(?:địa chỉ|dia chi)(?: mới| moi)?(?:\s*:|\s+(?=(?:số|so|sn|ngõ|ngo|ngách|ngach|hẻm|hem|thôn|thon|xóm|xom|tổ|to|khu|\d))))\s*/iu;
 const TAIL_FILLER = /[\s,.;!]*(?:nhé|nhe|nha|nhá|ạ|a|em|shop|nhé em|nha em)?[\s,.;!]*$/iu;
 
 /** Các cách đọc một dòng thành địa chỉ: nguyên dòng, rồi phần sau lời dẫn (bỏ tiểu từ cuối). HÀM THUẦN. */
