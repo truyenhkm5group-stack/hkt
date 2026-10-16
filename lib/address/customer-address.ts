@@ -403,7 +403,12 @@ export function legacyAddressUnmapped(address: string, province = ""): { raw: st
   const t = ` ${line.normalize("NFC").toLowerCase()} `;
   const commune = a.legacy !== null || LEGACY_COMMUNE_PREFIX.test(t);
   const district = a.legacy !== null || LEGACY_DISTRICT_PREFIX.test(t) || oldDistrictsIn(line, a.provinceCode).length > 0;
-  if (!commune || !district) return null;
+  // P0 16/10 (ca Nguyễn Hồng, #870) — khách đã cho SỐ NHÀ / NGÕ / THÔN + HUYỆN CŨ + TỈNH nhưng không có tên XÃ: không bắt khách tra
+  // địa giới mới; giữ nguyên địa chỉ, nhân viên đối chiếu trước khi tạo vận đơn. Thiếu cấp xã thì phần đường phải là ĐIỂM GIAO THẬT theo
+  // luật chặt của câu chat (`chatStreetLooksReal`): số nhà theo sau là tên đường / ngõ, hoặc tiền tố nơi chốn có dấu («Ngõ 3 …», «Thôn X»).
+  // SĐT, «1kg …», «2 hộp …», «Gia Lâm, Hà Nội» trần KHÔNG phải điểm giao ⇒ vẫn là khách thiếu thông tin, được hỏi phần thiếu một lần.
+  if (!district) return null;
+  if (!commune && !chatStreetLooksReal(a)) return null;
   return { raw: line.trim(), province: a.province, candidates: a.candidates, hint: addressReviewHint(a) };
 }
 

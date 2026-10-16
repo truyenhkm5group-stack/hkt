@@ -79,7 +79,11 @@ const DECLINE_ADDRESS_RE = /\b(dia chi|dc) (khac|moi)\b|\bdoi (dia chi|dc)\b|\bk
 const DECLINE_PHONE_RE = /\b(so|sdt|so dien thoai) (khac|moi)\b|\bdoi (so|sdt)\b|\bkhong (dung|dung nua|con dung) (so|sdt) (cu|do)\b/;
 
 /** Lời dẫn trước địa chỉ («giao về …», «gửi tới …», «ship qua …», «địa chỉ: …») — phần SAU nó mới là dòng địa chỉ. */
-const LEAD_IN = /(?:(?:giao|gửi|gui|ship|chuyển|chuyen)(?: hàng| hang)? (?:về|ve|tới|toi|đến|den|qua|sang)|địa chỉ(?: mới| moi)?\s*:|dia chi(?: moi)?\s*:)\s*/iu;
+// «địa chỉ:» có dấu hai chấm, HOẶC «địa chỉ» theo ngay sau là số nhà / ngõ / thôn / tổ / khu (ca Ngô Thùy Nga #870: «Cho tôi 2kg, địa chỉ
+// số 15 ngõ 7 … quận … Hà Nội SĐT …» — tin đặt hàng Messenger không có dấu hai chấm). «địa chỉ cũ», «địa chỉ như cũ» không khớp.
+// Tiền tố nơi chốn PHẢI đi kèm con số (không còn «\d» trần — review #870): «địa chỉ 2 nơi nữa ở Hà Nội», «địa chỉ 1 người bạn» là lượng từ,
+// không phải số nhà, và đọc nhầm thì máy chủ ghi đè địa chỉ đang giữ. «toàn / ngoài / khuya» không khớp vì sau tiền tố phải là số.
+const LEAD_IN = /(?:(?:giao|gửi|gui|ship|chuyển|chuyen)(?: hàng| hang)? (?:về|ve|tới|toi|đến|den|qua|sang)|(?:địa chỉ|dia chi)(?: mới| moi)?(?:\s*:|\s+(?=(?:số nhà|so nha|số|so|sn|ngõ|ngo|ngách|ngach|hẻm|hem|kiệt|kiet|thôn|thon|xóm|xom|tổ|to|khu)\s*\d|\d+(?:\/\d+)*\s+(?:ngõ|ngo|ngách|ngach|hẻm|hem|kiệt|kiet|đường|duong|phố|pho)\s)))\s*/iu;
 const TAIL_FILLER = /[\s,.;!]*(?:nhé|nhe|nha|nhá|ạ|a|em|shop|nhé em|nha em)?[\s,.;!]*$/iu;
 
 /** Các cách đọc một dòng thành địa chỉ: nguyên dòng, rồi phần sau lời dẫn (bỏ tiểu từ cuối). HÀM THUẦN. */
@@ -539,7 +543,9 @@ export function addressReaskVerdict(botText: string, k: AddressKnowledge, turn: 
   // Mốc «đã hỏi phường»: khi nơi gọi đưa `botTexts` (engine) thì CHỈ tính câu thật sự đã gửi tới khách — mốc của công cụ
   // (`wardAskedAt`) ghi lúc công cụ trả câu hỏi, có thể chưa bao giờ tới khách. Không đưa (bài kiểm / nơi gọi cũ) ⇒ dùng mốc công cụ.
   const wardAskedSent = opts.botTexts !== undefined ? askedWardBefore : k.wardAskedAt !== null && k.wardAskedAt < turn;
-  const wardAsked = free && k.ward === null && !k.legacyUnmapped && wardAskedSent && repeatOk;
+  // Địa chỉ «chưa ghép danh mục» (#870) mà tin khách mới nhất không nhắc lại nó vẫn chịu luật hỏi-một-lần: đã hỏi phường rồi thì không hỏi
+  // lại (trước đây `legacyUnmapped` bị loại khỏi vế này ⇒ câu hỏi lặp lọt qua).
+  const wardAsked = free && k.ward === null && wardAskedSent && repeatOk;
   const reuse = free && Boolean(k.reuseUnresolved);
   const complaintOn = (field: AskField) => free && Boolean(k.complained) && (field === "phone" ? askedPhoneBefore : field === "name" ? askedNameBefore : askedAddressBefore || askedWardBefore || k.wardAskedAt !== null);
   const twice = (field: AskField) => free && repeatOk && (field === "phone" ? askedPhoneBefore && !k.phoneKnown : field === "name" ? askedNameBefore && !k.nameKnown : field === "address" ? askedAddressBefore && !addressHeld : false);
