@@ -20,20 +20,20 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-16T06:59:52.941Z",
-  "updated_at": "2026-10-16T09:51:47.264Z",
-  "last_heartbeat": "2026-10-16T09:50:58.449Z",
+  "updated_at": "2026-10-16T11:25:31.977Z",
+  "last_heartbeat": "2026-10-16T11:25:31.977Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/p0-863-cancel-flow",
-    "sha": "07ca5244ac985dfbdf68c5f28173654b98160c44",
-    "at": "2026-10-16T09:50:58.449Z",
+    "sha": "8f951875fb67b2cabbda9eb2c63db83a784440ce",
+    "at": "2026-10-16T11:25:31.977Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "P0 #863 HSLC: bot gửi chốt sau tin nhân viên; khách huỷ vì lỗi bot ⇒ xin lỗi cụ thể, sửa bằng giá chuẩn, một phương án cứu, kiên quyết thì huỷ đúng vòng đời",
     "summary": "",
     "tests": [
-      "typecheck + eslint sạch",
-      "p0-863-cancel-flow (5 golden chatTurn) + order-cancel/order-review/conversation-control/cart-commitment/p0-855-cart/claim-guard/quote640/human-takeover/self-service-journey: đạt",
-      "golden + order-golden: không đổi ảnh chụp"
+      "npm test đầy đủ: TẤT CẢ KIỂM THỬ ĐẠT @8f951875",
+      "golden 23 + đơn vàng v2 khớp",
+      "sửa theo review: phủ định huỷ, nhắc lại giỏ có thêm, tổng nhân viên theo mệnh đề"
     ]
   }
 }
