@@ -287,12 +287,6 @@ export function pickDeliveryOrder<T extends { id: string; stage: string; inserte
 
 // ─────────────────────────── MONG MUỐN GIỜ GIAO TRƯỚC KHI CHỐT (#871, ca «Ngọc Nguyễn» HSLC 16/10/2026) ───────────────────────────
 
-/**
- * Câu ghi nhận mong muốn giờ giao khi CHƯA có lịch giao xác minh — không nêu mốc (nêu «9h sáng mai» là một lời hứa), không xin lại thông
- * tin nhận hàng. Bài kiểm khoá: câu này KHÔNG bị chính `deliveryPromiseIn` coi là lời hứa.
- */
-export const DELIVERY_NOTED_TEXT = "Dạ em ghi nhận mong muốn thời gian giao của mình rồi ạ, shop kiểm tra lịch giao rồi báo lại mình nhé.";
-
 /** Ghi nhận (không phải hứa): «ghi nhận», «ghi chú», «mong muốn», «kiểm tra», «báo lại», «xác nhận lại», «cố gắng», «nếu được». Đã chuẩn hoá. */
 const HEDGE_RE = /(?:^|\s)(?:xacnhan lai|xacnhan|ghi nhan|ghi chu|ghi lai|luu y|mong muon|kiem tra|bao lai|co gang|neu duoc|neu kip|du kien|se bao)(?=\s|$)/;
 /** Mốc giờ / ngày khách nêu: «9h», «9 giờ», «9g30», «thứ 7», «chủ nhật», «ngày 18». Bản gập dấu. */

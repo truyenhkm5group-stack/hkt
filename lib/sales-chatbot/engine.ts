@@ -71,8 +71,8 @@ import { readConversationControl } from "@/lib/sales-chatbot/conversation-contro
 import { customerHandoffVerdict, nextObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
-import { ADDRESS_KNOWN_TEXT, ADDRESS_STAFF_TEXT, addressKnowledge, addressReaskVerdict, continuesSameOrder, knownContactPrompt } from "@/lib/sales-chatbot/address-memory";
-import { DELIVERY_HANDOFF_TEXT, DELIVERY_NOTED_TEXT, deliveryPreferenceOf, deliveryPromiseIn, deliveryReplyViolation, turnDeliverySay } from "@/lib/sales-chatbot/delivery-intent";
+import { ADDRESS_KNOWN_TEXT, ADDRESS_STAFF_TEXT, SCHEDULE_NOTED_TEXT, addressKnowledge, addressReaskVerdict, continuesSameOrder, isScheduleOnly, knownContactPrompt } from "@/lib/sales-chatbot/address-memory";
+import { DELIVERY_HANDOFF_TEXT, deliveryPreferenceOf, deliveryPromiseIn, deliveryReplyViolation, turnDeliverySay } from "@/lib/sales-chatbot/delivery-intent";
 import { postSaleReplyGuard } from "@/lib/sales-chatbot/post-sale-guard";
 import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, noteSeenTotals, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
 import { flagOrderForReviewAsAgent, loadAutoConfirmComplete } from "@/lib/records/order-create";
@@ -1149,21 +1149,14 @@ async function chatTurnCore(
       conv.state = st as Record<string, unknown>;
       st0 = st;
     }
-    // CÂU MẪU GỬI NGUYÊN VĂN cũng chịu hàng rào thông tin nhận hàng (#871): câu mẫu «giao hàng tận nơi… cho em xin SĐT + địa chỉ» khớp chữ
-    // «giao» từng đi thẳng tới khách đã gửi đủ SĐT + địa chỉ — đường câu mẫu không qua `addressReaskVerdict` như chữ model.
-    const knownContact = addressKnowledge(st0, customerTexts);
-    const quickReasks = (t: string) => addressReaskVerdict(t, knownContact, turnSeq, { botTexts: recentSaid }) !== null;
     const quick0: QuickReplyStep = st0.priceDispute?.open
       ? { kind: "SKIP", reason: "Khách đang phản đối giá — AI báo lại theo báo giá máy chủ" }
       : postSale
         ? { kind: "SKIP", reason: `Khách ở giai đoạn ${CUSTOMER_PHASE_LABEL[phase!.phase]} — câu mẫu bán hàng sai ngữ cảnh, AI trả lời` }
         : opts.context ? { kind: "SKIP", reason: "Có ngữ cảnh bài viết — AI đọc cùng ngữ cảnh" } : qrSettings.enabled ? await quickReplyByKeyword(text, { ordering: Boolean(st0.draft && !st0.confirmed), cfg, recent: recentSaid }) : { kind: "SKIP", reason: "Câu mẫu đang tắt" };
-    const quick: QuickReplyStep =
-      quick0.kind === "ANSWER" && quickReasks(quick0.pick.text)
-        ? { kind: "SKIP", reason: "Câu mẫu xin lại SĐT / địa chỉ khách đã cho — AI trả lời" }
-        : deliveryPrefText && (st0.customer || st0.draft) && quick0.kind !== "SKIP"
-          ? { kind: "SKIP", reason: "Khách hẹn giờ giao cho đơn đang lên — AI ghi chú giao hàng" }
-          : quick0;
+    // Khách hẹn giờ giao cho đơn đang lên (#871) ⇒ AI ghi chú giao hàng; câu mẫu không biết gì về đơn. (Câu mẫu xin lại SĐT / địa chỉ đã có
+    // bị chặn ngay trước khi gửi — `quickReasks`, #872.)
+    const quick: QuickReplyStep = deliveryPrefText && (st0.customer || st0.draft) && quick0.kind !== "SKIP" ? { kind: "SKIP", reason: "Khách hẹn giờ giao cho đơn đang lên — AI ghi chú giao hàng" } : quick0;
     const sendQuick = async (pick: QuickReplyPick, ai: { calls: number; inTok: number; outTok: number } | null): Promise<TurnResult> => {
       const verdict = await guardOutgoing(pick.text, () => claimFacts(st0));
       if (!verdict.ok) {
@@ -1181,7 +1174,11 @@ async function chatTurnCore(
       });
       return { ok: true, view: (await conversationView(conv.id))!, media: { quickReplyId: pick.entry.id, imageIds: pick.imageIds } };
     };
-    if (quick.kind === "ANSWER") return sendQuick(quick.pick, null);
+    // #871: câu mẫu theo TỪ KHOÁ / AI chọn mã đi nguyên văn — cùng hàng rào hỏi lại như chữ model. Câu mẫu xin SĐT / địa chỉ khách đã
+    // cho («…xin SĐT + địa chỉ chính xác để em check tuyến giao» khớp chữ «giao» của «Giao sáng mai khoảng 9h») ⇒ không gửi, AI trả lời.
+    // Cùng cửa sổ với `customerTexts` của đường AI — hai đường phán cùng một tin như nhau.
+    const quickReasks = (pick: QuickReplyPick) => addressReaskVerdict(pick.text, addressKnowledge(st0, customerTexts), turnSeq, { botTexts: recentSaid }) !== null;
+    if (quick.kind === "ANSWER" && !quickReasks(quick.pick)) return sendQuick(quick.pick, null);
     const org = await currentOrganization();
     // Trang công khai: khách KHÔNG BAO GIỜ đọc lý do nội bộ (công tắc, hạn mức gói, khoá) — chuyển người, báo chủ shop.
     // Khung THỬ của chủ shop giữ nguyên câu lỗi để họ sửa được.
@@ -1220,7 +1217,7 @@ async function chatTurnCore(
         const inT = res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens;
         await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: quickProv.source, provider: quickProv.provider.name, model: res.model || quickProv.provider.model, requests: 1, inputTokens: inT, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || quickProv.provider.model, res.usage), status: "OK", actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id, workload: "quick_extract", ...usageDetail(res) }).catch(() => undefined);
         Object.assign(pre, { calls: 1, inTok: inT, outTok: res.usage.outputTokens });
-        if (pick && !repeatsRecent(pick.text, recentSaid) && !quickReasks(pick.text)) return sendQuick(pick, pre);
+        if (pick && !repeatsRecent(pick.text, recentSaid) && !quickReasks(pick)) return sendQuick(pick, pre);
       } catch (error) {
         if (error instanceof SeqConflict) throw error;
       }
@@ -1367,7 +1364,7 @@ async function chatTurnCore(
               if (promised.length) {
                 lastError = lastError ?? "Khách hẹn giờ giao — bản nháp hứa mốc giao chưa xác minh, đã thay bằng câu ghi nhận";
                 const rest = promised.reduce((acc, p) => acc.replace(p, ""), out).replace(/\s+/g, " ").trim();
-                out = rest ? `${rest} ${DELIVERY_NOTED_TEXT}` : DELIVERY_NOTED_TEXT;
+                out = rest ? `${rest} ${SCHEDULE_NOTED_TEXT}` : SCHEDULE_NOTED_TEXT;
               }
             }
             if (pricingNow && extractVndAmounts(out).length) {
@@ -1418,12 +1415,12 @@ async function chatTurnCore(
                 if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, addrHold.handoff, state.customer, now, { dedupeKey: `sales-chat:address-guard:${conv.id}:${turnSeq}` }).catch(() => undefined);
               }
               const restText = addrHold.handoff && isMessagingChannel(opts.channel) ? addrHold.rest.replace(ADDRESS_STAFF_TEXT, "").trim() : addrHold.rest;
-              // Lượt khách HẸN GIỜ GIAO (#871): câu ghi nhận nói về giờ giao, không phải «đã ghi nhận địa chỉ» (khách không vừa gửi địa chỉ).
-              const noted = deliveryPrefText && !addrHold.handoff && !restText.includes(DELIVERY_NOTED_TEXT) ? DELIVERY_NOTED_TEXT : "";
+              // Lượt khách HẸN GIỜ GIAO (#871 / #872): ghi nhận lời dặn, không hỏi lại, không hứa giờ. Sau bán hàng là việc của đường lịch giao.
+              const noted = !addrHold.handoff && !postSale && (deliveryPrefText || isScheduleOnly(customerTexts[customerTexts.length - 1] ?? "")) && !restText.includes(SCHEDULE_NOTED_TEXT) ? SCHEDULE_NOTED_TEXT : "";
               // Khách đang nói chuyện KHÁC về chính đơn (thêm món, hỏi giá — `continuesSameOrder`) ⇒ không chen «đã ghi nhận địa chỉ»: khách
               // không vừa gửi địa chỉ; lượt còn chữ khác / tóm tắt đơn, và cả lượt im thì khối «KHÔNG ĐỂ KHÁCH IM» lo.
               const ack = continuesSameOrder(text) ? "" : ADDRESS_KNOWN_TEXT;
-              const said = noted ? [restText, noted].filter(Boolean).join(" ") : restText || (draftUnsaid || addrHold.handoff ? "" : ack);
+              const said = [restText, noted].filter(Boolean).join(" ") || (draftUnsaid || addrHold.handoff ? "" : ack);
               if (said && !content.some((x) => x.type === "text" && x.text === said)) {
                 content.push({ type: "text", text: said });
                 spoke = true;

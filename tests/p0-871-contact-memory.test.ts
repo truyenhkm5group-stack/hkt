@@ -33,8 +33,8 @@ import { setSalesChatProviderForTests } from "@/lib/sales-chatbot/engine";
 import { parsePancakeWebhook, processFanpageThread, receiveFanpageEvent } from "@/lib/sales-chatbot/fanpage";
 import { withoutPhones } from "@/lib/address/customer-address";
 import { createProductCore } from "@/lib/records/product-create";
-import { ADDRESS_KNOWN_TEXT, addressKnowledge, addressReaskVerdict, continuesSameOrder, knownContactPrompt } from "@/lib/sales-chatbot/address-memory";
-import { DELIVERY_NOTED_TEXT, deliveryPreferenceNote, deliveryPreferenceOf, deliveryPromiseIn } from "@/lib/sales-chatbot/delivery-intent";
+import { ADDRESS_KNOWN_TEXT, SCHEDULE_NOTED_TEXT, addressKnowledge, addressReaskVerdict, continuesSameOrder, knownContactPrompt } from "@/lib/sales-chatbot/address-memory";
+import { deliveryPreferenceNote, deliveryPreferenceOf, deliveryPromiseIn } from "@/lib/sales-chatbot/delivery-intent";
 import { futurePurchaseOnly, postSaleReplyGuard } from "@/lib/sales-chatbot/post-sale-guard";
 import { quickReplyByKeyword } from "@/lib/sales-chatbot/quick-replies";
 import { QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
@@ -90,7 +90,7 @@ function testPure() {
   assert.equal(deliveryPreferenceOf("bao giờ giao em?"), null, "hỏi «bao giờ» trần không phải hẹn giờ");
   assert.equal(deliveryPreferenceOf("giao trong ngày được không"), null, "câu hỏi chính sách không phải lời hẹn");
   assert.equal(deliveryPreferenceOf("Lấy 10 cái nem hải sản"), null);
-  assert.deepEqual(deliveryPromiseIn(DELIVERY_NOTED_TEXT), [], "câu ghi nhận không phải lời hứa");
+  assert.deepEqual(deliveryPromiseIn(SCHEDULE_NOTED_TEXT), [], "câu ghi nhận không phải lời hứa");
   assert.deepEqual(deliveryPromiseIn("Dạ em ghi nhận mong muốn giao khoảng 9h sáng mai, shop kiểm tra lịch giao rồi báo lại mình nhé."), [], "ghi nhận có nêu mốc vẫn không phải hứa");
   assert.deepEqual(deliveryPromiseIn("Dạ sáng mai 9h bên em giao tới cho mình nhé. Mình cần thêm gì không ạ?"), ["Dạ sáng mai 9h bên em giao tới cho mình nhé."]);
   const note = deliveryPreferenceNote({ text: "Giao sáng mai khoảng 9h", at: "2026-10-16T10:31:00.000Z" });
@@ -200,7 +200,7 @@ export async function testP0871ContactMemoryGolden(): Promise<void> {
         assert.equal((await quickReplyByKeyword("Giao sáng mai khoảng 9h", { ordering: false, cfg: { shippingFee: null } })).kind, "ANSWER", "câu mẫu vẫn khớp chữ — chỉ engine chặn nó");
         assert.ok(t.turns[2].rounds.length > 0, "lượt hẹn giờ đi đường AI, không đi câu mẫu");
         assert.ok(!shown[2].includes("xin SĐT") && !/địa chỉ chính xác/.test(shown[2]), `không xin lại SĐT + địa chỉ: ${shown[2]}`);
-        assert.ok(!/sáng mai 9h bên em giao/.test(shown[2]) && shown[2].includes(DELIVERY_NOTED_TEXT), `không hứa mốc, có câu ghi nhận: ${shown[2]}`);
+        assert.ok(!/sáng mai 9h bên em giao/.test(shown[2]) && shown[2].includes(SCHEDULE_NOTED_TEXT), `không hứa mốc, có câu ghi nhận: ${shown[2]}`);
         const p2 = t.prompts[t.turns[2].rounds[0]?.prompt ?? -1] ?? "";
         assert.ok(/THÔNG TIN NHẬN HÀNG ĐÃ CÓ/.test(p2), "lời nhắc lượt hẹn giờ: thông tin nhận hàng đã có, lên đơn ngay");
         // 17:32 — không xác nhận lại phường; đơn đủ hai món: 1kg chả cá + 1 hộp nem 10 cái (10 cái = 1 hộp).
