@@ -47,6 +47,8 @@ import { formatDate } from "@/lib/format";
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { normalizeVnPhone, promptDataText, vouchedOrder, type PancakeRecentOrder, type ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import { maskAddress, type ChatState } from "@/lib/sales-chatbot/tools";
+import { hasStreetDetail } from "@/lib/address/customer-address";
+import type { ReuseIntent } from "@/lib/sales-chatbot/address-memory";
 
 // ═══════════════════════════ KIỂU ═══════════════════════════
 
@@ -134,10 +136,14 @@ const RETURN_STAGES = new Set(["RETURNING", "PARTIAL_RETURN", "RETURNED"]);
  *    nên địa chỉ ấy KHÔNG BAO GIỜ được đề xuất «như đơn trước».
  *  · Đơn chưa qua bước xác nhận (NEW · WAITING) ⇒ `null`.
  *  · Còn lại: có tỉnh + xã chuẩn hoá (ô xã + ô tỉnh của đơn, hoặc dòng địa chỉ đọc ra MỘT đáp án) ⇒ `CONFIRMED_NORMALIZED`.
+ *  · Dòng địa chỉ không có số nhà / ngõ / đường / thôn / tổ thật (chỉ tên vùng — «Khương Đình») ⇒ `null` (#855).
  *  · Không thì `null`. Trạng thái Pancake không bao giờ nâng lên `DELIVERED`. HÀM THUẦN.
  */
 export function addressConfidence(f: Pick<OrderFact, "source" | "stage" | "outcome" | "address" | "province" | "ward">): AddressConfidence | null {
   if (!f.address.trim()) return null;
+  // Dòng địa chỉ chỉ là tên vùng / phường («Khương Đình») KHÔNG phải địa chỉ đầy đủ để giao lại, dù ô xã + tỉnh của đơn có điền (#855,
+  // ca «ThuyNgo»): «địa chỉ cũ» chỉ được dùng khi có số nhà / ngõ / đường / thôn / tổ thật.
+  if (!hasStreetDetail(f.address)) return null;
   const group = f.outcome ? OUTCOME_GROUP[f.outcome] : null;
   if (group === "RETURNED" || group === "CANCELLED" || DEAD_STAGES.has(f.stage)) return null;
   if (f.source === "ERP" && f.outcome === "DELIVERED") return "DELIVERED";
@@ -259,37 +265,8 @@ export function assembleCustomer360(input: AssembleInput): Customer360 {
 
 // ─────────────── Ý ĐỊNH «DÙNG LẠI THÔNG TIN CŨ» ───────────────
 
-/** Mỗi chiều (địa chỉ · SĐT) độc lập: khách có thể «vẫn địa chỉ cũ nhưng số mới». `null` = khách không nói gì về chiều đó. */
-export type ReuseSignal = "REUSE" | "DECLINE" | null;
-export type ReuseIntent = { address: ReuseSignal; phone: ReuseSignal };
-export const NO_REUSE_INTENT: ReuseIntent = { address: null, phone: null };
-
-// Đọc trên chữ đã bỏ dấu (`foldVnText`): khách nhắn không dấu / viết tắt như có dấu.
-const OLD_ADDRESS_RE = /\b(dia chi|diachi|dc|d c|cho|nha) cu\b|\bnhu (lan|don|hom|dot) truoc\b|\b(y |van |giao )?nhu cu\b|\bvan (dia chi|dc|cho|nha) (do|day|nay|ay|o tren|nhu cu)\b|\bvan (dia chi|dc)$|\bvan (dia chi|dc) (nhe|nha|a|em|nhe shop|nha shop)\b|\bdia chi (o )?tren\b|\bdia chi (lan|don) truoc\b/;
-const OLD_PHONE_RE = /\b(so|sdt|so dien thoai|so dt) cu\b|\bvan (so|sdt) (do|nay|ay|cu)\b|\bvan (so|sdt)$|\bvan (so|sdt) (nhe|nha|a|em)\b/;
-const DECLINE_ADDRESS_RE = /\b(dia chi|dc) (khac|moi)\b|\bdoi (dia chi|dc)\b|\bkhong (phai|dung|giao|gui) (ve )?(dia chi|dc|cho) (cu|do|nay)\b|\b(gui|giao|ship) (ve )?cho khac\b/;
-const DECLINE_PHONE_RE = /\b(so|sdt|so dien thoai) (khac|moi)\b|\bdoi (so|sdt)\b|\bkhong (dung|dung nua|con dung) (so|sdt) (cu|do)\b/;
-
-/**
- * Khách có đang nói «dùng lại địa chỉ / SĐT cũ» (hoặc KHÔNG dùng lại) không — đọc các tin khách theo thứ tự cũ → mới, mỗi chiều
- * riêng; tin mới hơn mang tín hiệu của chiều đó thì thắng («vẫn địa chỉ cũ» rồi «à thôi gửi chỗ khác» ⇒ từ chối địa chỉ). Từ chối
- * trong CÙNG một dòng thắng dùng lại. HÀM THUẦN.
- */
-export function reuseIntentOf(customerTexts: readonly string[]): ReuseIntent {
-  let address: ReuseSignal = null;
-  let phone: ReuseSignal = null;
-  for (const raw of customerTexts) {
-    for (const line of raw.split(/\n+/)) {
-      const t = foldVnText(line).replace(/\s+/g, " ").trim();
-      if (!t) continue;
-      if (DECLINE_ADDRESS_RE.test(t)) address = "DECLINE";
-      else if (OLD_ADDRESS_RE.test(t)) address = "REUSE";
-      if (DECLINE_PHONE_RE.test(t)) phone = "DECLINE";
-      else if (OLD_PHONE_RE.test(t)) phone = "REUSE";
-    }
-  }
-  return { address, phone };
-}
+// Luật đọc ý định sống ở `address-memory.ts` (hàng rào chữ gửi khách dùng CHÍNH nó — #855); re-export để nơi gọi cũ giữ nguyên.
+export { NO_REUSE_INTENT, reuseIntentOf, type ReuseIntent, type ReuseSignal } from "@/lib/sales-chatbot/address-memory";
 
 // ─────────────── LỜI NHẮC ───────────────
 
@@ -313,7 +290,10 @@ export function customer360Prompt(c: Customer360 | null, intent: ReuseIntent): s
     lines.push("ĐƠN ĐANG MỞ của khách ĐÃ THANH TOÁN và đã có SĐT + địa chỉ nhận: KHÔNG hỏi lại họ tên / SĐT / địa chỉ / thanh toán. Khách hỏi về đơn ⇒ get_order_status.");
   }
   const knownPhone = c?.identity.phones[0]?.phone ?? null;
-  if (intent.address === "DECLINE") {
+  if (intent.address === "NEW") {
+    // #855 (ca «ThuyNgo»): khách nói «địa chỉ cũ» rồi gửi một địa chỉ giao MỚI — địa chỉ mới thắng, không lặng lẽ để bản cũ thắng.
+    lines.push(`TRA LỊCH SỬ (máy chủ): sau lời «địa chỉ cũ», khách VỪA GỬI MỘT ĐỊA CHỈ GIAO MỚI trong tin — địa chỉ mới THẮNG địa chỉ cũ / đơn nháp. Ghi đúng NGUYÊN VĂN địa chỉ khách vừa gửi (đơn nháp có ⇒ update_draft_order với address = địa chỉ mới; chưa có ⇒ create_customer), KHÔNG dùng / nhắc lại địa chỉ cũ, KHÔNG hỏi lại địa chỉ, KHÔNG tự thêm phường / tỉnh. Đơn đang giữ địa chỉ khác thì nói «em cập nhật địa chỉ mới cho mình» chỉ SAU khi công cụ ghi thành công.${knownPhone && intent.phone !== "DECLINE" ? ` SĐT khách đã có trong hội thoại (đuôi ${tail4(knownPhone)}) — không xin lại.` : ""}`);
+  } else if (intent.address === "DECLINE") {
     lines.push(`TRA LỊCH SỬ (máy chủ): khách KHÔNG dùng lại địa chỉ cũ ⇒ xin địa chỉ MỚI, KHÔNG nhắc lại địa chỉ cũ.${intent.phone === "DECLINE" ? " Khách cũng đổi SĐT ⇒ xin SĐT mới." : knownPhone ? ` SĐT khách đã có trong hội thoại (đuôi ${tail4(knownPhone)}) — không xin lại.` : ""}`);
   } else if (intent.address === "REUSE" && c?.contactKnown) {
     // Thông tin nhận hàng của lượt này đã lưu (khách đã xác nhận / đã khai) — tin «như cũ» còn trong 3 tin gần nhất không được làm
@@ -346,7 +326,7 @@ export function customer360Prompt(c: Customer360 | null, intent: ReuseIntent): s
       const reason = c.noAddressReason === "ONLY_UNVERIFIED" ? "đơn cũ không có địa chỉ đã xác minh — đơn hoàn / huỷ / chưa xác nhận / địa chỉ chưa chuẩn hoá thì không dùng" : "chưa nối được hội thoại này với đơn cũ nào";
       const missing =
         knownPhone && intent.phone !== "DECLINE" ? `địa chỉ nhận (SĐT khách đã có trong hội thoại, đuôi ${tail4(knownPhone)} — chỉ hỏi «vẫn số đuôi ${tail4(knownPhone)} phải không ạ?», không xin số mới)` : "địa chỉ nhận + SĐT";
-      lines.push(`TRA LỊCH SỬ (máy chủ) — khách muốn ${said}: shop CHƯA tìm thấy địa chỉ cũ dùng được (${reason}). Nói thật ngắn «em chưa tìm thấy địa chỉ cũ của mình trên hệ thống ạ» rồi CHỈ xin ${missing}. KHÔNG nói như thể khách chưa từng mua. ${ORDER_FIRST}`);
+      lines.push(`TRA LỊCH SỬ (máy chủ) — khách muốn ${said}: shop CHƯA tìm thấy địa chỉ cũ dùng được (${reason}). Nói thật ngắn «em chưa tìm thấy địa chỉ cũ của mình trên hệ thống ạ» rồi CHỈ xin ${missing} — MỘT LẦN DUY NHẤT. KHÔNG suy ra địa chỉ từ một tên vùng / phường khách hay hồ sơ nhắc tới, KHÔNG tự thêm số nhà / đường / phường / tỉnh. Đã xin rồi mà khách vẫn nói «địa chỉ cũ» / «khách cũ mà hỏi gì» / phàn nàn ⇒ handoff_to_human (lý do: khách muốn dùng địa chỉ cũ, không có địa chỉ đã xác minh), KHÔNG xin lại lần hai. KHÔNG nói như thể khách chưa từng mua. ${ORDER_FIRST}`);
     }
   } else if (intent.phone === "REUSE") {
     const phone = c?.suggestion === "ONE" ? c.addresses[0].phone : knownPhone;

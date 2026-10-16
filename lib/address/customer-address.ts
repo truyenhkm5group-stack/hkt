@@ -299,7 +299,58 @@ const houseKey = (h: string | null) => (h ? h.toLowerCase() : null);
  */
 function streetLooksReal(a: Pick<CustomerAddress, "street" | "houseNumber">): boolean {
   if (a.houseNumber) return true;
-  return /^(?:khu|kdt|thon|xom|ap|ban|ngo|ngach|hem|kiet|duong|pho|to|cum|lo|toa|chung cu|cc|so)(?: |$)/.test(foldVnText(a.street));
+  // Viết tắt ở nông thôn / thị trấn (#855, ca «Lieu Dau»): «TDP 3» (tổ dân phố), «KP 2» (khu phố), «khóm», «buôn», «làng», «KV» (khu
+  // vực), «tiểu khu», «khối» (Nghệ An, ca «Lieu Dau» Anh Sơn) — thiếu chúng thì một địa chỉ cũ ĐỦ (tổ dân phố + thị trấn + huyện + tỉnh) bị coi là «không có phần đường».
+  return /^(?:khu|kdt|thon|xom|ap|ban|ngo|ngach|hem|kiet|duong|pho|to|tdp|kp|kv|khoi|khom|buon|lang|tieu khu|cum|lo|toa|chung cu|cc|so)(?: |$)/.test(foldVnText(a.street));
+}
+
+/**
+ * Dòng địa chỉ có phần SỐ NHÀ / ĐƯỜNG / THÔN / TỔ thật (không chỉ là tên đơn vị hành chính) — «Khương Đình» một mình KHÔNG phải một địa
+ * chỉ giao được (#855, ca «ThuyNgo»: bot chỉ còn «Khương Đình» mà vẫn coi như có địa chỉ cũ). HÀM THUẦN.
+ */
+export function hasStreetDetail(address: string): boolean {
+  const a = parseCustomerAddress(address);
+  return foldVnText(a.street).length >= 3 && streetLooksReal(a);
+}
+
+/**
+ * Chỗ trống của một địa chỉ — HAI thứ khác nhau, không được gộp (#855 P0-A2, ca «ThivanNguyen»): `CATALOG_UNMATCHED` = khách ĐÃ cho đủ
+ * (theo địa giới cũ) nhưng danh mục vận chuyển chưa ghép được một xã mới ⇒ việc của NHÂN VIÊN, không hỏi khách; `NOT_PROVIDED` = khách
+ * thật sự chưa cho phần đó (tỉnh / xã / số nhà) ⇒ được hỏi khách đúng phần thiếu, một lần. `COMPLETE` = tự điền được. HÀM THUẦN.
+ */
+export function addressGapOf(address: string, province = ""): { gap: "COMPLETE" | "CATALOG_UNMATCHED" | "NOT_PROVIDED"; missing: AddressPart[] } {
+  const a = parseCustomerAddress(address, province);
+  if (canAutoFill(a) && !a.missing.length) return { gap: "COMPLETE", missing: [] };
+  if (legacyAddressUnmapped(address, province)) return { gap: "CATALOG_UNMATCHED", missing: [] };
+  return { gap: a.missing.length ? "NOT_PROVIDED" : "COMPLETE", missing: a.missing };
+}
+
+/** Câu khách có DÁNG một địa chỉ giao (không phải câu hỏi): phần đường thật + đọc ra tỉnh / ứng viên xã / gợi ý tỉnh. HÀM THUẦN. */
+export function looksLikeDeliveryAddress(line: string): boolean {
+  const l = line.trim();
+  if (!l || l.includes("?")) return false;
+  const a = parseCustomerAddress(l);
+  return streetLooksReal(a) && foldVnText(a.street).length >= 3 && (a.province !== null || a.candidates.length > 0 || a.provinceHint !== null);
+}
+
+/**
+ * ĐỊA CHỈ THEO ĐỊA GIỚI CŨ, ĐỦ, NHƯNG CHƯA GHÉP ĐƯỢC XÃ MỚI (#855, ca «Lieu Dau» 16/10/2026): khách ghi tổ dân phố / thôn + thị trấn /
+ * xã CŨ + huyện / quận CŨ + tỉnh — đầy đủ theo địa giới khách biết. Danh mục (`vn-admin-2025.json`) không quy được về MỘT xã mới (xã cũ
+ * bị chia, hay tên cũ không có trong danh mục) KHÔNG có nghĩa địa chỉ vô hiệu: giữ NGUYÊN VĂN, cờ cần kiểm cho nhân viên, và KHÔNG bắt
+ * khách tra tên phường mới. Trả `null` khi tự điền được (đã có xã mới), thiếu tỉnh, thiếu phần đường thật, hoặc không có dấu vết đơn vị
+ * hành chính CŨ ở cả hai cấp (cấp xã: tiền tố «thị trấn / xã / phường» hoặc xã cũ nhận ra trong danh mục; cấp huyện: tiền tố «huyện /
+ * quận / thị xã» hoặc quận / huyện cũ có trong danh mục). Không bao giờ chọn một xã: `candidates` chỉ để người kiểm đọc. HÀM THUẦN.
+ */
+export function legacyAddressUnmapped(address: string, province = ""): { raw: string; province: string; candidates: string[]; hint: string } | null {
+  const a = parseCustomerAddress(address, province);
+  if (canAutoFill(a) || !a.province || a.provinceCode === null) return null;
+  if (!streetLooksReal(a) || foldVnText(a.street).length < 3) return null;
+  const line = [address, province].filter((x) => x.trim()).join(", ");
+  const f = expandAbbreviations(foldVnText(line));
+  const commune = a.legacy !== null || /(?:^| )(?:thi tran|xa|phuong) [a-z0-9]/.test(f);
+  const district = a.legacy !== null || /(?:^| )(?:huyen|quan|thi xa) [a-z0-9]/.test(f) || oldDistrictsIn(line, a.provinceCode).length > 0;
+  if (!commune || !district) return null;
+  return { raw: line.trim(), province: a.province, candidates: a.candidates, hint: addressReviewHint(a) };
 }
 
 /** Phần TÊN ĐƯỜNG / khu đã gập, bỏ số nhà và chữ «số / SN / nhà» ở đầu («230/20 Phan Huy Ích» ⇒ «phan huy ich»). */
