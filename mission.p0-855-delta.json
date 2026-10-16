@@ -3,7 +3,7 @@
   "mission_id": "p0-855-delta",
   "title": "P0 #855 phần còn lại: báo giá phải có căn cứ (680k), phủ nhận món bot thêm ⇒ người, giữ tuyến ORDER_REVIEW, dọn lời nhắc khách cũ, chặn câu xin lỗi lặp",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -30,9 +30,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-16T13:41:06.658Z",
-  "updated_at": "2026-10-16T19:58:52.058Z",
+  "updated_at": "2026-10-16T20:35:56.430Z",
   "last_heartbeat": "2026-10-16T19:58:52.058Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#873 → a97012c44d4ef19fd149861c10defe1d81ffa4aa"
+  },
   "handoff": {
     "branch": "claude/p0-855-delta",
     "sha": "95d299192caa71c0f817e6043693a51784e2f658",
