@@ -85,7 +85,7 @@ const PACK_RE = new RegExp(`(\\d{1,3}|${NUM_WORD})\\s*(${PACK_UNIT})(?![\\p{L}\\
 const BARE_RE = /(?<![\p{L}\d.,/:-])(\d{1,2}|một|hai|ba)\s+(?=\p{L})/giu;
 
 const numOf = (raw: string): number | null => {
-  const fraction = raw.match(/^(\\d+)\\s*\\/\\s*(\\d+)$/);
+  const fraction = raw.match(/^(\d+)\s*\/\s*(\d+)$/);
   if (fraction) {
     const denom = Number(fraction[2]);
     return denom > 0 ? Number(fraction[1]) / denom : null;
