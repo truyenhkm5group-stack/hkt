@@ -25,6 +25,12 @@
 
 
 
+
+## 16/10 — DESKTOP CẦM KHOÁ `integration-lead` · TIẾP QUẢN ISSUE #855 (ThuyNgo + Lieu Dau)
+- Sứ mệnh `p0-855-thuyngo-lieudau`, nhánh `fix/p0-thuyngo-negative-order` (ứng viên 9fe34468) — Desktop là NGƯỜI GHI DUY NHẤT nhánh này từ giờ. Web/Team: đừng đẩy lên nhánh, đừng gộp/deploy.
+- `tech-lead` vẫn của Web cho qa 0245 (#854) — Desktop không chạm #854.
+- Bước đầu: trace chỉ đọc hai hội thoại (conv-money-trace) trước khi sửa.
+
 ## Checkpoint 2026-10-15 ~18:25Z — CLAUDE WEB: #853 ĐÃ GỘP · HẬU KIỂM QUA ACTIONS CHẠY THẬT
 
 - **#853 gộp** `c52e5c57` (squash, khoá integration-lead, review độc lập PASS @fe94be44 sau 3 lượt — 1 lỗi TRUNG BÌNH «verify --record với mã sứ mệnh lạ vẫn xanh» + 1 «ô sứ mệnh toàn khoảng trắng xanh rỗng»
