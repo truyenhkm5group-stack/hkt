@@ -1,8 +1,8 @@
 {
   "pr": 861,
-  "sha": "c81c4d5653a8a219b05cece221356740cb35addc",
+  "sha": "9b1a64531848e019bef09e4c8ee1e3922ddbfffe",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-16T06:55:20.872Z",
-  "note": "PASS @0cf773e9; commit gộp main chỉ giải xung đột import"
+  "at": "2026-10-16T06:56:30.943Z",
+  "note": "PASS @0cf773e9; 9b1a6453 = gộp main (import) + bài kiểm của chính #861 theo luật #860"
 }
