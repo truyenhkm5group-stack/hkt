@@ -3,7 +3,7 @@
   "mission_id": "main-red-857-861",
   "title": "Main xanh lại sau #857 + #861 (ca ngữ cảnh hộp thư)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "CANCELLED",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -22,9 +22,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-16T08:29:19.582Z",
-  "updated_at": "2026-10-16T08:30:32.914Z",
-  "last_heartbeat": "2026-10-16T08:29:45.157Z",
+  "updated_at": "2026-10-16T09:13:01.202Z",
+  "last_heartbeat": "2026-10-16T09:13:01.202Z",
   "definition_of_done": [],
+  "evidence": {
+    "done": "trùng #866"
+  },
   "handoff": {
     "branch": "fix/main-red-address-reask",
     "sha": "e4d7e70f97b259363b979366bd582d17ba4b83cb",

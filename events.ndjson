@@ -1,4 +1,3 @@
-{"at":"2026-10-08T12:47:23.893Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"saas-identity-followup","detail":"OVERLAP_ACCEPTED với tech-worker-onboarding: phạm vi db/schema.ts · điểm nóng SERIAL db/schema.ts — cách tích hợp: db/schema.ts chỉ đổi chú thích; console.ts/provisioning.ts trùng saas-create-customer-correct (#682) — identity-followup gộp TRƯỚC, worker #682 đã được báo rebase giữ cả hai phía; trùng tệp khác với các sứ mệnh đã gộp"}
 {"at":"2026-10-08T12:47:35.137Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"saas-identity-followup","detail":"fix/identity-followup @ d227c148adbe · 1 lệnh kiểm thử"}
 {"at":"2026-10-08T12:47:56.496Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"saas-identity-followup","detail":"#684 cho fix/identity-followup @ d227c148adbe"}
 {"at":"2026-10-08T12:49:36.269Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"saas-v1-plan-migration","detail":"PASS 67fc09b108a931137fc888f6d71ba6744cc956b9 2026-10-08T12:49:29.969Z"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-16T08:30:33.005Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"main-red-857-861","detail":"#867 cho fix/main-red-address-reask @ e4d7e70f97b2"}
 {"at":"2026-10-16T08:32:42.892Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#867 @ e4d7e70f97b2 · review độc lập PASS: chỉ dữ liệu giả, không đổi khẳng định"}
 {"at":"2026-10-16T09:12:31.168Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#866 @ b5be4e72e098 · tương đương #867 đã review độc lập PASS; chỉ đổi model giả, không đổi khẳng định"}
+{"at":"2026-10-16T09:13:01.282Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CANCELLED","mission":"main-red-857-861","detail":"trùng #866"}
