@@ -177,6 +177,14 @@ function testReviewRound2() {
   assert.deepEqual(amountsIn("lay 1 goi ruoc tom\n230/20 Phan Huy Ích, P An Hội Tây, TP.HCM", CAT).map((a) => a.label), ["ruoc tom"]);
   assert.deepEqual(amountsIn("giao số 12 Lò Đúc nha", CAT), []);
   assert.deepEqual(amountsIn("cho chị 2 hộp nem", CAT).map((a) => a.value), [2], "đơn vị thường vẫn đọc");
+  // Khách gõ hoa đầu từ: dãy hoa KHỚP TRỌN tên danh mục ⇒ vẫn là số lượng.
+  assert.deepEqual(amountsIn("Lấy 2 Gói Chả Mực", CAT).map((a) => [a.value, a.label]), [[2, "cha muc gia tay"]]);
+  assert.deepEqual(amountsIn("Cho Chị 2 Hộp Nem", CAT).map((a) => [a.value, a.label]), [[2, "nem hai san tom be be"]]);
+  assert.deepEqual(amountsIn("Ship Chị 1 Mực Giã Tay", CAT).map((a) => [a.value, a.label]), [[1, "cha muc gia tay"]]);
+  // Số trần + dãy hoa + «, <đơn vị hành chính>» ⇒ ĐỊA CHỈ, kể cả khi trùng tên món.
+  assert.deepEqual(amountsIn("12 Chả Cá, Hoàn Kiếm", CAT), [], "«12 Chả Cá, Hoàn Kiếm» không thành 12 món");
+  assert.deepEqual(amountsIn("giao 5 Chả Cá, Phường Hoàn Kiếm nha", CAT), []);
+  assert.deepEqual(amountsIn("Ship Chị 1 Mực Giã Tay, Thủy Ngô 0961000855", CAT).map((a) => a.value), [1], "dấu phẩy + tên người không phải địa chỉ");
   // (5) Giỏ đã có món; số đứng trước KHÔNG tên là chuyện kể ⇒ chỉ THÊM, món cũ giữ nguyên.
   const base = applyCustomerCartMessage(undefined, "cho chị 1kg chả mực giã tay", 1, NOW(), { catalog: CAT });
   const out = applyCustomerCartMessage(base, "hôm qua chị lấy 2 gói rồi, thêm 1 hộp nem nữa", 2, NOW(), { catalog: CAT });
@@ -321,6 +329,28 @@ const HANDOFF_GOLDEN: GoldenCase[] = [
     ],
   },
   {
+    key: "gc-855-thuyngo-chuoi-that",
+    title: "#855 chuỗi ThuyNgo: chỉ đặt mực (cá bị từ chối) → «Kg có order chả cá» → «Chị order mực» → «Sao kg coi ở trên» (phản đối 1) → «Khách cũ mà hỏi gì» (phản đối 2 ⇒ chuyển người)",
+    shop: "food",
+    channel: "FANPAGE",
+    config: CFG,
+    turns: [
+      {
+        say: `Ship chị 1 mực giã tay, ThuyNgo 0961000857, ${ADDR}`,
+        ai: [
+          () => [tool("create_customer", { name: "ThuyNgo", phone: "0961000857", address: ADDR })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CCT-1KG"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })],
+          () => [say(ASK)],
+        ],
+      },
+      { say: "Kg có order chả cá thu nha", ai: [() => [say("Dạ đơn mình chỉ có 1kg chả mực giã tay ạ.")]] },
+      { say: "Chị order mực", ai: [() => [say("Dạ em giữ 1kg chả mực giã tay cho chị ạ.")]] },
+      { say: "Sao kg coi ở trên", ai: [() => [say("Dạ em đã ghi 1kg chả mực giã tay ạ.")]] },
+      { say: "Khách cũ mà hỏi gì", ai: [] },
+    ],
+  },
+  {
     key: "gc-855-robot-cong-tac-tat",
     title: "#855: chủ shop TẮT «chuyển khi khách muốn gặp người» ⇒ «Robot hả» vẫn do AI trả lời, không chuyển người",
     shop: "food",
@@ -337,6 +367,19 @@ async function testHandoffGolden() {
     beforeCase: async (_c, ctx) => seedCct(ctx),
     afterCase: async (c, ctx, t) => {
       seen.add(c.key);
+      if (c.key === "gc-855-thuyngo-chuoi-that") {
+        const r1 = JSON.stringify(t.turns[0].rounds.map((r) => r.results));
+        assert.match(r1, /KHÔNG đưa «Chả cá thu» vào đơn/, "máy chủ từ chối cá ở tin đầu");
+        assert.deepEqual(t.turns.slice(0, 4).map((x) => x.status), ["OPEN", "OPEN", "OPEN", "OPEN"], "4 tin đầu AI vẫn xử lý («kg có order chả cá» không phải phản đối món — giỏ không có cá)");
+        assert.equal(t.turns[4].status, "HANDOFF", "«Khách cũ mà hỏi gì» = phản đối lần 2 ⇒ chuyển người");
+        assert.equal(t.turns[4].rounds.length, 0, "không gọi model");
+        assert.deepEqual(t.turns[4].shown, [], "không thêm câu xin lỗi");
+        assert.equal(t.final.handoffReason, CUSTOMER_HANDOFF_REASON.REPEATED_OBJECTION);
+        const { items, order } = await orderOf(ctx.conversationId);
+        assert.equal(items.filter((i) => i.variantId === ctx.ids.get("CCT-1KG")).length, 0, "0 SKU tự thêm");
+        assert.equal(order?.totalPriceAfterDiscount, 400_000, "đơn đúng 1 chả mực 400.000 ₫");
+        return;
+      }
       if (c.key === "gc-855-robot-cong-tac-tat") {
         assert.equal(t.final.status, "OPEN", "công tắc tắt ⇒ không chuyển người");
         assert.equal(t.turns[0].shown.length, 1, "AI trả lời");

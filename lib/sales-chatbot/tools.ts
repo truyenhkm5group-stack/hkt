@@ -43,6 +43,7 @@ import { foldVi } from "@/lib/sales-chatbot/text";
 import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packingIssues, packingRequestOf, verifiedUnitPrices, type AgentQuoteClaim, type Priced, type PricingContext } from "@/lib/sales-chatbot/quote";
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
+import type { ObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { bindCommitment, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
 import { acceptCustomerWard, addressQuestion, canAutoFill, namesOtherWard, parseCustomerAddress, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
 import { askedBefore, askMemoryFor, askMemoryParts, askParts, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
@@ -86,6 +87,8 @@ export type ChatState = {
    * `seenQuoteId` / `seenLines` = báo giá + dòng hàng khách ĐÃ THẤY ở lượt trước (đổi số lượng / quy cách trong lượt này ⇒ báo giá cũ hết
    * hiệu lực, phải xin xác nhận tổng mới). `packing` = NGUYÊN VĂN yêu cầu đóng gói riêng của khách — ghi vào ghi chú đơn cho kho.
    */
+  /** Bộ đếm phản đối món của lượt mua hiện tại (P0 #855 — `nextObjectionTally`, handoff-routing-shared.ts). */
+  objectionTally?: ObjectionTally;
   draft?: { orderId: string | null; lines: CartLine[]; unitPrices: Record<string, number>; recipient: Recipient; note: string; simulated: boolean; shownTurn?: number; firstShownTurn?: number; quote?: AgentQuoteClaim; seenQuoteId?: string; seenLines?: CartLine[]; seenTotal?: number; packing?: string | null };
   /** Khách PHẢN ĐỐI giá (PRICE_DISPUTED, 11/10/2026) — engine ghi khi phát hiện; chốt đơn bị chặn tới khi máy chủ báo lại và khách xác nhận. */
   priceDispute?: PriceDisputeState;

@@ -20,7 +20,7 @@
  *
  * HÀM THUẦN, không đọc CSDL. Không động tới giá / tồn / SKU: số tiền vẫn chỉ từ báo giá máy chủ (`quote.ts`).
  */
-import { resolveRecipientPlace } from "@/lib/address/vn-address";
+import { foldVnText, isAdminName, resolveRecipientPlace } from "@/lib/address/vn-address";
 import { manualOrderGaps } from "@/lib/constants/manual-orders";
 import { formatVND } from "@/lib/format";
 import { foldVi } from "@/lib/sales-chatbot/text";
@@ -173,6 +173,33 @@ function labelAround(text: string, index: number, end: number): { match: string;
   return run.length ? { match: foldVi(run.join(" ")), display: run.join(" ") } : { match: "", display: "" };
 }
 
+/** Dãy từ VIẾT HOA liền nhau bắt đầu ở `pos` (dừng ở dấu câu / chữ thường): «Chả Mực, …» ⇒ ["Chả", "Mực"]. HÀM THUẦN. */
+function capRunAt(text: string, pos: number): string[] {
+  const run: string[] = [];
+  for (const w of text.slice(pos, pos + 60).split(CUT_RE)[0].trim().split(/\s+/)) {
+    if (!w || !/^\p{Lu}/u.test(w) || run.length >= 5) break;
+    run.push(w);
+  }
+  return run;
+}
+/** MỌI từ của `words` thuộc tên ĐÚNG MỘT sản phẩm danh mục ⇒ tên đó; còn lại `null`. HÀM THUẦN. */
+function oneNameOf(words: readonly string[], catalog: readonly string[]): string | null {
+  const toks = labelTokens(words.join(" "));
+  if (!toks.length) return null;
+  const hits = [...new Set(catalog.map(productName))].filter((nm) => {
+    const nt = labelTokens(nm);
+    return toks.every((w) => nt.includes(w));
+  });
+  return hits.length === 1 ? hits[0] : null;
+}
+/** Sau dãy chữ là «, <đơn vị hành chính>» («12 Chả Cá, Hoàn Kiếm» · «…, Phường Hoàn Kiếm») ⇒ đây là ĐỊA CHỈ. HÀM THUẦN. */
+function adminAfter(rest: string): boolean {
+  const m = rest.match(/^\s*,\s*([^,\n;]+)/);
+  if (!m) return false;
+  const seg = m[1].trim();
+  return /^(?:phường|p\.|quận|q\.|huyện|xã|thị trấn|tt\.?|tp\.?|thành phố|tỉnh)(?:\s|$)/iu.test(seg) || isAdminName(foldVnText(seg));
+}
+
 /**
  * Mọi số lượng khách nói trong câu: khối lượng (gram) và số gói / cái, theo thứ tự xuất hiện, kèm tên món quanh nó (`catalog` = tên
  * sản phẩm đang bán — có thì tên món PHẢI khớp danh mục). HÀM THUẦN.
@@ -203,7 +230,10 @@ export function amountsIn(text: string, catalog?: readonly string[]): CartAmount
     // ĐỊA CHỈ, không phải số lượng (review #855 — golden «230/20 Phan Huy Ích» từng thành «20 phần»): số đứng sau «/» (số nhà 230/20), hoặc chữ
     // «đơn vị» VIẾT HOA mà từ kế tiếp cũng viết hoa (tên riêng «Phan Huy Ích», «Lò Đúc»).
     if (/[\d]\/$/.test(text.slice(Math.max(0, idx - 2), idx))) continue;
-    if (/^\p{Lu}/u.test(m[2]) && /^\s+\p{Lu}/u.test(text.slice(idx + m[0].length))) continue;
+    // …trừ khi dãy chữ hoa phía sau KHỚP TRỌN một tên danh mục («Lấy 2 Gói Chả Mực», «Cho Chị 2 Hộp Nem» — khách gõ hoa đầu từ).
+    if (/^\p{Lu}/u.test(m[2]) && /^\s+\p{Lu}/u.test(text.slice(idx + m[0].length))) {
+      if (!catalog || !oneNameOf(capRunAt(text, idx + m[0].length), catalog)) continue;
+    }
     if (out.some((a) => idx < a.end && idx + m[0].length > a.index)) continue;
     push(n, "pack", idx, m[0].length, m[2]);
   }
@@ -232,6 +262,12 @@ export function amountsIn(text: string, catalog?: readonly string[]): CartAmount
         take.push(w);
       }
       if (!take.length) continue;
+      // Dãy VIẾT HOA rồi «, <đơn vị hành chính>» ⇒ địa chỉ («12 Chả Cá, Hoàn Kiếm» là số nhà + tên đường), kể cả khi trùng tên món.
+      if (take.every((w) => /^\p{Lu}/u.test(w))) {
+        let pos = idx + m[0].length;
+        for (const w of take) pos = text.indexOf(w, pos) + w.length;
+        if (adminAfter(text.slice(pos))) continue;
+      }
       // MỌI từ đã lấy (bắt đầu từ từ ĐẦU TIÊN sau con số) phải thuộc tên của ĐÚNG MỘT sản phẩm — không tìm chuỗi con ở giữa
       // (review #855: «Hai Bà Trưng» từng khớp «Chả trứng»; «2 đứa nhỏ thích mực» từng thành 2 món mực; «1 nem chua» không phải nem hải sản).
       const toks = labelTokens(take.join(" "));

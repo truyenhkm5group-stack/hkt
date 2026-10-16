@@ -68,7 +68,7 @@ import { FOOD_PACK, salesPackFor, type SalesPack } from "@/lib/sales-chatbot/pac
 import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
 import { amountText, applyCustomerCartMessage, buyingText, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, invitedProductOf, itemObjectionCue, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
 import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
-import { customerHandoffVerdict, nextObjectionTally, type ObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
+import { customerHandoffVerdict, nextObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
 import { ADDRESS_KNOWN_TEXT, addressKnowledge, addressReaskVerdict } from "@/lib/sales-chatbot/address-memory";
@@ -1062,7 +1062,7 @@ async function chatTurnCore(
     // đang tiếp quản ⇒ không đè quyết định của người. Copilot chạy lượt này trên hội thoại BÓNG kênh TEST (`shadowTurn`) ⇒ không báo ai.
     if (readConversationControl(st0)?.mode !== "HUMAN") {
       const objectionNow = itemObjectionCue(text, cartLabelsBefore);
-      const prevTally = (st0 as { objectionTally?: ObjectionTally }).objectionTally;
+      const prevTally = st0.objectionTally;
       const resumedAt = objectionNow && prevTally ? await lastAiResumedAt(conv.id) : null;
       const tally = nextObjectionTally(prevTally, { objectionNow, cycle: cycleStartTurns(st0, conv.turns, now), now, resumedAt });
       const wants = customerHandoffVerdict({ text, objections: tally?.n ?? 0, objectionNow, onCustomerRequest: cfg.handoff.onCustomerRequest });
@@ -1074,7 +1074,7 @@ async function chatTurnCore(
         return { ok: true, view: (await conversationView(conv.id))! };
       }
       if (tally !== prevTally) {
-        const st = Object.assign({}, st0, { objectionTally: tally }) as ChatState;
+        const st: ChatState = { ...st0, objectionTally: tally };
         await bump({ state: st as Record<string, unknown> });
         conv.state = st as Record<string, unknown>;
         st0 = st;
