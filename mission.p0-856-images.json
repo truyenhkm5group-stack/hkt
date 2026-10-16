@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "mission_id": "p0-856-images",
+  "title": "#856 ảnh Pancake: ảnh khách / page / nhân viên / AI hiện đủ, đúng vị trí, backfill theo message ID",
+  "business_goal": "Ảnh trong Pancake = ảnh trong hộp thư ERP; không gửi lại ảnh cho khách",
+  "status": "PLANNING",
+  "priority": "P0",
+  "risk": "HIGH",
+  "owner": "vm:hkt",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/p0-856-images",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/fanpage.ts",
+    "lib/sales-chatbot/inbox.ts",
+    "lib/sales-chatbot/messenger-history-shared.ts",
+    "lib/sales-chatbot/history.ts",
+    "components/sales-chatbot/",
+    "app/(dashboard)/ai/sales-chatbot/",
+    "tests/p0-856-images.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-16T03:48:04.609Z",
+  "updated_at": "2026-10-16T03:48:04.609Z",
+  "last_heartbeat": "2026-10-16T03:48:04.609Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "PARTIAL",
+    "evidence": []
+  }
+}
