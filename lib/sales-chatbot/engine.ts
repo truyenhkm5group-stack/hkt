@@ -1056,22 +1056,23 @@ async function chatTurnCore(
       return { ok: true, view: (await conversationView(conv.id))! };
     }
     // KHÁCH BỰC / ĐƠN MÂU THUẪN ⇒ NGƯỜI (P0 16/10/2026, #855 ca «ThuyNgo» — frustration.ts): khách phủ nhận món bot đưa vào đơn, xin gặp
-    // người, phàn nàn bot không đọc («robot hả», «khách cũ mà hỏi gì», «sao không coi ở trên»), hay đã sửa đơn bot đề nghị đủ số lần ⇒ MÁY
+    // người, phàn nàn bot không đọc («robot hả», «khách cũ mà hỏi gì», «sao không coi ở trên»), hay đã nói bot SAI đủ số lần ⇒ MÁY
     // CHỦ chuyển người ngay — không câu mẫu, không lượt AI (mỗi lượt AI thêm là thêm một câu xin lỗi / một lần hỏi lại). Lý do không thuộc
     // nhóm tự hết hạn ⇒ bot im tới khi nhân viên trả lại; follow-up chỉ chạy hội thoại WAITING nên cũng dừng. Đơn nháp đang có ⇒ cờ CẦN
     // NGƯỜI KIỂM «món khách chưa đồng ý» (khi khách phủ nhận món) để công tắc tự xác nhận / người kiểm không cho nó đi tiếp.
     const hasOffer = Boolean(st0.draft || st0.quote || st0.seenTotals?.length || st0.rejectedTotals?.length || cartBefore?.selectedItems.some((x) => !x.customerExplicit));
-    const frus = frustrationSignal({ text, before: cartBefore, after: st0.cart, hasOffer, corrections: st0.corrections?.length ?? 0, turn: turnSeq });
+    const offeredTexts = recentShopTexts(msgs, 6).map((t) => (t.startsWith(SHOP_SAID) ? t.slice(SHOP_SAID.length).trim() : t));
+    const frus = frustrationSignal({ text, before: cartBefore, after: st0.cart, hasOffer, offeredTexts, hasDraft: Boolean(st0.draft?.orderId), corrections: st0.corrections?.length ?? 0, turn: turnSeq });
     if (frus) {
       const reason = `${FRUSTRATION_HANDOFF_PREFIX}: ${frus.reason}`.slice(0, 300);
       const st: ChatState = { ...st0, handoff: { reason, at: now.toISOString() } };
-      if (frus.kind === "DENIED_BOT_ITEM" && st0.draft?.orderId && opts.channel !== "TEST") await flagOrderForReviewAsAgent(SALES_AGENT, st0.draft.orderId, { code: "UPSELL_UNCONSENTED", note: frus.reason.slice(0, 300), quote: text.trim().slice(0, 300) || null }, now).catch(() => undefined);
+      if (frus.kind === "DENIED_BOT_ITEM" && frus.inDraft && st0.draft?.orderId && opts.channel !== "TEST") await flagOrderForReviewAsAgent(SALES_AGENT, st0.draft.orderId, { code: "UPSELL_UNCONSENTED", note: frus.reason.slice(0, 300), quote: text.trim().slice(0, 300) || null }, now).catch(() => undefined);
       if (!isMessagingChannel(opts.channel)) await reply(conv, seq, cfg.handoff.message);
       await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1, nextFollowupAt: null, lastError: `Chuyển người trước lượt AI — ${frus.kind}` });
       if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey: `sales-chat:frustration:${conv.id}:${turnSeq}` }).catch(() => undefined);
       return { ok: true, view: (await conversationView(conv.id))! };
     }
-    if (isCorrectionTurn({ text, before: cartBefore, after: st0.cart, hasOffer, turn: turnSeq })) {
+    if (isCorrectionTurn({ text, hasOffer })) {
       const st: ChatState = { ...st0, corrections: [...(st0.corrections ?? []), turnSeq] };
       await bump({ state: st as Record<string, unknown> });
       conv.state = st as Record<string, unknown>;

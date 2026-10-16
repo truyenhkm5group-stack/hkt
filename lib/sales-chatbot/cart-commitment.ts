@@ -389,11 +389,8 @@ export function classifyCartMessage(text: string, catalog?: readonly string[]): 
     // «Không có order chả cá thu nha» / «Kg có order chả cá thu nha» = KHÁCH PHỦ NHẬN MÓN,
     // không phải lời đặt hàng. «kg» chỉ hiểu là «không» khi có cả «có order/đặt» phía sau,
     // tránh nhầm chữ kg chỉ đơn vị khối lượng với phủ định.
-    const denyOrder = f.match(/(?:^| )(?:khong|ko|k|hong|hok|kg)(?: co)? (?:order|dat)(?: mon)? ([a-z]+(?: [a-z]+){0,5})/);
-    if (denyOrder) {
-      const label = leadingRun(denyOrder[1]);
-      if (label) return { kind: "REMOVE", amounts: [], label };
-    }
+    const denied = deniedItemLabel(text);
+    if (denied) return { kind: "REMOVE", amounts: [], label: denied };
     // Bỏ một món, tên món ĐỨNG SAU: «không lấy chả cá nữa», «bỏ chả cá thu nha», «hủy chả cá», «bỏ món chả cá đi em».
     const rm = f.match(new RegExp(`(?:^| )(?:bo|huy|${NEG} (?:lay|mua))(?: mon)? ([a-z]+(?: [a-z]+){0,5})`));
     if (rm) {
@@ -707,6 +704,28 @@ export function mentionsProduct(name: string, customerSaid: string): boolean {
  * THUẪN (`frustration.ts`). HÀM THUẦN.
  */
 export const DENIAL_RE = /(?:^| )(?:khong|ko|k|hong|hok|kg)(?: co)? (?:order|dat)(?: |$)/;
+
+/**
+ * Chữ đứng sau «không đặt / không order» mà KHÔNG phải tên món (review độc lập PR #862): «không đặt THÊM gì nữa» (từ chối lời mời — câu
+ * trả lời phổ biến nhất của lời mời thêm món máy chủ bắt bot gửi), «không đặt CỌC», «không đặt TRƯỚC được hả», «sao k đặt ĐƯỢC», «không
+ * đặt NHIỀU đâu», «ko đặt SHIP nhanh». Câu có những chữ này là lời nói thường, không phải lời phủ nhận một món.
+ */
+const DENY_NOT_ITEM = new Set("them coc truoc duoc dc nhieu it ship giao hang lai nua gi tiep luon ngay som ky the vay nhu sau gap".split(" "));
+
+/**
+ * Tên món khách PHỦ NHẬN («không có order chả cá thu», «kg có order chả cá», «ko đặt chả mực») — chữ đã gập, cắt ở từ dừng; `null` khi
+ * câu không phủ nhận món nào («không đặt thêm gì nữa em», «không đặt cọc đâu»). Lời phủ nhận chỉ là MÂU THUẪN khi tên này khớp một món
+ * bot / shop đã đưa ra (`frustration.ts`). HÀM THUẦN.
+ */
+export function deniedItemLabel(text: string): string | null {
+  const f = foldCart(text);
+  const m = f.match(/(?:^| )(?:khong|ko|k|hong|hok|kg)(?: co)? (?:order|dat)(?: mon)? ([a-z]+(?: [a-z]+){0,5})/);
+  if (!m) return null;
+  const first = m[1].split(" ")[0];
+  if (DENY_NOT_ITEM.has(first)) return null;
+  const label = leadingRun(m[1]);
+  return label || null;
+}
 
 /** Mệnh đề KHÔNG phải lời mua: phủ định / bỏ / huỷ · hỏi giá / hỏi điều kiện · giả định. */
 const NOT_BUYING_RE = /(?:^| )(?:khong|ko|k|chua|dung|hong|hok|chang) (?:lay|mua|can|dat|an|thich)(?: |$)|(?:^| )(?:bao nhieu|bn|nhieu tien|may tien|het bao|bao gia|gia (?:bao|sao|nhieu|the nao|ca)|neu|thi sao)(?: |$)|(?:^| )(?:khong|ko|k|hong|hok)$/;
