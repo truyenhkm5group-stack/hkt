@@ -74,6 +74,18 @@ export function testP0855AddressPure() {
   assert.equal(addressCheckOf({ address: dongDaAddress, province: "" }).view.ask_customer, null, "không gửi câu phường theo địa giới mới");
   assert.ok(addressReaskVerdict(WARD_NEW_ASK, addressKnowledge(draftWith(dongDaAddress), [dongDaFull]), 2), "outbound guard chặn bot hỏi phường mới trong tin khách đặt hàng");
   assert.equal(legacyAddressUnmapped("Gia Lâm, Hà Nội"), null, "chỉ huyện+tỉnh thì chưa đủ phần đường");
+  // Review #870 [CAO]: «địa chỉ <lượng từ>» KHÔNG phải lời khai địa chỉ mới — đọc nhầm thì máy chủ ghi đè địa chỉ đang giữ và xoá xã.
+  const held = draftWith("12 Hàng Bạc, Hoàn Kiếm, Hà Nội", "Hà Nội", { ward: "Phường Hoàn Kiếm" });
+  for (const noise of ["em ơi địa chỉ 2 nơi nữa ở Hà Nội nhé", "địa chỉ 1 người bạn ở Hà Nội nhé", "địa chỉ toàn ở Hà Nội thôi", "địa chỉ ngoài Hà Nội có ship không"]) {
+    assert.equal(hasChangeCue(noise), false, `${noise}: không phải lời đổi địa chỉ`);
+    const d = deliveryAddressDecision(held, [noise]);
+    assert.notEqual(d.status, "CHANGE_PENDING_VERIFICATION", `${noise}: giữ nguyên địa chỉ đang có — ${JSON.stringify(d)}`);
+    assert.notEqual(d.status, "NEW_EXPLICIT", `${noise}: không nhận làm địa chỉ mới`);
+  }
+  // Đối chứng dương: tiền tố nơi chốn + số, hoặc số nhà + ngõ / đường, không cần dấu hai chấm.
+  for (const real of ["địa chỉ số 9 ngõ 3 Thử Nghiệm, Gia Lâm, Hà Nội", "địa chỉ 9 ngõ 3 Thử Nghiệm, Gia Lâm, Hà Nội", "địa chỉ ngõ 3 Thử Nghiệm, Gia Lâm, Hà Nội"]) {
+    assert.equal(hasChangeCue(real), true, `${real}: lời khai địa chỉ thật`);
+  }
   // Review #870: ngõ / thôn mở đầu (không có chữ số) cũng là điểm giao thật; SĐT / số lượng + huyện cũ thì KHÔNG.
   for (const ok of ["Ngõ 7 Thử Nghiệm, Gia Lâm, Hà Nội", "Thôn Thử, Gia Lâm, Hà Nội"]) {
     assert.ok(legacyAddressUnmapped(ok), `${ok}: điểm giao thật + huyện cũ ⇒ nhân viên kiểm`);
