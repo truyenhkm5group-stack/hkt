@@ -32,6 +32,12 @@
 
 
 
+
+## 16/10 ~17:30 VN — PRODUCTION = 2982fafb (Desktop deploy run 38879230154)
+- Gồm #854 #857 #858 #859 #860 #861 #864 #866. Smoke 135/135 · 0 lỗi ứng dụng · health commit 2982fafb0783. «failure» chỉ vì qa DEGRADED (nay thiếu 0245 + 0246 + 0247 — 0247 không tự áp được ở qa; việc của Web/qa).
+- #867 đóng (trùng #866). Đang review/sửa: #869 (#863 luồng huỷ — review FAIL lần 1: «không hủy» bị đọc là huỷ; nhắc lại giỏ hạ món đang thêm), #855-delta (calculate_cart có căn cứ, REVIEW_OPEN, lời nhắc khách cũ), #868 pha A (bỏ cổng bắt buộc mời thêm món trước khi lên đơn). Ba PR này cùng chạm engine.ts/tools.ts ⇒ Desktop gộp TUẦN TỰ.
+- #865 (đơn chốt thiếu chai mắm + HANDOFF kẹt) CHƯA ai nhận — Desktop giao sau #863.
+
 ## 16/10 ~15:40 VN — MAIN ĐỎ sau #857 + #861 + #864 (c3194e5f) — DEPLOY CHƯA LÊN, production vẫn 48651de2
 - Lượt deploy 38867586302 dừng ở gates (chưa chạm máy chủ): self-service-journey:1978 — model giả lặp y nguyên câu xin địa chỉ, #861 chặn đúng là hỏi lặp ⇒ chuyển người ⇒ 1 tin thay vì 2. Cả hai PR riêng lẻ đều xanh.
 - Sửa: PR #867 (`fix/main-red-address-reask`, chỉ đổi model giả của ca đó, không đổi khẳng định) — review độc lập + gates đang chạy. Desktop gộp #867 rồi MỘT deploy. Đừng ai deploy main trước đó.
