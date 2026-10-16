@@ -151,6 +151,25 @@ async function main(): Promise<number> {
     const kh = lapKeHoach(truoc);
     tomTat(`org-0245-index-preseed ${ts.org}: sổ migration ${mig[0]?.n ?? "?"} mục · 0245 ${truoc.da0245 ? "ĐÃ áp" : "CHƯA áp"} · chỉ mục ${truoc.chiMuc ? (truoc.chiMuc.hopLe ? "có, hợp lệ" : "có, INVALID") : "chưa có"} · sales_chat_inbound ${so[0]?.tong ?? "?"} dòng (PAGE_REPLY ${so[0]?.page_reply ?? "?"})`);
     tomTat(`RAM dùng được ${truoc.ramMb ?? "?"} MB (ngưỡng ${RAM_TOI_THIEU_MB}) · câu đang chạy > 30 s: ${truoc.cauDai}`);
+    // SỐ ĐO TÀI NGUYÊN cho câu tạo chỉ mục (chủ shop 16/10/2026: điều kiện riêng của CREATE INDEX CONCURRENTLY phải dựa trên số
+    // đo thật, không đoán). CHỈ ĐỌC: kích thước bảng / CSDL, khối chữ mà chỉ mục phải băm, tham số bộ nhớ Postgres, RSS của chính
+    // tiến trình này. Không đổi ngưỡng nào — ngưỡng chỉ đổi khi chủ shop duyệt trên các số này.
+    // Tải: hai hàm kích thước đọc catalog / tệp; một lượt quét các dòng PAGE_REPLY (~13k ở qa). Trần 30 s trên CHÍNH phiên này
+    // (nhánh --apply đặt lại trần của nó ngay sau) và hỏng thì in «chưa đo được» — phép đo không bao giờ chặn lượt chạy.
+    await client.query(`set statement_timeout = '30s'`);
+    const doTn = await q<{ bang_mb: string; csdl_mb: string; chu_mb: string; mwm: string; sb: string }>(
+      `select round(pg_total_relation_size('sales_chat_inbound') / 1048576.0, 1)::text bang_mb,
+              round(pg_database_size(current_database()) / 1048576.0, 1)::text csdl_mb,
+              (select round(coalesce(sum(octet_length(btrim(regexp_replace("text", '[[:space:]]+', ' ', 'g')))), 0) / 1048576.0, 1)::text
+                 from sales_chat_inbound where note = 'PAGE_REPLY') chu_mb,
+              current_setting('maintenance_work_mem') mwm, current_setting('shared_buffers') sb`,
+    ).catch((e: unknown) => {
+      tomTat(`SỐ ĐO tạo chỉ mục: chưa đo được — ${String((e as Error).message).slice(0, 120)}`);
+      return [];
+    });
+    await client.query(`set statement_timeout = default`);
+    const d = doTn[0];
+    if (d) tomTat(`SỐ ĐO tạo chỉ mục: bảng sales_chat_inbound ${d.bang_mb} MB · CSDL ${d.csdl_mb} MB · chữ PAGE_REPLY cần băm ${d.chu_mb} MB · maintenance_work_mem ${d.mwm} · shared_buffers ${d.sb} · RSS tiến trình này ${Math.round(process.memoryUsage().rss / 1048576)} MB`);
     tomTat(`KẾ HOẠCH: ${kh.viec} — ${kh.ly_do}${kh.chan.length ? ` · CHẶN: ${kh.chan.join(" · ")}` : ""}`);
 
     if (kh.viec === "KHONG_LAM_GI") return 0;
