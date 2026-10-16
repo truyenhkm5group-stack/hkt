@@ -109,13 +109,16 @@ export function testAddressWardExplicitPure() {
   const w2Line = "12 Nguyễn Văn Lượng, Gò Vấp, TP.HCM";
   assert.equal(wardFromCustomerWords(parseCustomerAddress(w2Line), w2Line, ["12 Lê Lợi, P Bến Thành, TP.HCM", "à chị đổi địa chỉ: 12 Nguyễn Văn Lượng, Gò Vấp, TPHCM nhé"]), null);
   const w2 = addressCheckOf({ address: "12 Nguyễn Văn Lượng, Gò Vấp", province: "TP.HCM" }, { customerTexts: ["12 Lê Lợi, P Bến Thành, TP.HCM", "à chị đổi địa chỉ: 12 Nguyễn Văn Lượng, Gò Vấp, TPHCM nhé"], turn: 5 }).view;
-  assert.deepEqual([w2.status, w2.ward, Boolean(w2.ask_customer)], ["AMBIGUOUS", null, true], JSON.stringify(w2));
-  //  W3: khách SỬA phường bằng câu không có đường ⇒ không gắn phường cũ, để bot hỏi.
+  // Không mượn phường của địa chỉ cũ (ward null). Từ #870 (chủ shop 16/10): số nhà + đường + quận cũ + tỉnh ⇒ KHÔNG hỏi khách phường mới,
+  // nhân viên kiểm nội bộ (ask_customer = null).
+  assert.deepEqual([w2.status, w2.ward, Boolean(w2.ask_customer)], ["AMBIGUOUS", null, false], JSON.stringify(w2));
+  //  W3: khách SỬA phường bằng câu không có đường ⇒ không gắn phường cũ.
   const w3Texts = ["230/20 Phan Huy Ích, P An Hội Tây, TP.HCM", "à em nhầm, phường An Hội Đông nhé"];
   assert.equal(wardFromCustomerWords(gv, MODEL_LINE, w3Texts), null);
   assert.deepEqual(customerStatedAddresses(w3Texts), [], "lời sửa mới hơn ⇒ địa chỉ cũ không còn là lời khai");
   const w3 = addressCheckOf({ address: MODEL_LINE, province: "" }, { customerTexts: w3Texts, turn: 5 }).view;
-  assert.deepEqual([w3.status, w3.ward, Boolean(w3.ask_customer)], ["AMBIGUOUS", null, true], JSON.stringify(w3));
+  // Từ #870 (chủ shop 16/10): dòng công cụ = số nhà + đường + quận cũ + tỉnh ⇒ không hỏi khách quy đổi phường; nhân viên kiểm (cờ).
+  assert.deepEqual([w3.status, w3.ward, Boolean(w3.ask_customer)], ["AMBIGUOUS", null, false], JSON.stringify(w3));
   //  W4: sửa KÈM đường ⇒ địa chỉ mới thắng.
   assert.equal(wardFromCustomerWords(gv, MODEL_LINE, ["230/20 Phan Huy Ích, P An Hội Tây, TP.HCM", "230/20 Phan Huy Ích, phường An Hội Đông, TP.HCM"])?.ward, "Phường An Hội Đông");
   //  W5: dòng công cụ KHÔNG có tỉnh + tin khách cũ ở tỉnh khác, cùng số nhà ⇒ không mượn tỉnh + phường.
@@ -138,7 +141,8 @@ export function testAddressWardExplicitPure() {
   assert.equal(askedBefore(asked, ["ward"], 4), true);
   const later = addressCheckOf({ address: `${MODEL_LINE} (gần chợ)`, province: "" }, { asked, turn: 4 }).view;
   assert.deepEqual([later.status, later.ask_customer], ["AMBIGUOUS", null], JSON.stringify(later));
-  assert.match(later.note, /KHÔNG hỏi lại/);
+  // Từ #870 dòng này (số nhà + đường + quận cũ) đi nhánh «chưa ghép danh mục» trước cả luật hỏi-một-lần: cả hai đều KHÔNG hỏi khách.
+  assert.match(later.note, /KHÔNG hỏi lại|KHÔNG hỏi khách tên phường/);
   // Trí nhớ dòng cũ (trước 15/10, chưa có `parts`) ⇒ suy phần đã hỏi từ chính địa chỉ của câu hỏi.
   assert.equal(askedBefore({ key: `${MODEL_LINE}||`, turn: 3 }, ["ward"], 4), true);
   assert.equal(askedBefore(undefined, ["ward"], 4), false);
@@ -204,11 +208,12 @@ export function testAddressWardExplicitPure() {
   assert.equal(addressReaskVerdict("Dạ mình đổi sang phường An Hội Đông đúng không ạ?", { ...corrected, wardAskedAt: 1 }, 6), null, "đã hỏi trước đó nhưng khách đang sửa ⇒ vẫn cho hỏi");
 
   // a5 (re-review PR #848): khách SỬA bằng phường SỐ CŨ không kèm quận («P15», «F15», «phường 15 cũ») — bộ đọc không ra phường nào
-  // chắc chắn, nhưng đó vẫn là lời sửa ⇒ bỏ cách đọc cũ, ô xã trống, bot được hỏi lại (hướng an toàn).
+  // chắc chắn, nhưng đó vẫn là lời sửa ⇒ bỏ cách đọc cũ, ô xã trống (hướng an toàn).
   for (const fix of ["à em nhầm P15 nhé", "nhầm rồi em, F15 nha", "à không phải An Hội Tây, phường 15 cũ", "à em nhầm, phường 15 Gò Vấp nhé"]) {
     const texts = ["230/20 Phan Huy Ích, P An Hội Tây, TP.HCM", fix];
     const vw = addressCheckOf({ address: "230/20 Phan Huy Ích, Gò Vấp", province: "TP.HCM" }, { customerTexts: texts, turn: 5 }).view;
-    assert.ok(vw.status !== "CUSTOMER_STATED" && vw.ward === null && Boolean(vw.ask_customer), `${fix}: ${JSON.stringify(vw)}`);
+    // Lời sửa vẫn bỏ cách đọc cũ (ô xã trống). Từ #870: không hỏi khách quy đổi «phường 15 cũ» sang tên mới — nhân viên kiểm.
+    assert.ok(vw.status !== "CUSTOMER_STATED" && vw.ward === null && !vw.ask_customer, `${fix}: ${JSON.stringify(vw)}`);
     const ask = "Dạ phường 15 cũ nay là phường nào theo tên mới ạ?";
     assert.equal(addressReaskVerdict(ask, addressKnowledge({}, texts), 5), null, `${fix}: không có trạng thái ⇒ không bỏ câu hỏi`);
     const kept: ChatState = { draft: { orderId: null, lines: [], unitPrices: {}, recipient: { name: "T", phone: "0901234567", address: "230/20 Phan Huy Ích, Gò Vấp", province: "TP.HCM", ward: AN_HOI_TAY }, note: "", simulated: true } };
@@ -224,9 +229,10 @@ export function testAddressWardExplicitPure() {
   assert.equal(parseCustomerAddress("thôn 3, xã Trần Phú, Hà Nội").ward, "Xã Trần Phú");
   const x6 = addressCheckOf({ address: "12 Trần Phú", province: "" }, { customerTexts: ["12 Trần Phú, phường Hạc Thành, Thanh Hóa", "ok em", "12 Trần Phú, Hà Đông, Hà Nội nha"], turn: 5 }).view;
   assert.ok(x6.ward !== "Xã Trần Phú" && x6.ward !== "Phường Hạc Thành", JSON.stringify(x6));
-  // X8: dòng công cụ nhắc quận cũ Gò Vấp; phường trong tin khách (Bến Thành — quận 1 cũ) không có đất ở Gò Vấp ⇒ không ghép, hỏi.
+  // X8: dòng công cụ nhắc quận cũ Gò Vấp; phường trong tin khách (Bến Thành — quận 1 cũ) không có đất ở Gò Vấp ⇒ không ghép.
   const x8 = addressCheckOf({ address: "12 Lê Lợi nối dài, Gò Vấp", province: "TP.HCM" }, { customerTexts: ["12 Lê Lợi, P Bến Thành, TP.HCM"], turn: 5 }).view;
-  assert.deepEqual([x8.status, x8.ward, Boolean(x8.ask_customer)], ["AMBIGUOUS", null, true], JSON.stringify(x8));
+  // Không ghép phường lạ (ward null). Từ #870: số nhà + đường + quận cũ + tỉnh ⇒ nhân viên kiểm, không hỏi khách.
+  assert.deepEqual([x8.status, x8.ward, Boolean(x8.ask_customer)], ["AMBIGUOUS", null, false], JSON.stringify(x8));
 
   // ⑧ Câu khi lượt im: đã có dòng địa chỉ mà chỉ thiếu TỈNH ⇒ hỏi đúng tỉnh, không xin lại cả địa chỉ.
   const cart: CartCommitment = { selectedItems: [{ label: "chả cá thu", match: "cha ca thu", productId: null, variantId: null, sku: null, quantity: 1000, unit: "g", sourceMessageId: 1, confidence: "HIGH", customerExplicit: true }], turn: 1, at: new Date().toISOString() };
@@ -256,17 +262,24 @@ export async function testAddressWardExplicitTools() {
   const gate = await executeTool("confirm_order", { customer_confirmation: "ok em" }, ctx(clone(base), "ok em", 3, [TUYET_MSG, "ok em"])).catch((e: unknown) => ({ isError: true, summary: `ném: ${String(e)}`, content: "", state: {} as ChatState }));
   assert.ok(!/địa chỉ chưa chuẩn hoá/.test(gate.summary), `chữ khách có phường ⇒ không hỏi lại: ${gate.summary}`);
 
-  // KHÔNG HỎI LẠI Ở LƯỢT SAU: không có chữ khách, địa chỉ mơ hồ ⇒ lượt 3 hỏi MỘT lần (câu ngắn, không danh sách 6) ...
-  const ask = await executeTool("confirm_order", { customer_confirmation: "ok em" }, ctx(clone(base), "ok em", 3));
+  // #870 (chủ shop 16/10): số nhà + đường + quận cũ + tỉnh, không chữ khách nào có phường ⇒ cổng chốt KHÔNG hỏi khách phường mới
+  // (đơn đi với ô xã trống + cờ cần kiểm, nhân viên đối chiếu nội bộ).
+  const legacyGate = await executeTool("confirm_order", { customer_confirmation: "ok em" }, ctx(clone(base), "ok em", 3)).catch((e: unknown) => ({ isError: true, summary: `ném: ${String(e)}`, content: "", state: {} as ChatState }));
+  assert.ok(!/địa chỉ chưa chuẩn hoá/.test(legacyGate.summary), `địa chỉ cũ đủ ⇒ không hỏi khách phường: ${legacyGate.summary}`);
+
+  // KHÔNG HỎI LẠI Ở LƯỢT SAU: địa chỉ THẬT SỰ thiếu (không có quận / huyện) ⇒ lượt 3 hỏi MỘT lần (câu ngắn, không danh sách) ...
+  const NO_DISTRICT = "230/20 Phan Huy Ích, TP.HCM";
+  const askBase: ChatState = { customer: { ...base.customer!, address: NO_DISTRICT }, draft: { ...base.draft!, recipient: { ...recipient, address: NO_DISTRICT } } };
+  const ask = await executeTool("confirm_order", { customer_confirmation: "ok em" }, ctx(clone(askBase), "ok em", 3));
   assert.ok(ask.isError && /địa chỉ chưa chuẩn hoá/.test(ask.summary), ask.summary);
   assert.ok(GO_VAP_SIX.every((w) => !ask.content.includes(w.replace(/^Phường/, "phường"))), `câu hỏi không liệt kê 6 phường: ${ask.content}`);
   assert.equal(ask.state.addressAsk?.parts?.ward, 3);
   // ... lượt 4 model chép lại địa chỉ KHÁC chuỗi (khách thêm «gần chợ») ⇒ không hỏi lại, đơn đi tiếp (cờ cần kiểm của lõi đơn).
-  const moved: ChatState = { ...clone(ask.state), draft: { ...clone(ask.state).draft!, recipient: { ...recipient, address: `${MODEL_LINE} gần chợ` } } };
+  const moved: ChatState = { ...clone(ask.state), draft: { ...clone(ask.state).draft!, recipient: { ...recipient, address: `${NO_DISTRICT} gần chợ` } } };
   const again = await executeTool("confirm_order", { customer_confirmation: "ok em" }, ctx(moved, "ok em", 4)).catch((e: unknown) => ({ isError: true, summary: `ném: ${String(e)}`, content: "", state: {} as ChatState }));
   assert.ok(!/địa chỉ chưa chuẩn hoá/.test(again.summary), `đã hỏi phường ở lượt 3 ⇒ lượt 4 không hỏi lại dù chuỗi địa chỉ đổi: ${again.summary}`);
   // create_customer ở lượt sau cũng không đưa câu hỏi phường nữa.
-  const cc2 = await executeTool("create_customer", { name: "Tuyết", phone: "0901234567", address: `${MODEL_LINE} gần chợ` }, ctx(clone(ask.state), "giao giúp chị nhé", 4));
+  const cc2 = await executeTool("create_customer", { name: "Tuyết", phone: "0901234567", address: `${NO_DISTRICT} gần chợ` }, ctx(clone(ask.state), "giao giúp chị nhé", 4));
   const v2 = (JSON.parse(cc2.content) as { address_check: { ask_customer: string | null; note: string } }).address_check;
   assert.deepEqual([v2.ask_customer, /KHÔNG hỏi lại/.test(v2.note)], [null, true], JSON.stringify(v2));
   // Lời trả lời phường ở tin TRƯỚC rồi «ok em» KHÔNG được nhận (review PR #848 lần 4: lời trả lời không gắn được với câu hỏi của đúng
@@ -322,7 +335,7 @@ export async function testAddressWardExplicitTools() {
   assert.equal(sameDeliveryPlace(MODEL_LINE, NEW_ADDR), false);
   assert.ok(askMemoryFor(ask.state.addressAsk, `${MODEL_LINE} gần chợ`));
   assert.equal(askMemoryFor(ask.state.addressAsk, NEW_ADDR), undefined);
-  const elsewhere: ChatState = { ...clone(ask.state), draft: { ...clone(ask.state).draft!, recipient: { ...recipient, address: "99 Quang Trung, Gò Vấp, TP.HCM" } } };
+  const elsewhere: ChatState = { ...clone(ask.state), draft: { ...clone(ask.state).draft!, recipient: { ...recipient, address: "99 Lê Văn Sỹ, TP.HCM" } } }; // không quận cũ ⇒ thật sự thiếu (từ #870 có quận cũ ⇒ nhân viên kiểm)
   const fresh = await executeTool("confirm_order", { customer_confirmation: "ok em" }, ctx(elsewhere, "ok em", 10)).catch((e: unknown) => ({ isError: true, summary: `ném: ${String(e)}`, content: "", state: {} as ChatState }));
   assert.ok(/địa chỉ chưa chuẩn hoá/.test(fresh.summary), `địa chỉ khác hẳn, mơ hồ ⇒ được hỏi phường một lần: ${fresh.summary}`);
   console.log("✓ Công cụ bot: chữ khách có phường ⇒ create_customer không hỏi, cổng chốt không chặn · hỏi đúng một lần (không danh sách 6) · lượt sau không hỏi lại dù địa chỉ chép khác · model không tự chọn phường");

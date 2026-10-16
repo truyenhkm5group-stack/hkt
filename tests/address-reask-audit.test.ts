@@ -120,6 +120,12 @@ function testPure() {
   assert.deepEqual(anhSon.causes, ["OLD_WARD_CONVERT_ASK"], "thị trấn + huyện cũ (tên cũ không có trong danh mục)");
   // «Xa La» không phải «xã», «khu đô thị» không chứa «thị xã»: chỉ quận cũ ⇒ không phải nhóm này (vẫn như ca «Lê Văn Dụ» ở trên).
   assert.equal(once.causes.includes("OLD_WARD_CONVERT_ASK"), false);
+  // #870, ca «Nguyễn Hồng» (fixture bịa): số nhà / ngõ + huyện cũ + tỉnh, KHÔNG có cấp xã ⇒ bot hỏi tên phường mới cũng là nhóm này.
+  const hong = auditAddressReask(convo([["user", txt(`Số 9 ngõ 3 Thử Nghiệm, Gia Lâm, Hà Nội\n${PHONE}`)], ["assistant", txt("Dạ mình cho em xin tên phường / xã mới của địa chỉ với ạ?")]]), start);
+  assert.ok(hong.causes.includes("OLD_WARD_CONVERT_ASK"), JSON.stringify(hong));
+  // Không có điểm giao (chỉ huyện + tỉnh) ⇒ khách thật sự thiếu, câu hỏi không thuộc nhóm này.
+  const bare = auditAddressReask(convo([["user", txt("Gia Lâm, Hà Nội")], ["assistant", txt("Dạ mình cho em xin số nhà và tên phường / xã với ạ?")]]), start);
+  assert.equal(bare.causes.includes("OLD_WARD_CONVERT_ASK"), false, JSON.stringify(bare));
   // Không gửi địa chỉ ⇒ ngoài mẫu số; câu hỏi giá không phải địa chỉ.
   assert.equal(auditAddressReask(convo([["user", txt("chả cá bao nhiêu em?")], ["assistant", txt("Dạ mình cho em xin địa chỉ nhé?")]]), start).givenAt, null);
   // Cửa sổ: sự việc TRƯỚC mốc không đếm.
