@@ -1,0 +1,8 @@
+{
+  "pr": 861,
+  "sha": "0cf773e96cd6cdfebcb15d68a741623303482f87",
+  "verdict": "PASS",
+  "actor": "vm:hkt",
+  "at": "2026-10-16T06:02:39.234Z",
+  "note": "review độc lập 6 lượt; đo đơn cũ có cờ + xã trước deploy"
+}
