@@ -71,7 +71,7 @@ import { readConversationControl } from "@/lib/sales-chatbot/conversation-contro
 import { customerHandoffVerdict, nextObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
-import { ADDRESS_KNOWN_TEXT, ADDRESS_STAFF_TEXT, addressKnowledge, addressReaskVerdict } from "@/lib/sales-chatbot/address-memory";
+import { ADDRESS_KNOWN_TEXT, ADDRESS_STAFF_TEXT, SCHEDULE_NOTED_TEXT, addressKnowledge, addressReaskVerdict, isScheduleOnly } from "@/lib/sales-chatbot/address-memory";
 import { DELIVERY_HANDOFF_TEXT, deliveryReplyViolation, turnDeliverySay } from "@/lib/sales-chatbot/delivery-intent";
 import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, noteSeenTotals, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
 import { flagOrderForReviewAsAgent, loadAutoConfirmComplete } from "@/lib/records/order-create";
@@ -1146,7 +1146,12 @@ async function chatTurnCore(
       });
       return { ok: true, view: (await conversationView(conv.id))!, media: { quickReplyId: pick.entry.id, imageIds: pick.imageIds } };
     };
-    if (quick.kind === "ANSWER") return sendQuick(quick.pick, null);
+    // #871: câu mẫu theo TỪ KHOÁ / AI chọn mã đi nguyên văn — cùng hàng rào hỏi lại như chữ model. Câu mẫu xin SĐT / địa chỉ khách đã
+    // cho («…xin SĐT + địa chỉ chính xác để em check tuyến giao» khớp chữ «giao» của «Giao sáng mai khoảng 9h») ⇒ không gửi, AI trả lời.
+    // Cùng cửa sổ với `customerTexts` của đường AI — hai đường phán cùng một tin như nhau.
+    const quickTexts = [...msgs.slice(Math.max(0, msgs.length - SALES_CHATBOT_LIMITS.historyMessages)).filter((m) => m.role === "user" && !m.content.some((b) => b.type === "tool_result")).map((m) => textOf(m.content)), text];
+    const quickReasks = (pick: QuickReplyPick) => addressReaskVerdict(pick.text, addressKnowledge(st0, quickTexts), turnSeq, { botTexts: recentSaid }) !== null;
+    if (quick.kind === "ANSWER" && !quickReasks(quick.pick)) return sendQuick(quick.pick, null);
     const org = await currentOrganization();
     // Trang công khai: khách KHÔNG BAO GIỜ đọc lý do nội bộ (công tắc, hạn mức gói, khoá) — chuyển người, báo chủ shop.
     // Khung THỬ của chủ shop giữ nguyên câu lỗi để họ sửa được.
@@ -1185,7 +1190,7 @@ async function chatTurnCore(
         const inT = res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens;
         await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: quickProv.source, provider: quickProv.provider.name, model: res.model || quickProv.provider.model, requests: 1, inputTokens: inT, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || quickProv.provider.model, res.usage), status: "OK", actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id, workload: "quick_extract", ...usageDetail(res) }).catch(() => undefined);
         Object.assign(pre, { calls: 1, inTok: inT, outTok: res.usage.outputTokens });
-        if (pick && !repeatsRecent(pick.text, recentSaid)) return sendQuick(pick, pre);
+        if (pick && !repeatsRecent(pick.text, recentSaid) && !quickReasks(pick)) return sendQuick(pick, pre);
       } catch (error) {
         if (error instanceof SeqConflict) throw error;
       }
@@ -1364,7 +1369,10 @@ async function chatTurnCore(
                 if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, addrHold.handoff, state.customer, now, { dedupeKey: `sales-chat:address-guard:${conv.id}:${turnSeq}` }).catch(() => undefined);
               }
               const restText = addrHold.handoff && isMessagingChannel(opts.channel) ? addrHold.rest.replace(ADDRESS_STAFF_TEXT, "").trim() : addrHold.rest;
-              const said = restText || (draftUnsaid || addrHold.handoff ? "" : ADDRESS_KNOWN_TEXT);
+              // #871: khách đã đủ SĐT + địa chỉ rồi chỉ hẹn giờ giao («Giao sáng mai khoảng 9h») ⇒ ghi nhận lời dặn, không hỏi lại, không hứa
+              // giờ. Sau bán hàng (đổi lịch đơn đã chốt) là việc của đường lịch giao / nhân viên, không chèn câu này.
+              const scheduleAck = !addrHold.handoff && !postSale && isScheduleOnly(customerTexts[customerTexts.length - 1] ?? "") ? SCHEDULE_NOTED_TEXT : "";
+              const said = [restText, scheduleAck].filter(Boolean).join(" ") || (draftUnsaid || addrHold.handoff ? "" : ADDRESS_KNOWN_TEXT);
               if (said && !content.some((x) => x.type === "text" && x.text === said)) {
                 content.push({ type: "text", text: said });
                 spoke = true;
