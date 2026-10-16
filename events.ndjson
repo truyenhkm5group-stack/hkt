@@ -1,4 +1,3 @@
-{"at":"2026-10-08T07:38:41.429Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"inbox-composer-hardening","detail":"PASS 3a28e83e9971e73fec586bbf7fb0f5076c90ff19 2026-10-08T07:38:37.044Z"}
 {"at":"2026-10-08T07:38:51.256Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"inbox-composer-hardening","detail":"gộp vào main; deploy 37741568283 (3a28e83e) success; verify PASS"}
 {"at":"2026-10-08T07:39:01.622Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"saas-l1-followup","detail":"PASS 3a28e83e9971e73fec586bbf7fb0f5076c90ff19 2026-10-08T07:38:57.183Z"}
 {"at":"2026-10-08T07:39:11.194Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DONE","mission":"saas-l1-followup","detail":"gộp vào main; deploy 37741568283 (3a28e83e) success; verify PASS"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-16T04:50:20.479Z","actor":"vm:hkt","kind":"OVERLAP_ACCEPTED","mission":"p0-855-address","detail":"OVERLAP_ACCEPTED với saas-l5-billing-trial: phạm vi lib/sales-chatbot/engine.ts — cách tích hợp: bài kiểm tuyến giao cho cờ ADDRESS_UNRESOLVED"}
 {"at":"2026-10-16T04:50:20.479Z","actor":"vm:hkt","kind":"OVERLAP_ACCEPTED","mission":"p0-855-address","detail":"OVERLAP_ACCEPTED với saas-ops-signals: phạm vi lib/sales-chatbot/engine.ts, lib/sales-chatbot/tools.ts — cách tích hợp: bài kiểm tuyến giao cho cờ ADDRESS_UNRESOLVED"}
 {"at":"2026-10-16T04:50:20.479Z","actor":"vm:hkt","kind":"OVERLAP_ACCEPTED","mission":"p0-855-address","detail":"OVERLAP_ACCEPTED với sales-claim-guard: phạm vi lib/sales-chatbot/claim-guard.ts, lib/sales-chatbot/engine.ts — cách tích hợp: bài kiểm tuyến giao cho cờ ADDRESS_UNRESOLVED"}
+{"at":"2026-10-16T05:04:31.927Z","actor":"vm:hkt","kind":"REVIEW_PASS","detail":"#859 @ 17955aa1d9c8 · review độc lập 3 lượt; dòng 207 để sau giỏ hàng"}
