@@ -135,11 +135,10 @@ export function classifyOutbound(f: OutboundFacts): OutboundOrigin {
   // Tài khoản nhân viên Pancake gõ một câu đã dùng ở hội thoại khác (câu trả lời lưu sẵn) vẫn là NGƯỜI — tin mẫu chỉ là chứng cứ khi
   // không có danh tính người gửi.
   if (f.pancakeStaffAccount) return "VERIFIED_HUMAN";
-  // Hộp thư người của Meta (Business Suite / Messenger) cũng là danh tính người gửi: câu trả lời lưu sẵn gửi từ đó vẫn là NGƯỜI, xét TRƯỚC
-  // chứng cứ câu mẫu (review #857 — đảo thứ tự thì nhân viên dùng câu lưu sẵn trên Business Suite thành «tự động», AI chen vào).
-  if (f.metaAppId && META_HUMAN_INBOX_APP_IDS.includes(f.metaAppId)) return "VERIFIED_HUMAN";
+  // Câu mẫu xét TRƯỚC mã app hộp thư người của Meta: chưa có số đo chứng minh trả lời tự động / trả lời nhanh cài trong Business Suite
+  // KHÔNG mang mã app đó — đảo thứ tự thì lời chào quảng cáo thành «người», đóng lượt và AI nhường 30 phút (đúng ca #856, chiều ngược).
   if (f.templateText) return "PANCAKE_AUTOMATION";
-  if (f.metaAppId) return "OTHER_APP";
+  if (f.metaAppId) return META_HUMAN_INBOX_APP_IDS.includes(f.metaAppId) ? "VERIFIED_HUMAN" : "OTHER_APP";
   return "UNKNOWN";
 }
 
