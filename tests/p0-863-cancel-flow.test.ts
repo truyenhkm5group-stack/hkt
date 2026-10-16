@@ -52,6 +52,13 @@ function testPure() {
     assert.equal(explicitCancel(t), false, `«${t}» không phải huỷ`);
   }
   assert.equal(explicitCancel("thôi khỏi"), true, "«thôi khỏi» trơn vẫn là huỷ");
+  // Review #869 vòng 3: fanpage nối các tin khách liên tiếp bằng xuống dòng — lời RÚT LẠI đứng sau câu huỷ thắng (mệnh đề cuối quyết).
+  for (const t of ["Hủy đơn\nà thôi khoan đã", "Hủy đơn\nkhoan đã", "hủy đi, à thôi không hủy nữa", "Hủy đơn đi em\nThôi không hủy nữa, giữ đơn nhé"]) {
+    assert.equal(negatedCancel(t), true, `«${t}» là rút lại — giữ đơn`);
+    assert.equal(explicitCancel(t), false, `«${t}» không phải huỷ`);
+    assert.notEqual(classifyCartMessage(t).kind, "CANCEL", `«${t}» không xoá giỏ`);
+  }
+  assert.equal(explicitCancel("Không\nHủy đơn giùm chị"), true, "«không» rồi câu huỷ ở tin sau ⇒ huỷ");
   // Re-review #869: «không» TRẢ LỜI câu giữ đơn rồi một câu huỷ (mệnh đề khác) ⇒ HUỶ — phủ định chỉ tính trong CÙNG mệnh đề với «hủy».
   for (const t of ["không, hủy đơn đi", "Không. Hủy đơn đi em", "k, huỷ đi", "không không, hủy giùm chị", "chưa, hủy đơn giúp chị", "ko lấy nữa, hủy đi", "không cần giữ, hủy luôn", "ko đâu em, hủy đi", "không nha, hủy đơn", "đừng giữ, hủy đi em", "hủy đi, không lấy nữa"]) {
     assert.equal(negatedCancel(t), false, `«${t}» không phải phủ định huỷ`);
@@ -293,6 +300,22 @@ const CASES: GoldenCase[] = [
     turns: [draftTurn("0961000870"), changeTurn, { say: CANCEL_1, ai: [] }, { say: "Không, hủy đi", ai: [] }],
   },
   {
+    key: "gc-863-huy-roi-rut-lai",
+    title: "Review #869 vòng 3: sau lượt giữ đơn, «Hủy đơn đi em» rồi «Thôi không hủy nữa, giữ đơn nhé» (hai tin nối) ⇒ KHÔNG huỷ, kể cả model gọi CANCEL",
+    shop: "food",
+    channel: "FANPAGE",
+    config: CFG,
+    turns: [
+      draftTurn("0961000871"),
+      changeTurn,
+      { say: CANCEL_1, ai: [] },
+      {
+        say: "Hủy đơn đi em\nThôi không hủy nữa, giữ đơn nhé",
+        ai: [() => [tool("cancel_order", { decision: "CANCEL", customer_words: "Hủy đơn đi em" })], () => [say("Dạ vâng, em giữ đơn cho mình ạ.")]],
+      },
+    ],
+  },
+  {
     key: "gc-863-dung-huy-lan-dau",
     title: "Review #869: «đừng hủy nha em» sau lỗi bot ⇒ không phải câu huỷ: không xin lỗi / đề nghị huỷ, không mở yêu cầu huỷ",
     shop: "food",
@@ -412,6 +435,15 @@ async function testGolden() {
       assert.match(r.shown[0] ?? "", /đã huỷ đơn #<MÃ ĐƠN>/);
       const { order } = await orderOf(ctx.conversationId);
       assert.equal(order?.stage, "CANCELLED", "đơn ĐÃ huỷ trong CSDL");
+    },
+    "gc-863-huy-roi-rut-lai": async (t, ctx) => {
+      assert.match(t.turns[2].shown[0] ?? "", /xin lỗi/, "lượt huỷ đầu: máy chủ giữ đơn");
+      const r = t.turns[3];
+      assert.ok(r.rounds.length > 0, "lời rút lại KHÔNG đi đường huỷ của máy chủ");
+      assert.match(JSON.stringify(r.rounds.map((x) => x.results)), /khách nói KHÔNG huỷ/, "cancel_order CANCEL bị từ chối");
+      assert.ok(!r.shown.some((x) => /đã huỷ/.test(x)), `không câu «đã huỷ»: ${JSON.stringify(r.shown)}`);
+      const { order } = await orderOf(ctx.conversationId);
+      assert.notEqual(order?.stage, "CANCELLED", "đơn KHÔNG bị huỷ");
     },
     "gc-863-dung-huy-lan-dau": async (t, ctx) => {
       const r = t.turns[2];

@@ -419,21 +419,25 @@ const CANCEL_RE = new RegExp(
 export const NEGATED_CANCEL_RE = /(?:^| )(?:khong|ko|k|hong|hok|dung|chua|dau co|khoi)(?: (?:can|phai|muon|duoc))? (?:huy|bo don)(?= |$)|^khoan(?= |$)/;
 /** Từ huỷ trong một mệnh đề (đọc trên `foldCart`). */
 const CANCEL_WORD_RE = /(?:^| )(?:huy|bo don|cancel)(?= |$)/;
+/** Mệnh đề RÚT LẠI / giữ đơn không chứa «hủy»: «khoan (đã)», «à thôi khoan», «giữ đơn», «giữ lại đơn» (đọc trên `foldCart`). */
+const KEEP_CLAUSE_RE = /(?:^| )khoan(?= |$)|(?:^| )giu (?:lai )?don(?= |$)/;
 
 /**
- * Khách nói KHÔNG huỷ / chưa huỷ (đồng ý giữ đơn) — `true` thì không bao giờ là câu huỷ. Tách mệnh đề trên chữ GỐC (`, . ; ! ? /` xuống dòng)
- * trước khi bỏ dấu: phủ định chỉ khi có ít nhất một mệnh đề phủ định huỷ VÀ không mệnh đề nào là câu huỷ không phủ định («không không, hủy
- * giùm chị» ⇒ huỷ). Bare «thôi khỏi» (không có «hủy») vẫn là câu huỷ. HÀM THUẦN.
+ * Khách nói KHÔNG huỷ / chưa huỷ (đồng ý giữ đơn) — `true` thì không bao giờ là câu huỷ. Tách mệnh đề trên chữ GỐC (`, . ; ! ? /` xuống dòng —
+ * fanpage nối các tin khách liên tiếp bằng xuống dòng) trước khi bỏ dấu; MỆNH ĐỀ CUỐI có nói tới việc huỷ quyết: câu huỷ không phủ định ⇒ huỷ
+ * («Không, hủy đi», «không không, hủy giùm chị»); phủ định huỷ / «khoan» / «giữ đơn» ⇒ giữ — kể cả khi đứng SAU một câu huỷ («Hủy đơn\nà thôi
+ * khoan đã», «hủy đi, à thôi không hủy nữa»: lời rút lại muộn hơn thắng, review #869). Bare «thôi khỏi» (không có «hủy») vẫn là câu huỷ.
+ * HÀM THUẦN.
  */
 export function negatedCancel(text: string): boolean {
-  let negated = false;
+  let last: "KEEP" | "CANCEL" | null = null;
   for (const clause of text.split(/[,.;!?/\n]+/)) {
     const f = foldCart(clause);
     if (!f) continue;
-    if (NEGATED_CANCEL_RE.test(f)) negated = true;
-    else if (CANCEL_WORD_RE.test(f)) return false;
+    if (NEGATED_CANCEL_RE.test(f) || KEEP_CLAUSE_RE.test(f)) last = "KEEP";
+    else if (CANCEL_WORD_RE.test(f)) last = "CANCEL";
   }
-  return negated;
+  return last === "KEEP";
 }
 
 /** Đoạn chữ cuối là tên món (dãy từ không thuộc STOP đứng ngay trước / sau một động từ). */
