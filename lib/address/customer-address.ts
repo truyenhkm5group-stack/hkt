@@ -174,18 +174,10 @@ export function addressQuestion(a: CustomerAddress): string | null {
 }
 
 /**
- * Xã / phường MỚI khách vừa xác nhận ⇒ tên chuẩn. Hai điều kiện, thiếu một là từ chối (không đoán thay khách):
- *  1. Tên có trong danh mục xã của tỉnh đã nhận ra (chưa biết tỉnh ⇒ không nhận).
- *  2. Chữ khách đưa vào (`customerText`) nhắc đúng tên đó và KHÔNG nhắc một xã khác của tỉnh — model không tự chọn một ứng viên. Nơi
- *     gọi chỉ đưa TIN CUỐI; tên xã ở tin TRƯỚC chỉ đi qua `wardFromCustomerWords` (địa chỉ đầy đủ khớp dòng đơn). Lời trả lời phường ở
- *     tin trước rồi «ok em» KHÔNG được nhận (review PR #848 lần 4: không gắn được lời trả lời với câu hỏi của đúng nơi giao) — đơn đi
- *     với ô xã trống + cờ cần kiểm, và bot không hỏi lại vì phường đã hỏi rồi.
- */
-/**
- * Xã KHÁC của cùng tỉnh mà tin khách nêu, ngoài `ward` (null = không có). Dò TỪNG VẾ (giữa dấu phẩy / chấm / xuống dòng) và sau khi đã bỏ
- * chính tên `ward` khỏi vế (#871): gấp dấu bỏ dấu câu nên «An Hội Tây, TP.HCM» / «An Hội Tây Tp.HCM» thành «… tay thanh pho …» và khớp
- * nhầm «Phường Tây Thạnh» — đơn của khách đủ địa chỉ bị chặn ba lần «xã chưa xác nhận». Tên nằm trọn trong tên đã nhận («An Phú» trong
- * «An Phú Đông») không tính là xã khác. HÀM THUẦN.
+ * Xã KHÁC của cùng tỉnh mà tin khách nêu, ngoài `ward` (null = không có). Dò TỪNG VẾ (giữa dấu phẩy / chấm / xuống dòng) và bỏ qua lần
+ * nêu VẮT NGANG tên đã nhận (#871): gấp dấu bỏ dấu câu nên «An Hội Tây, TP.HCM» / «An Hội Tây Tp.HCM» thành «… tay thanh pho …» và khớp
+ * nhầm «Phường Tây Thạnh» — đơn của khách đủ địa chỉ bị chặn ba lần «xã chưa xác nhận». Tên nằm trọn trong tên đã nhận không tính là xã
+ * khác; tên CHỨA TRỌN tên đã nhận («An Phú Đông» khi đã nhận «An Phú») thì tính. HÀM THUẦN.
  */
 export function otherWardNamed(provinceCode: number, ward: string, customerText: string): AdminWard | null {
   const coreOf = (name: string) => foldVnText(name).replace(/^(phuong|xa|thi tran|dac khu) /, "");
@@ -200,17 +192,28 @@ export function otherWardNamed(provinceCode: number, ward: string, customerText:
   // Một lần nêu xã khác chỉ bị bỏ qua khi nó VẮT NGANG tên đã nhận (bắt đầu bên trong, kết thúc bên ngoài: «an hoi [tay thanh] pho»).
   // Tên CHỨA TRỌN tên đã nhận («An Phú Đông» khi đã nhận «An Phú») vẫn là xã khác.
   const straddles = (seg: string, i: number, len: number) => at(seg, own).some((j) => i > j && i < j + own.length - 1 && i + len > j + own.length);
+  // Tên QUẬN / HUYỆN CŨ của chính xã đã nhận trùng tên một xã mới («P An Hội Tây, Gò Vấp» — Gò Vấp vừa là quận cũ của An Hội Tây vừa là
+  // «Phường Gò Vấp» mới; tương tự Bình Thạnh, Phú Nhuận, Tân Bình…) là phần địa chỉ cũ, không phải lời nêu xã thứ hai (review #874).
+  const oldDistricts = wardOldDistricts(ward, provinceCode);
   return (
     adminWardsOf(provinceCode).find((w) => {
       if (w.name === ward) return false;
       const c = coreOf(w.name);
-      if (` ${core} `.includes(` ${c} `)) return false;
+      if (` ${core} `.includes(` ${c} `) || oldDistricts.includes(c)) return false;
       const n = ` ${/^\d+$/.test(c) ? foldVnText(w.name) : c} `;
       return segments.some((seg) => at(seg, n).some((i) => !straddles(seg, i, n.length)));
     }) ?? null
   );
 }
 
+/**
+ * Xã / phường MỚI khách vừa xác nhận ⇒ tên chuẩn. Hai điều kiện, thiếu một là từ chối (không đoán thay khách):
+ *  1. Tên có trong danh mục xã của tỉnh đã nhận ra (chưa biết tỉnh ⇒ không nhận).
+ *  2. Chữ khách đưa vào (`customerText`) nhắc đúng tên đó và KHÔNG nhắc một xã khác của tỉnh — model không tự chọn một ứng viên. Nơi
+ *     gọi chỉ đưa TIN CUỐI; tên xã ở tin TRƯỚC chỉ đi qua `wardFromCustomerWords` (địa chỉ đầy đủ khớp dòng đơn). Lời trả lời phường ở
+ *     tin trước rồi «ok em» KHÔNG được nhận (review PR #848 lần 4: không gắn được lời trả lời với câu hỏi của đúng nơi giao) — đơn đi
+ *     với ô xã trống + cờ cần kiểm, và bot không hỏi lại vì phường đã hỏi rồi.
+ */
 export function acceptCustomerWard(a: Pick<CustomerAddress, "provinceCode" | "province">, ward: string, customerText: string): { ok: true; ward: string } | { ok: false; error: string } {
   if (!a.provinceCode) return { ok: false, error: "Chưa nhận ra tỉnh / thành của địa chỉ — hỏi khách tỉnh / thành trước, chưa ghi xã." };
   const hit = findWardIn(a.provinceCode, ward);
