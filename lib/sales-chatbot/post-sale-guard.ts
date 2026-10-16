@@ -37,8 +37,11 @@ const RECONFIRM_RE = [
   / (?:co )?(?:muon )?(?:tiep tuc )?(?:chot|dat|lay) (?:don )?(?:khong|ko|chua) /,
   / lay them gi (?:nua )?(?:khong|ko) /,
 ];
-/** Dấu hiệu câu HỎI / NHỜ (không phải câu kể). */
-const ASKING_RE = / (?:\?|nhe|nha|khong|ko|chua|duoc khong|giup em|cho em|voi a|a nhe|a nha) |\?/;
+/**
+ * Dấu hiệu câu HỎI / NHỜ (không phải câu kể): dấu «?», tiểu từ hỏi / nhờ ở CUỐI câu, hay «giúp em / cho em». «không» GIỮA câu không tính
+ * («Đã chốt đơn (thử — không tạo đơn thật), tổng thu …» là câu kể).
+ */
+const ASKING_RE = /\?| (?:nhe|nha|khong|ko|chua|duoc khong|a nhe|a nha|voi a)\s*$| (?:giup em|cho em|giup minh) /;
 
 function sentencesOf(text: string): string[] {
   return text

@@ -100,6 +100,7 @@ function testPure() {
   const ps = postSaleReplyGuard("Dạ đơn của chị đang chờ gửi đi ạ. Chị xác nhận lại đơn giúp em nhé? Mình lấy thêm 1 hộp nem hải sản không ạ?");
   assert.deepEqual([ps.text, ps.dropped], ["Dạ đơn của chị đang chờ gửi đi ạ.", ["RECONFIRM", "UPSELL"]]);
   assert.deepEqual(postSaleReplyGuard("Dạ đơn của chị đã chốt rồi ạ, shop đóng gói và gửi sớm nhé.").dropped, [], "câu kể không bị bỏ");
+  assert.deepEqual(postSaleReplyGuard("Đã chốt đơn (thử — không tạo đơn thật, không báo nhóm), tổng thu 400.000 ₫.").dropped, [], "«không» giữa câu kể không biến nó thành câu hỏi");
   assert.deepEqual(postSaleReplyGuard("Dạ bên em đang có combo nem hải sản ưu đãi cho chị nè.").dropped, ["UPSELL"]);
   assert.equal(futurePurchaseOnly("ok em, mua tiếp lần sau nhé"), true);
   assert.equal(futurePurchaseOnly("hôm khác chị đặt tiếp"), true);
