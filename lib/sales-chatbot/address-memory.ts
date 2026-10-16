@@ -539,7 +539,9 @@ export function addressReaskVerdict(botText: string, k: AddressKnowledge, turn: 
   // Mốc «đã hỏi phường»: khi nơi gọi đưa `botTexts` (engine) thì CHỈ tính câu thật sự đã gửi tới khách — mốc của công cụ
   // (`wardAskedAt`) ghi lúc công cụ trả câu hỏi, có thể chưa bao giờ tới khách. Không đưa (bài kiểm / nơi gọi cũ) ⇒ dùng mốc công cụ.
   const wardAskedSent = opts.botTexts !== undefined ? askedWardBefore : k.wardAskedAt !== null && k.wardAskedAt < turn;
-  const wardAsked = free && k.ward === null && !k.legacyUnmapped && wardAskedSent && repeatOk;
+  // Địa chỉ «chưa ghép danh mục» (#870) mà tin khách mới nhất không nhắc lại nó vẫn chịu luật hỏi-một-lần: đã hỏi phường rồi thì không hỏi
+  // lại (trước đây `legacyUnmapped` bị loại khỏi vế này ⇒ câu hỏi lặp lọt qua).
+  const wardAsked = free && k.ward === null && wardAskedSent && repeatOk;
   const reuse = free && Boolean(k.reuseUnresolved);
   const complaintOn = (field: AskField) => free && Boolean(k.complained) && (field === "phone" ? askedPhoneBefore : field === "name" ? askedNameBefore : askedAddressBefore || askedWardBefore || k.wardAskedAt !== null);
   const twice = (field: AskField) => free && repeatOk && (field === "phone" ? askedPhoneBefore && !k.phoneKnown : field === "name" ? askedNameBefore && !k.nameKnown : field === "address" ? askedAddressBefore && !addressHeld : false);

@@ -60,13 +60,21 @@ export function testP0855AddressPure() {
     assert.equal(legacyAddressUnmapped(partial), null, `${partial}: không đủ địa giới cũ hai cấp + phần đường ⇒ không phải ca này`);
   }
   // P0 Nguyễn Hồng: đã có số nhà/ngõ + huyện cũ Gia Lâm + Hà Nội, không bắt tự tra tên phường sau sáp nhập.
-  const districtOnly = "Số 9 ngõ 3 Kiên Thành, Gia Lâm, Hà Nội"; // fixture thay số nhà, không PII khách
+  const districtOnly = "Số 9 ngõ 3 Thử Nghiệm, Gia Lâm, Hà Nội"; // fixture bịa hoàn toàn (số nhà, ngõ), không PII khách
   assert.ok(legacyAddressUnmapped(districtOnly), "số nhà + ngõ + huyện cũ + tỉnh đủ để giao nhân viên kiểm nội bộ");
   assert.equal(addressGapOf(districtOnly).gap, "CATALOG_UNMATCHED");
   assert.equal(addressCheckOf({ address: districtOnly, province: "" }).view.ask_customer, null, "không hỏi phường mới");
   assert.equal(addressReaskVerdict(WARD_NEW_ASK, addressKnowledge(draftWith(districtOnly), [districtOnly]), 2)?.note, ADDRESS_REASK_NOTE.LEGACY_UNMAPPED, "chặn cả câu bot tự hỏi phường");
   assert.ok(legacyAddressUnmapped("230/20 Phan Huy Ích, Gò Vấp, TP.HCM"), "số nhà+quận cũ+tỉnh nhưng thiếu phường ⇒ người kiểm, không hỏi khách");
   assert.equal(legacyAddressUnmapped("Gia Lâm, Hà Nội"), null, "chỉ huyện+tỉnh thì chưa đủ phần đường");
+  // Review #870: ngõ / thôn mở đầu (không có chữ số) cũng là điểm giao thật; SĐT / số lượng + huyện cũ thì KHÔNG.
+  for (const ok of ["Ngõ 7 Thử Nghiệm, Gia Lâm, Hà Nội", "Thôn Thử, Gia Lâm, Hà Nội"]) {
+    assert.ok(legacyAddressUnmapped(ok), `${ok}: điểm giao thật + huyện cũ ⇒ nhân viên kiểm`);
+    assert.equal(addressCheckOf({ address: ok, province: "" }).view.ask_customer, null, `${ok}: không hỏi phường mới`);
+  }
+  for (const not of ["0900000999, Gia Lâm, Hà Nội", "1kg chả mực giao Gia Lâm, Hà Nội", "2 hộp, Gia Lâm, Hà Nội"]) {
+    assert.equal(legacyAddressUnmapped(not), null, `${not}: không phải điểm giao ⇒ khách thiếu địa chỉ, được hỏi`);
+  }
   assert.equal(hasStreetDetail("Khương Đình"), false, "một tên phường không phải địa chỉ đầy đủ");
   assert.equal(hasStreetDetail("Số 8 ngõ 2, Phường Cầu Giấy, Hà Nội"), true);
   assert.equal(looksLikeDeliveryAddress(NEW_THU_DUC), true);
@@ -95,8 +103,9 @@ export function testP0855AddressPure() {
   assert.deepEqual([mapped.ward, addressReaskVerdict(WARD_NEW_ASK, mapped, 2)?.note], ["Xã Đan Phượng", ADDRESS_REASK_NOTE.WARD_KNOWN]);
   // Khách đổi địa chỉ / sửa phường ⇒ hàng rào đứng ngoài (không chặn nhầm).
   assert.equal(addressReaskVerdict(WARD_NEW_ASK, addressKnowledge(draftWith(OLD_SPLIT), [OLD_SPLIT, "à chị đổi địa chỉ nhé"]), 3), null);
-  // Địa chỉ chỉ có quận cũ (không có cấp xã cũ) ⇒ câu hỏi phường ĐẦU TIÊN vẫn đi qua (luồng #848 giữ nguyên).
-  assert.equal(addressReaskVerdict(WARD_NEW_ASK, addressKnowledge({}, ["230/20 Phan Huy Ích, Gò Vấp, TP.HCM"]), 2), null);
+  // Số nhà + đường + quận cũ + tỉnh, chưa có phường (ca Nguyễn Hồng / #870, chủ shop 16/10): đủ để nhân viên kiểm nội bộ ⇒ câu hỏi
+  // phường mới bị bỏ ngay lần đầu, không bắt khách tự quy đổi. (Trước #870 câu hỏi đầu tiên được đi qua.)
+  assert.equal(addressReaskVerdict(WARD_NEW_ASK, addressKnowledge({}, ["230/20 Phan Huy Ích, Gò Vấp, TP.HCM"]), 2)?.note, ADDRESS_REASK_NOTE.LEGACY_UNMAPPED);
 
   // ③ CA C — CUSTOMER 360: một tên phường không bao giờ là «địa chỉ cũ đã xác minh».
   const fact = (o: Partial<OrderFact>): OrderFact => ({ orderId: "o", source: "ERP", at: "2026-01-10T03:00:00.000Z", stage: "SHIPPED", outcome: null, link: "THREAD", customerId: null, name: "Chị Thử", phone: "0900000111", address: "Số 8 ngõ 2", ward: "Phường Cầu Giấy", province: "Thành phố Hà Nội", items: [], paid: false, currentCycle: false, ...o });
@@ -215,10 +224,15 @@ export function testP0855AddressPure() {
   assert.ok(hasChangeCue("à chị chuyển ra HN rồi") && hasChangeCue("chị chuyển nhà rồi") && hasChangeCue(`giao về ${NEW_THU_DUC} nhé`) && !hasChangeCue("giao về sớm nhé"));
   assert.ok(looksLikeStreetFragment("Số 5 ngõ 10") && looksLikeStreetFragment("ngõ 10"));
   //  · Phường đã hỏi MỘT lần (câu thật sự gửi) và khách đã trả lời ⇒ bỏ câu hỏi, KHÔNG chuyển người; chưa có phần địa chỉ nào ⇒ chuyển người.
-  const replied = addressKnowledge({}, ["230/20 Phan Huy Ích, Gò Vấp, TP.HCM", "chị ở gần chợ em ơi"]);
+  //    (Địa chỉ không có quận / huyện cũ ⇒ không phải «chưa ghép danh mục», luật hỏi-một-lần áp nguyên vẹn.)
+  const replied = addressKnowledge({}, ["230/20 Phan Huy Ích, TP.HCM", "chị ở gần chợ em ơi"]);
   const wv = addressReaskVerdict("Dạ mình ở phường nào ạ?", replied, 3, { botTexts: ["Dạ mình cho em xin tên phường / xã mới của địa chỉ với ạ?"] });
   assert.ok(wv && wv.note === ADDRESS_REASK_NOTE.WARD_ASKED && !wv.handoff && wv.rest === "", JSON.stringify(wv));
   assert.equal(addressReaskVerdict("Dạ mình ở phường nào ạ?", replied, 3, { botTexts: [] }), null, "mốc công cụ không tính khi câu hỏi chưa từng gửi");
+  //    Có quận cũ (ca #870): câu hỏi phường bị bỏ ngay lần ĐẦU, không chuyển người.
+  const legacyReplied = addressKnowledge({}, ["230/20 Phan Huy Ích, Gò Vấp, TP.HCM"]);
+  const lv = addressReaskVerdict("Dạ mình ở phường nào ạ?", legacyReplied, 3, { botTexts: [] });
+  assert.ok(lv && lv.note === ADDRESS_REASK_NOTE.LEGACY_UNMAPPED && !lv.handoff && lv.rest === "", JSON.stringify(lv));
   //  · Bỏ câu xin SĐT đã có mà chưa có địa chỉ ⇒ câu thay KHÔNG nói «ghi nhận địa chỉ».
   assert.equal(addressReaskVerdict("Dạ chị cho em xin số điện thoại ạ?", addressKnowledge({}, ["0912345678"]), 2)?.rest, CONTACT_KNOWN_TEXT);
   //  · Đặt hộ: MỘT tin mang địa chỉ người đặt và địa chỉ người nhận ⇒ không phải đổi địa chỉ (đơn vàng «dat-ho-nguoi-than»).

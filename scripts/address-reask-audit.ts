@@ -99,7 +99,7 @@ export function addressGivenIn(text: string, previous: string | null): { clear: 
     if (!a.province || foldVnText(a.street).length < 3) continue;
     const clear = canAutoFill(a);
     if (clear) return { clear, province: true, oldWard: false };
-    const oldWard = oldWardNamed(c, a.legacy !== null);
+    const oldWard = oldWardNamed(c, a.legacy !== null, a.confidence === "AMBIGUOUS" && a.candidates.length > 1);
     if (!best || (oldWard && !best.oldWard)) best = { clear: false, province: true, oldWard };
   }
   return best;
@@ -109,14 +109,19 @@ export function addressGivenIn(text: string, previous: string | null): { clear: 
  * Địa chỉ nêu phường / xã CŨ ở cả hai cấp: xã cũ bị chia (bộ đọc trả `legacy`), hoặc tiền tố «phường / xã / thị trấn <tên>» kèm «quận /
  * huyện / thị xã <tên>». Bản tự chứa (không import `legacyAddressUnmapped` của lib mới — ops chạy script từ main, lib từ image). HÀM THUẦN.
  */
-export function oldWardNamed(address: string, legacy: boolean): boolean {
+export function oldWardNamed(address: string, legacy: boolean, ambiguousOldDistrict = false): boolean {
   if (legacy) return true;
   // Đọc trên chữ CÓ dấu: bỏ dấu thì «Xa La» thành «xa la» (như «xã») và «khu đô thị Xa La» chứa «thi xa». Không dấu chỉ nhận «phuong /
   // thi tran / quan / huyen» (không mơ hồ).
   const t = ` ${address.normalize("NFC").toLowerCase()} `;
   const commune = /[\s,.(](?:phường|xã|thị trấn|phuong|thi tran|p[.\s]|tt[.\s])\s*[\p{L}\d]/u.test(t);
   const district = /[\s,.(](?:quận|huyện|thị xã|quan|huyen|q[.\s]|h\.)\s*[\p{L}\d]/u.test(t);
-  return commune && district;
+  if (commune && district) return true;
+  // #870 (ca Nguyễn Hồng): KHÔNG có cấp xã nhưng có điểm giao thật (số nhà + tên đường / ngõ, hoặc mở đầu bằng ngõ / thôn / tổ / khu…)
+  // + quận / huyện CŨ (tiền tố, hoặc bộ đọc ra nhiều ứng viên của một quận cũ) ⇒ cũng là địa chỉ cũ đủ để nhân viên kiểm.
+  const street = /^\s*(?:(?:số nhà|số|sn)\.?\s*)?\d+[0-9a-z/-]*\s+(?:ngõ|ngách|hẻm|kiệt|đường|phố)?\s*\p{L}/iu.test(address) && !/^\s*\d+(?:[.,]\d+)?\s*(?:kg|kí|g|gr|lạng|hộp|gói|cái|bộ|túi|chai|hũ)(?=$|[\s,.])/iu.test(address);
+  const place = /^\s*(?:ngõ|ngách|hẻm|kiệt|thôn|xóm|ấp|tổ|tdp|khu|kđt)\s+[\p{L}\d]/iu.test(address.normalize("NFC"));
+  return (district || ambiguousOldDistrict) && (street || place);
 }
 
 // ─────────────────────────── MỘT HỘI THOẠI ───────────────────────────
