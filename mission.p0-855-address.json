@@ -25,15 +25,18 @@
     "tests/address-ward-explicit.test.ts",
     "tests/address-normalize.test.ts",
     "tests/sync-fixtures.test.ts",
-    "lib/constants/order-review.ts"
+    "lib/constants/order-review.ts",
+    "lib/shipping/route.ts",
+    "lib/shipping/routing.ts",
+    "tests/shipping-route.test.ts"
   ],
   "dependencies": [],
   "blocked_by": [],
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-16T03:48:00.196Z",
-  "updated_at": "2026-10-16T04:41:40.014Z",
-  "last_heartbeat": "2026-10-16T04:41:40.014Z",
+  "updated_at": "2026-10-16T04:49:58.164Z",
+  "last_heartbeat": "2026-10-16T04:49:58.164Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
