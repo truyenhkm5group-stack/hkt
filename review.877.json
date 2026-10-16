@@ -1,0 +1,8 @@
+{
+  "pr": 877,
+  "sha": "4d1620bf227a86758336d6742a0ab9151228ab92",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-16T16:44:56.175Z",
+  "note": "+12 dòng chỉ đọc (số đo cỡ bảng/CSDL, chữ cần băm, tham số bộ nhớ); tomTat chỉ số tổng hợp, không PII"
+}
