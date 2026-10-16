@@ -44,7 +44,8 @@ import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packi
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
 import type { ObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
-import { bindCommitment, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, mentionText, unrequestedProducts, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
+import { bindCommitment, cartDraftDiff, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, mentionText, negatedCancel, unrequestedProducts, type CartCommitment, type CartDraftDiff } from "@/lib/sales-chatbot/cart-commitment";
+import { cartQuoteLines, type CatalogLite } from "@/lib/sales-chatbot/cancel-recovery";
 import { acceptCustomerWard, addressQuestion, canAutoFill, legacyAddressUnmapped, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
 import { addressKnowledge, addressReaskVerdict, askedBefore, askMemoryFor, askMemoryParts, askParts, deliveryAddressDecision, hasChangeCue, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
@@ -135,7 +136,20 @@ export type ChatState = {
    * KHÁCH XIN HUỶ ĐƠN ĐÃ CÓ (chủ shop 10/10/2026 — `lib/constants/order-cancel.ts`): lượt GIỮ ĐƠN đang mở. `turn` = lượt khách xin huỷ
    * lần đầu — huỷ thật chỉ ở một lượt SAU (khách đã nghe lời giữ đơn mà vẫn huỷ). `orderIds` = đơn đang mở lúc khách xin huỷ.
    */
-  cancelRequest?: { orderIds: string[]; at: string; turn: number | null; quote: string | null; reason: string };
+  cancelRequest?: {
+    orderIds: string[];
+    at: string;
+    turn: number | null;
+    quote: string | null;
+    reason: string;
+    /**
+     * LƯỢT GIỮ ĐƠN DO MÁY CHỦ GỬI vì lỗi của bot (P0 #863 — `cancel-recovery.ts`): loại lỗi + dòng hàng / tổng của ĐƠN ĐÃ SỬA theo báo giá
+     * máy chủ. Có khoá này ⇒ lượt giữ đơn DUY NHẤT của lần huỷ này đã dùng.
+     */
+    recovery?: { kind: "QUANTITY" | "UNCONSENTED" | "PRICE" | "STAFF_CONFLICT"; lines: CartLine[]; items: string; subtotal: number; total: number | null; quoteId: string; turn: number | null };
+  };
+  /** Seq tin nhân viên (chép vào lịch sử) đã bị máy chủ xét là LỆCH đơn nháp (P0 #863) — mỗi tin chỉ chuyển người một lần. */
+  staffConflictSeq?: number;
   /** Đơn ĐÃ HUỶ theo yêu cầu khách trong hội thoại — chỉ ghi SAU KHI lõi đơn ghi «Đã huỷ» xong. */
   cancelledOrders?: { orderId: string | null; at: string; simulated: boolean }[];
   /** Lịch hẹn bot đã đặt trong hội thoại này (một hội thoại một lịch — đổi / huỷ là việc của người). */
@@ -478,6 +492,25 @@ function rememberPrices(state: ChatState, amounts: readonly (number | null | und
 /** Ngữ cảnh tính giá của hội thoại — CÙNG chế độ giá với `priceLines` (bảng giá sỉ khi shop bật). */
 async function pricingContextFor(cfg: SalesChatbotConfig, customerId: string | null): Promise<PricingContext> {
   return loadPricingContext(cfg, await booksForChat(cfg, customerId));
+}
+
+/**
+ * ĐỐI CHIẾU ĐƠN NHÁP VỚI GIỎ KHÁCH NÓI + BÁO GIÁ MÁY CHỦ CỦA GIỎ ĐÓ (P0 #863) — một lượt đọc danh mục. `cart` = giỏ cần đối chiếu (thường
+ * là giỏ TRƯỚC câu huỷ — câu huỷ xoá giỏ). `diff` = món khách nói tường minh mà đơn nháp ghi khác lượng (`cartDraftDiff`); `corrected` =
+ * báo giá máy chủ của chính giỏ khách nói (`cartQuoteLines` → `computePriced` → `buildQuote`), `null` khi không ghép chắc được giỏ ⇒ dòng
+ * hàng hoặc khi `fallbackLines` (giá đơn nháp tính lại) cũng không có. Không ghi gì.
+ */
+export async function draftCartReview(state: ChatState, cfg: SalesChatbotConfig, cart: CartCommitment | undefined, opts: { fallbackToDraft?: boolean } = {}): Promise<{ diff: CartDraftDiff[]; corrected: PricedQuote | null; lines: CartLine[] | null }> {
+  const d = state.draft;
+  const ctx = await pricingContextFor(cfg, verifiedCustomerId(state));
+  const asked = d ? computePriced(d.lines, ctx, null).asked : [];
+  const diff = d ? cartDraftDiff(cart, asked) : [];
+  const catalog: CatalogLite[] = [...ctx.byId.values()].map((c) => ({ variantId: c.variantId, productId: c.productId, name: c.name, price: c.price, weightGrams: ctx.weight.get(c.variantId) ?? null, addOnOnly: Boolean(c.addOnOnly) }));
+  const lines = cartQuoteLines(cart, catalog) ?? (opts.fallbackToDraft && d?.lines.length ? d.lines : null);
+  if (!lines?.length) return { diff, corrected: null, lines: null };
+  const address = d ? [d.recipient.address, d.recipient.province].filter(Boolean).join(", ") : null;
+  const priced = computePriced(lines, ctx, address);
+  return { diff, corrected: { ...priced, quote: buildQuote(priced, ctx) }, lines };
 }
 const ADD_ON_ONLY_ERROR = "Giỏ / đơn chỉ có mẫu mã CHỈ BÁN KÈM (vd 0,5kg) — không bán riêng. Báo khách quy cách nhỏ nhất bán riêng (vd 1kg) và giá; khách lấy món chính rồi mới thêm mẫu mã bán kèm.";
 
@@ -1215,6 +1248,13 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const seenBefore = d.shownTurn !== undefined && ctx.turn !== undefined && d.shownTurn < ctx.turn;
       const noBasis = lineBasisViolation(state.cart, priced.asked, ctx.turn ?? null, ctx.customerSaid ?? "", seenBefore ? new Set(priced.asked.map((l) => l.productId ?? l.variantId)) : new Set<string>());
       if (noBasis) return err("Chốt: dòng hàng không có căn cứ từ khách", `${noBasis} Sửa đơn nháp (update_draft_order) cho đúng món khách chọn rồi mới chốt.`, state);
+      // ĐƠN NHÁP LỆCH GIỎ KHÁCH NÓI SAU KHI THẤY ĐƠN (P0 #863, ca 16/10/2026: khách «1/2 kg chả mực, 1kg chả cá thu thôi» mà đơn nháp vẫn 2kg
+      // mực ⇒ bot «chốt đơn tổng 1.060.000đ»). Món khách nói tường minh SAU lượt khách thấy tóm tắt mà đơn ghi khác lượng ⇒ KHÔNG chốt — kể
+      // cả máy tự chốt. Lượt máy không áp chắc câu sửa (`relaxedTurn`) ⇒ không chặn (luật an toàn của giỏ).
+      const drift = state.cart && !(ctx.turn !== undefined && state.cart.relaxedTurn === ctx.turn) ? cartDraftDiff(state.cart, priced.asked, { since: d.shownTurn ?? null }) : [];
+      if (drift.length) {
+        return err("Chốt: đơn nháp lệch giỏ khách nói", `Đơn nháp KHÁC lượng khách vừa nói: ${drift.map((x) => `${x.label} — khách nói ${x.want}, đơn ghi ${x.got}`).join("; ")}. KHÔNG chốt. Sửa đơn nháp (update_draft_order) đúng lượng khách nói, gửi tóm tắt với tổng MỚI của máy chủ rồi đợi khách đồng ý.`, state);
+      }
       // Giá chưa xác thực ⇒ KHÔNG chốt, người xác minh (yêu cầu 4–5 của chủ shop).
       if (!priced.quote.verified) {
         state.quote = quoteSnapshotOf(priced.quote, now);
@@ -1328,6 +1368,12 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       return r.needsHuman ? { ...out, requireHuman: r.needsHuman } : out;
     }
     case "mark_declined": {
+      // LƯỢT GIỮ ĐƠN ĐÃ DÙNG (P0 #863, ca 16/10/2026 «Ko mua»): khách đã nghe lời giữ đơn ở một lượt TRƯỚC mà vẫn từ chối ⇒ đây là lần huỷ
+      // THỨ HAI, không phải lượt giữ đơn mới — đi ĐÚNG bước 2 của `cancel_order` (huỷ theo vòng đời đơn). Bản cũ mở lại lượt giữ đơn ở mỗi
+      // lần model gọi công cụ này ⇒ khách nói «không» bao nhiêu lần cũng chỉ nhận thêm một câu nài.
+      if (!simulated && state.cancelRequest && !(ctx.turn !== undefined && state.cancelRequest.turn === ctx.turn) && ctx.lastUserText.trim().length >= 2) {
+        return executeToolCore("cancel_order", { decision: "CANCEL", customer_words: ctx.lastUserText.trim().slice(0, 300), reason: typeof input.reason === "string" ? input.reason : state.cancelRequest.reason }, ctx);
+      }
       const reason = z.string().trim().min(2).max(300).safeParse(input.reason);
       state.declined = { reason: reason.success ? reason.data : "Khách từ chối", at: new Date().toISOString() };
       state.stage = "DECLINED";
@@ -1353,6 +1399,8 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const why = z.string().trim().min(2).max(300).safeParse(input.reason);
       const reason = why.success ? why.data : "Khách huỷ đơn";
       const quote = ctx.lastUserText.trim().slice(0, 300) || null;
+      // Khách nói KHÔNG / CHƯA huỷ («không hủy đâu em», «đừng hủy nha») ⇒ không bao giờ huỷ theo câu đó (review #869) — kể cả model gọi CANCEL.
+      if (decision.data === "CANCEL" && negatedCancel(ctx.lastUserText)) return err("Huỷ đơn: khách nói KHÔNG huỷ", "Câu cuối của khách là KHÔNG / CHƯA huỷ — KHÔNG huỷ đơn. Khách đồng ý giữ đơn ⇒ cancel_order decision KEEP (đơn đã sửa thì update_draft_order trước).", state);
       const sameTurn = (r: NonNullable<ChatState["cancelRequest"]>) => ctx.turn !== undefined && r.turn === ctx.turn;
       if (simulated) {
         if (decision.data === "KEEP") {
@@ -1371,6 +1419,8 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         return ok("(Thử) Huỷ đơn — mô phỏng", { cancelled: true, simulated: true, note: "Khung thử: không có đơn thật nào bị huỷ." }, state);
       }
       const targets = await conversationCancelTargets(ctx.conversationId, [state.confirmed?.orderId, state.draft?.orderId]);
+      // Không còn đơn mở (người đã huỷ / đơn đã khép) ⇒ lượt giữ đơn cũ hết đối tượng: bỏ nó, để `mark_declined` ghi từ chối như thường.
+      if (!targets.length) delete state.cancelRequest;
       if (!targets.length) return ok("Huỷ đơn: hội thoại không có đơn đang mở", { cancelled: false, no_open_order: true, instruction: "Hội thoại không có đơn đang mở để huỷ — khách không mua nữa thì gọi mark_declined. KHÔNG nói «đã huỷ đơn»." }, state);
       const ids = targets.map((t) => t.id);
       const codes = ids.map((id) => `#${manualOrderShortCode(id)}`);

@@ -58,6 +58,7 @@ export const CANCEL_BLOCK_CODES = [
   "CARRIER_UNKNOWN",
   "CARRIER_UNAVAILABLE",
   "WRITE_FAILED",
+  "PAID_ORDER",
 ] as const;
 export type CancelBlockCode = (typeof CANCEL_BLOCK_CODES)[number];
 
@@ -75,6 +76,7 @@ export const CANCEL_BLOCK_LABEL: Record<CancelBlockCode, string> = {
   CARRIER_UNKNOWN: "Không rõ hãng đã nhận lệnh huỷ chưa",
   CARRIER_UNAVAILABLE: "Chưa gọi được hãng (kết nối chưa bật / lỗi)",
   WRITE_FAILED: "Ghi trạng thái huỷ hỏng sau khi thử lại",
+  PAID_ORDER: "Đơn đã có chứng từ thu tiền — huỷ kèm hoàn tiền, người xử lý",
 };
 
 /** Việc người phải làm với từng mã — in cạnh lý do. */
@@ -92,6 +94,7 @@ export const CANCEL_BLOCK_HINT: Record<CancelBlockCode, string> = {
   CARRIER_UNKNOWN: "Kiểm trên trang hãng trước khi bấm lại — đừng gửi lệnh huỷ hai lần mù.",
   CARRIER_UNAVAILABLE: "Kiểm kết nối hãng ở «Kết nối dữ liệu», rồi huỷ vận đơn + «Huỷ đơn».",
   WRITE_FAILED: "Bấm «Huỷ đơn» trên trang đơn; lỗi lặp lại thì báo kỹ thuật.",
+  PAID_ORDER: "Liên hệ khách thống nhất hoàn tiền (hoặc giữ đơn đã sửa), ghi chứng từ hoàn rồi «Huỷ đơn».",
 };
 
 /** Giai đoạn đơn còn MỞ — đơn khách có thể đang muốn huỷ. Đơn đồng bộ còn PACKING…SHIPPED (ERP không ghi được ⇒ người). */
@@ -255,6 +258,11 @@ export type CancelPlanInput = {
   attempts: readonly CancelAttemptInput[];
   /** Số phiếu XUẤT KHO TAY (ISSUE) trỏ về đơn — hàng đã rời kho không qua ĐVVC. */
   manualIssues: number;
+  /**
+   * Tiền ĐÃ THU theo chứng từ thanh toán đã xác nhận (P0 #863): > 0 ⇒ huỷ kèm hoàn tiền là việc của người — máy không tự huỷ. Vắng
+   * (bài kiểm / đường gọi cũ) ⇒ như 0.
+   */
+  paid?: number;
 };
 
 export type CancelPlan =
@@ -278,6 +286,7 @@ export function customerCancelPlan(i: CancelPlanInput): CancelPlan {
   if (!MANUAL_CANCELLABLE.has(i.stage)) return { kind: "NEEDS_HUMAN", code: "FINAL_STAGE" };
   if (i.attempts.some((a) => a.handoffKnown || HANDOFF.has(a.stage))) return { kind: "NEEDS_HUMAN", code: "HANDED_TO_CARRIER" };
   if (i.manualIssues > 0) return { kind: "NEEDS_HUMAN", code: "LEFT_WAREHOUSE_NO_HANDOFF" };
+  if ((i.paid ?? 0) > 0) return { kind: "NEEDS_HUMAN", code: "PAID_ORDER" };
   const live = i.attempts.map((a, idx) => ({ a, idx })).filter(({ a }) => attemptHoldsOrder({ stage: a.stage, raw: a.raw }));
   if (!live.length) return { kind: "CANCEL_NOW" };
   if (live.length > 1) return { kind: "NEEDS_HUMAN", code: "MULTIPLE_ATTEMPTS" };

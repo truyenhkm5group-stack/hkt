@@ -571,6 +571,7 @@ import { testSalesQuoteIntegrity } from "./sales-quote-integrity.test";
 import { testSalesCartCommitment } from "./sales-cart-commitment.test";
 import { testP0855Cart } from "./p0-855-cart.test";
 import { testP0855Delta } from "./p0-855-delta.test";
+import { testP0863CancelFlow } from "./p0-863-cancel-flow.test";
 import { testConvMoneyTrace } from "./conv-money-trace.test";
 import { testSalesQuote640 } from "./sales-quote-640.test";
 import { testSalesIntegrityAudit } from "./sales-integrity-audit.test";
@@ -3083,6 +3084,8 @@ async function main() {
   // P0 #855 phần còn lại (sau #860 / #861): báo giá phải có căn cứ + tổng giỏ bị từ chối không tới khách, phủ nhận món bot đưa ra ⇒ người
   // ngay lần đầu + giữ tuyến giao ORDER_REVIEW, lời nhắc khách cũ, không lặp câu xin lỗi — tổ chức THẬT `gd-food-p855d`.
   await testP0855Delta();
+  // P0 #863 — tin phía page tới giữa lượt ⇒ bot không gửi · khách huỷ sau lỗi bot ⇒ xin lỗi cụ thể + đơn đã sửa · huỷ lần hai ⇒ vòng đời đơn — tổ chức THẬT `gd-food-p863`.
+  await testP0863CancelFlow();
   // P0 14/10/2026 — tổng tiền trong chữ bot = tổng máy chủ của giỏ hiện tại (ca «Châu Dương» 640k cho 1kg 280k) · lượt im không «nói rõ
   // hơn» (ca «Viet Nguyen Thi») · upsell chưa đồng ý không vào đơn · tin vọng lại / trùng không sinh tin — tổ chức THẬT `gd-food-q640`.
   await testSalesQuote640();

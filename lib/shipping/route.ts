@@ -1,6 +1,7 @@
 import { adminProvinces, adminWardsOf, findProvince, foldVnText } from "@/lib/address/vn-address";
 import type { CarrierKey } from "@/lib/carriers/types";
 import { formatDateTime } from "@/lib/format";
+import { ORDER_REVIEW_HOLD_CODES } from "@/lib/constants/order-review";
 import { autoAttemptDue, ROUTE_HOLD_META, SHIPPING_ROUTING_LIMITS, type AutoAttemptState, type RouteHoldCode, type SelfArea, type ShippingRoute, type ShippingRoutingConfig } from "@/lib/constants/shipping-routing";
 
 /**
@@ -97,8 +98,8 @@ export function addressReviewOpenOf(raw: unknown): boolean {
   return entries.some((e) => !e || typeof e !== "object" || (e as { code?: unknown }).code === "ADDRESS_UNRESOLVED");
 }
 
-/** Mã cờ cần kiểm giữ đơn khỏi vận đơn ngoài ĐỊA CHỈ (#855) — món khách chưa đồng ý · giá · khách huỷ / máy không huỷ được. */
-export const ORDER_REVIEW_HOLD_CODES: readonly string[] = ["UPSELL_UNCONSENTED", "PRICE_DISPUTED", "PRICE_MISMATCH", "CUSTOMER_CANCELLED", "CANCEL_BLOCKED"];
+/** Mã cờ cần kiểm giữ đơn khỏi vận đơn ngoài ĐỊA CHỈ (#855) — khai MỘT lần ở `lib/constants/order-review.ts`, dùng chung với chặn tự xác nhận. */
+export { ORDER_REVIEW_HOLD_CODES };
 
 /**
  * Đơn có cờ cần kiểm MÓN / GIÁ / KHÁCH HUỶ đang mở không (`ORDER_REVIEW_HOLD_CODES`) — cùng cách đọc `raw.review` với `addressReviewOpenOf`.
@@ -109,7 +110,7 @@ export function orderReviewOpenOf(raw: unknown): boolean {
   const review = (raw as Record<string, unknown>).review;
   if (!review || typeof review !== "object" || Array.isArray(review)) return false;
   const entries = (review as { entries?: unknown }).entries;
-  return Array.isArray(entries) && entries.some((e) => Boolean(e) && typeof e === "object" && ORDER_REVIEW_HOLD_CODES.includes(String((e as { code?: unknown }).code)));
+  return Array.isArray(entries) && entries.some((e) => Boolean(e) && typeof e === "object" && (ORDER_REVIEW_HOLD_CODES as readonly string[]).includes(String((e as { code?: unknown }).code)));
 }
 
 function hold(code: RouteHoldCode, reason?: string): ShippingRoute {

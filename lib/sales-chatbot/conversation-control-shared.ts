@@ -83,23 +83,40 @@ export function controlSkipNote(control: ConversationControl): string | null {
   return control === "HUMAN" ? CONTROL_HUMAN_NOTE : control === "COPILOT" ? CONTROL_COPILOT_NOTE : null;
 }
 
-/** Ảnh chụp hội thoại đọc lại ngay TRƯỚC khi bot gửi. */
-export type SendSnapshot = { status: string; state: unknown; lastStaffAt: Date | null };
+/**
+ * Ảnh chụp hội thoại đọc lại ngay TRƯỚC khi bot gửi. `pageSideAt` (P0 #863) = mốc NHẬN tin phía page mới nhất có thể là NGƯỜI (nhân viên
+ * đã xác minh · chưa rõ ai gửi · ứng dụng khác — không tính chữ hệ thống, tự động của page, tiếng vọng của bot); `humanCooldownUntil` = hạn
+ * nhường người đang lưu. Hai trường vắng (kênh không có tin phía page) ⇒ như `null`.
+ */
+export type SendSnapshot = { status: string; state: unknown; lastStaffAt: Date | null; pageSideAt?: Date | null; humanCooldownUntil?: Date | null };
+
+/** Giá trị mốc sau MỚI HƠN giá trị trước (trước vắng mà sau có cũng là mới). */
+const movedLater = (before: Date | null | undefined, now: Date | null | undefined): boolean => {
+  const is = now?.getTime() ?? null;
+  if (is === null) return false;
+  const was = before?.getTime() ?? null;
+  return was === null || is > was;
+};
 
 /**
  * Bot có được GỬI câu vừa soạn không? So ảnh chụp lúc BẮT ĐẦU lượt với ảnh chụp đọc lại ngay trước khi gửi. Lượt AI mất vài
  * giây; trong lúc đó nhân viên có thể gửi tin từ hộp thư (`last_staff_at` tăng), tiếp quản (chế độ HUMAN / COPILOT), hoặc trả
  * lời ngoài ERP và tiếng vọng đã chuyển hội thoại sang người (`HANDOFF`). Bất kỳ điều nào ⇒ KHÔNG gửi: khách nhận câu của
  * người, không nhận thêm câu của bot đè lên. So bằng giá trị đã lưu, không bằng đồng hồ — hai máy lệch giờ không đổi kết luận.
- * HÀM THUẦN.
+ *
+ * P0 #863 (HSLC 16/10/2026, 12:52–12:54): nhân viên gõ ngoài ERP «Tổng 480k miễn ship» mà Pancake không gắn tài khoản ⇒ tin mang nguồn
+ * CHƯA RÕ, KHÔNG chuyển hội thoại sang người (luật 11/10: tin chưa rõ không bật nhường) ⇒ ảnh chụp cũ không thấy gì và câu bot «chốt đơn
+ * tổng 1.060.000đ» vẫn đi, SAU câu của nhân viên. Luật 11/10 cũng nói tin chưa rõ ĐÃ TRẢ LỜI lượt khách ngay trước nó — nên tin phía page
+ * tới sau lúc lượt bắt đầu (`pageSideAt` tăng) ⇒ câu bot soạn cho lượt đó đã thừa: KHÔNG gửi. Hạn nhường người vừa được đặt mới
+ * (`humanCooldownUntil` tăng) cũng vậy. HÀM THUẦN.
  */
 export function botSendVerdict(before: SendSnapshot, now: SendSnapshot): { ok: true } | { ok: false; reason: string } {
   if (now.status === "HANDOFF") return { ok: false, reason: BOT_YIELDED_NOTE };
   const control = controlOf(now.state);
   if (control !== "AUTO") return { ok: false, reason: BOT_YIELDED_NOTE };
-  const was = before.lastStaffAt?.getTime() ?? null;
-  const is = now.lastStaffAt?.getTime() ?? null;
-  if (is !== null && (was === null || is > was)) return { ok: false, reason: BOT_YIELDED_NOTE };
+  if (movedLater(before.lastStaffAt, now.lastStaffAt)) return { ok: false, reason: BOT_YIELDED_NOTE };
+  if (movedLater(before.pageSideAt, now.pageSideAt)) return { ok: false, reason: BOT_YIELDED_NOTE };
+  if (movedLater(before.humanCooldownUntil, now.humanCooldownUntil)) return { ok: false, reason: BOT_YIELDED_NOTE };
   return { ok: true };
 }
 

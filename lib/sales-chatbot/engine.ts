@@ -66,6 +66,7 @@ import { volumeDiscountPolicyText } from "@/lib/sales-chatbot/volume-discount";
 import { formatVND } from "@/lib/format";
 import { withTurnEvents } from "@/lib/sales-chatbot/events";
 import { FOOD_PACK, salesPackFor, type SalesPack } from "@/lib/sales-chatbot/packs";
+import { recoveryPrompt, serverCancelStep } from "@/lib/sales-chatbot/cancel-flow";
 import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
 import { amountText, applyCustomerCartMessage, botProposedDenial, buyingText, customerTextsSince, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, invitedProductOf, itemObjectionCue, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
 import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
@@ -1013,6 +1014,7 @@ async function chatTurnCore(
     // Lỗi bất kỳ ở bước này ⇒ giỏ giữ nguyên NHƯNG tắt kiểm cứng của lượt (không chặn khách), không ném ra ngoài lượt.
     // Tên món trong giỏ TRƯỚC tin này — căn cứ nhận câu phản đối món (#855): «kg có order chả cá thu» vừa bỏ cá khỏi giỏ ở bước dưới.
     const cartLabelsBefore = (st0.cart?.selectedItems ?? []).map((x) => x.label).filter(Boolean);
+    // Giỏ TRƯỚC tin này (P0 #863): câu huỷ xoá giỏ ở bước dưới, nhưng «đơn đúng như khách đặt» là giỏ ngay trước câu huỷ.
     const cartBefore = st0.cart;
     let cartNext: ChatState["cart"];
     try {
@@ -1133,6 +1135,36 @@ async function chatTurnCore(
       conv.state = st as Record<string, unknown>;
       st0 = st;
     }
+    // LỜI NHÂN VIÊN LỆCH ĐƠN NHÁP · KHÁCH HUỶ (P0 #863 — cancel-flow.ts): máy chủ quyết TRƯỚC câu mẫu / lượt AI. Huỷ lần hai ⇒ huỷ qua vòng đời
+    // đơn («đã huỷ» chỉ sau khi CSDL ghi); huỷ lần đầu ngay sau lỗi của bot ⇒ xin lỗi CỤ THỂ + đơn đã sửa theo báo giá máy chủ (lượt giữ đơn
+    // duy nhất); nhân viên báo tổng khác đơn nháp ⇒ chuyển người. Nhân viên đang tiếp quản ⇒ không đè quyết định của người. Khung THỬ không đi
+    // nhánh này (không có đơn thật).
+    if (opts.channel !== "TEST" && readConversationControl(st0)?.mode !== "HUMAN") {
+      const lastBotSeq = Math.max(0, ...msgs.filter((m) => m.role === "assistant" && textOf(m.content) && !textOf(m.content).startsWith(SHOP_SAID)).map((m) => m.seq));
+      const staffTexts = msgs.filter((m) => m.role === "assistant" && m.seq > lastBotSeq && textOf(m.content).startsWith(SHOP_SAID)).map((m) => ({ seq: m.seq, text: textOf(m.content).slice(SHOP_SAID.length).trim() }));
+      const step = await serverCancelStep({ conversationId: conv.id, channel: opts.channel, config: cfg, agent: SALES_AGENT, state: st0, cartBefore, text, turn: turnSeq, ...(prevTurn !== undefined ? { prevTurn } : {}), now, staffTexts });
+      if (step?.kind === "SAY") {
+        const verdict = await guardOutgoing(step.text, () => claimFacts(step.state));
+        if (verdict.ok) {
+          await reply(conv, seq, step.text);
+          await bump({ state: step.state as Record<string, unknown>, turns: conv.turns + 1, lastError: step.note, ...(step.stopFollowups ? { nextFollowupAt: null } : {}), ...(step.state.customer?.id ? { customerId: step.state.customer.id } : {}) });
+          return { ok: true, view: (await conversationView(conv.id))! };
+        }
+        // Câu máy chủ dựng mà hàng rào khẳng định vẫn chặn (số tiền chưa thuộc báo giá đã xác thực…) ⇒ không gửi, chuyển người.
+        const reason = `Cần người xử lý — khách huỷ đơn, câu máy chủ bị hàng rào chặn (${verdict.note})`.slice(0, 300);
+        const st: ChatState = { ...step.state, handoff: { reason, at: now.toISOString() } };
+        if (!isMessagingChannel(opts.channel)) await reply(conv, seq, cfg.handoff.message);
+        await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1, lastError: verdict.note, nextFollowupAt: null });
+        if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey: `sales-chat:cancel-flow:${conv.id}:${turnSeq}` }).catch(() => undefined);
+        return { ok: true, view: (await conversationView(conv.id))! };
+      }
+      if (step?.kind === "HANDOFF") {
+        if (!isMessagingChannel(opts.channel)) await reply(conv, seq, cfg.handoff.message);
+        await bump({ status: "HANDOFF", handoffReason: step.reason, state: step.state as Record<string, unknown>, turns: conv.turns + 1, lastError: step.note, nextFollowupAt: null });
+        if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, step.reason, step.state.customer, now, { dedupeKey: `sales-chat:cancel-flow:${conv.id}:${turnSeq}` }).catch(() => undefined);
+        return { ok: true, view: (await conversationView(conv.id))! };
+      }
+    }
     // Câu bot / page vừa nói — câu mẫu TRÙNG một câu trong số này thì không gửi lại (khách đang trả lời nó).
     const recentSaid = recentShopTexts(msgs, 4);
     const quick: QuickReplyStep = st0.priceDispute?.open
@@ -1232,7 +1264,7 @@ async function chatTurnCore(
     const bookingOn = cfg.booking.enabled && (await canUseModule("appointments"));
     // TỰ CHỐT KHI ĐỦ ĐƠN (P0-A, chủ shop 11/10/2026): theo công tắc «đơn đủ thông tin = đã xác nhận» của tổ chức. Lỗi đọc ⇒ TẮT (luồng xin xác nhận cũ).
     const autoConfirm = await loadAutoConfirmComplete().catch(() => false);
-    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }), postSale ? "" : customer360Prompt(c360, reuse), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), confirmedOrderPrompt(known), cartPromptOf(known, text, turnSeq, autoConfirm, prevTurn), postSale ? postSalePrompt(phase!, phase!.shortCode) : "", opts.context ?? ""].filter(Boolean).join("\n");
+    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }), postSale ? "" : customer360Prompt(c360, reuse), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), confirmedOrderPrompt(known), cartPromptOf(known, text, turnSeq, autoConfirm, prevTurn), postSale ? postSalePrompt(phase!, phase!.shortCode) : "", recoveryPrompt(known), opts.context ?? ""].filter(Boolean).join("\n");
     // Chữ KHÁCH của lượt mua hiện tại — căn cứ «khách đã gọi tên món» khi công cụ lên / chốt đơn (lineBasisViolation, P0 14/10/2026).
     // Chỉ CHỮ MUA (bỏ câu hỏi giá / câu từ chối / giả định — `buyingText`): gọi tên món trong «nem tôm bao nhiêu?» không phải căn cứ.
     // Tin KHÁCH thô (cũ ⇒ mới) trong cùng cửa sổ — căn cứ đọc ĐỊA CHỈ KHÁCH TỰ GÕ (P0 15/10/2026: dòng model chép vào công cụ có thể mất
