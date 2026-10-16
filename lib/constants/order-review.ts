@@ -33,6 +33,13 @@
 export const ORDER_REVIEW_CODES = ["CUSTOMER_CANCELLED", "ADDRESS_UNRESOLVED", "CANCEL_BLOCKED", "PRICE_DISPUTED", "PRICE_MISMATCH", "UPSELL_UNCONSENTED"] as const;
 export type OrderReviewCode = (typeof ORDER_REVIEW_CODES)[number];
 
+/**
+ * Cờ cần kiểm MÓN / GIÁ / KHÁCH HUỶ (mọi mã trừ `ADDRESS_UNRESOLVED`) — MỘT danh sách cho hai chỗ chặn: giữ đơn khỏi vận đơn
+ * (`orderReviewOpenOf` ở `lib/shipping/route.ts`, #855) và chặn công tắc «đơn đủ thông tin = đã xác nhận» tự nâng đơn
+ * (`autoConfirmComplete` ở `lib/records/order-create.ts`, #863). Khách có thể không muốn ĐÚNG đơn này ⇒ người quyết, ở cả hai chỗ.
+ */
+export const ORDER_REVIEW_HOLD_CODES: readonly OrderReviewCode[] = ["UPSELL_UNCONSENTED", "PRICE_DISPUTED", "PRICE_MISMATCH", "CUSTOMER_CANCELLED", "CANCEL_BLOCKED"];
+
 export const ORDER_REVIEW_LABEL: Record<OrderReviewCode, string> = {
   CUSTOMER_CANCELLED: "Khách báo huỷ trong hội thoại",
   ADDRESS_UNRESOLVED: "Địa chỉ chưa ghép được xã / phường",

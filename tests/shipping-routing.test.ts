@@ -59,7 +59,7 @@ function testPure() {
   const now = new Date("2026-10-06T12:00:00Z");
   const cfg: ShippingRoutingConfig = { selfAreas: [{ province: "Thành phố Hà Nội", wards: ["Phường Hoàn Kiếm"] }, { province: "Tỉnh Bắc Ninh", wards: [] }], defaultCarrier: "GHN", autoCreate: true, serviceCode: null, autoSince: since.toISOString() };
   const ready = new Set(["GHN"] as const);
-  const base: RouteOrderInput = { isErp: true, stage: "CONFIRMED", province: "Thành phố Hồ Chí Minh", ward: "Phường Sài Gòn", hasLiveShipment: false, weightGrams: 600, confirmedAt: new Date("2026-10-06T09:00:00Z"), updatedAt: new Date("2026-10-06T09:00:00Z"), auto: null, addressReviewOpen: false };
+  const base: RouteOrderInput = { isErp: true, stage: "CONFIRMED", province: "Thành phố Hồ Chí Minh", ward: "Phường Sài Gòn", hasLiveShipment: false, weightGrams: 600, confirmedAt: new Date("2026-10-06T09:00:00Z"), updatedAt: new Date("2026-10-06T09:00:00Z"), auto: null, addressReviewOpen: false, orderReviewOpen: false };
   const r = (o: Partial<RouteOrderInput>, c: Partial<ShippingRoutingConfig> = {}, rd: ReadonlySet<"VTP" | "GHN" | "GHTK"> = ready) => decideShippingRoute({ ...base, ...o }, { ...cfg, ...c }, rd, now);
 
   assert.deepEqual(r({ isErp: false }), { kind: "HOLD", code: "NOT_ERP", reason: "Đơn đồng bộ từ nguồn khác" });

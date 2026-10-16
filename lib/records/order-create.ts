@@ -91,7 +91,7 @@ import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { normalizePhone as pancakePhone } from "@/lib/integrations/http";
 import { orderCancellationOf, withCancelOutcome, type CancelActor, type CancelRequester, type RescueResult } from "@/lib/constants/order-cancel";
-import { canFlagOrderForReview, orderReviewOf, reviewConflictMessage, unseenReviewEntries, withCustomerReconfirm, withReviewEntry, withReviewResolved, type OrderReviewEntry, type OrderReviewResolution, type ReviewSeen } from "@/lib/constants/order-review";
+import { canFlagOrderForReview, ORDER_REVIEW_HOLD_CODES, orderReviewOf, reviewConflictMessage, unseenReviewEntries, withCustomerReconfirm, withReviewEntry, withReviewResolved, type OrderReviewEntry, type OrderReviewResolution, type ReviewSeen } from "@/lib/constants/order-review";
 
 export type OrderGate = { allowed: true } | { allowed: false; code: "FORBIDDEN" | "NOT_SUPPORTED" | "MODULE_DISABLED"; reason: string };
 
@@ -565,8 +565,8 @@ export async function loadAutoConfirmComplete(): Promise<boolean> {
  * Đơn «Mới» ĐỦ THÔNG TIN ở tổ chức bật công tắc ⇒ «Đã xác nhận» (`AUTO_CONFIRM_COMPLETE_SETTING_KEY`). Vượt hạn mức nợ ⇒ giữ
  * «Mới» — hạn mức là quyết định của người, công tắc không được vượt qua nó.
  */
-/** Cờ cần kiểm chặn công tắc «đơn đủ thông tin = đã xác nhận» tự nâng đơn (P0 #863). */
-const AUTO_CONFIRM_BLOCKING_REVIEW: ReadonlySet<string> = new Set(["CUSTOMER_CANCELLED", "CANCEL_BLOCKED", "UPSELL_UNCONSENTED", "PRICE_DISPUTED"]);
+/** Cờ cần kiểm chặn công tắc «đơn đủ thông tin = đã xác nhận» tự nâng đơn (P0 #863) — CÙNG danh sách giữ đơn khỏi vận đơn (#855). */
+const AUTO_CONFIRM_BLOCKING_REVIEW: ReadonlySet<string> = new Set(ORDER_REVIEW_HOLD_CODES);
 
 async function autoConfirmComplete(p: Prepared, existingOrderId?: string, existingRaw?: unknown): Promise<Prepared> {
   if (p.stage !== "NEW" || !manualOrderComplete(p.recipient, p.totals.lines.length) || !(await loadAutoConfirmComplete())) return p;

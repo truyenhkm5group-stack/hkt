@@ -179,6 +179,8 @@ export function handoffFollowupKey(conversationId: string, queuedAt: Date, lastS
 export const CUSTOMER_HANDOFF_REASON = {
   WANTS_HUMAN: "Khách muốn gặp người thật (hỏi có phải máy / đòi nhân viên)",
   REPEATED_OBJECTION: "Không xác định được sản phẩm — khách phản đối món bot nhập sai từ 2 lần, cần người kiểm lại đơn",
+  /** Khách phủ nhận ĐÚNG một món bot / shop đã đưa vào giỏ / báo giá / đơn nháp («kg có order chả cá thu») — chủ shop: dừng ngay từ lần đầu. */
+  DENIED_BOT_ITEM: "Không xác định được sản phẩm — khách phủ nhận món bot đưa vào đơn, không tự chốt, cần người gọi lại khách",
 } as const;
 export type CustomerHandoffCode = keyof typeof CUSTOMER_HANDOFF_REASON;
 
@@ -228,7 +230,13 @@ export function nextObjectionTally(prev: ObjectionTally | undefined, i: { object
  * = công tắc của chủ shop «chuyển khi khách muốn gặp người» (`cfg.handoff.onCustomerRequest`): tắt ⇒ vế đòi người không chạy (phản đối lặp
  * vẫn chuyển — đó là bot đọc sai, không phải yêu cầu của khách). `null` = AI trả lời tiếp. HÀM THUẦN.
  */
-export function customerHandoffVerdict(i: { text: string; objections: number; objectionNow: boolean; onCustomerRequest?: boolean }): { code: CustomerHandoffCode; reason: string } | null {
+/**
+ * `deniedBotItem` (P0 #855, quyết định 16/10/2026) = tin này phủ nhận ĐÚNG một món bot / shop đã đưa ra (`botProposedDenial`, cart-commitment.ts)
+ * ⇒ chuyển người ngay LẦN ĐẦU: đơn đang mâu thuẫn với lời khách, máy không được tự chốt nó. «Không đặt thêm gì nữa», «không đặt cọc» không
+ * phải (câu không phủ nhận món nào). Vắng ⇒ như cũ.
+ */
+export function customerHandoffVerdict(i: { text: string; objections: number; objectionNow: boolean; onCustomerRequest?: boolean; deniedBotItem?: boolean }): { code: CustomerHandoffCode; reason: string } | null {
+  if (i.deniedBotItem) return { code: "DENIED_BOT_ITEM", reason: CUSTOMER_HANDOFF_REASON.DENIED_BOT_ITEM };
   if (i.onCustomerRequest !== false && customerDemandsHuman(i.text)) return { code: "WANTS_HUMAN", reason: CUSTOMER_HANDOFF_REASON.WANTS_HUMAN };
   if (i.objectionNow && i.objections >= OBJECTION_HANDOFF_AT) return { code: "REPEATED_OBJECTION", reason: CUSTOMER_HANDOFF_REASON.REPEATED_OBJECTION };
   return null;
