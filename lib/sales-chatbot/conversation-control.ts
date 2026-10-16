@@ -1,4 +1,4 @@
-import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
@@ -136,11 +136,45 @@ export async function setConversationControlCore(user: SessionUser, conversation
   return { ok: true, mode, changed: true };
 }
 
+/** Ghi chú dòng tin PHÍA PAGE (cùng giá trị `PAGE_REPLY` của fanpage.ts — không nạp tệp đó: nó nạp tệp này). */
+const PAGE_REPLY_NOTE = "PAGE_REPLY";
+/** Nguồn gốc tin phía page CÓ THỂ là người trả lời (response-ownership.ts); `NULL` = dòng cũ / tin nhân viên gửi từ hộp thư ERP. */
+const PAGE_SIDE_HUMANISH = ["VERIFIED_HUMAN", "UNKNOWN", "OTHER_APP"];
+/** Cửa sổ đọc tin phía page cho ảnh chụp gửi — một lượt AI không bao giờ dài hơn. */
+const PAGE_SIDE_WINDOW_MS = 24 * 3_600_000;
+
+/**
+ * Mốc NHẬN tin phía page mới nhất có thể là người (P0 #863): dòng `PAGE_REPLY` có nguồn gốc người / chưa rõ / ứng dụng khác, không phải
+ * tin nhập từ lịch sử, và chữ KHÔNG trùng một câu bot đã gửi (tiếng vọng của chính bot không bao giờ chặn câu tiếp theo của bot).
+ */
+async function pageSideAt(pageId: string, threadId: string): Promise<Date | null> {
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  const since = new Date(Date.now() - PAGE_SIDE_WINDOW_MS);
+  const rows = await db
+    .select({ text: t.text, at: t.createdAt })
+    .from(t)
+    .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, PAGE_REPLY_NOTE), isNull(t.importedAt), or(isNull(t.senderKind), inArray(t.senderKind, PAGE_SIDE_HUMANISH)), gte(t.createdAt, since)))
+    .orderBy(desc(t.createdAt))
+    .limit(20);
+  if (!rows.length) return null;
+  const bot = await db
+    .select({ text: t.text })
+    .from(t)
+    .where(and(eq(t.pageId, pageId), eq(t.threadId, threadId), eq(t.note, "BOT_SENT"), gte(t.createdAt, since)))
+    .limit(200);
+  const botTexts = new Set(bot.map((b) => b.text.replace(/\s+/g, " ").trim()).filter(Boolean));
+  const hit = rows.find((r) => !botTexts.has(r.text.replace(/\s+/g, " ").trim()));
+  return hit ? new Date(hit.at) : null;
+}
+
 async function readSendSnapshot(conversationId: string): Promise<SendSnapshot | null> {
   const db = await getDb();
   const c = schema.salesChatConversations;
-  const [row] = await db.select({ status: c.status, state: c.state, lastStaffAt: c.lastStaffAt }).from(c).where(eq(c.id, conversationId)).limit(1);
-  return row ?? null;
+  const [row] = await db.select({ status: c.status, state: c.state, lastStaffAt: c.lastStaffAt, humanCooldownUntil: c.humanCooldownUntil, pageId: c.pageId, threadId: c.threadId }).from(c).where(eq(c.id, conversationId)).limit(1);
+  if (!row) return null;
+  const page = row.pageId && row.threadId ? await pageSideAt(row.pageId, row.threadId) : null;
+  return { status: row.status, state: row.state, lastStaffAt: row.lastStaffAt, humanCooldownUntil: row.humanCooldownUntil, pageSideAt: page };
 }
 
 /** Ảnh chụp lúc BẮT ĐẦU lượt — lối vào kênh gọi ngay TRƯỚC `chatTurn`. */

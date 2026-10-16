@@ -926,7 +926,9 @@ export async function markWaitingForCustomer(conversationId: string, now: Date, 
   const [row] = await db.select({ status: c.status, state: c.state }).from(c).where(eq(c.id, conversationId)).limit(1);
   if (!row) return;
   const st = (row.state ?? {}) as ChatState;
-  const done = row.status === "HANDOFF" || Boolean(st.confirmed) || Boolean(st.declined) || Boolean(st.handoff);
+  // Khách đang XIN HUỶ (lượt giữ đơn đã gửi — P0 #863): không xếp lịch nhắc. Một lần huỷ chỉ có ĐÚNG MỘT lượt giữ đơn; tin nhắc tự động
+  // sau đó là lượt giữ đơn thứ hai.
+  const done = row.status === "HANDOFF" || Boolean(st.confirmed) || Boolean(st.declined) || Boolean(st.handoff) || Boolean(st.cancelRequest);
   // ĐƠN ĐÃ XÁC NHẬN THẮNG SỔ CŨ (chủ shop 11/10/2026 · P0-B): `state.confirmed` chỉ do `confirm_order` ghi — đơn tự xác nhận ở lõi
   // đơn (công tắc «đơn đủ thông tin = đã xác nhận») hay do người xác nhận thì sổ vẫn trống. Đọc ĐƠN THẬT trước khi xếp lịch: đã
   // xác nhận ⇒ không xếp, dọn lịch cũ + bước DONE ngay tại đây. Đọc lỗi ⇒ xếp như cũ (cổng của job đọc lại và chặn ở phía hẹp).

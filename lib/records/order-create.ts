@@ -565,10 +565,14 @@ export async function loadAutoConfirmComplete(): Promise<boolean> {
  * Đơn «Mới» ĐỦ THÔNG TIN ở tổ chức bật công tắc ⇒ «Đã xác nhận» (`AUTO_CONFIRM_COMPLETE_SETTING_KEY`). Vượt hạn mức nợ ⇒ giữ
  * «Mới» — hạn mức là quyết định của người, công tắc không được vượt qua nó.
  */
+/** Cờ cần kiểm chặn công tắc «đơn đủ thông tin = đã xác nhận» tự nâng đơn (P0 #863). */
+const AUTO_CONFIRM_BLOCKING_REVIEW: ReadonlySet<string> = new Set(["CUSTOMER_CANCELLED", "CANCEL_BLOCKED", "UPSELL_UNCONSENTED", "PRICE_DISPUTED"]);
+
 async function autoConfirmComplete(p: Prepared, existingOrderId?: string, existingRaw?: unknown): Promise<Prepared> {
   if (p.stage !== "NEW" || !manualOrderComplete(p.recipient, p.totals.lines.length) || !(await loadAutoConfirmComplete())) return p;
-  // Luật 04/10 «trừ những đơn huỷ»: đơn khách đã báo huỷ (cờ CẦN NGƯỜI KIỂM còn mở) KHÔNG được công tắc tự nâng — người quyết.
-  if (orderReviewOf(existingRaw)?.entries.some((e) => e.code === "CUSTOMER_CANCELLED")) return p;
+  // Luật 04/10 «trừ những đơn huỷ»: đơn khách đã báo huỷ (cờ CẦN NGƯỜI KIỂM còn mở) KHÔNG được công tắc tự nâng — người quyết. P0 #863:
+  // cùng luật cho đơn mang cờ món / số lượng khách chưa đồng ý, khách phản đối giá, máy không huỷ được — khách có thể không muốn ĐÚNG đơn này.
+  if (orderReviewOf(existingRaw)?.entries.some((e) => AUTO_CONFIRM_BLOCKING_REVIEW.has(e.code))) return p;
   const promoted: Prepared = { ...p, stage: "CONFIRMED" };
   return (await creditGate(promoted, existingOrderId)) ? p : promoted;
 }
