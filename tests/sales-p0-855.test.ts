@@ -18,7 +18,7 @@ import { normalizeVnAddress } from "@/lib/address/vn-address";
 import { orderReviewOf, reviewCodes } from "@/lib/constants/order-review";
 import { createProductCore } from "@/lib/records/product-create";
 import { addressProvenanceVerdict } from "@/lib/sales-chatbot/address-provenance";
-import { buyingText, classifyCartMessage, DENIAL_RE, mentionText, namesProductLoosely, repeatsPreviousOrder, unrequestedProducts, type AskedLine, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
+import { buyingText, classifyCartMessage, DENIAL_RE, lineBasisViolation, mentionText, namesProductLoosely, repeatsPreviousOrder, unrequestedProducts, type AskedLine, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
 import { CLAIM_SAFE_TEXT, guardClaims } from "@/lib/sales-chatbot/claim-guard";
 import { setConversationControlCore } from "@/lib/sales-chatbot/conversation-control";
 import { appendContextMessages } from "@/lib/sales-chatbot/engine";
@@ -66,6 +66,13 @@ function testBasis() {
   assert.deepEqual(unrequestedProducts(undefined, asked, mentionText(["lấy như lần trước nhé, thêm 1 mực giã tay"])), []);
   // Tin của SHOP / nhân viên không phải lời khách: engine chỉ đưa tin KHÁCH vào `customerTexts` ⇒ chữ shop nhắc chả cá không thành căn cứ.
   assert.deepEqual(unrequestedProducts(undefined, asked, mentionText(["Ship chị 1 mực giã tay"]), new Set()), ["Chả cá thu"]);
+  // Sai số lượng khi giỏ chưa có số máy đọc được: «1 mực giã tay» mà đơn 2 gói ⇒ chặn; khách gõ «2» ⇒ qua; SĐT không phải số lượng.
+  assert.match(lineBasisViolation(undefined, [line("p-muc", MUC, 2)], 3, buyingText(["Ship chị 1 mực giã tay"])) ?? "", /KHÔNG tự đặt 2 × «Chả mực giã tay»/);
+  assert.equal(lineBasisViolation(undefined, [line("p-muc", MUC, 2)], 3, buyingText(["cho chị 2 mực giã tay"])), null);
+  assert.match(lineBasisViolation(undefined, [line("p-muc", MUC, 3)], 3, buyingText(["Ship chị mực giã tay 0977000333"])) ?? "", /KHÔNG tự đặt 3/);
+  assert.equal(lineBasisViolation(undefined, [line("p-muc", MUC, 1)], 3, buyingText(["Ship chị 1 mực giã tay"])), null);
+  // Lên đơn có món đơn cũ ⇒ cùng hàng rào với báo giá.
+  assert.match(lineBasisViolation(undefined, asked, 3, buyingText(["Ship chị 1 mực giã tay"])) ?? "", /KHÔNG đưa «Chả cá thu» vào đơn/);
   // Khách phủ nhận món ⇒ REMOVE đúng món đó (không huỷ cả giỏ) — hai commit ứng viên giữ nguyên.
   assert.deepEqual([classifyCartMessage("Kg có order chả cá thu nha").kind, classifyCartMessage("Kg có order chả cá thu nha").label], ["REMOVE", "cha ca thu"]);
   console.log("  ✓ #855 căn cứ dòng hàng: phủ nhận «kg có order X» không phải lời mua · gọi tên tắt «mực giã tay» · giỏ trống mà khách gọi tên một món ⇒ món đơn cũ là món lạ · «như lần trước» mới mở món đơn cũ");
@@ -209,6 +216,16 @@ const CASES: GoldenCase[] = [
         ],
       },
       { say: "Không có order chả cá thu nha", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [tool("confirm_order", { customer_confirmation: "Không có order chả cá thu nha" })]] },
+    ],
+  },
+  {
+    key: "p855-khong-lap-xin-loi",
+    title: "Model gửi lại ĐÚNG câu xin lỗi + hỏi lại vừa gửi ⇒ câu lặp bị bỏ, chuyển người (không vòng xin lỗi)",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      { say: "Ship chị 1 chả mực giã tay", ai: [() => [say("Dạ em xin lỗi, chị cho em xin địa chỉ nhận hàng ạ?")]] },
+      { say: "chị gửi ở trên rồi", ai: [() => [say("Dạ em xin lỗi, chị cho em xin địa chỉ nhận hàng ạ?")]] },
     ],
   },
   {
@@ -402,6 +419,12 @@ async function testGolden() {
           assert.equal(orders.length, 1);
           assert.notEqual(orders[0].stage, "CONFIRMED");
           assert.ok(reviewCodes(orderReviewOf(orders[0].raw)).includes("UPSELL_UNCONSENTED"), JSON.stringify(orders[0].raw));
+          return;
+        }
+        case "p855-khong-lap-xin-loi": {
+          assert.equal(t.turns[1].shown.filter((x) => /xin lỗi/.test(x)).length, 0, `câu xin lỗi không gửi lần hai: ${JSON.stringify(t.turns[1].shown)}`);
+          assert.equal(t.final.status, "HANDOFF");
+          assert.match(t.final.handoffReason ?? "", /lặp lại câu xin lỗi/);
           return;
         }
         case "p855-khach-cu-phan-nan-fanpage": {

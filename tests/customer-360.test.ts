@@ -225,7 +225,11 @@ function testHistoryPrompt() {
   assert.ok(/CHỈ GỢI Ý/.test(hist) && /use_saved_address = true/.test(hist) && /KHÔNG tự gõ địa chỉ này/.test(hist), hist);
   assert.ok(!hist.includes("hoặc trả lời tiếp về món ⇒ create_customer bằng ĐÚNG thông tin trên"), "hồ sơ từ lịch sử không còn đường «trả lời tiếp về món ⇒ create_customer»");
   const typedHere: ReturningCustomer = { ...fromHistory!, fromHistory: undefined };
-  assert.ok(returningCustomerPrompt(typedHere, undefined).includes("hoặc trả lời tiếp về món ⇒ create_customer bằng ĐÚNG thông tin trên"), "hồ sơ khách tự khai giữ nguyên hành vi main");
+  // ĐỔI LUẬT (P0 #855, 16/10/2026 — ca «ThuyNgo»): «trả lời tiếp về món» KHÔNG còn là lời đồng ý dùng địa chỉ cũ; địa chỉ cũ chỉ dùng lại
+  // khi khách TỰ nói («như cũ», «địa chỉ ở trên»), và địa chỉ khách gõ mới nhất luôn thắng.
+  const typedPrompt = returningCustomerPrompt(typedHere, undefined);
+  assert.ok(typedPrompt.includes("Khách đồng ý, nói «như cũ» / «địa chỉ ở trên» ⇒ create_customer bằng ĐÚNG thông tin trên"), "hồ sơ khách tự khai: đồng ý tường minh ⇒ create_customer");
+  assert.ok(!typedPrompt.includes("trả lời tiếp về món") && /MỚI NHẤT luôn thắng/.test(typedPrompt), typedPrompt);
   assert.equal(historyAddressWithoutConsent(fromHistory, "Số 1 ngõ 1, Phường Cầu Giấy", "cho chị 1 gói"), true, "gõ lại địa chỉ đơn cũ khi khách chưa xác nhận ⇒ chặn");
   assert.equal(historyAddressWithoutConsent(fromHistory, "Số 1 ngõ 1", "giao về Số 1 ngõ 1 nhé"), false, "khách tự gõ địa chỉ ⇒ được");
   assert.equal(historyAddressWithoutConsent(fromHistory, "Số 77 phố Mới", "cho chị 1 gói"), false, "địa chỉ khác ⇒ không liên quan");

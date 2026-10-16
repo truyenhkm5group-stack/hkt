@@ -854,6 +854,17 @@ export function lineBasisViolation(cart: CartCommitment | undefined, asked: read
       }
     }
   }
+  // GIỎ CHƯA CÓ SỐ LƯỢNG MÁY ĐỌC ĐƯỢC (P0 16/10/2026, #855): «Ship chị 1 mực giã tay» — số «1» không kèm đơn vị nên giỏ trống. Món khách
+  // gọi tên mà đơn đề nghị nhiều hơn MỌI con số khách gõ (bỏ SĐT / số dài) ⇒ bot tự đặt số lượng: hỏi khách, không lên đơn.
+  if (!explicit.length) {
+    const nums = (customerSaid.match(/\d+/g) ?? []).filter((x) => x.length <= 4).map(Number).filter((n) => n > 0);
+    for (const p of [...new Set(asked.map(keyOfLine))].filter((k) => !grounded.has(k))) {
+      const lines = asked.filter((l) => keyOfLine(l) === p);
+      if (!lines.some((l) => namesProductLoosely(l.name, customerSaid))) continue;
+      const qty = lines.reduce((t, l) => t + l.quantity, 0);
+      if (qty > 1 && !nums.some((n) => n >= qty)) return `KHÔNG tự đặt ${qty} × «${productName(lines[0].name)}»: khách chưa nói số lượng đó${nums.length ? ` (khách gõ ${nums.join(", ")})` : ""}. Lên đơn ĐÚNG số khách nói; chưa rõ thì HỎI khách lấy mấy.`;
+    }
+  }
   // Lượt «nới» (khách có ý sửa mà máy chưa chắc) chỉ nới vế HẠ / BỎ (commitmentViolation) — KHÔNG nới vế TĂNG: «thôi nem khỏi em» không
   // phải căn cứ để bot đặt chả cá 10kg (review 15/10/2026, ca «Hoa Lê»). Khách muốn tăng thật thì khách nói số mới.
   if (!cart) return null;
