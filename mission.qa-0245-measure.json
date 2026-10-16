@@ -3,7 +3,7 @@
   "mission_id": "qa-0245-measure",
   "title": "qa × 0245: số đo tài nguyên tạo chỉ mục",
   "business_goal": "Đo RAM/IO/Postgres thật để duyệt ngưỡng riêng cho CREATE INDEX CONCURRENTLY",
-  "status": "INTEGRATING",
+  "status": "FAILED",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-token-budget",
@@ -22,7 +22,7 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-16T16:42:43.812Z",
-  "updated_at": "2026-10-16T17:57:40.690Z",
+  "updated_at": "2026-10-16T21:53:52.362Z",
   "last_heartbeat": "2026-10-16T17:56:30.669Z",
   "definition_of_done": [],
   "intake": {
@@ -30,7 +30,9 @@
     "evidence": []
   },
   "evidence": {
-    "merged": "#877 → 4004bd7eac421c059acab6d9bd16606c6dccf491"
+    "merged": "#877 → 4004bd7eac421c059acab6d9bd16606c6dccf491",
+    "verify": "FAIL a97012c44d4ef19fd149861c10defe1d81ffa4aa 2026-10-16T21:53:33.865Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/38963505770"
   },
   "handoff": {
     "branch": "claude/qa-0245-a1",
