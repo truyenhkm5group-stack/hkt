@@ -121,7 +121,8 @@ function isQuestion(raw: string, f: string): boolean {
 export function classifySentence(raw: string): SentenceClass | null {
   const f = foldVi(raw);
   if (!f) return null;
-  if (GREETING_RE.test(f) && f.split(" ").length <= 14) return "GREETING";
+  // Chỉ câu CHÀO thuần (không kèm câu hỏi, ngắn) — «Dạ em chào chị, chị cần món gì ạ?» mang một câu hỏi, không phải lời chào lặp.
+  if (GREETING_RE.test(f) && !raw.includes("?") && f.split(" ").length <= 12) return "GREETING";
   if (SIZE_REASK_RE.test(f) && isQuestion(raw, f)) return "SIZE_REASK";
   const weights = new Set(amountsIn(raw).filter((a) => a.unit === "g").map((a) => a.value));
   const money = raw.match(VND_RE)?.length ?? 0;

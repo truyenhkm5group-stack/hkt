@@ -34,6 +34,7 @@ const OPEN: OfferWindow = { open: true };
 
 function testClassify() {
   assert.equal(classifySentence("Dạ em chào chị ạ!"), "GREETING");
+  assert.equal(classifySentence("Dạ em chào chị, chị cần tư vấn món gì ạ?"), null, "lời chào kèm câu hỏi không phải lời chào lặp");
   assert.equal(classifySentence("Chị lấy 1kg hay 2kg ạ?"), "SIZE_REASK");
   assert.equal(classifySentence("1kg 280.000đ, 2kg chỉ 540.000đ thôi ạ."), "PRICE_LIST");
   assert.equal(classifySentence("Lấy 2kg sẽ được giảm 20.000đ, tiết kiệm hơn ạ."), "UPSELL");
