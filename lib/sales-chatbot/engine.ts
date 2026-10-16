@@ -1266,7 +1266,9 @@ async function chatTurnCore(
     // đọc khi chữ có câu mời cần kiểm (lượt thường 0 truy vấn); đọc lỗi ⇒ câu mời bị bỏ.
     const upsellReplyId = quickCatalog.find((q) => q.upsell)?.id ?? null;
     let offerFacts: Promise<OfferFacts | null> | null = null;
-    const greetedBefore = recentShopTexts(msgs, 1).length > 0;
+    // Kênh nhắn tin (fanpage / Zalo) KHÔNG gửi lời chào mở đầu lưu ở seq 1 (`openConversation`) — khách chưa thấy nó, nên lời chào
+    // đầu tiên của bot ở đó không phải lời chào lặp. Web hiện lời chào ấy trên khung chat.
+    const greetedBefore = recentShopTexts(isMessagingChannel(opts.channel) ? msgs.filter((m) => m.seq > 1) : msgs, 1).length > 0;
     const offerGuard = async (out: string): Promise<string> => {
       const facts = needsOfferFacts(out) ? await (offerFacts ??= loadOfferFacts(cfg, upsellReplyId).catch(() => null)) : null;
       const window = offerWindow({ state, lastUserText: text, complaint: customerComplaintSignal(text), orderError: orderWriteFailed, returningPending: returningPendingOf(returning, state, turnSeq) });
