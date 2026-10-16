@@ -17,7 +17,7 @@
  * hard-code HSLC) và KHÔNG gửi tin thật.
  */
 import assert from "node:assert/strict";
-import { addressGapOf, addressQuestion, customerStatedAddresses, hasStreetDetail, legacyAddressUnmapped, looksLikeDeliveryAddress, looksLikeStreetFragment, parseCustomerAddress } from "@/lib/address/customer-address";
+import { addressGapOf, addressQuestion, customerStatedAddresses, hasStreetDetail, legacyAddressUnmapped, looksLikeDeliveryAddress, looksLikeStreetFragment, parseCustomerAddress, wantsAddressChange } from "@/lib/address/customer-address";
 import { ADDRESS_HANDOFF_REASON, ADDRESS_KNOWN_TEXT, ADDRESS_REASK_NOTE, CONTACT_KNOWN_TEXT, hasChangeCue, ADDRESS_STAFF_TEXT, addressKnowledge, addressReaskVerdict, asksForName, asksForPhone, deliveryAddressDecision, reuseIntentOf as reuseFromMemory } from "@/lib/sales-chatbot/address-memory";
 import { addressConfidence, assembleCustomer360, customer360Prompt, reuseIntentOf, type OrderFact } from "@/lib/sales-chatbot/customer-360";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -218,6 +218,12 @@ export function testP0855AddressPure() {
   assert.equal(deliveryAddressDecision({ customer: { id: null, name: "Hiền", phone: "0930000121", address: "20 hẻm Thử, Phường Sài Gòn, Hồ Chí Minh", province: "", simulated: true } } as ChatState, [datHo]).status, "NEW_EXPLICIT");
   //  · Địa chỉ đứng sau «tên, SĐT,» hoặc sau «:» vẫn đọc được (đơn vàng «doi-dia-chi»).
   assert.equal(deliveryAddressDecision(draftWith("Lô 3 khu Thử, Phường Cầu Giấy, Hà Nội"), ["cho chị 1 hộp chả cá thu 1kg, Thu, 0915000404, Lô 3 khu Thử, Phường Cầu Giấy, Hà Nội", "à em ơi đổi địa chỉ giao về cơ quan chị: 10 đường Mẫu, Phường Đống Đa, Hà Nội nhé"]).use?.raw, "10 đường Mẫu, Phường Đống Đa, Hà Nội");
+  //  · Review @4899fdd2: tin TRỘN dấu vẫn là lời đổi (hồi quy #848); «đợi chờ» thì không. Câu kể chuyện đã qua nhắc địa chỉ ≠ đổi địa chỉ.
+  for (const t of ["doi dia chi nhé", "giao ve cong ty nhé", "gửi về cong ty chi"]) assert.equal(wantsAddressChange(t), true, t);
+  assert.equal(wantsAddressChange("đợi chờ"), false);
+  const narrative = deliveryAddressDecision(draftWith("Số 8 ngõ 2, Phường Cầu Giấy", "Thành phố Hà Nội"), ["Số 8 ngõ 2, Phường Cầu Giấy, Hà Nội", "Lần trước giao chậm quá, 12 Lê Lợi Huế mà 5 ngày"]);
+  assert.notEqual(narrative.status, "CHANGE_PENDING_VERIFICATION", JSON.stringify(narrative));
+  assert.notEqual(narrative.status, "CHANGE_INCOMPLETE", JSON.stringify(narrative));
   //  · Chỉ sửa món sau «như cũ» đã điền địa chỉ xác minh ⇒ không có đổi địa chỉ nào (không đè địa chỉ use_saved_address).
   assert.equal(deliveryAddressDecision(verified, ["vẫn địa chỉ cũ nhé", "cho chị thêm 1 hộp nữa"]).status, "REUSE_VERIFIED");
 

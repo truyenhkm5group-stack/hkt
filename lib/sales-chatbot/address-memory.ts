@@ -83,6 +83,11 @@ const LEAD_IN = /(?:(?:giao|gửi|gui|ship|chuyển|chuyen)(?: hàng| hang)? (?:
 const TAIL_FILLER = /[\s,.;!]*(?:nhé|nhe|nha|nhá|ạ|a|em|shop|nhé em|nha em)?[\s,.;!]*$/iu;
 
 /** Các cách đọc một dòng thành địa chỉ: nguyên dòng, rồi phần sau lời dẫn (bỏ tiểu từ cuối). HÀM THUẦN. */
+/** Dấu hiệu câu kể chuyện đã qua / phàn nàn về giao hàng (có dấu, hoặc cụm không mơ hồ khi bỏ dấu). */
+const NARRATIVE_ACCENTED = /(?:^|[\s,.!])(?:(?:lần|hôm|đơn|bữa|đợt|tuần|tháng) trước|hôm qua|chậm quá|lâu quá|giao chậm|giao lâu|mất \d+ ngày|mà \d+ ngày|\d+ ngày mới)(?=$|[\s,.!?])/u;
+const NARRATIVE_FOLDED = /(?:^| )(?:lan truoc|hom truoc|bua truoc|dot truoc|tuan truoc|thang truoc|hom qua|cham qua|lau qua|giao cham|giao lau|mat \d+ ngay|ma \d+ ngay)(?: |$)/;
+const isNarrative = (seg: string) => NARRATIVE_ACCENTED.test(seg.normalize("NFC").toLowerCase()) || NARRATIVE_FOLDED.test(foldVnText(seg));
+
 function addressReadings(line: string): string[] {
   const out: string[] = [];
   const add = (x: string) => {
@@ -92,6 +97,9 @@ function addressReadings(line: string): string[] {
   // Từng CÂU (tách ở «. » / «! » / «? »): một tin có thể mang hai địa chỉ của hai người («Chị ở <A>. Người nhận: …, <B>»).
   const whole = line.trim();
   for (const seg of [whole, ...whole.split(/[.!?]\s+/).map((x) => x.trim()).filter((x) => x && x !== whole)]) {
+    // Câu KỂ chuyện đã qua / phàn nàn («Lần trước giao chậm quá, 12 Lê Lợi Huế mà 5 ngày») nhắc một địa chỉ nhưng không phải lời
+    // giao tới đó (review #855) ⇒ không đọc thành địa chỉ giao.
+    if (isNarrative(seg)) continue;
     add(seg);
     const m = LEAD_IN.exec(seg);
     if (m) add(seg.slice(m.index + m[0].length));

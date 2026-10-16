@@ -211,9 +211,16 @@ const CHANGE_ACCENTED = /(?:^|[\s,.!])(?:(?:đổi|thay|sửa)(?: lại)?(?: (?:
 /** Chữ có dấu tiếng Việt (khách gõ có dấu ⇒ đọc trên chữ có dấu, tránh «đợi chờ» = «đổi chỗ» khi bỏ dấu). */
 const HAS_VN_DIACRITIC = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/iu;
 
+/**
+ * Bản bỏ dấu CHỈ gồm cụm không mơ hồ khi bỏ dấu — cho tin TRỘN dấu («doi dia chi nhé», «giao ve cong ty nhé», «gửi về cong ty chi»).
+ * Loại «cho» (chỗ / chờ / chợ / cho) và «nha» (nhà / nha) — «đợi chờ» không được thành «đổi chỗ».
+ */
+const CHANGE_FOLDED_UNAMBIGUOUS = /(?:^| )(?:doi|thay|sua)(?: lai)?(?: (?:sang|qua))? dia chi(?: |$)|(?:^| )dia chi (?:moi|khac)(?: |$)|(?:^| )(?:giao|gui|ship|chuyen)(?: hang)? (?:ve|toi|den|sang|qua|o) (?:cong ty|co quan|cua hang|truong|benh vien|xuong|kho|van phong|toa|chung cu)(?: |$)/;
+
 export function wantsAddressChange(text: string): boolean {
-  if (HAS_VN_DIACRITIC.test(text)) return CHANGE_ACCENTED.test(text.normalize("NFC").toLowerCase());
   const f = foldVnText(text);
+  // Tin có dấu (kể cả trộn dấu): regex CÓ DẤU, hoặc bản bỏ dấu đã loại cụm mơ hồ. Tin không dấu hoàn toàn: luật cũ (#848).
+  if (HAS_VN_DIACRITIC.test(text)) return CHANGE_ACCENTED.test(text.normalize("NFC").toLowerCase()) || CHANGE_FOLDED_UNAMBIGUOUS.test(f);
   return /(?:^| )(?:doi|thay|sua)(?: lai)?(?: (?:sang|qua))? (?:dia chi|cho|noi|nha)(?: |$)|(?:^| )dia chi (?:moi|khac)(?: |$)|(?:^| )(?:cho|noi|nha) khac(?: |$)|(?:^| )(?:giao|gui|ship|chuyen)(?: hang)? (?:ve|toi|den|sang|qua|o|cho) (?:nha|cong ty|co quan|cua hang|shop|truong|benh vien|cho|xuong|kho|van phong|toa|chung cu)(?: |$)/.test(f);
 }
 
