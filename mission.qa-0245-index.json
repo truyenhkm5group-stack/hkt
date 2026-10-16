@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "mission_id": "qa-0245-index",
+  "title": "qa 0245: chỉ mục chữ chuẩn hoá PAGE_REPLY — migration 0247 + tạo trước có điều kiện trên qa",
+  "business_goal": "qa áp được 0245 (deploy hết failure) mà không sửa 0245; mọi tổ chức có cùng chỉ mục qua migration chuẩn",
+  "status": "PLANNING",
+  "priority": "P0",
+  "risk": "HIGH",
+  "owner": "vm:hkt",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/qa-0245-index",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "drizzle/0247_sales_chat_inbound_text_hash_idx.sql",
+    "drizzle/meta/_journal.json",
+    "db/schema.ts",
+    "scripts/org-0245-index-preseed.ts",
+    ".github/workflows/ops-vps.yml",
+    "tests/qa-0245-index.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-16T02:15:23.051Z",
+  "updated_at": "2026-10-16T02:15:23.051Z",
+  "last_heartbeat": "2026-10-16T02:15:23.051Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "MISSING",
+    "evidence": []
+  }
+}
