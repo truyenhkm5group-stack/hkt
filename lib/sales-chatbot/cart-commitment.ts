@@ -792,6 +792,31 @@ export function commitmentViolation(cart: CartCommitment | undefined, asked: rea
   return null;
 }
 
+/** Một món khách nói TƯỜNG MINH mà đơn nháp ghi khác lượng (`gotAmount = 0` ⇒ đơn thiếu hẳn món đó). */
+export type CartDraftDiff = { label: string; want: string; got: string; wantAmount: number; gotAmount: number; unit: CartUnit; sourceMessageId: number | null };
+
+/**
+ * ĐƠN NHÁP LỆCH GIỎ KHÁCH NÓI GẦN NHẤT (P0 #863): mỗi món khách nói tường minh, ghép được đúng một sản phẩm của đơn và đo được, mà lượng
+ * trong đơn KHÁC lượng khách nói (nhiều hơn hay ít hơn đều là lệch). `since` = chỉ xét món khách nói SAU lượt đó (vd lượt khách đã thấy tóm
+ * tắt đơn nháp — khách đổi ý sau khi thấy đơn). Không ghép / không đo được ⇒ bỏ qua (không đoán). Món đơn có mà giỏ không có KHÔNG tính ở
+ * đây — lời mời khách «ok» có thể chưa vào giỏ (`lineBasisViolation` lo vế đó lúc ghi đơn). HÀM THUẦN.
+ */
+export function cartDraftDiff(cart: CartCommitment | undefined, asked: readonly AskedLine[], opts: { since?: number | null } = {}): CartDraftDiff[] {
+  if (!cart) return [];
+  const out: CartDraftDiff[] = [];
+  for (const item of cart.selectedItems) {
+    if (!item.customerExplicit || item.quantity <= 0) continue;
+    if (opts.since !== undefined && opts.since !== null && (item.sourceMessageId === null || item.sourceMessageId <= opts.since)) continue;
+    const pid = productFor(item, cart, asked);
+    if (!pid) continue;
+    const got = proposedAmount(pid, item.unit, asked, item.pieces);
+    if (got === null || got === item.quantity) continue;
+    const label = item.label || productName(asked.find((l) => l.productId === pid)?.name ?? "") || "món khách chọn";
+    out.push({ label, want: amountText(item.quantity, item.unit, item.pieces), got: amountText(got, item.unit, item.pieces), wantAmount: item.quantity, gotAmount: got, unit: item.unit, sourceMessageId: item.sourceMessageId });
+  }
+  return out;
+}
+
 /**
  * Khách đã GỌI TÊN sản phẩm trong chữ của mình (kể cả không kèm số lượng máy đọc được — «cho chị 2 gói, thêm 1 ruốc tôm»): từ ĐẦU của tên
  * (danh từ món: «ruốc», «nem», «chả») có mặt VÀ ít nhất hai từ của tên có mặt (tên một từ ⇒ đủ một). «chả cá» không gọi tên «Chả mực giã

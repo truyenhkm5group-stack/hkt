@@ -91,7 +91,7 @@ import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { normalizePhone as pancakePhone } from "@/lib/integrations/http";
 import { orderCancellationOf, withCancelOutcome, type CancelActor, type CancelRequester, type RescueResult } from "@/lib/constants/order-cancel";
-import { canFlagOrderForReview, orderReviewOf, reviewConflictMessage, unseenReviewEntries, withCustomerReconfirm, withReviewEntry, withReviewResolved, type OrderReviewEntry, type OrderReviewResolution, type ReviewSeen } from "@/lib/constants/order-review";
+import { canFlagOrderForReview, orderReviewOf, reviewConflictMessage, reviewHoldOf, unseenReviewEntries, withCustomerReconfirm, withReviewEntry, withReviewResolved, type OrderReviewEntry, type OrderReviewResolution, type ReviewSeen } from "@/lib/constants/order-review";
 
 export type OrderGate = { allowed: true } | { allowed: false; code: "FORBIDDEN" | "NOT_SUPPORTED" | "MODULE_DISABLED"; reason: string };
 
@@ -554,8 +554,9 @@ export async function loadAutoConfirmComplete(): Promise<boolean> {
  */
 async function autoConfirmComplete(p: Prepared, existingOrderId?: string, existingRaw?: unknown): Promise<Prepared> {
   if (p.stage !== "NEW" || !manualOrderComplete(p.recipient, p.totals.lines.length) || !(await loadAutoConfirmComplete())) return p;
-  // Luật 04/10 «trừ những đơn huỷ»: đơn khách đã báo huỷ (cờ CẦN NGƯỜI KIỂM còn mở) KHÔNG được công tắc tự nâng — người quyết.
-  if (orderReviewOf(existingRaw)?.entries.some((e) => e.code === "CUSTOMER_CANCELLED")) return p;
+  // Luật 04/10 «trừ những đơn huỷ»: đơn khách đã báo huỷ (cờ CẦN NGƯỜI KIỂM còn mở) KHÔNG được công tắc tự nâng — người quyết. P0 #863:
+  // cùng luật cho đơn mang cờ món / số lượng khách chưa đồng ý, khách phản đối giá, máy không huỷ được (`ORDER_REVIEW_HOLD_CODES`).
+  if (reviewHoldOf(existingRaw)) return p;
   const promoted: Prepared = { ...p, stage: "CONFIRMED" };
   return (await creditGate(promoted, existingOrderId)) ? p : promoted;
 }

@@ -89,7 +89,7 @@ export function isServiceCode(v: string): boolean {
 
 // ─────────────────────────── KẾT QUẢ TUYẾN ───────────────────────────
 
-export const ROUTE_HOLD_CODES = ["NOT_ERP", "NOT_CONFIRMED", "NO_PROVINCE", "NO_WARD", "NO_CARRIER", "CARRIER_OFF", "NO_WEIGHT", "AUTO_FAILED"] as const;
+export const ROUTE_HOLD_CODES = ["NOT_ERP", "NOT_CONFIRMED", "REVIEW", "NO_PROVINCE", "NO_WARD", "NO_CARRIER", "CARRIER_OFF", "NO_WEIGHT", "AUTO_FAILED"] as const;
 export type RouteHoldCode = (typeof ROUTE_HOLD_CODES)[number];
 
 /** Lối sửa của một lý do giữ lại — màn hình dựng link từ đây. */
@@ -98,6 +98,7 @@ export type RouteFix = "EDIT_ORDER" | "ROUTING" | "CONNECTIONS" | "PRODUCTS" | "
 export const ROUTE_HOLD_META: Record<RouteHoldCode, { label: string; fix: RouteFix; fixLabel: string }> = {
   NOT_ERP: { label: "Đơn đồng bộ từ nguồn khác", fix: "ORDER", fixLabel: "Nguồn của đơn đẩy sang hãng" },
   NOT_CONFIRMED: { label: "Đơn chưa «Đã xác nhận»", fix: "EDIT_ORDER", fixLabel: "Chốt đơn với khách" },
+  REVIEW: { label: "Đơn đang CẦN NGƯỜI KIỂM (khách báo huỷ / món chưa đồng ý / phản đối giá)", fix: "ORDER", fixLabel: "Mở đơn, gọi khách rồi «Xác nhận đơn» hoặc «Huỷ đơn»" },
   NO_PROVINCE: { label: "Chưa ghép được tỉnh / thành", fix: "EDIT_ORDER", fixLabel: "Sửa đơn — chọn tỉnh và xã" },
   NO_WARD: { label: "Chưa ghép được xã / phường", fix: "EDIT_ORDER", fixLabel: "Sửa đơn — chọn xã / phường" },
   NO_CARRIER: { label: "Ngoài khu tự giao, chưa chọn hãng mặc định", fix: "ROUTING", fixLabel: "Cấu hình tuyến giao" },
