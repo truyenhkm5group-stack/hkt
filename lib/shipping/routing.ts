@@ -12,7 +12,7 @@ import { manualOrderAmountDue, manualPaymentStatus, sumConfirmedPayments } from 
 import { ORDER_REVIEW_LABEL, reviewHoldOf } from "@/lib/constants/order-review";
 import { isServiceCode, nextFailedAttempts, parseShippingRoutingConfig, SHIPPING_ROUTING_LIMITS, SHIPPING_ROUTING_SETTING_KEY, type AutoAttemptState, type ShippingRoute, type ShippingRoutingConfig } from "@/lib/constants/shipping-routing";
 import { manualOrderGate, manualOrderOrgGate } from "@/lib/records/order-create";
-import { canonicalProvince, canonicalWard, decideShippingRoute } from "@/lib/shipping/route";
+import { addressReviewOpenOf, canonicalProvince, canonicalWard, decideShippingRoute } from "@/lib/shipping/route";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
 
@@ -113,6 +113,7 @@ export async function routedOrders(now = new Date()): Promise<{ rows: RoutedOrde
           const h = reviewHoldOf(order.raw);
           return h ? ORDER_REVIEW_LABEL[h.code] : null;
         })(),
+        addressReviewOpen: addressReviewOpenOf(order.raw),
       },
       config,
       ready,

@@ -62,7 +62,7 @@ export const ORDER_REVIEW_SHORT_LABEL: Record<OrderReviewCode, string> = {
 /** Việc người phải làm với từng lý do — in cạnh lý do để người đọc biết bấm gì. */
 export const ORDER_REVIEW_HINT: Record<OrderReviewCode, string> = {
   CUSTOMER_CANCELLED: "Gọi / nhắn lại khách: khách huỷ thật ⇒ «Huỷ đơn»; cứu được ⇒ «Xác nhận đơn».",
-  ADDRESS_UNRESOLVED: "Hỏi lại khách xã / phường mới, sửa đơn chọn xã rồi «Xác nhận đơn».",
+  ADDRESS_UNRESOLVED: "Đối chiếu địa chỉ khách ghi với danh mục hành chính / ĐVVC (không bắt khách tự quy đổi phường mới — chủ shop 16/10/2026), chọn xã rồi «Xác nhận đơn»; không xác định được thì gọi khách xác nhận.",
   CANCEL_BLOCKED: "Đọc lý do: hãng đã lấy hàng ⇒ chặn giao / chờ hoàn; hãng lỗi ⇒ huỷ vận đơn trên trang hãng rồi «Huỷ đơn».",
   PRICE_DISPUTED: "Đối chiếu bảng giá (SKU · gói · giảm theo khối lượng) với số khách nói, báo lại khách giá đúng, sửa đơn nếu cần rồi «Xác nhận đơn».",
   PRICE_MISMATCH: "Ghi chú có số tiền ĐÚNG theo báo giá máy chủ: sửa dòng đơn (thường là thiếu giảm theo khối lượng), báo khách nếu tổng đổi, rồi «Xác nhận đơn».",

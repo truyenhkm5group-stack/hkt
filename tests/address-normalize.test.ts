@@ -9,6 +9,10 @@
  *    `tests/sales-integrity-audit.test.ts` — MISSING_PROVINCE); cách đọc đó chỉ đi kèm (`provinceHint`) để câu hỏi khách hỏi ĐÚNG
  *    tỉnh. Khách ghi thêm «TP.HCM» ⇒ biết tỉnh; danh mục trước sáp nhập KHÔNG có phường 13 Gò Vấp (đã gộp 01/01/2025) ⇒ xã mơ hồ
  *    trong 6 phường mới có đất Gò Vấp ⇒ hỏi xã.
+ *  · ĐỔI LUẬT 16/10/2026 (chủ shop, issue #855: «không yêu cầu khách tự tìm hiểu tên phường mới», «không chọn ngẫu nhiên», «không
+ *    chắc ⇒ chuyển nhân viên»): ca Cổ Nhuế 2 có số nhà + phường cũ + quận cũ + tỉnh là địa chỉ ĐỦ theo địa giới cũ ⇒ công cụ KHÔNG còn
+ *    đưa câu hỏi khách (`ask_customer = null`), cổng chốt không chặn vì địa chỉ, đơn đi với ô xã trống + cờ cần kiểm cho nhân viên.
+ *    `addressQuestion` vẫn soạn câu cho địa chỉ THIẾU thật (chỉ có quận cũ, thiếu tỉnh) — kỳ vọng các ca đó giữ nguyên.
  *  · Luật: chỉ EXACT / UNIQUE_FROM_OLD được tự điền; viết tắt tên quận không bao giờ là căn cứ DUY NHẤT của tỉnh; xã chỉ ghi khi
  *    KHÁCH vừa nói tên đó.
  */
@@ -138,13 +142,16 @@ export function testAddressNormalizePure() {
   assert.equal(streetPart("12 Hàng Bạc, Hoàn Kiếm, Hà Nội"), "12 Hàng Bạc");
   assert.equal(streetPart("số 5 ngõ 12 cổ nhuế hn"), "số 5 ngõ 12 cổ nhuế");
 
-  // Kết quả cho bot: xã khách đã xác nhận ⇒ không hỏi lại; mơ hồ ⇒ ask_customer + không có số nhà trong kết quả.
+  // Kết quả cho bot: xã khách đã xác nhận ⇒ không hỏi lại. Địa chỉ cũ ĐỦ mà xã cũ bị chia (luật 16/10/2026, #855) ⇒ KHÔNG câu hỏi khách,
+  // ứng viên THẬT chỉ cho người kiểm, ghi chú nội bộ «không hỏi khách tên phường mới», không có số nhà trong kết quả.
   const view = addressCheckOf({ address: CO_NHUE, province: "" }).view;
   assert.equal(view.status, "AMBIGUOUS");
-  assert.ok(view.ask_customer?.includes("phường Đông Ngạc") && !JSON.stringify(view).includes("242"), JSON.stringify(view));
+  assert.equal(view.ask_customer, null, JSON.stringify(view));
+  assert.deepEqual([...view.candidates].sort(), ["Phường Thượng Cát", "Phường Đông Ngạc"]);
+  assert.ok(/KHÔNG hỏi khách tên phường/.test(view.note) && !JSON.stringify(view).includes("242"), JSON.stringify(view));
   const confirmed = addressCheckOf({ address: CO_NHUE, province: "", ward: "Phường Đông Ngạc" }).view;
   assert.deepEqual([confirmed.status, confirmed.ward, confirmed.ask_customer], ["CUSTOMER_CONFIRMED", "Phường Đông Ngạc", null]);
-  console.log("✓ Địa chỉ tự do: Cổ Nhuế 2 cũ ⇒ hỏi Thượng Cát / Đông Ngạc · f1q5 · P13 GV không tỉnh ⇒ hỏi TỈNH (gợi ý Gò Vấp) · có tỉnh ⇒ 6 ứng viên · tỉnh gộp · không tồn tại ⇒ NOT_FOUND · xã chỉ ghi khi khách nói");
+  console.log("✓ Địa chỉ tự do: Cổ Nhuế 2 cũ (đủ, có số nhà) ⇒ không hỏi khách, ứng viên Thượng Cát / Đông Ngạc cho người kiểm · f1q5 · P13 GV không tỉnh ⇒ hỏi TỈNH (gợi ý Gò Vấp) · có tỉnh ⇒ 6 ứng viên · tỉnh gộp · không tồn tại ⇒ NOT_FOUND · xã chỉ ghi khi khách nói");
 }
 
 /** Cổng ở công cụ bot (khung thử TEST — không ghi gì): chốt đơn địa chỉ mơ hồ ⇒ hỏi khách trước; xã chỉ nhận khi khách nói. */
@@ -157,27 +164,23 @@ export async function testAddressNormalizeTools() {
   const ctx = (state: ChatState, last: string, turn: number) => ({ conversationId: "conv-addr", channel: "TEST" as const, config: parseSalesChatbotConfig(null), state, lastUserText: last, agent: AGENT, turn });
   const clone = (s: ChatState): ChatState => JSON.parse(JSON.stringify(s)) as ChatState;
 
-  // Khách «Oki! Em lên đơn cho chị luôn nhé» khi chưa ai hỏi phường ⇒ CHƯA chốt, trả đúng câu hỏi.
+  // Khách «Oki! Em lên đơn cho chị luôn nhé» với địa chỉ cũ ĐỦ (luật 16/10/2026, #855) ⇒ cổng địa chỉ KHÔNG chặn, KHÔNG đưa câu hỏi
+  // phường mới cho khách, không ghi mốc «đã hỏi» (không có câu hỏi nào). Khung thử không có mẫu mã ⇒ lượt dừng ở bước giá, không ở địa chỉ.
   const gate = await executeTool("confirm_order", { customer_confirmation: "Oki! Em lên đơn cho chị luôn nhé" }, ctx(clone(base), "Oki! Em lên đơn cho chị luôn nhé", 5));
-  assert.ok(gate.isError && /địa chỉ chưa chuẩn hoá/.test(gate.summary), JSON.stringify(gate));
-  assert.ok(!gate.state.confirmed, "chưa chốt");
-  assert.ok(gate.content.includes("phường Thượng Cát") && gate.content.includes("phường Đông Ngạc"), gate.content);
-  assert.equal(gate.state.addressAsk?.turn, 5);
-
-  // Cùng lượt gọi lại ⇒ vẫn chặn (khách chưa thấy câu hỏi).
-  const again = await executeTool("confirm_order", { customer_confirmation: "Oki! Em lên đơn cho chị luôn nhé" }, ctx(clone(gate.state), "Oki! Em lên đơn cho chị luôn nhé", 5));
-  assert.ok(again.isError && /địa chỉ chưa chuẩn hoá/.test(again.summary));
+  assert.ok(!/địa chỉ chưa chuẩn hoá/.test(gate.summary), JSON.stringify(gate));
+  assert.ok(!gate.content.includes("phường Thượng Cát") && !gate.content.includes("phường Đông Ngạc"), `không gợi ý ứng viên cho khách: ${gate.content}`);
+  assert.equal(gate.state.addressAsk, undefined);
 
   // Lượt SAU khách vẫn đồng ý ⇒ cổng địa chỉ cho qua (luật chủ shop 08/10: chốt + cờ cần người kiểm, ô xã trống).
-  const later = await executeTool("confirm_order", { customer_confirmation: "ok em" }, ctx(clone(gate.state), "ok em", 6)).catch((e: unknown) => ({ isError: true, summary: `ném: ${String(e)}`, content: "", state: {} as ChatState }));
+  const later = await executeTool("confirm_order", { customer_confirmation: "ok em" }, ctx(clone(base), "ok em", 6)).catch((e: unknown) => ({ isError: true, summary: `ném: ${String(e)}`, content: "", state: {} as ChatState }));
   assert.ok(!/địa chỉ chưa chuẩn hoá/.test(later.summary), `đã hỏi ở lượt trước ⇒ không chặn lần nữa: ${later.summary}`);
 
   // Model tự điền xã khi khách chưa nói ⇒ từ chối, đơn nháp giữ nguyên.
-  const guess = await executeTool("update_draft_order", { ward: "Phường Đông Ngạc" }, ctx(clone(gate.state), "ok em", 6));
+  const guess = await executeTool("update_draft_order", { ward: "Phường Đông Ngạc" }, ctx(clone(base), "ok em", 6));
   assert.ok(guess.isError && /chưa xác nhận/.test(guess.summary), JSON.stringify(guess));
   assert.equal(guess.state.draft?.recipient.ward, undefined);
   // Xã không có trong danh mục ⇒ từ chối.
-  const bogus = await executeTool("update_draft_order", { ward: "Phường Cổ Nhuế 2" }, ctx(clone(gate.state), "phường Cổ Nhuế 2 em ơi", 6));
+  const bogus = await executeTool("update_draft_order", { ward: "Phường Cổ Nhuế 2" }, ctx(clone(base), "phường Cổ Nhuế 2 em ơi", 6));
   assert.ok(bogus.isError && /không có trong danh mục/.test(bogus.content), bogus.content);
 
   // Tự chốt của máy chủ (P0-A, main): biết tỉnh mà xã mơ hồ KHÔNG chặn — đơn tự chốt kèm cờ cần kiểm (tests/sales-quote-integrity

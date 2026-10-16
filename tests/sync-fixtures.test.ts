@@ -185,6 +185,7 @@ import { testMigrationNumberUnique, testMigrationAppendOnly, testRepoIntegrity }
 import { testAiTechRoom } from "./ai-tech-room.test";
 import { testDeliveryV2 } from "./delivery-v2.test";
 import { testWorkflowHardening } from "./workflow-hardening.test";
+import { testPageAutoSkipAudit } from "./page-auto-skip-audit.test";
 import { testQa0245Index } from "./qa-0245-index.test";
 import { testAiVerifyWorkflow } from "./ai-verify-workflow.test";
 import { testChatbotDeployShape, testChatbotImportGuards, testChatbotNoSecretsInRepo } from "./chatbot.test";
@@ -378,6 +379,7 @@ import { testVnAddress } from "./vn-address.test";
 import { testAddressNormalizePure, testAddressNormalizeTools } from "./address-normalize.test";
 import { testAddressWardExplicitPure, testAddressWardExplicitTools } from "./address-ward-explicit.test";
 import { testAddressReaskAudit } from "./address-reask-audit.test";
+import { testP0855Address } from "./p0-855-address.test";
 import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
 import { testOutreachClearanceUnit } from "./outreach-clearance-unit.test";
 import { testPageUsageDb, testPageUsagePure, testPageUsageSource } from "./page-usage.test";
@@ -2396,6 +2398,7 @@ async function main() {
   testAddressWardExplicitPure();
   await testAddressWardExplicitTools();
   await testAddressReaskAudit();
+  await testP0855Address(); // #855: địa giới cũ / «như cũ» / địa chỉ mới thắng / không hỏi lại SĐT · tên · địa chỉ · phường
   // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
   testVelocityUnifyPure();
   testOutreachClearanceUnit();
@@ -2823,6 +2826,8 @@ async function main() {
   // Team Premium F7/F8: job chạm VPS chỉ chạy từ main + Environment production; checkout của workflow agent / có quyền GHI
   // không giữ credential; agent-run không dán đầu ra bước vào shell, token GHI chỉ ở bước đẩy nhánh.
   testWorkflowHardening();
+  // #856: đo tin khách bị chốt «Page đã trả lời» nhầm (chỉ đọc, luật buildCustomerTurns).
+  testPageAutoSkipAudit();
   // qa × 0245: chỉ mục 0247 = công cụ tạo trước (chỉ qa, có tiền điều kiện) = ứng viên rehearsal.
   testQa0245Index();
   // Hậu kiểm production chạy trên máy Actions (`ai-verify.yml`): chỉ main · chỉ lệnh verify · đỏ khi KHÔNG ĐẠT.

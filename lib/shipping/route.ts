@@ -12,7 +12,9 @@ import { autoAttemptDue, ROUTE_HOLD_META, SHIPPING_ROUTING_LIMITS, type AutoAtte
  * Thứ tự căn cứ (dừng ở điều đầu tiên đúng):
  *  1. Đơn không tạo trong ERP / chưa «Đã xác nhận» ⇒ GIỮ (không phải việc của tuyến giao).
  *  2. Đã có lần gửi còn hiệu lực ở hãng ⇒ ĐÃ ĐI. Đơn đang CẦN NGƯỜI KIỂM vì khách có thể không muốn đúng đơn này ⇒ GIỮ (P0 #863).
- *  3. Thiếu tỉnh / xã đã ghép ⇒ GIỮ — không đọc lại dòng địa chỉ ở đây: ô tỉnh + xã chỉ có giá trị khi lõi ghi đơn đã đối chiếu
+ *  3. Đơn còn cờ cần kiểm địa chỉ đang mở (ADDRESS_UNRESOLVED — #855) ⇒ GIỮ: ô xã có thể do máy đọc lại từ một địa chỉ CHƯA ai xác
+ *     minh (khách đổi địa chỉ, địa giới cũ chưa ghép); người gỡ cờ («Xác nhận đơn») thì đi tiếp.
+ *  3b. Thiếu tỉnh / xã đã ghép ⇒ GIỮ — không đọc lại dòng địa chỉ ở đây: ô tỉnh + xã chỉ có giá trị khi lõi ghi đơn đã đối chiếu
  *     được với danh mục hoặc người đã chọn (`manualOrderGaps`), đọc lại là đoán.
  *  4. Thuộc khu tự giao ⇒ TỰ GIAO (khu tự giao thắng hãng: shop đã khai mình tự chở tới đó).
  *  5. Còn lại đi hãng mặc định — chưa chọn / chưa bật / thiếu cân ⇒ GIỮ; máy hỏng đủ lần ⇒ GIỮ kèm câu lỗi của hãng.
@@ -30,6 +32,11 @@ export type RouteOrderInput = {
   confirmedAt: Date | null;
   updatedAt: Date;
   auto: AutoAttemptState | null;
+  /**
+   * Đơn còn cờ CẦN NGƯỜI KIỂM địa chỉ đang mở (`orders.raw.review` có ADDRESS_UNRESOLVED — #855: địa chỉ cũ chưa ghép, khách đổi địa
+   * chỉ chưa xác minh) ⇒ GIỮ, kể cả khi ô tỉnh + xã đã có. Bắt buộc khai: nơi gọi quên là lỗi biên dịch, không phải một vận đơn sai.
+   */
+  addressReviewOpen: boolean;
   /**
    * Lý do CẦN NGƯỜI KIỂM đang chặn giao (`reviewHoldOf` — khách báo huỷ · món / số lượng khách chưa đồng ý · phản đối giá · máy không huỷ
    * được); vắng / `null` = không có. P0 #863: đơn khách chưa đồng ý ĐÚNG món / số lượng không được đi giao, kể cả khi đã «Đã xác nhận».
@@ -75,6 +82,20 @@ export function matchSelfArea(areas: readonly SelfArea[], province: string, ward
   return null;
 }
 
+/**
+ * Đơn có cờ cần kiểm ĐỊA CHỈ đang mở không — đọc thẳng `raw.review` (không qua bộ đọc lọc mã lạ). FAIL-CLOSED: khoá `review` có mặt
+ * mà không đọc được (không phải đối tượng có mảng `entries`) ⇒ coi như CÓ cờ (giữ đơn). HÀM THUẦN.
+ */
+export function addressReviewOpenOf(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const review = (raw as Record<string, unknown>).review;
+  if (review === undefined || review === null) return false;
+  if (typeof review !== "object" || Array.isArray(review)) return true;
+  const entries = (review as { entries?: unknown }).entries;
+  if (!Array.isArray(entries)) return true;
+  return entries.some((e) => !e || typeof e !== "object" || (e as { code?: unknown }).code === "ADDRESS_UNRESOLVED");
+}
+
 function hold(code: RouteHoldCode, reason?: string): ShippingRoute {
   return { kind: "HOLD", code, reason: reason ?? ROUTE_HOLD_META[code].label };
 }
@@ -84,6 +105,7 @@ export function decideShippingRoute(o: RouteOrderInput, cfg: ShippingRoutingConf
   if (o.stage !== "CONFIRMED") return hold("NOT_CONFIRMED");
   if (o.hasLiveShipment) return { kind: "SHIPPED" };
   if (o.reviewHold) return hold("REVIEW", `${ROUTE_HOLD_META.REVIEW.label}: ${o.reviewHold}`);
+  if (o.addressReviewOpen) return hold("ADDRESS_REVIEW");
   if (!o.province.trim()) return hold("NO_PROVINCE");
   if (!o.ward.trim()) return hold("NO_WARD");
   const area = matchSelfArea(cfg.selfAreas, o.province, o.ward);

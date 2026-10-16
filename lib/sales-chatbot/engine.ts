@@ -72,7 +72,7 @@ import { readConversationControl } from "@/lib/sales-chatbot/conversation-contro
 import { customerHandoffVerdict, nextObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
-import { ADDRESS_KNOWN_TEXT, addressKnowledge, addressReaskVerdict } from "@/lib/sales-chatbot/address-memory";
+import { ADDRESS_KNOWN_TEXT, ADDRESS_STAFF_TEXT, addressKnowledge, addressReaskVerdict } from "@/lib/sales-chatbot/address-memory";
 import { DELIVERY_HANDOFF_TEXT, deliveryReplyViolation, turnDeliverySay } from "@/lib/sales-chatbot/delivery-intent";
 import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, noteSeenTotals, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
 import { flagOrderForReviewAsAgent, loadAutoConfirmComplete } from "@/lib/records/order-create";
@@ -1386,10 +1386,18 @@ async function chatTurnCore(
             }
             // ĐỊA CHỈ ĐÃ BIẾT / ĐÃ HỎI KHÔNG HỎI LẠI (P0 15/10/2026, ca «Tuyet Nguyen Thi» · «Lê Văn Dụ»): câu hỏi phường / xã bị bỏ, phần
             // còn lại vẫn gửi. Cả tin chỉ là câu hỏi lại ⇒ câu ghi nhận — trừ khi tóm tắt đơn của máy chủ còn nợ khách (nó sẽ được gửi).
-            const addrHold = verdict.ok ? addressReaskVerdict(out, addressKnowledge(state, customerTexts), turnSeq) : null;
+            // #855: `botTexts` = câu shop đã gửi ở lượt trước ⇒ cùng một trường không hỏi lần 2. `handoff` ⇒ chuyển người THẬT (như
+            // claim-guard): ghi `state.handoff` (lượt kết thúc HANDOFF, lượt sau AI không chen), báo nhân viên một lần mỗi lượt; fanpage /
+            // Zalo ⇒ bot không gửi câu nhân viên (nhân viên tiếp quản), chỉ gửi phần còn lại nếu có.
+            const addrHold = verdict.ok ? addressReaskVerdict(out, addressKnowledge(state, customerTexts), turnSeq, { botTexts: recentSaid }) : null;
             if (addrHold) {
               lastError = lastError ?? addrHold.note;
-              const said = addrHold.rest || (draftUnsaid ? "" : ADDRESS_KNOWN_TEXT);
+              if (addrHold.handoff && !state.handoff) {
+                state = { ...state, handoff: { reason: addrHold.handoff, at: now.toISOString() } };
+                if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, addrHold.handoff, state.customer, now, { dedupeKey: `sales-chat:address-guard:${conv.id}:${turnSeq}` }).catch(() => undefined);
+              }
+              const restText = addrHold.handoff && isMessagingChannel(opts.channel) ? addrHold.rest.replace(ADDRESS_STAFF_TEXT, "").trim() : addrHold.rest;
+              const said = restText || (draftUnsaid || addrHold.handoff ? "" : ADDRESS_KNOWN_TEXT);
               if (said && !content.some((x) => x.type === "text" && x.text === said)) {
                 content.push({ type: "text", text: said });
                 spoke = true;

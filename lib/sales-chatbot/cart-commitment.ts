@@ -75,7 +75,8 @@ const WORD_NUM: Record<string, number> = { mot: 1, hai: 2, ba: 3, bon: 4, nam: 5
 const WEIGHT_UNIT = "kg|kí|ký|ki|ky|cân|can|gram|gr|g";
 const PACK_UNIT = "túi|tui|gói|goi|hộp|hop|set|phần|phan|bịch|bich|khay|combo|suất|suat|hũ|hủ|hu|lọ|lo|cái|cai|chiếc|chiec|đôi|doi|bộ|bo|cây|cay";
 const NUM_WORD = "một|mot|hai|ba|bốn|bon|năm|nam|sáu|sau|bảy|bay|tám|tam|chín|chin|mười|muoi";
-const WEIGHT_RE = new RegExp(`(\\d+(?:[.,]\\d+)?|${NUM_WORD}|nửa|nua)\\s*(${WEIGHT_UNIT})(?:\\s*(rưỡi|ruoi))?(?![\\p{L}\\d])`, "giu");
+/** Nhận nguyên phân số trước số nguyên; chặn nhặt nhầm \"2 kg\" ở đuôi \"1/2 kg\" (#863). */
+const WEIGHT_RE = new RegExp(`(?<![\\p{L}\\d.,/:-])(\\d+\\s*\\/\\s*\\d+|\\d+(?:[.,]\\d+)?|${NUM_WORD}|nửa|nua)\\s*(${WEIGHT_UNIT})(?:\\s*(rưỡi|ruoi))?(?![\\p{L}\\d])`, "giu");
 const PACK_RE = new RegExp(`(\\d{1,3}|${NUM_WORD})\\s*(${PACK_UNIT})(?![\\p{L}\\d])`, "giu");
 /**
  * Số TRẦN đứng trước chữ («1 mực giã tay»): tối đa hai chữ số, không dính chữ / số / dấu chấm phẩy phía trước (SĐT, «12.5», «F4/22»).
@@ -84,6 +85,11 @@ const PACK_RE = new RegExp(`(\\d{1,3}|${NUM_WORD})\\s*(${PACK_UNIT})(?![\\p{L}\\
 const BARE_RE = /(?<![\p{L}\d.,/:-])(\d{1,2}|một|hai|ba)\s+(?=\p{L})/giu;
 
 const numOf = (raw: string): number | null => {
+  const fraction = raw.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (fraction) {
+    const denom = Number(fraction[2]);
+    return denom > 0 ? Number(fraction[1]) / denom : null;
+  }
   const f = foldVi(raw);
   if (f === "nua") return 0.5;
   if (WORD_NUM[f] !== undefined) return WORD_NUM[f];
