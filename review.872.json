@@ -2,7 +2,7 @@
   "pr": 872,
   "sha": "b6c46c261c93c77fb9eea2966e80fa6d93b6ba42",
   "verdict": "PASS",
-  "actor": "vm:hkt",
-  "at": "2026-10-16T12:31:37.916Z",
-  "note": "Review độc lập đọc-chỉ 2 lượt: lượt 1 CẦN SỬA (3 TRUNG BÌNH) đã sửa; lượt 2 ĐẠT, còn 3 THẤP an toàn"
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-16T13:50:33.873Z",
+  "note": "review độc lập PASS: isScheduleOnly, câu mẫu qua hàng rào hỏi lại, tomTat không PII"
 }
