@@ -66,6 +66,13 @@ export function testP0855AddressPure() {
   assert.equal(addressCheckOf({ address: districtOnly, province: "" }).view.ask_customer, null, "không hỏi phường mới");
   assert.equal(addressReaskVerdict(WARD_NEW_ASK, addressKnowledge(draftWith(districtOnly), [districtOnly]), 2)?.note, ADDRESS_REASK_NOTE.LEGACY_UNMAPPED, "chặn cả câu bot tự hỏi phường");
   assert.ok(legacyAddressUnmapped("230/20 Phan Huy Ích, Gò Vấp, TP.HCM"), "số nhà+quận cũ+tỉnh nhưng thiếu phường ⇒ người kiểm, không hỏi khách");
+  // P0 Ngo Thuy Nga: số nhà/ngõ + tên đường + quận cũ + Hà Nội trong cùng tin đặt 2kg, không có phường mới.
+  // Dùng số nhà, SĐT giả; giữ ngữ cảnh tự nhiên KHÔNG phân cách dấu phẩy như tin Messenger thực.
+  const dongDaFull = "Cho tôi 2kg, địa chỉ số 15 ngõ 7 Hào Nam quận Đống Đa Hà Nội SĐT 0900000000";
+  const dongDaAddress = "Số 15 ngõ 7 Hào Nam quận Đống Đa Hà Nội";
+  assert.ok(legacyAddressUnmapped(dongDaAddress), "có nhà/ngõ + quận Đống Đa Hà Nội ⇒ nhân viên xác minh xã, không hỏi khách");
+  assert.equal(addressCheckOf({ address: dongDaAddress, province: "" }).view.ask_customer, null, "không gửi câu phường theo địa giới mới");
+  assert.ok(addressReaskVerdict(WARD_NEW_ASK, addressKnowledge(draftWith(dongDaAddress), [dongDaFull]), 2), "outbound guard chặn bot hỏi phường mới trong tin khách đặt hàng");
   assert.equal(legacyAddressUnmapped("Gia Lâm, Hà Nội"), null, "chỉ huyện+tỉnh thì chưa đủ phần đường");
   assert.equal(hasStreetDetail("Khương Đình"), false, "một tên phường không phải địa chỉ đầy đủ");
   assert.equal(hasStreetDetail("Số 8 ngõ 2, Phường Cầu Giấy, Hà Nội"), true);
