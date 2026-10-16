@@ -1,7 +1,7 @@
 import { adminProvinces, adminWardsOf, findProvince, foldVnText } from "@/lib/address/vn-address";
 import type { CarrierKey } from "@/lib/carriers/types";
 import { formatDateTime } from "@/lib/format";
-import { autoAttemptDue, ROUTE_HOLD_META, SHIPPING_ROUTING_LIMITS, type AutoAttemptState, type RouteHoldCode, type SelfArea, type ShippingRoute, type ShippingRoutingConfig } from "@/lib/constants/shipping-routing";
+import { autoAttemptDue, ROUTE_HOLD_META, SHIP_HOLD_REVIEW_CODES, SHIPPING_ROUTING_LIMITS, type AutoAttemptState, type RouteHoldCode, type SelfArea, type ShippingRoute, type ShippingRoutingConfig } from "@/lib/constants/shipping-routing";
 
 /**
  * ═══════════ QUYẾT TUYẾN GIAO CHO MỘT ĐƠN — HÀM THUẦN (POS tự chủ P7 · lib/constants/shipping-routing.ts) ═══════════
@@ -30,6 +30,8 @@ export type RouteOrderInput = {
   confirmedAt: Date | null;
   updatedAt: Date;
   auto: AutoAttemptState | null;
+  /** Mã lý do CẦN NGƯỜI KIỂM đang mở của đơn (`reviewCodes`) — vắng ⇒ không có. */
+  reviewCodes?: readonly string[];
 };
 
 /** Khoá so khớp tỉnh: tên tỉnh chuẩn (nhận cả tên cũ / viết tắt) ⇒ chữ đã gập; không nhận ra ⇒ chữ gập của chính nó. */
@@ -78,6 +80,8 @@ export function decideShippingRoute(o: RouteOrderInput, cfg: ShippingRoutingConf
   if (!o.isErp) return hold("NOT_ERP");
   if (o.stage !== "CONFIRMED") return hold("NOT_CONFIRMED");
   if (o.hasLiveShipment) return { kind: "SHIPPED" };
+  const openReview = (o.reviewCodes ?? []).filter((c) => SHIP_HOLD_REVIEW_CODES.includes(c));
+  if (openReview.length) return hold("REVIEW_OPEN", `${ROUTE_HOLD_META.REVIEW_OPEN.label}: ${openReview.join(", ")}`);
   if (!o.province.trim()) return hold("NO_PROVINCE");
   if (!o.ward.trim()) return hold("NO_WARD");
   const area = matchSelfArea(cfg.selfAreas, o.province, o.ward);

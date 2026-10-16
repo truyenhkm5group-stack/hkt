@@ -700,6 +700,14 @@ export function mentionsProduct(name: string, customerSaid: string): boolean {
   return words.filter((w) => said.has(w)).length >= Math.min(2, new Set(words).size);
 }
 
+/**
+ * KHÁCH PHỦ NHẬN MÓN (P0 16/10/2026, #855 ca «ThuyNgo»): «không có order chả cá thu», «Kg có order chả cá thu nha» (kg = không khi đứng
+ * trước «có order / đặt»), «ko order X», «không đặt X». Đọc trên chữ ĐÃ GẬP. Câu này nói khách CHƯA BAO GIỜ đặt món đó — tên món trong
+ * câu KHÔNG BAO GIỜ là căn cứ đưa món vào đơn (`buyingText`, `mentionText`), và nếu bot đã đưa món đó vào giỏ / báo giá thì đó là MÂU
+ * THUẪN (`frustration.ts`). HÀM THUẦN.
+ */
+export const DENIAL_RE = /(?:^| )(?:khong|ko|k|hong|hok|kg)(?: co)? (?:order|dat)(?: |$)/;
+
 /** Mệnh đề KHÔNG phải lời mua: phủ định / bỏ / huỷ · hỏi giá / hỏi điều kiện · giả định. */
 const NOT_BUYING_RE = /(?:^| )(?:khong|ko|k|chua|dung|hong|hok|chang) (?:lay|mua|can|dat|an|thich)(?: |$)|(?:^| )(?:bao nhieu|bn|nhieu tien|may tien|het bao|bao gia|gia (?:bao|sao|nhieu|the nao|ca)|neu|thi sao)(?: |$)|(?:^| )(?:khong|ko|k|hong|hok)$/;
 /** «bỏ» / «hủy» / «khỏi» đọc trên chữ CÓ DẤU — bỏ dấu thì «bò» (tên món) cũng thành «bo». */
@@ -719,11 +727,62 @@ export function buyingText(texts: readonly string[]): string {
     for (const clause of t.split(/[\n,.;!]+|\s+(?:nhưng|nhung)\s+/i)) {
       if (!clause.trim() || clause.includes("?")) continue;
       const fc = foldVi(clause);
-      if (NOT_BUYING_RE.test(fc) || DEFER_OR_ASK_RE.test(fc) || NOT_BUYING_RAW_RE.test(clause.toLowerCase()) || ASK_TAIL_RAW_RE.test(clause.toLowerCase().trim())) continue;
+      if (NOT_BUYING_RE.test(fc) || DENIAL_RE.test(fc) || DEFER_OR_ASK_RE.test(fc) || NOT_BUYING_RAW_RE.test(clause.toLowerCase()) || ASK_TAIL_RAW_RE.test(clause.toLowerCase().trim())) continue;
       out.push(clause.trim());
     }
   }
   return out.join("\n");
+}
+
+/** Phủ định / bỏ / huỷ (không gồm câu hỏi giá) — mệnh đề này gọi tên món để TỪ CHỐI nó. */
+const NEGATION_RE = /(?:^| )(?:khong|ko|k|chua|dung|hong|hok|chang) (?:lay|mua|can|dat|an|thich)(?: |$)/;
+
+/**
+ * CHỮ GỌI TÊN MÓN của khách cho một BÁO GIÁ (P0 16/10/2026, #855): như `buyingText` nhưng GIỮ câu hỏi giá / giả định («chả cá bao
+ * nhiêu?», «nếu lấy 2kg thì sao») — khách hỏi giá một món là căn cứ để TÍNH GIÁ món đó, dù chưa phải căn cứ để LÊN ĐƠN. Bỏ mệnh đề phủ
+ * định / phủ nhận / bỏ / huỷ: «không có order chả cá» không bao giờ là căn cứ tính một giỏ có chả cá. HÀM THUẦN.
+ */
+export function mentionText(texts: readonly string[]): string {
+  const out: string[] = [];
+  for (const t of texts) {
+    for (const clause of t.split(/[\n,.;!?]+|\s+(?:nhưng|nhung)\s+/i)) {
+      if (!clause.trim()) continue;
+      const fc = foldVi(clause);
+      if (NEGATION_RE.test(fc) || DENIAL_RE.test(fc) || NOT_BUYING_RAW_RE.test(clause.toLowerCase())) continue;
+      out.push(clause.trim());
+    }
+  }
+  return out.join("\n");
+}
+
+/** «như lần trước», «lấy như cũ», «giống đơn trước», «như mọi khi» — khách TỰ xin lặp lại đơn cũ. */
+const REPEAT_ORDER_RE = /(?:^| )(?:nhu|giong)(?: (?:lan|don|hom|bua))? (?:truoc|cu|moi khi|lan truoc|don truoc|hom truoc)(?: |$)/;
+
+/**
+ * Khách TỰ xin lặp lại đơn cũ — điều kiện DUY NHẤT để món của đơn cũ thành căn cứ khi khách không gọi tên (#855: món đơn cũ là LỊCH SỬ,
+ * không phải giỏ). HÀM THUẦN.
+ */
+export function repeatsPreviousOrder(customerSaid: string): boolean {
+  return REPEAT_ORDER_RE.test(foldVi(customerSaid));
+}
+
+/** Từ CHUNG của tên món — không đủ để nhận ra món khi khách bỏ danh từ đầu («loại 1kg», «size M»). */
+const GENERIC_NAME_WORDS = new Set(["loai", "size", "goi", "hop", "tui", "set", "combo", "vi", "kg", "g", "gram", "dac", "biet", "ngon", "nhat", "moi"]);
+
+/**
+ * Khách GỌI TÊN món theo cách nói tắt — bỏ danh từ đầu (P0 16/10/2026, #855: «Ship chị 1 mực giã tay» = «Chả mực giã tay»;
+ * `mentionsProduct` đòi từ ĐẦU «chả» nên đọc là không gọi tên món nào). Nhận khi `mentionsProduct` nhận, hoặc MỌI từ riêng của tên (bỏ từ
+ * đầu, số, đơn vị, từ chung) có mặt trong chữ khách VÀ có ít nhất HAI từ như thế — «mực» đơn lẻ không đủ (shop có thể có «Mực khô»).
+ * HÀM THUẦN.
+ */
+export function namesProductLoosely(name: string, customerSaid: string): boolean {
+  if (mentionsProduct(name, customerSaid)) return true;
+  if (!customerSaid.trim()) return false;
+  const words = [...new Set(labelTokens(productName(name)).filter((w) => !/^\d/.test(w)))];
+  const own = words.slice(1).filter((w) => !GENERIC_NAME_WORDS.has(w));
+  if (own.length < 2) return false;
+  const said = new Set(labelTokens(customerSaid));
+  return own.every((w) => said.has(w));
 }
 
 /**
@@ -750,11 +809,21 @@ const keyOfLine = (l: Pick<AskedLine, "productId" | "variantId">) => l.productId
  */
 export function unrequestedProducts(cart: CartCommitment | undefined, asked: readonly AskedLine[], customerSaid = "", grounded: ReadonlySet<string> = new Set()): string[] {
   const explicit = cart?.selectedItems.filter((x) => x.customerExplicit) ?? [];
-  if (!explicit.length) return [];
   const products = [...new Set(asked.map(keyOfLine))].filter((p) => !grounded.has(p));
+  const named = (p: string) => asked.some((l) => keyOfLine(l) === p && namesProductLoosely(l.name, customerSaid));
+  if (!explicit.length) {
+    /*
+      GIỎ CHƯA CÓ SỐ LƯỢNG KHÁCH NÓI (P0 16/10/2026, #855 ca «ThuyNgo»): «Ship chị 1 mực giã tay» không có đơn vị nên giỏ có thẩm quyền
+      trống, và luật cũ trả `[]` ⇒ bot tự thêm «Chả cá thu» (món của đơn CŨ) vào báo giá 680.000 ₫ mà không hàng rào nào đứng. Khách ĐÃ
+      GỌI TÊN ít nhất một món của đề nghị ⇒ đó là lựa chọn của khách: món KHÁC mà khách không gọi tên là món lạ. Khách không gọi tên món
+      nào ⇒ giữ luật an toàn cũ (không đủ căn cứ để chặn).
+    */
+    if (!products.some(named) || repeatsPreviousOrder(customerSaid)) return [];
+    return products.filter((p) => !named(p)).map((p) => productName(asked.find((l) => keyOfLine(l) === p)?.name ?? "") || "món mời");
+  }
   const strange = products.filter((p) => {
     const lines = asked.filter((l) => keyOfLine(l) === p);
-    if (lines.some((l) => mentionsProduct(l.name, customerSaid))) return false;
+    if (lines.some((l) => namesProductLoosely(l.name, customerSaid))) return false;
     return !explicit.some((it) => (it.productId && it.productId === p) || (it.match && lines.some((l) => labelsMatch(it.match, l.name))));
   });
   const unnamed = explicit.filter((it) => !it.productId && !it.match).length;

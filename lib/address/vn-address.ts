@@ -464,6 +464,15 @@ function readWithinProvince(head: string, pv: AdminProvince, area: Index["wards"
     }
   }
 
+  // 3c. THỊ TRẤN CŨ MANG TÊN MỘT XÃ MỚI (P0 16/10/2026, #855 ca «Lieu Dau»: «thị trấn Anh Sơn, huyện Anh Sơn, Nghệ An»). Thị trấn huyện lỵ
+  //     từng đổi tên ngay trước 2025 (TT Anh Sơn → TT Kim Nhan) nên danh mục cũ không còn tên khách gõ, và bước 4 đưa cả 6 xã của huyện cho
+  //     người chọn. Nhưng tên khách gõ có loại «thị trấn» trùng TÊN của ĐÚNG MỘT xã / phường MỚI trong tỉnh, và xã mới đó có phần đất của
+  //     chính huyện cũ khách ghi (khách không ghi huyện ⇒ đủ một xã trùng tên) ⇒ đó là xã ấy. Hai xã trùng tên, xã trùng tên không có đất
+  //     của huyện khách ghi, hay danh mục cũ CÓ một thị trấn mang đúng tên đó (bước 2 / 3b đã xét) ⇒ không dùng bước này (không đoán).
+  const townHits = area.filter((x) => !needsType(x.core) && lastWordHit(head, `thi tran ${x.core}`) >= 0);
+  const oldTownNamed = area.some((x) => x.legacy.some((l) => l.wardType === "thi tran" && lastWordHit(head, `thi tran ${l.ward}`) >= 0));
+  if (townHits.length === 1 && !oldTownNamed && (!districtsInHead.size || townHits[0].legacy.some((l) => districtsInHead.has(l.district)))) return { status: "MATCHED", province: pv, ward: townHits[0].w, via: "LEGACY" };
+
   // 4. Chỉ huyện cũ.
   const byDistrict = area.filter((x) => x.legacy.some((l) => (l.districtType && lastWordHit(head, `${l.districtType} ${l.district}`) >= 0) || (!needsType(l.district) && lastWordHit(head, l.district) >= 0)));
   // Xã mới mang ĐÚNG tên huyện cũ («Đặc khu Phú Quốc», «Phường Việt Trì») lên đầu danh sách — vẫn là gợi ý, người chọn.

@@ -71,6 +71,7 @@ import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
 import { ADDRESS_KNOWN_TEXT, addressKnowledge, addressReaskVerdict } from "@/lib/sales-chatbot/address-memory";
 import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, noteSeenTotals, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
+import { FRUSTRATION_HANDOFF_PREFIX, frustrationSignal, isCorrectionTurn } from "@/lib/sales-chatbot/frustration";
 import { flagOrderForReviewAsAgent, loadAutoConfirmComplete } from "@/lib/records/order-create";
 import type { PriceDisputeState } from "@/lib/sales-chatbot/quote-shared";
 import { catalogReferenceAmounts, catalogReferenceBreakdown } from "@/lib/sales-chatbot/quote";
@@ -997,7 +998,7 @@ async function chatTurnCore(
       const within = Number.isFinite(at) && now.getTime() - at < POST_ORDER_HANDOFF_MS;
       if (!within) {
         const fresh: ChatState = { ...st0, pastOrders: [...(st0.pastOrders ?? []), st0.confirmed], cycleStartTurns: conv.turns, cartRev: now.toISOString() };
-        for (const k of ["confirmed", "draft", "stage", "upsellSent", "upsellUnavailable", "declined", "handoff", "cart"] as const) delete fresh[k];
+        for (const k of ["confirmed", "draft", "stage", "upsellSent", "upsellUnavailable", "declined", "handoff", "cart", "corrections", "rejectedTotals"] as const) delete fresh[k];
         await bump({ state: fresh as Record<string, unknown> });
         conv.state = fresh as Record<string, unknown>;
         st0 = fresh;
@@ -1007,6 +1008,7 @@ async function chatTurnCore(
     // mẫu / lượt AI); chỉ câu sửa tường minh mới đổi nó. Câu mơ hồ («ngon chị mới lấy nha em», «ok») ⇒ giỏ giữ nguyên, không ghi gì.
     // Lỗi bất kỳ ở bước này ⇒ giỏ giữ nguyên NHƯNG tắt kiểm cứng của lượt (không chặn khách), không ném ra ngoài lượt.
     let cartNext: ChatState["cart"];
+    const cartBefore = st0.cart;
     try {
       const catalog = await cartCatalogNames(text);
       // Món VỪA ĐƯỢC MỜI (bot / page gọi tên đúng một món kể từ tin khách trước) — «ừ cho chị 1 hộp» là số của món đó (review 14/10). Danh mục
@@ -1051,6 +1053,28 @@ async function chatTurnCore(
       await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1 });
       if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey: `sales-chat:complaint:${conv.id}:${turnSeq}` }).catch(() => undefined);
       return { ok: true, view: (await conversationView(conv.id))! };
+    }
+    // KHÁCH BỰC / ĐƠN MÂU THUẪN ⇒ NGƯỜI (P0 16/10/2026, #855 ca «ThuyNgo» — frustration.ts): khách phủ nhận món bot đưa vào đơn, xin gặp
+    // người, phàn nàn bot không đọc («robot hả», «khách cũ mà hỏi gì», «sao không coi ở trên»), hay đã sửa đơn bot đề nghị đủ số lần ⇒ MÁY
+    // CHỦ chuyển người ngay — không câu mẫu, không lượt AI (mỗi lượt AI thêm là thêm một câu xin lỗi / một lần hỏi lại). Lý do không thuộc
+    // nhóm tự hết hạn ⇒ bot im tới khi nhân viên trả lại; follow-up chỉ chạy hội thoại WAITING nên cũng dừng. Đơn nháp đang có ⇒ cờ CẦN
+    // NGƯỜI KIỂM «món khách chưa đồng ý» (khi khách phủ nhận món) để công tắc tự xác nhận / người kiểm không cho nó đi tiếp.
+    const hasOffer = Boolean(st0.draft || st0.quote || st0.seenTotals?.length || st0.rejectedTotals?.length || cartBefore?.selectedItems.some((x) => !x.customerExplicit));
+    const frus = frustrationSignal({ text, before: cartBefore, after: st0.cart, hasOffer, corrections: st0.corrections?.length ?? 0, turn: turnSeq });
+    if (frus) {
+      const reason = `${FRUSTRATION_HANDOFF_PREFIX}: ${frus.reason}`.slice(0, 300);
+      const st: ChatState = { ...st0, handoff: { reason, at: now.toISOString() } };
+      if (frus.kind === "DENIED_BOT_ITEM" && st0.draft?.orderId && opts.channel !== "TEST") await flagOrderForReviewAsAgent(SALES_AGENT, st0.draft.orderId, { code: "UPSELL_UNCONSENTED", note: frus.reason.slice(0, 300), quote: text.trim().slice(0, 300) || null }, now).catch(() => undefined);
+      if (!isMessagingChannel(opts.channel)) await reply(conv, seq, cfg.handoff.message);
+      await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1, nextFollowupAt: null, lastError: `Chuyển người trước lượt AI — ${frus.kind}` });
+      if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey: `sales-chat:frustration:${conv.id}:${turnSeq}` }).catch(() => undefined);
+      return { ok: true, view: (await conversationView(conv.id))! };
+    }
+    if (isCorrectionTurn({ text, before: cartBefore, after: st0.cart, hasOffer, turn: turnSeq })) {
+      const st: ChatState = { ...st0, corrections: [...(st0.corrections ?? []), turnSeq] };
+      await bump({ state: st as Record<string, unknown> });
+      conv.state = st as Record<string, unknown>;
+      st0 = st;
     }
     // HÀNG RÀO KHẲNG ĐỊNH (claim-guard.ts): MỌI chữ bot sắp gửi — câu mẫu, câu mẫu AI gửi qua công cụ, chữ model — qua
     // `guardOutgoing`. «Đã nhận tiền» khi chưa có chứng từ thu, «đã chốt đơn» khi chưa có đơn ERP ⇒ câu KHÔNG được ghi / gửi;

@@ -127,6 +127,14 @@ export function parseCustomerAddress(address: string, province = ""): CustomerAd
   };
 }
 
+/**
+ * Khách đã ghi ĐỦ xã cũ + huyện cũ (+ tỉnh), và xã cũ ấy bị CHIA cho nhiều xã mới (P0 16/10/2026, #855) — phần còn thiếu là quy đổi địa
+ * giới, việc của SHOP: không hỏi khách, đơn đi với cờ cần kiểm địa chỉ. HÀM THUẦN.
+ */
+export function oldWardSplit(a: Pick<CustomerAddress, "confidence" | "legacy" | "missing">): boolean {
+  return a.confidence === "AMBIGUOUS" && a.legacy !== null && !a.missing.includes("province");
+}
+
 /** Chỉ hai mức này được tự điền tỉnh + xã vào đơn. */
 export function canAutoFill(a: Pick<CustomerAddress, "confidence">): boolean {
   return a.confidence === "EXACT" || a.confidence === "UNIQUE_FROM_OLD";
@@ -303,7 +311,7 @@ function streetLooksReal(a: Pick<CustomerAddress, "street" | "houseNumber">): bo
 }
 
 /** Phần TÊN ĐƯỜNG / khu đã gập, bỏ số nhà và chữ «số / SN / nhà» ở đầu («230/20 Phan Huy Ích» ⇒ «phan huy ich»). */
-function streetCore(street: string): string {
+export function streetCore(street: string): string {
   const words = foldVnText(street).split(" ").filter(Boolean);
   let i = 0;
   while (i < words.length && (/\d/.test(words[i]) || ["so", "sn", "nha"].includes(words[i]))) i++;
@@ -311,7 +319,7 @@ function streetCore(street: string): string {
 }
 
 /** Hai phần đường cùng nói một con đường / một khu: cả hai đủ dài và cái này nằm trọn (đủ từ) trong cái kia. */
-function sameStreet(x: string, y: string): boolean {
+export function sameStreet(x: string, y: string): boolean {
   const a = streetCore(x);
   const b = streetCore(y);
   if (a.length < 3 || b.length < 3) return false;

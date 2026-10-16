@@ -14,7 +14,7 @@
  *
  * KHÔNG ĐOÁN: hàng rào chỉ BỎ câu hỏi, không bao giờ tự điền một phường. Phường chưa biết và chưa hỏi lần nào ⇒ câu hỏi đầu tiên đi qua.
  */
-import { canAutoFill, customerStatedAddresses, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wantsAddressChange, wardFromCustomerWords, type AddressPart } from "@/lib/address/customer-address";
+import { canAutoFill, customerStatedAddresses, namesOtherWard, oldWardSplit, parseCustomerAddress, sameDeliveryPlace, wantsAddressChange, wardFromCustomerWords, type AddressPart } from "@/lib/address/customer-address";
 
 export { wantsAddressChange };
 import { foldVnText } from "@/lib/address/vn-address";
@@ -68,7 +68,8 @@ export function askedBefore(m: AddressAskMemory | undefined, parts: readonly Add
  * Những gì máy chủ BIẾT về địa chỉ giao của lượt. `ward` = tên chuẩn khi đã biết; `wardAskedAt` = lượt đầu tiên đã hỏi phường;
  * `corrected` = tin khách MỚI NHẤT nêu một phường KHÁC phường máy đang biết (khách đang sửa) — khi đó bot được hỏi / xác nhận lại.
  */
-export type AddressKnowledge = { ward: string | null; wardAskedAt: number | null; province: boolean; street: boolean; corrected?: boolean; changeRequested?: boolean; lastSettlesAddress?: boolean };
+/** `oldWardStated` = khách đã ghi đủ xã cũ + huyện cũ mà xã cũ bị chia (`oldWardSplit`) — quy đổi là việc của shop, bot không hỏi khách phường mới. */
+export type AddressKnowledge = { ward: string | null; wardAskedAt: number | null; province: boolean; street: boolean; corrected?: boolean; changeRequested?: boolean; lastSettlesAddress?: boolean; oldWardStated?: boolean };
 
 /** Lời đồng ý ngắn («ok em», «vâng», «đúng rồi», «chốt nhé»). */
 const ACK = /^(?:ok|oke|okie|okay|uh|u|um|vang|da|dung|dung roi|duoc|chot|chot don|roi|co|yes)(?: (?:em|a|nhe|nha|shop|ban|roi|luon|di|vay|the))*$/;
@@ -103,7 +104,7 @@ export function addressKnowledge(state: Pick<ChatState, "draft" | "customer" | "
     const provinceName = a.province ?? stated?.province ?? null;
     // Khách vừa nêu một phường khác (sửa không kèm đường) ⇒ phường máy đang giữ KHÔNG còn là điều đã biết.
     if (ward && provinceName && last.split(/\n+/).some((x) => namesOtherWard(x, provinceName, ward))) return { ward: null, wardAskedAt, province: true, street: !a.missing.includes("street"), corrected: true };
-    return { ward, wardAskedAt, province: a.province !== null || Boolean(stated), street: !a.missing.includes("street"), lastSettlesAddress: settlesAddress(last, ward) };
+    return { ward, wardAskedAt, province: a.province !== null || Boolean(stated), street: !a.missing.includes("street"), lastSettlesAddress: settlesAddress(last, ward), ...(!ward && oldWardSplit(a) ? { oldWardStated: true } : {}) };
   }
   const [said] = customerStatedAddresses(customerTexts);
   return said ? { ward: said.ward, wardAskedAt, province: said.province !== null, street: !said.missing.includes("street"), lastSettlesAddress: settlesAddress(last, said.ward) } : { ward: null, wardAskedAt, province: false, street: false };
@@ -151,12 +152,12 @@ export function addressReaskVerdict(botText: string, k: AddressKnowledge, turn: 
   // Khách đang sửa phường ⇒ bot được hỏi / xác nhận lại — hàng rào không bỏ câu hỏi phường ở lượt đó.
   // Phường ĐÃ BIẾT chỉ chặn câu hỏi phường khi tin khách mới nhất xác nhận / mang chính địa chỉ đó — tin khác có thể là đổi người / nơi
   // nhận («gửi cho mẹ chị dưới quê»), bot phải hỏi được phường của nơi mới (review PR #848 lần 4).
-  const wardSettled = !k.corrected && ((k.ward !== null && Boolean(k.lastSettlesAddress)) || (k.ward === null && k.wardAskedAt !== null && k.wardAskedAt < turn));
+  const wardSettled = !k.corrected && ((k.ward !== null && Boolean(k.lastSettlesAddress)) || (k.ward === null && k.wardAskedAt !== null && k.wardAskedAt < turn) || (k.ward === null && Boolean(k.oldWardStated)));
   const fullKnown = k.ward !== null && k.province && k.street && Boolean(k.lastSettlesAddress);
   if (!wardSettled && !fullKnown) return null;
   const sentences = (botText.match(/[^.!?\n]+[.!?]*/g) ?? []).map((s) => s.trim()).filter(Boolean);
   const drop = (s: string) => (wardSettled && asksForWard(s)) || (fullKnown && asksForFullAddress(s));
   if (!sentences.some(drop)) return null;
-  const note = k.ward !== null ? "AI hỏi lại phường / xã khách đã cho (máy chủ đã ghép được theo địa giới mới) — đã bỏ câu hỏi" : "AI hỏi lại phường / xã đã hỏi khách ở lượt trước — đã bỏ câu hỏi, đơn đi tiếp với cờ cần kiểm địa chỉ";
+  const note = k.ward !== null ? "AI hỏi lại phường / xã khách đã cho (máy chủ đã ghép được theo địa giới mới) — đã bỏ câu hỏi" : k.oldWardStated && !(k.wardAskedAt !== null && k.wardAskedAt < turn) ? "AI bắt khách tự quy đổi xã / phường cũ sang tên mới — đã bỏ câu hỏi, đơn đi tiếp với cờ cần kiểm địa chỉ (nhân viên chọn xã)" : "AI hỏi lại phường / xã đã hỏi khách ở lượt trước — đã bỏ câu hỏi, đơn đi tiếp với cờ cần kiểm địa chỉ";
   return { rest: sentences.filter((s) => !drop(s)).join(" "), note };
 }

@@ -21,6 +21,8 @@ import { parseSalesChatbotConfig } from "@/lib/sales-chatbot/config";
 
 const AGENT = { name: "Chatbot bán hàng", source: "lib/sales-chatbot/tools.ts" };
 const CO_NHUE = "SN 242 đường cổ Nhuế, phường Cổ Nhuế 2, Bắc Từ Liêm, Hà Nội";
+/** Chỉ quận CŨ, không phường — phường là phần khách CHƯA nói (6 phường mới có đất của Gò Vấp cũ). */
+const GV_DISTRICT = "230 Phan Huy Ích, Quận Gò Vấp, TP Hồ Chí Minh";
 const GO_VAP = "1094/3 Lê Đức Thọ P13 GV";
 
 export function testAddressNormalizePure() {
@@ -139,29 +141,42 @@ export function testAddressNormalizePure() {
   assert.equal(streetPart("số 5 ngõ 12 cổ nhuế hn"), "số 5 ngõ 12 cổ nhuế");
 
   // Kết quả cho bot: xã khách đã xác nhận ⇒ không hỏi lại; mơ hồ ⇒ ask_customer + không có số nhà trong kết quả.
+  // ĐỔI LUẬT CHỦ SHOP (P0 16/10/2026, #855 — thay luật 11/10 «hỏi khách» của đơn #463DEBAE): khách ĐÃ ghi đủ phường cũ + quận cũ mà
+  // phường cũ bị CHIA ⇒ KHÔNG bắt khách tự quy đổi địa giới — không ask_customer, ứng viên vẫn nằm trong kết quả cho nhân viên chọn.
   const view = addressCheckOf({ address: CO_NHUE, province: "" }).view;
   assert.equal(view.status, "AMBIGUOUS");
-  assert.ok(view.ask_customer?.includes("phường Đông Ngạc") && !JSON.stringify(view).includes("242"), JSON.stringify(view));
+  assert.equal(view.ask_customer, null, JSON.stringify(view));
+  assert.ok(view.candidates.includes("Phường Đông Ngạc") && /việc của SHOP/.test(view.note) && !JSON.stringify(view).includes("242"), JSON.stringify(view));
+  // Chỉ có quận cũ (khách CHƯA nói phường) ⇒ phường là phần THIẾU thật ⇒ vẫn hỏi đúng một câu chung.
+  assert.match(addressCheckOf({ address: GV_DISTRICT, province: "" }).view.ask_customer ?? "", /tên phường \/ xã \(theo địa giới mới\)/);
   const confirmed = addressCheckOf({ address: CO_NHUE, province: "", ward: "Phường Đông Ngạc" }).view;
   assert.deepEqual([confirmed.status, confirmed.ward, confirmed.ask_customer], ["CUSTOMER_CONFIRMED", "Phường Đông Ngạc", null]);
-  console.log("✓ Địa chỉ tự do: Cổ Nhuế 2 cũ ⇒ hỏi Thượng Cát / Đông Ngạc · f1q5 · P13 GV không tỉnh ⇒ hỏi TỈNH (gợi ý Gò Vấp) · có tỉnh ⇒ 6 ứng viên · tỉnh gộp · không tồn tại ⇒ NOT_FOUND · xã chỉ ghi khi khách nói");
+  console.log("✓ Địa chỉ tự do: Cổ Nhuế 2 cũ ⇒ KHÔNG hỏi khách quy đổi, ứng viên Thượng Cát / Đông Ngạc cho nhân viên · f1q5 · P13 GV không tỉnh ⇒ hỏi TỈNH (gợi ý Gò Vấp) · có tỉnh ⇒ 6 ứng viên · tỉnh gộp · không tồn tại ⇒ NOT_FOUND · xã chỉ ghi khi khách nói");
 }
 
 /** Cổng ở công cụ bot (khung thử TEST — không ghi gì): chốt đơn địa chỉ mơ hồ ⇒ hỏi khách trước; xã chỉ nhận khi khách nói. */
 export async function testAddressNormalizeTools() {
-  const recipient = { name: "Đỗ Minh Nguyệt", phone: "0912000111", address: CO_NHUE, province: "" };
+  // Cổng hỏi địa chỉ dựng trên địa chỉ CHỈ CÓ QUẬN CŨ (phường là phần thiếu thật). Phường cũ bị chia (Cổ Nhuế 2) KHÔNG còn hỏi khách —
+  // ĐỔI LUẬT CHỦ SHOP 16/10/2026 (#855), khẳng định ngay dưới.
+  const recipient = { name: "Đỗ Minh Nguyệt", phone: "0912000111", address: GV_DISTRICT, province: "" };
   const base: ChatState = {
-    customer: { id: null, name: recipient.name, phone: recipient.phone, address: CO_NHUE, province: "", simulated: true },
+    customer: { id: null, name: recipient.name, phone: recipient.phone, address: GV_DISTRICT, province: "", simulated: true },
     draft: { orderId: null, lines: [{ variantId: "addr-test-var", quantity: 1 }], unitPrices: { "addr-test-var": 280_000 }, recipient, note: "", simulated: true, shownTurn: 4, firstShownTurn: 4 },
   };
   const ctx = (state: ChatState, last: string, turn: number) => ({ conversationId: "conv-addr", channel: "TEST" as const, config: parseSalesChatbotConfig(null), state, lastUserText: last, agent: AGENT, turn });
   const clone = (s: ChatState): ChatState => JSON.parse(JSON.stringify(s)) as ChatState;
 
+  // Phường CŨ bị chia (Cổ Nhuế 2 — khách đã ghi đủ phường + quận cũ): cổng địa chỉ KHÔNG hỏi khách quy đổi (#855) — chốt đi tiếp, đơn mang cờ
+  // cần kiểm địa chỉ, tuyến giao giữ NO_WARD tới khi nhân viên chọn phường.
+  const coNhue: ChatState = { ...clone(base), customer: { ...clone(base).customer!, address: CO_NHUE }, draft: { ...clone(base).draft!, recipient: { ...recipient, address: CO_NHUE } } };
+  const split = await executeTool("confirm_order", { customer_confirmation: "Oki! Em lên đơn cho chị luôn nhé" }, ctx(coNhue, "Oki! Em lên đơn cho chị luôn nhé", 5)).catch((e: unknown) => ({ isError: true, summary: `ném: ${String(e)}`, content: "", state: {} as ChatState }));
+  assert.ok(!/địa chỉ chưa chuẩn hoá/.test(split.summary) && !/cũ nay thuộc/.test(split.content), `phường cũ bị chia ⇒ không hỏi khách: ${split.summary}`);
+
   // Khách «Oki! Em lên đơn cho chị luôn nhé» khi chưa ai hỏi phường ⇒ CHƯA chốt, trả đúng câu hỏi.
   const gate = await executeTool("confirm_order", { customer_confirmation: "Oki! Em lên đơn cho chị luôn nhé" }, ctx(clone(base), "Oki! Em lên đơn cho chị luôn nhé", 5));
   assert.ok(gate.isError && /địa chỉ chưa chuẩn hoá/.test(gate.summary), JSON.stringify(gate));
   assert.ok(!gate.state.confirmed, "chưa chốt");
-  assert.ok(gate.content.includes("phường Thượng Cát") && gate.content.includes("phường Đông Ngạc"), gate.content);
+  assert.ok(gate.content.includes("tên phường / xã (theo địa giới mới)"), gate.content);
   assert.equal(gate.state.addressAsk?.turn, 5);
 
   // Cùng lượt gọi lại ⇒ vẫn chặn (khách chưa thấy câu hỏi).
@@ -173,7 +188,7 @@ export async function testAddressNormalizeTools() {
   assert.ok(!/địa chỉ chưa chuẩn hoá/.test(later.summary), `đã hỏi ở lượt trước ⇒ không chặn lần nữa: ${later.summary}`);
 
   // Model tự điền xã khi khách chưa nói ⇒ từ chối, đơn nháp giữ nguyên.
-  const guess = await executeTool("update_draft_order", { ward: "Phường Đông Ngạc" }, ctx(clone(gate.state), "ok em", 6));
+  const guess = await executeTool("update_draft_order", { ward: "Phường An Nhơn" }, ctx(clone(gate.state), "ok em", 6));
   assert.ok(guess.isError && /chưa xác nhận/.test(guess.summary), JSON.stringify(guess));
   assert.equal(guess.state.draft?.recipient.ward, undefined);
   // Xã không có trong danh mục ⇒ từ chối.
