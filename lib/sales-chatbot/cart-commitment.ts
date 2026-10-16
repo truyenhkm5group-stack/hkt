@@ -346,6 +346,8 @@ export function hasEditCue(text: string, labels: readonly string[] = []): boolea
   const has = (re: RegExp) => re.test(f);
   const amt = amountsIn(text).length > 0;
   const mentionsItem = labels.some((l) => l && labelTokens(l).length && labelsMatch(l, f) && labelTokens(l).some((t) => f.split(" ").includes(t)));
+  // Tin khách đính chính món bot tự thêm: «không có order chả cá», «kg có order chả cá» (kg = không khi có «order»).
+  if (has(/(?:^| )(?:khong|ko|k|hong|hok|kg)(?: co)? (?:order|dat)(?: |$)/)) return true;
   if (has(/(?:^| )(?:huy|bo|cancel)(?: |$)/)) return true;
   if (has(/(?:^| )bot(?: |$)/)) return true;
   if (has(/(?:^| )giam (?:bot|xuong|di|lai|con)(?: |$)/)) return true;
@@ -383,6 +385,14 @@ export function classifyCartMessage(text: string, catalog?: readonly string[]): 
     if (keep) {
       const label = trailingRun(keep[1]);
       if (label && label === keep[1].split(" ").filter((w) => !STOP.has(w)).join(" ")) return { kind: "KEEP", amounts: [], label };
+    }
+    // «Không có order chả cá thu nha» / «Kg có order chả cá thu nha» = KHÁCH PHỦ NHẬN MÓN,
+    // không phải lời đặt hàng. «kg» chỉ hiểu là «không» khi có cả «có order/đặt» phía sau,
+    // tránh nhầm chữ kg chỉ đơn vị khối lượng với phủ định.
+    const denyOrder = f.match(/(?:^| )(?:khong|ko|k|hong|hok|kg)(?: co)? (?:order|dat)(?: mon)? ([a-z]+(?: [a-z]+){0,5})/);
+    if (denyOrder) {
+      const label = leadingRun(denyOrder[1]);
+      if (label) return { kind: "REMOVE", amounts: [], label };
     }
     // Bỏ một món, tên món ĐỨNG SAU: «không lấy chả cá nữa», «bỏ chả cá thu nha», «hủy chả cá», «bỏ món chả cá đi em».
     const rm = f.match(new RegExp(`(?:^| )(?:bo|huy|${NEG} (?:lay|mua))(?: mon)? ([a-z]+(?: [a-z]+){0,5})`));
