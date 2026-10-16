@@ -15,6 +15,7 @@ import {
   CAU_TAO,
   CAU_XOA_INVALID,
   MOC_0245,
+  MOC_0247,
   RAM_TOI_THIEU_MB,
   TEN_CHI_MUC,
   THAN_CHI_MUC,
@@ -37,6 +38,7 @@ export function testQa0245Index() {
   const journal = JSON.parse(doc("drizzle/meta/_journal.json")) as { entries: { tag: string; when: number }[] };
   assert.ok(journal.entries.some((e) => e.tag === "0247_sales_chat_inbound_text_hash_idx"), "0247 phải có trong sổ _journal.json");
   assert.equal(MOC_0245, journal.entries.find((e) => e.tag === "0245_sales_chat_last_inbound")?.when, "MOC_0245 phải là mốc `when` của 0245 trong sổ (drizzle ghi đúng số này khi áp)");
+  assert.equal(MOC_0247, journal.entries.find((e) => e.tag === "0247_sales_chat_inbound_text_hash_idx")?.when, "MOC_0247 phải là mốc `when` của 0247 trong sổ");
   // Sổ tương thích: 0247 chưa áp thì mã vẫn phục vụ được — thiếu mục này thì `qa` (thiếu 0245+0246+0247) sập thay vì DEGRADED_MIGRATION.
   const compat = doc("lib/constants/migration-serve-compat.ts");
   assert.ok(compat.includes(`tag: "0247_sales_chat_inbound_text_hash_idx"`), "0247 phải khai trong MIGRATION_SERVE_COMPAT");
@@ -69,13 +71,17 @@ export function testQa0245Index() {
   assert.equal(ramDungDuocMb("MemTotal:  2010000 kB\nMemAvailable:  716800 kB\n"), 700);
   assert.equal(ramDungDuocMb("MemTotal: 1 kB\n"), null);
 
-  const du = { da0245: false, chiMuc: null, cauDai: 0, ramMb: 900 } as const;
+  const du = { da0245: false, da0247: false, chiMuc: null, cauDai: 0, ramMb: 900 } as const;
   assert.deepEqual(lapKeHoach(du), { viec: "TAO", ly_do: "0245 chưa áp, chỉ mục chưa có", chan: [] });
   assert.equal(lapKeHoach({ ...du, chiMuc: { hopLe: false } }).viec, "XOA_INVALID_ROI_TAO");
   assert.equal(lapKeHoach({ ...du, chiMuc: { hopLe: true } }).viec, "KHONG_LAM_GI");
   assert.equal(lapKeHoach({ ...du, da0245: true }).viec, "KHONG_LAM_GI", "0245 đã áp ⇒ chỉ mục đi đường chuẩn 0247, không tạo ngoài migration");
   assert.equal(lapKeHoach({ ...du, da0245: true, chiMuc: { hopLe: false } }).viec, "XOA_INVALID", "0245 đã áp mà còn bản INVALID ⇒ chỉ xoá để 0247 dựng lại (IF NOT EXISTS sẽ bỏ qua bản hỏng mãi)");
   assert.equal(lapKeHoach({ ...du, da0245: true, chiMuc: { hopLe: true } }).viec, "KHONG_LAM_GI");
+  // 0247 đã ghi sổ: migrator không chạy lại nó ⇒ chỉ mục thiếu / hỏng chỉ còn công cụ này dựng lại (review lượt 2).
+  assert.equal(lapKeHoach({ ...du, da0245: true, da0247: true, chiMuc: { hopLe: false } }).viec, "XOA_INVALID_ROI_TAO");
+  assert.equal(lapKeHoach({ ...du, da0245: true, da0247: true, chiMuc: null }).viec, "TAO");
+  assert.equal(lapKeHoach({ ...du, da0245: true, da0247: true, chiMuc: { hopLe: true } }).viec, "KHONG_LAM_GI");
   assert.deepEqual(lapKeHoach({ ...du, ramMb: 699 }).chan, ["RAM dùng được 699 MB < 700 MB"]);
   assert.deepEqual(lapKeHoach({ ...du, ramMb: null }).chan, ["không đọc được RAM dùng được"], "thiếu số đo RAM không phải «đủ»");
   assert.equal(lapKeHoach({ ...du, cauDai: 1 }).chan.length, 1, "có câu dài đang chạy (migrate / đọc nặng) ⇒ không chen vào");

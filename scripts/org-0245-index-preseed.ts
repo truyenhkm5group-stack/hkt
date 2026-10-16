@@ -44,6 +44,8 @@ export const TRAN_CAU_GIAY = 300;
 export const TRAN_KHOA_GIAY = 5;
 /** Mốc `when` của 0245 trong drizzle/meta/_journal.json (bài kiểm đối chiếu) — drizzle ghi đúng số này vào `created_at` khi áp. */
 export const MOC_0245 = 1791401500000;
+/** Mốc `when` của 0247 — đã ghi sổ thì migrator KHÔNG bao giờ chạy lại 0247, nên chỉ mục thiếu / hỏng không còn đường chuẩn nào dựng lại. */
+export const MOC_0247 = 1791488000000;
 
 export type ThamSo = { org: string; apply: boolean } | { error: string };
 
@@ -64,6 +66,8 @@ export function ramDungDuocMb(meminfo: string): number | null {
 
 export type TrangThai = {
   da0245: boolean;
+  /** 0247 đã ghi vào sổ migration (drizzle sẽ không chạy lại nó). */
+  da0247: boolean;
   chiMuc: null | { hopLe: boolean };
   /** Câu đang chạy > 30 s trên CSDL qa (ngoài phiên này) — đang có migrate / đọc dài ⇒ không chen vào. */
   cauDai: number;
@@ -79,9 +83,15 @@ export function lapKeHoach(t: TrangThai): KeHoach {
   else if (t.ramMb < RAM_TOI_THIEU_MB) chan.push(`RAM dùng được ${t.ramMb} MB < ${RAM_TOI_THIEU_MB} MB`);
   if (t.cauDai > 0) chan.push(`${t.cauDai} câu đang chạy > 30 s trên CSDL tổ chức`);
   if (t.da0245) {
-    if (t.chiMuc && !t.chiMuc.hopLe)
-      return { viec: "XOA_INVALID", ly_do: "0245 đã áp nhưng còn bản chỉ mục INVALID — chỉ XOÁ nó; 0247 (IF NOT EXISTS theo tên) sẽ dựng lại ở lượt migrate kế tiếp", chan };
-    return { viec: "KHONG_LAM_GI", ly_do: t.chiMuc ? "0245 đã áp và chỉ mục đã có, hợp lệ" : "0245 đã áp — chỉ mục đi đường chuẩn (migration 0247), không tạo ngoài migration", chan };
+    if (t.chiMuc?.hopLe) return { viec: "KHONG_LAM_GI", ly_do: "0245 đã áp và chỉ mục đã có, hợp lệ", chan };
+    if (!t.da0247) {
+      // 0247 chưa ghi sổ ⇒ lượt migrate kế tiếp sẽ chạy nó: chỉ cần dọn bản hỏng (IF NOT EXISTS theo tên sẽ bỏ qua bản hỏng mãi).
+      if (t.chiMuc) return { viec: "XOA_INVALID", ly_do: "0245 đã áp, 0247 chưa — còn bản chỉ mục INVALID: chỉ XOÁ; 0247 sẽ dựng lại ở lượt migrate kế tiếp", chan };
+      return { viec: "KHONG_LAM_GI", ly_do: "0245 đã áp, 0247 chưa — chỉ mục đi đường chuẩn (migration 0247), không tạo ngoài migration", chan };
+    }
+    // 0247 đã ghi sổ mà chỉ mục thiếu / hỏng: migrator không chạy lại 0247 ⇒ không đường chuẩn nào sửa được — dựng lại đúng câu của 0247.
+    if (t.chiMuc) return { viec: "XOA_INVALID_ROI_TAO", ly_do: "0247 đã ghi sổ nhưng chỉ mục INVALID — migration sẽ không chạy lại: xoá rồi dựng lại (CONCURRENTLY)", chan };
+    return { viec: "TAO", ly_do: "0247 đã ghi sổ nhưng chỉ mục không tồn tại — migration sẽ không chạy lại: dựng lại (CONCURRENTLY)", chan };
   }
   if (t.chiMuc?.hopLe) return { viec: "KHONG_LAM_GI", ly_do: "chỉ mục đã có và HỢP LỆ — chờ 0245 thử lại", chan };
   if (t.chiMuc && !t.chiMuc.hopLe) return { viec: "XOA_INVALID_ROI_TAO", ly_do: "chỉ mục tồn tại nhưng INVALID (lượt trước bị cắt) — xoá đúng chỉ mục ấy rồi dựng lại", chan };
@@ -115,6 +125,7 @@ async function main(): Promise<number> {
     const q = async <R extends Record<string, unknown>>(text: string, values: unknown[] = []) => (await client.query<R>(text, values)).rows;
     const doc = async (): Promise<TrangThai> => {
       const da = await q<{ n: string }>(`select count(*)::text n from drizzle.__drizzle_migrations where created_at = $1::bigint`, [String(MOC_0245)]);
+      const da7 = await q<{ n: string }>(`select count(*)::text n from drizzle.__drizzle_migrations where created_at = $1::bigint`, [String(MOC_0247)]);
       const cm = await q<{ hop_le: boolean }>(
         `select i.indisvalid and i.indisready as hop_le from pg_index i join pg_class c on c.oid = i.indexrelid where c.relname = $1 and c.relnamespace = to_regnamespace(current_schema())::oid`,
         [TEN_CHI_MUC],
@@ -129,7 +140,7 @@ async function main(): Promise<number> {
       } catch {
         ram = null;
       }
-      return { da0245: Number(da[0]?.n ?? 0) > 0, chiMuc: cm[0] ? { hopLe: cm[0].hop_le === true } : null, cauDai: Number(dai[0]?.n ?? 0), ramMb: ram };
+      return { da0245: Number(da[0]?.n ?? 0) > 0, da0247: Number(da7[0]?.n ?? 0) > 0, chiMuc: cm[0] ? { hopLe: cm[0].hop_le === true } : null, cauDai: Number(dai[0]?.n ?? 0), ramMb: ram };
     };
 
     const truoc = await doc();
@@ -165,7 +176,7 @@ async function main(): Promise<number> {
     if (kh.viec === "XOA_INVALID") {
       await client.query(CAU_XOA_INVALID);
       const con = (await doc()).chiMuc;
-      tomTat(`ĐÃ XOÁ bản INVALID trong ${Date.now() - t0} ms — ${con ? "VẪN CÒN chỉ mục, cần người kiểm" : "sạch; 0247 sẽ dựng lại ở lượt migrate kế tiếp"}`);
+      tomTat(`ĐÃ XOÁ bản INVALID trong ${Date.now() - t0} ms — ${con ? "VẪN CÒN chỉ mục, cần người kiểm" : "sạch; 0247 (chưa ghi sổ) sẽ dựng lại ở lượt migrate kế tiếp"}`);
       return con ? 1 : 0;
     }
     try {
