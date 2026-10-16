@@ -1068,6 +1068,39 @@ export function itemObjectionCue(text: string, labels: readonly string[] = []): 
   return (amountsIn(text).length === 0 && DENY_ORDER_RE.test(f)) || DENY_RE.test(f);
 }
 
+/** Khách TỰ nhận nhầm («chị nhầm rồi», «tôi gõ nhầm», «à nhầm») — khách tự sửa đơn, KHÔNG trách bot (luật 6). Đọc trên `foldCart`. */
+const SELF_SLIP_RE = /(?:^| )(?:(?:chi|anh|toi|minh|tui|tao|c|a|t) (?:lai |bi )?(?:go |ghi |noi |nhin |doc )?(?:nham|sai)(?: roi)?|(?:a|o|ay|ui|oi) (?:nham|sai)(?: roi)?)(?= |$)/g;
+/**
+ * Câu TRÁCH BOT (đọc trên `foldCart`, đã gỡ lời khách tự nhận nhầm): «sai rồi (em)», «em / shop / bot nhầm · sai», «nhầm rồi em», «không
+ * phải vậy», «sao không coi ở trên», «khách cũ mà». «Nhầm rồi» đứng trơ không gọi ai là câu khách tự sửa — không tính.
+ */
+const BOT_BLAME_RE = /(?:^| )(?:sai roi|nham roi (?:em|e|shop|ban|bot|ad|admin|oi)|(?:em|e|shop|bot|ban|ad|admin) (?:lai |da )?(?:ghi |len |doc |tinh |nghe )?(?:sai|nham)|(?:khong|ko|k|kg|hong|hok) phai (?:vay|the|nhu vay|nhu the)|sao (?:khong|ko|k|kg|hong|hok) (?:coi|xem|doc|nhin)|khach cu ma)(?= |$)/;
+/** Ngay sau «không có order / đặt» là «thêm / gì / nữa» ⇒ khách từ chối THÊM món, không phủ nhận món đã có. */
+const ADD_ON_TAIL_RE = /^(?:them|gi|j|nua|chi them|cai gi|mon gi|mon nao)(?: |$)/;
+
+/**
+ * Tin cuối của khách là lời PHẢN ĐỐI đơn bot đề nghị — KHÔNG phải lời đồng ý chốt (P0 #855, ca «ThuyNgo»). MỘT định nghĩa cho cả
+ * `confirm_order` lẫn tự chốt (`autoConfirmBlocker`) — hai đường không được nói khác nhau. `labels` = tên món đang / vừa có trong giỏ,
+ * đơn nháp, tóm tắt khách đã thấy. Phản đối là: (1) trách bot («sai rồi em», «em nhầm rồi», «không phải vậy», «sao không coi ở trên»);
+ * (2) phủ nhận đã đặt một món CÓ trong `labels` («không có order chả cá thu», «kg có order chả cá» — «kg» sau một con số là đơn vị);
+ * (3) «nói rồi» / «chưa đặt» kèm tên một món trong `labels`. KHÔNG phải: khách tự nhận nhầm rồi sửa («chị nhầm rồi, lấy 1kg thôi»), từ
+ * chối lời mời thêm món («không có order thêm gì đâu em, chốt nhé», «không đặt thêm, chốt nhé»), tự sửa số («không phải 2kg lấy 1kg»).
+ * Đọc theo từng mệnh đề; mệnh đề chỉ từ chối thêm món (`declinesAddOnOnly`) bị bỏ trước. HÀM THUẦN.
+ */
+export function confirmObjection(text: string, labels: readonly string[] = []): boolean {
+  const known = labels.filter(Boolean);
+  for (const clause of text.split(/[\n,.;!?]+/)) {
+    if (!clause.trim() || declinesAddOnOnly(clause)) continue;
+    const f = ` ${foldCart(clause)} `.replace(SELF_SLIP_RE, " ").replace(/\s+/g, " ").trim();
+    if (!f) continue;
+    if (BOT_BLAME_RE.test(f)) return true;
+    const deny = f.match(new RegExp(`${DENY_ORDER_RE.source}(?: mon)? ([a-z0-9]+(?: [a-z0-9]+){0,5})`));
+    if (deny && !ADD_ON_TAIL_RE.test(deny[1]) && known.some((l) => labelsMatch(l, deny[1]) || calledByName(l, deny[1]))) return true;
+    if (DENY_RE.test(f) && known.some((l) => mentionsProduct(l, clause) || calledByName(l, clause))) return true;
+  }
+  return false;
+}
+
 // ─────────────────────────── CHỮ BOT ───────────────────────────
 
 const TRIAL_RE = /(?:^| )(?:an thu|dung thu|thu truoc|lay thu|mua thu|goi thu|thu (?:1|mot|it)|it thoi|lay it)(?: |$)/;

@@ -44,9 +44,9 @@ import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packi
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
 import type { ObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
-import { bindCommitment, commitmentViolation, customerHesitates, declinesAddOnOnly, itemObjectionCue, lineBasisViolation, mentionText, unrequestedProducts, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
+import { bindCommitment, commitmentViolation, confirmObjection, customerHesitates, declinesAddOnOnly, lineBasisViolation, mentionText, unrequestedProducts, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
 import { acceptCustomerWard, addressQuestion, canAutoFill, legacyAddressUnmapped, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
-import { askedBefore, askMemoryFor, askMemoryParts, askParts, deliveryAddressDecision, hasChangeCue, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
+import { askedBefore, askMemoryFor, askMemoryParts, askParts, deliveryAddressDecision, hasChangeCue, reuseIntentOf, type AddressAskMemory, type AddressDecision } from "@/lib/sales-chatbot/address-memory";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
 import { isMessagingChannel, type ChatChannel, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
@@ -79,7 +79,7 @@ export type ChatState = {
    * (review bảo mật 08/10/2026). `savedAddress` = địa chỉ / tên do MÁY CHỦ điền từ
    * hồ sơ chủ SĐT — mọi màn đọc cho khách phải che.
    */
-  customer?: { id: string | null; name: string; phone: string; address: string; province: string; simulated: boolean; at?: string; savedAddress?: boolean; verifiedIdentity?: boolean };
+  customer?: { id: string | null; name: string; phone: string; address: string; province: string; simulated: boolean; at?: string; savedAddress?: boolean; verifiedIdentity?: boolean; savedConfirm?: string };
   /**
    * `shownTurn` = lượt (seq tin khách) bot lên / sửa đơn nháp và đọc tóm tắt; `firstShownTurn` = lượt khách thấy tóm tắt LẦN
    * ĐẦU. Chưa từng thấy tóm tắt ⇒ chốt chỉ ở lượt SAU; đã thấy ở lượt trước rồi đồng ý thêm / sửa món ⇒ sửa và chốt luôn.
@@ -112,7 +112,7 @@ export type ChatState = {
   /**
    * TỔNG của những giỏ máy chủ TỪ CHỐI tính vì có món khách chưa gọi tên (P0 16/10/2026, #855 ca «ThuyNgo» — 680.000 ₫ cho «chả cá + chả
    * mực» khi khách chỉ gọi chả mực). Máy chủ đã biết con số đó SAI cho khách này ⇒ chữ bot mang nó luôn bị chặn (`claim-guard.ts`), kể cả
-   * khi hội thoại chưa có báo giá hợp lệ nào để so. Tối đa `REJECTED_TOTALS_MAX`; xoá khi sang lượt mua mới.
+   * khi hội thoại chưa có báo giá hợp lệ nào để so. Tối đa `REJECTED_TOTALS_MAX`; xoá khi giỏ đổi theo lời khách hoặc sang lượt mua mới.
    */
   rejectedTotals?: number[];
   /** Giá ĐÃ XÁC THỰC công cụ đọc đã trả cho model trong hội thoại (search / get_product / get_current_price) — tối đa `PRICE_FACTS_MAX`. */
@@ -618,10 +618,35 @@ function noteRejectedTotals(state: ChatState, amounts: readonly (number | null)[
 }
 
 /**
- * Khách PHỦ NHẬN đã đặt một món («không có order chả cá thu», «kg có order chả cá») — đọc trên chữ đã gập. Câu như thế không bao giờ là
- * lời đồng ý chốt đơn (#855), kể cả khi món ấy đã bị bỏ khỏi giỏ ngay trước lượt AI. «Không đặt thêm gì nữa» (không «có») không thuộc đây.
+ * Tên món khách có thể đang PHẢN ĐỐI (#855): món của giỏ + dòng đơn nháp + dòng khách ĐÃ THẤY ở tóm tắt trước (`seenLines`) — món bị bỏ
+ * khỏi giỏ / đơn ngay trước lời chốt vẫn là món khách vừa phủ nhận. Đọc tên lỗi ⇒ chỉ tên trong giỏ (bộ đọc trách bot vẫn chạy).
  */
-const DENIED_ORDER_RE = /(?:^| )(?:khong|ko|k|hong|hok|kg) co (?:order|dat)(?: |$)/;
+async function objectionLabels(state: ChatState, cfg: SalesChatbotConfig): Promise<string[]> {
+  const lines = [...(state.draft?.lines ?? []), ...(state.draft?.seenLines ?? [])];
+  const names = lines.length ? await priceLines(lines, cfg, verifiedCustomerId(state)).then((p) => p.asked.map((l) => l.name), () => [] as string[]) : [];
+  return [...new Set([...(state.cart?.selectedItems ?? []).map((x) => x.label), ...names].filter((x): x is string => Boolean(x)))];
+}
+
+/**
+ * Địa chỉ model ghi vào đơn nháp KHÁC nơi giao khách tự gõ mới nhất (#855 ca «ThuyNgo») ⇒ trả lại dòng địa chỉ khách đã gõ (để model ghi
+ * lại đúng nó); `null` = không vướng. Chỉ xét khi `deliveryAddressDecision` = NEW_EXPLICIT. KHÔNG áp khi lời khách mới hơn địa chỉ đã gõ
+ * là lời CHỌN địa chỉ khác (review #862): tin cuối nói «địa chỉ cũ / như lần trước», hoặc lời khách chọn địa chỉ đã lưu
+ * (`use_saved_address` / chọn số trong Customer 360 — `savedConfirm`) nằm ở chính tin mang địa chỉ đã gõ hoặc tin sau — đẩy model về
+ * địa chỉ đã gõ lúc đó là ghi đè lựa chọn mới nhất của khách. Dòng model ghi nằm NGUYÊN VĂN trong một tin khách từ tin mang địa chỉ đó
+ * trở đi (đặt hộ: «Chị ở <A>. Người nhận: <B>»), hay cùng nơi giao (model chuẩn hoá chữ khách) ⇒ vẫn là chữ khách. HÀM THUẦN.
+ */
+export function typedAddressConflict(input: { written: string | undefined; recipientAddress: string; change: AddressDecision; texts: readonly string[]; savedConfirm?: string | null }): string | null {
+  const { written, change, texts } = input;
+  const typedAt = change.use?.messageIndex ?? null;
+  if (!written?.trim() || change.status !== "NEW_EXPLICIT" || !change.use || typedAt === null) return null;
+  if (reuseIntentOf([texts[texts.length - 1] ?? ""]).address === "REUSE") return null;
+  const confirm = input.savedConfirm?.trim();
+  if (confirm && texts.some((t, i) => i >= typedAt && quotedInText(confirm, t))) return null;
+  const key = foldVi(written).replace(/[^a-z0-9]+/g, " ").trim();
+  const writtenByCustomer = key.length >= 6 && texts.slice(typedAt).some((t) => ` ${foldVi(t).replace(/[^a-z0-9]+/g, " ")} `.includes(` ${key} `));
+  if (writtenByCustomer || sameDeliveryPlace(input.recipientAddress, change.use.raw)) return null;
+  return change.use.raw;
+}
 
 function orderInput(state: ChatState, draft: NonNullable<ChatState["draft"]>, priced: Priced, stage: "NEW" | "CONFIRMED", cfg: SalesChatbotConfig, channel: ChatChannel) {
   const notes = [
@@ -936,6 +961,8 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (state.confirmed && !state.confirmed.auto) return { ...err("Đơn đã chốt", "Đơn của hội thoại này đã chốt — đổi SĐT / địa chỉ là sửa đơn: KHÔNG nói đã cập nhật; máy chủ đã chuyển nhân viên.", state), requireHuman: `Sửa đơn đã chốt — khách đổi thông tin nhận hàng: «${ctx.lastUserText.trim().slice(0, 120)}»` };
       // KHÁCH CŨ: máy chủ điền SĐT + địa chỉ của lần mua trước — chỉ khi khách VỪA xác nhận (luật 3.12: gợi ý, không tự điền).
       let saved = false;
+      // Nguyên văn lời khách CHỌN địa chỉ đã lưu — mốc «khách chọn địa chỉ đã lưu SAU địa chỉ đã gõ» của `typedAddressConflict`.
+      let savedConfirm: string | null = null;
       let fields: Record<string, unknown> = input;
       if (input.use_saved_address === true) {
         // Nhiều địa chỉ cũ (Customer 360): khách chọn số mấy trong danh sách máy chủ đã đọc cho bot — sai số ⇒ hỏi lại, không đoán.
@@ -955,6 +982,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         const phone = c360.savedAddressPhone(r, input.phone, ctx.lastUserText);
         if ("error" in phone) return err("Lưu khách: SĐT mới chưa xác minh", phone.error, state);
         fields = { name: typed.length >= 2 ? typed : r.name, phone: phone.phone, address: r.address, province: r.province };
+        savedConfirm = quote.data.slice(0, 300);
         // Mức PHONE — và THREAD mà chính nó đã là địa chỉ máy điền (`returning.ts` trả về mức PHONE) — đều là dữ liệu chủ SĐT.
         saved = r.trust === "PHONE";
       }
@@ -968,7 +996,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // Giữ mốc lần đầu khi khách sửa tên / địa chỉ mà vẫn cùng SĐT — một SĐT chỉ «để lại» một lần.
       const firstAt = state.customer?.phone === v.data.phone && state.customer.at ? state.customer.at : new Date().toISOString();
       if (simulated) {
-        state.customer = { id: null, name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province ?? "", simulated: true, at: firstAt, ...(saved ? { savedAddress: true } : {}) };
+        state.customer = { id: null, name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province ?? "", simulated: true, at: firstAt, ...(saved ? { savedAddress: true } : {}), ...(savedConfirm ? { savedConfirm } : {}) };
         const chkSim = addressCheckOf({ address: v.data.address, province: v.data.province ?? "" }, addressOpts(state, ctx));
         markAddressAsked(state, chkSim, ctx.turn);
         return ok(`(Thử) lưu khách ${v.data.name}`, { customer_id: "thu-nghiem", simulated: true, note: "Khung thử: KHÔNG lưu khách thật.", address_check: chkSim.view }, state);
@@ -984,7 +1012,8 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const verifiedIdentity = (ctx.returning?.trust === "FB_ID" && ctx.returning.customerId === r.id) || (state.customer?.verifiedIdentity === true && state.customer.id === r.id);
       // Địa chỉ máy điền giữ nhãn khi khách gọi lại công cụ với ĐÚNG thông tin đó — không để lượt sau bỏ che (review bảo mật H1).
       const keepSaved = saved || (state.customer?.savedAddress === true && state.customer.phone === v.data.phone && state.customer.address === v.data.address);
-      state.customer = { id: r.id, name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province ?? "", simulated: false, at: firstAt, ...(keepSaved ? { savedAddress: true } : {}), ...(verifiedIdentity ? { verifiedIdentity: true } : {}) };
+      const keptConfirm = savedConfirm ?? (keepSaved && !saved ? state.customer?.savedConfirm : undefined);
+      state.customer = { id: r.id, name: v.data.name, phone: v.data.phone, address: v.data.address, province: v.data.province ?? "", simulated: false, at: firstAt, ...(keepSaved ? { savedAddress: true } : {}), ...(verifiedIdentity ? { verifiedIdentity: true } : {}), ...(keptConfirm ? { savedConfirm: keptConfirm } : {}) };
       const chk = addressCheckOf({ address: v.data.address, province: v.data.province ?? "" }, addressOpts(state, ctx));
       markAddressAsked(state, chk, ctx.turn);
       return ok(r.existing ? `Khách cũ (${v.data.phone})` : `Đã lưu khách ${v.data.name}`, { customer_id: r.id, existing_customer: r.existing, address_check: chk.view }, state);
@@ -1066,12 +1095,10 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // ĐỊA CHỈ KHÁCH GÕ MỚI NHẤT THẮNG (P0 16/10/2026, #855 ca «ThuyNgo» — đơn quay về «Khương Đình» của đơn cũ sau khi khách đã gõ địa chỉ
       // ở Thủ Đức): model gửi một `address` KHÁC nơi giao khách tự gõ gần nhất (`deliveryAddressDecision` = NEW_EXPLICIT) ⇒ không ghi; model
       // ghi lại đúng địa chỉ khách. Khách thật sự đổi / xin địa chỉ cũ thì quyết định đã khác NEW_EXPLICIT (đổi chờ xác minh · dùng lại).
-      // Dòng model ghi nằm NGUYÊN VĂN trong một tin khách từ tin mang địa chỉ đó trở đi (đặt hộ: «Chị ở <A>. Người nhận: <B>») ⇒ vẫn là chữ khách.
-      const typedAt = change.use?.messageIndex ?? null;
-      const writtenKey = foldVi(v.data.address ?? "").replace(/[^a-z0-9]+/g, " ").trim();
-      const writtenByCustomer = typedAt !== null && writtenKey.length >= 6 && texts.slice(typedAt).some((t) => ` ${foldVi(t).replace(/[^a-z0-9]+/g, " ")} `.includes(` ${writtenKey} `));
-      if (v.data.address?.trim() && change.status === "NEW_EXPLICIT" && change.use && !writtenByCustomer && !sameDeliveryPlace(recipient.address, change.use.raw)) {
-        return err("Đơn nháp: khác địa chỉ khách vừa gõ", `Địa chỉ này KHÁC địa chỉ khách đã gõ: «${change.use.raw.slice(0, 160)}». Địa chỉ khách nói MỚI NHẤT luôn thắng địa chỉ cũ / đã lưu — gọi lại với address = đúng dòng địa chỉ khách đã gõ (giữ nguyên chữ khách), hoặc bỏ trống address để giữ người nhận hiện tại. KHÔNG dùng địa chỉ đơn cũ, KHÔNG hỏi lại phần khách đã nói.`, state);
+      // Khách CHỌN địa chỉ đã lưu / nói «địa chỉ cũ» SAU khi gõ ⇒ lời chọn đó là lời mới nhất, không áp (`typedAddressConflict`).
+      const typedRaw = typedAddressConflict({ written: v.data.address, recipientAddress: recipient.address, change, texts, savedConfirm: state.customer?.savedAddress ? state.customer.savedConfirm : null });
+      if (typedRaw) {
+        return err("Đơn nháp: khác địa chỉ khách vừa gõ", `Địa chỉ này KHÁC địa chỉ khách đã gõ: «${typedRaw.slice(0, 160)}». Địa chỉ khách nói MỚI NHẤT luôn thắng địa chỉ cũ / đã lưu — gọi lại với address = đúng dòng địa chỉ khách đã gõ (giữ nguyên chữ khách), hoặc bỏ trống address để giữ người nhận hiện tại. KHÔNG dùng địa chỉ đơn cũ, KHÔNG hỏi lại phần khách đã nói.`, state);
       }
       const addressChange = pending && (explicitChange || modelWroteNew) ? { to: pending.raw, from: changeFrom } : null;
       if (addressChange && !modelWroteNew && !sameDeliveryPlace(recipient.address, addressChange.to)) {
@@ -1116,7 +1143,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         const payload = orderInput(state, draft, priced, editingConfirmed ? "CONFIRMED" : "NEW", ctx.config, ctx.channel);
         // Đơn MỚI mang mã quảng cáo đã dẫn khách vào hội thoại (trong cửa sổ quy kết — máy chủ quyết); sửa đơn KHÔNG đổi nó.
         // Tổ chức tự chốt mà bot quyết CHƯA chốt (khách hoãn / phản đối giá / vừa mời thêm món) ⇒ lõi giữ «Mới» (`holdNew`).
-        const holdNew = ctx.autoConfirm === true && autoConfirmBlocker({ ...state, draft }, ctx) !== null;
+        // Lời phản đối (`confirmObjection`) là một lý do giữ «Mới» — cùng bộ đọc với confirm_order, nếu không lõi đơn tự nâng đơn lên «Đã
+        // xác nhận» trong khi confirm_order báo chưa chốt (review #862).
+        const holdNew = ctx.autoConfirm === true && autoConfirmBlocker({ ...state, draft }, { ...ctx, objectionLabels: await objectionLabels({ ...state, draft }, ctx.config) }) !== null;
         // Cờ «khách đổi địa chỉ» ghi CÙNG giao dịch với đơn (tạo / sửa) — hỏng thì cả lượt ghi hỏng, không có đơn «có xã mà không cờ».
         const review = changeFlag ? { review: changeFlag } : {};
         const r = draft.orderId
@@ -1142,7 +1171,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // TỰ CHỐT KHI ĐỦ ĐƠN (P0-A): đủ sáu điều kiện ⇒ chốt NGAY bằng chính lượt chốt của confirm_order (cùng kiểm giá · tồn · địa chỉ của lõi),
       // không hỏi khách «có chốt không / lấy thêm gì không». Thiếu ⇒ nói đúng phần thiếu cho model hỏi khách.
       if (ctx.autoConfirm && !state.confirmed) {
-        const blocker = autoConfirmBlocker(state, ctx);
+        const blocker = autoConfirmBlocker(state, { ...ctx, objectionLabels: await objectionLabels(state, ctx.config) });
         if (!blocker) {
           const c = await executeToolCore("confirm_order", { customer_confirmation: "" }, { ...ctx, state, autoConfirming: true });
           if (c.isError) {
@@ -1171,10 +1200,10 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         return err("Chốt: chưa có lời xác nhận của khách", "customer_confirmation phải là nguyên văn lời đồng ý trong câu CUỐI của khách. Khách chưa xác nhận ⇒ đọc lại tóm tắt và hỏi khách có đồng ý không.", state);
       }
       // LỜI PHẢN ĐỐI KHÔNG PHẢI LỜI ĐỒNG Ý (P0 16/10/2026, #855 ca «ThuyNgo»): «Không có order chả cá thu nha», «sai rồi», «sao không coi ở
-      // trên» là khách PHẢN ĐỐI đơn bot đề nghị (cùng bộ đọc `itemObjectionCue` của bộ đếm chuyển người) — bot sửa đơn được (luật #860: phản
-      // đối lần đầu ⇒ bot sửa giỏ), nhưng KHÔNG chốt bằng chính câu phản đối: gửi lại tóm tắt đã sửa, đợi khách đồng ý ở tin SAU. Khách TỰ
-      // sửa số lượng sau khi đã thấy tóm tắt («không phải 2kg, lấy 1kg») vẫn sửa và chốt luôn (luật 6).
-      if (DENIED_ORDER_RE.test(foldVi(ctx.lastUserText)) || itemObjectionCue(ctx.lastUserText, (state.cart?.selectedItems ?? []).map((x) => x.label).filter(Boolean))) {
+      // trên» là khách PHẢN ĐỐI đơn bot đề nghị (`confirmObjection` — cùng bộ đọc của tự chốt `autoConfirmBlocker`) — bot sửa đơn được (luật
+      // #860: phản đối lần đầu ⇒ bot sửa giỏ), nhưng KHÔNG chốt bằng chính câu phản đối: gửi lại tóm tắt đã sửa, đợi khách đồng ý ở tin SAU.
+      // Khách TỰ sửa («không phải 2kg, lấy 1kg», «chị nhầm rồi, lấy 1kg thôi») hay từ chối thêm món vẫn sửa và chốt luôn (luật 6).
+      if (confirmObjection(ctx.lastUserText, await objectionLabels(state, ctx.config))) {
         return err("Chốt: khách đang phản đối / sửa đơn", "Tin cuối của khách là lời PHẢN ĐỐI / SỬA đơn, không phải lời đồng ý — KHÔNG chốt trong lượt này. Sửa đơn nháp cho đúng lời khách (nếu chưa), gửi lại tóm tắt và đợi khách đồng ý ở tin SAU mới gọi confirm_order.", state);
       }
       const d = state.draft;
@@ -1428,7 +1457,7 @@ export { customerHesitates };
  * (3) số lượng > 0, (4) SĐT hợp lệ, (5) địa chỉ đủ giao (đọc được tỉnh / thành; xã / phường chưa ghép ⇒ vẫn chốt, lõi gắn cờ cần kiểm).
  * Không tự chốt khi: khách đang phản đối giá, đang xin huỷ / đã từ chối, hay vừa nhận lời mời thêm món trong CHÍNH lượt này. HÀM THUẦN.
  */
-export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "lastUserText" | "turn" | "prevTurn">): string | null {
+export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "lastUserText" | "turn" | "prevTurn"> & { objectionLabels?: readonly string[] }): string | null {
   const d = state.draft;
   if (!d || !d.lines.length || d.lines.some((l) => l.quantity <= 0)) return "Chưa có món / số lượng — hỏi khách món và số lượng";
   if (!d.quote) return "Chưa có báo giá máy chủ — gọi lại create_draft_order";
@@ -1436,6 +1465,8 @@ export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "las
   if (state.declined || state.cancelRequest) return "Khách đang từ chối / xin huỷ — không tự chốt";
   if (state.priceDispute && (state.priceDispute.open || (ctx.turn !== undefined && state.priceDispute.requotedTurn === ctx.turn))) return "Khách đang phản đối giá — báo lại giá máy chủ, đợi khách đồng ý";
   if (ctx.turn !== undefined && state.upsellTurn === ctx.turn) return "Vừa mời thêm món trong lượt này — đợi khách trả lời rồi chốt";
+  // Lời PHẢN ĐỐI / trách bot (#855) — cùng một bộ đọc với confirm_order (`confirmObjection`). Thiếu `objectionLabels` ⇒ tên món của giỏ.
+  if (confirmObjection(ctx.lastUserText, ctx.objectionLabels ?? (state.cart?.selectedItems ?? []).map((x) => x.label))) return "Khách đang phản đối / sửa đơn — gửi lại tóm tắt đã sửa, đợi khách đồng ý ở tin sau";
   // «Không lấy thêm» / «để lần sau» chỉ là TỪ CHỐI LỜI MỜI khi đó là lượt khách NGAY SAU lời mời thêm món (hoặc ngay sau tóm tắt «lấy thêm
   // gì không») VÀ giỏ có món khách đã nói tường minh; câu còn vế hoãn khác («…, để chị bàn với chồng») vẫn là hoãn (review 12/10/2026).
   const justInvited = ctx.prevTurn !== undefined && (state.upsellTurn === ctx.prevTurn || d.shownTurn === ctx.prevTurn);

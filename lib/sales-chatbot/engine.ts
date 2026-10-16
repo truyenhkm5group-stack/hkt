@@ -1025,7 +1025,10 @@ async function chatTurnCore(
       cartNext = st0.cart ? { ...st0.cart, relaxedTurn: turnSeq } : undefined;
     }
     if (cartNext !== st0.cart) {
+      // Giỏ có thẩm quyền vừa đổi theo lời khách ⇒ sổ tổng «đã từ chối» của giỏ trước hết hiệu lực (review #862): giữ nó là chặn mãi một số
+      // tiền có thể đúng cho giỏ mới; tổng của giỏ cũ vẫn bị chặn bởi `seenTotals` / bội số giỏ khác.
       const st: ChatState = { ...st0, cart: cartNext, cartRev: now.toISOString() };
+      delete st.rejectedTotals;
       await bump({ state: st as Record<string, unknown> });
       conv.state = st as Record<string, unknown>;
       st0 = st;

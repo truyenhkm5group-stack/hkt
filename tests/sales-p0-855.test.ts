@@ -20,12 +20,15 @@ import { and, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { orderReviewOf, reviewCodes } from "@/lib/constants/order-review";
 import { createProductCore } from "@/lib/records/product-create";
-import { buyingText, classifyCartMessage, mentionText, unrequestedProducts, type AskedLine } from "@/lib/sales-chatbot/cart-commitment";
+import { buyingText, classifyCartMessage, confirmObjection, mentionText, unrequestedProducts, type AskedLine } from "@/lib/sales-chatbot/cart-commitment";
+import { deliveryAddressDecision } from "@/lib/sales-chatbot/address-memory";
 import { CLAIM_SAFE_TEXT, guardClaims } from "@/lib/sales-chatbot/claim-guard";
+import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
+import { setSettingJson } from "@/lib/settings";
 import { setConversationControlCore } from "@/lib/sales-chatbot/conversation-control";
 import { appendContextMessages } from "@/lib/sales-chatbot/engine";
 import { CUSTOMER_HANDOFF_REASON } from "@/lib/sales-chatbot/handoff-routing-shared";
-import type { ChatState } from "@/lib/sales-chatbot/tools";
+import { autoConfirmBlocker, typedAddressConflict, type ChatState } from "@/lib/sales-chatbot/tools";
 import { aiHoldOf } from "@/lib/sales-chatbot/ai-hold-shared";
 import { addressReviewOpenOf, decideShippingRoute } from "@/lib/shipping/route";
 import { seedReturningThread } from "./sales-agent-golden/cases";
@@ -65,7 +68,58 @@ function testClaim() {
   // Tổng của giỏ hiện tại / giá một đơn vị KHÔNG bị chặn dù trùng số đã từ chối.
   assert.equal(guardClaims("Dạ tổng 400.000 ₫ ạ", { ...facts, rejected: new Set([680_000]) }).ok, true);
   assert.equal(guardClaims("Dạ 680.000 ₫ ạ", { ...facts, rejected: new Set([680_000]), totals: { allowed: new Set([680_000]), current: { total: 680_000, shipping: null }, stale: false } }).ok, true, "khách thật sự đặt cả hai ⇒ tổng hợp lệ");
-  console.log("  ✓ #855 tiền: tổng của giỏ máy chủ đã từ chối luôn bị chặn + người, kể cả khi chưa có báo giá để so");
+  // Câu GỌI TÊN món rồi nói bội số của CHÍNH món đó («nem tôm 120k một hộp, 2 hộp 240k») KHÔNG bị chặn dù 240k từng là tổng bị từ chối —
+  // cùng miễn trừ `explained` của nhánh bội số (review #862); không gọi tên món ⇒ vẫn chặn.
+  const named = { ...facts, allowedAmounts: new Set([...facts.allowedAmounts, 120_000, 240_000]), rejected: new Set([240_000]), unitPrices: new Set([120_000]), namedAmounts: new Map([["Nem tôm", new Set([120_000, 240_000])]]) };
+  assert.equal(guardClaims("Dạ nem tôm 120k một hộp, 2 hộp 240k ạ", named).ok, true, "bội số của món câu gọi tên");
+  assert.equal(guardClaims("Dạ tổng 240.000 ₫ ạ", named).ok, false, "không gọi tên món ⇒ vẫn là tổng bị từ chối");
+  console.log("  ✓ #855 tiền: tổng của giỏ máy chủ đã từ chối luôn bị chặn + người, kể cả khi chưa có báo giá để so · bội số của món câu gọi tên vẫn nói được");
+}
+
+function testObjection() {
+  const labels = ["Chả mực giã tay", "Chả cá thu"];
+  // Phản đối / trách bot ⇒ KHÔNG chốt bằng chính câu đó (confirm_order và tự chốt dùng CÙNG một bộ đọc).
+  for (const t of ["Không có order chả cá thu nha", "Kg có order chả cá thu nha", "sai rồi em, chị lấy 1 gói thôi", "em nhầm rồi", "nhầm rồi em ơi", "bot sai rồi", "không phải vậy", "Sao kg coi ở trên", "chị chưa đặt chả cá thu"]) {
+    assert.equal(confirmObjection(t, labels), true, `phản đối: «${t}»`);
+  }
+  // Đồng ý / tự sửa / từ chối THÊM món ⇒ vẫn chốt được (luật 6).
+  for (const t of ["ok chốt", "không đặt thêm, chốt nhé", "Không có order thêm gì đâu em, chốt nhé", "ko có đặt thêm gì nữa, chốt luôn", "không phải 2kg lấy 1kg", "Chị nhầm rồi, lấy 1kg thôi, chốt nhé", "à nhầm, lấy 2 gói nhé", "tôi nhầm, lấy 1 gói thôi", "cho chị 2 kg có đặt luôn nhé", "không cần thêm, chốt nhé"]) {
+    assert.equal(confirmObjection(t, labels), false, `không phải phản đối: «${t}»`);
+  }
+  // Phủ nhận một món KHÔNG có trong giỏ / đơn / tóm tắt ⇒ không phải phản đối đơn.
+  assert.equal(confirmObjection("Không có order ruốc bông nha", labels), false);
+  // Tự chốt đọc ĐÚNG bộ đọc đó (review #862: trước đây `autoConfirmBlocker` không có vế này nên lõi đơn tự nâng đơn lên «Đã xác nhận»).
+  const st = { customer: { id: null, name: "Ngọc", phone: "0977000889", address: "9 Hai Bà Trưng, Phường Hoàn Kiếm, Thành phố Hà Nội", province: "Hà Nội", simulated: true }, draft: { orderId: null, lines: [{ variantId: "v-muc", quantity: 1 }], unitPrices: { "v-muc": 400_000 }, recipient: { name: "Ngọc", phone: "0977000889", address: "9 Hai Bà Trưng, Phường Hoàn Kiếm, Thành phố Hà Nội", province: "Hà Nội" }, note: "", simulated: true, quote: { id: "q", total: 400_000, subtotal: 400_000 } } } as unknown as ChatState;
+  assert.match(autoConfirmBlocker(st, { lastUserText: "Không có order chả cá thu nha", objectionLabels: labels }) ?? "", /phản đối/);
+  assert.match(autoConfirmBlocker(st, { lastUserText: "sai rồi em" }) ?? "", /phản đối/);
+  for (const t of ["ok chốt", "Không có order thêm gì đâu em, chốt nhé", "không phải 2kg lấy 1kg"]) assert.equal(autoConfirmBlocker(st, { lastUserText: t, objectionLabels: labels }), null, `tự chốt được: «${t}»`);
+  console.log("  ✓ #855 lời chốt: trách bot / phủ nhận món đã có ⇒ không chốt (cả confirm_order lẫn tự chốt) · tự nhận nhầm, từ chối thêm món, tự sửa số ⇒ vẫn chốt");
+}
+
+function testTypedAddress() {
+  const A = "12 Lê Văn Việt, phường Tăng Nhơn Phú, TP HCM";
+  const SAVED = "Số 3 ngõ 5 Khương Đình, Hà Nội";
+  const st = { customer: { id: null, name: "Thủy", phone: "0977000333", address: A, province: "", simulated: true } } as ChatState;
+  // Gõ A ⇒ model ghi địa chỉ đơn cũ ⇒ vướng, trả lại A.
+  const t1 = [`Giao về ${A}`, "ok em"];
+  assert.equal(typedAddressConflict({ written: SAVED, recipientAddress: SAVED, change: deliveryAddressDecision(st, t1), texts: t1 }), A);
+  // Gõ A → khách CHỌN địa chỉ đã lưu (Customer 360 «số 2») ở tin SAU ⇒ không áp, không đẩy model về A.
+  const t2 = [`Giao về ${A}`, "lấy địa chỉ số 2 nhé"];
+  assert.equal(typedAddressConflict({ written: SAVED, recipientAddress: SAVED, change: deliveryAddressDecision(st, t2), texts: t2, savedConfirm: "số 2 nhé" }), null, "chọn địa chỉ đã lưu sau khi gõ");
+  // … nhưng lời chọn đó ở TRƯỚC địa chỉ đã gõ ⇒ địa chỉ gõ mới nhất vẫn thắng.
+  const t3 = ["lấy địa chỉ số 2 nhé", `à giao về ${A}`];
+  assert.equal(typedAddressConflict({ written: SAVED, recipientAddress: SAVED, change: deliveryAddressDecision(st, t3), texts: t3, savedConfirm: "số 2 nhé" }), A);
+  // Tin cuối nói «địa chỉ cũ» ⇒ không áp.
+  const t4 = [`Giao về ${A}`, "thôi giao địa chỉ cũ nhé"];
+  assert.equal(typedAddressConflict({ written: SAVED, recipientAddress: SAVED, change: { status: "NEW_EXPLICIT", use: { source: "CUSTOMER_MESSAGE", raw: A, province: "", messageIndex: 0 }, previous: null, reason: "" }, texts: t4 }), null, "lời «địa chỉ cũ» ở tin cuối");
+  // Model chuẩn hoá đúng nơi khách gõ (đặt hộ / viết lại chữ) ⇒ không vướng.
+  const t5 = [`Chị ở 5 Trần Phú, Ba Đình, Hà Nội. Người nhận: Lan 0977000123, ${A}`];
+  const c5 = deliveryAddressDecision({}, t5);
+  assert.equal(c5.status, "NEW_EXPLICIT");
+  assert.equal(typedAddressConflict({ written: "5 Trần Phú, Ba Đình, Hà Nội", recipientAddress: "5 Trần Phú, Ba Đình, Hà Nội", change: c5, texts: t5 }), null, "đặt hộ: địa chỉ người đặt nằm nguyên văn trong tin khách");
+  assert.equal(typedAddressConflict({ written: "99 Nguyễn Trãi, Thanh Xuân, Hà Nội", recipientAddress: "99 Nguyễn Trãi, Thanh Xuân, Hà Nội", change: c5, texts: t5 }), A, "nơi thứ ba khách không gõ ⇒ vướng");
+  for (const w of [A, "12 Le Van Viet, P. Tang Nhon Phu, TP Ho Chi Minh"]) assert.equal(typedAddressConflict({ written: w, recipientAddress: w, change: c5, texts: t5 }), null, `chuẩn hoá đúng nơi: «${w}» · ${JSON.stringify(c5.use)}`);
+  console.log("  ✓ #855 địa chỉ: model ghi khác địa chỉ khách gõ ⇒ trả lại địa chỉ khách · khách chọn địa chỉ đã lưu / «địa chỉ cũ» sau đó ⇒ không áp · chuẩn hoá đúng nơi ⇒ qua");
 }
 
 // ═══ HỘI THOẠI VÀNG (chatTurn thật) ═══
@@ -130,6 +184,26 @@ const CASES: GoldenCase[] = [
       {
         say: "Không có order chả cá thu nha",
         ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [tool("confirm_order", { customer_confirmation: "Không có order chả cá thu nha" })], () => [say("Dạ em bỏ chả cá thu rồi ạ, đơn còn 1 gói chả mực. Chị xác nhận giúp em nhé?")]],
+      },
+    ],
+  },
+  {
+    key: "p855-tu-chot-phan-doi",
+    title: "Tổ chức bật «đơn đủ thông tin = đã xác nhận»: khách phản đối món bot thêm («Không có order chả cá thu nha») ⇒ model sửa đơn — đơn KHÔNG được tự nâng lên «Đã xác nhận» bằng chính câu phản đối",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      {
+        say: `Cho chị 1 gói chả mực giã tay và 1 gói chả cá thu, Ngọc 0977000889, ${HN}, để chị xem đã`,
+        ai: [
+          () => [tool("create_customer", { name: "Ngọc", phone: "0977000889", address: HN })],
+          ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }, { variant_id: v("CCT-1KG"), quantity: 1 }] })],
+          () => [say("Tóm tắt: 1 gói chả mực + 1 gói chả cá thu. Chị xem rồi báo em nhé.")],
+        ],
+      },
+      {
+        say: "Không có order chả cá thu nha",
+        ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em bỏ chả cá thu rồi ạ, đơn còn 1 gói chả mực. Chị xác nhận giúp em nhé?")]],
       },
     ],
   },
@@ -315,8 +389,11 @@ async function stateOf(conversationId: string) {
 async function testGolden() {
   const seen = new Set<string>();
   await runGoldenCases(CASES, {
-    orgSuffix: "-p855",
-    beforeCase: async (_c, ctx) => seedCa(ctx),
+    orgSuffix: "-p862",
+    beforeCase: async (c, ctx) => {
+      await seedCa(ctx);
+      await setSettingJson(AUTO_CONFIRM_COMPLETE_SETTING_KEY, { enabled: c.key === "p855-tu-chot-phan-doi" });
+    },
     afterCase: async (c, ctx, t) => {
       seen.add(c.key);
       const { row, state } = await stateOf(ctx.conversationId);
@@ -349,6 +426,13 @@ async function testGolden() {
           assert.equal(t.final.confirmed, null, "không tự chốt");
           assert.equal(orders.length, 1);
           assert.notEqual(orders[0].stage, "CONFIRMED");
+          assert.deepEqual(t.final.draft?.lines.map((l) => [l.sku, l.quantity]), [["CHA-MUC", 1]], "món bị phủ nhận đã bỏ khỏi đơn");
+          return;
+        }
+        case "p855-tu-chot-phan-doi": {
+          assert.equal(orders.length, 1);
+          assert.notEqual(orders[0].stage, "CONFIRMED", `đơn không tự chốt bằng câu phản đối: ${orders[0].stage} · ${resultsOf(t, 1).slice(0, 600)}`);
+          assert.equal(t.final.confirmed, null, "state không ghi đã chốt");
           assert.deepEqual(t.final.draft?.lines.map((l) => [l.sku, l.quantity]), [["CHA-MUC", 1]], "món bị phủ nhận đã bỏ khỏi đơn");
           return;
         }
@@ -411,6 +495,10 @@ async function testGolden() {
           assert.match(resultsOf(t, 1), /PHẢN ĐỐI \/ SỬA đơn/, "«sai rồi …» không phải lời chốt");
           assert.equal(orders.length, 1, "không đơn thứ hai");
           assert.deepEqual(t.final.draft?.lines.map((l) => [l.sku, l.quantity]), [["CHA-MUC", 1]], "đúng số khách nói");
+          // Lượt 3 «không phải, chị nói 1 gói mà» là khách TỰ nói lại số (không trách bot) ⇒ chốt thật: state + đơn ERP.
+          assert.ok(!/PHẢN ĐỐI \/ SỬA đơn/.test(resultsOf(t, 2)), resultsOf(t, 2).slice(0, 600));
+          assert.ok(t.final.confirmed, `đơn đã chốt ở lượt 3: ${resultsOf(t, 2).slice(0, 600)}`);
+          assert.equal(orders[0].stage, "CONFIRMED", "đơn ERP đã xác nhận");
           return;
         }
         case "p855-khach-tu-doi-y": {
@@ -444,6 +532,8 @@ async function testGolden() {
 export async function testSalesP0855() {
   testBasis();
   testClaim();
+  testObjection();
+  testTypedAddress();
   await testGolden();
 }
 

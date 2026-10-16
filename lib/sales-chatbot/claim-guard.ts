@@ -534,8 +534,11 @@ export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, am
   // TỔNG CỦA GIỎ MÁY CHỦ ĐÃ TỪ CHỐI (P0 16/10/2026, #855 ca «ThuyNgo» — 680.000 ₫ của «chả cá + chả mực» khi khách chỉ gọi chả mực):
   // máy chủ đã biết số đó là tổng của một giỏ có món khách KHÔNG chọn (`calculate_cart` từ chối) ⇒ LUÔN chặn + người, kể cả khi hội thoại
   // chưa có báo giá hợp lệ nào (`tf` vắng — số ấy từng lọt qua vì nằm trong tập tham chiếu của danh mục). Trừ khi nó cũng là tổng hợp lệ
-  // hiện tại / giá một đơn vị / số của cấu hình ship.
-  const rejectedBad = facts.rejected?.size ? [...new Set(amounts.filter((a) => facts.rejected!.has(a) && !(tf?.allowed.has(a) ?? false) && !cfgOk(a) && !(facts.unitPrices?.has(a) ?? false)))] : [];
+  // hiện tại / giá một đơn vị / số của cấu hình ship / bội số của CHÍNH món câu gọi tên («nem 120k một hộp, 2 hộp 240k» — cùng miễn trừ
+  // `explained` của nhánh bội số dưới, review #862).
+  const named = facts.namedAmounts && text ? namedProductsIn(text, [...facts.namedAmounts.keys()]) : [];
+  const explained = (a: number) => named.some((n) => facts.namedAmounts!.get(n)?.has(a));
+  const rejectedBad = facts.rejected?.size ? [...new Set(amounts.filter((a) => facts.rejected!.has(a) && !(tf?.allowed.has(a) ?? false) && !cfgOk(a) && !(facts.unitPrices?.has(a) ?? false) && !explained(a)))] : [];
   if (rejectedBad.length) {
     return { ok: false, claim: "PRICE_UNVERIFIED", safeText: CLAIM_SAFE_TEXT.PRICE, handoffReason: CLAIM_HANDOFF_REASON.PRICE_UNVERIFIED, note: `Đã chặn câu có số tiền ${rejectedBad.map((n) => formatVND(n)).join(", ")} — tổng của giỏ có món khách chưa chọn (máy chủ đã từ chối tính)`, handoff: true, amounts: rejectedBad };
   }
@@ -547,8 +550,6 @@ export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, am
     return { ok: false, claim: "PRICE_UNVERIFIED", safeText: CLAIM_SAFE_TEXT.PRICE, handoffReason: CLAIM_HANDOFF_REASON.PRICE_UNVERIFIED, note: `Đã chặn câu có số tiền ${seenBad.map((n) => formatVND(n)).join(", ")} — tổng máy chủ đã báo cho một giỏ trước, không phải giỏ hiện tại`, handoff: true, amounts: seenBad };
   }
   // Bội số của mẫu mã KHÔNG có trong giỏ (tổng của giỏ khác) — trừ khi câu GỌI TÊN đúng món đó («nem 120k một hộp, 2 hộp 240k»).
-  const named = facts.namedAmounts && text ? namedProductsIn(text, [...facts.namedAmounts.keys()]) : [];
-  const explained = (a: number) => named.some((n) => facts.namedAmounts!.get(n)?.has(a));
   const susp = tf && facts.suspicious ? [...new Set(amounts.filter((a) => facts.suspicious!.has(a) && !cfgOk(a) && !explained(a)))] : [];
   if (susp.length) {
     return { ok: false, claim: "PRICE_UNVERIFIED", safeText: CLAIM_SAFE_TEXT.PRICE, handoffReason: CLAIM_HANDOFF_REASON.PRICE_UNVERIFIED, note: `Đã chặn câu có số tiền ${susp.map((n) => formatVND(n)).join(", ")} — là tổng đã tính cho một giỏ khác, không phải giỏ hiện tại`, handoff: true, amounts: susp };

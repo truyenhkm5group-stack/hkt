@@ -3080,7 +3080,7 @@ async function main() {
   // ghi đơn hạ / bỏ món ⇒ máy chủ từ chối; ma trận G1–G6 qua chatTurn thật — tổ chức THẬT `gd-food-cc1` / `gd-food-cc2`.
   await testSalesCartCommitment();
   // P0 #855 16/10/2026 (ca «ThuyNgo» · «Lieu Dau»): báo giá phải có căn cứ, tổng giỏ bị từ chối không tới khách, model không ghi địa chỉ
-  // khác địa chỉ khách gõ mới nhất, lời phản đối không thành lời chốt; còn lại theo luật main (#860 giỏ · #861 địa chỉ) — tổ chức `gd-food-p855`.
+  // khác địa chỉ khách gõ mới nhất, lời phản đối không thành lời chốt; còn lại theo luật main (#860 giỏ · #861 địa chỉ) — tổ chức `gd-food-p862`.
   await testSalesP0855();
   await testP0855Cart();
   // P0 14/10/2026 — tổng tiền trong chữ bot = tổng máy chủ của giỏ hiện tại (ca «Châu Dương» 640k cho 1kg 280k) · lượt im không «nói rõ
