@@ -36,6 +36,13 @@
 
 
 
+
+## 17/10 ~01:00 VN — PRODUCTION = 64831af7 (deploy 38933484208) · gồm #869 (#863 luồng huỷ + cổng gửi khi nhân viên đã nhắn)
+- Smoke 135/135 · health commit khớp · «failure» chỉ vì qa (phiên code-erp-66 đang làm qa hướng A; VPS nhường cho backup/restore-drill của họ, Desktop chưa deploy tiếp tới khi họ báo xong).
+- #877 (qa-0245-measure): review PASS @0aad7e00, chờ code-erp-66 bàn giao lại đúng SHA rồi Desktop gộp (chỉ script, không deploy).
+- Tiếp theo: #873 (worker mới đang gộp main + giải xung đột với #869 ở engine.ts/tools.ts/sync-fixtures) → review độc lập → gộp; #871 phần còn lại; #876 (#868 pha A); #875.
+- Đo nghiệp vụ sáng 17/10 (khi có lưu lượng): conv-money-trace --since=2026-10-16T15:20Z (in được tên lỗi tạo đơn) · address-reask-audit --since=2026-10-16T15:20Z.
+
 ## 16/10 ~22:20 VN — PRODUCTION = 1eee82da (deploy 38911638556) · gồm #870 + #872
 - Smoke 135/135 · health commit khớp · «failure» chỉ vì qa DEGRADED (0245/0246/0247).
 - Đo cần làm khi đủ lưu lượng (sáng 17/10): `address-reask-audit "hslc-hmt-shop --since=2026-10-16T15:20Z"` · `conv-money-trace "hslc-hmt-shop --scan --since=2026-10-16T15:20Z"` (giờ in được tên lỗi công cụ lên đơn nhờ #872 ⇒ đọc lý do create_draft_order LỖI của ca #871).
