@@ -16,7 +16,7 @@
  * Tệp này THUẦN (không đọc CSDL): nhận diện câu huỷ, ghép giỏ khách nói ⇒ dòng hàng để máy chủ báo giá, dựng câu xin lỗi từ số MÁY CHỦ
  * đã tính, và nhận ra lời nhân viên báo tổng / món khác đơn nháp.
  */
-import { amountText, classifyCartMessage, declinesAddOnOnly, labelsMatch, type CartCommitment, type CartDraftDiff } from "@/lib/sales-chatbot/cart-commitment";
+import { amountText, classifyCartMessage, declinesAddOnOnly, labelsMatch, negatedCancel, type CartCommitment, type CartDraftDiff } from "@/lib/sales-chatbot/cart-commitment";
 import { extractVndAmounts } from "@/lib/sales-chatbot/claim-guard";
 import { formatVND } from "@/lib/format";
 import { foldVi } from "@/lib/sales-chatbot/text";
@@ -29,7 +29,7 @@ import { foldVi } from "@/lib/sales-chatbot/text";
 export function explicitCancel(text: string): boolean {
   const t = text.trim();
   if (!t || /[?？]\s*$/.test(t)) return false;
-  if (declinesAddOnOnly(t)) return false;
+  if (declinesAddOnOnly(t) || negatedCancel(t)) return false;
   return classifyCartMessage(t).kind === "CANCEL";
 }
 
@@ -124,8 +124,10 @@ export const DECLINE_NOTED_TEXT = "Dạ vâng, em ghi nhận mình không lấy 
 
 // ─────────────────────────── LỜI NHÂN VIÊN LỆCH ĐƠN NHÁP ───────────────────────────
 
-/** Chữ báo TỔNG («tổng 480k», «tất cả 480k», «hết 480k», «thu hộ 480k»). */
-const TOTAL_CUE_RE = /(?:^| )(?:tong|tat ca|ca thay|het|thanh tien|cod|thu ho)(?: |$)/;
+/** Chữ báo TỔNG ĐƠN NÀY («tổng 480k», «tất cả 480k», «thu hộ 480k») — «hết» / «cod» một mình không đủ («hết hàng», «cod 30k» là phí). */
+const TOTAL_CUE_RE = /(?:^| )(?:tong|tat ca|ca thay|thanh tien|thu ho)(?: |$)/;
+/** Mệnh đề nói PHÍ SHIP / ĐƠN GIÁ / ĐƠN CŨ / tổng CHƯA gồm ship — số trong đó không phải tổng đơn hiện tại (review #869). */
+const NOT_TOTAL_RE = /(?:^| )(?:phi (?:ship|van chuyen|giao)|tien ship|cuoc|ship \d|chua (?:bao )?gom|don cu|don truoc|don hom|gia)(?: |$)|\/ ?(?:kg|ky|ki|hop|goi|hu)\b/;
 
 /**
  * Nhân viên (tin phía page chép vào lịch sử) báo một TỔNG khác mọi tổng máy chủ của đơn nháp ⇒ số nhân viên nói (để ghi chú); khớp / không
@@ -135,9 +137,12 @@ export function staffTotalConflict(staffTexts: readonly string[], draftTotals: r
   const known = new Set(draftTotals.filter((n) => Number.isFinite(n) && n > 0));
   if (!known.size) return null;
   for (const s of staffTexts) {
-    if (!TOTAL_CUE_RE.test(` ${foldVi(s)} `)) continue;
-    const amounts = extractVndAmounts(s).filter((a) => a >= 10_000);
-    if (amounts.length && !amounts.some((a) => known.has(a))) return amounts[amounts.length - 1];
+    for (const clause of s.split(/[,.;!?\n]+/)) {
+      const f = foldVi(clause);
+      if (!TOTAL_CUE_RE.test(f) || NOT_TOTAL_RE.test(f)) continue;
+      const amounts = extractVndAmounts(clause).filter((a) => a >= 10_000);
+      if (amounts.length && !amounts.some((a) => known.has(a))) return amounts[amounts.length - 1];
+    }
   }
   return null;
 }

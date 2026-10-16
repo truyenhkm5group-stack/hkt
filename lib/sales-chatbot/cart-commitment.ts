@@ -68,7 +68,8 @@ export type CartIntentKind = "ORDER" | "SET" | "ADD" | "REDUCE" | "KEEP" | "REMO
 export type CartAmount = { value: number; unit: CartUnit; label: string; display: string; index: number; end: number; ambiguous?: boolean; hint?: string; pieces?: boolean; word?: string; unbound?: boolean; raw?: string; bare?: boolean };
 /** `tentative` = số lượng nói kèm câu hỏi giá («lấy 2kg bao nhiêu em») — chỉ THÊM món mới (không dính), không bao giờ sửa món đã có. */
 /** `restate` = khách NHẮC LẠI CẢ GIỎ (nhiều món, mỗi món một số, kết bằng «thôi» / «chỉ lấy») — SET từng món, không phải «thêm» (P0 #863). */
-export type CartIntent = { kind: CartIntentKind; amounts: CartAmount[]; label: string | null; tentative?: boolean; restate?: boolean };
+/** `added` = nhãn món mang «thêm» / «nữa» trong câu nhắc lại — món đang có trong giỏ mà mang chữ này thì KHÔNG đặt lại số (review #869). */
+export type CartIntent = { kind: CartIntentKind; amounts: CartAmount[]; label: string | null; tentative?: boolean; restate?: boolean; added?: string[] };
 
 // ─────────────────────────── ĐỌC SỐ LƯỢNG ───────────────────────────
 
@@ -410,6 +411,17 @@ const CANCEL_RE = new RegExp(
   `(?:^| )(?:${NEG} (?:lay|mua|dat|can)(?! them)${PARTICLES}$|${NEG} (?:lay|mua|dat) (?:nua|gi)(?: |$)|(?:${THOI} )?khoi(?: (?:lay|mua|dat))?${PARTICLES}$|huy${PARTICLES}$|huy don(?: |$)|bo don(?: |$)|cancel(?: don)?(?: |$))`,
 );
 
+/**
+ * Câu PHỦ ĐỊNH việc huỷ (review #869 — «không hủy đâu em», «đừng hủy nha em», «khoan đã, chưa hủy nhé», «đâu có hủy»): phủ định đứng ngay
+ * trước «hủy» / «bỏ đơn» (cách tối đa một từ «cần / phải / muốn»), hoặc «khoan» ở đầu câu. Đọc trên `foldCart`. HÀM THUẦN qua `negatedCancel`.
+ */
+export const NEGATED_CANCEL_RE = /(?:^| )(?:khong|ko|k|hong|hok|dung|chua|dau co)(?: (?:can|phai|muon|duoc))? (?:huy|bo don)(?= |$)|^khoan(?= |$)/;
+
+/** Khách nói KHÔNG huỷ / chưa huỷ (đồng ý giữ đơn) — `true` thì không bao giờ là câu huỷ. HÀM THUẦN. */
+export function negatedCancel(text: string): boolean {
+  return NEGATED_CANCEL_RE.test(foldCart(text));
+}
+
 /** Đoạn chữ cuối là tên món (dãy từ không thuộc STOP đứng ngay trước / sau một động từ). */
 function trailingRun(s: string): string {
   const w = s.split(" ").filter(Boolean);
@@ -505,7 +517,8 @@ export function classifyCartMessage(text: string, catalog?: readonly string[], o
       const label = leadingRun(rm[1]);
       if (label) return { kind: "REMOVE", amounts: [], label };
     }
-    if (CANCEL_RE.test(f)) return none("CANCEL");
+    // «không hủy đâu em», «đừng hủy nha», «chưa hủy nhé» — câu PHỦ ĐỊNH việc huỷ, không phải câu huỷ (review #869).
+    if (CANCEL_RE.test(f) && !NEGATED_CANCEL_RE.test(f)) return none("CANCEL");
   }
   if (/(?:^| )(?:neu|thi) /.test(` ${f} `)) return none("QUESTION");
   // «không phải 2kg», «không lấy 2kg đâu», «2kg nhiều quá» — số bị phủ định là số CŨ; «2kg, à không 1kg» — số đứng trước bị rút lại.
@@ -527,7 +540,8 @@ export function classifyCartMessage(text: string, catalog?: readonly string[], o
   {
     const named = amounts.filter((a) => a.label && !a.ambiguous && !a.unbound);
     const restateCue = new RegExp(`(?:^| )${THOI}${PARTICLES}$`).test(f) ||/chỉ\s+(?:lấy|mua|đặt)/.test(raw.slice(0, amounts[0].index));
-    if (!priceAsk && restateCue && amounts.length >= 2 && named.length === amounts.length && new Set(named.map((a) => a.label)).size === named.length) return { kind: "SET", amounts, label: null, restate: true };
+    const added = named.filter((a) => /(?:^| )(?:them|cong them|lay them)(?: |$)/.test(tail(text.slice(0, a.index))) || /^nua(?: |$)/.test(trailOf(a))).map((a) => a.label);
+    if (!priceAsk && restateCue && amounts.length >= 2 && named.length === amounts.length && new Set(named.map((a) => a.label)).size === named.length) return { kind: "SET", amounts, label: null, restate: true, ...(added.length ? { added } : {}) };
   }
   const addRe = /(?:^| )(?:them|cong them|lay them|them cho (?:chi|em|anh|minh))$/;
   const adds = amounts.filter((a) => addRe.test(leadOf(a)) || /^nua(?: |$)/.test(trailOf(a)));
@@ -697,6 +711,11 @@ function applyCart(cart: CartCommitment | undefined, text: string, turn: number 
     return unitFits(a, items[only]) ? only : "UNIT";
   };
   const targets = intent.amounts.map(target);
+  // Câu nhắc lại cả giỏ mà món ĐANG CÓ mang «thêm» / «nữa» («thêm 1 hộp nem, 1 hũ ruốc nữa thôi» khi giỏ đã 2 hộp nem): không biết khách
+  // muốn cộng hay muốn giữ đúng số ⇒ KHÔNG đặt lại (đặt lại là hạ món khách đang thêm), giỏ giữ nguyên + hỏi lại (review #869).
+  if (intent.restate && intent.added?.length && intent.amounts.some((a, k) => typeof targets[k] === "number" && intent.added!.includes(a.label))) {
+    return relax("Khách nói «thêm» một món ĐANG CÓ trong câu nhắc lại cả giỏ — chưa chắc cộng thêm hay giữ đúng số: HỎI LẠI khách muốn tổng mỗi món bao nhiêu");
+  }
   const unitMiss = intent.amounts.find((_, k) => targets[k] === "UNIT");
   if (unitMiss && cart) return relax(`Khách nói ${amountText(unitMiss.value, unitMiss.unit, unitMiss.pieces)} không kèm tên món mà món đang có tính theo đơn vị khác — chưa quy đổi được, HỎI LẠI khách muốn thêm món nào`);
   if (targets.includes("AMBIGUOUS")) return cart ? relax(`Khách nói ${intent.amounts.map((a) => amountText(a.value, a.unit)).join(", ")} nhưng giỏ có ${items.length} món — chưa rõ món nào, GIỮ NGUYÊN và hỏi lại`) : cart;

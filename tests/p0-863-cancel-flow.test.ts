@@ -21,7 +21,7 @@ import { getDb, schema } from "@/db";
 import { customerCancelPlan } from "@/lib/constants/order-cancel";
 import { orderReviewOf } from "@/lib/constants/order-review";
 import { createProductCore } from "@/lib/records/product-create";
-import { cartDraftDiff, applyCustomerCartMessage, type AskedLine } from "@/lib/sales-chatbot/cart-commitment";
+import { cartDraftDiff, applyCustomerCartMessage, classifyCartMessage, negatedCancel, type AskedLine } from "@/lib/sales-chatbot/cart-commitment";
 import { botErrorFromReview, cartQuoteLines, explicitCancel, recoveryText, staffTotalConflict, type CatalogLite } from "@/lib/sales-chatbot/cancel-recovery";
 import { botSendVerdict, type SendSnapshot } from "@/lib/sales-chatbot/conversation-control-shared";
 import { botMaySend, captureSendSnapshot } from "@/lib/sales-chatbot/conversation-control";
@@ -39,6 +39,14 @@ function testPure() {
   // Câu huỷ rõ ràng — một bộ nhận diện với giỏ có thẩm quyền.
   for (const t of ["Vậy anh ko mua nhé, hủy đơn", "Ko mua", "không mua nữa", "thôi khỏi", "hủy đơn", "thoi huy di em"]) assert.equal(explicitCancel(t), true, `«${t}» là huỷ`);
   for (const t of ["huỷ được không?", "không lấy thêm đâu", "ok em", "lấy 1kg thôi", "để mai chị lấy"]) assert.equal(explicitCancel(t), false, `«${t}» không phải huỷ`);
+  // Review #869 (FAIL-1): câu PHỦ ĐỊNH việc huỷ = khách GIỮ đơn — không bao giờ là câu huỷ, không xoá giỏ.
+  for (const t of ["không hủy đâu em", "đừng hủy nha em", "khoan đã, chưa hủy nhé", "ko huỷ nhé", "không cần hủy đâu", "đâu có hủy đơn", "chưa huỷ đơn nha", "Đừng huỷ đơn của chị"]) {
+    assert.equal(explicitCancel(t), false, `«${t}» là KHÔNG huỷ`);
+    assert.equal(negatedCancel(t), true, `«${t}» là phủ định huỷ`);
+    assert.notEqual(classifyCartMessage(t).kind, "CANCEL", `«${t}» không xoá giỏ`);
+  }
+  assert.equal(negatedCancel("hủy đơn"), false);
+  assert.equal(negatedCancel("thôi không lấy nữa"), false, "«không lấy nữa» vẫn là huỷ");
 
   // Chuỗi chữ khách của #863 ⇒ giỏ 1kg cá + 500g mực (câu nhắc lại cả giỏ không cộng lần hai, không bỏ rơi vế mực).
   const P = { catalog: CAT, products: PRODUCTS };
@@ -46,10 +54,25 @@ function testPure() {
   c = applyCustomerCartMessage(c, "Lấy thêm 1/2 kg chả mực", 3, new Date(), P);
   assert.deepEqual(items(c), [["Chả cá thu", 1000, "g", true], ["Chả mực giã tay", 500, "g", true]], "«1/2 kg» = 500g (#864)");
   c = applyCustomerCartMessage(c, "Lấy thêm 1/2 kg chả mực, 1kg chả cá thu thôi", 5, new Date(), P);
-  assert.deepEqual(items(c), [["Chả cá thu", 1000, "g", true], ["Chả mực giã tay", 500, "g", true]], "nhắc lại cả giỏ ⇒ SET từng món, KHÔNG thành 1kg mực");
+  assert.deepEqual(items(c), [["Chả cá thu", 1000, "g", true], ["Chả mực giã tay", 500, "g", true]], "nhắc lại «thêm 1/2 kg» món đang có ⇒ giỏ giữ nguyên (KHÔNG thành 1kg mực), hỏi lại");
+  assert.equal(c?.relaxedTurn, 5);
   let d = applyCustomerCartMessage(undefined, "Lấy 1kg chả cá thu với 2kg chả mực", 1, new Date(), P);
   d = applyCustomerCartMessage(d, "Lấy 1/2 kg chả mực, 1kg chả cá thu thôi", 3, new Date(), P);
   assert.deepEqual(items(d), [["Chả cá thu", 1000, "g", true], ["Chả mực giã tay", 500, "g", true]], "sửa cả giỏ bằng một câu ⇒ cả hai món đúng số khách nói");
+  // Review #869 (FAIL-2): món ĐANG CÓ mang «thêm» / «nữa» trong câu nhắc lại ⇒ không đặt lại số (đặt lại là hạ món khách đang thêm) — giỏ giữ
+  // nguyên + hỏi lại. Món MỚI mang «thêm» (ca #863: giỏ chỉ có cá) vẫn đặt đúng.
+  const CAT2 = [...CAT, "Nem hải sản tôm bề bề (Hộp 10 cái)"];
+  const P2 = { catalog: CAT2, products: [...PRODUCTS, "Nem hải sản tôm bề bề"] };
+  const nem = applyCustomerCartMessage(undefined, "cho chị 2 hộp nem hải sản", 1, new Date(), P2);
+  const nem2 = applyCustomerCartMessage(nem, "thêm 1 hộp nem, 1 hũ ruốc nữa thôi nhé", 3, new Date(), P2);
+  assert.deepEqual(items(nem2), items(nem), "2 hộp nem KHÔNG bị hạ xuống 1");
+  assert.equal(nem2?.relaxedTurn, 3, "không chắc ⇒ hỏi lại, không chặn");
+  const ca1 = applyCustomerCartMessage(undefined, "cho chị 1kg chả cá thu", 1, new Date(), P);
+  const ca2 = applyCustomerCartMessage(ca1, "cho chị thêm 1kg chả cá với 1kg chả mực thôi", 3, new Date(), P);
+  assert.deepEqual(items(ca2), items(ca1), "cá đang có mang «thêm» ⇒ không đặt lại");
+  assert.equal(ca2?.relaxedTurn, 3);
+  const r0 = applyCustomerCartMessage(ca1, "Lấy thêm 1/2 kg chả mực, 1kg chả cá thu thôi", 3, new Date(), P);
+  assert.deepEqual(items(r0), [["Chả cá thu", 1000, "g", true], ["Chả mực giã tay", 500, "g", true]], "ca #863: giỏ chỉ có cá ⇒ 1kg cá + 500g mực");
   // Một món + «thôi» vẫn đi đường cũ (chọn lại MỘT món).
   const one = applyCustomerCartMessage(d, "chỉ lấy 1kg chả cá thu thôi", 5, new Date(), P);
   assert.deepEqual(items(one), [["Chả cá thu", 1000, "g", true]]);
@@ -91,6 +114,12 @@ function testPure() {
   assert.equal(staffTotalConflict(["Tổng 480k miễn ship", "1kg chả cá và 0,5 mực"], [1_060_000]), 480_000);
   assert.equal(staffTotalConflict(["Tổng 480k miễn ship"], [480_000]), null, "khớp tổng máy chủ ⇒ không lệch");
   assert.equal(staffTotalConflict(["1kg chả cá 280k nha"], [1_060_000]), null, "đơn giá không phải tổng");
+  // Review #869 (P1): phí ship / COD / đơn giá / đơn cũ / tổng chưa gồm ship KHÔNG phải tổng đơn hiện tại.
+  for (const t of ["ship COD toàn quốc chị nhé, phí ship 30k", "cod 30k ạ", "dạ thanh toán khi nhận, tổng chưa gồm ship 30k", "chả mực giá 400k, tổng đơn cũ của chị 1.060k", "chả mực 400k/kg, chả cá 280k/kg ạ", "dạ hết hàng chả mực rồi ạ", "hết 2 hộp nem rồi chị ơi"]) {
+    assert.equal(staffTotalConflict([t], [1_060_000, 1_030_000]), null, `«${t}» không phải tổng đơn`);
+  }
+  assert.equal(staffTotalConflict(["tất cả 480k ạ"], [1_060_000]), 480_000);
+  assert.equal(staffTotalConflict(["thu hộ 480k nha chị"], [1_060_000]), 480_000);
 
   // Cổng gửi: phía page nhắn / nhường người mới SAU lúc lượt bắt đầu ⇒ không gửi.
   const t0 = new Date(Date.now() - 60_000);
@@ -230,6 +259,30 @@ const CASES: GoldenCase[] = [
     ],
   },
   {
+    key: "gc-863-khong-huy-sau-cuu",
+    title: "Review #869: sau lượt giữ đơn của máy chủ, khách «không hủy đâu em» ⇒ KHÔNG huỷ (kể cả model gọi CANCEL), không câu «đã huỷ»",
+    shop: "food",
+    channel: "FANPAGE",
+    config: CFG,
+    turns: [
+      draftTurn("0961000868"),
+      changeTurn,
+      { say: CANCEL_1, ai: [] },
+      {
+        say: "không hủy đâu em",
+        ai: [() => [tool("cancel_order", { decision: "CANCEL", customer_words: "không hủy đâu em" })], () => [say("Dạ vâng, em giữ đơn cho mình ạ.")]],
+      },
+    ],
+  },
+  {
+    key: "gc-863-dung-huy-lan-dau",
+    title: "Review #869: «đừng hủy nha em» sau lỗi bot ⇒ không phải câu huỷ: không xin lỗi / đề nghị huỷ, không mở yêu cầu huỷ",
+    shop: "food",
+    channel: "FANPAGE",
+    config: CFG,
+    turns: [draftTurn("0961000869"), changeTurn, { say: "đừng hủy nha em", ai: [() => [say("Dạ vâng, em giữ đơn cho mình ạ.")]] }],
+  },
+  {
     key: "gc-863-da-thu-tien",
     title: "#863: đơn đã có chứng từ thu tiền ⇒ khách huỷ lần hai vẫn KHÔNG tự huỷ — chuyển người, không câu «đã huỷ»",
     shop: "food",
@@ -324,6 +377,24 @@ async function testGolden() {
       assert.equal(state.cancelRequest, undefined);
       assert.equal(row.nextFollowupAt, null, "lịch nhắc đã dọn");
       assert.ok(sendGuardChecked, "đã kiểm cổng gửi");
+    },
+    "gc-863-khong-huy-sau-cuu": async (t, ctx) => {
+      assert.match(t.turns[2].shown[0] ?? "", /xin lỗi/, "lượt huỷ đầu: máy chủ giữ đơn");
+      const r = t.turns[3];
+      assert.ok(r.rounds.length > 0, "câu phủ định huỷ KHÔNG đi đường huỷ của máy chủ — model trả lời");
+      assert.match(JSON.stringify(r.rounds.map((x) => x.results)), /khách nói KHÔNG huỷ|KHÔNG \/ CHƯA huỷ/, "cancel_order CANCEL bị từ chối");
+      assert.ok(!r.shown.some((x) => /đã huỷ/.test(x)), `không câu «đã huỷ»: ${JSON.stringify(r.shown)}`);
+      const { order } = await orderOf(ctx.conversationId);
+      assert.notEqual(order?.stage, "CANCELLED", "đơn KHÔNG bị huỷ");
+    },
+    "gc-863-dung-huy-lan-dau": async (t, ctx) => {
+      const r = t.turns[2];
+      assert.ok(r.rounds.length > 0, "không phải nhánh huỷ của máy chủ");
+      assert.ok(!r.shown.some((x) => /xin lỗi|huỷ đơn giúp/.test(x)), `không xin lỗi / đề nghị huỷ: ${JSON.stringify(r.shown)}`);
+      const { order, state } = await orderOf(ctx.conversationId);
+      assert.notEqual(order?.stage, "CANCELLED");
+      assert.equal(state.cancelRequest, undefined, "không mở yêu cầu huỷ");
+      assert.ok(!orderReviewOf(order?.raw)?.entries.some((e) => e.code === "CUSTOMER_CANCELLED"), "không cờ «khách huỷ»");
     },
     "gc-863-da-thu-tien": async (t, ctx) => {
       assert.equal(t.turns[2].rounds.length, 0, "huỷ lần hai do máy chủ quyết");

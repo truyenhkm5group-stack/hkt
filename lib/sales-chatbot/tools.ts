@@ -44,7 +44,7 @@ import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packi
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
 import type { ObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
-import { bindCommitment, cartDraftDiff, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, type CartCommitment, type CartDraftDiff } from "@/lib/sales-chatbot/cart-commitment";
+import { bindCommitment, cartDraftDiff, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, negatedCancel, type CartCommitment, type CartDraftDiff } from "@/lib/sales-chatbot/cart-commitment";
 import { cartQuoteLines, type CatalogLite } from "@/lib/sales-chatbot/cancel-recovery";
 import { acceptCustomerWard, addressQuestion, canAutoFill, legacyAddressUnmapped, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
 import { askedBefore, askMemoryFor, askMemoryParts, askParts, deliveryAddressDecision, hasChangeCue, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
@@ -1340,6 +1340,8 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const why = z.string().trim().min(2).max(300).safeParse(input.reason);
       const reason = why.success ? why.data : "Khách huỷ đơn";
       const quote = ctx.lastUserText.trim().slice(0, 300) || null;
+      // Khách nói KHÔNG / CHƯA huỷ («không hủy đâu em», «đừng hủy nha») ⇒ không bao giờ huỷ theo câu đó (review #869) — kể cả model gọi CANCEL.
+      if (decision.data === "CANCEL" && negatedCancel(ctx.lastUserText)) return err("Huỷ đơn: khách nói KHÔNG huỷ", "Câu cuối của khách là KHÔNG / CHƯA huỷ — KHÔNG huỷ đơn. Khách đồng ý giữ đơn ⇒ cancel_order decision KEEP (đơn đã sửa thì update_draft_order trước).", state);
       const sameTurn = (r: NonNullable<ChatState["cancelRequest"]>) => ctx.turn !== undefined && r.turn === ctx.turn;
       if (simulated) {
         if (decision.data === "KEEP") {
