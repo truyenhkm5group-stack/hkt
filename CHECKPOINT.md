@@ -26,6 +26,15 @@
 
 
 
+
+## 16/10/2026 ~04:15Z — Tech Lead (Web): P0 #855/#856 tiến độ
+- PR #857 (page-auto-not-answer) @ 7ec9b9bf: review độc lập PASS (3 lượt) đã ghi sổ; CI đang chạy. Hoàn thứ tự classifyOutbound cũ (chưa đo được Business Suite auto-reply không mang mã app). Việc sau: catch-up API chỉ nhận cờ Pancake; chữ PAGE_REPLIED_REASON.
+- PR #854 (qa-0245-index): CI xanh, review PASS — chờ khoá integration-lead (Desktop giữ tới 04:43Z, không tranh).
+- Thứ tự gộp dự kiến: #854 → #857 → p0-856-images → p0-855-address → p0-855-delivery-intent → một lượt deploy.
+- Worker đang chạy: p0-855-cart, p0-855-address (đã nhận thêm ca ThivanNguyen — nhánh AMBIGUOUS addressQuestion hỏi khách tên phường mới), p0-856-images (nhánh đã đẩy), p0-855-delivery-intent (MỚI — câu "Hôm nào có hàng?" bị trả bằng chuỗi trạng thái order-status-shared.ts:70).
+- Trùng phạm vi cần chủ shop/Desktop phối hợp: sứ mệnh p0-855-thuyngo-lieudau của phiên Desktop.
+- Ops chỉ đọc đã gửi: address-reask-audit hslc-hmt-shop 1 ngày; conv-money-trace cho hội thoại ThivanNguyen (kết quả MÃ HOÁ).
+
 ## 16/10 — DESKTOP CẦM KHOÁ `integration-lead` · TIẾP QUẢN ISSUE #855 (ThuyNgo + Lieu Dau)
 - Sứ mệnh `p0-855-thuyngo-lieudau`, nhánh `fix/p0-thuyngo-negative-order` (ứng viên 9fe34468) — Desktop là NGƯỜI GHI DUY NHẤT nhánh này từ giờ. Web/Team: đừng đẩy lên nhánh, đừng gộp/deploy.
 - `tech-lead` vẫn của Web cho qa 0245 (#854) — Desktop không chạm #854.
