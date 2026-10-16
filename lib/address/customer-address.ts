@@ -403,7 +403,11 @@ export function legacyAddressUnmapped(address: string, province = ""): { raw: st
   const t = ` ${line.normalize("NFC").toLowerCase()} `;
   const commune = a.legacy !== null || LEGACY_COMMUNE_PREFIX.test(t);
   const district = a.legacy !== null || LEGACY_DISTRICT_PREFIX.test(t) || oldDistrictsIn(line, a.provinceCode).length > 0;
-  if (!commune || !district) return null;
+  // P0 16/10 — khách đã cho SỐ NHÀ/NGÕ + HUYỆN CŨ + TỈNH nhưng không biết tên XÃ mới.
+  // Không bắt khách tra địa giới mới: giữ nguyên địa chỉ, nhân viên mapping trước khi tạo vận đơn.
+  // Chỉ nhận trường hợp thiếu tên xã khi có SỐ NHÀ THẬT và huyện cũ xác định được;
+  // "Gia Lâm, Hà Nội" trần không được coi là địa chỉ có đủ điểm giao.
+  if (!district || (!commune && !a.houseNumber)) return null;
   return { raw: line.trim(), province: a.province, candidates: a.candidates, hint: addressReviewHint(a) };
 }
 
