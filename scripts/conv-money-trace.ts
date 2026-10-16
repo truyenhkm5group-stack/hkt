@@ -54,6 +54,9 @@ import { parsePlaceholders } from "@/lib/sales-chatbot/quick-replies-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { rowsOf } from "@/lib/sql-rows";
 
+/** Tên lỗi in được ra kênh công khai: CHỈ dạng «<nhóm đã biết>: <lý do>» của tools.ts, không chữ số, không ngoặc trích / @. Tên lỗi sau
+ *  này nội suy dữ liệu khách mà không theo dạng ấy thì không lọt (kho PUBLIC). */
+const SAFE_ERROR_TITLE = /^(?:Lưu khách|Đơn nháp|Sửa đơn|Chốt|Khách cũ): [^\d«»"'@:]{1,60}$|^Đơn đã chốt$/u;
 const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s.slice(0, 300)}`);
 const vnd = (n: number | null | undefined) => (typeof n === "number" && Number.isFinite(n) ? `${Math.round(n).toLocaleString("vi-VN")} ₫` : "—");
 
@@ -256,6 +259,7 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
   const toolNames = new Map<string, string>();
   const src: Record<string, number> = {};
   const tools: Record<string, number> = {};
+  const toolErrors: Record<string, number> = {};
   let mismatches = 0;
   let emptyNoNew = 0;
   let lastUserSeq: number | null = null;
@@ -304,6 +308,9 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
         const tn = toolNames.get(String(b.toolUseId ?? "")) ?? "?";
         bump(tools, `${tn} ${b.isError ? "LỖI" : "OK"}`);
         const mo = moneyOfToolResult(b.content);
+        // #871: tên lỗi của công cụ lên đơn / lưu khách là CHUỖI HẰNG trong tools.ts — đưa ra kênh tóm tắt khi không mang chữ số / ngoặc
+        // trích (tức không thể chứa SĐT, địa chỉ, chữ khách). Lý do «create_draft_order LỖI 3» trước đây chỉ nằm trong phần mã hoá.
+        if (b.isError && /draft|customer|confirm/.test(tn) && mo?.summary && SAFE_ERROR_TITLE.test(mo.summary)) bump(toolErrors, `${tn}: ${mo.summary}`);
         const moneyTool = /cart|draft|confirm|price|quick/.test(tn);
         const lines = mo?.lines.length ? ` · dòng ${mo.lines.map((l) => `${variantLabel(l.variantId)} × ${l.quantity} @ ${vnd(l.unitPrice)}${l.discount ? ` − ${vnd(l.discount)}` : ""} = ${vnd(l.lineTotal)}`).join(" | ")}` : "";
         const money = mo && (mo.subtotal !== null || mo.total !== null) ? ` · tiền hàng ${vnd(mo.subtotal)} · ship ${vnd(mo.shipping)} · COD ${vnd(mo.total)}` : "";
@@ -362,6 +369,7 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
 
   const fmt = (x: Record<string, number>) => Object.entries(x).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(" · ") || "0";
   tomTat(`conv-money-trace: ${conv.channel} · ${conv.status} · tin bot theo NGUỒN: ${fmt(src)}`);
+  if (Object.keys(toolErrors).length) tomTat(`Lỗi công cụ (tên lỗi hằng): ${fmt(toolErrors)}`);
   tomTat(`Công cụ: ${fmt(tools)} · tin bot có số TỔNG lệch báo giá ${mismatches} · câu «nói rõ hơn» không có tin khách mới ${emptyNoNew}`);
   tomTat(`Báo giá hội thoại: ${quote ? `${quote.verified ? "xác thực" : "CHƯA xác thực"} · tiền hàng ${vnd(quote.subtotal)} · tổng ${vnd(quote.total ?? null)}` : "—"} · nháp ${draft ? `tổng ${vnd(draft.quote?.total ?? null)} · khách thấy ${vnd(draft.seenTotal)}` : "—"} · chốt ${confirmed ? vnd(confirmed.total) : "—"} · upsell ${st.upsellSent ? "đã gửi" : "chưa"}`);
   for (const r of orders) {

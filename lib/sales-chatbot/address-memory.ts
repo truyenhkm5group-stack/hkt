@@ -313,10 +313,48 @@ const ACK = /^(?:ok|oke|okie|okay|uh|u|um|vang|da|dung|dung roi|duoc|chot|chot d
  * điều vừa biết. Tin khác («gửi cho mẹ chị dưới quê nhé», «chị không ở đó nữa rồi») có thể là đổi người / nơi nhận mà không danh sách
  * mẫu nào bắt hết ⇒ hàng rào để câu xin địa chỉ đi qua (review PR #848 lần 4). HÀM THUẦN.
  */
+/**
+ * Tin CHỈ nói lịch giao («Giao sáng mai khoảng 9h», «chiều nay 5h nhé») — #871: khách đã gửi SĐT + địa chỉ rồi hẹn giờ, bot xin lại cả
+ * hai. Mọi từ phải thuộc từ vựng LỊCH GIAO / tiểu từ và có ít nhất một mốc thời gian: chỉ cần MỘT từ lạ («mẹ», «quê», tên đường, tên
+ * phường) là KHÔNG phải tin lịch giao, để «gửi cho mẹ chị dưới quê» vẫn được hỏi nơi nhận mới (review PR #848 lần 4). HÀM THUẦN.
+ */
+const SCHEDULE_WORDS = new Set("giao ship gui nhan hang don cho vao luc khoang truoc sau tu den hom nay mai ngay sang trua chieu kia mot cuoi tuan gio phut ruoi kem duoc khong ko nhe nha a ah voi giup dum nhanh som gap la thi tot oke ok vang da de the nhu nao roi hoac hay trong buoi shop sop".split(" "));
+const SCHEDULE_TIME = new Set("nay mai kia sang trua chieu tuan gio".split(" "));
+/** «thứ <ngày>» / «chủ nhật» — «thu», «hai», «ba», «nam»… đứng một mình là tên người («chị Thu», «anh Nam»), không phải ngày. */
+const WEEKDAY = new Set("hai ba tu nam sau bay".split(" "));
+/** Người nhận là CHÍNH khách («giao cho chị sáng mai») — chỉ hợp lệ khi theo sau là mốc / tiểu từ / động từ, không phải một cái tên. */
+const SELF = new Set("em minh chi anh".split(" "));
+const AFTER_SELF = new Set("sang trua chieu toi mai nay ngay hom nhe nha a ah nhan giao gui voi oi can muon lay khoang luc vao truoc sau".split(" "));
+const CLOCK = /^\d{1,2}(?:h|g|gio)(?:\d{1,2})?$/;
+export function isScheduleOnly(text: string): boolean {
+  // «9:30» / «9.30» ⇒ «9h30» TRƯỚC khi gấp dấu (foldVnText bỏ dấu câu).
+  const raw = text.normalize("NFC").replace(/(\d{1,2})[:.](\d{2})\b/g, "$1h$2").split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const words = raw.map((w) => foldVnText(w).trim());
+  if (!words.length || words.length > 14) return false;
+  let time = false;
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    const next = words[i + 1];
+    // «thứ 7» / «chủ nhật» / «tối nay · tối mai» là mốc (nuốt luôn từ sau); «tôi» / «tối» đứng khác chỗ («chị tôi») thì không.
+    const pair = (w === "thu" && next !== undefined && (WEEKDAY.has(next) || /^\d$/.test(next))) || (w === "chu" && next === "nhat") || (w === "toi" && (next === "nay" || next === "mai"));
+    if (CLOCK.test(w)) time = true;
+    else if (pair) {
+      time = true;
+      i++;
+    } else if (SELF.has(w)) {
+      // «chị Mai» / «anh Nam» / «chị Hằng» — tên riêng viết hoa giữa câu, hoặc một từ không thuộc bảng ⇒ đổi NGƯỜI nhận, không phải lịch.
+      if (next !== undefined && (!AFTER_SELF.has(next) || /^\p{Lu}/u.test(raw[i + 1]))) return false;
+    } else if (SCHEDULE_TIME.has(w)) time = true;
+    else if (/^\d{1,2}$/.test(w)) continue; // «7 giờ»
+    else if (!SCHEDULE_WORDS.has(w)) return false;
+  }
+  return time;
+}
+
 function settlesAddress(last: string, ward: string | null): boolean {
   const f = foldVnText(last);
   const wardCore = ward ? foldVnText(ward).replace(/^(phuong|xa|thi tran|dac khu) /, "") : "";
-  return ACK.test(f) || customerStatedAddresses([last]).length > 0 || deliveryAddressIn(last) !== null || last.split(/\n+/).some((l) => deliveryAddressIn(l) !== null) || (wardCore.length > 0 && ` ${f} `.includes(` ${wardCore} `));
+  return ACK.test(f) || isScheduleOnly(last) || customerStatedAddresses([last]).length > 0 || deliveryAddressIn(last) !== null || last.split(/\n+/).some((l) => deliveryAddressIn(l) !== null) || (wardCore.length > 0 && ` ${f} `.includes(` ${wardCore} `));
 }
 
 /**
@@ -342,9 +380,11 @@ const PHONE_CHANGE = /(?:^| )(?:so|sdt|so dien thoai|so dt) (?:khac|moi)(?: |$)|
 export function addressKnowledge(state: Pick<ChatState, "draft" | "customer" | "addressAsk">, customerTexts: readonly string[]): AddressKnowledge {
   const last = customerTexts[customerTexts.length - 1] ?? "";
   const lastF = foldVnText(last);
+  // #871: «Giao cho chị sáng mai khoảng 9h» là lịch giao của CHÍNH khách, không phải đổi người nhận.
+  const recipientChange = PHONE_CHANGE.test(lastF) && !isScheduleOnly(last);
   const contact = {
-    phoneKnown: Boolean(state.customer?.phone?.trim() || state.draft?.recipient.phone?.trim() || customerTexts.some(hasPhone)) && !PHONE_CHANGE.test(lastF),
-    nameKnown: Boolean(state.customer?.name?.trim() || state.draft?.recipient.name?.trim()) && !PHONE_CHANGE.test(lastF),
+    phoneKnown: Boolean(state.customer?.phone?.trim() || state.draft?.recipient.phone?.trim() || customerTexts.some(hasPhone)) && !recipientChange,
+    nameKnown: Boolean(state.customer?.name?.trim() || state.draft?.recipient.name?.trim()) && !recipientChange,
     complained: isComplaint(last),
     deferred: DEFER_RE.test(lastF),
     lastAddsAddress: last.split(/\n+/).some((l) => deliveryAddressIn(l) !== null || looksLikeStreetFragment(l) || legacyAddressUnmapped(l) !== null),
@@ -455,6 +495,9 @@ export function asksForName(sentence: string): boolean {
 
 /** Câu thay khi cả tin chỉ là câu hỏi lại địa chỉ — ghi nhận, không hỏi gì thêm. */
 export const ADDRESS_KNOWN_TEXT = "Dạ em ghi nhận địa chỉ của mình rồi ạ.";
+/** Câu ghi nhận khi tin khách CHỈ là lịch giao (#871) — không hứa giờ (chưa có xác nhận của shop / ĐVVC) và không hứa một việc tiếp
+ *  theo mà máy chủ không bảo đảm («shop báo lại»): chỉ nói đã nhận lời dặn. */
+export const SCHEDULE_NOTED_TEXT = "Dạ em đã nhận lời dặn giờ giao của mình ạ.";
 /** Câu thay khi câu bị bỏ là xin SĐT / tên đã có mà CHƯA có địa chỉ — không nói «đã ghi nhận địa chỉ». */
 export const CONTACT_KNOWN_TEXT = "Dạ em ghi nhận thông tin của mình rồi ạ.";
 /** Câu thay khi phải chuyển người kiểm thông tin nhận hàng (#855) — không hỏi khách thêm lần nào. */
