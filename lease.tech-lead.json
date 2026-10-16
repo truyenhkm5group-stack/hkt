@@ -1,10 +1,10 @@
 {
   "name": "tech-lead",
   "holder": "vm:hkt",
-  "purpose": "Tech Lead (Web) — nghiệm thu P0",
+  "purpose": "Tech Lead (Web) — qa 0245",
   "acquired_at": "2026-10-15T17:12:53.040Z",
-  "heartbeat_at": "2026-10-15T17:44:20.163Z",
-  "expires_at": "2026-10-15T18:44:20.163Z",
+  "heartbeat_at": "2026-10-16T02:10:07.154Z",
+  "expires_at": "2026-10-16T03:10:07.154Z",
   "generation": 4,
   "token_hash": "3413971257de323469046e5188c3af45ef64330e1d93b7e6d8e16996fa3758ba"
 }
