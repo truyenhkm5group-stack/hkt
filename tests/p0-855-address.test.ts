@@ -100,6 +100,9 @@ export function testP0855AddressPure() {
   for (const t of ["230/20 Phan Huy Ích, P An Hội Tây, Gò Vấp, TP.HCM", "Số 9 Quang Trung, P An Hội Tây, Gò Vấp, Sài Gòn", "Số 9 Quang Trung, P An Hội Tây, Gò Vấp, TP.HCM. Mai giao được không?"]) assert.equal(otherWardNamed(79, "Phường An Hội Tây", t), null, `số hẻm «/», «Sài Gòn», «?» ở vế khác không phải lời chọn: ${t}`);
   assert.equal(otherWardNamed(79, "Phường An Hội Tây", "An Hội Tây/Gò Vấp")?.name, "Phường Gò Vấp", "«/» giữa hai tên ⇒ lựa chọn");
   assert.equal(otherWardNamed(79, "Phường An Hội Tây", "An Hội Tây, phường Sài Gòn")?.name, "Phường Sài Gòn", "«phường Sài Gòn» có chữ loại ⇒ là xã, không phải tên thành phố");
+  // Lời SỬA ở vế trước áp cho tên ở vế sau (review #874).
+  assert.equal(otherWardNamed(1, "Phường Ngọc Hà", "Không phải Ngọc Hà, Ba Đình")?.name, "Phường Ba Đình");
+  assert.equal(otherWardNamed(79, "Phường An Hội Tây", "nhầm rồi, An Hội Tây, Gò Vấp mới đúng")?.name, "Phường Gò Vấp");
   // #871: tin CHỈ hẹn giờ giao không đổi nơi nhận ⇒ câu xin lại SĐT + địa chỉ đã có bị bỏ, không chuyển người; tin có nơi chốn lạ thì không.
   for (const t of ["Giao sáng mai khoảng 9h", "chiều nay 5h nhé", "Thứ 7 giao giúp em", "7 giờ tối nay", "Giao cho chị sáng mai khoảng 9h nhé", "mai giao lúc 9:30 nha", "chủ nhật giao nhé"]) assert.equal(isScheduleOnly(t), true, t);
   // Review #871: tên người trùng từ chỉ thời gian («Thu», «Nam», «Mai», «Hằng», «Tư») và người thứ ba («ba», «mẹ») ⇒ đổi NGƯỜI nhận.

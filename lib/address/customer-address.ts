@@ -200,9 +200,11 @@ export function otherWardNamed(provinceCode: number, ward: string, customerText:
   const oldDistricts = wardOldDistricts(ward, provinceCode);
   // Lời chọn / sửa xét THEO VẾ: «?» của «mai giao được không?» ở vế khác không biến «Gò Vấp» thành một lựa chọn; «/» chỉ là lựa chọn khi
   // nằm giữa hai CHỮ («An Hội Tây/Gò Vấp»), không phải số hẻm «230/20»; «sai» không phải «Sài Gòn» (review #874).
-  const choosingAt = (k: number) => /\?|\p{L}\s*\/\s*\p{L}/u.test(rawSegments[k]) || /(?:^| )(?:hay|hoac|khong phai|ko phai|k phai|nham|sai(?! gon)|chang)(?: |$)/.test(segments[k]);
+  // Lời SỬA thì xét trên CẢ tin («Không phải Ngọc Hà, Ba Đình» — lời sửa ở vế trước áp cho tên ở vế sau).
+  const correcting = /(?:^| )(?:khong phai|ko phai|k phai|nham|sai(?! gon))(?: |$)/.test(` ${expandAbbreviations(foldVnText(customerText))} `);
+  const choosingAt = (k: number) => correcting || /\?|\p{L}\s*\/\s*\p{L}/u.test(rawSegments[k]) || /(?:^| )(?:hay|hoac|chang)(?: |$)/.test(segments[k]);
   // Vế CHỈ là tên tỉnh («…, Sài Gòn» = TP.HCM) không nêu xã — dù «Phường Sài Gòn» mới trùng chữ. «phường Sài Gòn» (có chữ loại) vẫn là xã.
-  const provinceOnly = (k: number) => !/^ (?:phuong|xa|thi tran|dac khu) /.test(segments[k]) && findProvince(rawSegments[k].trim())?.code === provinceCode;
+  const provinceOnly = (k: number) => !correcting && !/^ (?:phuong|xa|thi tran|dac khu) /.test(segments[k]) && findProvince(rawSegments[k].trim())?.code === provinceCode;
   const asDistrict = (k: number, i: number) => !choosingAt(k) && !/ (?:phuong|(?<!thi )xa|thi tran|dac khu)$/.test(segments[k].slice(0, i));
   return (
     adminWardsOf(provinceCode).find((w) => {
