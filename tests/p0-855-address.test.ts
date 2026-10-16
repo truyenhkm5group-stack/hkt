@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import { addressGapOf, addressQuestion, customerStatedAddresses, hasStreetDetail, legacyAddressUnmapped, looksLikeDeliveryAddress, looksLikeStreetFragment, parseCustomerAddress, wantsAddressChange } from "@/lib/address/customer-address";
 import { ADDRESS_HANDOFF_REASON, ADDRESS_KNOWN_TEXT, ADDRESS_REASK_NOTE, CONTACT_KNOWN_TEXT, hasChangeCue, ADDRESS_STAFF_TEXT, addressKnowledge, addressReaskVerdict, asksForName, asksForPhone, deliveryAddressDecision, reuseIntentOf as reuseFromMemory } from "@/lib/sales-chatbot/address-memory";
 import { addressConfidence, assembleCustomer360, customer360Prompt, reuseIntentOf, type OrderFact } from "@/lib/sales-chatbot/customer-360";
-import type { ChatState } from "@/lib/sales-chatbot/tools";
+import { addressCheckOf, type ChatState } from "@/lib/sales-chatbot/tools";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { orderReviewOf } from "@/lib/constants/order-review";
@@ -56,9 +56,17 @@ export function testP0855AddressPure() {
   assert.equal(legacyAddressUnmapped(OLD_MAPPED), null, "ghép được xã mới ⇒ không phải «chưa ghép»");
   assert.equal(parseCustomerAddress(OLD_MAPPED).ward, "Xã Đan Phượng");
   assert.equal(customerStatedAddresses([OLD_MAPPED])[0]?.ward, "Xã Đan Phượng", "«TDP 3» là phần đường thật ⇒ khách đã ghi rõ");
-  for (const partial of ["Khương Đình", "Khương Đình, Thanh Xuân, Hà Nội", "230/20 Phan Huy Ích, Gò Vấp, TP.HCM", "à em nhầm, phường 15 Gò Vấp nhé"]) {
+  for (const partial of ["Khương Đình", "Khương Đình, Thanh Xuân, Hà Nội", "à em nhầm, phường 15 Gò Vấp nhé"]) {
     assert.equal(legacyAddressUnmapped(partial), null, `${partial}: không đủ địa giới cũ hai cấp + phần đường ⇒ không phải ca này`);
   }
+  // P0 Nguyễn Hồng: đã có số nhà/ngõ + huyện cũ Gia Lâm + Hà Nội, không bắt tự tra tên phường sau sáp nhập.
+  const districtOnly = "Số 9 ngõ 3 Kiên Thành, Gia Lâm, Hà Nội"; // fixture thay số nhà, không PII khách
+  assert.ok(legacyAddressUnmapped(districtOnly), "số nhà + ngõ + huyện cũ + tỉnh đủ để giao nhân viên kiểm nội bộ");
+  assert.equal(addressGapOf(districtOnly).gap, "CATALOG_UNMATCHED");
+  assert.equal(addressCheckOf({ address: districtOnly, province: "" }).view.ask_customer, null, "không hỏi phường mới");
+  assert.equal(addressReaskVerdict(WARD_NEW_ASK, addressKnowledge(draftWith(districtOnly), [districtOnly]), 2)?.note, ADDRESS_REASK_NOTE.LEGACY_UNMAPPED, "chặn cả câu bot tự hỏi phường");
+  assert.ok(legacyAddressUnmapped("230/20 Phan Huy Ích, Gò Vấp, TP.HCM"), "số nhà+quận cũ+tỉnh nhưng thiếu phường ⇒ người kiểm, không hỏi khách");
+  assert.equal(legacyAddressUnmapped("Gia Lâm, Hà Nội"), null, "chỉ huyện+tỉnh thì chưa đủ phần đường");
   assert.equal(hasStreetDetail("Khương Đình"), false, "một tên phường không phải địa chỉ đầy đủ");
   assert.equal(hasStreetDetail("Số 8 ngõ 2, Phường Cầu Giấy, Hà Nội"), true);
   assert.equal(looksLikeDeliveryAddress(NEW_THU_DUC), true);
@@ -195,7 +203,7 @@ export function testP0855AddressPure() {
   assert.equal(addressReaskVerdict("Dạ chị cho em xin thêm số nhà ạ?", addressKnowledge({}, ["Láng Hạ, Đống Đa, Hà Nội"]), 3, { botTexts: ["Dạ chị cho em xin địa chỉ nhận hàng ạ?"] }), null, "khách vừa gửi phần địa chỉ mới ⇒ hỏi phần còn thiếu không phải hỏi lặp");
   assert.equal(addressReaskVerdict("Dạ chị cho em xin địa chỉ giao hàng ạ.", addressKnowledge({}, ["lấy 1 hộp 1kg", "0920000909"]), 3, { botTexts: ["Dạ chị cho em xin SĐT và địa chỉ nhận hàng ạ."] }), null, "khách trả lời một phần (SĐT) ⇒ xin tiếp địa chỉ không phải hỏi lặp");
   //  · Địa giới cũ đọc trên chữ CÓ DẤU: «Xa La» không phải «xã», «khu đô thị» không chứa «thị xã».
-  assert.equal(legacyAddressUnmapped("Số 5 khu đô thị Xa La, Hà Đông, Hà Nội"), null);
+  assert.ok(legacyAddressUnmapped("Số 5 khu đô thị Xa La, Hà Đông, Hà Nội"), "số nhà+quận cũ+tỉnh, chưa xác định phường ⇒ chỉ người kiểm");
   //  · Review vòng 3 — CHANGE_INCOMPLETE không bắt nhầm số lượng / tiểu từ / «chuyển khoản»: đơn nháp đã có địa chỉ ⇒ vẫn là địa chỉ đó.
   for (const t of ["2 nha", "1 nhé", "38 nha", "Số 2 nhé", "chị chuyển qua rồi nhé", "chuyển cho em rồi", "đợi chờ"]) {
     assert.equal(looksLikeStreetFragment(t), false, `${t}: không phải mảnh địa chỉ`);
