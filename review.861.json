@@ -1,8 +1,8 @@
 {
   "pr": 861,
-  "sha": "0cf773e96cd6cdfebcb15d68a741623303482f87",
+  "sha": "9b1a64531848e019bef09e4c8ee1e3922ddbfffe",
   "verdict": "PASS",
   "actor": "vm:hkt",
-  "at": "2026-10-16T06:02:39.234Z",
-  "note": "review độc lập 6 lượt; đo đơn cũ có cờ + xã trước deploy"
+  "at": "2026-10-16T06:55:06.397Z",
+  "note": "merge origin/main 1681f098; chỉ gỡ import + 1 ca kiểm theo luật #860"
 }
