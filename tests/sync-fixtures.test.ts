@@ -196,6 +196,7 @@ import { testDuplicateMetrics } from "./duplicate-metrics.test";
 import { testLogisticsStatusBoundary } from "./logistics-status-boundary.test";
 import { testSchedulerCoverage } from "./scheduler-coverage.test";
 import { testSchedulerClock } from "./scheduler-clock.test";
+import { testClaudeUsage } from "./claude-usage.test";
 import { testShipmentJoinGrain } from "./shipment-join-grain.test";
 import { testFastPathWiring } from "./fast-path-wiring.test";
 import { testBankMatch } from "./bank-match.test";
@@ -2210,6 +2211,7 @@ async function main() {
   testMigrationJournal();
   testSchedulerCoverage();
   await testSchedulerClock();
+  await testClaudeUsage();
   testShipmentJoinGrain();
   testFastPathWiring();
   testBankMatch();

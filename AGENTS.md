@@ -791,6 +791,9 @@ Chủ shop giao MỌI việc phát triển qua MỘT cửa: skill `/lead` (Tech 
   đổi mã chạy trên VPS). KHÔNG ĐẠT ⇒ INCIDENT, sửa tiến, không rollback tự động (migration chỉ đi tới).
 - **Không bao giờ phá việc của cây khác.** Không reset / rebase / xoá cây hay nhánh của sứ mệnh khác; dọn chỉ
   bằng `cleanup` (từ chối cây bẩn / chưa đẩy / chưa vào / không rõ chủ).
+- **Ngân sách token** (`docs/ai-tech-room/token-budget.md`): không vòng `sleep` trong lượt của model — chờ bằng
+  `npm run ai -- wait …` chạy nền; một worker = một PR rồi kết thúc; tra cứu / chờ / hậu kiểm dùng `ai-tech-scout`
+  (Haiku), Opus giữ cho sửa P0 và review rủi ro cao. Tiến bộ đo bằng `scripts/claude-usage.mjs` theo CU / việc DONE.
 - **Cổng chạy song song, không cổng nào bị nới.** `gates.yml` = bốn job + job gom tên `gates` (luôn chạy, đỏ khi
   bất kỳ nhánh nào không xanh); deploy dùng lại lượt cổng XANH của ĐÚNG SHA trên `main` (job `bang_chung`),
   không có thì tự chạy cổng. Đổi một trong hai là đổi hàng rào — `tests/delivery-v2.test.ts` khoá cả hai.
