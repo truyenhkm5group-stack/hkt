@@ -432,7 +432,23 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   tomTat(`conv-money-trace quét ${span}: ${ids.length}${convs.length > TRACE_MAX_SCAN_CONVERSATIONS ? "+" : ""} hội thoại`);
   tomTat(`A câu «nói rõ hơn» của engine: ${A.total} tin · KHÔNG có tin khách mới kể từ tin bot trước ${A.noNew} tin / ${A.convs.size} hội thoại`);
   tomTat(`B tin bot có số TỔNG ≠ tổng giỏ / nháp máy chủ ngay trước: ${B.msgs} tin / ${B.convs.size} hội thoại · số TỔNG khi chưa có giỏ / nháp nào ${B.noQuote} tin`);
+  // C — P0 khách cũ mua lại (#886): lượt bình luận ĐÃ CHÉP sang hộp thư (`carryCommentTurn` gắn nhãn cố định ở đầu tin khách) và đơn được
+  // gắn cờ ROUND_ABANDONED trong kỳ. Chỉ số đếm. Nhãn gõ lại ở đây (không import) vì ops lấy script từ main nhưng lib từ ảnh đang chạy;
+  // tests/conv-money-trace.test.ts đối chiếu đúng chuỗi này với engine.ts.
+  const [carried] = await db
+    .select({ n: sql<number>`count(*)::int`, convs: sql<number>`count(distinct ${m.conversationId})::int` })
+    .from(m)
+    .where(and(gte(m.createdAt, from), eq(m.role, "user"), sql`${m.content}::text like ${`%${COMMENT_CARRY_LABEL}%`}`));
+  const o = schema.orders;
+  const [abandoned] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(o)
+    .where(sql`exists (select 1 from jsonb_array_elements(coalesce(${o.raw}->'review'->'entries', '[]'::jsonb)) e where e->>'code' = 'ROUND_ABANDONED' and e->>'at' >= ${from.toISOString()})`);
+  tomTat(`C bình luận mua lại chép sang hộp thư: ${carried?.n ?? 0} tin / ${carried?.convs ?? 0} hội thoại · đơn gắn cờ ROUND_ABANDONED: ${abandoned?.n ?? 0}`);
 }
+
+/** Nhãn đầu tin khách mà `carryCommentTurn` (lib/sales-chatbot/engine.ts) gắn khi chép lượt bình luận sang hộp thư. */
+export const COMMENT_CARRY_LABEL = "[Khách bình luận trên bài viết lúc ";
 
 async function main() {
   const args = parseTraceArgs(process.argv.slice(2));
