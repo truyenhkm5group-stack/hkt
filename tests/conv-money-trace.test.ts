@@ -10,11 +10,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import { inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { CLAIM_SAFE_TEXT } from "@/lib/sales-chatbot/claim-guard";
 import { EMPTY_REPLY_TEXT } from "@/lib/sales-chatbot/engine";
-import { fixedAmountsInTemplate, fixedTextKind, moneyOfToolResult, parseTraceArgs, scanPatterns, totalClaimsIn, traceConversation } from "../scripts/conv-money-trace";
+import { COMMENT_CARRY_LABEL, fixedAmountsInTemplate, fixedTextKind, moneyOfToolResult, parseTraceArgs, scanPatterns, totalClaimsIn, traceConversation } from "../scripts/conv-money-trace";
 
 const PHONE = "0900003106";
 
@@ -23,6 +24,7 @@ function testPure() {
   assert.deepEqual(parseTraceArgs(["hslc", "--scan", "--days=7"]), { code: "hslc", conv: null, order: null, scan: true, days: 7 });
   assert.deepEqual(parseTraceArgs(["hslc-hmt-shop", "--order=42F28794"]), { code: "hslc-hmt-shop", conv: null, order: "42f28794", scan: false, days: 3 }, "chỉ mã đơn ngắn (org-order-audit in 8 ký tự cuối) ⇒ tự tìm hội thoại của đơn");
   assert.ok("error" in parseTraceArgs(["hslc-hmt-shop"]), "không --conv / --order / --scan ⇒ từ chối");
+  assert.ok(readFileSync(path.join(__dirname, "..", "lib", "sales-chatbot", "engine.ts"), "utf8").includes(`\`${COMMENT_CARRY_LABEL}\${at.toISOString()}]\``), "nhãn đếm ở dòng C TRÙNG đúng nhãn carryCommentTurn gắn (đổi một bên thì dòng C đếm 0 mãi)");
   assert.deepEqual(parseTraceArgs(["hslc", "--scan", "--since=2026-10-14T08:10Z"]), { code: "hslc", conv: null, order: null, scan: true, days: 3, since: new Date("2026-10-14T08:10:00Z") }, "--since đo đúng khoảng sau deploy");
   for (const bad of ["--since=hôm qua", "--since=2026-10-14", "--since=2026-10-14T08:10"]) assert.ok("error" in parseTraceArgs(["hslc", "--scan", bad]), `--since sai bị từ chối: ${bad}`);
   for (const bad of [[], ["hslc"], ["HSLC;rm", "--scan"], ["hslc", "--conv=abc"], ["hslc", "--scan", "--days=31"], ["hslc", "--conv=1b942a28-86ba-4146-bf0a-2a9705f05ad3", "--order=xyz"]]) assert.ok("error" in parseTraceArgs(bad), `đối số sai bị từ chối: ${bad.join(" ")}`);
