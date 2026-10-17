@@ -32,8 +32,14 @@ const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s.slice(0, 300)}`);
 
 /** Tổ chức DUY NHẤT được phép — ngoại lệ chủ shop duyệt cho đúng sự cố qa × 0245. Thêm mã vào đây là một quyết định mới, không phải cấu hình. */
 export const TO_CHUC_DUOC_PHEP = ["qa"] as const;
-/** = RAM_TOI_THIEU_DIEN_TAP_MB của scripts/erp-backup.sh (bài kiểm đối chiếu). Chủ shop: không hạ. */
-export const RAM_TOI_THIEU_MB = 700;
+/**
+ * Ngưỡng RAM của RIÊNG câu CREATE INDEX CONCURRENTLY này — chủ shop DUYỆT CÓ ĐIỀU KIỆN 17/10/2026 trên số đo thật (ops run
+ * 38949729356, qa): bảng sales_chat_inbound 15,2 MB · chữ cần băm 3,2 MB · maintenance_work_mem 64 MB · RSS script 108 MB ⇒ cần
+ * thêm ≈ 172 MB; 350 = gấp đôi. Trước đây = 700 MB của diễn tập khôi phục (một Postgres TẠM thứ hai) — ngưỡng ấy GIỮ NGUYÊN cho
+ * diễn tập và mọi tác vụ khác. Điều kiện đi kèm (ops-vps.yml + phần chạy): bản sao lưu qa ≤ 120 phút, diễn tập khôi phục qa
+ * ĐẠT ≤ 14 ngày, không câu / giao dịch nào > 30 s, đo LẠI ngay trước câu dựng và dừng nếu thiếu.
+ */
+export const RAM_TOI_THIEU_MB = 350;
 export const TEN_CHI_MUC = "sales_chat_inbound_page_reply_text_hash_idx";
 /** Biểu thức + điều kiện của chỉ mục — TRÙNG KÝ TỰ với drizzle/0247 (bài kiểm). */
 export const THAN_CHI_MUC = `ON "sales_chat_inbound" USING hash ((btrim(regexp_replace("text", '[[:space:]]+', ' ', 'g')))) WHERE "note" = 'PAGE_REPLY'`;
@@ -198,6 +204,14 @@ async function main(): Promise<number> {
       tomTat(`ĐÃ XOÁ bản INVALID trong ${Date.now() - t0} ms — ${con ? "VẪN CÒN chỉ mục, cần người kiểm" : "sạch; 0247 (chưa ghi sổ) sẽ dựng lại ở lượt migrate kế tiếp"}`);
       return con ? 1 : 0;
     }
+    // Đo LẠI ngay trước câu dựng (chủ shop 17/10/2026: theo dõi RAM, không chen vào giao dịch đang chặn, thiếu thì dừng):
+    // giữa lúc lập kế hoạch và lúc dựng, một lượt sao lưu / migrate có thể đã bắt đầu.
+    const ngay = await doc();
+    const chanNgay = lapKeHoach(ngay).chan;
+    if (chanNgay.length) {
+      tomTat(`DỪNG trước khi dựng (đo lại): ${chanNgay.join(" · ")} — chưa ghi gì`);
+      return 1;
+    }
     try {
       if (kh.viec === "XOA_INVALID_ROI_TAO") await client.query(CAU_XOA_INVALID);
       await client.query(CAU_TAO);
@@ -209,7 +223,7 @@ async function main(): Promise<number> {
     if (!sau.chiMuc?.hopLe) return donVaBao("SAU KHI DỰNG chỉ mục KHÔNG hợp lệ");
     const t1 = Date.now();
     await client.query(`analyze sales_chat_inbound`);
-    tomTat(`ĐÃ TẠO ${TEN_CHI_MUC}: dựng ${msDung} ms · ANALYZE ${Date.now() - t1} ms · hợp lệ. 0245 sẽ tự áp ở lượt thử lại kế tiếp (hoặc lượt deploy). Hoàn tác: ${CAU_XOA_INVALID}`);
+    tomTat(`ĐÃ TẠO ${TEN_CHI_MUC}: dựng ${msDung} ms · ANALYZE ${Date.now() - t1} ms · hợp lệ · RAM dùng được trước ${ngay.ramMb ?? "?"} MB → sau ${sau.ramMb ?? "?"} MB. 0245 sẽ tự áp ở lượt thử lại kế tiếp (hoặc lượt deploy). Hoàn tác: ${CAU_XOA_INVALID}`);
     return 0;
   } finally {
     client.release();

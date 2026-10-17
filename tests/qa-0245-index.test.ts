@@ -61,8 +61,13 @@ export function testQa0245Index() {
 
   // ── 3. Ngoại lệ có giới hạn ──
   assert.deepEqual([...TO_CHUC_DUOC_PHEP], ["qa"], "ngoại lệ chủ shop duyệt chỉ cho `qa`");
-  const ramSh = /^RAM_TOI_THIEU_DIEN_TAP_MB=(\d+)$/m.exec(doc("scripts/erp-backup.sh"))?.[1];
-  assert.equal(String(RAM_TOI_THIEU_MB), ramSh, "ngưỡng RAM phải là đúng ngưỡng của erp-backup.sh (chủ shop: không hạ)");
+  // Chủ shop 17/10/2026: diễn tập khôi phục GIỮ 700 MB; riêng câu tạo chỉ mục được 350 MB (gấp đôi số đo thật ≈ 172 MB).
+  const ramSh = Number(/^RAM_TOI_THIEU_DIEN_TAP_MB=(\d+)$/m.exec(doc("scripts/erp-backup.sh"))?.[1]);
+  assert.equal(ramSh, 700, "ngưỡng diễn tập khôi phục GIỮ NGUYÊN 700 MB (chủ shop: không hạ)");
+  assert.equal(RAM_TOI_THIEU_MB, 350, "ngưỡng riêng của câu tạo chỉ mục = 350 MB, đúng mức chủ shop duyệt — đổi phải có quyết định mới");
+  assert.ok(RAM_TOI_THIEU_MB < ramSh, "ngưỡng tạo chỉ mục không bao giờ vượt lên làm thay ngưỡng diễn tập");
+  const chay = doc("scripts/org-0245-index-preseed.ts");
+  assert.ok(chay.indexOf("const chanNgay = lapKeHoach(ngay).chan") > 0 && chay.indexOf("const chanNgay = lapKeHoach(ngay).chan") < chay.indexOf("await client.query(CAU_TAO)"), "đo LẠI RAM + giao dịch dài ngay TRƯỚC câu dựng, thiếu thì dừng");
 
   assert.deepEqual(docThamSo(["qa"]), { org: "qa", apply: false });
   assert.deepEqual(docThamSo(["qa", "--apply"]), { org: "qa", apply: true });
@@ -82,7 +87,7 @@ export function testQa0245Index() {
   assert.equal(lapKeHoach({ ...du, da0245: true, da0247: true, chiMuc: { hopLe: false } }).viec, "XOA_INVALID_ROI_TAO");
   assert.equal(lapKeHoach({ ...du, da0245: true, da0247: true, chiMuc: null }).viec, "TAO");
   assert.equal(lapKeHoach({ ...du, da0245: true, da0247: true, chiMuc: { hopLe: true } }).viec, "KHONG_LAM_GI");
-  assert.deepEqual(lapKeHoach({ ...du, ramMb: 699 }).chan, ["RAM dùng được 699 MB < 700 MB"]);
+  assert.deepEqual(lapKeHoach({ ...du, ramMb: 349 }).chan, ["RAM dùng được 349 MB < 350 MB"]);
   assert.deepEqual(lapKeHoach({ ...du, ramMb: null }).chan, ["không đọc được RAM dùng được"], "thiếu số đo RAM không phải «đủ»");
   assert.equal(lapKeHoach({ ...du, cauDai: 1 }).chan.length, 1, "có câu dài đang chạy (migrate / đọc nặng) ⇒ không chen vào");
 
@@ -101,5 +106,5 @@ export function testQa0245Index() {
   for (const can of [`-lt ${RAM_TOI_THIEU_MB}`, "-lt 2048", "-mmin -120", "-mtime -14", `'"result":"OK"'`, "exit 1", "fetch_script org-0245-index-preseed.ts", "ma_hoa_ket_qua chay_voi_arg"])
     assert.ok(nhanh.includes(can), `nhánh ops phải có \`${can}\``);
   assert.ok(nhanh.indexOf("exit 1") < nhanh.indexOf("fetch_script"), "tiền điều kiện phải chặn TRƯỚC khi chạy script");
-  console.log("✓ qa × 0245: 0247 = công cụ tạo trước = ứng viên rehearsal (một câu) · trùng biểu thức hàm 0245 · chỉ qa · RAM ≥ 700 · ops chặn --apply khi thiếu RAM / ổ / sao lưu / diễn tập");
+  console.log("✓ qa × 0245: 0247 = công cụ tạo trước = ứng viên rehearsal (một câu) · trùng biểu thức hàm 0245 · chỉ qa · RAM ≥ 350 riêng tạo chỉ mục (diễn tập giữ 700) · ops chặn --apply khi thiếu RAM / ổ / sao lưu / diễn tập");
 }
