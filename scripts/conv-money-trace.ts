@@ -78,7 +78,7 @@ export function parseTraceArgs(argv: readonly string[]): TraceArgs | { error: st
   const order = (val("order") ?? "").replace(/^#/, "") || null;
   if (order !== null && !/^[0-9a-f]{8}$/i.test(order)) return { error: "--order phải là mã ngắn 8 ký tự (vd 91F3641C)" };
   const scan = argv.includes("--scan");
-  if (!scan && !conv) return { error: "cần --conv=<uuid> hoặc --scan" };
+  if (!scan && !conv && !order) return { error: "cần --conv=<uuid>, --order=<mã ngắn> hoặc --scan" };
   const rawDays = val("days");
   const days = rawDays === undefined ? TRACE_DEFAULT_SCAN_DAYS : Number(rawDays);
   if (!Number.isInteger(days) || days < 1 || days > TRACE_MAX_SCAN_DAYS) return { error: `--days phải là số nguyên 1..${TRACE_MAX_SCAN_DAYS}` };
@@ -458,7 +458,17 @@ async function main() {
   let ok = true;
   await withOrganization(org.code, async () => {
     if (args.scan) await scanPatterns(db, args.days, new Date(), args.since);
-    if (args.conv) ok = await traceConversation(db, args.conv, args.order, await loadCtx(db));
+    // Chỉ có mã đơn ngắn (8 ký tự ĐẦU sau «erp-» như màn hình đơn, hoặc 8 ký tự CUỐI như org-order-audit in) ⇒ tìm hội thoại của đơn.
+    let conv = args.conv;
+    if (!conv && args.order) {
+      const o = schema.orders;
+      const rows = await db.select({ id: o.id, conv: o.salesConversationId }).from(o).where(or(like(o.id, `erp-${args.order}%`), like(o.id, `%${args.order}`))).limit(3);
+      const convs = [...new Set(rows.map((r) => r.conv).filter((x): x is string => Boolean(x)))];
+      tomTat(`conv-money-trace: --order=${args.order} khớp ${rows.length} đơn · ${convs.length} hội thoại`);
+      if (convs.length !== 1) ok = false;
+      else conv = convs[0];
+    }
+    if (conv) ok = await traceConversation(db, conv, args.order, await loadCtx(db));
   });
   process.stdout.write("", () => process.exit(ok ? 0 : 1));
 }
