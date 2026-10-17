@@ -3,7 +3,7 @@
   "mission_id": "p0-868-smart-upsell",
   "title": "P0 #868 pha A: upsell/cross-sell thông minh — bỏ cổng bắt buộc mời trước khi lên đơn, mời một lần có lý do, không hỏi lại món đã chọn, đo attach/AOV",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,9 +20,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-16T09:37:22.052Z",
-  "updated_at": "2026-10-17T05:23:29.031Z",
+  "updated_at": "2026-10-17T05:59:09.603Z",
   "last_heartbeat": "2026-10-17T05:23:29.031Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#876 → abcb7da97ba86f68a59bf26b341473b7c1895091"
+  },
   "handoff": {
     "branch": "claude/p0-868-smart-upsell",
     "sha": "867dbd1d554294ce2b43fd7920fc22e087a9c1a8",
