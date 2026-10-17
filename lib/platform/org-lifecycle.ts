@@ -100,7 +100,7 @@ export type DrillEvidence = {
   result: BackupDrillResult | null;
   finishedAt: Date | null;
   ageHours: number | null;
-  /** Trường tuỳ chọn của lời khai (nơi chạy diễn tập) — đã LỌC ký tự, chỉ để in, không tham gia phán quyết. */
+  /** Nơi chạy diễn tập (trường tuỳ chọn `site`, hoặc `tempDatabase = ngoai-vps` của record-external-drill-org #884) — đã LỌC, chỉ để in. */
   site: string | null;
 };
 
@@ -169,7 +169,7 @@ export function drillEvidence(dirReadable: boolean, raw: unknown, database: stri
   const finishedAt = fin && !Number.isNaN(new Date(fin).getTime()) ? new Date(fin) : null;
   if (!result || !finishedAt) return none("UNREADABLE");
   if (inFuture(finishedAt, now)) return none("FUTURE");
-  return { state: "OK", result, finishedAt, ageHours: Math.max(0, hoursBetween(finishedAt, now)), site: safeSite(raw.site) };
+  return { state: "OK", result, finishedAt, ageHours: Math.max(0, hoursBetween(finishedAt, now)), site: safeSite(raw.site) ?? (raw.tempDatabase === "ngoai-vps" ? "ngoai-vps" : null) };
 }
 
 /** Hàm THUẦN: vì sao KHÔNG được lưu trữ. Rỗng ⇔ lưu trữ được (vẫn cần `--confirm` đúng mã). Tổ chức đã ARCHIVED xử lý riêng (không làm gì). */

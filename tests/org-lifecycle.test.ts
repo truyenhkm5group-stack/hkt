@@ -116,6 +116,10 @@ export function testOrgLifecyclePure() {
   assert.equal(external.drill.state, "OK");
   assert.equal(external.drill.site, "offsite-runner");
   assert.deepEqual(refuse(external), []);
+  // Lời khai thật của `record-external-drill-org` (#884): không có `site`, `tempDatabase = ngoai-vps`, `reason` mang tên tệp.
+  const ngoaiVps = ev({ lastSuccess: backupOk(), lastDrill: drillOk({ tempDatabase: "ngoai-vps", reason: "NGOÀI VPS: erp_org_qa-20261017-0300.dump" }) });
+  assert.equal(ngoaiVps.drill.site, "ngoai-vps");
+  assert.deepEqual(refuse(ngoaiVps), [], "diễn tập ngoài VPS đã được VPS đối chiếu ⇒ dùng được");
 
   // ── từ chối: tiền ──
   const withInvoice = noMoney.map((o) => (o.key === "OPEN_INVOICE" ? { ...o, rows: 1, amountVnd: 199_000 } : o));
