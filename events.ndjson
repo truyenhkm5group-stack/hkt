@@ -1,4 +1,3 @@
-{"at":"2026-10-08T19:04:14.094Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"6883bfbf9b23 · run 37829126099 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37829126099"}
 {"at":"2026-10-08T19:08:48.390Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"saas-ops-signals","detail":"feat/saas-ops-signals @ a9aad1fb4769 · 1 lệnh kiểm thử"}
 {"at":"2026-10-08T19:08:58.493Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#692 @ a9aad1fb4769 · Đã PASS ở 9d41af49; a9aad1fb sửa lỗi bảo mật CI bắt được (platform-rbac:242 — kết quả đăng nhập lộ reason/orgCode): publicVerdict dựng lại đúng 3 trường ở verifyLogin + completeProviderLogin (Integration Lead đọc mã), lý do chỉ qua onFailure; kỳ vọng platform-rbac giữ nguyên; testPublicVerdictShape + static guard; runner theo thứ tự sync-fixtures đạt"}
 {"at":"2026-10-08T19:35:07.052Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"registry-refresh-0909","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-17T00:25:40.279Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"p0-871-contact-memory","detail":"claude/p0-871-contact-memory @ 974c7d8ee47e · 2 lệnh kiểm thử"}
 {"at":"2026-10-17T00:26:01.076Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#878 @ 974c7d8ee47e · PASS @91bb52a1; commit mới chỉ gộp main (#874), không xung đột"}
 {"at":"2026-10-17T01:03:27.371Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"p0-871-contact-memory","detail":"#878 @ 974c7d8ee47e → d11467d0ae66 (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-17T01:04:39.197Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"d11467d0ae66 · run 38989255364 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38989255364"}
