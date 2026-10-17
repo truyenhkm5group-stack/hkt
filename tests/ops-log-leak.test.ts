@@ -302,6 +302,7 @@ const KHONG_MA_HOA_DA_RA: Record<string, string> = {
   "backup-status": "scripts/erp-backup.sh status: tệp trạng thái (kết quả, mốc, kích thước, tên remote ngoài máy) + dung lượng ổ — không dữ liệu nghiệp vụ",
   "restore-drill": "scripts/erp-backup.sh restore-drill: tên bảng + số dòng bản khôi phục so với CSDL sống — chỉ số đếm",
   "restore-drill-org": "scripts/erp-backup.sh restore-drill-org: tên CSDL tổ chức + tên bảng lõi + số dòng bản khôi phục so với CSDL sống — chỉ số đếm",
+  "record-external-drill-org": "scripts/erp-backup.sh record-external-drill-org: tên CSDL tổ chức + tên tệp dump + 12 ký tự đầu sha256 + số mục TABLE DATA + mốc thời gian + lý do khớp / không khớp — không đọc dữ liệu bảng, không dữ liệu cá nhân",
   restart: "health",
   "rotate-webhook-secrets": "health; secret mới không in",
   "apply-ai-env": "độ dài khoá; check-integrations --ai chỉ in meta (không in câu trả lời)",

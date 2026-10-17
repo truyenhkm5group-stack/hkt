@@ -1378,6 +1378,7 @@ function khungDienTap(lenh: string, truoc = ""): string {
     '    case "$*" in',
     "      *pg_isready*) exit 0 ;;",
     "      *pg_database_size*) echo 42 ;;",
+    '      *"pg_restore --list"*) for i in $(seq 1 "${STUB_TOC:-3}"); do echo "$i; 0 0 TABLE DATA public t$i erp"; done ;;',
     '      *"pg_restore -U"*) [ "${STUB_RESTORE:-ok}" = ok ] || { echo "pg_restore: error: loi gia" >&2; exit 1; } ;;',
     '      *"select count(*) from"*)',
     '        b="${!#}"; b="${b##*from }"',
@@ -1542,6 +1543,56 @@ export function testDienTapToChucChayThat() {
 const DONG_HO_GIA = 'gio_vn() { date -u -d "$STUB_GIO_VN" "$@"; }';
 /** Ghi MỌI lần xin khoá sao lưu (FD 7) vào nhật ký giả — để khẳng định "không lấy khoá", không chỉ "không dump". */
 const KHOA_GHI_LAI = 'khoa_chong_chong() { echo "KHOA-SAO-LUU" >> "$DOCKER_LOG"; [ "${STUB_KHOA_BAN:-0}" != 1 ]; }';
+
+/**
+ * Diễn tập NGOÀI VPS (chủ shop chọn 17/10/2026): máy chủ KHÔNG tin lời khai — chỉ ghi OK khi sha256 + mục lục của ĐÚNG bản trên
+ * máy khớp và lượt ngoài nằm trong cửa sổ 120 phút. Mốc «bây giờ» đi theo đồng hồ thật vì lệnh đo bằng đồng hồ thật (luật 50).
+ */
+export function testDienTapNgoaiToChucChayThat() {
+  const ten = "erp_org_alpha-20260927-1015.dump";
+  const sha = createHash("sha256").update("PGDMP\n").digest("hex");
+  const luc = (phutTruoc: number) => new Date(Date.now() - phutTruoc * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const ghi = (args: string, env?: Record<string, string>) => {
+    const r = chayBash(khungDienTap(`main record-external-drill-org ${args}`), env);
+    const json = phan(r.ra, "ALPHA");
+    return { exit: phan(r.ra, "EXIT"), drill: json ? (JSON.parse(json) as { result: string; reason: string; tempDatabase: string; dumpFile: string }) : null, docker: phan(r.ra, "DOCKER") };
+  };
+  const dat = ghi(`alpha ${ten} ${sha} 3 ${luc(10)} OK`);
+  assert.equal(dat.exit, "0", "khớp đủ ⇒ ghi nhận");
+  assert.equal(dat.drill?.result, "OK");
+  assert.match(dat.drill?.reason ?? "", /^NGOÀI VPS: /, "bản OK phải nói rõ là diễn tập NGOÀI VPS");
+  assert.equal(dat.drill?.tempDatabase, "ngoai-vps");
+  assert.equal(dat.drill?.dumpFile, ten);
+  assert.ok(!/^run /m.test(dat.docker), "không dựng container nào trên VPS");
+  assert.ok(!/exec (-i )?erp-db (psql|pg_dump)/.test(dat.docker), "không chạm CSDL sống — chỉ đọc mục lục bản dump");
+
+  const saiSha = ghi(`alpha ${ten} ${"0".repeat(64)} 3 ${luc(10)} OK`);
+  assert.equal(saiSha.exit, "1");
+  assert.equal(saiSha.drill?.result, "FAILED");
+  assert.match(saiSha.drill?.reason ?? "", /sha256/, "khác bản ⇒ FAILED nói vì sha256");
+  const saiMuc = ghi(`alpha ${ten} ${sha} 3 ${luc(10)} OK`, { STUB_TOC: "2" });
+  assert.equal(saiMuc.drill?.result, "FAILED");
+  assert.match(saiMuc.drill?.reason ?? "", /mục lục|TABLE DATA/, "số bảng máy ngoài khôi phục ≠ mục lục ⇒ FAILED");
+  const cu = ghi(`alpha ${ten} ${sha} 3 ${luc(180)} OK`);
+  assert.equal(cu.drill?.result, "FAILED", "lượt ngoài quá 120 phút ⇒ không dùng được làm cổng");
+  const tuongLai = ghi(`alpha ${ten} ${sha} 3 ${luc(-30)} OK`);
+  assert.equal(tuongLai.drill?.result, "FAILED", "mốc ở tương lai ⇒ không nhận");
+  const khongBan = ghi(`alpha erp_org_alpha-20990101-0000.dump ${sha} 3 ${luc(10)} OK`);
+  assert.equal(khongBan.drill?.result, "FAILED");
+  assert.match(khongBan.drill?.reason ?? "", /Không có bản/);
+  const khaiHong = ghi(`alpha ${ten} ${sha} 3 ${luc(10)} FAILED`);
+  assert.equal(khaiHong.drill?.result, "FAILED", "máy ngoài khai FAILED ⇒ ghi FAILED");
+
+  for (const sai of [`alpha ${ten} ${sha} 3 ${luc(10)}`, `alpha erp_org_beta-20260927-1015.dump ${sha} 3 ${luc(10)} OK`, `alpha ${ten} ABC 3 ${luc(10)} OK`, `alpha ${ten} ${sha} 3 hom-qua OK`]) {
+    const r = ghi(sai);
+    assert.equal(r.exit, "2", `tham số sai phải thoát 2: ${sai}`);
+    assert.equal(r.drill, null, "tham số sai ⇒ KHÔNG ghi trạng thái nào");
+  }
+  const ops = readFileSync(path.join(path.dirname(SCRIPT), "..", ".github", "workflows", "ops-vps.yml"), "utf8").replace(/\r\n/g, "\n");
+  const nhanh = /^ {14}record-external-drill-org\)\n([\s\S]*?record-external-drill-org \$ARG) ;;\n/m.exec(ops)?.[1] ?? "";
+  assert.ok(nhanh.includes("*[!a-zA-Z0-9_.:\\ -]*") && nhanh.indexOf("exit 1") < nhanh.indexOf("record-external-drill-org $ARG"), "ops lọc ký tự của ô arg TRƯỚC khi tách thành tham số");
+  console.log("✓ Diễn tập ngoài VPS: chỉ ghi OK khi sha256 + mục lục của đúng bản trên máy khớp và trong 120 phút · sai băm / sai mục lục / quá cũ / tương lai / thiếu bản / khai hỏng ⇒ FAILED có lý do · tham số sai ⇒ thoát 2, không ghi · không dựng container, không chạm CSDL sống");
+}
 
 export function testLuotGioToChucMaNguon() {
   const code = boChuThichShell(src().replace(/\r\n/g, "\n"));
@@ -2339,6 +2390,7 @@ export async function testSaoLuu() {
   await testChamSaoLuuToChuc();
   testDienTapToChucMaNguon();
   testDienTapToChucChayThat();
+  testDienTapNgoaiToChucChayThat();
   testLuotGioToChucMaNguon();
   testLuotGioToChucChayThat();
   testDienTapTuanToChucChayThat();
