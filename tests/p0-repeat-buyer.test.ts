@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { customerTextsSince } from "@/lib/sales-chatbot/cart-commitment";
-import { carryCommentTurn, freshPurchaseRound, lastCustomerTextAt, NEW_ROUND_GAP_MS, openConversation, purchaseRoundStart } from "@/lib/sales-chatbot/engine";
+import { carryCommentTurn, COMMENT_BATCH_WINDOW_MS, freshPurchaseRound, lastCustomerTextAt, NEW_ROUND_GAP_MS, openConversation, purchaseRoundStart } from "@/lib/sales-chatbot/engine";
 import { fanpageBotSendersForTests, fanpageVisitorKey } from "@/lib/sales-chatbot/fanpage";
 import { setPageRuntimeReaderForTests } from "@/lib/sales-chatbot/page-runtime";
 import { orderBeforeRound, orderIdempotencyKey } from "@/lib/sales-chatbot/tools";
@@ -152,6 +152,19 @@ async function testChepBinhLuan() {
   assert.equal(await orderBeforeRound(maDon, { roundStartAt: new Date(now.getTime() - NGAY).toISOString() }), true, "đơn 30 ngày trước, lượt mua mở hôm qua ⇒ đơn lượt cũ");
   assert.equal(await orderBeforeRound(maDon, { roundStartAt: new Date(now.getTime() - 40 * NGAY).toISOString() }), false, "đơn thuộc lượt hiện tại ⇒ dùng lại được (gọi lại)");
   assert.equal(await orderBeforeRound(maDon, {}), false, "không có mốc lượt mua ⇒ không chặn");
+
+  // (review #886 · 3) Hội thoại bình luận còn tin khách CŨ không ai trả lời («Cho 1kg» 4 tháng trước) + bình luận mới ⇒ CHỈ tin mới sang.
+  const hopCu = await moi("inbox-binh-luan-cu");
+  const bl6 = await moi("comment-6");
+  await db.insert(m).values([
+    { conversationId: bl6, seq: 2, role: "user", content: [{ type: "text", text: "Cho 1kg" }], createdAt: new Date(now.getTime() - 120 * NGAY) },
+    { conversationId: bl6, seq: 3, role: "user", content: [{ type: "text", text: "Cho 1,5 kg gửi đc cũ" }] },
+  ]);
+  assert.equal(await carryCommentTurn(bl6, hopCu, now, { botReplySent: false }), true);
+  const tin6 = (await tinCua(hopCu)).filter((x) => x.role === "user").map((x) => x.text);
+  assert.ok(tin6.some((x) => /Cho 1,5 kg gửi đc cũ/.test(x)), "bình luận mới sang");
+  assert.ok(!tin6.some((x) => /\] Cho 1kg$/.test(x)), `bình luận 4 tháng trước KHÔNG sang: ${JSON.stringify(tin6)}`);
+  assert.ok(COMMENT_BATCH_WINDOW_MS <= 60 * 60_000, "cửa sổ một lượt bình luận tính bằng phút, không phải ngày");
   console.log("  ✓ bình luận mua lại của khách cũ: chép sang hộp thư cũ, lượt mua mới từ lúc bình luận, giỏ 1,5 kg đi theo · chạy lại không chép hai lần · đơn đang chốt / lượt mua đang chạy / người đang giữ không bị cắt · ALREADY không chép câu bot chưa gửi");
 }
 

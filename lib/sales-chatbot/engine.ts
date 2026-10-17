@@ -1857,6 +1857,12 @@ export async function appendContextMessages(conversationId: string, items: reado
 
 export { purchaseRoundStart };
 
+/**
+ * Cửa sổ của MỘT lượt bình luận khi chép sang hộp thư: chỉ tin khách liền nhau trong chừng này trước tin cuối (review #886 vòng 3 — hội thoại
+ * bình luận có thể dồn tin khách không ai trả lời qua một đợt người giữ; «Cho 1kg» của nhiều tháng trước không phải lời mua lượt này).
+ */
+export const COMMENT_BATCH_WINDOW_MS = 30 * 60_000;
+
 /** Khách im lặng quá chừng này rồi nhắn lại, mà lượt trước không chốt qua bot ⇒ lượt mua MỚI (P0 17/10/2026). Ngắn hơn thì vẫn là một
  * lượt mua: khách hỏi giá hôm nay, chốt vài hôm sau là chuyện thường. */
 export const NEW_ROUND_GAP_MS = 7 * 24 * 3_600_000;
@@ -1903,7 +1909,7 @@ export async function carryCommentTurn(fromConversationId: string, toConversatio
   // MỌI tin khách liền nhau của lượt bình luận («Cho 1,5kg» + «gửi đc cũ» tách hai tin — review #886), không chỉ tin cuối.
   const iCuoi = fm.indexOf(lastUser);
   let iDau = iCuoi;
-  while (iDau > 0 && fm[iDau - 1].role === "user" && !fm[iDau - 1].content.some((b) => b.type === "tool_result")) iDau--;
+  while (iDau > 0 && fm[iDau - 1].role === "user" && !fm[iDau - 1].content.some((b) => b.type === "tool_result") && lastUser.at.getTime() - fm[iDau - 1].at.getTime() <= COMMENT_BATCH_WINDOW_MS) iDau--;
   const luot = fm
     .slice(iDau)
     .filter((m) => (m.role === "user" ? m.seq <= lastUser.seq : opts.botReplySent) && !m.content.some((b) => b.type === "tool_result" || b.type === "tool_use"))
