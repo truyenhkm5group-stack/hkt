@@ -36,7 +36,7 @@ import { publish } from "@/lib/realtime/bus";
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { PANCAKE_PAGES_API, scrubSecrets } from "@/lib/connectors/testers";
 import { chunkText } from "@/lib/messaging/providers";
-import { AI_DOWN_HANDOFF_REASON, appendContextMessages, chatTurn, conversationView, describeCustomerImages, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
+import { AI_DOWN_HANDOFF_REASON, appendContextMessages, carryCommentTurn, chatTurn, conversationView, describeCustomerImages, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
 import { ALREADY_REPLIED_NOTE, alreadyRepliedRows, CONV_OPEN_FAILED_NOTE, HANDOFF_SILENT_NOTE, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, deadLetter, dueForClaim, releaseWithBackoff } from "@/lib/sales-chatbot/inbound-retry";
 import { readQuickReplyImage, rememberPancakeContent } from "@/lib/sales-chatbot/quick-replies";
 import { loadPollState, savePollState } from "@/lib/sales-chatbot/pancake-poll";
@@ -1017,6 +1017,18 @@ async function privateReplyInbox(pageId: string, threadId: string, commentId: st
  * lùi về trả lời công khai. (4) Gửi xong: tìm hộp thư vừa mở ⇒ ghi dấu ở hộp thư đó (khách nhắn tiếp được trả lời nhanh, tiếng
  * vọng không bị coi là nhân viên), chuyển hội thoại sang hộp thư ấy (giữ mạch), gửi ảnh của câu mẫu vào đó.
  */
+/** Hội thoại hộp thư ĐÃ CÓ của khách (khác hội thoại bình luận) ⇒ chép lượt bình luận sang (`carryCommentTurn`). Lỗi không làm hỏng lượt trả lời. */
+async function carryIntoInbox(pageId: string, inboxId: string, commentConversationId: string, now: Date): Promise<void> {
+  try {
+    const db = await getDb();
+    const c = schema.salesChatConversations;
+    const [inbox] = await db.select({ id: c.id }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(pageId, inboxId)))).limit(1);
+    if (inbox && inbox.id !== commentConversationId) await carryCommentTurn(commentConversationId, inbox.id, now);
+  } catch (e) {
+    console.warn(`[fanpage] không chép được lượt bình luận sang hộp thư: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 async function deliverCommentReply(input: CommentReplyInput, deps: FanpageDeps): Promise<CommentReplyResult> {
   const fetchImpl = deps.fetch ?? fetch;
   const now = deps.now ?? (() => new Date());
@@ -1026,7 +1038,11 @@ async function deliverCommentReply(input: CommentReplyInput, deps: FanpageDeps):
   const text = input.text.trim().slice(0, TEXT_MAX);
   if (!text) return { kind: "FAILED", reason: "Bot không soạn được câu trả lời cho bình luận" };
   const before = await privateReplyInbox(pageId, threadId, commentId, token, fetchImpl);
-  if (before.inboxId) return { kind: "ALREADY", reason: "Bình luận đã được nhắn riêng (Pancake tự động / nhân viên) — bot không nhắn lần hai" };
+  if (before.inboxId) {
+    // Pancake tự động / nhân viên đã nhắn riêng: bot không nhắn lần hai, nhưng lời mua trong bình luận vẫn phải đi tiếp ở hộp thư (P0 17/10).
+    await carryIntoInbox(pageId, before.inboxId, input.conversationId, now());
+    return { kind: "ALREADY", reason: "Bình luận đã được nhắn riêng (Pancake tự động / nhân viên) — bot không nhắn lần hai" };
+  }
   const db = await getDb();
   const t = schema.salesChatInbound;
   await db.insert(t).values({ pageId, threadId: PRIVATE_REPLY_THREAD, messageId: `bot-out:${randomUUID()}`, text: normalizeEcho(text), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
@@ -1056,6 +1072,8 @@ async function deliverCommentReply(input: CommentReplyInput, deps: FanpageDeps):
     .set({ visitorKey: fanpageVisitorKey(pageId, inboxId), updatedAt: now() })
     .where(and(eq(c.id, input.conversationId), sql`not exists (select 1 from ${c} x where x.channel = 'FANPAGE' and x.visitor_key = ${fanpageVisitorKey(pageId, inboxId)})`))
     .catch(() => undefined);
+  // Khách cũ đã có hội thoại hộp thư ⇒ bước chuyển trên bỏ qua; chép lượt bình luận sang hội thoại đó (P0 17/10, `carryCommentTurn`).
+  await carryIntoInbox(pageId, inboxId, input.conversationId, now());
   let warning: string | null = null;
   if (input.imageIds.length) {
     const up = await contentIdsFor(pageId, token, input.imageIds, fetchImpl, now());

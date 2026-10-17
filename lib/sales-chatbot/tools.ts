@@ -113,6 +113,8 @@ export type ChatState = {
   quote?: QuoteSnapshot;
   /** Mốc REVISION của giỏ — ghi cả khi giỏ bị XOÁ (lượt mua mới), để một lượt cũ chạy chậm không dựng lại giỏ đã xoá (review 15/10/2026). */
   cartRev?: string;
+  /** Mốc bắt đầu lượt mua mới KHÔNG do bot chốt đơn mở ra (khách quay lại sau `NEW_ROUND_GAP_MS` · bình luận mua lại mang sang hộp thư) — `purchaseRoundStart`. */
+  roundStartAt?: string;
   /** Mọi TỔNG / tiền hàng máy chủ đã tính cho các giỏ / đơn nháp trong hội thoại (`noteSeenTotals`) — hàng rào chặn nói lại tổng của giỏ CŨ. */
   seenTotals?: number[];
   /**
