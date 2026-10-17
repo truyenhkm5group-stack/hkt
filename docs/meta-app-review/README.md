@@ -39,6 +39,8 @@ bản này ERP tự tách được bằng vai trò của người bấm trong ap
 4. [04-reviewer-instructions-en.md](04-reviewer-instructions-en.md) — đoạn tiếng Anh dán thẳng vào các ô của Meta.
 5. [05-kiem-toan-ho-so-17-10.md](05-kiem-toan-ho-so-17-10.md) — kiểm toán hồ sơ nộp 07/10, bốn video theo từng quyền, việc
    kỹ thuật chặn trước khi quay (K3 · K4 · K8), việc chủ tài khoản Meta làm (O1–O10).
+6. [06-kiem-thu-thuc-te-va-checklist.md](06-kiem-thu-thuc-te-va-checklist.md) — rà soát ảnh hưởng + bảo mật của K3/K8, kiểm thử
+   thực tế cô lập bằng cửa hàng demo (kèm cách hoàn tác), checklist thao tác Meta của chủ shop.
 
 ## Thứ tự làm
 
