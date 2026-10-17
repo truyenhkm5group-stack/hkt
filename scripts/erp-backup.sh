@@ -1259,13 +1259,14 @@ cmd_sao_luu_gio_to_chuc() {
 # giải mã trên máy đó → Postgres 16 cô lập → pg_restore + kiểm toàn vẹn + chạy thử migration → xoá. Dữ liệu và khoá giải mã
 # KHÔNG đi qua GitHub; lệnh này chỉ nhận SỐ (tên tệp, sha256, số mục, mốc, kết luận).
 #
-# Lệnh KHÔNG tin lời khai. Nó chỉ ghi last-drill.json = OK khi TẤT CẢ đúng:
-#   · bản dump mang ĐÚNG tên ấy có trên máy, trong thư mục của tổ chức (cùng bản đã đẩy lên Drive);
-#   · sha256 của bản trên máy TRÙNG sha256 mà máy ngoài đã khôi phục — cùng một bản, từng byte;
-#   · số mục TABLE DATA trong `pg_restore --list` của bản trên máy TRÙNG số bảng máy ngoài khôi phục được;
-#   · lượt ngoài kết thúc không quá CUA_SO_DIEN_TAP_NGOAI_PHUT phút trước, không ở tương lai, và khai OK.
-# Sai một điều ⇒ ghi FAILED kèm lý do. Lý do của bản OK ghi rõ «NGOÀI VPS» và CSDL tạm là `ngoai-vps`, để không ai nhầm với
-# lượt diễn tập trên máy. Bằng chứng đầy đủ (đếm từng bảng, giờ chạy migration) nằm ở máy chạy diễn tập.
+# PHẦN NÀO VPS XÁC MINH, PHẦN NÀO LÀ LỜI KHAI — nói thẳng, vì một bản ghi OK trông như nhau dù nó đứng trên cái gì:
+#   VPS XÁC MINH được: bản dump mang ĐÚNG tên ấy có trên máy (cùng bản đã đẩy lên Drive); sha256 của nó TRÙNG sha256 máy ngoài
+#     báo — cùng một bản, từng byte; số mục TABLE DATA trong `pg_restore --list` của nó TRÙNG số máy ngoài báo; mốc kết thúc
+#     nằm trong 0–CUA_SO_DIEN_TAP_NGOAI_PHUT phút.
+#   LỜI KHAI của máy ngoài, VPS KHÔNG kiểm được: rằng nó ĐÃ pg_restore thật vào Postgres cô lập và các bảng có dòng. Số mục
+#     TABLE DATA tự nó tính được chỉ bằng `pg_restore --list`, không cần khôi phục — nên khớp số KHÔNG chứng minh đã khôi phục.
+# Sai một điều VPS xác minh được ⇒ ghi FAILED kèm lý do. Lý do của bản OK nói đúng hai phần trên, CSDL tạm là `ngoai-vps`, để
+# không ai nhầm với lượt diễn tập trên máy. Bằng chứng đầy đủ (đếm dòng từng bảng, giờ chạy migration) nằm ở máy chạy diễn tập.
 CUA_SO_DIEN_TAP_NGOAI_PHUT=120
 cmd_ghi_dien_tap_ngoai_to_chuc() { # $1=mã $2=tệp dump $3=sha256 $4=số TABLE DATA $5=finishedAt ISO (UTC) $6=OK|FAILED
   local csdl ten sha toc xong ket ban bat_dau sha_may toc_may moc_xong tuoi ly_do=""
@@ -1304,7 +1305,7 @@ cmd_ghi_dien_tap_ngoai_to_chuc() { # $1=mã $2=tệp dump $3=sha256 $4=số TABL
     ghi_dien_tap_to_chuc "$csdl" "FAILED" "NGOÀI VPS: $ly_do" "$ten" "ngoai-vps" "[]" "$bat_dau"
     loi "Diễn tập ngoài VPS của $csdl KHÔNG được ghi nhận: $ly_do"; return 1
   fi
-  ghi_dien_tap_to_chuc "$csdl" "OK" "NGOÀI VPS: khôi phục thật trên máy riêng (Postgres cô lập), kết thúc $xong · sha256 ${sha:0:12}… khớp bản trên máy · $toc bảng có dữ liệu khớp mục lục" "$ten" "ngoai-vps" "[]" "$bat_dau"
+  ghi_dien_tap_to_chuc "$csdl" "OK" "NGOÀI VPS: máy ngoài KHAI đã khôi phục thật (Postgres cô lập), kết thúc $xong · VPS xác minh: sha256 ${sha:0:12}… khớp bản trên máy · $toc mục TABLE DATA khớp mục lục" "$ten" "ngoai-vps" "[]" "$bat_dau"
   bao "diễn tập NGOÀI VPS của $csdl: ĐÃ GHI NHẬN — $ten · sha256 khớp · $toc bảng khớp · kết thúc $tuoi phút trước"
   return 0
 }
