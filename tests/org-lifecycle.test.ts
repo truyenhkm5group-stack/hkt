@@ -338,10 +338,22 @@ export async function testOrgLifecycleDb() {
     await pdb.execute(sql`update platform_invoices set status = 'VOID', void_reason = 'kiểm thử' where org_code = ${MA} and status = 'OPEN'`);
     await pdb.execute(sql`delete from platform_audit_log where target_org_code = ${MA}`);
 
-    // 5 · SỔ MIGRATION TỤT: bỏ mục cuối khỏi sổ của CSDL tổ chức (như một CSDL đứng ngoài migration trong lúc lưu trữ).
+    // 5 · SỔ MIGRATION TỤT: bỏ ĐÚNG mục 0247 (ghim THEO TÊN, không theo vị trí — 0247 chỉ `CREATE INDEX IF NOT EXISTS`, áp lại vô hại)
+    //     khỏi sổ của CSDL tổ chức, như một CSDL đứng ngoài migration trong lúc lưu trữ. Bài kiểm KHÔNG BAO GIỜ áp lại migration nào
+    //     khác (AGENTS.md mục 50 / 65): migration mới vào kho sau 0247 không đổi được kết luận của bài này.
     const entries = readJournalEntries();
-    const last = entries[entries.length - 1];
-    await withOrganization(MA, async () => (await getDb()).execute(sql`delete from "drizzle"."__drizzle_migrations" where created_at = ${last.when}`));
+    const PIN = "0247_sales_chat_inbound_text_hash_idx";
+    const pin = entries.find((e) => e.tag === PIN);
+    assert.ok(pin, `sổ migration phải còn ${PIN}`);
+    assert.match(readFileSync(path.join(goc, "drizzle", `${PIN}.sql`), "utf8").replace(/--.*$/gm, ""), /create index if not exists/i, `${PIN} phải idempotent`);
+    const pinIsLast = entries[entries.length - 1].tag === PIN;
+    const saved = await withOrganization(MA, async () => {
+      const db = await getDb();
+      const [row] = rowsOf<{ hash: string; created_at: string | number }>(await db.execute(sql`select hash, created_at from "drizzle"."__drizzle_migrations" where created_at = ${pin.when}`));
+      await db.execute(sql`delete from "drizzle"."__drizzle_migrations" where created_at = ${pin.when}`);
+      return row;
+    });
+    assert.ok(saved, "CSDL tổ chức đã áp 0247 trước khi bị bỏ khỏi sổ");
 
     // 6 · ACTIVE ⇒ lưu trữ: ĐÚNG cột trạng thái + nhật ký; mọi cửa vào từ chối.
     const r3 = await applyArchive(MA, { confirm: MA }, deps);
@@ -355,7 +367,7 @@ export async function testOrgLifecycleDb() {
     assert.equal((await applyArchive(MA, { confirm: MA }, deps)).outcome, "NOOP", "đã lưu trữ ⇒ không làm gì");
     // Sổ đang tụt đúng một mục (đo qua handle CHỈ ĐỌC — không migrate).
     const insp = await getDbForInspection({ code: MA, isHome: false });
-    assert.equal(await checkDb("kiểm thử (chỉ đọc)", insp, entries), 1, "CSDL lưu trữ thiếu đúng mục cuối");
+    assert.equal(await checkDb("kiểm thử (chỉ đọc)", insp, entries), 1, "CSDL lưu trữ thiếu đúng mục 0247");
     await releaseOrganizationDb(MA, { inspectionOnly: true });
 
     // 7 · đối chiếu không đạt ⇒ VẪN ARCHIVED (+ reactivate:stopped).
@@ -365,7 +377,19 @@ export async function testOrgLifecycleDb() {
     assert.equal((await applyReactivate(MA, { confirm: "khac" }, { verify: okVerify })).outcome, "REFUSED");
     assert.deepEqual(await auditSubjects(MA, "ORG_REACTIVATE"), ["reactivate:start", "reactivate:stopped"]);
 
-    // 8 · kích hoạt lại thật: migrate đưa sổ về khớp ⇒ về ĐÚNG trạng thái cũ (ACTIVE).
+    // 8 · kích hoạt lại thật (migrate + checkDb). Hai nhánh, CẢ HAI đều là khẳng định về hành vi thật, không nhánh nào bỏ qua:
+    //   · 0247 là mục CUỐI ⇒ drizzle áp lại nó ⇒ sổ khớp ⇒ về ĐÚNG trạng thái cũ (ACTIVE).
+    //   · đã có migration SAU 0247 ⇒ drizzle KHÔNG áp lại mục có mốc cũ hơn mốc đã áp (bị bỏ qua vĩnh viễn) ⇒ checkDb MISSING ⇒ VẪN
+    //     ARCHIVED. Rồi trả dòng sổ về đúng như cũ (không chạy SQL migration nào) và kích hoạt lại ⇒ ACTIVE.
+    if (!pinIsLast) {
+      const rSkip = await applyReactivate(MA, { confirm: MA }, { verify: realVerify });
+      assert.equal(rSkip.outcome, "VERIFY_FAILED", "mục bị bỏ qua vĩnh viễn ⇒ đối chiếu không đạt ⇒ không bật");
+      assert.equal(await orgStatus(MA), "ARCHIVED");
+      // Ghi lại dòng sổ qua lối kích hoạt lại (handle GHI của chính tiến trình kiểm thử), đúng hash + mốc đã lưu.
+      const w = await openForReactivation(MA);
+      await w.execute(sql`insert into "drizzle"."__drizzle_migrations" (hash, created_at) values (${saved.hash}, ${saved.created_at})`);
+      await releaseOrganizationDb(MA);
+    }
     const r6 = await applyReactivate(MA, { confirm: MA }, { verify: realVerify });
     assert.ok(r6.outcome === "DONE" && r6.status === "ACTIVE" && !r6.fallback, r6.lines.join(" | "));
     assert.equal(await orgStatus(MA), "ACTIVE");
@@ -386,6 +410,8 @@ export async function testOrgLifecycleDb() {
     await setStatus(MA, "ACTIVE");
     assert.equal((await applyArchive(MA, { confirm: MA }, deps)).outcome, "DONE");
     await pdb.execute(sql`delete from platform_audit_log where target_org_code = ${MA} and action = 'ORG_ARCHIVE'`);
+    // Nhật ký của tổ chức CŨ cùng mã (ghi TRƯỚC lúc tạo dòng tổ chức hiện tại) không được dùng làm trạng thái cũ.
+    await pdb.insert(schema.platformAuditLog).values({ targetOrgCode: MA, action: "ORG_ARCHIVE", subject: "archive:done", before: { status: "ACTIVE" }, after: { status: "ARCHIVED" }, source: "TEST", at: new Date(Date.now() - 400 * 86_400_000) });
     const r8 = await applyReactivate(MA, { confirm: MA }, { verify: okVerify });
     assert.ok(r8.outcome === "DONE" && r8.status === "SUSPENDED" && r8.fallback, r8.lines.join(" | "));
     assert.ok(r8.lines.some((l) => l.includes("KHÔNG đọc được trạng thái trước khi lưu trữ")), "lùi về SUSPENDED phải được nói ra");
@@ -393,5 +419,5 @@ export async function testOrgLifecycleDb() {
   } finally {
     await cleanup();
   }
-  console.log("  ✓ org-lifecycle (CSDL): từ chối khi thiếu sao lưu / diễn tập / còn hoá đơn MỞ / dựng hỏng · tiền về giữa lượt ⇒ hoàn tác + archive:stopped · lưu trữ đổi ĐÚNG cột trạng thái · getDbFor / withOrganization / fan-out từ chối · sổ migration tụt ⇒ kích hoạt lại migrate cho khớp ⇒ ACTIVE · đình chỉ ⇒ về đình chỉ · mất nhật ký ⇒ SUSPENDED · dữ liệu còn nguyên");
+  console.log("  ✓ org-lifecycle (CSDL): từ chối khi thiếu sao lưu / diễn tập / còn hoá đơn MỞ / dựng hỏng · tiền về giữa lượt ⇒ hoàn tác + archive:stopped · lưu trữ đổi ĐÚNG cột trạng thái · getDbFor / withOrganization / fan-out từ chối · sổ migration tụt ⇒ kích hoạt lại migrate cho khớp ⇒ ACTIVE · đình chỉ ⇒ về đình chỉ · mất nhật ký (hoặc chỉ còn nhật ký của tổ chức cũ cùng mã) ⇒ SUSPENDED · dữ liệu còn nguyên");
 }

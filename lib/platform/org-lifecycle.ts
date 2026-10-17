@@ -467,12 +467,18 @@ export async function applyArchive(code: string, opts: { confirm: string | null 
       lines.push(`${code} · DỪNG — ${error.why}. Đã HOÀN TÁC, trạng thái giữ nguyên ${prior}.`);
       return { outcome: "CHANGED_DURING_RUN", lines };
     }
+    // ĐÃ COMMIT: từ đây trạng thái đã đổi — mọi lỗi phía sau KHÔNG được ghi thành "stopped" (đó là một lời nói dối).
+    done = true;
     invalidateOrganizations();
     invalidateCapabilities(code);
-    await releaseOrganizationDb(code);
-    // `before.status` của dòng này là TRẠNG THÁI CŨ mà lượt kích hoạt lại khôi phục (`priorStatusFromAudit`).
-    await platformAudit({ action: "ORG_ARCHIVE", targetOrgCode: code, subject: "archive:done", before: { status: prior }, after: { status: "ARCHIVED" }, reason: ARCHIVE_REASON, source: "SCRIPT", actor: null });
-    done = true;
+    try {
+      await releaseOrganizationDb(code);
+      // `before.status` của dòng này là TRẠNG THÁI CŨ mà lượt kích hoạt lại khôi phục (`priorStatusFromAudit`).
+      await platformAudit({ action: "ORG_ARCHIVE", targetOrgCode: code, subject: "archive:done", before: { status: prior }, after: { status: "ARCHIVED" }, reason: ARCHIVE_REASON, source: "SCRIPT", actor: null });
+    } catch (error) {
+      await platformAudit({ action: "ORG_ARCHIVE", targetOrgCode: code, subject: "archive:done-unlogged", before: { status: prior }, after: { status: "ARCHIVED", error: errorClass(error) }, reason: ARCHIVE_REASON, source: "SCRIPT", actor: null }).catch(() => undefined);
+      lines.push(`${code} · CẢNH BÁO: trạng thái ĐÃ đổi ${prior} → ARCHIVED (giao dịch đã commit) nhưng bước sau đó lỗi (${errorClass(error)}) — ghi archive:done-unlogged; chạy lại ops chỉ báo «đã ARCHIVED»`);
+    }
   } catch (error) {
     stopped = { error: errorClass(error) };
     throw error;
@@ -491,11 +497,20 @@ export function openForReactivation(code: string): Promise<Db> {
   return getDbFor({ code, isHome: false }, { reactivation: true });
 }
 
-/** Trạng thái trước khi lưu trữ, đọc từ `archive:done` GẦN NHẤT của tổ chức. `null` = không có / không đọc được. */
+/**
+ * Trạng thái trước khi lưu trữ, đọc từ `archive:done` (hoặc `archive:done-unlogged`) GẦN NHẤT của tổ chức. CHỈ nhật ký ghi SAU lúc tạo
+ * dòng tổ chức HIỆN TẠI: mã tổ chức được dùng lại sau offboard (lib/onboarding/quick.ts::freeOrgCode), và tổ chức mới không được thừa
+ * kế trạng thái của tổ chức cũ cùng mã. `null` = không có / không đọc được.
+ */
 export async function priorStatusFromAudit(exec: Exec, code: string): Promise<string | null> {
   try {
     const [r] = rowsOf<{ s: string | null }>(
-      await exec.execute(sql`select before->>'status' as s from platform_audit_log where target_org_code = ${code} and action = 'ORG_ARCHIVE' and subject = 'archive:done' order by at desc, id desc limit 1`),
+      await exec.execute(
+        sql`select a.before->>'status' as s from platform_audit_log a
+            join platform_organizations o on o.code = a.target_org_code
+            where a.target_org_code = ${code} and a.action = 'ORG_ARCHIVE' and a.subject in ('archive:done', 'archive:done-unlogged') and a.at >= o.created_at
+            order by a.at desc, a.id desc limit 1`,
+      ),
     );
     return r?.s ?? null;
   } catch {
@@ -553,11 +568,17 @@ export async function applyReactivate(code: string, opts: { confirm: string | nu
       lines.push(`${code} · DỪNG — ${error.why}.`);
       return { outcome: "CHANGED_DURING_RUN", lines };
     }
+    // ĐÃ COMMIT: trạng thái đã đổi — lỗi phía sau KHÔNG được ghi thành "stopped".
+    done = true;
     invalidateOrganizations();
     invalidateCapabilities(code);
-    await releaseOrganizationDb(code);
-    await platformAudit({ action: "ORG_REACTIVATE", targetOrgCode: code, subject: "reactivate:done", before: { status: "ARCHIVED", prior }, after: { status: target.status, fallback: target.fallback }, reason: REACTIVATE_REASON, source: "SCRIPT", actor: null });
-    done = true;
+    try {
+      await releaseOrganizationDb(code);
+      await platformAudit({ action: "ORG_REACTIVATE", targetOrgCode: code, subject: "reactivate:done", before: { status: "ARCHIVED", prior }, after: { status: target.status, fallback: target.fallback }, reason: REACTIVATE_REASON, source: "SCRIPT", actor: null });
+    } catch (error) {
+      await platformAudit({ action: "ORG_REACTIVATE", targetOrgCode: code, subject: "reactivate:done-unlogged", before: { status: "ARCHIVED", prior }, after: { status: target.status, fallback: target.fallback, error: errorClass(error) }, reason: REACTIVATE_REASON, source: "SCRIPT", actor: null }).catch(() => undefined);
+      lines.push(`${code} · CẢNH BÁO: trạng thái ĐÃ đổi ARCHIVED → ${target.status} (giao dịch đã commit) nhưng bước sau đó lỗi (${errorClass(error)}) — ghi reactivate:done-unlogged`);
+    }
   } catch (error) {
     stopped = { error: errorClass(error) };
     throw error;
