@@ -21,6 +21,7 @@
  * Không hàm nào ở đây đổi giỏ, số lượng hay tiền — lời mời chỉ là chữ; món mời vào đơn vẫn chỉ qua lời đồng ý tường minh của khách
  * (`lineBasisViolation`, cart-commitment.ts).
  */
+import { purchaseRoundStart } from "@/lib/sales-chatbot/purchase-round";
 import { resolveRecipientPlace } from "@/lib/address/vn-address";
 import { amountsIn, declinesAddOnOnly, labelsMatch, namedProductsIn, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
 import { foldVi } from "@/lib/sales-chatbot/text";
@@ -88,12 +89,12 @@ export function offerWindow(input: { state: OfferStateView; lastUserText: string
 /**
  * Hồ sơ nhận hàng thuộc LƯỢT MUA HIỆN TẠI (review PR #876): lượt mua mới (engine — đơn cũ sang `pastOrders`) xoá nháp nhưng GIỮ
  * `customer` (gợi ý khách cũ), nên «có `customer`» đóng cửa sổ ORDERING mãi mãi sau đơn đầu. Mốc là lúc lượt mua bắt đầu (lúc chốt
- * của đơn gần nhất trong `pastOrders`, cùng mốc `purchaseRoundStart` của engine): hồ sơ ghi TRƯỚC mốc đó (hay không có mốc ghi) là
+ * của đơn gần nhất trong `pastOrders`, cùng mốc `purchaseRoundStart` — purchase-round.ts, gồm cả `roundStartAt`): hồ sơ ghi TRƯỚC mốc đó (hay không có mốc ghi) là
  * của lượt mua cũ. HÀM THUẦN.
  */
-function customerThisRound(s: Pick<ChatState, "customer" | "pastOrders">): boolean {
+function customerThisRound(s: Pick<ChatState, "customer" | "pastOrders" | "roundStartAt">): boolean {
   if (!s.customer) return false;
-  const start = Math.max(...(s.pastOrders ?? []).map((o) => Date.parse(o.at)).filter((n) => Number.isFinite(n)), -Infinity);
+  const start = purchaseRoundStart(s)?.getTime() ?? NaN;
   if (!Number.isFinite(start)) return true;
   const at = s.customer.at ? Date.parse(s.customer.at) : NaN;
   return Number.isFinite(at) && at > start;

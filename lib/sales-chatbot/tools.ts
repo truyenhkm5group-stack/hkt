@@ -19,6 +19,7 @@
 import { and, desc, eq, inArray, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
+import { purchaseRoundStart } from "@/lib/sales-chatbot/purchase-round";
 import type { AiToolDef } from "@/lib/ai/provider";
 import { freeSlots, slotBookable, vnDayOffset, vnInstant, WEEKDAY_LABEL } from "@/lib/constants/booking";
 import { isManualOrderId, manualOrderGaps, manualOrderShortCode, manualOrderTotals } from "@/lib/constants/manual-orders";
@@ -570,13 +571,32 @@ function unitPriceFor(it: CatalogItem, quantity: number, books: Awaited<ReturnTy
 }
 
 /**
+ * Khoá LẦN MUA của đơn bot tạo: cùng lượt mua ⇒ cùng khoá ⇒ gọi lại trả ĐÚNG đơn đầu. Lượt mua MỚI phải có khoá MỚI — trước đây khoá chỉ
+ * đổi khi đơn bot CHỐT sang `pastOrders`, nên một lượt mua cắt vì khách quay lại sau thời gian dài (nháp bỏ dở, không chốt) giữ nguyên
+ * khoá và lõi đơn trả lại ĐƠN CŨ (review #886, P0 17/10/2026). `roundStartAt` vào khoá; hội thoại chưa có nó giữ đúng khoá cũ. HÀM THUẦN.
+ */
+export function orderIdempotencyKey(conversationId: string, state: Pick<ChatState, "pastOrders" | "roundStartAt">): string {
+  const r = state.roundStartAt ? Date.parse(state.roundStartAt) : NaN;
+  return `sales-chat:${conversationId}:${state.pastOrders?.length ?? 0}${Number.isFinite(r) ? `:r${r}` : ""}`;
+}
+
+/**
  * Chế độ giá + khoá LẦN MUA cho lõi đơn: lõi tính lại đơn giá theo đúng chế độ bot đang báo giá, và tạo đơn nháp hai lần
  * cho cùng một lượt mua (lỗi mạng, gọi lại) trả về ĐÚNG đơn đầu — không đơn thứ hai.
  */
 function agentOrderOpts(ctx: ToolContext, state: ChatState, creating: boolean, quote?: AgentQuoteClaim, holdNew = false): AgentOrderOptions {
   // Bảng giá RIÊNG của khách chỉ khi danh tính đã xác minh — lõi đơn tính lại đúng chế độ này nên báo giá và đơn không lệch nhau.
   const pricing = !ctx.config.wholesalePricing ? "RETAIL" : verifiedCustomerId(state) ? "PRICE_BOOK" : "DEFAULT_BOOK";
-  return { pricing, idempotencyKey: creating ? `sales-chat:${ctx.conversationId}:${state.pastOrders?.length ?? 0}` : null, allowShortStock: ctx.config.sellWithoutStockCheck, ...(quote ? { quote } : {}), ...(holdNew ? { holdNew: true } : {}) };
+  return { pricing, idempotencyKey: creating ? orderIdempotencyKey(ctx.conversationId, state) : null, allowShortStock: ctx.config.sellWithoutStockCheck, ...(quote ? { quote } : {}), ...(holdNew ? { holdNew: true } : {}) };
+}
+
+/** Đơn `orderId` được tạo TRƯỚC mốc lượt mua hiện tại (`purchaseRoundStart`) — không có mốc ⇒ `false` (cả hội thoại là một lượt). */
+async function orderBeforeRound(orderId: string, state: Pick<ChatState, "pastOrders" | "roundStartAt">): Promise<boolean> {
+  const start = purchaseRoundStart(state);
+  if (!start) return false;
+  const db = await getDb();
+  const [o] = await db.select({ at: schema.orders.insertedAt }).from(schema.orders).where(eq(schema.orders.id, orderId)).limit(1);
+  return Boolean(o?.at && o.at.getTime() < start.getTime());
 }
 
 /** Giỏ đã tính + BÁO GIÁ MÁY CHỦ của chính giỏ đó (`quote.ts` — một phép tính, một mã báo giá). */
@@ -1189,6 +1209,11 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
           ? await updateOrderAsAgent(ctx.agent, draft.orderId, payload, { ...agentOrderOpts(ctx, state, false, quoteClaim, holdNew), ...review })
           : await createOrderAsAgent(ctx.agent, payload, { ...agentOrderOpts(ctx, state, true, quoteClaim, holdNew), adId: await chatOrderAdId(ctx.conversationId, now), ...review });
         if (!r.ok) return err("Đơn nháp: lỗi", failureText(r), state, omsSignal(r));
+        // Lõi đơn trả lại một đơn ĐÃ CÓ theo khoá (`reused`) mà đơn ấy tạo TRƯỚC lượt mua này ⇒ đó là đơn của lượt mua cũ: KHÔNG báo
+        // «đã lên đơn» (review #886 — đúng triệu chứng 42f28794: khách thấy 1,5 kg, CSDL vẫn là đơn 1 kg cũ). Đơn mới của lượt này không bị chặn.
+        if (!draft.orderId && "reused" in r && r.reused && (await orderBeforeRound(r.id, state))) {
+          return err("Đơn nháp: lỗi", "Khoá đơn trỏ tới ĐƠN CỦA LƯỢT MUA TRƯỚC — không dùng lại đơn cũ cho lượt mua này; chuyển nhân viên kiểm.", state);
+        }
         markOrderWritten(ctx.writeMark, r.id);
         draft.orderId = r.id;
       }

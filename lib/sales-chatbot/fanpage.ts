@@ -1018,14 +1018,15 @@ async function privateReplyInbox(pageId: string, threadId: string, commentId: st
  * vọng không bị coi là nhân viên), chuyển hội thoại sang hộp thư ấy (giữ mạch), gửi ảnh của câu mẫu vào đó.
  */
 /** Hội thoại hộp thư ĐÃ CÓ của khách (khác hội thoại bình luận) ⇒ chép lượt bình luận sang (`carryCommentTurn`). Lỗi không làm hỏng lượt trả lời. */
-async function carryIntoInbox(pageId: string, inboxId: string, commentConversationId: string, now: Date): Promise<void> {
+async function carryIntoInbox(pageId: string, inboxId: string, commentConversationId: string, now: Date, botReplySent: boolean): Promise<void> {
   try {
     const db = await getDb();
     const c = schema.salesChatConversations;
     const [inbox] = await db.select({ id: c.id }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(pageId, inboxId)))).limit(1);
-    if (inbox && inbox.id !== commentConversationId) await carryCommentTurn(commentConversationId, inbox.id, now);
+    if (inbox && inbox.id !== commentConversationId) await carryCommentTurn(commentConversationId, inbox.id, now, { botReplySent });
   } catch (e) {
-    console.warn(`[fanpage] không chép được lượt bình luận sang hộp thư: ${e instanceof Error ? e.message : String(e)}`);
+    // Chỉ tên lỗi: thông điệp lỗi Drizzle mang cả tham số câu SQL (chữ khách) — không đưa vào log.
+    console.warn(`[fanpage] không chép được lượt bình luận sang hộp thư: ${e instanceof Error ? e.name : "lỗi"}`);
   }
 }
 
@@ -1040,7 +1041,7 @@ async function deliverCommentReply(input: CommentReplyInput, deps: FanpageDeps):
   const before = await privateReplyInbox(pageId, threadId, commentId, token, fetchImpl);
   if (before.inboxId) {
     // Pancake tự động / nhân viên đã nhắn riêng: bot không nhắn lần hai, nhưng lời mua trong bình luận vẫn phải đi tiếp ở hộp thư (P0 17/10).
-    await carryIntoInbox(pageId, before.inboxId, input.conversationId, now());
+    await carryIntoInbox(pageId, before.inboxId, input.conversationId, now(), false);
     return { kind: "ALREADY", reason: "Bình luận đã được nhắn riêng (Pancake tự động / nhân viên) — bot không nhắn lần hai" };
   }
   const db = await getDb();
@@ -1073,7 +1074,7 @@ async function deliverCommentReply(input: CommentReplyInput, deps: FanpageDeps):
     .where(and(eq(c.id, input.conversationId), sql`not exists (select 1 from ${c} x where x.channel = 'FANPAGE' and x.visitor_key = ${fanpageVisitorKey(pageId, inboxId)})`))
     .catch(() => undefined);
   // Khách cũ đã có hội thoại hộp thư ⇒ bước chuyển trên bỏ qua; chép lượt bình luận sang hội thoại đó (P0 17/10, `carryCommentTurn`).
-  await carryIntoInbox(pageId, inboxId, input.conversationId, now());
+  await carryIntoInbox(pageId, inboxId, input.conversationId, now(), true);
   let warning: string | null = null;
   if (input.imageIds.length) {
     const up = await contentIdsFor(pageId, token, input.imageIds, fetchImpl, now());
