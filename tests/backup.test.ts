@@ -1558,6 +1558,16 @@ export function testLuotGioToChucMaNguon() {
   assert.match(gio, /giu_khoa 8 "\$KHOA_DOC_DB" -x "\$TRAN_CHO_KHOA_GIO_GIAY"/);
   assert.match(gio, /giu_khoa 9 "\$KHOA_VONG_DOI" -s "\$TRAN_CHO_KHOA_GIO_GIAY"/);
   assert.ok(hangSo("TRAN_CHO_KHOA_GIO_GIAY") < 3600, "lượt giờ chờ khoá phải NGẮN hơn một giờ — không được treo sang lượt giờ sau");
+  // Phạm vi khoá (chủ shop duyệt 17/10/2026): lượt giờ nhả FD 8 + FD 9 CHỈ SAU khi bản đã kiểm toàn vẹn, TRƯỚC bước đẩy ngoài
+  // máy — 16/10 lượt giờ giữ khoá đọc nặng 10–70 phút vì Drive, ba lượt diễn tập liền hết 900 s chờ. FD 7 (chống chạy trùng) giữ.
+  const mot = thanHam("sao_luu_mot_to_chuc");
+  const iNha = mot.indexOf('if [ "${NHA_KHOA_TRUOC_NGOAI_MAY:-0}" = "1" ]; then exec 8>&- 9>&-; fi');
+  assert.ok(iNha > mot.indexOf("pg_restore --list") && iNha > mot.indexOf("bang_loi_thieu") && iNha > mot.indexOf('mv -f "$tam"'), "chỉ nhả khoá SAU khi dump + kiểm mục lục + bảng lõi + đổi tên đều đạt");
+  assert.ok(iNha > 0 && iNha < mot.indexOf("day_ngoai_may_to_chuc"), "nhả khoá TRƯỚC bước đẩy ngoài máy");
+  assert.ok(!/exec 7>&-/.test(mot) && !/exec 7>&-/.test(gio), "khoá chống chạy trùng FD 7 KHÔNG được nhả giữa lượt");
+  assert.match(gio, /NHA_KHOA_TRUOC_NGOAI_MAY=1 sao_luu_mot_to_chuc "\$csdl" "\$moc" hourly/, "chỉ lượt giờ đặt cờ nhả khoá");
+  assert.equal((code.match(/NHA_KHOA_TRUOC_NGOAI_MAY=1/g) ?? []).length, 1, "bản đêm / bản tay KHÔNG đặt cờ — giữ khoá như cũ");
+  assert.ok(gio.indexOf("giu_khoa 8") > gio.indexOf("while IFS= read -r csdl"), "khoá xin LẠI cho từng CSDL (đã nhả ở CSDL trước)");
   // Khung đêm: đọc daily-done của nhà để BỎ lượt, không bao giờ để chạy chen.
   assert.match(gio, /\$GIO_BAT_DAU" \] && \[ "\$gio" -le "\$GIO_KET_THUC" \] && \[ "\$\(cat "\$STATUS_DIR\/daily-done"/, "khung bản đêm mà bản đêm chưa xong ⇒ bỏ lượt");
   // Xoay vòng + dọn ngoài máy của hourly/ suy từ ĐÚNG MỘT hằng số.
