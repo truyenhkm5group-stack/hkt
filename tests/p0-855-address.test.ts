@@ -17,7 +17,7 @@
  * hard-code HSLC) và KHÔNG gửi tin thật.
  */
 import assert from "node:assert/strict";
-import { addressGapOf, addressQuestion, customerStatedAddresses, hasStreetDetail, legacyAddressUnmapped, looksLikeDeliveryAddress, looksLikeStreetFragment, parseCustomerAddress, wantsAddressChange } from "@/lib/address/customer-address";
+import { acceptCustomerWard, otherWardNamed, addressGapOf, addressQuestion, customerStatedAddresses, hasStreetDetail, legacyAddressUnmapped, looksLikeDeliveryAddress, looksLikeStreetFragment, parseCustomerAddress, wantsAddressChange } from "@/lib/address/customer-address";
 import { ADDRESS_HANDOFF_REASON, ADDRESS_KNOWN_TEXT, SCHEDULE_NOTED_TEXT, isScheduleOnly, ADDRESS_REASK_NOTE, CONTACT_KNOWN_TEXT, hasChangeCue, ADDRESS_STAFF_TEXT, addressKnowledge, addressReaskVerdict, asksForName, asksForPhone, deliveryAddressDecision, reuseIntentOf as reuseFromMemory } from "@/lib/sales-chatbot/address-memory";
 import { addressConfidence, assembleCustomer360, customer360Prompt, reuseIntentOf, type OrderFact } from "@/lib/sales-chatbot/customer-360";
 import { addressCheckOf, type ChatState } from "@/lib/sales-chatbot/tools";
@@ -79,6 +79,30 @@ export function testP0855AddressPure() {
   assert.equal(addressCheckOf({ address: dongDaAddress, province: "" }).view.ask_customer, null, "không gửi câu phường theo địa giới mới");
   assert.ok(addressReaskVerdict(WARD_NEW_ASK, addressKnowledge(draftWith(dongDaAddress), [dongDaFull]), 2), "outbound guard chặn bot hỏi phường mới trong tin khách đặt hàng");
   assert.equal(legacyAddressUnmapped("Gia Lâm, Hà Nội"), null, "chỉ huyện+tỉnh thì chưa đủ phần đường");
+  // #871 (đơn không lên): dò «xã khác» trên cả câu đã gấp dấu khớp nhầm «An Hội Tây, TP.HCM» ⇒ «tay thanh pho» ⇒ «Phường Tây Thạnh».
+  const pSched = parseCustomerAddress(SCHEDULE_ADDRESS);
+  assert.deepEqual(acceptCustomerWard(pSched, "Phường An Hội Tây", SCHEDULE_CONTACT), { ok: true, ward: "Phường An Hội Tây" }, "«…An Hội Tây, TP.HCM» không phải hai phường");
+  assert.equal(acceptCustomerWard(pSched, "Phường An Hội Tây", "An Hội Tây hoặc Hạnh Thông nhé").ok, false, "khách nêu thật hai phường ⇒ vẫn hỏi");
+  assert.equal(acceptCustomerWard(pSched, "Phường An Hội Tây", "không phải An Hội Tây, An Hội Đông cơ").ok, false, "lời sửa sang phường khác ⇒ vẫn hỏi");
+  // Review #874: không dấu phẩy («…An Hội Tây Tp.HCM») cũng không phải hai phường; tên CHỨA TRỌN tên đã nhận vẫn là phường khác.
+  for (const t of ["Số 9 Quang Trung An Hội Tây Tp.HCM", "An Hội Tây TP HCM", "An Hội Tây, TP.HCM"]) assert.equal(otherWardNamed(79, "Phường An Hội Tây", t), null, t);
+  for (const [t, other] of [["An Hội Tây. Hạnh Thông nhé", "Phường Hạnh Thông"], ["P. An Hội Tây/An Hội Đông", "Phường An Hội Đông"], ["An Hội Tây hay Hạnh Thông vậy em?", "Phường Hạnh Thông"]] as const) assert.equal(otherWardNamed(79, "Phường An Hội Tây", t)?.name, other, t);
+  assert.equal(otherWardNamed(79, "Phường An Phú", "An Phú Đông nhé")?.name, "Phường An Phú Đông", "«An Phú Đông» không phải lời xác nhận «An Phú»");
+  // Tên quận cũ của chính xã đã nhận trùng tên xã mới («Gò Vấp») là phần địa chỉ cũ, không phải xã thứ hai.
+  assert.equal(otherWardNamed(79, "Phường An Hội Tây", "Số 9 Quang Trung, P An Hội Tây, Gò Vấp, TP.HCM"), null, "«…An Hội Tây, Gò Vấp» không phải hai phường");
+  assert.deepEqual(acceptCustomerWard(parseCustomerAddress("Số 9 Quang Trung, P An Hội Tây, Gò Vấp, TP.HCM"), "Phường An Hội Tây", "Số 9 Quang Trung, P An Hội Tây, Gò Vấp, TP.HCM"), { ok: true, ward: "Phường An Hội Tây" });
+  assert.equal(otherWardNamed(79, "Phường An Hội Tây", "An Hội Tây, Bình Thạnh")?.name, "Phường Bình Thạnh", "quận KHÁC (không phải quận cũ của xã) vẫn là xã khác");
+  // …nhưng khi khách nêu tên ấy như MỘT XÃ để chọn / sửa thì vẫn là xã khác (review #874 [CAO]).
+  assert.equal(otherWardNamed(79, "Phường An Hội Tây", "An Hội Tây hay phường Gò Vấp vậy em?")?.name, "Phường Gò Vấp");
+  assert.equal(otherWardNamed(79, "Phường An Hội Tây", "phường Gò Vấp chứ em")?.name, "Phường Gò Vấp", "chữ loại «phường» ngay trước ⇒ là xã");
+  assert.equal(otherWardNamed(1, "Phường Ngọc Hà", "Ngọc Hà hay Ba Đình ấy em, chị không rõ")?.name, "Phường Ba Đình", "Hà Nội: phân vân giữa hai phường ⇒ hỏi lại");
+  assert.equal(otherWardNamed(1, "Phường Ngọc Hà", "Số 5 ngõ Thử, Ngọc Hà, Ba Đình, Hà Nội"), null, "Ba Đình ở vị trí quận cũ ⇒ không phải xã thứ hai");
+  for (const t of ["230/20 Phan Huy Ích, P An Hội Tây, Gò Vấp, TP.HCM", "Số 9 Quang Trung, P An Hội Tây, Gò Vấp, Sài Gòn", "Số 9 Quang Trung, P An Hội Tây, Gò Vấp, TP.HCM. Mai giao được không?"]) assert.equal(otherWardNamed(79, "Phường An Hội Tây", t), null, `số hẻm «/», «Sài Gòn», «?» ở vế khác không phải lời chọn: ${t}`);
+  assert.equal(otherWardNamed(79, "Phường An Hội Tây", "An Hội Tây/Gò Vấp")?.name, "Phường Gò Vấp", "«/» giữa hai tên ⇒ lựa chọn");
+  assert.equal(otherWardNamed(79, "Phường An Hội Tây", "An Hội Tây, phường Sài Gòn")?.name, "Phường Sài Gòn", "«phường Sài Gòn» có chữ loại ⇒ là xã, không phải tên thành phố");
+  // Lời SỬA ở vế trước áp cho tên ở vế sau (review #874).
+  assert.equal(otherWardNamed(1, "Phường Ngọc Hà", "Không phải Ngọc Hà, Ba Đình")?.name, "Phường Ba Đình");
+  assert.equal(otherWardNamed(79, "Phường An Hội Tây", "nhầm rồi, An Hội Tây, Gò Vấp mới đúng")?.name, "Phường Gò Vấp");
   // #871: tin CHỈ hẹn giờ giao không đổi nơi nhận ⇒ câu xin lại SĐT + địa chỉ đã có bị bỏ, không chuyển người; tin có nơi chốn lạ thì không.
   for (const t of ["Giao sáng mai khoảng 9h", "chiều nay 5h nhé", "Thứ 7 giao giúp em", "7 giờ tối nay", "Giao cho chị sáng mai khoảng 9h nhé", "mai giao lúc 9:30 nha", "chủ nhật giao nhé"]) assert.equal(isScheduleOnly(t), true, t);
   // Review #871: tên người trùng từ chỉ thời gian («Thu», «Nam», «Mai», «Hằng», «Tư») và người thứ ba («ba», «mẹ») ⇒ đổi NGƯỜI nhận.
@@ -430,6 +454,17 @@ const GOLDEN: GoldenCase[] = [
     ],
   },
   {
+    key: "p871-len-don-luot-hen-gio",
+    title: "#871: đơn lên ở lượt khách hẹn giờ, model ghi xã đọc từ chính địa chỉ khách gõ ⇒ đơn nháp lên, không «xã chưa xác nhận»",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      { say: "Mình muốn mua 1 chả mực giã tay", ai: [() => [say("Dạ mình cho em xin SĐT + địa chỉ để em lên đơn nhé!")]] },
+      { say: SCHEDULE_CONTACT, ai: [() => [tool("create_customer", { name: "Khách Thử", phone: "0900000127", address: SCHEDULE_ADDRESS })], () => [say("Dạ em ghi nhận địa chỉ của mình rồi ạ.")]] },
+      { say: "Giao sáng mai khoảng 9h", ai: [({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }], ward: "Phường An Hội Tây", delivery_note: "Khách muốn giao khoảng 9h sáng mai" })], () => [say("Dạ em lên đơn cho mình rồi ạ.")]] },
+    ],
+  },
+  {
     key: "p871-giao-cho-chi",
     title: "#871: «Giao cho chị sáng mai khoảng 9h nhé» là lịch của chính khách ⇒ không xin lại, không chuyển người",
     shop: "food",
@@ -483,6 +518,16 @@ export async function testP0855AddressGolden() {
     },
     afterCase: async (c, _ctx, t) => {
       seen.add(c.key);
+      if (c.key === "p871-len-don-luot-hen-gio") {
+        const db = await getDb();
+        const [cv] = await db.select({ state: schema.salesChatConversations.state }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, _ctx.conversationId));
+        const st = cv.state as ChatState;
+        const results = t.turns[2].rounds.flatMap((r) => r.results) as { __summary?: string }[];
+        assert.ok(!results.some((r) => /xã \/ phường chưa xác nhận/.test(r.__summary ?? "")), `không chặn «xã chưa xác nhận»: ${JSON.stringify(results)}`);
+        assert.equal(st.draft?.recipient.ward, "Phường An Hội Tây", `đơn nháp mang đúng xã khách gõ: ${JSON.stringify(st.draft?.recipient)}`);
+        assert.equal(st.draft?.lines[0]?.quantity, 1, "số lượng giữ nguyên");
+        return;
+      }
       if (c.key.startsWith("p871-")) {
         if (c.key !== "p871-hen-gio-giao") await (await getDb()).update(schema.salesChatQuickReplies).set({ active: false }).where(eq(schema.salesChatQuickReplies.answer, SCHEDULE_REASK));
         const last = t.turns[2].shown.join(" | ");

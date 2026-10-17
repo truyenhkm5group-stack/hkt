@@ -46,7 +46,7 @@ import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guar
 import type { ObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { bindCommitment, cartDraftDiff, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, mentionText, negatedCancel, unrequestedProducts, type CartCommitment, type CartDraftDiff } from "@/lib/sales-chatbot/cart-commitment";
 import { cartQuoteLines, type CatalogLite } from "@/lib/sales-chatbot/cancel-recovery";
-import { acceptCustomerWard, addressQuestion, canAutoFill, legacyAddressUnmapped, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
+import { acceptCustomerWard, addressQuestion, canAutoFill, legacyAddressUnmapped, namesOtherWard, otherWardNamed, parseCustomerAddress, sameDeliveryPlace, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
 import { addressKnowledge, addressReaskVerdict, askedBefore, askMemoryFor, askMemoryParts, askParts, deliveryAddressDecision, hasChangeCue, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
@@ -1081,7 +1081,12 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         else {
           const wardCore = (x: string) => foldVnText(x).replace(/^(phuong|xa|thi tran|dac khu) /, "");
           const stated = wardFromCustomerWords(parsedWard, recipient.address, ctx.customerTexts);
-          if (stated && wardCore(stated.ward) === wardCore(v.data.ward)) {
+          // Xã đọc CHẮC từ chính dòng địa chỉ của đơn (khách tự gõ trong địa chỉ) trùng xã model ghi ⇒ nhận, dù tin CUỐI không nhắc lại
+          // (#871: đơn lên ở lượt khách hẹn giờ giao, tin cuối là «Giao sáng mai khoảng 9h» ⇒ ba lần «xã chưa xác nhận», không có đơn).
+          // Tin cuối nêu một xã KHÁC — kể cả câu hỏi «An Hội Tây hay Hạnh Thông?» (cùng phép dò từng vế của acceptCustomerWard) — vẫn chặn.
+          const ownWard = canAutoFill(parsedWard) && parsedWard.ward && parsedWard.province && wardCore(parsedWard.ward) === wardCore(v.data.ward) && parsedWard.provinceCode && !otherWardNamed(parsedWard.provinceCode, parsedWard.ward, ctx.lastUserText) && !ctx.lastUserText.split(/\n+/).some((l) => namesOtherWard(l, parsedWard.province!, parsedWard.ward!)) ? parsedWard.ward : null;
+          if (ownWard) recipient.ward = ownWard;
+          else if (stated && wardCore(stated.ward) === wardCore(v.data.ward)) {
             recipient.ward = stated.ward;
             if (!parsedWard.province) recipient.province = stated.province;
           } else return err("Đơn nháp: xã / phường chưa xác nhận", okWard.ok ? `Tin khách nêu cả một phường khác ngoài «${okWard.ward}» — hỏi lại khách đúng một câu, không tự chọn.` : okWard.error, state);
