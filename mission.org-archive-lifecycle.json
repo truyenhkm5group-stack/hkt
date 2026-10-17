@@ -3,7 +3,7 @@
   "mission_id": "org-archive-lifecycle",
   "title": "Lưu trữ / kích hoạt lại tổ chức thử (không xoá)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-org-archive",
@@ -47,7 +47,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-17T09:54:06.061Z",
-  "updated_at": "2026-10-17T09:54:06.061Z",
-  "last_heartbeat": "2026-10-17T09:54:06.061Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-17T09:55:10.522Z",
+  "last_heartbeat": "2026-10-17T09:55:10.522Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/org-archive-lifecycle",
+    "sha": "83ce65e94ccb3ad8b837ad74327ac66e09ebbf49",
+    "at": "2026-10-17T09:55:10.522Z",
+    "actor": "DESKTOP-56TH98Y:wt-org-archive",
+    "title": "Lưu trữ / kích hoạt lại tổ chức thử (không xoá)",
+    "summary": "Lưu trữ / kích hoạt lại tổ chức thử, không xoá: một vị ngữ vận hành, getDbFor chặn ARCHIVED, ops org-lifecycle (chạy thử mặc định), sổ bảo vệ vnx + HSLC, kích hoạt lại về đúng trạng thái cũ sau migrate + checkDb. Review vòng 2 PASS + 3 việc vòng 3 đã làm.",
+    "tests": [
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "npm test: TẤT CẢ KIỂM THỬ ĐẠT (✓ org-lifecycle (thuần) · ✓ org-lifecycle (CSDL))",
+      "npm run build: đạt ở đầu trước (chỉ đổi phía máy chủ sau đó)"
+    ]
+  }
 }
