@@ -37,6 +37,15 @@
 
 
 
+
+## 17/10/2026 ~03:30Z — Tech Lead Web: #872 + #874 đã lên production (d11467d0)
+
+- **Production**: health 02:58Z `commit d11467d0ae66` (gồm #870 · #872 · #869 · #873 · #874 · #878) · migrations 248 · `degradedMigration: true` (tổ chức thử «qa» thiếu 0245–0247 — deploy thứ 5 liên tiếp đỏ CHỈ vì «qa»; app đã dựng lại, smoke 135/135, 0 lỗi thật). #877 đang đo tài nguyên cho «qa» 0245.
+- **#874** (ca #871 không lên đơn): nguyên nhân = `acceptCustomerWard` dò «xã khác» trên câu đã gấp dấu ⇒ «An Hội Tây, TP.HCM» khớp nhầm «Phường Tây Thạnh»; + nhánh dự phòng bỏ xã đọc chắc từ địa chỉ. Sửa: `otherWardNamed` (từng vế, bỏ lần nêu vắt ngang, quận cũ chỉ khi ở vị trí quận và không có lời chọn/sửa, vế chỉ-tên-tỉnh). Review độc lập 6 vòng → ĐẠT; gộp 00:23Z.
+- **Hậu kiểm sau deploy** (tóm tắt công khai, ESTIMATED): address-reask-audit từ 02:15Z: hỏi lại 0/17 · phường rõ mà vẫn hỏi 0/9 (mẫu nhỏ). Lượt của phiên khác từ 15:20Z 16/10: 0/22; conv-money-trace scan: tổng lệch giỏ 1 tin / 182 hội thoại; upsell-basis: dòng không căn cứ 1 (còn sống 0).
+- Ca #871 (904b7c9b…): trace vẫn hiện 3 lỗi «xã / phường chưa xác nhận» — là lịch sử của hội thoại cũ (16/10 trước bản sửa), đơn #40675E5C do nhân viên lên; không gửi tin thử cho khách thật nên chưa có hội thoại mới cùng dạng để đo trực tiếp.
+- **Blocker MỚI**: release 02:20Z báo `Pancake Pages lỗi: Không tìm thấy gói cước nào cho người dùng này (mã 121)` — token Pancake Pages (chat fanpage) có thể hết gói ⇒ nguy cơ không nhận/gửi tin fanpage. Cần chủ shop kiểm gói Pancake. Vẫn còn: Copilot 401 invalid x-api-key · VTP tra cứu 403 · «qa» 0245–0247.
+
 ## 17/10 ~01:00 VN — PRODUCTION = 64831af7 (deploy 38933484208) · gồm #869 (#863 luồng huỷ + cổng gửi khi nhân viên đã nhắn)
 - Smoke 135/135 · health commit khớp · «failure» chỉ vì qa (phiên code-erp-66 đang làm qa hướng A; VPS nhường cho backup/restore-drill của họ, Desktop chưa deploy tiếp tới khi họ báo xong).
 - #877 (qa-0245-measure): review PASS @0aad7e00, chờ code-erp-66 bàn giao lại đúng SHA rồi Desktop gộp (chỉ script, không deploy).
