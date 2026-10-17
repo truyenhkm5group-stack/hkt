@@ -163,6 +163,20 @@ function testReview876() {
   }
   kept("Dạ em đổi sang 2kg chả cá thu cho chị nhé, tổng 540.000đ.", { lastUserText: "đổi sang 2kg giúp chị" });
   assert.equal(classifySentence("Chị đổi sang 2kg cho tiết kiệm hơn không ạ?"), "UPSELL", "dạng hỏi vẫn là lời mời");
+  // Miễn trừ «đã xong» / «thay đổi khách xin» chỉ phủ ĐÚNG vế đó — vế mời đi ké trong cùng câu bị cắt, vế xác nhận ở lại.
+  const ride: [string, string, string?][] = [
+    ["Dạ em đã đổi sang 2kg rồi, chị lấy luôn 3kg cho rẻ hơn ạ.", "Dạ em đã đổi sang 2kg rồi."],
+    ["Dạ em đã nâng lên 2kg chả cá thu cho chị rồi, mua thêm chả mực giã tay ăn kèm ạ.", "Dạ em đã nâng lên 2kg chả cá thu cho chị rồi."],
+    ["Dạ em đổi sang 2kg cho chị nhé, chị lấy thêm chả mực giã tay ăn kèm ạ.", "Dạ em đổi sang 2kg cho chị nhé.", "đổi sang 2kg giúp chị"],
+    ["Dạ em đổi sang 2kg chả cá thu, lấy luôn 3kg cho rẻ hơn ạ.", "Dạ em đổi sang 2kg chả cá thu.", "đổi sang 2kg giúp chị"],
+    ["Em đã thêm vào đơn rồi, chị lấy thêm chả mực giã tay nữa nhé.", "Em đã thêm vào đơn rồi."],
+    ["Em đã thêm 1 hũ ruốc vào đơn rồi, thêm 1 hũ nữa cho đủ bữa ạ.", "Em đã thêm 1 hũ ruốc vào đơn rồi."],
+    ["Em đã thêm vào đơn rồi và chị mua thêm chả mực giã tay ăn kèm cho ngon ạ.", "Em đã thêm vào đơn rồi."],
+  ];
+  for (const [text, want, cust] of ride) {
+    const r = g(text, cust ? { lastUserText: cust } : {});
+    assert.deepEqual([r.text, r.offered, r.dropped.map((d) => d.reason)], [want, null, ["ORDERING"]], `${text} ⇒ ${r.text}`);
+  }
   // Câu chốt chung «lấy thêm món nào nữa không» không gọi tên món ⇒ không phải lời mời, đi cả khi đơn đang lên.
   assert.equal(classifySentence("Mình lấy thêm món nào nữa không, không thì em giao luôn ạ?"), null);
   kept("Mình lấy thêm món nào nữa không, không thì em giao luôn ạ?", { lastUserText: "ok em" });

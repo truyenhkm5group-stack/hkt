@@ -161,9 +161,32 @@ export function classifySentence(raw: string): SentenceClass | null {
   const weights = new Set(amountsIn(raw).filter((a) => a.unit === "g").map((a) => a.value));
   const money = raw.match(VND_RE)?.length ?? 0;
   if (money >= 2 && weights.size >= 2 && !SUMMARY_RE.test(f)) return "PRICE_LIST";
-  if ((ACK_RE.test(f) || CHANGE_VERB_RE.test(f)) && doneStatement(raw)) return null;
+  // Câu kể việc ĐÃ xong không phải lời mời — nhưng miễn trừ chỉ phủ VẾ đã-xong (review PR #876): vế mời đi kèm trong cùng câu
+  // («Dạ em đã đổi sang 2kg rồi, chị lấy luôn 3kg cho rẻ hơn ạ») vẫn là lời mời, và cả câu mang lớp của nó để hàng rào cắt đúng vế đó.
+  if ((ACK_RE.test(f) || CHANGE_VERB_RE.test(f)) && doneStatement(raw)) return riderAfterDone(raw);
   if (SAVING_RE.test(f) && weights.size >= 1) return "UPSELL";
   if (CROSS_RE.test(f.replace(GENERIC_MORE_RE, " "))) return "CROSS_SELL";
+  return null;
+}
+
+const OFFER_CLASSES: readonly (SentenceClass | null)[] = ["UPSELL", "CROSS_SELL"];
+
+/**
+ * Vế MỜI đi ké một câu đã-xong. Vế đã-xong đầu tiên (`doneStatement`) là phần được miễn; một vế mời là đi ké khi nó đứng SAU vế đó,
+ * hay không mang động từ thêm / đổi nào (nên không thể là một nửa của câu xác nhận). Vế mời đứng TRƯỚC và mang động từ đổi
+ * («Dạ em đổi sang 2kg cho chị, em xác nhận rồi ạ») là chính việc được kể. HÀM THUẦN.
+ */
+function riderAfterDone(raw: string): SentenceClass | null {
+  const cs = clausesOf(raw);
+  if (cs.length < 2) return null;
+  const done = cs.findIndex((c) => doneStatement(c));
+  for (let i = 0; i < cs.length; i++) {
+    if (i === done) continue;
+    const k = classifySentence(cs[i]);
+    if (!OFFER_CLASSES.includes(k)) continue;
+    const f = foldVi(cs[i]);
+    if ((done >= 0 && i > done) || !(ACK_RE.test(f) || CHANGE_VERB_RE.test(f))) return k;
+  }
   return null;
 }
 
@@ -181,9 +204,22 @@ export function needsOfferFacts(text: string, cart?: CartCommitment): boolean {
   return splitSentences(text).some((s) => needs(s) || clausesOf(s).some(needs));
 }
 
-/** Cắt một câu thành VẾ theo «, » / «; » (có khoảng trắng sau — «300,000đ» không bị cắt). HÀM THUẦN. */
+/**
+ * Cắt một câu thành VẾ theo «, » / «; » (có khoảng trắng sau — «300,000đ» không bị cắt), và theo « và » khi phần sau tự nó là một lời
+ * mời («Em đã thêm vào đơn rồi và chị mua thêm chả mực … ạ») — «2kg chả cá và 1 hũ ruốc» thì không cắt. HÀM THUẦN.
+ */
 function clausesOf(sentence: string): string[] {
-  return sentence.split(/\s*[,;]\s+/).map((x) => x.trim()).filter(Boolean);
+  return sentence.split(/\s*[,;]\s+/).flatMap(splitOfferAnd).map((x) => x.trim()).filter(Boolean);
+}
+
+function splitOfferAnd(clause: string): string[] {
+  const re = /\s+và\s+/gu;
+  for (const m of clause.matchAll(re)) {
+    const before = clause.slice(0, m.index).trim();
+    const after = clause.slice((m.index ?? 0) + m[0].length).trim();
+    if (before && after && OFFER_CLASSES.includes(classifySentence(after))) return [before, after];
+  }
+  return [clause];
 }
 
 /**
@@ -291,6 +327,18 @@ export function guardReply(text: string, input: ReplyGuardInput): ReplyGuardResu
   // Khách vừa hỏi giá / quy cách / có mấy loại ⇒ câu kể giá, giảm theo gói là câu TRẢ LỜI, kể cả khi đơn đang lên hay đã chọn quy cách.
   const asked = priceAsked || optionsAsked;
   const changeAsked = CHANGE_ASK_RE.test(custF);
+  const custGrams = new Set(amountsIn(input.lastUserText).filter((a) => a.unit === "g").map((a) => a.value));
+  const gramsOf = (t: string) => amountsIn(t).filter((a) => a.unit === "g").map((a) => a.value);
+  /** Mọi khối lượng chữ nêu nằm trong số khách vừa xin (khách không nêu khối lượng ⇒ không ràng). */
+  const gramsAsked = (t: string) => !custGrams.size || gramsOf(t).every((g) => custGrams.has(g));
+  /**
+   * VẾ là chính THAY ĐỔI khách vừa xin (review PR #876): không hỏi, có động từ đổi hay nêu khối lượng, và khối lượng nằm trong số khách
+   * vừa xin («đổi sang 2kg» ⇒ «em đổi sang 2kg chả cá thu» là xác nhận; «lấy luôn 3kg cho rẻ hơn», «chị lấy thêm chả mực» là lời mời).
+   */
+  const requestedChange = (c: string) => !asking(c) && gramsAsked(c) && (CHANGE_VERB_RE.test(foldVi(c)) || gramsOf(c).length > 0);
+  /** Miễn trừ «xác nhận thay đổi» chỉ phủ vế là thay đổi được xin — câu còn một vế mời khác ⇒ không miễn, hàng rào cắt vế mời. */
+  const changeConfirm = (raw: string) =>
+    changeAsked && !asking(raw) && gramsAsked(raw) && !clausesOf(raw).some((c) => !requestedChange(c) && OFFER_CLASSES.includes(classifySentence(c)));
   const catalog = input.facts?.catalogNames ?? [];
   // Tên món trong giỏ luôn biết (kể cả khi chưa đọc danh mục) — để nhận câu nói về món đã chọn.
   const cartLabels = (cart?.selectedItems ?? []).map((x) => x.label).filter((x): x is string => Boolean(x));
@@ -335,7 +383,7 @@ export function guardReply(text: string, input: ReplyGuardInput): ReplyGuardResu
     if (kind === "UPSELL" && priceAsked && !sizeChosenFor(named)) return KEEP;
     // Câu TRẢ LỜI giá / quy cách khách vừa hỏi («Dạ 2kg là 540.000đ, rẻ hơn 20.000đ ạ») hay xác nhận THAY ĐỔI khách vừa xin («Dạ em đổi
     // sang 2kg cho chị nhé, tổng …») — không phải lời mời, không bị đếm.
-    if (kind === "UPSELL" && ((asked && !inviting(raw)) || (changeAsked && !asking(raw)))) return KEEP;
+    if (kind === "UPSELL" && ((asked && !inviting(raw)) || changeConfirm(raw))) return KEEP;
     if (!window.open) return block(window.reason);
     if (!input.facts) return block(kind === "UPSELL" ? "NO_PRICE_REASON" : "NOT_ELIGIBLE");
     const f = foldVi(raw);
