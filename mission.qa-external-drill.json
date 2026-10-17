@@ -3,7 +3,7 @@
   "mission_id": "qa-external-drill",
   "title": "Ghi diễn tập khôi phục chạy ngoài VPS vào cổng (có đối chiếu)",
   "business_goal": "Có diễn tập ĐẠT thật cho tổ chức khi VPS thiếu RAM, không hạ ngưỡng 700",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-token-budget",
@@ -22,11 +22,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-17T05:37:52.494Z",
-  "updated_at": "2026-10-17T05:37:52.494Z",
-  "last_heartbeat": "2026-10-17T05:37:52.494Z",
+  "updated_at": "2026-10-17T05:38:19.577Z",
+  "last_heartbeat": "2026-10-17T05:38:19.577Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/qa-external-drill",
+    "sha": "4d10888a6d107e9a4b15299b645d3b89d958677d",
+    "at": "2026-10-17T05:38:19.577Z",
+    "actor": "DESKTOP-56TH98Y:wt-token-budget",
+    "title": "Diễn tập khôi phục ngoài VPS được ghi vào cổng — chỉ khi máy chủ tự đối chiếu đúng bản",
+    "summary": "",
+    "tests": [
+      "tests/backup.test.ts: 26/26 ĐẠT (flock thật: CI Linux)",
+      "bash -n: sạch"
+    ]
   }
 }
