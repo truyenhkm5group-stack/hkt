@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "mission_id": "qa-preseed-tighten",
+  "title": "qa × 0245: diễn tập ĐẠT ≤ 120 phút + bắt giao dịch dài",
+  "business_goal": "Tạo chỉ mục chỉ chạy sau backup + drill mới ĐẠT",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-token-budget",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/qa-preseed-tighten",
+  "base_sha": "cbc8d8a884444f7f05bd7b59ff7e7acd5cf880bf",
+  "domains": [],
+  "owned_paths": [
+    "scripts/org-0245-index-preseed.ts",
+    "tests/qa-0245-index.test.ts",
+    ".github/workflows/ops-vps.yml"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-17T05:13:52.180Z",
+  "updated_at": "2026-10-17T05:13:52.180Z",
+  "last_heartbeat": "2026-10-17T05:13:52.180Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "PARTIAL",
+    "evidence": []
+  }
+}
