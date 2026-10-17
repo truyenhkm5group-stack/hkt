@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "mission_id": "qa-preseed-350",
+  "title": "qa × 0245: ngưỡng RAM 350 MB riêng cho tạo chỉ mục",
+  "business_goal": "Tạo chỉ mục 0247 cho qa sau khi backup + drill ĐẠT, để 0245–0247 áp và deploy xanh",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-token-budget",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/qa-preseed-350",
+  "base_sha": "d11467d0ae66e6c80d29d7c16016fb17b58905c4",
+  "domains": [],
+  "owned_paths": [
+    "scripts/org-0245-index-preseed.ts",
+    "tests/qa-0245-index.test.ts",
+    ".github/workflows/ops-vps.yml"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-17T02:48:11.312Z",
+  "updated_at": "2026-10-17T02:48:11.312Z",
+  "last_heartbeat": "2026-10-17T02:48:11.312Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "PARTIAL",
+    "evidence": []
+  }
+}
