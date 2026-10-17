@@ -234,8 +234,11 @@ function testDeployDungLaiTheoCay() {
   assert.ok(!/run_started_at/.test(cay) && !/ngay_gop|ngay_chay/.test(cay), "không suy cây từ run_started_at / ngày commit");
 
   // 2. Lọc lượt chạy theo SỐ PR (không chỉ head_sha), mọi lần chạy lại, và job «gates / gates» phải success.
-  assert.ok(cay.includes("(.pull_requests // []) | map(.number) | index($pr)"), "lượt chạy phải lọc theo pull_requests[].number");
-  assert.ok(!cay.includes("head_sha"), "không dựa vào head_sha");
+  // Lọc theo ĐẦU NHÁNH CUỐI của PR (head_sha + head_branch + cùng kho), KHÔNG theo pull_requests[] — GitHub xoá mảng ấy khi PR đã
+  // gộp (đo #878: cả 7 lượt rỗng) mà deploy luôn chạy sau khi gộp. An toàn vẫn do phép so CÂY từ artifact.
+  assert.ok(cay.includes(".head_sha == $dau") && cay.includes(".head_branch == $nhanh") && cay.includes("head_repository.full_name"), "lượt chạy phải lọc theo đầu nhánh cuối + nhánh + cùng kho");
+  assert.ok(!cay.includes("pull_requests"), "không dựa vào pull_requests[] (rỗng sau khi gộp)");
+  // head_sha CHỈ dùng để chọn lượt trên đầu nhánh cuối của PR; quyết định dùng lại vẫn là phép so CÂY từ artifact.
   for (const dk of ['.merge_commit_sha == $sha', '.base.ref == "main"', '.merged_at != null', '.event == "pull_request"', '.path == ".github/workflows/ci.yml"', '.status == "completed"', '.conclusion == "success"', 'select(.name == "gates / gates")'])
     assert.ok(cay.includes(dk), `bằng chứng PR phải lọc ${dk}`);
   assert.match(cay, /\[ "\$cong" = "success" \] \|\| lui/, "job gates / gates phải success");
@@ -271,7 +274,8 @@ function testDeployDungLaiTheoCay() {
   assert.ok(rel[1].includes("needs.gates.result == 'success'") && rel[1].includes("needs.bang_chung.outputs.reuse == 'true'") && rel[1].includes("needs.gates.result == 'skipped'"), "release: cổng xanh HOẶC (gates bỏ qua VÀ bằng chứng) — không có đường thứ ba");
   assert.match(d, /\n {2}gates:\n {4}needs: bang_chung\n {4}if: \$\{\{ needs\.bang_chung\.outputs\.reuse != 'true' \}\}/, "gates chạy trừ khi có bằng chứng");
   // Bước «ba SHA»: đường theo cây so CÂY với cây ảnh đã dựng (đo từ checkout của build_image); đường kia vẫn so SHA.
-  assert.match(d, /GATES_TREE: \$\{\{ needs\.gates\.result == 'success' && '' \|\| needs\.bang_chung\.outputs\.tree \}\}/, "GATES_TREE chỉ có khi cổng không chạy trong lượt này");
+  // `cond && '' || x` luôn ra x (chuỗi rỗng là false trong biểu thức Actions) ⇒ viết ngược điều kiện.
+  assert.match(d, /GATES_TREE: \$\{\{ needs\.gates\.result != 'success' && needs\.bang_chung\.outputs\.tree \|\| '' \}\}/, "GATES_TREE chỉ có khi cổng không chạy trong lượt này");
   assert.match(d, /BUILD_TREE: \$\{\{ needs\.build_image\.outputs\.tree \}\}/);
   assert.ok(d.includes("echo \"tree=$(git rev-parse 'HEAD^{tree}')\" >> \"$GITHUB_OUTPUT\""), "build_image đo cây từ bản checkout");
   assert.match(d, /if \[ -n "\$GATES_TREE" \]; then[\s\S]*?\[ "\$GATES_TREE" != "\$BUILD_TREE" \][\s\S]*?elif \[ "\$GATES_SHA" != "\$ERP_DEPLOY_SHA" \]; then/, "release so CÂY khi dùng bằng chứng theo cây, ngược lại so SHA");

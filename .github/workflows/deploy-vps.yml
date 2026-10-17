@@ -107,8 +107,10 @@ jobs:
       # Điều kiện (đủ cả, thiếu một là KHÔNG dùng lại):
       #   1. không `force_gates`, và triển khai từ `refs/heads/main`;
       #   2. đúng MỘT PR đã gộp, `merge_commit_sha` = SHA này, nhánh gốc `main`;
-      #   3. lượt `ci.yml` sự kiện `pull_request` MỚI NHẤT (mọi lần chạy lại) có `pull_requests[].number` = PR đó,
-      #      `completed` + `success`, và job «gates / gates» của nó `success`;
+      #   3. lượt `ci.yml` sự kiện `pull_request` MỚI NHẤT (mọi lần chạy lại) trên ĐÚNG đầu nhánh cuối của PR (`head_sha` =
+      #      `head.sha`, `head_branch` = `head.ref`, cùng kho — PR từ fork không dùng lại), `completed` + `success`, và job
+      #      «gates / gates» của nó `success`. KHÔNG lọc theo `pull_requests[]`: GitHub xoá mảng ấy khi PR đã gộp (đo #878:
+      #      cả 7 lượt đều rỗng), mà deploy luôn chạy SAU khi gộp. Ràng buộc an toàn là phép so CÂY ở bước 5;
       #   4. artifact `tested-tree` của lượt ấy tải được, khai đúng run_id / lần chạy;
       #   5. CÂY ghi trong artifact BẰNG cây của SHA đang triển khai (`git/commits/$SHA`).
       # `sha` xuất ra là COMMIT mà cổng đã kiểm (đọc từ artifact), không chép SHA đầu vào; `release` so CÂY.
@@ -134,9 +136,12 @@ jobs:
           [ "$(printf '%s' "$prs" | jq 'length')" = "1" ] || lui "không có đúng một PR đã gộp tạo ra $SHA"
           pr="$(printf '%s' "$prs" | jq -r '.[0].number')"
           nhanh_pr="$(printf '%s' "$prs" | jq -r '.[0].head.ref')"
-          [ -n "$pr" ] && [ "$pr" != "null" ] && [ -n "$nhanh_pr" ] && [ "$nhanh_pr" != "null" ] || lui "thiếu số PR hoặc nhánh của PR"
-          luot="$(api "actions/workflows/ci.yml/runs?event=pull_request&branch=$nhanh_pr&per_page=100" | jq -r --argjson pr "$pr" '[.workflow_runs[] | select(.event == "pull_request" and .path == ".github/workflows/ci.yml" and ((.pull_requests // []) | map(.number) | index($pr)) != null and .status == "completed" and .conclusion == "success")] | sort_by(.updated_at) | last | if . == null then empty else "\(.id) \(.run_attempt) \(.html_url)" end' 2>/dev/null)" || luot=""
-          [ -n "$luot" ] || lui "PR #$pr chưa có lượt ci.yml XANH (mọi lần chạy lại đều tính)"
+          dau_pr="$(printf '%s' "$prs" | jq -r '.[0].head.sha')"
+          kho_dau="$(printf '%s' "$prs" | jq -r '.[0].head.repo.full_name // empty')"
+          [ -n "$pr" ] && [ "$pr" != "null" ] && [ -n "$nhanh_pr" ] && [ "$nhanh_pr" != "null" ] && [ -n "$dau_pr" ] && [ "$dau_pr" != "null" ] || lui "thiếu số PR, nhánh hoặc đầu nhánh của PR"
+          [ "$kho_dau" = "$REPO" ] || lui "PR #$pr đến từ kho khác (${kho_dau:-vắng})"
+          luot="$(api "actions/workflows/ci.yml/runs?event=pull_request&branch=$nhanh_pr&per_page=100" | jq -r --arg dau "$dau_pr" --arg nhanh "$nhanh_pr" --arg kho "$REPO" '[.workflow_runs[] | select(.event == "pull_request" and .path == ".github/workflows/ci.yml" and .head_sha == $dau and .head_branch == $nhanh and (.head_repository.full_name // "") == $kho and .status == "completed" and .conclusion == "success")] | sort_by(.updated_at) | last | if . == null then empty else "\(.id) \(.run_attempt) \(.html_url)" end' 2>/dev/null)" || luot=""
+          [ -n "$luot" ] || lui "PR #$pr chưa có lượt ci.yml XANH trên đầu nhánh cuối ${dau_pr:0:12} (mọi lần chạy lại đều tính)"
           luot_id="${luot%% *}"
           luot_rest="${luot#* }"
           luot_lan="${luot_rest%% *}"
@@ -334,7 +339,7 @@ jobs:
           GATES_SHA: ${{ needs.gates.result == 'success' && needs.gates.outputs.sha || needs.bang_chung.outputs.sha }}
           GATES_FROM: ${{ needs.gates.result == 'success' && 'chạy trong lượt này' || needs.bang_chung.outputs.run_url }}
           # Đường bằng chứng theo CÂY (squash đổi SHA): cổng được dùng lại khai CÂY, không khai SHA trùng.
-          GATES_TREE: ${{ needs.gates.result == 'success' && '' || needs.bang_chung.outputs.tree }}
+          GATES_TREE: ${{ needs.gates.result != 'success' && needs.bang_chung.outputs.tree || '' }}
           BUILD_TREE: ${{ needs.build_image.outputs.tree }}
           BUILD_SHA: ${{ needs.build_image.outputs.sha }}
           ERP_IMAGE: ${{ needs.build_image.outputs.image }}
