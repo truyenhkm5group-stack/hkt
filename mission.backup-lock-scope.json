@@ -3,7 +3,7 @@
   "mission_id": "backup-lock-scope",
   "title": "Sao lưu hằng giờ nhả khoá đọc DB trước bước đẩy Drive",
   "business_goal": "Ops đọc nặng và diễn tập qa lấy được khoá; sao lưu vẫn toàn vẹn",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-token-budget",
@@ -23,12 +23,15 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-17T02:45:47.740Z",
-  "updated_at": "2026-10-17T02:50:29.542Z",
+  "updated_at": "2026-10-17T03:45:05.548Z",
   "last_heartbeat": "2026-10-17T02:46:16.298Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "evidence": {
+    "merged": "#879 → ebc4efc980e17d5faebd06b5cbf311a6dc4b59a8"
   },
   "handoff": {
     "branch": "claude/backup-lock-scope",
