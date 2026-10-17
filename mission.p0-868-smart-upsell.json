@@ -20,20 +20,19 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-16T09:37:22.052Z",
-  "updated_at": "2026-10-16T16:17:47.132Z",
-  "last_heartbeat": "2026-10-16T16:16:50.270Z",
+  "updated_at": "2026-10-17T05:23:29.031Z",
+  "last_heartbeat": "2026-10-17T05:23:29.031Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/p0-868-smart-upsell",
-    "sha": "ab28775a96ab7cf69b0249958f47038c534cfc92",
-    "at": "2026-10-16T16:16:50.270Z",
+    "sha": "867dbd1d554294ce2b43fd7920fc22e087a9c1a8",
+    "at": "2026-10-17T05:23:29.031Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "P0 #868 pha A: upsell/cross-sell thông minh — bỏ cổng bắt buộc mời trước khi lên đơn, mời một lần có lý do, không hỏi lại món đã chọn, đo attach/AOV",
     "summary": "",
     "tests": [
-      "npm test đầy đủ @3d4ba209: TẤT CẢ KIỂM THỬ ĐẠT",
-      "@ab28775a (sau gộp main): typecheck, lint, sales-next-best-action, upsell-offer-audit, golden, sales-quote-640, p0-855-address, conv-money-trace, claim-guard đạt",
-      "19-20 ảnh chụp golden chỉ đổi dòng lời nhắc hệ thống"
+      "npm test đầy đủ: TẤT CẢ KIỂM THỬ ĐẠT @867dbd1d",
+      "review độc lập: 4 blocker + 7 rò rỉ đã sửa, PASS @867dbd1d"
     ]
   }
 }
