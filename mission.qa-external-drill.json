@@ -22,8 +22,8 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-17T05:37:52.494Z",
-  "updated_at": "2026-10-17T05:38:19.577Z",
-  "last_heartbeat": "2026-10-17T05:38:19.577Z",
+  "updated_at": "2026-10-17T05:40:26.443Z",
+  "last_heartbeat": "2026-10-17T05:40:26.443Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
@@ -31,13 +31,13 @@
   },
   "handoff": {
     "branch": "claude/qa-external-drill",
-    "sha": "4d10888a6d107e9a4b15299b645d3b89d958677d",
-    "at": "2026-10-17T05:38:19.577Z",
+    "sha": "60642b4b2793a1b12b1dc3a1c0dd71ff509ee2a6",
+    "at": "2026-10-17T05:40:26.443Z",
     "actor": "DESKTOP-56TH98Y:wt-token-budget",
-    "title": "Diễn tập khôi phục ngoài VPS được ghi vào cổng — chỉ khi máy chủ tự đối chiếu đúng bản",
+    "title": "Diễn tập khôi phục ngoài VPS được ghi vào cổng — tách phần VPS xác minh và phần lời khai",
     "summary": "",
     "tests": [
-      "tests/backup.test.ts: 26/26 ĐẠT (flock thật: CI Linux)",
+      "tests/backup.test.ts: 26/26 ĐẠT",
       "bash -n: sạch"
     ]
   }
