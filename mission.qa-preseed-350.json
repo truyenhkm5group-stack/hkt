@@ -3,7 +3,7 @@
   "mission_id": "qa-preseed-350",
   "title": "qa × 0245: ngưỡng RAM 350 MB riêng cho tạo chỉ mục",
   "business_goal": "Tạo chỉ mục 0247 cho qa sau khi backup + drill ĐẠT, để 0245–0247 áp và deploy xanh",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-token-budget",
@@ -24,12 +24,15 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-17T02:48:11.312Z",
-  "updated_at": "2026-10-17T02:51:35.075Z",
+  "updated_at": "2026-10-17T03:47:45.300Z",
   "last_heartbeat": "2026-10-17T02:48:48.572Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
     "evidence": []
+  },
+  "evidence": {
+    "merged": "#880 → 4b4a51b0072ce3eb35117d09cafc48fc291b60b1"
   },
   "handoff": {
     "branch": "claude/qa-preseed-350",
