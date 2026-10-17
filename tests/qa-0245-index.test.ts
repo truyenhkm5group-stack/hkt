@@ -103,8 +103,13 @@ export function testQa0245Index() {
   assert.ok(` ${maHoa} `.includes(" org-0245-index-preseed "), "kết quả phải MÃ HOÁ");
   const nhanh = /^ {14}org-0245-index-preseed\)\n([\s\S]*?scripts\/org-0245-index-preseed\.ts) ;;\n/m.exec(ops)?.[1] ?? "";
   assert.ok(nhanh, "ops-vps.yml phải có nhánh org-0245-index-preseed");
-  for (const can of [`-lt ${RAM_TOI_THIEU_MB}`, "-lt 2048", "-mmin -120", "-mtime -14", `'"result":"OK"'`, "exit 1", "fetch_script org-0245-index-preseed.ts", "ma_hoa_ket_qua chay_voi_arg"])
+  for (const can of [`-lt ${RAM_TOI_THIEU_MB}`, "-lt 2048", "-mmin -120", `'"result":"OK"'`, "exit 1", "fetch_script org-0245-index-preseed.ts", "ma_hoa_ket_qua chay_voi_arg"])
     assert.ok(nhanh.includes(can), `nhánh ops phải có \`${can}\``);
   assert.ok(nhanh.indexOf("exit 1") < nhanh.indexOf("fetch_script"), "tiền điều kiện phải chặn TRƯỚC khi chạy script");
+  // Chủ shop 17/10/2026: «chỉ sau khi backup VÀ restore drill PASS» ⇒ diễn tập phải mới (≤ 120 phút, cùng cửa sổ với bản sao lưu),
+  // không phải «một lần đạt trong 14 ngày» rồi dùng mãi.
+  assert.match(nhanh, /_dt_ok="\$\(find "\$_dt" -mmin -120 /, "diễn tập khôi phục qa phải ĐẠT trong 120 phút");
+  assert.ok(!nhanh.includes("-mtime -14"), "không còn cửa sổ diễn tập 14 ngày");
+  assert.match(chay, /state = 'active' and now\(\) - coalesce\(xact_start, query_start\) > interval '30 seconds'/, "giao dịch dài chạy nhiều câu ngắn cũng phải bị thấy (xact_start)");
   console.log("✓ qa × 0245: 0247 = công cụ tạo trước = ứng viên rehearsal (một câu) · trùng biểu thức hàm 0245 · chỉ qa · RAM ≥ 350 riêng tạo chỉ mục (diễn tập giữ 700) · ops chặn --apply khi thiếu RAM / ổ / sao lưu / diễn tập");
 }

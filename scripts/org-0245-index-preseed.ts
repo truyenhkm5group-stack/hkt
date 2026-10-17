@@ -12,7 +12,7 @@
    · Chỉ khi `qa` CHƯA áp 0245 (sổ `drizzle.__drizzle_migrations` chưa có mốc `MOC_0245`). Đã áp ⇒ không tạo: 0247 sẽ tạo chỉ mục qua
      đường chuẩn (riêng bản INVALID còn sót thì XOÁ để 0247 dựng lại — `IF NOT EXISTS` theo tên sẽ bỏ qua nó mãi).
    · Mặc định CHẠY THỬ: in kế hoạch + mọi điều kiện, không ghi. `--apply` mới ghi, và ops-vps.yml chỉ cho `--apply` đi tiếp khi RAM ≥
-     700 MB, ổ đĩa ≥ 2 GB, có bản sao lưu `qa` ≤ 120 phút và lượt diễn tập khôi phục `qa` gần nhất ĐẠT (≤ 14 ngày).
+     350 MB (riêng tạo chỉ mục — chủ shop duyệt 17/10/2026), ổ đĩa ≥ 2 GB, có bản sao lưu `qa` ≤ 120 phút và lượt diễn tập khôi phục `qa` ĐẠT ≤ 120 phút (chạy SAU bản sao lưu đang dùng).
    · Không đụng dữ liệu: chỉ CREATE INDEX (và DROP INDEX CONCURRENTLY đúng chỉ mục này nếu nó đang INVALID do một lượt trước bị cắt) +
      ANALYZE bảng. Hoàn tác = `DROP INDEX CONCURRENTLY "sales_chat_inbound_page_reply_text_hash_idx"` (mất chỉ mục, không mất dòng nào).
    · Không bao giờ để lại chỉ mục INVALID: sau khi dựng, hỏi lại `pg_index.indisvalid`; hỏng ⇒ xoá ngay, thoát 1. Lý do: 0247 dùng
@@ -138,7 +138,7 @@ async function main(): Promise<number> {
       );
       const dai = await q<{ n: string }>(
         // «idle in transaction» cũng tính: CONCURRENTLY phải đợi mọi giao dịch cũ hơn kết thúc.
-        `select count(*)::text n from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid() and ((state = 'active' and now() - query_start > interval '30 seconds') or (state like 'idle in transaction%' and now() - xact_start > interval '30 seconds'))`,
+        `select count(*)::text n from pg_stat_activity where datname = current_database() and pid <> pg_backend_pid() and ((state = 'active' and now() - coalesce(xact_start, query_start) > interval '30 seconds') or (state like 'idle in transaction%' and now() - xact_start > interval '30 seconds'))`,
       );
       let ram: number | null = null;
       try {
