@@ -1,4 +1,3 @@
-{"at":"2026-10-08T18:52:30.205Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-shell-polish","detail":"#700 @ 8f063effd7ae → c2918d775972 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-08T18:59:49.985Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"saas-acceptance-hardening","detail":"#696 @ ab0f5a944aec → 6883bfbf9b23 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-08T19:04:14.094Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"6883bfbf9b23 · run 37829126099 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37829126099"}
 {"at":"2026-10-08T19:08:48.390Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"saas-ops-signals","detail":"feat/saas-ops-signals @ a9aad1fb4769 · 1 lệnh kiểm thử"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-17T00:22:41.551Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#874 @ 5c1b6e4e233f · review độc lập PASS: acceptCustomerWard không còn đọc «An Hội Tây, TP.HCM» thành hai phường; hai phường thật vẫn bắt"}
 {"at":"2026-10-17T00:23:32.394Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","detail":"#874 @ 5c1b6e4e233f → de03295ce1f6 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-17T00:25:40.279Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"p0-871-contact-memory","detail":"claude/p0-871-contact-memory @ 974c7d8ee47e · 2 lệnh kiểm thử"}
+{"at":"2026-10-17T00:26:01.076Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#878 @ 974c7d8ee47e · PASS @91bb52a1; commit mới chỉ gộp main (#874), không xung đột"}
