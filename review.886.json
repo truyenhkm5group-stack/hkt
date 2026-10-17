@@ -1,0 +1,8 @@
+{
+  "pr": 886,
+  "sha": "497b59e76db7e5b244ed792dd2ef8ecf3eda2d67",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-17T07:43:23.117Z",
+  "note": "review độc lập 2 vòng PASS: bình luận không xoá lượt mua đang dở (chỉ cắt khi hộp thư im >7 ngày, không đơn chốt, không HANDOFF); khoá tạo đơn mang roundStartAt (không có thì giữ khoá cũ); ALREADY chỉ chép tin khách; đường thật deliverCommentReply→carryIntoInbox có test"
+}
