@@ -24,8 +24,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-17T05:37:52.494Z",
-  "updated_at": "2026-10-17T05:41:32.625Z",
-  "last_heartbeat": "2026-10-17T05:40:26.443Z",
+  "updated_at": "2026-10-17T05:52:14.932Z",
+  "last_heartbeat": "2026-10-17T05:52:14.932Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
@@ -33,12 +33,13 @@
   },
   "handoff": {
     "branch": "claude/qa-external-drill",
-    "sha": "60642b4b2793a1b12b1dc3a1c0dd71ff509ee2a6",
-    "at": "2026-10-17T05:40:26.443Z",
+    "sha": "1207bc344ac6dc93224498480d2240121a7340ce",
+    "at": "2026-10-17T05:52:14.932Z",
     "actor": "DESKTOP-56TH98Y:wt-token-budget",
     "title": "Diễn tập khôi phục ngoài VPS được ghi vào cổng — tách phần VPS xác minh và phần lời khai",
     "summary": "",
     "tests": [
+      "tests/ops-log-leak.test.ts: 12/12 ĐẠT",
       "tests/backup.test.ts: 26/26 ĐẠT",
       "bash -n: sạch"
     ]
