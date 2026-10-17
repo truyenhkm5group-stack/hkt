@@ -26,8 +26,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-17T07:14:56.345Z",
-  "updated_at": "2026-10-17T07:16:36.700Z",
-  "last_heartbeat": "2026-10-17T07:15:21.588Z",
+  "updated_at": "2026-10-17T07:34:57.324Z",
+  "last_heartbeat": "2026-10-17T07:34:57.324Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
@@ -35,16 +35,16 @@
   },
   "handoff": {
     "branch": "claude/p0-repeat-buyer",
-    "sha": "3e067cf419737890204b31c393ba0b6f9e32cdd8",
-    "at": "2026-10-17T07:15:21.588Z",
+    "sha": "497b59e76db7e5b244ed792dd2ef8ecf3eda2d67",
+    "at": "2026-10-17T07:34:57.324Z",
     "actor": "DESKTOP-56TH98Y:wt-token-budget",
     "title": "P0 khách cũ mua lại: bình luận «1,5 kg gửi đc cũ» đi tiếp ở hộp thư cũ, lời mua lượt trước không lọt sang đơn mới",
     "summary": "",
     "tests": [
-      "tests/p0-repeat-buyer.test.ts: ĐẠT (thuần + CSDL + 2 hội thoại chatTurn)",
+      "tests/p0-repeat-buyer.test.ts: ĐẠT (gồm 3 ca review + đường thật)",
       "p0-855-cart · p0-855-delta · p0-863-cancel-flow · sales-cart-commitment · sales-next-best-action: ĐẠT",
-      "tsc: sạch (trừ qrcode của node_modules mượn)",
-      "eslint: sạch"
+      "tsc · eslint: sạch",
+      "npm test đầy đủ: để CI (node_modules mượn thiếu qrcode)"
     ]
   }
 }

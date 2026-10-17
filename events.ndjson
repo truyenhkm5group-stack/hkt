@@ -1,4 +1,3 @@
-{"at":"2026-10-09T00:15:36.994Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"vtp-edit-cod-prefill","detail":"#717 cho fix/vtp-edit-cod-prefill @ ec8db14297ea"}
 {"at":"2026-10-09T00:15:49.574Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#717 @ ec8db14297ea · Review Integration Lead (C0): điền sẵn đúng từ vận đơn (cod_amount NOT NULL, không lùi về COD đơn; địa chỉ receiver_* rồi shipFullAddress); máy chủ từ chối đổi COD thiếu confirmCodChange=true và KHÔNG gọi VTP; có xác nhận thì gửi + audit trước/sau + vẫn ghi dòng nhật ký MANUAL (luật 47); cod_status/cod_collected không chạm (§3.6); «Đã thu» dùng HAS_CASH_EVIDENCE của ORDER_OUTCOME (chỉ thêm export)"}
 {"at":"2026-10-09T00:31:20.694Z","actor":"DESKTOP-56TH98Y:wt-polish2","kind":"HANDOFF","mission":"commercial-polish-2","detail":"claude/commercial-polish-2 @ 5ffc56490452 · 1 lệnh kiểm thử"}
 {"at":"2026-10-09T00:32:01.118Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"commercial-polish-2","detail":"#718 cho claude/commercial-polish-2 @ 5ffc56490452"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-17T07:18:01.830Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_FAIL","mission":"p0-868-smart-upsell","detail":"FAIL abcb7da97ba86f68a59bf26b341473b7c1895091 2026-10-17T07:17:38.073Z"}
 {"at":"2026-10-17T07:24:30.527Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"qa-external-drill","detail":"#884 @ 1207bc344ac6 → acafc4f5c750 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-17T07:26:13.698Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"acafc4f5c750 · run 39013572125 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39013572125"}
+{"at":"2026-10-17T07:34:57.369Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"HANDOFF","mission":"p0-repeat-buyer","detail":"claude/p0-repeat-buyer @ 497b59e76db7 · 4 lệnh kiểm thử"}
