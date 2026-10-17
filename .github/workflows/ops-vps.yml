@@ -126,6 +126,7 @@ on:
           - pitr-drill          # PITR: DIỄN TẬP khôi phục tới một mốc (arg: ISO, ví dụ 2026-09-30T20:15:00Z; rỗng = đoạn WAL mới nhất − 2 phút) trong container TẠM (không mạng, trần RAM) — không chạm erp-db
           - pitr-pause          # PITR: PHANH — tạm dừng lưu WAL không cần khởi động lại (arg rỗng); arg "resume" = chạy lại (sau đó chụp bản nền mới)
           - restore-drill-org   # DIỄN TẬP khôi phục MỘT CSDL tổ chức erp_org_* (arg: mã tổ chức; rỗng = luân phiên) vào CSDL tạm tam_khoiphuc_<mã> trong container TẠM, đếm bảng lõi, xoá container — chạy tay; cron cũng tự chạy mỗi Chủ nhật qua drill-org-weekly (luân phiên)
+          - record-external-drill-org # GHI diễn tập khôi phục chạy NGOÀI VPS (arg: "<mã> <tệp dump> <sha256> <số TABLE DATA> <finishedAt UTC> <OK|FAILED>") — máy chủ đối chiếu sha256 + mục lục của đúng bản trên máy, ≤ 120 phút; không khớp ⇒ FAILED
           - migration-rehearsal # CHẠY THỬ migration còn thiếu trên BẢN SAO một CSDL tổ chức (cùng đường khôi phục với restore-drill-org, container TẠM) — thống kê bảng, bấm giờ từng câu, chẩn đoán hàm 0245, EXPLAIN; KHÔNG chạm erp-db; MÃ HOÁ, số qua kênh tóm tắt (arg: "<mã tổ chức> [--candidate-index] [--compare-jit] [--timeout=1200] [--budget=600] [--sample=20] [--explain=3] [--no-analyze] [--skip-diagnose] [--skip-migrate]")
           - page-auto-skip-audit # P0 HSLC 16/10/2026 (issue #856 «Cao Hải Ninh»): tin khách bị chốt «Page đã trả lời» mà KHÔNG có câu trả lời hợp lệ nào (chỉ tin tự động / chữ hệ thống / tin chào sau nó) trên MỘT tổ chức — chốt nhầm · bỏ sót hiện tại · ≤ 2 giờ (tự cứu sau deploy) · có người giữ · có đơn — MÃ HOÁ, chỉ số đếm (CHỈ ĐỌC; arg: "<mã tổ chức> [--hours=1..336]")
           - org-0245-index-preseed # NGOẠI LỆ CHỦ SHOP DUYỆT 16/10/2026: tạo TRƯỚC chỉ mục của migration 0247 trên CSDL tổ chức qa (chỉ qa) để 0245 hết quá trần — MẶC ĐỊNH CHẠY THỬ; "--apply" chỉ đi khi RAM ≥ 700 MB · ổ ≥ 2 GB · có bản sao lưu qa ≤ 120 phút · diễn tập khôi phục qa gần nhất ĐẠT ≤ 14 ngày; CONCURRENTLY, không đụng dữ liệu — MÃ HOÁ (arg: "qa [--apply]")
@@ -1557,6 +1558,18 @@ jobs:
                 SB=/root/erp/scripts/erp-backup.sh
                 [ -f "$SB" ] || { SB="$(mktemp)"; fetch_script erp-backup.sh > "$SB"; }
                 ERP_DIR=/root/erp bash "$SB" restore-drill-org "$ARG" ;;
+              record-external-drill-org)
+                # GHI DIỄN TẬP KHÔI PHỤC CHẠY NGOÀI VPS (chủ shop chọn 17/10/2026 — VPS 2 GB không có 700 MB RAM cho container
+                # diễn tập, ngưỡng giữ nguyên). Ô arg chỉ mang SỐ: "<mã> <tệp dump> <sha256> <số TABLE DATA> <finishedAt UTC> <OK|FAILED>".
+                # Máy chủ tự đối chiếu sha256 + mục lục của ĐÚNG bản trên máy, cửa sổ 120 phút — lời khai không khớp ⇒ ghi FAILED.
+                # Không dữ liệu, không khoá giải mã đi qua GitHub. Bản erp-backup.sh đã deploy chưa có lệnh này thì lấy từ main.
+                case "$ARG" in
+                  *[!a-zA-Z0-9_.:\ -]*) echo "::error::arg chỉ nhận chữ, số, - _ . : và dấu cách."; exit 1 ;;
+                esac
+                SB=/root/erp/scripts/erp-backup.sh
+                grep -q "record-external-drill-org" "$SB" 2>/dev/null || { SB="$(mktemp)"; fetch_script erp-backup.sh > "$SB"; }
+                # shellcheck disable=SC2086 — tách ô arg thành 6 tham số là CHỦ Ý (đã lọc ký tự ở trên)
+                ERP_DIR=/root/erp bash "$SB" record-external-drill-org $ARG ;;
               page-auto-skip-audit)
                 # TIN KHÁCH BỊ CHỐT «PAGE ĐÃ TRẢ LỜI» NHẦM (scripts/page-auto-skip-audit.ts — P0 HSLC 16/10/2026, issue #856) — CHỈ ĐỌC
                 # (script tự đặt ERP_READ_ONLY=1 và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection). Luật của image đang chạy

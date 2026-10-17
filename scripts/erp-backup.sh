@@ -1252,6 +1252,63 @@ cmd_sao_luu_gio_to_chuc() {
   return 0
 }
 
+# ═══════════════ LỆNH: record-external-drill-org — GHI DIỄN TẬP KHÔI PHỤC CHẠY NGOÀI VPS (chủ shop chọn 17/10/2026) ═══════════════
+#
+# VPS 2 GB không bao giờ có 700 MB RAM cho container diễn tập (đo 16–17/10: 525–635 MB, 621 MB cả khi đã dừng ai-staging), và
+# ngưỡng 700 MB GIỮ NGUYÊN. Chủ shop chọn diễn tập THẬT trên máy riêng đủ RAM: bản sao lưu MÃ HOÁ trên Drive (rclone crypt) →
+# giải mã trên máy đó → Postgres 16 cô lập → pg_restore + kiểm toàn vẹn + chạy thử migration → xoá. Dữ liệu và khoá giải mã
+# KHÔNG đi qua GitHub; lệnh này chỉ nhận SỐ (tên tệp, sha256, số mục, mốc, kết luận).
+#
+# Lệnh KHÔNG tin lời khai. Nó chỉ ghi last-drill.json = OK khi TẤT CẢ đúng:
+#   · bản dump mang ĐÚNG tên ấy có trên máy, trong thư mục của tổ chức (cùng bản đã đẩy lên Drive);
+#   · sha256 của bản trên máy TRÙNG sha256 mà máy ngoài đã khôi phục — cùng một bản, từng byte;
+#   · số mục TABLE DATA trong `pg_restore --list` của bản trên máy TRÙNG số bảng máy ngoài khôi phục được;
+#   · lượt ngoài kết thúc không quá CUA_SO_DIEN_TAP_NGOAI_PHUT phút trước, không ở tương lai, và khai OK.
+# Sai một điều ⇒ ghi FAILED kèm lý do. Lý do của bản OK ghi rõ «NGOÀI VPS» và CSDL tạm là `ngoai-vps`, để không ai nhầm với
+# lượt diễn tập trên máy. Bằng chứng đầy đủ (đếm từng bảng, giờ chạy migration) nằm ở máy chạy diễn tập.
+CUA_SO_DIEN_TAP_NGOAI_PHUT=120
+cmd_ghi_dien_tap_ngoai_to_chuc() { # $1=mã $2=tệp dump $3=sha256 $4=số TABLE DATA $5=finishedAt ISO (UTC) $6=OK|FAILED
+  local csdl ten sha toc xong ket ban bat_dau sha_may toc_may moc_xong tuoi ly_do=""
+  bat_dau="$(bay_gio_utc)"
+  if [ "$#" -ne 6 ]; then loi "record-external-drill-org <mã> <tệp dump> <sha256> <số TABLE DATA> <finishedAt ISO> <OK|FAILED>"; return 2; fi
+  csdl="$(csdl_tu_ma_to_chuc "$1")" || { loi "Mã tổ chức không hợp lệ."; return 2; }
+  ten="$2"; sha="$3"; toc="$4"; xong="$5"; ket="$6"
+  [[ "$ten" =~ ^${csdl}-[0-9]{8}-[0-9]{4}\.dump$ ]] || { loi "Tên tệp dump không đúng mẫu của $csdl."; return 2; }
+  [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || { loi "sha256 phải là 64 ký tự hex thường."; return 2; }
+  [[ "$toc" =~ ^[0-9]+$ ]] || { loi "Số TABLE DATA phải là số nguyên."; return 2; }
+  [[ "$xong" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || { loi "finishedAt phải dạng YYYY-MM-DDTHH:MM:SSZ."; return 2; }
+  case "$ket" in OK | FAILED) ;; *) loi "Kết quả phải là OK hoặc FAILED."; return 2 ;; esac
+
+  giu_khoa 9 "$KHOA_VONG_DOI" -s "$TRAN_CHO_KHOA_GIAY" || { loi "Hết giờ chờ khoá vòng đời — KHÔNG ghi."; return 75; }
+  ban="$(find "$THU_MUC_TO_CHUC/$csdl" -type f -name "$ten" 2>/dev/null | head -n 1)"
+  moc_xong="$(date -u -d "$xong" +%s 2>/dev/null || true)"
+  if [ "$ket" != "OK" ]; then
+    ly_do="Máy ngoài khai FAILED cho $ten."
+  elif [ -z "$ban" ]; then
+    ly_do="Không có bản $ten trên máy — không đối chiếu được, KHÔNG nhận."
+  elif [ -z "$moc_xong" ]; then
+    ly_do="Không đọc được mốc finishedAt."
+  else
+    tuoi=$(( ( $(date -u +%s) - moc_xong ) / 60 ))
+    sha_may="$(sha256sum "$ban" | cut -d' ' -f1)"
+    toc_may="$(docker exec -i "$DB_CONTAINER" pg_restore --list < "$ban" 2>/dev/null | grep -c ' TABLE DATA ' || true)"
+    if [ "$tuoi" -lt 0 ] || [ "$tuoi" -gt "$CUA_SO_DIEN_TAP_NGOAI_PHUT" ]; then
+      ly_do="Lượt ngoài kết thúc $tuoi phút trước — ngoài cửa sổ 0–$CUA_SO_DIEN_TAP_NGOAI_PHUT phút."
+    elif [ "$sha_may" != "$sha" ]; then
+      ly_do="sha256 bản trên máy KHÁC bản máy ngoài đã khôi phục — không phải cùng một bản."
+    elif [ "${toc_may:-x}" != "$toc" ]; then
+      ly_do="Mục lục bản trên máy có ${toc_may:-?} mục TABLE DATA, máy ngoài khôi phục $toc bảng — không khớp."
+    fi
+  fi
+  if [ -n "$ly_do" ]; then
+    ghi_dien_tap_to_chuc "$csdl" "FAILED" "NGOÀI VPS: $ly_do" "$ten" "ngoai-vps" "[]" "$bat_dau"
+    loi "Diễn tập ngoài VPS của $csdl KHÔNG được ghi nhận: $ly_do"; return 1
+  fi
+  ghi_dien_tap_to_chuc "$csdl" "OK" "NGOÀI VPS: khôi phục thật trên máy riêng (Postgres cô lập), kết thúc $xong · sha256 ${sha:0:12}… khớp bản trên máy · $toc bảng có dữ liệu khớp mục lục" "$ten" "ngoai-vps" "[]" "$bat_dau"
+  bao "diễn tập NGOÀI VPS của $csdl: ĐÃ GHI NHẬN — $ten · sha256 khớp · $toc bảng khớp · kết thúc $tuoi phút trước"
+  return 0
+}
+
 # ═══════════════ LỆNH: drill-org-weekly — DIỄN TẬP TỔ CHỨC TỰ ĐỘNG MỖI TUẦN (quyết định C7) ═══════════════
 #
 # LUẬT:
@@ -1754,6 +1811,11 @@ main() {
     local ma_dien_tap=0
     cmd_restore_drill_to_chuc "$@" || ma_dien_tap=$?
     return "$ma_dien_tap"
+  fi
+  if [ "$lenh" = "record-external-drill-org" ]; then
+    local ma_ngoai=0
+    cmd_ghi_dien_tap_ngoai_to_chuc "$@" || ma_ngoai=$?
+    return "$ma_ngoai"
   fi
   if [ "$lenh" = "hourly-org" ]; then
     local ma_gio=0
