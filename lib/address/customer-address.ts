@@ -18,7 +18,7 @@
  *    («P13 GV») cũng ở đây: `province = null`, `missing` có `province`, cách đọc đi riêng ở `provinceHint` cho câu hỏi khách.
  * Chỉ `EXACT` / `UNIQUE_FROM_OLD` được tự điền (`canAutoFill`). Hai mức còn lại ⇒ hỏi khách, ô xã để trống, cờ cần kiểm giữ nguyên.
  */
-import { adminWardsOf, expandAbbreviations, findProvince, findWardIn, foldVnText, isAdminName, normalizeVnAddress, oldDistrictsIn, wardOldDistricts, type AddressMatch } from "@/lib/address/vn-address";
+import { adminWardsOf, expandAbbreviations, findProvince, findWardIn, foldVnText, isAdminName, normalizeVnAddress, oldDistrictsIn, wardOldDistricts, type AddressMatch, type AdminWard } from "@/lib/address/vn-address";
 
 export const ADDRESS_CONFIDENCES = ["EXACT", "UNIQUE_FROM_OLD", "AMBIGUOUS", "NOT_FOUND"] as const;
 export type AddressConfidence = (typeof ADDRESS_CONFIDENCES)[number];
@@ -174,6 +174,51 @@ export function addressQuestion(a: CustomerAddress): string | null {
 }
 
 /**
+ * Xã KHÁC của cùng tỉnh mà tin khách nêu, ngoài `ward` (null = không có). Dò TỪNG VẾ (giữa dấu phẩy / chấm / xuống dòng) và bỏ qua lần
+ * nêu VẮT NGANG tên đã nhận (#871): gấp dấu bỏ dấu câu nên «An Hội Tây, TP.HCM» / «An Hội Tây Tp.HCM» thành «… tay thanh pho …» và khớp
+ * nhầm «Phường Tây Thạnh» — đơn của khách đủ địa chỉ bị chặn ba lần «xã chưa xác nhận». Tên nằm trọn trong tên đã nhận không tính là xã
+ * khác; tên CHỨA TRỌN tên đã nhận («An Phú Đông» khi đã nhận «An Phú») thì tính. HÀM THUẦN.
+ */
+export function otherWardNamed(provinceCode: number, ward: string, customerText: string): AdminWard | null {
+  const coreOf = (name: string) => foldVnText(name).replace(/^(phuong|xa|thi tran|dac khu) /, "");
+  const core = coreOf(ward);
+  const own = ` ${/^\d+$/.test(core) ? foldVnText(ward) : core} `;
+  const rawSegments = customerText.split(/[,;.\n]+/);
+  const segments = rawSegments.map((x) => ` ${expandAbbreviations(foldVnText(x))} `);
+  const at = (seg: string, needle: string) => {
+    const out: number[] = [];
+    for (let i = seg.indexOf(needle); i >= 0; i = seg.indexOf(needle, i + 1)) out.push(i);
+    return out;
+  };
+  // Một lần nêu xã khác chỉ bị bỏ qua khi nó VẮT NGANG tên đã nhận (bắt đầu bên trong, kết thúc bên ngoài: «an hoi [tay thanh] pho»).
+  // Tên CHỨA TRỌN tên đã nhận («An Phú Đông» khi đã nhận «An Phú») vẫn là xã khác.
+  const straddles = (seg: string, i: number, len: number) => at(seg, own).some((j) => i > j && i < j + own.length - 1 && i + len > j + own.length);
+  // Tên QUẬN / HUYỆN CŨ của chính xã đã nhận trùng tên một xã mới («P An Hội Tây, Gò Vấp» — Gò Vấp vừa là quận cũ của An Hội Tây vừa là
+  // «Phường Gò Vấp» mới; tương tự Bình Thạnh, Phú Nhuận, Tân Bình…) là phần địa chỉ cũ, không phải lời nêu xã thứ hai (review #874).
+  // CHỈ khi tên ấy đứng ở VỊ TRÍ QUẬN của địa chỉ: không có chữ loại xã ngay trước, và tin không mang lời chọn / sửa («Ngọc Hà hay Ba Đình
+  // ấy em», «An Hội Tây hay phường Gò Vấp?», «không phải…», «/») — khi đó khách đang nêu nó như MỘT XÃ để chọn, phải hỏi lại (review #874).
+  const oldDistricts = wardOldDistricts(ward, provinceCode);
+  // Lời chọn / sửa xét THEO VẾ: «?» của «mai giao được không?» ở vế khác không biến «Gò Vấp» thành một lựa chọn; «/» chỉ là lựa chọn khi
+  // nằm giữa hai CHỮ («An Hội Tây/Gò Vấp»), không phải số hẻm «230/20»; «sai» không phải «Sài Gòn» (review #874).
+  // Lời SỬA thì xét trên CẢ tin («Không phải Ngọc Hà, Ba Đình» — lời sửa ở vế trước áp cho tên ở vế sau).
+  const correcting = /(?:^| )(?:khong phai|ko phai|k phai|nham|sai(?! gon))(?: |$)/.test(` ${expandAbbreviations(foldVnText(customerText))} `);
+  const choosingAt = (k: number) => correcting || /\?|\p{L}\s*\/\s*\p{L}/u.test(rawSegments[k]) || /(?:^| )(?:hay|hoac|chang)(?: |$)/.test(segments[k]);
+  // Vế CHỈ là tên tỉnh («…, Sài Gòn» = TP.HCM) không nêu xã — dù «Phường Sài Gòn» mới trùng chữ. «phường Sài Gòn» (có chữ loại) vẫn là xã.
+  const provinceOnly = (k: number) => !correcting && !/^ (?:phuong|xa|thi tran|dac khu) /.test(segments[k]) && findProvince(rawSegments[k].trim())?.code === provinceCode;
+  const asDistrict = (k: number, i: number) => !choosingAt(k) && !/ (?:phuong|(?<!thi )xa|thi tran|dac khu)$/.test(segments[k].slice(0, i));
+  return (
+    adminWardsOf(provinceCode).find((w) => {
+      if (w.name === ward) return false;
+      const c = coreOf(w.name);
+      if (` ${core} `.includes(` ${c} `)) return false;
+      const n = ` ${/^\d+$/.test(c) ? foldVnText(w.name) : c} `;
+      const oldDistrict = oldDistricts.includes(c);
+      return segments.some((seg, k) => !provinceOnly(k) && at(seg, n).some((i) => !straddles(seg, i, n.length) && !(oldDistrict && asDistrict(k, i))));
+    }) ?? null
+  );
+}
+
+/**
  * Xã / phường MỚI khách vừa xác nhận ⇒ tên chuẩn. Hai điều kiện, thiếu một là từ chối (không đoán thay khách):
  *  1. Tên có trong danh mục xã của tỉnh đã nhận ra (chưa biết tỉnh ⇒ không nhận).
  *  2. Chữ khách đưa vào (`customerText`) nhắc đúng tên đó và KHÔNG nhắc một xã khác của tỉnh — model không tự chọn một ứng viên. Nơi
@@ -191,13 +236,7 @@ export function acceptCustomerWard(a: Pick<CustomerAddress, "provinceCode" | "pr
   if (!said.includes(` ${needle} `)) return { ok: false, error: `Khách chưa nói «${hit.name}» trong tin vừa gửi — chỉ ghi xã / phường khi KHÁCH vừa xác nhận tên đó.` };
   // Tin nêu thêm một xã KHÁC của cùng tỉnh («An Hội Tây hoặc Hạnh Thông», «không phải An Hội Tây, An Hội Đông») ⇒ chưa phải lời xác nhận
   // MỘT xã (review PR #848 lần 4). Tên nằm trọn trong tên đã nhận («An Phú» trong «An Phú Đông») không tính là xã khác.
-  const coreOf = (name: string) => foldVnText(name).replace(/^(phuong|xa|thi tran|dac khu) /, "");
-  const other = adminWardsOf(a.provinceCode).find((w) => {
-    if (w.name === hit.name) return false;
-    const c = coreOf(w.name);
-    if (` ${core} `.includes(` ${c} `)) return false;
-    return said.includes(` ${/^\d+$/.test(c) ? foldVnText(w.name) : c} `);
-  });
+  const other = otherWardNamed(a.provinceCode, hit.name, customerText);
   if (other) return { ok: false, error: `Tin khách nêu cả «${hit.name}» lẫn «${other.name}» — hỏi lại khách đúng một câu, không tự chọn.` };
   return { ok: true, ward: hit.name };
 }
@@ -246,12 +285,24 @@ export type StatedAddress = CustomerAddress & { messageIndex: number };
  * Đông nhé» — sửa không kèm đường; hay một địa chỉ khác hẳn) bị bỏ: khách đã sửa, phường cũ không còn là lời khai (review PR #848).
  * Thứ tự: mới nhất trước; không có ⇒ mảng rỗng. HÀM THUẦN.
  */
+/**
+ * Bỏ SĐT (kèm nhãn «SĐT», «số», «đt») khỏi một dòng khách gõ trước khi đọc địa chỉ (#871, ca «Ngọc Nguyễn»: SĐT + địa chỉ trong CÙNG một
+ * dòng ⇒ bộ đọc lấy SĐT làm SỐ NHÀ, địa chỉ khách ghi rõ không còn khớp dòng model chép). HÀM THUẦN.
+ */
+export function withoutPhones(line: string): string {
+  return line
+    .replace(/(?:(?:sđt|sdt|số điện thoại|so dien thoai|số đt|so dt|đt|dt|số|so|phone|tel)\s*[:.]?\s*)?(?:\+?84|0)[35789](?:[\s.-]?\d){8}(?!\d)/giu, " ")
+    .replace(/\s*[,;]\s*(?=[,;]|$)/g, "")
+    .replace(/^\s*[,;]\s*/, "")
+    .replace(/\s+/g, " ");
+}
+
 export function customerStatedAddresses(texts: readonly string[]): StatedAddress[] {
   const msgs = texts.map((t) => t.trim()).filter(Boolean);
   const out: StatedAddress[] = [];
   const seen = new Set<string>();
   const tryLine = (line: string, messageIndex: number) => {
-    const l = line.trim();
+    const l = withoutPhones(line).trim();
     if (!l || l.includes("?") || seen.has(l)) return;
     seen.add(l);
     const a = parseCustomerAddress(l);

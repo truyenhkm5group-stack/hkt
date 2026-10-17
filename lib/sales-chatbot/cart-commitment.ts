@@ -67,7 +67,9 @@ export type CartIntentKind = "ORDER" | "SET" | "ADD" | "REDUCE" | "KEEP" | "REMO
 /** `bare` = số TRẦN không chữ đơn vị («1 mực giã tay» — #855); gộp được với khối lượng cùng món đứng ngay sau («1 chả cá thu 2kg»). */
 export type CartAmount = { value: number; unit: CartUnit; label: string; display: string; index: number; end: number; ambiguous?: boolean; hint?: string; pieces?: boolean; word?: string; unbound?: boolean; raw?: string; bare?: boolean };
 /** `tentative` = số lượng nói kèm câu hỏi giá («lấy 2kg bao nhiêu em») — chỉ THÊM món mới (không dính), không bao giờ sửa món đã có. */
-export type CartIntent = { kind: CartIntentKind; amounts: CartAmount[]; label: string | null; tentative?: boolean };
+/** `restate` = khách NHẮC LẠI CẢ GIỎ (nhiều món, mỗi món một số, kết bằng «thôi» / «chỉ lấy») — SET từng món, không phải «thêm» (P0 #863). */
+/** `added` = nhãn món mang «thêm» / «nữa» trong câu nhắc lại — món đang có trong giỏ mà mang chữ này thì KHÔNG đặt lại số (review #869). */
+export type CartIntent = { kind: CartIntentKind; amounts: CartAmount[]; label: string | null; tentative?: boolean; restate?: boolean; added?: string[] };
 
 // ─────────────────────────── ĐỌC SỐ LƯỢNG ───────────────────────────
 
@@ -107,7 +109,10 @@ const STOP = new Set(
     "chot len don order de ok oke okie vang u uh roi khong ko k hok hong hem khoi phai chu ma cua loai dt sdt so dien thoai dia gium giup dum luon di hang nay kia do nao " +
     "the vay duoc dc can cai tong hay hoac moi ngon an truoc trc chiu bao nhieu bn gia sao dung tien het may tui goi hop set phan bich khay combo suat hu lo chiec cay " +
     "kg ky ki can gram gr g x da uhm oki shop xuong tru ha mai mot ve du qua lam it lan gio hom ngay toi sang chieu trua dem tuan thang tet mon huy gi vao ra " +
-    "nhen nghen nghe ne nhi hen nhaa ak day dau giu vs cung"
+    "nhen nghen nghe ne nhi hen nhaa ak day dau giu vs cung " +
+    // «Mình MUỐN mua 1 kg» (#871, ca «Ngọc Nguyễn»): động từ «muốn / thích» không phải tên món — trước đây «muốn» thành nhãn món, số 1kg
+    // bị bỏ khỏi giỏ vì «muốn» không khớp danh mục, rồi lên đơn chả cá bị chặn «khách chưa nói lấy món này».
+    "muon thich"
   ).split(" "),
 );
 const CUT_RE = /[\n,/;:+!?()[\]|.&]|\d/;
@@ -369,7 +374,7 @@ const head = (s: string) => {
 
 const NEG = "(?:khong|ko|k|hok|hong|hem)";
 const THOI = "(?:thoi|thui|thoii+|thoy)";
-const PARTICLES = "(?: (?:nha|nhe|nhen|a|em|chi|anh|di|dau|day|luon|giup|cho|dum|don|ca|het|gi|nua))*";
+const PARTICLES = "(?: (?:nha|nhe|nhen|a|em|chi|anh|di|dau|day|luon|giup|gium|cho|dum|don|ca|het|gi|nua))*";
 
 /**
  * Bỏ dấu theo TỪNG chữ gốc cho luật giỏ: «bỏ» / «bo» ⇒ `bo` nhưng «bố» · «bộ» · «bò» · «bơ» ⇒ `box` (không phải động từ bỏ); «hủy» / «huỷ»
@@ -404,10 +409,90 @@ export function foldCart(text: string): string {
  */
 const DENY_ORDER_RE = /(?:^| )(?:khong|ko|k|hong|hok|(?<!\d )kg)(?: co)? (?:order|dat)(?= |$)/;
 
+/**
+ * Chữ đứng sau «không đặt / không order» mà KHÔNG phải tên món (review độc lập PR #862): «không đặt THÊM gì nữa» (câu trả lời phổ biến nhất
+ * của lời mời thêm món máy chủ bắt bot gửi), «không đặt CỌC», «không đặt TRƯỚC được hả», «sao k đặt ĐƯỢC», «không đặt NHIỀU đâu», «ko đặt
+ * SHIP nhanh». Câu có những chữ này là lời nói thường, không phải lời phủ nhận một món.
+ */
+const DENY_NOT_ITEM = new Set("them coc truoc duoc dc nhieu it ship giao hang lai nua gi tiep luon ngay som ky the vay nhu sau gap".split(" "));
+
+/**
+ * Tên món khách PHỦ NHẬN («không có order chả cá thu», «kg có order chả cá», «ko đặt chả mực») — chữ đã gập, cắt ở từ dừng; `null` khi câu
+ * không phủ nhận món nào («không đặt thêm gì nữa em», «chị không đặt cọc đâu»). Chỉ là MÂU THUẪN khi tên này khớp một món bot / shop đã
+ * đưa ra (`botProposedDenial`). HÀM THUẦN.
+ */
+export function deniedItemLabel(text: string): string | null {
+  const m = foldCart(text).match(new RegExp(`${DENY_ORDER_RE.source}(?: mon)? ([a-z]+(?: [a-z]+){0,5})`));
+  if (!m) return null;
+  if (DENY_NOT_ITEM.has(m[1].split(" ")[0])) return null;
+  return leadingRun(m[1]) || null;
+}
+
+/**
+ * Khách phủ nhận ĐÚNG một món BOT ĐÃ ĐỀ NGHỊ (P0 #855 — chủ shop: phủ nhận món bot tự thêm ⇒ dừng tự chốt, người gọi lại ngay từ LẦN ĐẦU).
+ * Chỉ hai nguồn được coi là «bot đề nghị» (review độc lập PR #873):
+ *  · món bot tự thêm vào giỏ TRƯỚC tin này (`customerExplicit = false` — đơn nháp bot lên gắn vào giỏ qua `bindCommitment`);
+ *  · món nằm trong một BÁO GIÁ / ĐƠN NHÁP máy chủ đã tính cho bot (`proposedNames` — kết quả calculate_cart / create · update_draft_order).
+ * Món chỉ được NHẮC trong chữ bot / shop (menu, bảng giá, lời mời thêm món) KHÔNG tính: «không đặt chả cá, chị lấy 1kg chả mực» sau bảng giá
+ * là khách đang CHỌN, «không đặt nem đâu em» sau lời mời là khách TỪ CHỐI lời mời. Món khách đã tự nói tường minh, hay món trong báo giá mà
+ * khách đã tự nói MUA ở một tin trước của CHÍNH lượt mua này (`customerEarlier`) ⇒ khách đổi ý / tự chọn (bộ đếm phản đối của #860 lo).
+ * `inDraft` = món đó đã gắn mã từ đơn nháp đang mở ⇒ cờ cần người kiểm lên đơn. `null` = không phải. HÀM THUẦN.
+ */
+export function botProposedDenial(text: string, before: CartCommitment | undefined, proposedNames: readonly string[], hasDraft: boolean, customerEarlier: readonly string[] = []): { what: string; inDraft: boolean } | null {
+  const label = deniedItemLabel(text);
+  if (!label) return null;
+  // Review PR #873 vòng 2: chỉ LỜI MUA (`buyingText` — không câu hỏi giá) của LƯỢT MUA HIỆN TẠI (nơi gọi lọc — `customerTextsSince`) mới
+  // là «khách tự chọn món này». Món bot tự thêm vào giỏ (`customerExplicit = false`) LUÔN là bot đề nghị — không bao giờ bị che.
+  const earlier = buyingText(customerEarlier);
+  const customerChose = (name: string) => Boolean(earlier) && (` ${foldVi(earlier)} `.includes(` ${label} `) || calledByName(name, earlier));
+  const item = (before?.selectedItems ?? []).find((x) => labelsMatch(label, x.label || x.match));
+  if (item?.customerExplicit) return null;
+  if (item) return { what: item.label || item.match, inDraft: hasDraft && Boolean(item.productId) };
+  const proposed = proposedNames.find((n) => labelsMatch(label, n));
+  return proposed && !customerChose(proposed) ? { what: proposed, inDraft: false } : null;
+}
+
+/**
+ * Tin KHÁCH của LƯỢT MUA HIỆN TẠI (#855, review PR #873 vòng 2): chỉ tin sau mốc bắt đầu lượt mua (`since` = mốc chốt đơn của lượt mua TRƯỚC —
+ * `ChatState.pastOrders`; `null` = hội thoại chưa từng sang lượt mua mới). Tin của shop / bot và kết quả công cụ không vào. HÀM THUẦN.
+ */
+export function customerTextsSince(msgs: readonly { role: "user" | "assistant"; at: Date; text: string; toolResult?: boolean }[], since: Date | null): string[] {
+  return msgs.filter((m) => m.role === "user" && !m.toolResult && m.text.trim() && (!since || m.at.getTime() > since.getTime())).map((m) => m.text);
+}
+
 /** Cả đơn: «thôi không lấy nữa», «hok lấy nữa», «khỏi lấy nữa», «thôi khỏi», «hủy giúp chị», «bỏ đơn đi», «cancel đơn», «không lấy nha em». */
 const CANCEL_RE = new RegExp(
   `(?:^| )(?:${NEG} (?:lay|mua|dat|can)(?! them)${PARTICLES}$|${NEG} (?:lay|mua|dat) (?:nua|gi)(?: |$)|(?:${THOI} )?khoi(?: (?:lay|mua|dat))?${PARTICLES}$|huy${PARTICLES}$|huy don(?: |$)|bo don(?: |$)|cancel(?: don)?(?: |$))`,
 );
+
+/**
+ * Câu PHỦ ĐỊNH việc huỷ (review #869 — «không hủy đâu em», «đừng hủy nha em», «khoan đã, chưa hủy nhé», «đâu có hủy», «thôi khỏi hủy»): trong
+ * CÙNG một mệnh đề, phủ định đứng ngay trước «hủy» / «bỏ đơn» (cách tối đa một từ «cần / phải / muốn / được»), hoặc mệnh đề mở bằng «khoan».
+ * Đọc trên `foldCart` của TỪNG mệnh đề — «Không, hủy đơn đi» là câu TRẢ LỜI «không» rồi một câu huỷ, không phải «không hủy».
+ */
+export const NEGATED_CANCEL_RE = /(?:^| )(?:khong|ko|k|hong|hok|dung|chua|dau co|khoi)(?: (?:can|phai|muon|duoc))? (?:huy|bo don)(?= |$)|^khoan(?= |$)/;
+/** Từ huỷ trong một mệnh đề (đọc trên `foldCart`). */
+const CANCEL_WORD_RE = /(?:^| )(?:huy|bo don|cancel)(?= |$)/;
+/** Mệnh đề RÚT LẠI / giữ đơn không chứa «hủy»: «khoan (đã)», «à thôi khoan», «giữ đơn», «giữ lại đơn» (đọc trên `foldCart`). */
+const KEEP_CLAUSE_RE = /(?:^| )khoan(?= |$)|(?:^| )giu (?:lai )?don(?= |$)/;
+
+/**
+ * Khách nói KHÔNG huỷ / chưa huỷ (đồng ý giữ đơn) — `true` thì không bao giờ là câu huỷ. Tách mệnh đề trên chữ GỐC (`, . ; ! ? /` xuống dòng —
+ * fanpage nối các tin khách liên tiếp bằng xuống dòng) trước khi bỏ dấu; MỆNH ĐỀ CUỐI có nói tới việc huỷ quyết: câu huỷ không phủ định ⇒ huỷ
+ * («Không, hủy đi», «không không, hủy giùm chị»); phủ định huỷ / «khoan» / «giữ đơn» ⇒ giữ — kể cả khi đứng SAU một câu huỷ («Hủy đơn\nà thôi
+ * khoan đã», «hủy đi, à thôi không hủy nữa»: lời rút lại muộn hơn thắng, review #869). Bare «thôi khỏi» (không có «hủy») vẫn là câu huỷ.
+ * HÀM THUẦN.
+ */
+export function negatedCancel(text: string): boolean {
+  let last: "KEEP" | "CANCEL" | null = null;
+  for (const clause of text.split(/[,.;!?/\n]+/)) {
+    const f = foldCart(clause);
+    if (!f) continue;
+    if (NEGATED_CANCEL_RE.test(f) || KEEP_CLAUSE_RE.test(f)) last = "KEEP";
+    else if (CANCEL_WORD_RE.test(f)) last = "CANCEL";
+  }
+  return last === "KEEP";
+}
 
 /** Đoạn chữ cuối là tên món (dãy từ không thuộc STOP đứng ngay trước / sau một động từ). */
 function trailingRun(s: string): string {
@@ -504,7 +589,8 @@ export function classifyCartMessage(text: string, catalog?: readonly string[], o
       const label = leadingRun(rm[1]);
       if (label) return { kind: "REMOVE", amounts: [], label };
     }
-    if (CANCEL_RE.test(f)) return none("CANCEL");
+    // «không hủy đâu em», «đừng hủy nha», «chưa hủy nhé» — câu PHỦ ĐỊNH việc huỷ, không phải câu huỷ (review #869).
+    if (CANCEL_RE.test(f) && !negatedCancel(text)) return none("CANCEL");
   }
   if (/(?:^| )(?:neu|thi) /.test(` ${f} `)) return none("QUESTION");
   // «không phải 2kg», «không lấy 2kg đâu», «2kg nhiều quá» — số bị phủ định là số CŨ; «2kg, à không 1kg» — số đứng trước bị rút lại.
@@ -516,10 +602,25 @@ export function classifyCartMessage(text: string, catalog?: readonly string[], o
   });
   if (!amounts.length) return none("AMBIGUOUS");
   const buyVerb = /(?:^| )(?:lay|cho|dat|mua|gui|ship|chot|order|lam|len don)(?: (?:chi|em|anh|minh|toi|c|a|e|cho chi|cho em|cho anh|cho minh|them))*$/;
-  const priceAsk = raw.includes("?") || /(?:^| )(?:bao nhieu|bn|nhieu tien|may tien|het bao|gia (?:bao|sao|the nao|nhieu|nhu)|(?:duoc|dc|co|dung|phai) (?:khong|ko|k)|the nao|sao|tinh tien|tinh gia|bao gia)(?: |$)/.test(f) || /(?:^| )(?:khong|ko|k|hong|hok)(?: (?:em|e|a|shop|ban|vay|nhi))?$/.test(f);
+  // CÂU HỎI xét từ CÂU chứa số lượng đầu tiên TỚI HẾT TIN (#871, ca «Ngọc Nguyễn»: «Ship gò vấp bn? Mình muốn mua 1 kg» — câu hỏi ship ở
+  // câu TRƯỚC không biến lời mua ở câu sau thành «số lượng nói kèm câu hỏi giá»). Chỉ thu hẹp ĐẦU cửa sổ: câu hỏi giá đứng SAU số lượng
+  // («2kg chả cá thu. Bao nhiêu vậy em?», «Cho chị hỏi 2kg chả cá thu⏎bao nhiêu tiền») vẫn là câu HỎI, không thành món đã chốt (review PR #878).
+  const sentenceStart = Math.max(0, ...[...raw.slice(0, amounts[0].index).matchAll(/[?.!\n]/g)].map((m) => (m.index ?? -1) + 1));
+  const sentence = raw.slice(sentenceStart);
+  const fs = foldCart(sentence);
+  const priceAsk = sentence.includes("?") || /(?:^| )(?:bao nhieu|bn|nhieu tien|may tien|het bao|gia (?:bao|sao|the nao|nhieu|nhu)|(?:duoc|dc|co|dung|phai) (?:khong|ko|k)|the nao|sao|tinh tien|tinh gia|bao gia)(?: |$)/.test(fs) || /(?:^| )(?:khong|ko|k|hong|hok)(?: (?:em|e|a|shop|ban|vay|nhi))?$/.test(fs);
   const last = amounts[amounts.length - 1];
   const leadOf = (a: CartAmount) => tail(text.slice(0, a.index));
   const trailOf = (a: CartAmount) => head(text.slice(a.end));
+  // KHÁCH NHẮC LẠI CẢ GIỎ (P0 #863, HSLC 16/10/2026): «Lấy thêm 1/2 kg chả mực, 1kg chả cá thu thôi» — ≥ 2 số lượng, mỗi số gọi tên một món KHÁC
+  // nhau, câu kết bằng «thôi» (hoặc mở bằng «chỉ lấy») ⇒ đó là GIỎ CUỐI khách muốn (1kg cá + 0,5kg mực), không phải «thêm 0,5kg mực nữa» (bản cũ
+  // cộng lần hai ⇒ 1kg mực) và không phải chỉ sửa món cuối (bản cũ bỏ rơi vế mực). ⇒ SET từng món đúng số khách nói.
+  {
+    const named = amounts.filter((a) => a.label && !a.ambiguous && !a.unbound);
+    const restateCue = new RegExp(`(?:^| )${THOI}${PARTICLES}$`).test(f) ||/chỉ\s+(?:lấy|mua|đặt)/.test(raw.slice(0, amounts[0].index));
+    const added = named.filter((a) => /(?:^| )(?:them|cong them|lay them)(?: |$)/.test(tail(text.slice(0, a.index))) || /^nua(?: |$)/.test(trailOf(a))).map((a) => a.label);
+    if (!priceAsk && restateCue && amounts.length >= 2 && named.length === amounts.length && new Set(named.map((a) => a.label)).size === named.length) return { kind: "SET", amounts, label: null, restate: true, ...(added.length ? { added } : {}) };
+  }
   const addRe = /(?:^| )(?:them|cong them|lay them|them cho (?:chi|em|anh|minh))$/;
   const adds = amounts.filter((a) => addRe.test(leadOf(a)) || /^nua(?: |$)/.test(trailOf(a)));
   if (adds.length) {
@@ -676,8 +777,10 @@ function applyCart(cart: CartCommitment | undefined, text: string, turn: number 
       const i = findItem(items, a.label);
       if (i !== null) return i;
       if (items.some((x) => labelsMatch(x.match, a.label))) return "AMBIGUOUS";
-      // «Cho chị 2kg» rồi «2kg chả cá thu nhé» — giỏ có đúng MỘT món chưa rõ tên ⇒ đó là món này.
-      return items.length === 1 && !items[0].match ? 0 : "NEW";
+      // «Cho chị 2kg» rồi «2kg chả cá thu nhé» — giỏ có đúng MỘT món chưa rõ tên ⇒ đó là món này. CHỈ khi hợp đơn vị (#871, ca «Ngọc
+      // Nguyễn»: «mua 1 kg» rồi «Lấy 10 cái nem hải sản» — 10 CÁI không thể là 1 KG đó; trước đây nem ĐÈ lên món 1kg, giỏ mất 1kg chả cá
+      // và lên đơn chả cá bị chặn «khách chưa nói lấy món này»). Khác đơn vị ⇒ món MỚI.
+      return items.length === 1 && !items[0].match && unitFits(a, items[0]) ? 0 : "NEW";
     }
     // Số KHÔNG TÊN rơi về món sẵn có CHỈ khi hợp đơn vị (ca «Hoa Lê» 15/10/2026: «thêm 10 cái nem hải sản» không gắn được tên ⇒ rơi về
     // chả cá 1kg ⇒ +10kg). Khác đơn vị ⇒ HỎI LẠI, không bao giờ cộng vào món đó. «gói / túi» với món bán theo kg vẫn tới món đó (quy theo
@@ -688,6 +791,11 @@ function applyCart(cart: CartCommitment | undefined, text: string, turn: number 
     return unitFits(a, items[only]) ? only : "UNIT";
   };
   const targets = intent.amounts.map(target);
+  // Câu nhắc lại cả giỏ mà món ĐANG CÓ mang «thêm» / «nữa» («thêm 1 hộp nem, 1 hũ ruốc nữa thôi» khi giỏ đã 2 hộp nem): không biết khách
+  // muốn cộng hay muốn giữ đúng số ⇒ KHÔNG đặt lại (đặt lại là hạ món khách đang thêm), giỏ giữ nguyên + hỏi lại (review #869).
+  if (intent.restate && intent.added?.length && intent.amounts.some((a, k) => typeof targets[k] === "number" && intent.added!.includes(a.label))) {
+    return relax("Khách nói «thêm» một món ĐANG CÓ trong câu nhắc lại cả giỏ — chưa chắc cộng thêm hay giữ đúng số: HỎI LẠI khách muốn tổng mỗi món bao nhiêu");
+  }
   const unitMiss = intent.amounts.find((_, k) => targets[k] === "UNIT");
   if (unitMiss && cart) return relax(`Khách nói ${amountText(unitMiss.value, unitMiss.unit, unitMiss.pieces)} không kèm tên món mà món đang có tính theo đơn vị khác — chưa quy đổi được, HỎI LẠI khách muốn thêm món nào`);
   if (targets.includes("AMBIGUOUS")) return cart ? relax(`Khách nói ${intent.amounts.map((a) => amountText(a.value, a.unit)).join(", ")} nhưng giỏ có ${items.length} món — chưa rõ món nào, GIỮ NGUYÊN và hỏi lại`) : cart;
@@ -697,7 +805,7 @@ function applyCart(cart: CartCommitment | undefined, text: string, turn: number 
   if (intent.kind !== "ADD" && [...hits.values()].some((n) => n > 1)) return cart ? relax("Khách nói nhiều số lượng cho cùng một món trong một câu — chưa chắc số nào, hỏi lại") : cart;
   // Giỏ ≥ 2 món + «chỉ» / «thôi» kèm số của MỘT món («chỉ lấy 1kg chả mực thôi») ⇒ GIỮ đúng món đó với số mới, bỏ món kia; không
   // chắc món nào ⇒ hỏi lại, không chặn (review vòng 3).
-  if (items.length >= 2 && (intent.kind === "SET" || intent.kind === "ORDER") && !intent.tentative && pickCueOf(text)) {
+  if (items.length >= 2 && (intent.kind === "SET" || intent.kind === "ORDER") && !intent.tentative && !intent.restate && pickCueOf(text)) {
     const t = targets[0];
     if (intent.amounts.length !== 1 || typeof t !== "number" || !intent.amounts[0].label) return relax("Khách chọn lại món («chỉ / thôi») nhưng chưa rõ giữ món nào — hỏi lại");
     const a = intent.amounts[0];
@@ -798,6 +906,31 @@ export function commitmentViolation(cart: CartCommitment | undefined, asked: rea
   return null;
 }
 
+/** Một món khách nói TƯỜNG MINH mà đơn nháp ghi khác lượng (`gotAmount = 0` ⇒ đơn thiếu hẳn món đó). */
+export type CartDraftDiff = { label: string; want: string; got: string; wantAmount: number; gotAmount: number; unit: CartUnit; sourceMessageId: number | null };
+
+/**
+ * ĐƠN NHÁP LỆCH GIỎ KHÁCH NÓI GẦN NHẤT (P0 #863): mỗi món khách nói tường minh, ghép được đúng một sản phẩm của đơn và đo được, mà lượng
+ * trong đơn KHÁC lượng khách nói (nhiều hơn hay ít hơn đều là lệch). `since` = chỉ xét món khách nói SAU lượt đó (vd lượt khách đã thấy tóm
+ * tắt đơn nháp — khách đổi ý sau khi thấy đơn). Không ghép / không đo được ⇒ bỏ qua (không đoán). Món đơn có mà giỏ không có KHÔNG tính ở
+ * đây — lời mời khách «ok» có thể chưa vào giỏ (`lineBasisViolation` lo vế đó lúc ghi đơn). HÀM THUẦN.
+ */
+export function cartDraftDiff(cart: CartCommitment | undefined, asked: readonly AskedLine[], opts: { since?: number | null } = {}): CartDraftDiff[] {
+  if (!cart) return [];
+  const out: CartDraftDiff[] = [];
+  for (const item of cart.selectedItems) {
+    if (!item.customerExplicit || item.quantity <= 0) continue;
+    if (opts.since !== undefined && opts.since !== null && (item.sourceMessageId === null || item.sourceMessageId <= opts.since)) continue;
+    const pid = productFor(item, cart, asked);
+    if (!pid) continue;
+    const got = proposedAmount(pid, item.unit, asked, item.pieces);
+    if (got === null || got === item.quantity) continue;
+    const label = item.label || productName(asked.find((l) => l.productId === pid)?.name ?? "") || "món khách chọn";
+    out.push({ label, want: amountText(item.quantity, item.unit, item.pieces), got: amountText(got, item.unit, item.pieces), wantAmount: item.quantity, gotAmount: got, unit: item.unit, sourceMessageId: item.sourceMessageId });
+  }
+  return out;
+}
+
 /**
  * Khách đã GỌI TÊN sản phẩm trong chữ của mình (kể cả không kèm số lượng máy đọc được — «cho chị 2 gói, thêm 1 ruốc tôm»): từ ĐẦU của tên
  * (danh từ món: «ruốc», «nem», «chả») có mặt VÀ ít nhất hai từ của tên có mặt (tên một từ ⇒ đủ một). «chả cá» không gọi tên «Chả mực giã
@@ -839,10 +972,32 @@ const ASK_TAIL_RAW_RE = /(?:^|\s)(?:hả|à|hở)(?:\s+(?:em|e|shop|chị|c|ạ|
 export function buyingText(texts: readonly string[]): string {
   const out: string[] = [];
   for (const t of texts) {
-    for (const clause of t.split(/[\n,.;!]+|\s+(?:nhưng|nhung)\s+/i)) {
+    // «?» cũng cắt câu (#871): «Ship gò vấp bn? Mình muốn mua 1 kg» — câu hỏi bị bỏ, lời mua ở câu sau vẫn là chữ mua.
+    for (const clause of t.replace(/\?/g, "?\n").split(/[\n,.;!]+|\s+(?:nhưng|nhung)\s+/i)) {
       if (!clause.trim() || clause.includes("?")) continue;
       const fc = foldVi(clause);
-      if (NOT_BUYING_RE.test(fc) || DEFER_OR_ASK_RE.test(fc) || NOT_BUYING_RAW_RE.test(clause.toLowerCase()) || ASK_TAIL_RAW_RE.test(clause.toLowerCase().trim())) continue;
+      if (NOT_BUYING_RE.test(fc) || DENY_ORDER_RE.test(fc) || DEFER_OR_ASK_RE.test(fc) || NOT_BUYING_RAW_RE.test(clause.toLowerCase()) || ASK_TAIL_RAW_RE.test(clause.toLowerCase().trim())) continue;
+      out.push(clause.trim());
+    }
+  }
+  return out.join("\n");
+}
+
+/** Phủ định / bỏ / huỷ (không gồm câu hỏi giá) — mệnh đề này gọi tên món để TỪ CHỐI nó. */
+const NEGATION_RE = /(?:^| )(?:khong|ko|k|chua|dung|hong|hok|chang) (?:lay|mua|can|dat|an|thich)(?: |$)/;
+
+/**
+ * CHỮ GỌI TÊN MÓN của khách cho một BÁO GIÁ (P0 #855, ca «ThuyNgo»): như `buyingText` nhưng GIỮ câu hỏi giá / giả định («chả cá bao nhiêu?»,
+ * «nếu lấy 2kg thì sao») — khách hỏi giá một món là căn cứ để TÍNH GIÁ món đó, dù chưa phải căn cứ để LÊN ĐƠN. Bỏ mệnh đề phủ định / phủ
+ * nhận («kg có order chả cá thu») / bỏ / huỷ: không bao giờ là căn cứ tính một giỏ có món đó. HÀM THUẦN.
+ */
+export function mentionText(texts: readonly string[]): string {
+  const out: string[] = [];
+  for (const t of texts) {
+    for (const clause of t.split(/[\n,.;!?]+|\s+(?:nhưng|nhung)\s+/i)) {
+      if (!clause.trim()) continue;
+      const fc = foldVi(clause);
+      if (NEGATION_RE.test(fc) || DENY_ORDER_RE.test(fc) || NOT_BUYING_RAW_RE.test(clause.toLowerCase())) continue;
       out.push(clause.trim());
     }
   }
