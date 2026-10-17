@@ -128,7 +128,7 @@ on:
           - restore-drill-org   # DIỄN TẬP khôi phục MỘT CSDL tổ chức erp_org_* (arg: mã tổ chức; rỗng = luân phiên) vào CSDL tạm tam_khoiphuc_<mã> trong container TẠM, đếm bảng lõi, xoá container — chạy tay; cron cũng tự chạy mỗi Chủ nhật qua drill-org-weekly (luân phiên)
           - migration-rehearsal # CHẠY THỬ migration còn thiếu trên BẢN SAO một CSDL tổ chức (cùng đường khôi phục với restore-drill-org, container TẠM) — thống kê bảng, bấm giờ từng câu, chẩn đoán hàm 0245, EXPLAIN; KHÔNG chạm erp-db; MÃ HOÁ, số qua kênh tóm tắt (arg: "<mã tổ chức> [--candidate-index] [--compare-jit] [--timeout=1200] [--budget=600] [--sample=20] [--explain=3] [--no-analyze] [--skip-diagnose] [--skip-migrate]")
           - page-auto-skip-audit # P0 HSLC 16/10/2026 (issue #856 «Cao Hải Ninh»): tin khách bị chốt «Page đã trả lời» mà KHÔNG có câu trả lời hợp lệ nào (chỉ tin tự động / chữ hệ thống / tin chào sau nó) trên MỘT tổ chức — chốt nhầm · bỏ sót hiện tại · ≤ 2 giờ (tự cứu sau deploy) · có người giữ · có đơn — MÃ HOÁ, chỉ số đếm (CHỈ ĐỌC; arg: "<mã tổ chức> [--hours=1..336]")
-          - org-0245-index-preseed # NGOẠI LỆ CHỦ SHOP DUYỆT 16/10/2026: tạo TRƯỚC chỉ mục của migration 0247 trên CSDL tổ chức qa (chỉ qa) để 0245 hết quá trần — MẶC ĐỊNH CHẠY THỬ; "--apply" chỉ đi khi RAM ≥ 700 MB · ổ ≥ 2 GB · có bản sao lưu qa ≤ 120 phút · diễn tập khôi phục qa gần nhất ĐẠT ≤ 14 ngày; CONCURRENTLY, không đụng dữ liệu — MÃ HOÁ (arg: "qa [--apply]")
+          - org-0245-index-preseed # NGOẠI LỆ CHỦ SHOP DUYỆT 16/10/2026: tạo TRƯỚC chỉ mục của migration 0247 trên CSDL tổ chức qa (chỉ qa) để 0245 hết quá trần — MẶC ĐỊNH CHẠY THỬ; "--apply" chỉ đi khi RAM ≥ 350 MB (riêng tạo chỉ mục, chủ shop duyệt 17/10) · ổ ≥ 2 GB · có bản sao lưu qa ≤ 120 phút · diễn tập khôi phục qa ĐẠT ≤ 120 phút; CONCURRENTLY, không đụng dữ liệu — MÃ HOÁ (arg: "qa [--apply]")
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
           - apply-ai-env        # ghi OPENAI_API_KEY / ANTHROPIC_API_KEY / AI_PROVIDER từ Secrets vào .env, khởi động lại, rồi kiểm tra AI
@@ -1577,9 +1577,9 @@ jobs:
                     _o="$(df -Pm / | awk 'NR==2 {print $4}')"
                     _ban="$(find /root/backups/orgs/erp_org_qa -name 'erp_org_qa-*.dump' -mmin -120 2>/dev/null | head -1)"
                     _dt="/root/backups/status/orgs/erp_org_qa/last-drill.json"
-                    _dt_ok="$(find "$_dt" -mtime -14 2>/dev/null | head -1)"
+                    _dt_ok="$(find "$_dt" -mmin -120 2>/dev/null | head -1)"  # diễn tập ĐẠT trong 120 phút: chạy SAU bản sao lưu đang dùng (chủ shop 17/10)
                     _dt_kq="$(grep -o '"result":"[A-Z]*"' "$_dt" 2>/dev/null | head -1)"
-                    echo "[ops:tom-tat] tiền điều kiện: RAM dùng được ${_ram:-?} MB (≥ 350, riêng tạo chỉ mục) · ổ trống ${_o:-?} MB (≥ 2048) · bản sao lưu qa ≤ 120 phút: $([ -n "$_ban" ] && echo có || echo KHÔNG) · diễn tập khôi phục qa: ${_dt_kq:-chưa có} $([ -n "$_dt_ok" ] && echo '(≤ 14 ngày)' || echo '(cũ / không có)')"
+                    echo "[ops:tom-tat] tiền điều kiện: RAM dùng được ${_ram:-?} MB (≥ 350, riêng tạo chỉ mục) · ổ trống ${_o:-?} MB (≥ 2048) · bản sao lưu qa ≤ 120 phút: $([ -n "$_ban" ] && echo có || echo KHÔNG) · diễn tập khôi phục qa: ${_dt_kq:-chưa có} $([ -n "$_dt_ok" ] && echo '(≤ 120 phút)' || echo '(cũ hơn 120 phút / không có)')"
                     if [ -z "$_ram" ] || [ "$_ram" -lt 350 ] || [ -z "$_o" ] || [ "$_o" -lt 2048 ] || [ -z "$_ban" ] || [ -z "$_dt_ok" ] || [ "$_dt_kq" != '"result":"OK"' ]; then
                       echo "::error::org-0245-index-preseed --apply: tiền điều kiện CHƯA đạt — KHÔNG ghi. Chạy restore-drill-org qa / chờ máy rảnh rồi thử lại."
                       exit 1
