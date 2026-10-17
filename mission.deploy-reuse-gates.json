@@ -3,7 +3,7 @@
   "mission_id": "deploy-reuse-gates",
   "title": "CI/CD: deploy dùng lại bằng chứng gates khi cây (tree) commit gộp trùng merge ref PR đã kiểm — bỏ chạy lại gates trùng",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "FAILED",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,11 +20,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-17T03:16:14.367Z",
-  "updated_at": "2026-10-17T09:54:41.671Z",
+  "updated_at": "2026-10-17T11:12:03.064Z",
   "last_heartbeat": "2026-10-17T03:42:13.688Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#881 → d5173b9ae0e0ef70993937bb8a980b34a89b0941"
+    "merged": "#881 → d5173b9ae0e0ef70993937bb8a980b34a89b0941",
+    "verify": "FAIL d5173b9ae0e0ef70993937bb8a980b34a89b0941 2026-10-17T11:11:44.867Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39022956592"
   },
   "handoff": {
     "branch": "claude/deploy-reuse-gates",
