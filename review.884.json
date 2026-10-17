@@ -1,8 +1,8 @@
 {
   "pr": 884,
-  "sha": "60642b4b2793a1b12b1dc3a1c0dd71ff509ee2a6",
+  "sha": "1207bc344ac6dc93224498480d2240121a7340ce",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-17T05:41:47.099Z",
-  "note": "review: VPS chỉ ghi OK khi sha256 + số TABLE DATA của đúng bản trên máy khớp, cửa sổ 0–120 phút; lời lý do tách phần VPS xác minh khỏi lời khai khôi phục; arg lọc ký tự trước khi tách; tham số sai không ghi"
+  "at": "2026-10-17T05:52:34.534Z",
+  "note": "review: như 60642b4b + phân loại thao tác ops không in dữ liệu cá nhân (KHONG_MA_HOA_DA_RA)"
 }
