@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "backup-lock-scope",
+  "title": "Sao lưu hằng giờ nhả khoá đọc DB trước bước đẩy Drive",
+  "business_goal": "Ops đọc nặng và diễn tập qa lấy được khoá; sao lưu vẫn toàn vẹn",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-token-budget",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/backup-lock-scope",
+  "base_sha": "d11467d0ae66e6c80d29d7c16016fb17b58905c4",
+  "domains": [],
+  "owned_paths": [
+    "scripts/erp-backup.sh",
+    "tests/backup.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-17T02:45:47.740Z",
+  "updated_at": "2026-10-17T02:45:47.740Z",
+  "last_heartbeat": "2026-10-17T02:45:47.740Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "MISSING",
+    "evidence": []
+  }
+}
