@@ -70,6 +70,7 @@ import { withTurnEvents } from "@/lib/sales-chatbot/events";
 import { FOOD_PACK, salesPackFor, type SalesPack } from "@/lib/sales-chatbot/packs";
 import { recoveryPrompt, serverCancelStep } from "@/lib/sales-chatbot/cancel-flow";
 import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, returningPendingOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
+import { purchaseRoundStart } from "@/lib/sales-chatbot/purchase-round";
 import { amountText, applyCustomerCartMessage, botProposedDenial, buyingText, customerTextsSince, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, invitedProductOf, itemObjectionCue, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
 import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
 import { customerHandoffVerdict, nextObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
@@ -407,6 +408,42 @@ async function loadMessages(conversationId: string): Promise<{ seq: number; role
 }
 
 class SeqConflict extends Error {}
+
+/**
+ * Ghi một hội thoại — đường DUY NHẤT cho `state` (lượt chat `bump` và `carryCommentTurn` dùng chung). `startedAt` = lúc lượt ghi bắt đầu.
+ * `state.orderSync` thuộc job GHI ĐƠN TỪ HỘI THOẠI (order-sync.ts), không thuộc lượt này: lấy bản đang nằm trong CSDL, không ghi đè bằng
+ * bản chụp lúc lượt bắt đầu (mất nhật ký ⇒ job đọc lại hội thoại và có thể ghi trùng đơn). `state.control` (Tiếp quản / AI gợi ý —
+ * conversation-control-shared.ts) thuộc NGƯỜI, cùng luật: nhân viên tiếp quản trong lúc AI đang soạn thì lượt này không được xoá mất lựa
+ * chọn đó. `state.cart` (giỏ có thẩm quyền) — REVISION theo `cart.at` (review 15/10/2026, ca «Hoa Lê»): một lượt CŨ chạy chậm (webhook
+ * lặp, job trễ) không được đè giỏ mà một lượt MỚI HƠN đã ghi sau khi lượt này bắt đầu ⇒ giữ giỏ trong CSDL. Lượt này tự ghi giỏ luôn mang
+ * mốc = lúc bắt đầu lượt, nên không bao giờ tự chặn mình.
+ */
+async function writeConversation(conversationId: string, patch: Partial<typeof schema.salesChatConversations.$inferInsert>, startedAt: Date): Promise<void> {
+  const db = await getDb();
+  await db.update(schema.salesChatConversations).set(conversationSet(patch, startedAt)).where(eq(schema.salesChatConversations.id, conversationId));
+}
+
+/** Phần `set` của `writeConversation` — để một giao dịch (`carryCommentTurn`) ghi trạng thái bằng ĐÚNG luật đó, cùng giao dịch với tin chép. */
+function conversationSet(patch: Partial<typeof schema.salesChatConversations.$inferInsert>, startedAt: Date) {
+  const cv = schema.salesChatConversations;
+  const { state, ...rest } = patch;
+  const ourCart = state ? ((state as ChatState).cart ?? null) : null;
+  const ourRev = state ? ((state as ChatState).cartRev ?? null) : null;
+  // Mốc của bản trong CSDL = muộn hơn trong mốc giỏ và `cartRev` (ghi cả khi giỏ bị xoá) — giỏ đã XOÁ bởi lượt mới hơn cũng không bị dựng lại.
+  const newerInDb = sql`greatest(coalesce(${cv.state}->'cart'->>'at', ''), coalesce(${cv.state}->>'cartRev', '')) > ${startedAt.toISOString()}`;
+  const stateSql = state ? sql`${JSON.stringify({ ...state, orderSync: undefined, control: undefined, cart: undefined, cartRev: undefined })}::jsonb || jsonb_strip_nulls(jsonb_build_object('orderSync', ${cv.state}->'orderSync', 'control', ${cv.state}->'control', 'cart', CASE WHEN ${newerInDb} THEN ${cv.state}->'cart' ELSE ${JSON.stringify(ourCart)}::jsonb END, 'cartRev', CASE WHEN ${newerInDb} THEN ${cv.state}->'cartRev' ELSE ${JSON.stringify(ourRev)}::jsonb END))` : undefined;
+  return { ...rest, ...(stateSql ? { state: stateSql } : {}), updatedAt: new Date() };
+}
+
+/**
+ * Lượt mua bị cắt mà còn ĐƠN NHÁP bot đã ghi (chưa chốt) ⇒ đơn đó nằm lại ở «Mới» cạnh đơn của lượt mới ⇒ cờ ROUND_ABANDONED (giữ khỏi vận
+ * đơn, người chọn đơn khách muốn) — không bao giờ để nhân viên thấy hai đơn «Mới» mà giao cả hai (review #886). Lỗi không chặn lượt.
+ */
+async function flagAbandonedDraft(st: ChatState, now: Date): Promise<void> {
+  const orderId = st.draft?.orderId;
+  if (!orderId || st.confirmed) return;
+  await flagOrderForReviewAsAgent(SALES_AGENT, orderId, { code: "ROUND_ABANDONED", note: "Khách quay lại sau thời gian dài / bình luận mua lại — bot mở lượt mua MỚI; nháp này thuộc lượt cũ", quote: null }, now).catch(() => undefined);
+}
 
 async function appendMessage(conversationId: string, seq: number, role: "user" | "assistant", content: AiBlock[]) {
   const db = await getDb();
@@ -939,24 +976,7 @@ async function chatTurnCore(
   try {
     const turnSeq = seq;
     await appendMessage(conv.id, seq++, "user", [{ type: "text", text }]);
-    const db = await getDb();
-    const cv = schema.salesChatConversations;
-    const bump = async (patch: Partial<typeof schema.salesChatConversations.$inferInsert>) => {
-      // `state.orderSync` thuộc job GHI ĐƠN TỪ HỘI THOẠI (order-sync.ts), không thuộc lượt này: lấy bản đang nằm trong CSDL,
-      // không ghi đè bằng bản chụp lúc lượt bắt đầu (mất nhật ký ⇒ job đọc lại hội thoại và có thể ghi trùng đơn).
-      // `state.control` (Tiếp quản / AI gợi ý — conversation-control-shared.ts) thuộc NGƯỜI, cùng luật: nhân viên tiếp quản
-      // trong lúc AI đang soạn thì lượt này không được xoá mất lựa chọn đó.
-      // `state.cart` (giỏ có thẩm quyền) — REVISION theo `cart.at` (review 15/10/2026, ca «Hoa Lê»): một lượt CŨ chạy chậm (webhook lặp, job
-      // trễ) không được đè giỏ mà một lượt MỚI HƠN đã ghi sau khi lượt này bắt đầu. Giỏ trong CSDL có mốc muộn hơn lúc lượt này bắt đầu ⇒
-      // giữ giỏ trong CSDL. Lượt này tự ghi giỏ luôn mang mốc = lúc bắt đầu lượt, nên không bao giờ tự chặn mình.
-      const { state, ...rest } = patch;
-      const ourCart = state ? ((state as ChatState).cart ?? null) : null;
-      const ourRev = state ? ((state as ChatState).cartRev ?? null) : null;
-      // Mốc của bản trong CSDL = muộn hơn trong mốc giỏ và `cartRev` (ghi cả khi giỏ bị xoá) — giỏ đã XOÁ bởi lượt mới hơn cũng không bị dựng lại.
-      const newerInDb = sql`greatest(coalesce(${cv.state}->'cart'->>'at', ''), coalesce(${cv.state}->>'cartRev', '')) > ${now.toISOString()}`;
-      const stateSql = state ? sql`${JSON.stringify({ ...state, orderSync: undefined, control: undefined, cart: undefined, cartRev: undefined })}::jsonb || jsonb_strip_nulls(jsonb_build_object('orderSync', ${cv.state}->'orderSync', 'control', ${cv.state}->'control', 'cart', CASE WHEN ${newerInDb} THEN ${cv.state}->'cart' ELSE ${JSON.stringify(ourCart)}::jsonb END, 'cartRev', CASE WHEN ${newerInDb} THEN ${cv.state}->'cartRev' ELSE ${JSON.stringify(ourRev)}::jsonb END))` : undefined;
-      await db.update(cv).set({ ...rest, ...(stateSql ? { state: stateSql } : {}), updatedAt: new Date() }).where(eq(cv.id, conv.id));
-    };
+    const bump = (patch: Partial<typeof schema.salesChatConversations.$inferInsert>) => writeConversation(conv.id, patch, now);
     // Đã chuyển nhân viên ⇒ bot IM LẶNG ở MỌI kênh công khai (chủ shop 05/10/2026 — trước đây web nhắn «Nhân viên của shop
     // đang tiếp nhận…» mỗi tin khách gửi thêm). Tin khách vẫn ghi ở trên để nhân viên đọc; khung THỬ vẫn thấy câu báo.
     if (conv.status === "HANDOFF") {
@@ -1017,10 +1037,21 @@ async function chatTurnCore(
       const at = Date.parse(st0.confirmed.at);
       const within = Number.isFinite(at) && now.getTime() - at < POST_ORDER_HANDOFF_MS;
       if (!within) {
-        const fresh: ChatState = { ...st0, pastOrders: [...(st0.pastOrders ?? []), st0.confirmed], cycleStartTurns: conv.turns, cartRev: now.toISOString() };
-        // Báo giá + sổ tổng bị từ chối của lượt mua TRƯỚC không phải đề nghị đang mở, cũng không phải tổng hiện tại (#855). Sổ lời mời
-        // (#868: đã mời / đã từ chối / bị bỏ) cũng thuộc lượt mua — lượt mua mới được mời lại đúng một lần.
-        for (const k of ["confirmed", "draft", "stage", "upsellSent", "upsellUnavailable", "upsellDeclinedTurn", "offerDrops", "declined", "handoff", "cart", "quote", "rejectedTotals", "proposedItems", "deliveryPref"] as const) delete fresh[k];
+        const fresh = freshPurchaseRound(st0, conv.turns, now);
+        await bump({ state: fresh as Record<string, unknown> });
+        conv.state = fresh as Record<string, unknown>;
+        st0 = fresh;
+      }
+    }
+    // KHÁCH CŨ QUAY LẠI SAU THỜI GIAN DÀI MÀ LƯỢT TRƯỚC KHÔNG CHỐT QUA BOT (P0 17/10/2026, HSLC «Honganh Tran»: 27/05 «Cho 1kg»,
+    // 17/10 «Cho 1,5 kg gửi đc cũ» ⇒ bot lên đơn 1 kg 280.000 ₫). Lượt mua chỉ được cắt khi bot TỰ chốt (`confirmed` ⇒ `pastOrders`);
+    // đơn lên ở POS / nhân viên / trước khi có bot thì không có mốc nào ⇒ cả lịch sử là «lượt mua hiện tại», giỏ và lời mua cũ
+    // lọt sang đơn mới. Nay: tin khách trước đó cách quá NEW_ROUND_GAP_MS ⇒ lượt mua MỚI bắt đầu từ tin này. Không đụng đơn cũ.
+    if (!st0.confirmed) {
+      const prevAt = lastCustomerTextAt(msgs);
+      if (prevAt && now.getTime() - prevAt.getTime() > NEW_ROUND_GAP_MS) {
+        if (opts.channel !== "TEST") await flagAbandonedDraft(st0, now);
+        const fresh = freshPurchaseRound(st0, conv.turns, now, new Date(now.getTime() - 1));
         await bump({ state: fresh as Record<string, unknown> });
         conv.state = fresh as Record<string, unknown>;
         st0 = fresh;
@@ -1824,10 +1855,95 @@ export async function appendContextMessages(conversationId: string, items: reado
   }
 }
 
-/** Mốc bắt đầu LƯỢT MUA HIỆN TẠI: lúc chốt của đơn gần nhất đã sang `pastOrders`; chưa có ⇒ `null` (cả hội thoại). HÀM THUẦN. */
-export function purchaseRoundStart(st: Pick<ChatState, "pastOrders">): Date | null {
-  const at = Math.max(...(st.pastOrders ?? []).map((o) => Date.parse(o.at)).filter((n) => Number.isFinite(n)), -Infinity);
-  return Number.isFinite(at) ? new Date(at) : null;
+export { purchaseRoundStart };
+
+/**
+ * Cửa sổ của MỘT lượt bình luận khi chép sang hộp thư: chỉ tin khách liền nhau trong chừng này trước tin cuối (review #886 vòng 3 — hội thoại
+ * bình luận có thể dồn tin khách không ai trả lời qua một đợt người giữ; «Cho 1kg» của nhiều tháng trước không phải lời mua lượt này).
+ */
+export const COMMENT_BATCH_WINDOW_MS = 30 * 60_000;
+
+/** Khách im lặng quá chừng này rồi nhắn lại, mà lượt trước không chốt qua bot ⇒ lượt mua MỚI (P0 17/10/2026). Ngắn hơn thì vẫn là một
+ * lượt mua: khách hỏi giá hôm nay, chốt vài hôm sau là chuyện thường. */
+export const NEW_ROUND_GAP_MS = 7 * 24 * 3_600_000;
+
+/** Khoá trạng thái thuộc về MỘT lượt mua — lượt mua mới xoá hết (#855: báo giá / sổ tổng bị từ chối; #868: sổ lời mời). */
+const ROUND_STATE_KEYS = ["confirmed", "draft", "stage", "upsellSent", "upsellUnavailable", "upsellDeclinedTurn", "offerDrops", "declined", "handoff", "cart", "quote", "rejectedTotals", "proposedItems", "deliveryPref"] as const;
+
+/**
+ * Trạng thái của một LƯỢT MUA MỚI: đơn đã chốt (nếu có) sang `pastOrders`, mọi khoá của lượt mua cũ bị xoá, `startAt` (nếu có) thành mốc
+ * bắt đầu — tin khách trước mốc ấy không còn là lời mua của lượt này. Không đụng đơn nào trong CSDL. HÀM THUẦN.
+ */
+export function freshPurchaseRound(st: ChatState, turns: number, now: Date, startAt?: Date): ChatState {
+  const fresh: ChatState = { ...st, ...(st.confirmed ? { pastOrders: [...(st.pastOrders ?? []), st.confirmed] } : {}), cycleStartTurns: turns, cartRev: now.toISOString(), ...(startAt ? { roundStartAt: startAt.toISOString() } : {}) };
+  for (const k of ROUND_STATE_KEYS) delete fresh[k];
+  return fresh;
+}
+
+/** Mốc tin KHÁCH gần nhất có chữ (không tính kết quả công cụ) — `null` khi hội thoại chưa có tin khách nào. HÀM THUẦN. */
+export function lastCustomerTextAt(msgs: readonly { role: "user" | "assistant"; content: AiBlock[]; at: Date }[]): Date | null {
+  return [...msgs].reverse().find((m) => m.role === "user" && m.content.some((b) => b.type === "text") && !m.content.some((b) => b.type === "tool_result"))?.at ?? null;
+}
+
+/**
+ * BÌNH LUẬN MUA LẠI CỦA KHÁCH CŨ ĐI TIẾP Ở HỘP THƯ CŨ (P0 17/10/2026, HSLC «Honganh Tran»). Bot trả lời bình luận bằng tin riêng rồi chuyển
+ * hội thoại bình luận sang hộp thư — NHƯNG khách cũ đã có hội thoại hộp thư (khoá UNIQUE) nên bước chuyển bỏ qua, và lời mua trong bình
+ * luận («Cho 1,5 kg gửi đc cũ») nằm lại ở hội thoại bình luận. Khách nhắn tiếp trong hộp thư ⇒ bot đọc hội thoại hộp thư CŨ (lời mua
+ * tháng 5 «Cho 1kg»), lên đơn sai và hỏi lại địa chỉ. Nay chép lượt bình luận sang hội thoại hộp thư:
+ *  · CHỈ tin khách có nhãn «bình luận»; tin bot chỉ khi bot THẬT SỰ đã gửi tin riêng (`botReplySent`) — nhánh Pancake tự động / nhân viên
+ *    đã nhắn trước (ALREADY) thì câu bot soạn chưa từng tới khách, chép sang là bịa lịch sử (review #886).
+ *  · Mở lượt mua MỚI ở hộp thư (giỏ của bình luận đi theo) CHỈ khi hộp thư im quá NEW_ROUND_GAP_MS (đo trên CHÍNH hộp thư), không có đơn
+ *    bot chốt còn trong POST_ORDER_HANDOFF_MS, và không do người giữ (HANDOFF). Còn lại ⇒ chỉ chép tin: một lượt mua đang chạy trong
+ *    hộp thư (khách vừa «Cho chị 2kg», nháp, lời mời) không bao giờ bị một bình luận «còn hàng không shop» xoá (review #886).
+ *  · Tin chép trong MỘT giao dịch (đụng seq ⇒ cả khối huỷ, thử lại với seq mới — không chép dở); trạng thái ghi qua `writeConversation`
+ *    (giữ orderSync / control / mốc giỏ). Chạy lại không chép hai lần. Không đụng đơn nào.
+ */
+export async function carryCommentTurn(fromConversationId: string, toConversationId: string, now: Date, opts: { botReplySent: boolean }): Promise<boolean> {
+  if (fromConversationId === toConversationId) return false;
+  const [from, to] = await Promise.all([loadConversation(fromConversationId), loadConversation(toConversationId)]);
+  if (!from || !to) return false;
+  const fm = await loadMessages(fromConversationId);
+  const lastUser = [...fm].reverse().find((m) => m.role === "user" && textOf(m.content).trim() && !m.content.some((b) => b.type === "tool_result"));
+  if (!lastUser) return false;
+  const nhan = (at: Date) => `[Khách bình luận trên bài viết lúc ${at.toISOString()}]`;
+  // MỌI tin khách liền nhau của lượt bình luận («Cho 1,5kg» + «gửi đc cũ» tách hai tin — review #886), không chỉ tin cuối.
+  const iCuoi = fm.indexOf(lastUser);
+  let iDau = iCuoi;
+  while (iDau > 0 && fm[iDau - 1].role === "user" && !fm[iDau - 1].content.some((b) => b.type === "tool_result") && lastUser.at.getTime() - fm[iDau - 1].at.getTime() <= COMMENT_BATCH_WINDOW_MS) iDau--;
+  const luot = fm
+    .slice(iDau)
+    .filter((m) => (m.role === "user" ? m.seq <= lastUser.seq : opts.botReplySent) && !m.content.some((b) => b.type === "tool_result" || b.type === "tool_use"))
+    .map((m) => ({ role: m.role, text: m.role === "user" ? `${nhan(m.at)} ${textOf(m.content).trim()}` : textOf(m.content).trim() }))
+    .filter((m) => m.text && !/^\[[^\]]+\]\s*$/.test(m.text));
+  const db = await getDb();
+  const ts = (to.state ?? {}) as ChatState;
+  const confirmedAt = ts.confirmed ? Date.parse(ts.confirmed.at) : NaN;
+  const dangChot = Number.isFinite(confirmedAt) && now.getTime() - confirmedAt < POST_ORDER_HANDOFF_MS;
+  let tm = await loadMessages(toConversationId);
+  let catLuot = false;
+  for (let lan = 0; ; lan++) {
+    if (tm.some((m) => m.role === "user" && textOf(m.content).startsWith(nhan(lastUser.at)))) return false;
+    const base = tm[tm.length - 1]?.seq ?? 0;
+    const truocDo = lastCustomerTextAt(tm);
+    const imLau = !truocDo || now.getTime() - truocDo.getTime() > NEW_ROUND_GAP_MS;
+    catLuot = imLau && !dangChot && to.status !== "HANDOFF";
+    // Mốc lượt mua mới đặt TRƯỚC các tin vừa chép (chúng mang mốc ghi lúc này) để `customerTextsSince` đọc được lời mua của bình luận.
+    const fs = (from.state ?? {}) as ChatState;
+    const next = catLuot ? { ...freshPurchaseRound(ts, to.turns, now, new Date(now.getTime() - 1000)), ...(fs.cart?.selectedItems?.length ? { cart: fs.cart } : {}) } : null;
+    try {
+      // Tin chép + trạng thái trong MỘT giao dịch (review #886): đụng seq ⇒ cả khối huỷ, thử lại với seq mới — không chép dở, không ghi nửa.
+      await db.transaction(async (tx) => {
+        await tx.insert(schema.salesChatMessages).values(luot.map((m, i) => ({ conversationId: toConversationId, seq: base + 1 + i, role: m.role, content: [{ type: "text" as const, text: m.text }] })));
+        if (next) await tx.update(schema.salesChatConversations).set(conversationSet({ state: next as Record<string, unknown> }, now)).where(eq(schema.salesChatConversations.id, toConversationId));
+      });
+      break;
+    } catch (e) {
+      if (lan >= 2) throw e;
+      tm = await loadMessages(toConversationId);
+    }
+  }
+  if (catLuot) await flagAbandonedDraft(ts, now);
+  return true;
 }
 
 /** Tin lưu trữ ⇒ dạng `customerTextsSince` đọc (chữ thô, mốc, cờ kết quả công cụ). HÀM THUẦN. */
