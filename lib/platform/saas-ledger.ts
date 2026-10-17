@@ -7,7 +7,7 @@ import { connectionStatusRows } from "@/lib/connectors/service";
 import { planKeyOf, type PlanRow } from "@/lib/entitlements/check";
 import { platformAudit } from "@/lib/platform/audit";
 import { KILL_SWITCH_REASON_MIN } from "@/lib/platform/kill-switches";
-import { getHomeOrganization, listOrganizations } from "@/lib/platform/organizations";
+import { getHomeOrganization, isOperationalOrganization, listOrganizations } from "@/lib/platform/organizations";
 import { acceptanceWorkspaceOf } from "@/lib/constants/saas-acceptance-registry";
 import { plansForOrg } from "@/lib/pricing/price-book";
 import type { Organization } from "@/lib/platform/types";
@@ -173,7 +173,7 @@ async function captureUsage(orgs: Organization[], now: Date, errors: string[]): 
   const yesterday = vnDate(new Date(now.getTime() - 86_400_000));
   let written = 0;
   for (const org of orgs) {
-    if (org.status !== "ACTIVE") continue;
+    if (!isOperationalOrganization(org)) continue;
     try {
       const db = await getDbFor(org);
       // Fanpage đang hoạt động là số TỨC THỜI (0222): chỉ ghi vào dòng HÔM NAY; dòng hôm qua giữ số đã chụp hôm qua.
@@ -285,7 +285,7 @@ async function scanMilestones(orgs: Organization[], errors: string[]): Promise<n
   const createdAt = new Map((await pdb.select({ code: schema.platformOrganizations.code, at: schema.platformOrganizations.createdAt }).from(schema.platformOrganizations)).map((r) => [r.code, r.at]));
   let added = 0;
   for (const org of orgs) {
-    if (org.isHome || org.status !== "ACTIVE") continue;
+    if (org.isHome || !isOperationalOrganization(org)) continue;
     const got = have.get(org.code) ?? new Set<string>();
     const rows: { orgCode: string; milestone: string; reachedAt: Date; source: string }[] = [];
     const signedUp = createdAt.get(org.code);

@@ -11,7 +11,7 @@ import { recentFailures } from "@/lib/perf/registry";
 import { platformAudit, type PlatformAuditSource } from "@/lib/platform/audit";
 import { killSwitchState, type KillSwitchState } from "@/lib/platform/kill-switches";
 import { readOrgFlag, WORKFLOWS_PAUSED_FLAG } from "@/lib/platform/org-flags";
-import { findOrganization, listOrganizations } from "@/lib/platform/organizations";
+import { findOrganization, listOrganizations, mayOpenOrganizationDb } from "@/lib/platform/organizations";
 import { listPilotStages, loadPilotView, type PilotView } from "@/lib/platform/pilot";
 import { ORGANIZATION_CODE_PATTERN, type Organization } from "@/lib/platform/types";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
@@ -252,6 +252,11 @@ export async function listOrgSupportSummaries(user: SessionUser): Promise<Record
     let activeUsers: number | null = null;
     let lastLoginAt: string | null = null;
     let note: string | null = null;
+    // Tổ chức LƯU TRỮ: không mở CSDL (mở = migrate) — số người để `null` kèm lý do, không phải 0.
+    if (!mayOpenOrganizationDb(org)) {
+      out[org.code] = { stage: stages[org.code] ?? null, workflowsPaused: paused, activeUsers, lastLoginAt, note: "Lưu trữ — không mở CSDL." };
+      continue;
+    }
     try {
       const u = await users(await getDbFor(org));
       activeUsers = u.active;

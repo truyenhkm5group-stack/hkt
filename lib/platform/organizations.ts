@@ -91,14 +91,38 @@ export async function getHomeOrganization(): Promise<Organization> {
 }
 
 /**
+ * ═══════════ TRẠNG THÁI VẬN HÀNH — MỘT VỊ NGỮ CHO MỌI CỬA VÀO ═══════════
+ *
+ * `platform_organizations.status` là chiều VẬN HÀNH (docs/tenant-lifecycle.md): chỉ `ACTIVE` được đăng nhập, nhận webhook, chạy
+ * job / AI, được bộ lập lịch gọi và được bước kiểm deploy migrate. `SUSPENDED` (đình chỉ tạm, công tắc khẩn) · `ARCHIVED` (lưu trữ —
+ * dữ liệu còn nguyên, không tham gia gì) · `SETUP_FAILED` (dựng hỏng) đều KHÔNG. Chiều THƯƠNG MẠI (thuê bao / thu phí) và chiều
+ * TRIỂN KHAI (sổ migration, DEGRADED_MIGRATION) là hai câu hỏi khác — không suy ra từ cột này và không ghi vào cột này.
+ *
+ * Cửa vào nào hỏi "tổ chức này có được chạy không" thì gọi hàm này, không tự so chuỗi — để ngày thêm một trạng thái thứ năm chỉ
+ * phải sửa MỘT chỗ (tests/org-lifecycle.test.ts quét các cửa vào chính).
+ */
+export function isOperationalOrganization(org: Pick<Organization, "status">): boolean {
+  return org.status === "ACTIVE";
+}
+
+/**
+ * CSDL của tổ chức có được MỞ bằng đường của ứng dụng (`getDbFor` — mở lần đầu là MIGRATE) không. Mọi trạng thái trừ `ARCHIVED`:
+ * trang /platform vẫn mở CSDL của tổ chức đình chỉ để người vận hành chẩn đoán, nhưng tổ chức LƯU TRỮ không tham gia migration —
+ * chỉ lượt KÍCH HOẠT LẠI tường minh (`lib/platform/org-lifecycle.ts`) được mở nó, và chỉ để migrate + đối chiếu trước khi bật.
+ */
+export function mayOpenOrganizationDb(org: Pick<Organization, "status">): boolean {
+  return org.status !== "ARCHIVED";
+}
+
+/**
  * Mã các tổ chức mà bộ lập lịch được gọi thêm job `fanOut` cho: ĐANG HOẠT ĐỘNG và KHÔNG phải nhà
  * (lịch của nhà đi đường cũ, không `?org=`). Chỉ MÃ — không tên, không gói, không trạng thái: tuyến
  * trả nó ra (`GET /api/sync/organizations`) chỉ cần đủ để dựng URL. Sắp xếp để hai lượt đọc cùng sổ
- * cho cùng một thứ tự gọi.
+ * cho cùng một thứ tự gọi. CÙNG danh sách là tập tổ chức mà bước kiểm deploy (`scripts/verify-migrations.ts`) mở và migrate.
  */
 export function fanOutOrganizationCodes(list: readonly Organization[]): string[] {
   return list
-    .filter((o) => o.status === "ACTIVE" && !o.isHome)
+    .filter((o) => isOperationalOrganization(o) && !o.isHome)
     .map((o) => o.code)
     .sort();
 }

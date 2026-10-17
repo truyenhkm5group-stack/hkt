@@ -136,7 +136,10 @@ export function testOrgOffboardPure() {
     return out;
   };
   const goi = ["lib", "app", "components", "scripts"].flatMap((d) => walk(path.join(goc, d))).filter((f) => f !== "lib/platform/offboard.ts" && /@\/lib\/platform\/offboard["']/.test(readFileSync(f, "utf8")));
-  assert.deepEqual(goi, ["scripts/org-offboard.ts"], "lõi xoá tổ chức chỉ có script ops gọi — không trang, không server action");
+  // `lib/platform/org-lifecycle.ts` (ops org-lifecycle, 17/10/2026) chỉ mượn KẾ HOẠCH chỉ đọc (`planOffboard`: loại tổ chức, page Meta, số
+  // đếm qua handle chỉ đọc) — tuyệt đối không gọi đường xoá; dòng dưới khoá điều đó.
+  assert.deepEqual(goi, ["lib/platform/org-lifecycle.ts", "scripts/org-offboard.ts"], "lõi xoá tổ chức chỉ có script ops gọi — không trang, không server action");
+  assert.doesNotMatch(readFileSync("lib/platform/org-lifecycle.ts", "utf8"), /\bapplyOffboard\b|\bwaitForNoConnections\b/, "lưu trữ chỉ đọc kế hoạch offboard — không bao giờ gọi đường xoá");
   const loi = readFileSync("lib/platform/offboard.ts", "utf8");
   assert.ok(!/with\s*\(\s*force\s*\)/i.test(loi), "DROP DATABASE không bao giờ FORCE — cắt kết nối rảnh của ứng dụng làm sập tiến trình");
   assert.ok(!/platformAiLedgerEntries/.test(loi), "lõi không chạm sổ cái Số dư AI");

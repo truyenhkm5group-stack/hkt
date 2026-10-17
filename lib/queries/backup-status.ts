@@ -16,6 +16,7 @@ import {
   type BackupTarget,
 } from "@/lib/constants/backup";
 import { currentOrganization } from "@/lib/platform/context";
+import { listOrganizations } from "@/lib/platform/organizations";
 
 /**
  * Đọc tệp trạng thái mà `scripts/erp-backup.sh` ghi, rồi chấm bằng `evaluateBackupHealth()`.
@@ -90,4 +91,17 @@ export async function getBackupHealth(): Promise<BackupHealth> {
   // `memo` đã tách đệm theo tổ chức; khoá vẫn mang tên CSDL để hai đích không bao giờ dùng chung một ô.
   const khoa = target.scope === "HOME" ? "backupHealth" : `backupHealth:${target.database}`;
   return memo(khoa, 30_000, async () => evaluateBackupHealth(await readBackupStatusFiles(backupStatusDir(), target), new Date(), target));
+}
+
+/**
+ * CSDL tổ chức (`erp_org_…`) ⇒ mã + trạng thái VẬN HÀNH của tổ chức sở hữu — để thẻ sao lưu của nhà liệt kê tổ chức LƯU TRỮ riêng
+ * (`splitOrgBackupRowsByStatus`). Sổ không đọc được ⇒ bản đồ rỗng: mọi dòng rơi về nhóm "đang chạy" (chưa biết thì không giấu).
+ */
+export async function organizationOwnersByDatabase(): Promise<Map<string, { code: string; status: string }>> {
+  try {
+    const orgs = await listOrganizations();
+    return new Map(orgs.filter((o) => !o.isHome).map((o) => [organizationDatabaseName(o.code), { code: o.code, status: o.status }]));
+  } catch {
+    return new Map();
+  }
 }

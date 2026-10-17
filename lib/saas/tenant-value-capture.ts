@@ -27,6 +27,7 @@ import { readAiBalancePeriod } from "@/lib/billing/ai-balance";
 import { aiBalanceRevenueVnd, type AiBalancePeriod } from "@/lib/billing/ai-balance-rules";
 import { addDays, vnDate } from "@/lib/billing/rules";
 import { acceptanceWorkspaceOf } from "@/lib/constants/saas-acceptance-registry";
+import { isOperationalOrganization } from "@/lib/platform/organizations";
 import { DEFAULT_TENANT_VALUE_DECISIONS, TENANT_VALUE_WINDOWS, type TenantValueNumericKey, type TenantValueWindow } from "@/lib/constants/tenant-value-metrics";
 import { env } from "@/lib/env";
 import { withOrganization } from "@/lib/platform/context";
@@ -55,7 +56,7 @@ export type TenantValueSourceCode = (typeof TENANT_VALUE_SOURCES)[number];
  * lib/constants/saas-acceptance-registry.ts — mẫu `loadOwnerCockpit`). Mọi lượt chụp / kiểm đi qua đây; không chỗ thứ hai tự lọc.
  */
 export function tenantValueTargets(orgs: readonly Organization[]): Organization[] {
-  return orgs.filter((o) => o.status === "ACTIVE" && !o.isHome && !acceptanceWorkspaceOf(o.code));
+  return orgs.filter((o) => isOperationalOrganization(o) && !o.isHome && !acceptanceWorkspaceOf(o.code));
 }
 
 // ─────────────────────────── Cửa sổ ───────────────────────────

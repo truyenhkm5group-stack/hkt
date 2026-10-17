@@ -629,6 +629,14 @@ deploy dừng, không phải cảnh báo.
     chỉ tạo cho tài khoản của tổ chức KHÁCH, bắt buộc lý do, nhật ký nền tảng ghi TRƯỚC khi liên kết hiện ra. Không tự
     đăng nhập sau khi đặt.
 
+75. **LƯU TRỮ LÀ TRẠNG THÁI VẬN HÀNH, KHÔNG PHẢI XOÁ — VÀ ĐỨNG NGOÀI MIGRATION** (`docs/tenant-lifecycle.md`,
+    `lib/platform/org-lifecycle.ts`): ba chiều VẬN HÀNH (`platform_organizations.status`) · THƯƠNG MẠI (thuê bao / hoá đơn) ·
+    TRIỂN KHAI (sổ migration) không suy ra lẫn nhau. "Được chạy không" chỉ hỏi `isOperationalOrganization()`; tổ chức
+    `ARCHIVED` không đăng nhập, không webhook / job / AI, không vào fan-out lẫn bước kiểm deploy, và `getDbFor()` từ chối mở
+    nó — lối duy nhất là `openForReactivation()`. Tổ chức ACTIVE migrate hỏng LUÔN làm deploy đỏ: không có danh sách bỏ qua
+    thứ hai. Lưu trữ đòi không còn nghĩa vụ tiền + sao lưu OK ngoài máy + diễn tập khôi phục OK của CHÍNH CSDL ấy; kích hoạt
+    lại chỉ bật ACTIVE sau khi migrate + `checkDb` khớp. Không xoá dữ liệu, không DROP; sao lưu vẫn chạy cho tổ chức lưu trữ.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng
   `npm run db:generate`**: ảnh chụp `drizzle/meta/*_snapshot.json` chỉ tới `0032`, nên nó sinh migration

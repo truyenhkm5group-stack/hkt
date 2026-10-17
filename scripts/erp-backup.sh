@@ -887,10 +887,10 @@ sao_luu_cac_to_chuc() { # $1=mốc $2=thư mục con (daily|manual)
     loi "$loi_liet_ke"
     TO_CHUC_HONG=" (không liệt kê được CSDL tổ chức)"
   fi
-  # Đối chiếu sổ tổ chức: tổ chức đang ACTIVE/SUSPENDED mà KHÔNG có CSDL trên erp-db (CSDL ở máy khác
+  # Đối chiếu sổ tổ chức: tổ chức đang ACTIVE/SUSPENDED/ARCHIVED (lưu trữ = dữ liệu còn nguyên, VẪN phải có bản sao) mà KHÔNG có CSDL trên erp-db (CSDL ở máy khác
   # qua ORG_DATABASE_URL__<MÃ>, hoặc cấp dở) thì script này KHÔNG sao lưu được nó — nói ra, không im lặng.
   # Sổ không đọc được (CSDL nhà cũ chưa có bảng) thì bỏ qua phép đối chiếu, không coi là lỗi sao lưu.
-  if [ -z "$loi_liet_ke" ] && dang_ky="$(docker exec "$DB_CONTAINER" psql -U erp -d erp -Atc "select code from platform_organizations where not is_home and status in ('ACTIVE','SUSPENDED') order by 1" 2>/dev/null)"; then
+  if [ -z "$loi_liet_ke" ] && dang_ky="$(docker exec "$DB_CONTAINER" psql -U erp -d erp -Atc "select code from platform_organizations where not is_home and status in ('ACTIVE','SUSPENDED','ARCHIVED') order by 1" 2>/dev/null)"; then
     while IFS= read -r ma; do
       ma="${ma%$'\r'}"
       [ -n "$ma" ] || continue
