@@ -15,6 +15,10 @@ on:
         description: "Tạo lại file .env trên VPS từ Secrets (xoá .env cũ)"
         type: boolean
         default: false
+      force_gates:
+        description: "Ép chạy ĐỦ cổng trong lượt này: không dùng lại bằng chứng nào (cả theo cây lẫn theo SHA)"
+        type: boolean
+        default: false
 
 # ═══════════ KHOÁ ĐẶT Ở JOB `release`, KHÔNG Ở MỨC WORKFLOW ═══════════
 #
@@ -80,21 +84,90 @@ jobs:
     permissions:
       actions: read
       contents: read
+    # Hai đường bằng chứng, đúng MỘT đường được dùng: `cay` (cùng CÂY mã với lượt PR đã qua cổng — không phải
+    # chờ CI của push) rồi tới `tim` (cùng SHA đã xanh trên main). `cay` khớp thì `tim` BỊ BỎ QUA.
     outputs:
-      reuse: ${{ steps.tim.outputs.reuse }}
-      sha: ${{ steps.tim.outputs.sha }}
-      run_url: ${{ steps.tim.outputs.run_url }}
+      reuse: ${{ steps.cay.outputs.khop == 'true' && 'true' || steps.tim.outputs.reuse }}
+      sha: ${{ steps.cay.outputs.khop == 'true' && steps.cay.outputs.sha || steps.tim.outputs.sha }}
+      run_url: ${{ steps.cay.outputs.khop == 'true' && steps.cay.outputs.run_url || steps.tim.outputs.run_url }}
     steps:
-      - name: Tìm lượt cổng XANH của đúng SHA này trên main (dùng lại thay vì chạy lại)
-        id: tim
+      # ═══ DÙNG LẠI BẰNG CHỨNG THEO CÂY MÃ — SQUASH ĐỔI SHA NHƯNG KHÔNG ĐỔI NỘI DUNG ═══
+      #
+      # Gộp bằng squash tạo commit mới trên main (SHA khác đầu PR), nên `tim` phải chờ CI của push (~35′)
+      # dù chính CÂY MÃ ấy vừa qua cổng ở PR. Khi main không nhích giữa lúc PR chạy CI và lúc gộp, cây của
+      # commit squash BẰNG cây của commit gộp thử `refs/pull/N/merge` mà CI của PR đã kiểm — cùng byte, cùng
+      # kết quả. Bước này chứng minh điều đó rồi mới bỏ cổng; MỌI nghi ngờ ⇒ `khop=false` ⇒ chạy cổng như cũ.
+      #
+      # Điều kiện (đủ cả sáu, thiếu một là KHÔNG dùng lại):
+      #   1. không `force_gates`, và triển khai từ `refs/heads/main`;
+      #   2. đúng MỘT PR đã gộp, `merge_commit_sha` = SHA này, nhánh gốc `main`;
+      #   3. có lượt chạy `ci.yml` sự kiện `pull_request`, `head_sha` = đầu PR, `completed` + `success`;
+      #   4. `refs/pull/N/merge` có mặt, và cha thứ hai của nó đúng là đầu PR;
+      #   5. commit gộp thử sinh ra TRƯỚC khi lượt CI bắt đầu (ref chưa bị tính lại sau lượt kiểm);
+      #   6. CÂY của commit gộp thử BẰNG cây của SHA đang triển khai.
+      - name: Tìm lượt cổng XANH của PR cho đúng CÂY mã này (dùng lại thay vì chờ / chạy lại)
+        id: cay
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.sha }}
           REPO: ${{ github.repository }}
           REF: ${{ github.ref }}
+          FORCE_GATES: ${{ inputs.force_gates && 'true' || 'false' }}
+        run: |
+          set -uo pipefail
+          echo "khop=false" >> "$GITHUB_OUTPUT"
+          lui() { echo "Không dùng lại bằng chứng theo cây: $1 — chạy cổng / hỏi CI của push như cũ."; exit 0; }
+          [ "$FORCE_GATES" = "true" ] && lui "force_gates được bật"
+          [ "$REF" = "refs/heads/main" ] || lui "triển khai từ $REF, không phải main"
+          api() { curl -fsS --max-time 20 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/$1"; }
+          cay_trien_khai="$(api "git/commits/$SHA" | jq -r '.tree.sha // empty' 2>/dev/null)" || cay_trien_khai=""
+          [ -n "$cay_trien_khai" ] || lui "không đọc được cây của $SHA"
+          prs="$(api "commits/$SHA/pulls" | jq -c --arg sha "$SHA" '[.[] | select(.merged_at != null and .merge_commit_sha == $sha and .base.ref == "main")]' 2>/dev/null)" || prs=""
+          [ -n "$prs" ] || lui "không hỏi được PR của $SHA"
+          [ "$(printf '%s' "$prs" | jq 'length')" = "1" ] || lui "không có đúng một PR đã gộp tạo ra $SHA"
+          pr="$(printf '%s' "$prs" | jq -r '.[0].number')"
+          dau_pr="$(printf '%s' "$prs" | jq -r '.[0].head.sha')"
+          [ -n "$pr" ] && [ -n "$dau_pr" ] && [ "$dau_pr" != "null" ] || lui "thiếu số PR hoặc đầu PR"
+          luot="$(api "actions/workflows/ci.yml/runs?event=pull_request&head_sha=$dau_pr&per_page=30" | jq -r --arg h "$dau_pr" '[.workflow_runs[] | select(.head_sha == $h and .event == "pull_request" and .path == ".github/workflows/ci.yml" and .status == "completed" and .conclusion == "success")] | sort_by(.run_started_at) | last | if . == null then empty else "\(.html_url) \(.run_started_at)" end' 2>/dev/null)" || luot=""
+          [ -n "$luot" ] || lui "PR #$pr chưa có lượt ci.yml XANH cho đầu $dau_pr"
+          luot_url="${luot% *}"
+          luot_bat_dau="${luot##* }"
+          tmp="$(mktemp -d)"
+          cd "$tmp" && git init -q || lui "không khởi tạo được kho tạm"
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          echo "::add-mask::$auth"
+          git -c "http.extraheader=AUTHORIZATION: basic $auth" fetch -q --depth=1 "https://github.com/$REPO.git" "refs/pull/$pr/merge" || lui "refs/pull/$pr/merge không còn"
+          gop_thu="$(git rev-parse FETCH_HEAD 2>/dev/null)" || lui "không đọc được commit gộp thử"
+          [ "$(git rev-parse "FETCH_HEAD^2" 2>/dev/null)" = "$dau_pr" ] || lui "cha thứ hai của commit gộp thử không phải đầu PR $dau_pr"
+          ngay_gop="$(git log -1 --format=%ct FETCH_HEAD 2>/dev/null)" || lui "không đọc được ngày commit gộp thử"
+          ngay_chay="$(date -d "$luot_bat_dau" +%s 2>/dev/null)" || lui "không đọc được giờ bắt đầu lượt CI"
+          [ "$ngay_gop" -le "$ngay_chay" ] 2>/dev/null || lui "commit gộp thử sinh SAU khi lượt CI bắt đầu — ref đã bị tính lại, cây đã kiểm không còn chắc"
+          cay_da_kiem="$(git rev-parse "FETCH_HEAD^{tree}" 2>/dev/null)" || lui "không đọc được cây của commit gộp thử"
+          if [ "$cay_da_kiem" != "$cay_trien_khai" ]; then
+            lui "cây đã kiểm $cay_da_kiem khác cây triển khai $cay_trien_khai (main đã nhích giữa lúc PR kiểm và lúc gộp)"
+          fi
+          echo "::notice::dùng lại bằng chứng gates của run $luot_url cho cây $cay_trien_khai (commit gộp thử $gop_thu của PR #$pr)"
+          # `sha` xuất ra là SHA đang triển khai: cây của nó ĐÃ được chứng minh bằng cây đã kiểm ở trên.
+          sha_da_chung_minh="$SHA"
+          echo "khop=true" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha_da_chung_minh" >> "$GITHUB_OUTPUT"
+          echo "run_url=$luot_url (cây $cay_trien_khai)" >> "$GITHUB_OUTPUT"
+      - name: Tìm lượt cổng XANH của đúng SHA này trên main (dùng lại thay vì chạy lại)
+        id: tim
+        if: ${{ steps.cay.outputs.khop != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          FORCE_GATES: ${{ inputs.force_gates && 'true' || 'false' }}
         run: |
           set -uo pipefail
           echo "reuse=false" >> "$GITHUB_OUTPUT"
+          if [ "$FORCE_GATES" = "true" ]; then
+            echo "force_gates bật — không dùng lại bằng chứng nào; chạy cổng."
+            exit 0
+          fi
           if [ "$REF" != "refs/heads/main" ]; then
             echo "Triển khai từ $REF (không phải main) — không có bằng chứng CI của main để dùng lại; chạy cổng."
             exit 0

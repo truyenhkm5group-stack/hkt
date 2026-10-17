@@ -206,6 +206,53 @@ function testDeployDungLaiBangChung() {
   assert.match(mig, /node scripts\/ai-tech\.ts migration check --pr=/);
 }
 
+/* ═════════════ 2b · DEPLOY: DÙNG LẠI BẰNG CHỨNG THEO CÂY MÃ (squash đổi SHA, không đổi cây) ═════════════ */
+
+function testDeployDungLaiTheoCay() {
+  const d = doc(".github/workflows/deploy-vps.yml");
+  const i0 = d.indexOf("\n      - name: Tìm lượt cổng XANH của PR cho đúng CÂY mã này");
+  const i1 = d.indexOf("\n      - name: Tìm lượt cổng XANH của đúng SHA này trên main");
+  assert.ok(i0 > 0 && i1 > i0, "bước `cay` phải đứng TRƯỚC bước `tim` trong bang_chung");
+  const cay = d.slice(i0, i1).replace(/^\s*#.*$/gm, "");
+
+  // 1. Cây phải BẰNG — không so SHA, không so ngày, không "gần giống".
+  assert.match(cay, /cay_da_kiem="\$\(git rev-parse "FETCH_HEAD\^\{tree\}"/, "cây của commit gộp thử đọc bằng git rev-parse ^{tree}");
+  assert.match(cay, /api "git\/commits\/\$SHA" \| jq -r '\.tree\.sha/, "cây của SHA triển khai đọc từ API git/commits");
+  assert.match(cay, /if \[ "\$cay_da_kiem" != "\$cay_trien_khai" \]; then\n\s+lui /, "khác cây ⇒ lùi về chạy cổng");
+  // Chỉ có MỘT chỗ ghi khop=true và nó nằm SAU phép so cây (và sau mọi nhánh `lui`).
+  assert.equal(cay.split('echo "khop=true"').length - 1, 1);
+  assert.ok(cay.indexOf('echo "khop=true"') > cay.indexOf('"$cay_da_kiem" != "$cay_trien_khai"'), "khop=true chỉ ghi sau khi cây bằng nhau");
+  assert.ok(cay.indexOf('echo "khop=false"') >= 0 && cay.indexOf('echo "khop=false"') < cay.indexOf('echo "khop=true"'), "mặc định khop=false ghi TRƯỚC");
+
+  // 2. Mọi lỗi / mơ hồ ⇒ lùi, không bao giờ exit khác 0 và không bao giờ khop=true.
+  assert.match(cay, /lui\(\) \{[^}]*exit 0; \}/, "`lui` luôn exit 0 (cổng sẽ chạy), không làm đỏ deploy");
+  for (const dk of ["force_gates", "không phải main", "không đọc được cây", "không hỏi được PR", "không có đúng một PR", "chưa có lượt ci.yml XANH", "không còn", "cha thứ hai", "SAU khi lượt CI bắt đầu"])
+    assert.ok(cay.includes(dk), `phải có nhánh lùi: ${dk}`);
+  assert.match(cay, /jq 'length'\)" = "1"/, "đúng MỘT PR đã gộp");
+  for (const dk of ['.merge_commit_sha == $sha', '.base.ref == "main"', '.merged_at != null', '.head_sha == $h', '.event == "pull_request"', '.path == ".github/workflows/ci.yml"', '.status == "completed"', '.conclusion == "success"'])
+    assert.ok(cay.includes(dk), `bằng chứng PR phải lọc ${dk}`);
+  assert.match(cay, /git rev-parse "FETCH_HEAD\^2"[^)]*\)" = "\$dau_pr"/, "cha thứ hai của commit gộp thử phải là đầu PR");
+  assert.match(cay, /\[ "\$ngay_gop" -le "\$ngay_chay" \]/, "commit gộp thử phải sinh trước khi lượt CI bắt đầu");
+  assert.ok(!/write/.test(cay.replace(/GITHUB_OUTPUT/g, "")), "bước chỉ ĐỌC");
+  assert.ok(cay.includes("dùng lại bằng chứng gates của run"), "phải có thông báo rõ run và cây được dùng lại");
+
+  // 3. force_gates: input mặc định false, và cả hai đường bằng chứng đều tôn trọng nó.
+  assert.match(d, /force_gates:\n {8}description: [^\n]+\n {8}type: boolean\n {8}default: false\n/, "input force_gates mặc định false");
+  assert.match(cay, /\[ "\$FORCE_GATES" = "true" \] && lui/);
+  const tim = d.slice(i1, d.indexOf("\n  gates:\n", i1));
+  assert.match(tim, /if \[ "\$FORCE_GATES" = "true" \]; then[\s\S]*?exit 0/, "tim cũng bỏ qua khi force_gates");
+  assert.ok(tim.indexOf('echo "reuse=false"') < tim.indexOf('FORCE_GATES" = "true"'), "reuse=false ghi trước khi thoát vì force_gates");
+
+  // 4. `tim` chỉ chạy khi `cay` không khớp; outputs gộp hai đường; release vẫn chỉ cần (cổng xanh) HOẶC (bằng chứng reuse=true).
+  assert.match(d, /id: tim\n {8}if: \$\{\{ steps\.cay\.outputs\.khop != 'true' \}\}/);
+  assert.match(d, /reuse: \$\{\{ steps\.cay\.outputs\.khop == 'true' && 'true' \|\| steps\.tim\.outputs\.reuse \}\}/, "reuse chỉ là 'true' khi cay khớp hoặc tim ghi true");
+  assert.match(d, /sha: \$\{\{ steps\.cay\.outputs\.khop == 'true' && steps\.cay\.outputs\.sha \|\| steps\.tim\.outputs\.sha \}\}/);
+  const rel = /\n {2}release:\n {4}needs: \[bang_chung, gates, build_image\]\n(?: {4}#.*\n)* {4}if: \$\{\{ (.+) \}\}\n/.exec(d);
+  assert.ok(rel, "release khai needs + if");
+  assert.ok(rel[1].includes("needs.gates.result == 'success'") && rel[1].includes("needs.bang_chung.outputs.reuse == 'true'") && rel[1].includes("needs.gates.result == 'skipped'"), "release: cổng xanh HOẶC (gates bỏ qua VÀ bằng chứng) — không có đường thứ ba");
+  assert.match(d, /\n {2}gates:\n {4}needs: bang_chung\n {4}if: \$\{\{ needs\.bang_chung\.outputs\.reuse != 'true' \}\}/, "gates chạy trừ khi có bằng chứng");
+}
+
 /* ═════════════ 3 · HÀM THUẦN ═════════════ */
 
 const now = Date.now();
@@ -838,6 +885,7 @@ function testChiMotChoDay() {
 export async function testDeliveryV2() {
   testCongSongSong();
   testDeployDungLaiBangChung();
+  testDeployDungLaiTheoCay();
   testKhoa();
   testChongPhamVi();
   testDoiChieu();
