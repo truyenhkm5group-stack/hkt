@@ -20,20 +20,21 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-17T03:16:14.367Z",
-  "updated_at": "2026-10-17T03:26:18.056Z",
-  "last_heartbeat": "2026-10-17T03:25:34.394Z",
+  "updated_at": "2026-10-17T03:42:13.688Z",
+  "last_heartbeat": "2026-10-17T03:42:13.688Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/deploy-reuse-gates",
-    "sha": "02e14c38dcf95291d1fcb069792417f4d389b303",
-    "at": "2026-10-17T03:25:34.394Z",
+    "sha": "dceb75b0b2a6a61a9d8bd0b3d1ea4da8308d9525",
+    "at": "2026-10-17T03:42:13.688Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "CI/CD: deploy dùng lại bằng chứng gates khi cây (tree) commit gộp trùng merge ref PR đã kiểm — bỏ chạy lại gates trùng",
     "summary": "",
     "tests": [
-      "delivery-v2 (gồm testDeployDungLaiTheoCay): đạt",
+      "delivery-v2: đạt",
       "bash -n bước cay: sạch",
-      "npm test đầy đủ: chạy ở CI (node_modules cục bộ thiếu qrcode)"
+      "js-yaml: parse được",
+      "npm test đầy đủ: ở CI"
     ]
   }
 }
