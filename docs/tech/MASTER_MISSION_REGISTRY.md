@@ -273,7 +273,7 @@ Lý do: không mission nào dưới đây có ảnh TRƯỚC / SAU của trang p
 - ACCEPTANCE_CRITERIA: `LAUNCH_GATE.md` §5 — smoke bằng tài khoản / Page KHÔNG có vai trò trong app
 - PRODUCTION_EVIDENCE: log 06/10 `reason=PERMISSION_NOT_GRANTED granted=public_profile` · hồ sơ App Review app `1794152675112502` NỘP 07/10, đang xét 5 quyền
 - AUDIT 17/10 (`docs/meta-app-review/05-kiem-toan-ho-so-17-10.md`): video đã nộp CHƯA XÁC MINH (không có trên máy / Drive chưa đọc được), chứng cứ gián tiếp cho thấy nộp trước khi luồng nối page chạy được; chính sách bảo mật production v1.1 chưa có mục Messenger (K3); tài khoản người duyệt thấy «sắp mở» thay cho nút vì không có đường bật `meta.direct-connect.open` (K8 = MM-FU-712)
-- NEXT_ACTION: chủ shop O1–O7 (05 §4) · kỹ thuật K3 (sau khi chủ shop duyệt câu) · K4 · K8 · rồi quay 4 video (05 §2), KHÔNG huỷ hồ sơ đang xét · LAST_UPDATED: 2026-10-17
+- NEXT_ACTION: K3 (chính sách 1.2) + K8 (công tắc cờ) CÓ MÃ trên nhánh `claude/meta-app-review-audit` — chủ shop đọc mục 3a rồi gộp + deploy; sau deploy: K4 cửa hàng demo (05 §7) → smoke §6.2 → quay 4 video (05 §2); chủ shop O1–O6 (05 §4). KHÔNG huỷ hồ sơ đang xét · LAST_UPDATED: 2026-10-17
 
 #### MM-META-01 — Smoke Meta Direct bằng tài khoản ngoài sau khi Meta duyệt
 - OWNER: Integration Lead · PRIORITY: P0 · STATUS: BLOCKED_EXTERNAL · CLASS: STILL REQUIRED
@@ -878,7 +878,7 @@ Lô `50293da6` (deploy 37886395475): #721 · #724 · #725 · #726 (có mã chạ
 | MM-FU-683 | Một tài khoản mang hai lý do cùng mã trên danh sách sức khoẻ | P2 | BACKLOG | STILL REQUIRED | #683 | giao khi có slot (#683 đã DONE) |
 | MM-FU-692a | `mark_declined` cần câu POSTWRITE; `ORDER_VALIDATION` nhiễu (quá nhiều tín hiệu không phải lỗi) | P2 | BACKLOG | STILL REQUIRED | #692 | giao khi có slot (#692 đã DONE) |
 | MM-FU-692b | **Hai nguồn sức khoẻ** (#683 danh sách khách vs gương `platform_org_health` của ops-signals) phải về MỘT nguồn — không để hai màn nói hai điều | P1 | BACKLOG | STILL REQUIRED (AGENTS §8.12 «logic chung không copy sang từng page») | #683 · #692 | cả hai đã DONE trên production ⇒ thiết kế một nguồn là việc P1 kế tiếp |
-| MM-FU-712 | Không có đường UI / ops nào bật cờ `meta.direct-connect.open` — cổng nối thẳng Facebook chỉ mở được bằng sửa CSDL. **Nâng P0 17/10: chặn người duyệt Meta App Review (05 §3, K8)** | P0 | BACKLOG | STILL REQUIRED (ngày bật = D20) | #712 | thêm công tắc người vận hành hoặc ops `set-setting` có vết |
+| MM-FU-712 | Không có đường UI / ops nào bật cờ `meta.direct-connect.open` — cổng nối thẳng Facebook chỉ mở được bằng sửa CSDL. **Nâng P0 17/10: chặn người duyệt Meta App Review (05 §3, K8)**. Mã 17/10: `setDirectConnectOpen` + công tắc ở /platform (danh sách mã cửa hàng, nhật ký `FLAG_SET`) | P0 | CODE_DONE_NOT_DEPLOYED | STILL REQUIRED (ngày bật = D20) | #712 | thêm công tắc người vận hành hoặc ops `set-setting` có vết |
 | MM-FU-724 | Dựng sự cố chỉ chứng minh được O6; O2–O5 · O7 · O8 «CHƯA ĐO ĐƯỢC» (cần kênh nhắn tin thật / AI trả tiền / thao tác phá huỷ) ⇒ cần CHUẨN BẰNG CHỨNG từ sự cố thật cho Launch Gate | P2 | BACKLOG | STILL REQUIRED (quyết định cách chấm O2–O8) | #724 | viết chuẩn vào `LAUNCH_GATE.md` §4 |
 | MM-FU-727a | (C2) `/o/[object]/new` gửi định nghĩa trường bị chặn bởi `viewPermission` xuống client (`new/page.tsx:27-44`) | P2 | BACKLOG | STILL REQUIRED | #727 (bàn giao Fable) | — |
 | MM-FU-727b | (C3) `ideas/[id]/page.tsx:25` xác định người đăng bằng email thay vì `users.id` (AGENTS 34) | P2 | BACKLOG | STILL REQUIRED | #727 | — |

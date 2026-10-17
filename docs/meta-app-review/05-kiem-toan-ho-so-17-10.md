@@ -146,12 +146,12 @@ Ghép 0 → A → B2–B3 → C → D → B4–B5 thành một mạch liền, d�
 
 ### 3.1 Danh sách
 
-| # | Việc | Vì sao chặn |
-|---|---|---|
-| K3 | Đưa mục «Kết nối Facebook Page để nhắn tin» (01 §5) lên trang chính sách, sửa câu mục 3 thành «Khi **đăng nhập**, chúng tôi không …», tăng `PRIVACY_POLICY.version` — **chủ shop duyệt câu chữ trước** (sửa văn bản pháp lý) | Trang đang chạy mâu thuẫn trực tiếp với `pages_messaging` |
-| K4 | Dựng cửa hàng thử cho người duyệt trên `app.chotdontudong.com`, bật AI bán hàng, có sản phẩm khớp bài viết P1 | Người duyệt cần đăng nhập thật |
-| K8 | Đường người vận hành bật cờ `meta.direct-connect.open` theo **danh sách mã cửa hàng** (có ghi `audit`) — đóng `MM-FU-712`. Sau đó đặt cờ = `["<mã cửa hàng thử>"]`, KHÔNG đặt `true` (mở cho mọi khách trước khi Meta duyệt là hứa điều chưa chạy) | Không có nó, tài khoản người duyệt thấy «sắp mở» thay vì nút |
-| K5 | Sửa chữ cũ: README + 01 §1 còn ghi «cùng app đăng nhập»; 04 đã sửa trong bản này | Tránh làm theo tài liệu sai |
+| # | Việc | Vì sao chặn | Trạng thái (17/10 chiều) |
+|---|---|---|---|
+| K3 | Mục «3a. Kết nối Facebook Page để nhắn tin (Messenger)» trên trang chính sách: dữ liệu nhận · mục đích · cách lưu · khung 24 giờ · gỡ kết nối · xoá; câu mục 3 thành «Khi **đăng nhập** …»; dòng Meta ở bảng bên thứ ba; câu xoá dữ liệu page ở mục 9; phiên bản **1.2** | Trang đang chạy mâu thuẫn trực tiếp với `pages_messaging` | **CÓ MÃ** (`components/legal/privacy-content.tsx`, băm ghim lại) — chờ deploy |
+| K4 | Dựng cửa hàng demo cho người duyệt trên `app.chotdontudong.com` (§7) | Người duyệt cần đăng nhập thật | Việc của người vận hành SAU deploy — tạo dữ liệu production |
+| K8 | Đường người vận hành đặt cờ `meta.direct-connect.open` theo **danh sách mã cửa hàng**, có nhật ký `FLAG_SET` — đóng `MM-FU-712`. Đặt `["<mã cửa hàng demo>"]`, KHÔNG đặt «Mở cho mọi cửa hàng» trước khi Meta duyệt | Không có nó, tài khoản người duyệt thấy «sắp mở» thay vì nút | **CÓ MÃ** (`/platform` → khung Webhook Messenger → «Nút Kết nối Facebook Page cho khách») — chờ deploy |
+| K5 | Sửa chữ cũ: README + 01 §1 còn ghi «cùng app đăng nhập» | Tránh làm theo tài liệu sai | Xong |
 
 ### 3.2 Lối tạm khi K8 chưa xong (không cần sửa mã)
 
@@ -173,10 +173,93 @@ hàng thử, đã đăng nhập, mở thẳng `https://app.chotdontudong.com/api
 | O4 | Kiểm **Valid OAuth Redirect URIs** có đủ dòng `https://app.chotdontudong.com/api/connect/messenger/callback` (và miền ERP nếu dùng) — đóng `MM-REC-05` | Use case Facebook Login (for Business) → Settings | Đủ dòng, đã lưu |
 | O5 | Kiểm Meta đã đếm **lượt gọi API thành công** cho từng quyền (không còn «0 of 1 API call(s)») | Use case Messenger → Permissions and features | Cả 4 quyền có lượt gọi |
 | O6 | Thêm tài khoản Facebook quay phim làm Tester nếu chưa có vai trò (P4) | App roles → Roles | Người đó đã Accept |
-| O7 | Duyệt câu chữ mục Messenger trong chính sách bảo mật (01 §5) để kỹ thuật làm K3 | — | Trả lời «đồng ý» hoặc sửa câu |
+| O7 | Đọc lại mục 3a của chính sách (bản 1.2, trong PR) trước khi deploy — sửa văn bản pháp lý là quyết định của chủ shop | PR trên GitHub | Đồng ý hoặc sửa câu |
 | O8 | Quay 4 video theo §2 sau khi K3, K4, K8 xong | Máy của chủ shop | 4 tệp MP4 |
 | O9 | Khi Meta **hỏi thêm / cho bổ sung / trả về**: tải 4 video mới vào đúng quyền, dán câu ở 04, **Resubmit** | App Review → Requests | Trạng thái lại In review |
 | O10 | Trong lúc chờ: giữ nguyên page thử, cửa hàng thử, tài khoản người duyệt, không đổi mật khẩu | — | — |
 
 Về O9: hồ sơ đang In review thường không sửa được video; Meta chỉ mở lại khi họ hỏi thêm hoặc trả về. Bộ video §2 là để sẵn
 sàng cho lúc đó, nộp lại trong ngày thay vì mất thêm một vòng.
+
+---
+
+## 5. Rà soát quyền — giữ / bỏ (KHÔNG đổi hồ sơ đang xét)
+
+Đối chiếu mã thật: hộp thoại xin `META_CONNECT_SCOPES.FACEBOOK_MESSENGER`; quyền chặn nối page là `MESSENGER_REQUIRED_PERMISSIONS`
+(`lib/integrations/messenger/graph.ts`).
+
+| Quyền | Lời gọi thật trong mã | Kết luận |
+|---|---|---|
+| `public_profile` | Mặc định của Facebook Login, không qua App Review | Giữ (không thuộc hồ sơ) |
+| `pages_show_list` | `GET /me/accounts` (`pagesFromCode`) — liệt kê page để chọn | **Giữ** — thiếu thì 0 page |
+| `pages_manage_metadata` | `POST / GET / DELETE /{page}/subscribed_apps` (`subscribePage`, `checkPageWebhook`, `unsubscribePage`) | **Giữ** — thiếu thì không tin nào tới |
+| `pages_messaging` | Send API `POST /me/messages` (chữ + ảnh, `messaging_type: RESPONSE`), Private Replies `recipient.comment_id`, Conversations API | **Giữ** — chức năng chính |
+| `pages_read_engagement` | `GET /{post-id}?fields=message` (`postMessage`) cho trả lời bình luận; Conversations API | **Giữ** — nhưng là quyền dễ bị hỏi «vì sao cần» nhất; video D phải dựng đúng như §2.5 |
+| `business_management` | Chỉ đường dự phòng khi `/me/accounts` rỗng VÀ quyền đã được cấp; hộp thoại KHÔNG xin | **Đề xuất bỏ** nếu đang nằm trong hồ sơ |
+| `instagram_basic`, `instagram_manage_messages` | Không thuộc luồng Messenger; hộp thoại KHÔNG xin từ #628 | **Đề xuất bỏ** khỏi hồ sơ này — Instagram DM là một lần nộp riêng |
+| `email` | App Messenger không dùng (đăng nhập ERP đi app khác) | Không cần |
+
+Webhook fields `messages · messaging_postbacks · message_echoes · feed`: `feed` cần cho bình luận (Private Reply);
+`message_echoes` để nhận ra tin của nhân viên / của bot (tránh bot trả lời đè người). Không trường nào thừa.
+
+Nếu quyền thứ 5 (O2) là một trong các quyền «đề xuất bỏ»: KHÔNG rút giữa lúc In review. Khi Meta trả hồ sơ / cho sửa: bỏ quyền đó,
+nộp lại 4 quyền.
+
+---
+
+## 6. Kiểm tra kỹ thuật — đã kiểm được gì, CHƯA kiểm được gì
+
+### 6.1 Đã kiểm (17/10/2026)
+
+| Mắt xích | Cách kiểm | Kết quả |
+|---|---|---|
+| Bắt đầu OAuth | GET production `/api/connect/messenger/start` không phiên | 401 — đúng (chỉ người có quyền Cài đặt) |
+| `state` / callback | Đọc `app/api/connect/messenger/callback/route.ts` | `state` ký trong cookie, khớp `state` + tổ chức + người bấm; sai ⇒ `loi=state`; cookie bị xoá ngay |
+| Bộ quyền hộp thoại xin | `META_CONNECT_SCOPES.FACEBOOK_MESSENGER` + `/platform` «Quyền hộp thoại … xin» | Đúng 5: `public_profile` + 4 quyền page |
+| Webhook xác minh | GET production verify token sai | 403 — đúng |
+| Webhook chữ ký / page lạ / trùng `mid` | `tests/messenger-webhook-secrets.test.ts`, `tests/messenger.test.ts` | Đạt (Graph giả lập) |
+| Chẩn đoán 7 lý do nối page | `tests/messenger-discovery.test.ts` | Đạt |
+| Nối / gỡ / nhiều page / sức khoẻ webhook | `tests/messenger-lifecycle.test.ts`, `-multipage`, `-health` | Đạt |
+| Cờ nối thẳng — đọc + đường ghi mới | `tests/direct-connect-gate.test.ts` (`testDirectConnectGate`, `testDirectConnectWrite`) | Đạt; kiểm đột biến: bỏ dòng chặn người vận hành ⇒ bài kiểm ĐỎ |
+| Chính sách 1.2 | `tests/legal-registers.test.ts` (băm ghim, trang dựng đúng cây được băm) | Đạt |
+
+### 6.2 CHƯA kiểm được — cần tài khoản Meta có vai trò trong app + page thử
+
+Mọi lời gọi Graph trong bài kiểm là GIẢ LẬP. Gửi / nhận tin THẬT qua Messenger API chỉ kiểm được bằng một tài khoản Facebook có vai
+trò trong app `1794152675112502` và một page thử — agent không có cả hai. Lượt smoke dưới đây cũng chính là lượt tạo «lượt gọi API
+thành công» Meta đòi (O5), làm SAU deploy và SAU §7:
+
+| Bước | Thao tác | Dấu hiệu ĐẠT |
+|---|---|---|
+| S1 | Đăng nhập cửa hàng demo → `/ai/sales-chatbot/messenger` | Thấy nút xanh «Kết nối Facebook Page» (không phải «sắp mở») |
+| S2 | Bấm, cấp đủ quyền, chọn page thử | Dòng «Đã nối page …»; log máy chủ `[messenger-connect] org=<mã demo> reason=OK … missing=- … eligible=1` |
+| S3 | «Kiểm tra lại» ở khối webhook theo page | Báo đã đăng ký đủ |
+| S4 | Tài khoản thứ hai nhắn page | Tin hiện ở `/ai/sales-chatbot/inbox`; KHÔNG có `messenger_webhook_rejected` trong log |
+| S5 | AI trả lời | Tài khoản thứ hai nhận tin trong Messenger |
+| S6 | «Tiếp quản» → gõ → gửi | Nhận đúng một tin |
+| S7 | Bình luận «price?» dưới bài nêu sản phẩm | Nhận một tin riêng nêu đúng sản phẩm |
+| S8 | Cửa hàng khác (không trong cờ) mở cùng trang | Vẫn thấy «Nối thẳng Facebook — sắp mở» |
+
+---
+
+## 7. Dựng cửa hàng demo cho người duyệt (K4 — SAU deploy, người vận hành làm)
+
+Mục tiêu: người duyệt tự đăng nhập, tự bấm kết nối, tự nhắn thử — mà không có quyền người vận hành, không thấy dữ liệu cửa hàng khác.
+
+1. Tạo một cửa hàng MỚI, riêng cho việc duyệt (đề xuất mã `meta-review-demo`), thương hiệu Chốt Đơn — qua mã mời ở `/platform` rồi
+   đăng ký ở `https://app.chotdontudong.com/start`. KHÔNG dùng cửa hàng của khách thật hay HSLC.
+2. Trong cửa hàng đó: bật module AI bán hàng, chế độ **AI tự trả lời** (không COPILOT), thêm 2–3 sản phẩm khớp bài viết của page thử.
+   **Không** nối Pancake cho page thử (`mutedByPancake` sẽ đẩy tin sang đường Pancake).
+3. Tạo tài khoản người duyệt trong CHÍNH cửa hàng đó, vai trò Quản trị (có `settings:manage` — route `/api/connect/messenger/start`
+   đòi quyền này). Mật khẩu chỉ ghi trong form Meta.
+4. `/platform` → khung «Webhook Messenger / Instagram» → «Nút Kết nối Facebook Page cho khách» → **Chỉ các cửa hàng được liệt kê**
+   → `meta-review-demo` → lý do «Cửa hàng cho người duyệt Meta App Review» → Đặt. Lượt đổi vào nhật ký nền tảng (`FLAG_SET`).
+5. Nối sẵn page thử (smoke §6.2) để người duyệt vào là thấy page đang nối; họ vẫn tự bấm «Thêm / nối lại page» được.
+
+Ranh giới bảo vệ (đã có sẵn, không phải viết thêm):
+- Mỗi cửa hàng một cơ sở dữ liệu riêng; tài khoản người duyệt chỉ đăng nhập được vào cửa hàng demo.
+- Quản trị của cửa hàng không phải nhà KHÔNG có quyền người vận hành, kể cả mang khoá `platform:operate` (`platformOperatorDenial`;
+  bài kiểm `testDirectConnectWrite` khoá đúng trường hợp này) — không tự mở cờ cho cửa hàng khác, không thấy `/platform`.
+- Cờ danh sách so khớp mã cửa hàng CHÍNH XÁC; mở cho `meta-review-demo` không mở cho cửa hàng nào khác.
+- Webhook định tuyến theo MÃ PAGE; page chưa nối vào cửa hàng nào thì bị bỏ qua, không rơi vào tổ chức nào.
+- Khi Meta duyệt xong: đổi cờ sang «Mở cho mọi cửa hàng» (một lượt, có nhật ký), rồi đình chỉ hoặc giữ cửa hàng demo cho lần duyệt sau.

@@ -16,8 +16,9 @@ export const PRIVACY_CONTENT: LegalDocumentContent = {
   intro: (
     <p>
       Chính sách này giải thích cách {COMPANY.name} («<strong>VNXcommerce</strong>», «chúng tôi») thu thập, sử dụng, lưu trữ
-      và bảo vệ dữ liệu cá nhân khi bạn dùng phần mềm quản lý bán hàng VNXcommerce tại <strong>vnxcommerce.com</strong> và{" "}
-      <strong>erp.vnxcommerce.com</strong> («Nền tảng»).
+      và bảo vệ dữ liệu cá nhân khi bạn dùng phần mềm quản lý bán hàng VNXcommerce tại <strong>vnxcommerce.com</strong>,{" "}
+      <strong>erp.vnxcommerce.com</strong>, và sản phẩm Chốt Đơn Tự Động (ứng dụng Facebook «ChotDonTuDong Messenger») tại{" "}
+      <strong>chotdontudong.com</strong>, <strong>app.chotdontudong.com</strong> («Nền tảng»).
     </p>
   ),
   body: (
@@ -55,7 +56,11 @@ export const PRIVACY_CONTENT: LegalDocumentContent = {
           duy nhất để tạo tài khoản, nhận ra bạn ở lần đăng nhập sau và liên hệ về dịch vụ.
         </p>
         <ul className="list-disc space-y-1 pl-5">
-          <li>Chúng tôi <strong>không</strong> đăng bài, không đọc danh sách bạn bè, tin nhắn cá nhân hay bất kỳ dữ liệu nào khác trong tài khoản Google / Facebook của bạn.</li>
+          <li>
+            Khi <strong>đăng nhập</strong>, chúng tôi <strong>không</strong> đăng bài, không đọc danh sách bạn bè, tin nhắn cá nhân hay bất kỳ dữ
+            liệu nào khác trong tài khoản Google / Facebook của bạn. Kết nối một Facebook Page để trả lời tin nhắn của khách là bước
+            RIÊNG, do quản trị cửa hàng chủ động bấm — xem mục 3a.
+          </li>
           <li>Chúng tôi không nhận và không lưu mật khẩu Google / Facebook của bạn.</li>
           <li>
             Việc sử dụng thông tin nhận từ API của Google tuân thủ{" "}
@@ -65,6 +70,41 @@ export const PRIVACY_CONTENT: LegalDocumentContent = {
             , bao gồm các yêu cầu Sử dụng giới hạn (Limited Use).
           </li>
           <li>Bạn có thể gỡ quyền của VNXcommerce bất kỳ lúc nào trong phần cài đặt bảo mật của tài khoản Google / Facebook.</li>
+        </ul>
+      </Section>
+
+      <Section id="messenger" title="3a. Kết nối Facebook Page để nhắn tin (Messenger)">
+        <p>
+          Chỉ xảy ra khi quản trị một cửa hàng bấm «<strong>Kết nối Facebook Page</strong>» và đồng ý trong hộp thoại của Facebook. Facebook
+          hỏi bốn quyền: <code>pages_show_list</code>, <code>pages_messaging</code>, <code>pages_manage_metadata</code>,{" "}
+          <code>pages_read_engagement</code>.
+        </p>
+        <Table
+          head={["Dữ liệu nhận từ Facebook", "Dùng để làm gì", "Lưu thế nào"]}
+          rows={[
+            ["Danh sách page người bấm quản lý (mã page, tên page) và mã truy cập của từng page", "Để người bấm chọn page nào nối với cửa hàng", "Danh sách chờ chọn được mã hoá và tự hết hạn sau 10 phút. Chỉ page được chọn được lưu: mã page, tên page, mã truy cập page (mã hoá trong cơ sở dữ liệu). Mã truy cập tài khoản Facebook cá nhân KHÔNG được lưu."],
+            ["Đăng ký nhận tin của page (webhook)", "Để tin nhắn và bình luận mới của page tới Hộp thư của cửa hàng", "Không phải dữ liệu cá nhân; huỷ khi gỡ page"],
+            ["Tin nhắn khách gửi tới page: mã định danh người gửi trong phạm vi page, nội dung, ảnh đính kèm, thời điểm", "Hiện trong Hộp thư của cửa hàng; chatbot của cửa hàng (nếu cửa hàng bật) và nhân viên trả lời khách", "Lưu trong cơ sở dữ liệu riêng của cửa hàng, là dữ liệu nhóm B (mục 2)"],
+            ["Mã quảng cáo đã dẫn khách vào hội thoại (nếu khách bấm quảng cáo của page)", "Báo cáo cho cửa hàng quảng cáo nào sinh ra hội thoại / đơn", "Lưu cùng hội thoại — dữ liệu nhóm B"],
+            ["Hội thoại gần đây của page (tên người tham gia, tối đa 20 tin gần nhất mỗi hội thoại) — chỉ khi cửa hàng bấm nhập", "Để nhân viên thấy ngữ cảnh cũ trong Hộp thư", "Lưu cùng hội thoại — dữ liệu nhóm B"],
+            ["Bình luận mới dưới bài viết của page", "Gửi MỘT tin nhắn riêng trả lời bình luận đó", "Như tin nhắn — dữ liệu nhóm B"],
+            ["Nội dung chữ của bài viết được bình luận", "Để chatbot hiểu khách đang hỏi sản phẩm nào trong bài", "Chỉ đọc lúc soạn câu trả lời, gửi cho nhà cung cấp AI cùng hội thoại (mục 6); KHÔNG lưu vào cơ sở dữ liệu"],
+          ]}
+        />
+        <ul className="list-disc space-y-1 pl-5">
+          <li>
+            Tin gửi đi qua kết nối này chỉ là câu trả lời cho người đã nhắn tin hoặc bình luận, trong khung thời gian Facebook cho phép
+            (24 giờ kể từ tin cuối của khách) — <strong>không</strong> gửi tin quảng cáo hàng loạt, không nhắn cho người chưa từng liên hệ page.
+          </li>
+          <li>Chỉ tài khoản nhân viên của chính cửa hàng đó xem được hội thoại; chúng tôi không bán, không chia sẻ cho cửa hàng khác, không dùng cho mục đích riêng (mục 4).</li>
+          <li>
+            Gỡ kết nối bất kỳ lúc nào: trong phần mềm (Chatbot bán hàng → Messenger → «Gỡ») — phần mềm huỷ đăng ký nhận tin của page ở
+            Facebook và thôi nhận tin; hoặc trong cài đặt của page trên Facebook (Cài đặt → Tích hợp doanh nghiệp).
+          </li>
+          <li>
+            Hội thoại đã lưu được giữ theo mục 7 cho tới khi cửa hàng xoá. Xoá mã truy cập page và hội thoại đã lưu: yêu cầu theo mục 9.
+            Khách hàng của cửa hàng muốn xoá hội thoại của mình gửi yêu cầu tới chính cửa hàng (mục 8).
+          </li>
         </ul>
       </Section>
 
@@ -99,6 +139,7 @@ export const PRIVACY_CONTENT: LegalDocumentContent = {
             ["Google (Gemini) hoặc nhà cung cấp mô hình AI khác do Khách thuê chọn", "Nội dung hội thoại, thông tin sản phẩm cần để trả lời", "Khi bật chatbot / tính năng AI"],
             ["Google, Facebook (đăng nhập)", "Mã định danh, họ tên, email (mục 3)", "Khi bạn chọn đăng nhập bằng Google / Facebook"],
             ["Pancake, Facebook (fanpage)", "Hội thoại, đơn hàng của fanpage", "Khi Khách thuê kết nối"],
+            ["Meta Platforms (Messenger API)", "Tin nhắn trả lời khách, tin riêng trả lời bình luận; đọc nội dung bài viết được bình luận (mục 3a)", "Khi Khách thuê kết nối Facebook Page trực tiếp"],
             ["Viettel Post", "Thông tin giao hàng của đơn", "Khi Khách thuê kết nối"],
             ["Ngân hàng / dịch vụ đối soát chuyển khoản (SePay)", "Nội dung và số tiền giao dịch", "Khi đối soát thanh toán"],
           ]}
@@ -143,6 +184,10 @@ export const PRIVACY_CONTENT: LegalDocumentContent = {
         <p>
           Nếu bạn đăng nhập bằng Facebook: bạn cũng có thể gỡ VNXcommerce trong Facebook → Cài đặt → Ứng dụng và trang web; sau đó gửi
           email như trên để chúng tôi xoá dữ liệu đã nhận từ Facebook (mã định danh, họ tên, email).
+        </p>
+        <p>
+          Nếu cửa hàng đã kết nối Facebook Page (mục 3a): quản trị cửa hàng gỡ page trong phần mềm, rồi gửi email như trên để chúng tôi
+          xoá mã truy cập page và các hội thoại Messenger đã lưu của page đó, cùng thời hạn 30 ngày.
         </p>
       </Section>
 
