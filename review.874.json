@@ -2,7 +2,7 @@
   "pr": 874,
   "sha": "5c1b6e4e233fec141f244f153a5f9283e5f0a60a",
   "verdict": "PASS",
-  "actor": "vm:hkt",
-  "at": "2026-10-16T17:45:45.774Z",
-  "note": "Gộp main 64831af7 (#869) vào 7d4485cf (đã PASS 6 vòng): chỉ xung đột dòng import tools.ts, giữ cả hai phía; không đổi logic #874; tsc/eslint sạch, p0-855-address, address-ward-explicit, address-normalize, sales-agent-golden, order-golden, order-review, p0-863-cancel-flow OK"
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-17T00:22:24.488Z",
+  "note": "review độc lập PASS: acceptCustomerWard không còn đọc «An Hội Tây, TP.HCM» thành hai phường; hai phường thật vẫn bắt"
 }
