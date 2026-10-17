@@ -1,4 +1,3 @@
-{"at":"2026-10-08T21:13:59.240Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"platform-key-project-probe","detail":"PASS c7183395051955e6cff5343a787e9df97d71d12b 2026-10-08T21:13:53.062Z"}
 {"at":"2026-10-08T21:14:12.593Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"registry-refresh-0909","detail":"PASS c7183395051955e6cff5343a787e9df97d71d12b 2026-10-08T21:14:06.372Z"}
 {"at":"2026-10-08T21:14:24.907Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"saas-acceptance-hardening","detail":"PASS c7183395051955e6cff5343a787e9df97d71d12b 2026-10-08T21:14:18.624Z"}
 {"at":"2026-10-08T21:14:36.930Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"saas-acceptance-smoke","detail":"PASS c7183395051955e6cff5343a787e9df97d71d12b 2026-10-08T21:14:30.715Z"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-17T03:45:05.590Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"backup-lock-scope","detail":"#879 @ f19bff1cd5e7 → ebc4efc980e1 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-17T03:46:39.324Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"ebc4efc980e1 · run 39000044073 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39000044073"}
 {"at":"2026-10-17T03:47:45.335Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"qa-preseed-350","detail":"#880 @ c4002e2394d9 → 4b4a51b0072c (MERGE_ISOLATED · HIGH · gates success)"}
+{"at":"2026-10-17T03:57:04.401Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#875 @ b5a534ca7652 · review độc lập PASS: chỉ công cụ dev/tài liệu/agent; wait chỉ GET; claude-usage chỉ đọc cục bộ; AGENTS.md +1 gạch không nới luật"}
