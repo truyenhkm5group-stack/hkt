@@ -1,4 +1,3 @@
-{"at":"2026-10-08T22:30:31.206Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ops-signals-check","detail":"#710 @ 0e52fc045065 → fae0a204f9d4 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-08T22:36:01.345Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"erp-a11y-bo-cuc","detail":"#708 @ 91e11e9e1d51 → dbab68130a72 (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-08T22:37:01.209Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"dbab68130a72 · run 37854562530 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37854562530"}
 {"at":"2026-10-08T22:58:34.559Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"acceptance-login-recorder","detail":"fix/acceptance-login-recorder @ 1d0a467aac92 · 1 lệnh kiểm thử"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-17T06:59:01.402Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"OVERLAP_ACCEPTED","mission":"trace-by-order","detail":"OVERLAP_ACCEPTED với money-trace-since: phạm vi scripts/conv-money-trace.ts, tests/conv-money-trace.test.ts — cách tích hợp: money-trace-since đã gộp (--since có trên main); chỉ thêm nhánh --order đứng một mình"}
 {"at":"2026-10-17T06:59:34.512Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"HANDOFF","mission":"trace-by-order","detail":"claude/trace-by-order @ 638a38fc44a3 · 2 lệnh kiểm thử"}
 {"at":"2026-10-17T07:01:48.087Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"trace-by-order","detail":"#885 cho claude/trace-by-order @ 638a38fc44a3"}
+{"at":"2026-10-17T07:02:47.682Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#885 @ 638a38fc44a3 · review: --order chạy một mình, tự tìm hội thoại (khớp đúng 1 hội thoại mới truy vết, limit 3); chỉ đọc. Ghi chú: like phân biệt hoa/thường — mã viết HOA không khớp"}
