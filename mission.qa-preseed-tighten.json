@@ -3,7 +3,7 @@
   "mission_id": "qa-preseed-tighten",
   "title": "qa × 0245: diễn tập ĐẠT ≤ 120 phút + bắt giao dịch dài",
   "business_goal": "Tạo chỉ mục chỉ chạy sau backup + drill mới ĐẠT",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-token-budget",
@@ -22,11 +22,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-17T05:13:52.180Z",
-  "updated_at": "2026-10-17T05:13:52.180Z",
-  "last_heartbeat": "2026-10-17T05:13:52.180Z",
+  "updated_at": "2026-10-17T05:14:21.864Z",
+  "last_heartbeat": "2026-10-17T05:14:21.864Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/qa-preseed-tighten",
+    "sha": "a1b9f67fe9bac40945048fc5a32d05574d73c56f",
+    "at": "2026-10-17T05:14:21.864Z",
+    "actor": "DESKTOP-56TH98Y:wt-token-budget",
+    "title": "qa × 0245: tạo chỉ mục chỉ chạy khi diễn tập khôi phục ĐẠT trong 120 phút",
+    "summary": "",
+    "tests": [
+      "tests/qa-0245-index.test.ts: ĐẠT",
+      "eslint: sạch"
+    ]
   }
 }
