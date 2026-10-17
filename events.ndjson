@@ -1,4 +1,3 @@
-{"at":"2026-10-08T21:56:11.188Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"hide-internal-429-flake","detail":"fix/hide-internal-429-flake @ 1f8626dc15bf · 1 lệnh kiểm thử"}
 {"at":"2026-10-08T21:56:34.175Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"hide-internal-429-flake","detail":"#709 cho fix/hide-internal-429-flake @ 1f8626dc15bf"}
 {"at":"2026-10-08T21:56:55.980Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#709 @ 1f8626dc15bf · Chỉ bài kiểm: thu hẹp mẫu 429 về ranh giới từ, ý định giữ nguyên, hai khẳng định khoá cả hai chiều. Không phải contract test, không đổi giá trị kỳ vọng nghiệp vụ."}
 {"at":"2026-10-08T22:03:26.795Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ops-signals-check","detail":"feat/ops-signals-check @ 0e52fc045065 · 1 lệnh kiểm thử"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-17T05:37:52.600Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"OVERLAP_ACCEPTED","mission":"qa-external-drill","detail":"OVERLAP_ACCEPTED với sync-runner-lock: điểm nóng SERIAL .github/ — cách tích hợp: thêm một lệnh + một nhánh ops mới, không đổi lệnh cũ; chủ shop chọn 17/10"}
 {"at":"2026-10-17T05:38:19.612Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"HANDOFF","mission":"qa-external-drill","detail":"claude/qa-external-drill @ 4d10888a6d10 · 2 lệnh kiểm thử"}
 {"at":"2026-10-17T05:40:26.479Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"HANDOFF","mission":"qa-external-drill","detail":"claude/qa-external-drill @ 60642b4b2793 · 2 lệnh kiểm thử"}
+{"at":"2026-10-17T05:41:32.659Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"qa-external-drill","detail":"#884 cho claude/qa-external-drill @ 60642b4b2793"}
