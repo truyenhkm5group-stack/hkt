@@ -1353,7 +1353,7 @@ async function chatTurnCore(
     // đầu tiên của bot ở đó không phải lời chào lặp. Web hiện lời chào ấy trên khung chat.
     const greetedBefore = recentShopTexts(isMessagingChannel(opts.channel) ? msgs.filter((m) => m.seq > 1) : msgs, 1).length > 0;
     const offerGuard = async (out: string): Promise<string> => {
-      const facts = needsOfferFacts(out) ? await (offerFacts ??= loadOfferFacts(cfg, upsellReplyId).catch(() => null)) : null;
+      const facts = needsOfferFacts(out, state.cart) ? await (offerFacts ??= loadOfferFacts(cfg, upsellReplyId).catch(() => null)) : null;
       const window = offerWindow({ state, lastUserText: text, complaint: customerComplaintSignal(text), orderError: orderWriteFailed, returningPending: returningPendingOf(returning, state, turnSeq) });
       const g = guardReply(out, { window, cart: state.cart, lastUserText: text, greetedBefore, facts });
       if (g.offered) state = { ...state, upsellSent: true, upsellTurn: turnSeq };

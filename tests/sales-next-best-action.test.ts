@@ -113,6 +113,76 @@ function testGuard() {
   assert.equal(volumeSaveFrom([{ grams: 500, price: 150_000, addOnOnly: true }, { grams: 1000, price: 280_000 }], { enabled: false, unitGrams: 1000, minWeightGrams: 2000, amount: 0, mode: "ONCE" }), null, "mẫu mã chỉ bán kèm không phải gói bán riêng");
 }
 
+/**
+ * Review PR #876: hàng rào chỉ được bỏ phần LỜI MỜI — không bao giờ bỏ câu trả lời đúng điều khách vừa hỏi, câu hỏi thông tin đơn cần
+ * (SĐT / địa chỉ / quy cách món khách VỪA xin), câu xác nhận thay đổi khách đã xin. Làm ở mức VẾ câu. Mọi khẳng định là CHỮ ĐƯỢC GIỮ.
+ */
+function testReview876() {
+  const ORD: OfferWindow = { open: false, reason: "ORDERING" };
+  const g = (text: string, o: Partial<Parameters<typeof guardReply>[1]> = {}) => guardReply(text, { window: ORD, cart: cart("Chả cá thu", 1000), lastUserText: "cho chị 1kg chả cá thu", greetedBefore: true, facts: FACTS, ...o });
+  const kept = (text: string, o: Partial<Parameters<typeof guardReply>[1]> = {}) => {
+    const r = g(text, o);
+    assert.deepEqual([r.text, r.dropped, r.offered], [text, [], null], `phải giữ nguyên: ${text} ⇒ ${r.text}`);
+  };
+  // B1 — quy cách đã chọn xét theo MÓN câu đang nói: giỏ chỉ có chả cá ⇒ hỏi quy cách chả mực khách vừa xin là câu đơn cần.
+  kept("Dạ chả mực giã tay chị lấy 500g hay 1kg ạ?", { lastUserText: "lấy thêm chả mực nữa em" });
+  kept("Dạ chả mực giã tay chị lấy 500g hay 1kg ạ?", { lastUserText: "lấy thêm chả mực nữa em", facts: null });
+  // B1 — câu một hơi «xin SĐT và địa chỉ, chị có muốn lấy thêm …» ⇒ chỉ mất vế mời (cả khi cửa sổ mở, cả khi chưa đọc được danh mục).
+  const ask = "Dạ em ghi nhận 1kg chả cá thu ạ. Chị cho em xin SĐT và địa chỉ, chị có muốn lấy thêm hũ ruốc cá không ạ?";
+  for (const o of [{}, { window: OPEN }, { facts: null }]) {
+    const r = g(ask, o);
+    assert.equal(r.text, "Dạ em ghi nhận 1kg chả cá thu ạ. Chị cho em xin SĐT và địa chỉ.", JSON.stringify([o, r.text]));
+    assert.equal(r.offered, null);
+    assert.equal(r.dropped.length, 1, JSON.stringify(r.dropped));
+  }
+  // Vế đuôi của lời mời («…, ngon lắm ạ») đi theo lời mời; vế tổng tiền thì không.
+  assert.equal(g("Mình xem thêm menu chả mực bên em nhé, ngon lắm ạ. Cho em xin SĐT nhé.").text, "Cho em xin SĐT nhé.");
+  assert.equal(g("Mình dùng thêm chả mực giã tay không ạ, tổng đơn 280.000đ + ship 30.000đ ạ.").text, "Tổng đơn 280.000đ + ship 30.000đ ạ.");
+  // B2 — khách vừa hỏi giá / quy cách ⇒ câu trả lời đi, kể cả khi đơn đang lên và đã chọn quy cách.
+  kept("Dạ 2kg là 540.000đ, rẻ hơn 20.000đ so với mua lẻ ạ.", { lastUserText: "2kg bao nhiêu" });
+  kept("Dạ 2kg là 540.000đ, rẻ hơn 20.000đ so với mua lẻ ạ.", { lastUserText: "2kg bao nhiêu", cart: cart("Chả cá thu", 2000) });
+  kept("Dạ 2kg là 540.000đ, rẻ hơn 20.000đ so với mua lẻ ạ.", { lastUserText: "2kg bao nhiêu", facts: null });
+  kept("Dạ chả mực giã tay có 2 loại: 500g 175.000đ, 1kg 340.000đ ạ.", { lastUserText: "chả mực có mấy loại em", cart: cart("Chả cá thu", 2000) });
+  kept("Dạ chả cá thu 1kg 280.000đ, 2kg 540.000đ ạ.", { lastUserText: "giá sao em", cart: cart("Chả cá thu", 2000) });
+  // Câu trả lời vẫn không được kèm lời mời: hỏi giá rồi mà bot rủ lên gói lớn hơn bằng câu hỏi ⇒ vẫn qua hàng rào.
+  assert.deepEqual(g("Chị lấy luôn 3kg chả cá thu cho tiết kiệm hơn nhé?", { lastUserText: "2kg bao nhiêu", cart: cart("Chả cá thu", 2000) }).dropped.map((d) => d.reason), ["ORDERING"]);
+  // B2 — bảng giá chỉ thừa khi là bảng giá của MÓN ĐÃ CHỌN; bảng giá món khác vẫn đi.
+  kept("Dạ chả mực giã tay 500g 175.000đ, 1kg 340.000đ ạ.", { lastUserText: "ok em", cart: cart("Chả cá thu", 2000) });
+  assert.equal(g("Dạ chả cá thu 1kg 280.000đ, 2kg 540.000đ ạ. Cho em xin SĐT nhé.", { lastUserText: "ok em", cart: cart("Chả cá thu", 2000) }).text, "Cho em xin SĐT nhé.");
+  // Dòng tóm tắt đơn liệt kê các món trong giỏ kèm giá ⇒ tóm tắt, không phải bảng giá.
+  const two: CartCommitment = { ...cart("Chả cá thu", 2000), selectedItems: [...cart("Chả cá thu", 2000).selectedItems, ...cart("Chả mực giã tay", 500).selectedItems] };
+  kept("Dạ đơn của chị:\n- Chả cá thu 2kg = 540.000đ, chả mực 500g = 175.000đ\nCho em xin SĐT nhé.", { lastUserText: "ok em", cart: two });
+  // B3 — «vào đơn» trong một câu HỎI / mời không phải câu xác nhận.
+  assert.equal(classifySentence("Chị lấy thêm 1 hũ ruốc cá vào đơn cho đủ bữa nhé ạ?"), "CROSS_SELL");
+  assert.equal(g("Dạ em ghi nhận 2kg chả cá thu ạ. Chị lấy thêm 1 hũ ruốc cá vào đơn cho đủ bữa nhé ạ?", { cart: cart("Chả cá thu", 2000), window: OPEN }).text, "Dạ em ghi nhận 2kg chả cá thu ạ.");
+  for (const s of ["Dạ em thêm 1 hũ ruốc vào đơn rồi ạ.", "Dạ em đã thêm 1 hũ ruốc vào đơn rồi nhé."]) assert.equal(classifySentence(s), null, s);
+  // B4 — xác nhận thay đổi: dạng đã xong, hay khách vừa xin đổi ⇒ giữ.
+  for (const s of ["Dạ em đổi sang 2kg chả cá thu cho chị rồi ạ, tổng 540.000đ + ship 30.000đ.", "Dạ em đã nâng lên 3kg chả cá thu cho chị ạ.", "Dạ em chuyển sang giao địa chỉ mới 2kg chả cá cho chị rồi ạ."]) {
+    assert.equal(classifySentence(s), null, s);
+    kept(s, { lastUserText: "ok em" });
+  }
+  kept("Dạ em đổi sang 2kg chả cá thu cho chị nhé, tổng 540.000đ.", { lastUserText: "đổi sang 2kg giúp chị" });
+  assert.equal(classifySentence("Chị đổi sang 2kg cho tiết kiệm hơn không ạ?"), "UPSELL", "dạng hỏi vẫn là lời mời");
+  // Câu chốt chung «lấy thêm món nào nữa không» không gọi tên món ⇒ không phải lời mời, đi cả khi đơn đang lên.
+  assert.equal(classifySentence("Mình lấy thêm món nào nữa không, không thì em giao luôn ạ?"), null);
+  kept("Mình lấy thêm món nào nữa không, không thì em giao luôn ạ?", { lastUserText: "ok em" });
+  // Danh mục không đọc được ⇒ lời mời không ai hỏi vẫn bị bỏ, câu hỏi / câu trả lời thì không.
+  assert.deepEqual(g("Chị lấy 2kg chả cá thu sẽ được giảm ạ.", { window: OPEN, facts: null }).dropped.map((d) => d.reason), ["NO_PRICE_REASON"]);
+  kept("Chị lấy 1kg hay 2kg ạ?", { facts: null, lastUserText: "ok em" });
+  // needsOfferFacts: câu hỏi lại quy cách / bảng giá cần danh mục khi giỏ đã có món khách chọn (phải biết câu nói món nào).
+  assert.equal(needsOfferFacts("Dạ chả mực giã tay chị lấy 500g hay 1kg ạ?", cart("Chả cá thu", 1000)), true);
+  assert.equal(needsOfferFacts("Dạ chả mực giã tay chị lấy 500g hay 1kg ạ?"), false);
+  // Lượt mua MỚI mở lại cửa sổ: hồ sơ nhận hàng của lượt mua trước (trước mốc chốt đơn cũ) không còn làm «đơn đang lên».
+  const st = (s: Partial<ChatState>) => s as ChatState;
+  const customer = (at?: string) => ({ id: null, name: "Hà", phone: "0961003107", address: "x", province: "", simulated: true, ...(at ? { at } : {}) });
+  const past = [{ orderId: null, simulated: true, total: 1, at: "2026-10-05T00:00:00.000Z" }];
+  const w = (s: Partial<ChatState>) => offerWindow({ state: st(s), lastUserText: "cho chị 1kg chả cá thu", complaint: false });
+  assert.deepEqual(w({ customer: customer("2026-10-01T00:00:00.000Z"), pastOrders: past }), { open: true }, "hồ sơ của lượt mua trước ⇒ mở");
+  assert.deepEqual(w({ customer: customer(), pastOrders: past }), { open: true }, "hồ sơ không mốc mà đã có lượt mua trước ⇒ của lượt cũ");
+  assert.deepEqual(w({ customer: customer("2026-10-06T00:00:00.000Z"), pastOrders: past }), { open: false, reason: "ORDERING" }, "hồ sơ ghi trong lượt mua này ⇒ đơn đang lên");
+  assert.deepEqual(w({ customer: customer("2026-10-01T00:00:00.000Z") }), { open: false, reason: "ORDERING" }, "chưa có lượt mua trước ⇒ như cũ");
+}
+
 // ═══ chatTurn THẬT ═══
 
 const CFG: Partial<SalesChatbotConfig> = { shippingFee: 30_000, sellWithoutStockCheck: false };
@@ -286,6 +356,7 @@ export async function testSalesNextBestAction() {
   testClassify();
   testWindow();
   testGuard();
+  testReview876();
   await testChatTurn();
   console.log("  ✓ #868 lời mời mua thêm thông minh: không còn cổng «chưa mời thêm món», đơn hợp lệ lên ngay; một lời mời mỗi lượt mua, không mời lúc khách gửi SĐT / địa chỉ / đã từ chối / phàn nàn / đơn lỗi; khách đã chọn 2kg ⇒ không «1kg hay 2kg», không bảng giá; mời gói lớn chỉ khi giảm thật theo kg; món kèm phải còn bán · còn hàng · giá xác thực · shop khai bổ trợ; khách tự hỏi món khác ⇒ tư vấn bình thường");
 }

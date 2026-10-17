@@ -13,7 +13,8 @@
  *  · TỪNG CÂU (`guardReply`): câu mời gói lớn hơn (UPSELL) chỉ đi khi DANH MỤC có lý do giá thật (gói lớn rẻ hơn theo kg, hoặc giảm
  *    theo khối lượng shop khai) ở khối lượng LỚN HƠN số khách đã chọn; câu mời món kèm (CROSS_SELL) chỉ đi khi gọi tên món nằm trong
  *    danh sách mời kèm (`OfferFacts.crossSell` — còn bán, giá đã xác thực, còn hàng, shop khai bổ trợ: câu mẫu UPSELL của shop hoặc
- *    mẫu mã chỉ bán kèm). Câu sai lúc bị BỎ, phần còn lại của tin vẫn gửi.
+ *    mẫu mã chỉ bán kèm). Câu sai lúc bị BỎ, phần còn lại của tin vẫn gửi — ở mức VẾ câu (review PR #876): chỉ phần LỜI MỜI bị bỏ,
+ *    không bao giờ câu trả lời điều khách vừa hỏi, câu hỏi thông tin đơn cần, hay câu xác nhận thay đổi khách đã xin.
  *  · GIỌNG (`guardReply`): bỏ lời chào lặp lại, và bảng giá nhiều quy cách khi khách đã chọn quy cách mà không hỏi giá — nhưng không
  *    bao giờ bỏ HẾT một tin vì giọng (tin chỉ có lời chào vẫn đi).
  * Khách TỰ hỏi món khác / menu ⇒ là TƯ VẤN, không phải lời mời: câu trả lời về đúng món ấy không bị chặn, không bị đếm.
@@ -49,7 +50,7 @@ export const OFFER_BLOCK_LABEL: Record<OfferBlock, string> = {
 export const OFFER_DROPS_MAX = 20;
 
 /** Phần state mà cửa sổ đọc (type-only — tệp này không đọc CSDL). */
-export type OfferStateView = Pick<ChatState, "upsellSent" | "upsellDeclinedTurn" | "handoff" | "confirmed" | "declined" | "cancelRequest" | "priceDispute" | "customer" | "draft">;
+export type OfferStateView = Pick<ChatState, "upsellSent" | "upsellDeclinedTurn" | "handoff" | "confirmed" | "declined" | "cancelRequest" | "priceDispute" | "customer" | "draft" | "pastOrders">;
 
 export type OfferWindow = { open: true } | { open: false; reason: OfferBlock };
 
@@ -78,10 +79,24 @@ export function offerWindow(input: { state: OfferStateView; lastUserText: string
   if (input.complaint) return { open: false, reason: "COMPLAINT" };
   if (s.confirmed) return { open: false, reason: "CONFIRMED" };
   if (contactInfoIn(input.lastUserText)) return { open: false, reason: "CONTACT_INFO" };
-  if (s.customer || s.draft || input.returningPending) return { open: false, reason: "ORDERING" };
+  if (customerThisRound(s) || s.draft || input.returningPending) return { open: false, reason: "ORDERING" };
   if (s.upsellDeclinedTurn !== undefined) return { open: false, reason: "DECLINED" };
   if (s.upsellSent) return { open: false, reason: "ALREADY_OFFERED" };
   return { open: true };
+}
+
+/**
+ * Hồ sơ nhận hàng thuộc LƯỢT MUA HIỆN TẠI (review PR #876): lượt mua mới (engine — đơn cũ sang `pastOrders`) xoá nháp nhưng GIỮ
+ * `customer` (gợi ý khách cũ), nên «có `customer`» đóng cửa sổ ORDERING mãi mãi sau đơn đầu. Mốc là lúc lượt mua bắt đầu (lúc chốt
+ * của đơn gần nhất trong `pastOrders`, cùng mốc `purchaseRoundStart` của engine): hồ sơ ghi TRƯỚC mốc đó (hay không có mốc ghi) là
+ * của lượt mua cũ. HÀM THUẦN.
+ */
+function customerThisRound(s: Pick<ChatState, "customer" | "pastOrders">): boolean {
+  if (!s.customer) return false;
+  const start = Math.max(...(s.pastOrders ?? []).map((o) => Date.parse(o.at)).filter((n) => Number.isFinite(n)), -Infinity);
+  if (!Number.isFinite(start)) return true;
+  const at = s.customer.at ? Date.parse(s.customer.at) : NaN;
+  return Number.isFinite(at) && at > start;
 }
 
 /**
@@ -106,9 +121,28 @@ const SIZE_REASK_RE = new RegExp(`(?:^| )${SIZE_WORD} hay (?:la )?${SIZE_WORD}(?
 const SAVING_RE = /(?:^| )(?:re hon|tiet kiem|loi hon|hoi hon|duoc giam|giam (?:con|them|ngay|\d+)|chi con|uu dai|nang len|doi sang|chuyen sang|lay luon|lay han|mua han)(?: |$)/;
 const CROSS_RE = /(?:^| )(?:dung kem|an kem|cham kem|mua kem|lay kem|dat kem|kem theo|kem them|kem voi|mua them|lay them|dat them|chon them|thu them|xem them|dung them|an them|bo sung|them (?:mon|mot|1|it|vai|hu|chai|hop|goi|tui|phan)|mon khac|combo|menu|thuc don)(?: |$)/;
 /** «Mình lấy thêm gì không» — câu hỏi CHUNG của bước chốt, không gọi tên món nào ⇒ không phải lời mời. */
-const GENERIC_MORE_RE = /(?:^| )(?:lay|mua|can|dat|ho tro|chon|dung) them (?:mon )?(?:gi|j|nua)(?: |$)|(?:^| )them (?:mon )?gi(?: |$)/g;
-/** Câu xác nhận món KHÁCH vừa xin thêm («em thêm 1 hũ ruốc vào đơn rồi ạ») — không phải lời mời. */
+const GENERIC_MORE_RE = /(?:^| )(?:lay|mua|can|dat|ho tro|chon|dung) them (?:mon )?(?:gi|j|nua|nao)(?: |$)|(?:^| )them (?:mon )?(?:gi|nao)(?: |$)/g;
+/**
+ * Câu xác nhận món KHÁCH vừa xin thêm («em thêm 1 hũ ruốc vào đơn rồi ạ») — không phải lời mời. CHỈ khi câu ở dạng ĐÃ XONG và không
+ * phải câu hỏi (review PR #876): «Chị lấy thêm 1 hũ ruốc cá vào đơn cho đủ bữa nhé ạ?» cũng có «vào đơn» mà là lời mời.
+ */
 const ACK_RE = /(?:^| )(?:vao don|len don|da them|em them|them vao|them cho minh roi)(?: |$)/;
+/** Động từ ĐỔI ĐƠN («đổi sang», «nâng lên»…) — dạng đã xong là câu xác nhận thay đổi, không phải lời mời gói lớn. Bản gập dấu. */
+const CHANGE_VERB_RE = /(?:^| )(?:doi sang|doi thanh|doi lai|chuyen sang|nang len|lay luon|sua thanh|sua lai|cap nhat)(?: |$)/;
+/** Câu kể việc ĐÃ làm («em đã thêm», «… rồi ạ», «em vừa đổi») — trên chữ CÓ DẤU, vì bản gập dấu không tách «đã» khỏi «dạ». */
+const COMPLETED_RE = /(?:^|[\s,.(])(?:đã|rồi|em vừa|shop vừa)(?=[\s,.!?)…]|$)/u;
+const INVITE_VERB_RE = /(?:^| )(?:co muon|moi (?:anh |chi |minh |ban |a |c )?(?:thu|xem|tham khao|dung|mua|dat))(?: |$)/;
+const clauseFolds = (raw: string) => raw.split(/[,;.!…\n]+/).map((c) => foldVi(c)).filter(Boolean);
+/** Câu HỎI: «?», động từ mời («có muốn», «mời chị thử»), hay một vế kết bằng «không / chưa». HÀM THUẦN. */
+function asking(raw: string): boolean {
+  return raw.includes("?") || INVITE_VERB_RE.test(foldVi(raw)) || clauseFolds(raw).some((c) => /(?:^| )(?:khong|ko|chua)(?: a)?$/.test(c));
+}
+/** Lời MỜI: câu hỏi, hay một vế kết bằng tiểu từ mời «nhé / nha / nè». «Dạ 2kg là 540.000đ ạ» là câu TRẢ LỜI. HÀM THUẦN. */
+function inviting(raw: string): boolean {
+  return asking(raw) || clauseFolds(raw).some((c) => /(?:^| )(?:nhe|nha|ne|nhen|nghen)(?: a)?$/.test(c));
+}
+/** Câu ở dạng ĐÃ XONG và không hỏi — câu kể / câu xác nhận. HÀM THUẦN. */
+const doneStatement = (raw: string) => COMPLETED_RE.test(raw.normalize("NFC").toLowerCase()) && !asking(raw);
 const GREETING_RE = /^(?:da |vang |xin )?(?:em |shop |ben em )?(?:xin )?chao (?:anh|chi|ban|minh|quy khach|ca nha|a|c|e|nang)(?: |$)|^(?:da )?(?:em |shop )?cam on (?:anh|chi|ban|minh|quy khach|a|c)(?: \S+)? (?:da )?(?:quan tam|nhan tin|lien he|ung ho|ghe)(?: |$)/;
 const SUMMARY_RE = /(?:^| )(?:tong|don|ship|cod|thanh toan|phi)(?: |$)/;
 const VND_RE = /\d[\d.,]*\s*(?:đ|₫|k(?![\p{L}])|nghìn|ngàn|vnđ|vnd|tr(?![\p{L}]))/giu;
@@ -127,18 +161,29 @@ export function classifySentence(raw: string): SentenceClass | null {
   const weights = new Set(amountsIn(raw).filter((a) => a.unit === "g").map((a) => a.value));
   const money = raw.match(VND_RE)?.length ?? 0;
   if (money >= 2 && weights.size >= 2 && !SUMMARY_RE.test(f)) return "PRICE_LIST";
-  if (ACK_RE.test(f)) return null;
+  if ((ACK_RE.test(f) || CHANGE_VERB_RE.test(f)) && doneStatement(raw)) return null;
   if (SAVING_RE.test(f) && weights.size >= 1) return "UPSELL";
   if (CROSS_RE.test(f.replace(GENERIC_MORE_RE, " "))) return "CROSS_SELL";
   return null;
 }
 
-/** Có câu nào CẦN dữ kiện danh mục để kiểm không — `false` ⇒ nơi gọi khỏi đọc CSDL. HÀM THUẦN. */
-export function needsOfferFacts(text: string): boolean {
-  return splitSentences(text).some((s) => {
+/**
+ * Có câu (hay VẾ câu) nào CẦN dữ kiện danh mục để kiểm không — `false` ⇒ nơi gọi khỏi đọc CSDL. Câu hỏi lại quy cách / bảng giá chỉ
+ * cần danh mục khi giỏ đã có món khách chọn (`cart`): phải biết câu đang nói về MÓN NÀO mới biết quy cách của món ấy đã chọn chưa
+ * (review PR #876 — «chả mực 500g hay 1kg» khi giỏ chỉ có chả cá). HÀM THUẦN.
+ */
+export function needsOfferFacts(text: string, cart?: CartCommitment): boolean {
+  const chosen = explicitItems(cart).length > 0;
+  const needs = (s: string) => {
     const c = classifySentence(s);
-    return c === "UPSELL" || c === "CROSS_SELL";
-  });
+    return c === "UPSELL" || c === "CROSS_SELL" || (chosen && (c === "SIZE_REASK" || c === "PRICE_LIST"));
+  };
+  return splitSentences(text).some((s) => needs(s) || clausesOf(s).some(needs));
+}
+
+/** Cắt một câu thành VẾ theo «, » / «; » (có khoảng trắng sau — «300,000đ» không bị cắt). HÀM THUẦN. */
+function clausesOf(sentence: string): string[] {
+  return sentence.split(/\s*[,;]\s+/).map((x) => x.trim()).filter(Boolean);
 }
 
 /**
@@ -187,6 +232,22 @@ const FREE_SHIP_RE = /(?:^| )(?:mien (?:phi )?ship|free ?ship|mien phi van chuye
 const MENU_RE = /(?:^| )(?:menu|thuc don)(?: |$)/;
 const PRICE_ASK_RE = /(?:^| )(?:gia|bao nhieu|bn|bnhieu|nhieu tien|may tien|tinh sao|het bao)(?: |$)/;
 const MENU_ASK_RE = /(?:^| )(?:menu|thuc don|mon khac|mon gi|con gi|co gi|co ban|ban gi|xem them|them mon|lay them|mua them|kem)(?: |$)/;
+/** Khách hỏi QUY CÁCH / LOẠI («chả mực có mấy loại em», «size nào») — câu trả lời kể quy cách, giá từng loại. Bản gập dấu. */
+const OPTIONS_ASK_RE = /(?:^| )(?:may loai|loai nao|loai gi|nhung loai|bao nhieu loai|co loai|may size|size nao|co size|quy cach|may kg|may ky|may goi|goi nao|may hop)(?: |$)/;
+/** Khách XIN ĐỔI đơn («đổi sang 2kg», «nâng lên 3kg», «chuyển giao địa chỉ khác») — câu xác nhận đổi là đúng lúc. Bản gập dấu. */
+const CHANGE_ASK_RE = /(?:^| )(?:(?:doi|chuyen) (?:sang|thanh|lai|qua|ve|giao|dia chi|\d)|nang len|tang len|sua (?:lai|thanh|don|dia chi)|thay (?:doi|bang|dia chi)|cap nhat)(?: |$)/;
+/** Vế XIN THÔNG TIN nhận hàng — đơn cần nó, không bao giờ bị bỏ theo một vế mời đứng trước. Bản gập dấu. */
+const INFO_ASK_RE = /(?:^| )(?:xin|sdt|so dien thoai|dia chi|so nha|ho ten|nguoi nhan|thong tin nhan)(?: |$)/;
+/** Vế kể TỔNG TIỀN / phí ship / COD của đơn. Bản gập dấu. */
+const TOTAL_RE = /(?:^| )(?:tong|tong cong|ship|phi ship|cod|thanh toan)(?: |$)/;
+/** Vế chỉ là tiếng đệm («Dạ», «vâng ạ», «chị ơi») — đứng một mình thì không phải nội dung. Bản gập dấu. */
+const FILLER_RE = /^(?:(?:da|vang|a|oi|chi|anh|em|minh|ban|c|e|nhe|nha|ok|okie|uh|u)(?: |$))*$/;
+
+/** Câu gọi tên một món trong giỏ bằng HAI chữ đầu của nhãn («chả mực» cho «Chả mực giã tay») — đủ để nhận dòng tóm tắt đơn. HÀM THUẦN. */
+function mentionsLabel(raw: string, label: string): boolean {
+  const head = foldVi(label.replace(/\s*\([^)]*\)\s*$/, "")).split(" ").slice(0, 2).join(" ");
+  return Boolean(head) && ` ${foldVi(raw)} `.includes(` ${head} `);
+}
 
 /**
  * Sản phẩm được gọi tên trong câu (`namedProductsIn`), bỏ tên chỉ khớp MỘT PHẦN khi có tên khác khớp TRỌN: «cá thu một nắng» không
@@ -215,31 +276,66 @@ function chosenGrams(cart: CartCommitment | undefined, name: string | null): num
  * HÀNG RÀO LỜI MỜI + GIỌNG cho MỘT đoạn chữ bot sắp gửi. Không câu nào bị bỏ ⇒ trả NGUYÊN VĂN chữ gốc. `offered` = loại lời mời
  * ĐẦU TIÊN được đi (nơi gọi ghi `upsellSent` / `upsellTurn` — tối đa một lời mời mỗi lượt mua, câu mời thứ hai trong cùng tin cũng bị
  * bỏ). Câu bỏ vì GIỌNG không bao giờ làm tin rỗng. HÀM THUẦN.
+ *
+ * NGUYÊN TẮC (review PR #876): hàng rào chỉ được bỏ phần LỜI MỜI. Không bao giờ bỏ (a) câu trả lời đúng điều khách vừa hỏi (giá /
+ * quy cách / loại), (b) câu hỏi thông tin đơn cần (SĐT · địa chỉ · quy cách của món khách VỪA xin), (c) câu xác nhận thay đổi khách
+ * đã xin. Làm ở mức VẾ câu (như `post-sale-guard.ts`): câu một hơi «xin SĐT và địa chỉ, chị có muốn lấy thêm … không ạ?» chỉ mất vế
+ * mời. Không đọc được danh mục (`facts: null`) ⇒ không bỏ câu trả lời / câu hỏi; chỉ bỏ lời mời không ai hỏi.
  */
 export function guardReply(text: string, input: ReplyGuardInput): ReplyGuardResult {
   const parts = splitSentences(text);
-  const sizeChosen = explicitItems(input.cart).length > 0;
+  const cart = input.cart;
   const custF = foldVi(input.lastUserText);
   const priceAsked = PRICE_ASK_RE.test(custF);
-  const names = input.facts?.catalogNames ?? [];
+  const optionsAsked = OPTIONS_ASK_RE.test(custF);
+  // Khách vừa hỏi giá / quy cách / có mấy loại ⇒ câu kể giá, giảm theo gói là câu TRẢ LỜI, kể cả khi đơn đang lên hay đã chọn quy cách.
+  const asked = priceAsked || optionsAsked;
+  const changeAsked = CHANGE_ASK_RE.test(custF);
+  const catalog = input.facts?.catalogNames ?? [];
+  // Tên món trong giỏ luôn biết (kể cả khi chưa đọc danh mục) — để nhận câu nói về món đã chọn.
+  const cartLabels = (cart?.selectedItems ?? []).map((x) => x.label).filter((x): x is string => Boolean(x));
+  const names = [...catalog, ...cartLabels.filter((l) => !catalog.some((n) => labelsMatch(n, l)))];
+  // Chưa đọc được danh mục ⇒ chỉ nhận tên món TRONG GIỎ theo hai chữ đầu nhãn: so khớp đầu-từ của `namedIn` trên danh mục một món
+  // nhận «chả mực» là «Chả cá thu» (chung chữ «chả»).
+  const namedOf = (t: string) => (input.facts ? (names.length ? namedIn(t, names) : []) : cartLabels.filter((l) => mentionsLabel(t, l)));
+  const custNamed = namedOf(input.lastUserText);
   // TƯ VẤN: khách tự gọi tên món ngoài giỏ / hỏi menu, món khác ⇒ câu về đúng món ấy là câu trả lời, không phải lời mời.
-  const askedNames = names.length ? namedIn(input.lastUserText, names).filter((n) => !inCart(n, input.cart)) : [];
+  const askedNames = custNamed.filter((n) => !inCart(n, cart));
   const menuAsked = MENU_ASK_RE.test(custF);
+  /**
+   * Quy cách đã chọn CHO MÓN CÂU ĐANG NÓI (review PR #876): «chả mực 500g hay 1kg» khi giỏ chỉ có chả cá thu là hỏi quy cách món khách
+   * VỪA xin — phải giữ. Câu không gọi tên món: khách vừa gọi tên một món chưa chọn quy cách ⇒ chưa chọn; không đọc được danh mục ⇒
+   * không biết câu nói món nào ⇒ coi như chưa chọn (không bỏ câu hỏi đơn cần).
+   */
+  const sizeChosenFor = (named: string[]): boolean => {
+    if (named.length) return named.every((n) => chosenGrams(cart, n) !== undefined);
+    if (!input.facts || custNamed.some((n) => chosenGrams(cart, n) === undefined)) return false;
+    return chosenGrams(cart, null) !== undefined;
+  };
   let window = input.window;
   let offered: OfferKind | null = null;
-  const verdicts: ({ keep: true } | { keep: false; drop: ReplyDrop })[] = parts.map((raw) => {
-    const cls = classifySentence(raw);
-    if (!cls) return { keep: true };
-    if (cls === "GREETING") return input.greetedBefore ? { keep: false, drop: { cls, reason: "STYLE" } } : { keep: true };
-    if (cls === "PRICE_LIST") return sizeChosen && !priceAsked ? { keep: false, drop: { cls, reason: "STYLE" } } : { keep: true };
-    if (cls === "SIZE_REASK") return sizeChosen ? { keep: false, drop: { cls, reason: "SIZE_CHOSEN" } } : { keep: true };
-    const named = names.length ? namedIn(raw, names) : [];
-    const others = named.filter((n) => !inCart(n, input.cart));
+  type Verdict = { keep: true } | { keep: false; drop: ReplyDrop };
+  const KEEP: Verdict = { keep: true };
+  const judge = (raw: string, cls: SentenceClass): Verdict => {
+    const block = (reason: OfferBlock | "STYLE"): Verdict => ({ keep: false, drop: { cls, reason } });
+    if (cls === "GREETING") return input.greetedBefore ? block("STYLE") : KEEP;
+    const named = namedOf(raw);
+    if (cls === "PRICE_LIST") {
+      if (asked) return KEEP;
+      // Dòng tóm tắt ĐƠN liệt kê ≥ 2 món trong giỏ kèm giá — không phải bảng giá nhiều quy cách.
+      if (cartLabels.filter((l) => mentionsLabel(raw, l)).length >= 2) return KEEP;
+      // Chỉ bảng giá của MÓN ĐÃ CHỌN quy cách mới thừa — bảng giá món khác vẫn đi.
+      return sizeChosenFor(named) ? block("STYLE") : KEEP;
+    }
+    if (cls === "SIZE_REASK") return sizeChosenFor(named) && !optionsAsked ? block("SIZE_CHOSEN") : KEEP;
+    const others = named.filter((n) => !inCart(n, cart));
     // Câu «mời món kèm» chỉ gọi tên món ĐÃ trong giỏ («thêm 1kg chả cá nữa») là mời TĂNG khối lượng ⇒ xét như UPSELL.
     const kind: OfferKind = cls === "CROSS_SELL" && named.length > 0 && others.length === 0 ? "UPSELL" : cls;
-    if (kind === "CROSS_SELL" && (menuAsked || (others.length > 0 && others.every((n) => askedNames.some((a) => labelsMatch(a, n)))))) return { keep: true };
-    if (kind === "UPSELL" && priceAsked && !sizeChosen) return { keep: true };
-    const block = (reason: OfferBlock) => ({ keep: false as const, drop: { cls, reason } });
+    if (kind === "CROSS_SELL" && (menuAsked || (others.length > 0 && others.every((n) => askedNames.some((a) => labelsMatch(a, n)))))) return KEEP;
+    if (kind === "UPSELL" && priceAsked && !sizeChosenFor(named)) return KEEP;
+    // Câu TRẢ LỜI giá / quy cách khách vừa hỏi («Dạ 2kg là 540.000đ, rẻ hơn 20.000đ ạ») hay xác nhận THAY ĐỔI khách vừa xin («Dạ em đổi
+    // sang 2kg cho chị nhé, tổng …») — không phải lời mời, không bị đếm.
+    if (kind === "UPSELL" && ((asked && !inviting(raw)) || (changeAsked && !asking(raw)))) return KEEP;
     if (!window.open) return block(window.reason);
     if (!input.facts) return block(kind === "UPSELL" ? "NO_PRICE_REASON" : "NOT_ELIGIBLE");
     const f = foldVi(raw);
@@ -247,10 +343,10 @@ export function guardReply(text: string, input: ReplyGuardInput): ReplyGuardResu
     const freeShipReason = input.facts.freeShip && FREE_SHIP_RE.test(f);
     if (kind === "UPSELL") {
       if (!freeShipReason) {
-        const target = named.find((n) => inCart(n, input.cart)) ?? named[0] ?? explicitItems(input.cart)[0]?.label ?? null;
+        const target = named.find((n) => inCart(n, cart)) ?? named[0] ?? explicitItems(cart)[0]?.label ?? null;
         const reason = target ? input.facts.volume.find((v) => labelsMatch(v.name, target)) : undefined;
         if (!reason) return block("NO_PRICE_REASON");
-        const chosen = chosenGrams(input.cart, target);
+        const chosen = chosenGrams(cart, target);
         if (chosen === null || (chosen !== undefined && chosen >= reason.saveFromGrams)) return block("SIZE_CHOSEN");
       }
     } else if (others.length) {
@@ -262,14 +358,54 @@ export function guardReply(text: string, input: ReplyGuardInput): ReplyGuardResu
     }
     offered = kind;
     window = { open: false, reason: "ALREADY_OFFERED" };
-    return { keep: true };
+    return KEEP;
+  };
+  /**
+   * Câu bị bỏ ⇒ thử giữ các VẾ không phải lời mời: vế mời / hỏi lại quy cách / mảnh bảng giá bị bỏ, cùng vế mời treo NGAY SAU một vế đã
+   * bỏ («…, cho đủ bữa nhé ạ?») — trừ vế xin thông tin nhận hàng. Còn vế có nội dung ⇒ ghép lại (vế cuối gốc bị bỏ ⇒ kết bằng «.»);
+   * không còn gì ngoài tiếng đệm, hay không vế nào bị bỏ (câu chỉ sai khi đọc cả câu) ⇒ `null`: bỏ cả câu.
+   */
+  const keptClauses = (raw: string, parent: SentenceClass): { text: string; drops: ReplyDrop[] } | null => {
+    const body = raw.replace(/\s+$/u, "");
+    const tail = raw.slice(body.length);
+    const clauses = clausesOf(body);
+    if (clauses.length < 2) return null;
+    const keep: boolean[] = [];
+    const drops: ReplyDrop[] = [];
+    clauses.forEach((c) => {
+      const cc = classifySentence(c);
+      const f = foldVi(c);
+      let v: Verdict = KEEP;
+      if (cc) v = judge(c, cc);
+      else if (parent === "PRICE_LIST" && (c.match(VND_RE)?.length ?? 0) > 0) v = { keep: false, drop: { cls: "PRICE_LIST", reason: "STYLE" } };
+      // Vế đứng SAU một vế mời đã bỏ là phần đuôi của lời mời («…, cho đủ bữa nhé ạ?», «…, ngon lắm ạ») — trừ vế xin thông tin nhận
+      // hàng và vế tổng tiền / ship (đơn cần chúng).
+      else if (drops.length && !INFO_ASK_RE.test(f) && !TOTAL_RE.test(f)) v = { keep: false, drop: drops[drops.length - 1] };
+      keep.push(v.keep);
+      if (!v.keep && v.drop !== drops[drops.length - 1]) drops.push(v.drop);
+    });
+    const kept = clauses.filter((_, i) => keep[i]);
+    if (kept.length === clauses.length || kept.every((p) => FILLER_RE.test(foldVi(p)))) return null;
+    let out = kept.map((p) => p.replace(/[,;]+$/u, "")).join(", ");
+    if (!keep[keep.length - 1]) out = `${out.replace(/[\s.!?…,;]+$/u, "")}.`;
+    return { text: `${out.charAt(0).toLocaleUpperCase("vi")}${out.slice(1)}${tail}`, drops };
+  };
+  type Item = { text: string | null; drops: ReplyDrop[]; style: boolean };
+  const items: Item[] = parts.map((raw) => {
+    const cls = classifySentence(raw);
+    if (!cls) return { text: raw, drops: [], style: false };
+    const v = judge(raw, cls);
+    if (v.keep) return { text: raw, drops: [], style: false };
+    const partial = cls === "GREETING" ? null : keptClauses(raw, cls);
+    if (partial) return { text: partial.text, drops: partial.drops, style: false };
+    return { text: null, drops: [v.drop], style: v.drop.reason === "STYLE" };
   });
-  if (verdicts.every((v) => v.keep)) return { text, offered, dropped: [] };
+  if (items.every((x) => !x.drops.length)) return { text, offered, dropped: [] };
   // Câu bỏ vì GIỌNG chỉ bỏ khi còn lại ít nhất một câu có chữ — tin chỉ có lời chào / bảng giá vẫn đi.
-  const keptAny = parts.some((p, i) => p.trim() && verdicts[i].keep);
-  const final = verdicts.map((v) => (v.keep ? v : v.drop.reason === "STYLE" && !keptAny ? ({ keep: true } as const) : v));
-  const out = parts.filter((_, i) => final[i].keep).join("").trim();
-  return { text: out, offered, dropped: final.flatMap((v) => (v.keep ? [] : [v.drop])) };
+  const keptAny = items.some((x) => x.text !== null && x.text.trim());
+  const final = items.map((x, i) => (x.text === null && x.style && !keptAny ? { text: parts[i], drops: [], style: false } : x));
+  const out = final.map((x) => x.text ?? "").join("").trim();
+  return { text: out, offered, dropped: final.flatMap((x) => x.drops) };
 }
 
 /** Ghi một lần bỏ lời mời vào state (đo đạc, có trần). Trả mảng MỚI. HÀM THUẦN. */
