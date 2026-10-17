@@ -1565,15 +1565,16 @@ async function testJourney() {
       );
       // Khớp qua MÃ FACEBOOK của chính người đang nhắn (FB_ID) ⇒ được nhắc món lần trước.
       assert.ok(returningCustomerPrompt(byFb, undefined).includes("Chả cá thu (1kg) × 2") && !returningCustomerPrompt(byPh, undefined).includes("Chả cá thu"), "FB_ID có lịch sử; PHONE không");
-      // MỜI THÊM MÓN TRƯỚC KHI LÊN ĐƠN (02/10/2026 · ảnh «Nguyễn Nga» / «Xuantra Tâm An»): shop có câu upsell ⇒ chưa gửi thì
-      // chặn lên đơn; gửi xong ⇒ lên đơn + tóm tắt NGAY trong cùng lượt; câu upsell thiếu số ERP ⇒ không chặn mãi.
+      // LUẬT CHỦ SHOP ĐỔI 16/10/2026 (#868 — thay luật 02/10/2026 «mời thêm món TRƯỚC khi lên đơn»): lời mời là CƠ HỘI, không bao giờ là
+      // điều kiện lên đơn. Ba khẳng định cũ (chưa mời ⇒ chặn lên đơn · mời xong ⇒ lên đơn · câu upsell lỗi ⇒ không chặn mãi) đổi thành:
+      // khách đã lưu thông tin nhận hàng mà CHƯA mời ⇒ đơn lên NGAY; câu mẫu UPSELL lúc đó bị máy chủ từ chối (đơn đang lên — cửa sổ lời
+      // mời đóng) và KHÔNG làm hỏng đơn; câu upsell lỗi vẫn lên đơn như cũ.
       const draftIn = (st: ChatState) => executeTool("create_draft_order", { items: [{ variant_id: chaMuc, quantity: 1 }] }, rctx(st, "ok em"));
       const noUp = await draftIn(savedC.state);
-      assert.ok(noUp.isError && noUp.content.includes("send_quick_reply") && noUp.content.includes("Q1") && !noUp.state.draft, `chưa mời thêm món ⇒ chặn: ${noUp.content}`);
+      assert.ok(!noUp.isError && noUp.state.draft && !noUp.state.upsellSent, `chưa mời thêm món ⇒ đơn VẪN lên ngay: ${noUp.content}`);
       const upNow = await executeTool("send_quick_reply", { code: "Q1" }, rctx(savedC.state, "ok em"));
-      assert.ok(!upNow.isError && upNow.state.upsellSent, JSON.stringify(upNow.state));
-      assert.ok(!(await draftIn(upNow.state)).isError, "mời xong ⇒ lên đơn + tóm tắt ngay trong cùng lượt");
-      assert.ok(!(await draftIn({ ...savedC.state, upsellUnavailable: true })).isError, "câu upsell không gửi được ⇒ không chặn mãi");
+      assert.ok(upNow.isError && /KHÔNG mời thêm món lúc này/.test(upNow.content) && !upNow.state.upsellSent && upNow.state.offerDrops?.[0]?.reason === "ORDERING", `đã có thông tin nhận hàng ⇒ không chen câu upsell: ${upNow.content}`);
+      assert.ok(!(await draftIn({ ...savedC.state, upsellUnavailable: true })).isError, "câu upsell không gửi được ⇒ không chặn (như cũ)");
       // MIỄN SHIP tính bằng MÁY trong giỏ / đơn (chả mực giã tay 400k, quy cách 1kg ở field package_size).
       const shipCfg = { ...parseSalesChatbotConfig(null), freeShipping: { enabled: true, minSubtotal: 300_000, minWeightGrams: 1000, areas: ["Hà Nội", "Hồ Chí Minh"] } };
       const shipCtx = (st: ChatState) => ({ ...rctx(st, "ok em"), config: shipCfg });

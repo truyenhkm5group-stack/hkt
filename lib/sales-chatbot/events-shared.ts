@@ -10,8 +10,9 @@
  *  · `ai.replied` — lượt có câu gửi khách; `mode` AI (có lời gọi model) · QUICK_REPLY (câu mẫu khớp chữ / AI chọn mã) · SYSTEM
  *    (câu dựng sẵn: ngoài giờ, đang chuyển người, quá trần, AI hỏng). Thời gian phản hồi = mốc tin trả lời − mốc tin khách.
  *  · `quote.given` — công cụ báo giá (get_current_price / calculate_cart) trả kết quả KHÔNG lỗi trong lượt.
- *  · `upsell.offered` — CHỈ đo được khi shop có câu mẫu UPSELL (`state.upsellSent`). Lời mời lẫn trong tin tóm tắt (shop không
- *    có câu mẫu upsell) KHÔNG đo được — chỉ số upsell của shop đó là CHƯA ĐO, không phải 0.
+ *  · `upsell.offered` — lượt mua có MỘT lời mời được đi (`state.upsellSent`): câu mẫu UPSELL, hoặc — từ #868 (16/10/2026) — câu mời
+ *    trong chữ bot mà máy chủ nhận ra và cho qua (`next-best-action.ts::guardReply`). Trước #868 lời mời lẫn trong chữ bot KHÔNG đo
+ *    được — chỉ số upsell của kỳ đó là CHƯA ĐO cho phần ấy, không phải 0.
  *  · `upsell.accepted` — sau lời mời, đơn nháp của CÙNG lượt mua TĂNG giá trị trước khi chốt; `amount_vnd` = phần tăng.
  *  · `upsell.declined` — đơn chốt mà lượt mua đã được mời và chưa có `upsell.accepted`.
  *  · `handoff.requested` — hội thoại chuyển sang `HANDOFF` trong lượt; `actor` AI khi model gọi `handoff_to_human`, còn lại SYSTEM.

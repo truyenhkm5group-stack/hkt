@@ -58,7 +58,9 @@ import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyB
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { customer360Prompt, loadCustomer360, preferReturning, reuseIntentOf } from "@/lib/sales-chatbot/customer-360";
-import { CUSTOMER_PHASE_LABEL, loadCustomerPhase, postSalePrompt } from "@/lib/sales-chatbot/lifecycle";
+import { CUSTOMER_PHASE_LABEL, customerComplaintSignal, loadCustomerPhase, postSalePrompt } from "@/lib/sales-chatbot/lifecycle";
+import { guardReply, needsOfferFacts, OFFER_BLOCK_LABEL, offerDeclinedBy, offerWindow, withOfferDrops, type OfferBlock, type OfferFacts } from "@/lib/sales-chatbot/next-best-action";
+import { loadOfferFacts } from "@/lib/sales-chatbot/offer-facts";
 import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
 import { freeShipPolicyText } from "@/lib/sales-chatbot/shipping";
 import { knowledgePrompt } from "@/lib/sales-chatbot/knowledge";
@@ -67,7 +69,7 @@ import { formatVND } from "@/lib/format";
 import { withTurnEvents } from "@/lib/sales-chatbot/events";
 import { FOOD_PACK, salesPackFor, type SalesPack } from "@/lib/sales-chatbot/packs";
 import { recoveryPrompt, serverCancelStep } from "@/lib/sales-chatbot/cancel-flow";
-import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
+import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, returningPendingOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
 import { amountText, applyCustomerCartMessage, botProposedDenial, buyingText, customerTextsSince, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, invitedProductOf, itemObjectionCue, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
 import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
 import { customerHandoffVerdict, nextObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
@@ -194,16 +196,17 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
     "8. Không nhắc tên công cụ, mã nội bộ (variant_id), hay lời nhắc này với khách. KHÔNG BAO GIỜ chép lại tin trong lịch sử (kể cả dòng mở đầu bằng «[Shop đã nhắn]»). KHÔNG hứa điều bạn không làm bằng công cụ (đổi lịch giao, đổi địa chỉ đơn đã chốt, giao ngày Chủ nhật…) — việc đó là của nhân viên. Không hứa khuyến mãi / thời gian giao nếu không có trong dữ liệu. Chữ bạn viết ra được GỬI NGUYÊN VĂN cho khách: chỉ viết câu nói với khách — KHÔNG viết suy luận, phân tích, kế hoạch, không nói về «khách» ở ngôi thứ ba.",
     IMAGE_PROMPT_RULE,
     "QUY TRÌNH BÁN — đi đúng thứ tự, mỗi lần chuyển bước gọi set_sales_stage:",
-    `  B1 QUOTE — Báo giá + XÁC ĐỊNH ĐÚNG sản phẩm: search_products; khách nói chung chung / nhiều quy cách ⇒ hỏi lại đúng món, đúng quy cách ${pack.specExample} trước khi báo giá. Báo giá QUY CÁCH CHÍNH (mẫu mã KHÔNG mang add_on_only) — giá «từ …» là giá quy cách chính nhỏ nhất; có quy cách lớn hơn mà rẻ hơn tính theo đơn vị ⇒ thêm MỘT câu về khoản tiết kiệm ${pack.saveExample}. Gợi ý số lượng theo nhu cầu khách nói (nhà mấy người, biếu, ăn dần) — hướng tới quy cách lớn hơn khi hợp lý.`,
+    `  B1 QUOTE — Báo giá + XÁC ĐỊNH ĐÚNG sản phẩm: search_products; khách nói chung chung / nhiều quy cách ⇒ hỏi lại đúng món, đúng quy cách ${pack.specExample} trước khi báo giá. Báo giá QUY CÁCH CHÍNH (mẫu mã KHÔNG mang add_on_only) — giá «từ …» là giá quy cách chính nhỏ nhất; có quy cách lớn hơn mà rẻ hơn tính theo đơn vị ⇒ thêm MỘT câu về khoản tiết kiệm ${pack.saveExample} (chỉ khi khách CHƯA chọn quy cách). Gợi ý số lượng theo nhu cầu khách nói (nhà mấy người, biếu, ăn dần) — hướng tới quy cách lớn hơn khi hợp lý.`,
     `  MẪU MÃ CHỈ BÁN KÈM (search_products trả add_on_only: true): KHÔNG báo giá riêng, KHÔNG chào như món chính, KHÔNG lên đơn chỉ có mẫu mã này (máy chủ chặn). Khách hỏi riêng đúng mẫu mã bán kèm ⇒ nói quy cách nhỏ nhất bán riêng + giá rồi hỏi chốt. Khách ĐÃ có món chính và muốn thêm ${pack.addOnExample} ⇒ thêm dòng mẫu mã bán kèm vào đơn và đọc tổng mới theo calculate_cart / đơn nháp.`,
     "  B2 CONSULT — Tư vấn + xử lý phản đối (chê đắt, phân vân, so sánh) theo sổ tay; không giảm giá ngoài giá ERP.",
-    "  B3 INFO — Lấy SĐT, ĐỊA CHỈ (họ tên: tên Facebook nếu có — KHÔNG xin): có khối KHÁCH CŨ ⇒ KHÔNG xin lại, làm theo «CÁCH LÀM» của khối (xác nhận ngắn + mời thêm món trong CÙNG một tin) rồi đi thẳng B4 / B5. Không có ⇒ hỏi; khách cho SĐT ⇒ lookup_customer; khách cũ ⇒ hỏi «giao về địa chỉ cũ … phải không ạ?» (chỉ gợi ý, khách xác nhận mới dùng) rồi create_customer.",
+    "  B3 INFO — Lấy SĐT, ĐỊA CHỈ (họ tên: tên Facebook nếu có — KHÔNG xin): có khối KHÁCH CŨ ⇒ KHÔNG xin lại, làm theo «CÁCH LÀM» của khối rồi đi thẳng B5. Không có ⇒ hỏi; khách cho SĐT ⇒ lookup_customer; khách cũ ⇒ hỏi «giao về địa chỉ cũ … phải không ạ?» (chỉ gợi ý, khách xác nhận mới dùng) rồi create_customer.",
     upsell
-      ? `  B4 UPSELL — NGAY khi khách vừa gửi đủ thông tin nhận hàng (create_customer xong): gửi câu mẫu ${upsell.code} (send_quick_reply — kèm ảnh menu, mời thêm món), rồi đi tiếp B5 TRONG CÙNG LƯỢT (máy chủ chặn lên đơn khi chưa mời). Chỉ mời ĐÚNG MỘT LẦN mỗi hội thoại. Mời thêm món CHỈ bằng câu mẫu này — khách nhìn ảnh menu tự chọn (chủ shop 09/10/2026): KHÔNG chào lẻ từng món, KHÔNG gợi ý tên món khác trong tóm tắt đơn hay ở bất kỳ tin nào. Khách chọn món trong menu ⇒ search_products rồi update_draft_order và đọc tổng mới.`
-      : "  B4 UPSELL — Gợi ý ĐÚNG MỘT món bổ trợ còn bán (search_products) ngay trong tin tóm tắt đơn — ưu tiên món dùng kèm / món khác dòng, hoặc một mẫu mã bán kèm của món khác để khách dùng thử; khách từ chối ⇒ không mời lại.",
+      ? `  B4 UPSELL — LỜI MỜI LÀ CƠ HỘI, KHÔNG PHẢI BƯỚC BẮT BUỘC (chủ shop 16/10/2026): KHÔNG BAO GIỜ trì hoãn lên đơn để mời. Tối đa MỘT lời mời mỗi lượt mua, chỉ khi khách đã chọn món mà CHƯA gửi SĐT / địa chỉ (gộp trong tin ghi nhận món + xin thông tin nhận hàng). Khách đang gửi SĐT / địa chỉ, đã có đơn, đang phàn nàn, đã từ chối, đơn lỗi / huỷ ⇒ KHÔNG mời — lên / chốt đơn ngay. Mời bằng câu mẫu ${upsell.code} (send_quick_reply — kèm ảnh menu) — khách nhìn ảnh menu tự chọn (chủ shop 09/10/2026): KHÔNG chào lẻ từng món, KHÔNG gợi ý tên món khác trong tóm tắt đơn hay ở bất kỳ tin nào. Khách từ chối ⇒ không mời lại; khách TỰ hỏi món khác ⇒ tư vấn bình thường. Khách chọn món trong menu ⇒ search_products rồi lên / sửa đơn và đọc tổng mới. Máy chủ bỏ mọi lời mời sai lúc.`
+      : "  B4 UPSELL — LỜI MỜI LÀ CƠ HỘI, KHÔNG PHẢI BƯỚC BẮT BUỘC (chủ shop 16/10/2026): KHÔNG BAO GIỜ trì hoãn lên đơn để mời. Tối đa MỘT lời mời mỗi lượt mua, chỉ khi khách đã chọn món mà CHƯA gửi SĐT / địa chỉ: Gợi ý ĐÚNG MỘT món bổ trợ còn bán (search_products) — mẫu mã bán kèm (add_on_only) của món khác để khách dùng thử — hoặc quy cách lớn hơn khi search_products cho thấy rẻ hơn tính theo đơn vị (nói khoản tiết kiệm MỘT lần). Khách đang gửi SĐT / địa chỉ, đã có đơn, đang phàn nàn, đã từ chối, đơn lỗi / huỷ ⇒ KHÔNG mời. Khách TỰ hỏi món khác ⇒ tư vấn bình thường. Máy chủ bỏ mọi lời mời sai lúc / món không đủ điều kiện.",
+    `  ĐÃ CHỌN QUY CÁCH / SỐ LƯỢNG ⇒ KHÔNG hỏi lại quy cách ${pack.specExample}, KHÔNG báo lại bảng giá / quảng cáo món chính, KHÔNG chào lại: ghi nhận NGẮN (1–2 câu) rồi đi bước kế.`,
     upsell
-      ? "  ĐƠN SÁT NGƯỠNG MIỄN SHIP (chính sách ship của shop / «Hướng dẫn thêm» có ngưỡng): đơn chỉ thiếu ít là đạt ⇒ trong tin tóm tắt nói ĐÚNG MỘT câu «mình chọn thêm một món trong menu là được miễn ship ạ» — KHÔNG nêu tên món. Không nói khi đơn đã đạt hoặc còn thiếu nhiều."
-      : "  ĐƠN SÁT NGƯỠNG MIỄN SHIP (chính sách ship của shop / «Hướng dẫn thêm» có ngưỡng): đơn chỉ thiếu ít là đạt ⇒ trong tin tóm tắt nói ĐÚNG MỘT câu «thêm … là được miễn ship» với món / quy cách cụ thể. Không nói khi đơn đã đạt hoặc còn thiếu nhiều.",
+      ? "  ĐƠN SÁT NGƯỠNG MIỄN SHIP (chính sách ship của shop / «Hướng dẫn thêm» có ngưỡng): lúc khách vừa chọn món (CHƯA gửi SĐT / địa chỉ) mà đơn chỉ thiếu ít là đạt ⇒ lời mời của lượt mua có thể là ĐÚNG MỘT câu «mình chọn thêm một món trong menu là được miễn ship ạ» — KHÔNG nêu tên món. Không nói khi đơn đã đạt, còn thiếu nhiều, hoặc đã mời."
+      : "  ĐƠN SÁT NGƯỠNG MIỄN SHIP (chính sách ship của shop / «Hướng dẫn thêm» có ngưỡng): lúc khách vừa chọn món (CHƯA gửi SĐT / địa chỉ) mà đơn chỉ thiếu ít là đạt ⇒ lời mời của lượt mua có thể là ĐÚNG MỘT câu «thêm … là được miễn ship» với món / quy cách cụ thể. Không nói khi đơn đã đạt, còn thiếu nhiều, hoặc đã mời.",
     opts.autoConfirm
       ? "  B5 CHỐT TỰ ĐỘNG (chủ shop 11/10/2026) — đủ món + số lượng + SĐT + địa chỉ giao + ý định mua ⇒ create_draft_order: máy chủ TỰ CHỐT (kết quả auto_confirmed = true) ⇒ gửi ĐÚNG câu say_to_customer, MỘT câu ngắn. KHÔNG hỏi «Mình lấy thêm gì không», «có chốt không», «em gửi đơn nhé», «xác nhận giúp em»; KHÔNG đọc lại cả đơn. Kết quả auto_confirm = false ⇒ chỉ hỏi khách ĐÚNG phần trong missing. Khách đổi món / số lượng ⇒ update_draft_order (máy chủ tự chốt lại nếu đủ)."
       : "  B5 CONFIRM — create_draft_order ⇒ TÓM TẮT NGẮN, tối đa 3 dòng: món × SL + tổng tiền hàng · ship (theo shipping_text) · giao tới địa chỉ + SĐT; KHÔNG ghi «Người nhận», mã đơn, đơn giá từng dòng khi chỉ 1–2 món; kết bằng «Mình lấy thêm gì không, không thì em giao luôn ạ?». Khách thêm món ⇒ update_draft_order rồi gửi lại tóm tắt; khách đồng ý ⇒ confirm_order.",
@@ -1015,8 +1018,9 @@ async function chatTurnCore(
       const within = Number.isFinite(at) && now.getTime() - at < POST_ORDER_HANDOFF_MS;
       if (!within) {
         const fresh: ChatState = { ...st0, pastOrders: [...(st0.pastOrders ?? []), st0.confirmed], cycleStartTurns: conv.turns, cartRev: now.toISOString() };
-        // Báo giá + sổ tổng bị từ chối của lượt mua TRƯỚC không phải đề nghị đang mở, cũng không phải tổng hiện tại (#855).
-        for (const k of ["confirmed", "draft", "stage", "upsellSent", "upsellUnavailable", "declined", "handoff", "cart", "quote", "rejectedTotals", "proposedItems", "deliveryPref"] as const) delete fresh[k];
+        // Báo giá + sổ tổng bị từ chối của lượt mua TRƯỚC không phải đề nghị đang mở, cũng không phải tổng hiện tại (#855). Sổ lời mời
+        // (#868: đã mời / đã từ chối / bị bỏ) cũng thuộc lượt mua — lượt mua mới được mời lại đúng một lần.
+        for (const k of ["confirmed", "draft", "stage", "upsellSent", "upsellUnavailable", "upsellDeclinedTurn", "offerDrops", "declined", "handoff", "cart", "quote", "rejectedTotals", "proposedItems", "deliveryPref"] as const) delete fresh[k];
         await bump({ state: fresh as Record<string, unknown> });
         conv.state = fresh as Record<string, unknown>;
         st0 = fresh;
@@ -1044,6 +1048,14 @@ async function chatTurnCore(
     }
     if (cartNext !== st0.cart) {
       const st: ChatState = { ...st0, cart: cartNext, cartRev: now.toISOString() };
+      await bump({ state: st as Record<string, unknown> });
+      conv.state = st as Record<string, unknown>;
+      st0 = st;
+    }
+    // KHÁCH TỪ CHỐI LỜI MỜI (#868 — next-best-action.ts): lượt khách NGAY SAU lời mời mua thêm mà là lời từ chối ⇒ ghi mốc; cửa sổ lời
+    // mời đóng tới hết lượt mua. Khách tự hỏi món khác sau đó vẫn được tư vấn bình thường (không phải lời mời).
+    if (st0.upsellSent && st0.upsellDeclinedTurn === undefined && prevTurn !== undefined && st0.upsellTurn === prevTurn && offerDeclinedBy(text)) {
+      const st: ChatState = { ...st0, upsellDeclinedTurn: turnSeq };
       await bump({ state: st as Record<string, unknown> });
       conv.state = st as Record<string, unknown>;
       st0 = st;
@@ -1331,6 +1343,31 @@ async function chatTurnCore(
     // Lượt có câu model bị bỏ vì LẶP câu xin lỗi / xin xác nhận vừa gửi (#855).
     let repeatedDrop = false;
     const aiTexts: string[] = [];
+    // HÀNG RÀO LỜI MỜI + GIỌNG (#868 — next-best-action.ts): chữ model sắp gửi qua `guardReply` theo trạng thái LÚC GỬI — lời mời sai lúc
+    // (khách đang gửi SĐT / địa chỉ, đơn đang lên, đã từ chối, đã mời…) hay không đủ căn cứ (không lý do giá, món không đủ điều kiện) bị
+    // BỎ, phần còn lại của tin vẫn đi; lời mời được đi ghi `upsellSent` / `upsellTurn` (một lời mời mỗi lượt mua). Dữ kiện danh mục chỉ
+    // đọc khi chữ có câu mời cần kiểm (lượt thường 0 truy vấn); đọc lỗi ⇒ câu mời bị bỏ.
+    const upsellReplyId = quickCatalog.find((q) => q.upsell)?.id ?? null;
+    let offerFacts: Promise<OfferFacts | null> | null = null;
+    // Kênh nhắn tin (fanpage / Zalo) KHÔNG gửi lời chào mở đầu lưu ở seq 1 (`openConversation`) — khách chưa thấy nó, nên lời chào
+    // đầu tiên của bot ở đó không phải lời chào lặp. Web hiện lời chào ấy trên khung chat.
+    const greetedBefore = recentShopTexts(isMessagingChannel(opts.channel) ? msgs.filter((m) => m.seq > 1) : msgs, 1).length > 0;
+    const offerGuard = async (out: string): Promise<string> => {
+      const facts = needsOfferFacts(out, state.cart) ? await (offerFacts ??= loadOfferFacts(cfg, upsellReplyId).catch(() => null)) : null;
+      const window = offerWindow({ state, lastUserText: text, complaint: customerComplaintSignal(text), orderError: orderWriteFailed, returningPending: returningPendingOf(returning, state, turnSeq) });
+      const g = guardReply(out, { window, cart: state.cart, lastUserText: text, greetedBefore, facts });
+      if (g.offered) state = { ...state, upsellSent: true, upsellTurn: turnSeq };
+      const blocked = g.dropped.filter((d) => d.reason !== "STYLE");
+      if (blocked.length) {
+        state = { ...state, offerDrops: withOfferDrops(state.offerDrops, turnSeq, blocked, "TEXT") };
+        lastError = lastError ?? `Bỏ lời mời mua thêm sai lúc — ${[...new Set(blocked.map((d) => OFFER_BLOCK_LABEL[d.reason as OfferBlock]))].join("; ")}`;
+        // HẬU MÃI: bộ lọc hậu mãi (#878, chạy trước) đã cho tin đi nhưng hàng rào này bỏ nốt phần còn lại (câu mời kèm mà bộ lọc kia không
+        // nhận ra) ⇒ cùng nghĩa «tin chỉ toàn lời mời»: câu thay là câu hậu mãi / câu trạng thái (`postSaleFallbackText`), không phải câu
+        // chung, và không để khách im vì hai hàng rào cùng bỏ.
+        if (!g.text && (postSale || state.confirmed)) postSaleEmptied = true;
+      }
+      return g.text;
+    };
     // SỔ AI THEO NHÀ CUNG CẤP THẬT (provider-failover.ts): vòng công cụ có thể đổi khoá giữa chừng (khoá chính hỏng ở vòng 3)
     // ⇒ mỗi đoạn liền một nhà cung cấp là MỘT dòng, để tiền không ghi nhầm nguồn trả (BYOK ≠ credit gói). Không đổi khoá ⇒
     // đúng một dòng như trước.
@@ -1437,8 +1474,10 @@ async function chatTurnCore(
             const cartHold = verdict.ok ? cartHoldVerdict(out, state.cart, text, { hasDraft: Boolean(state.draft) }) : null;
             if (cartHold) {
               lastError = lastError ?? cartHold.note;
-              if (!content.some((x) => x.type === "text" && x.text === cartHold.safeText)) {
-                content.push({ type: "text", text: cartHold.safeText });
+              // Phần «còn lại» của câu giữ đơn cũng qua hàng rào lời mời (#868).
+              const heldCartText = (await offerGuard(cartHold.safeText)) || cartHold.safeText;
+              if (!content.some((x) => x.type === "text" && x.text === heldCartText)) {
+                content.push({ type: "text", text: heldCartText });
                 spoke = true;
                 draftUnsaid = null;
               }
@@ -1476,12 +1515,14 @@ async function chatTurnCore(
                 if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, addrHold.handoff, state.customer, now, { dedupeKey: `sales-chat:address-guard:${conv.id}:${turnSeq}` }).catch(() => undefined);
               }
               const restText = addrHold.handoff && isMessagingChannel(opts.channel) ? addrHold.rest.replace(ADDRESS_STAFF_TEXT, "").trim() : addrHold.rest;
-              // Lượt khách HẸN GIỜ GIAO (#871 / #872): ghi nhận lời dặn, không hỏi lại, không hứa giờ. Sau bán hàng là việc của đường lịch giao.
-              const noted = !addrHold.handoff && !postSale && (deliveryPrefText || isScheduleOnly(customerTexts[customerTexts.length - 1] ?? "")) && !restText.includes(SCHEDULE_NOTED_TEXT) ? SCHEDULE_NOTED_TEXT : "";
+              // #868: phần chữ model còn lại qua hàng rào lời mời trước. Lượt khách HẸN GIỜ GIAO (#871 / #872): ghi nhận lời dặn, không hỏi
+              // lại, không hứa giờ. Sau bán hàng là việc của đường lịch giao.
+              const restKept = restText ? await offerGuard(restText) : restText;
+              const noted = !addrHold.handoff && !postSale && (deliveryPrefText || isScheduleOnly(customerTexts[customerTexts.length - 1] ?? "")) && !restKept.includes(SCHEDULE_NOTED_TEXT) ? SCHEDULE_NOTED_TEXT : "";
               // Khách đang nói chuyện KHÁC về chính đơn (thêm món, hỏi giá — `continuesSameOrder`) ⇒ không chen «đã ghi nhận địa chỉ»: khách
               // không vừa gửi địa chỉ; lượt còn chữ khác / tóm tắt đơn, và cả lượt im thì khối «KHÔNG ĐỂ KHÁCH IM» lo.
               const ack = continuesSameOrder(text) ? "" : ADDRESS_KNOWN_TEXT;
-              const said = [restText, noted].filter(Boolean).join(" ") || (draftUnsaid || addrHold.handoff ? "" : ack);
+              const said = [restKept, noted].filter(Boolean).join(" ") || (draftUnsaid || addrHold.handoff ? "" : ack);
               if (said && !content.some((x) => x.type === "text" && x.text === said)) {
                 content.push({ type: "text", text: said });
                 spoke = true;
@@ -1504,8 +1545,10 @@ async function chatTurnCore(
               }
               continue;
             }
-            content.push({ ...b, text: out });
-            modelOut.push(out);
+            const kept = await offerGuard(out);
+            if (!kept) continue;
+            content.push({ ...b, text: kept });
+            modelOut.push(kept);
             spoke = true;
             modelSpoke = true;
             draftUnsaid = null;
@@ -1565,7 +1608,10 @@ async function chatTurnCore(
         await appendMessage(conv.id, seq++, "user", results);
         // Chữ có số tiền giữ lại ở trên: kiểm theo trạng thái SAU công cụ (báo giá mới). Qua ⇒ gửi; không ⇒ câu thay (nói lại đúng tổng
         // máy chủ, hoặc câu an toàn + chuyển người khi báo giá đã cũ).
+        // Lời mời sai lúc trong chữ có số tiền giữ lại cũng bị bỏ (#868) — trước hàng rào khẳng định, theo trạng thái SAU công cụ.
+        for (let i = 0; i < heldMoney.length; i++) heldMoney[i] = await offerGuard(heldMoney[i]);
         for (const out of heldMoney) {
+          if (!out) continue;
           const v = await guardOutgoing(out, () => claimFacts(state));
           const cartHold = v.ok ? cartHoldVerdict(out, state.cart, text, { hasDraft: Boolean(state.draft) }) : null;
           if (v.ok && !cartHold) {
