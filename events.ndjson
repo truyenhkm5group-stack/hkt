@@ -1,4 +1,3 @@
-{"at":"2026-10-09T23:37:38.053Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"d803ab8bdc2c · run 38005322118 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38005322118"}
 {"at":"2026-10-10T00:33:59.293Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"onboarding-v2","detail":"feat/onboarding-v2 @ 01fd01c71f9c · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T00:34:12.349Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#752 @ 01fd01c71f9c · Cập nhật nhánh lên main, mã không đổi; gates xanh lại"}
 {"at":"2026-10-10T00:36:56.577Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","detail":"#758 @ b21154fb2710 → a74ddeeac55e (MERGE_NOW · LOW · gates success)"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-17T09:57:11.968Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#887 @ 83ce65e94ccb · review độc lập 2 vòng PASS + delta vòng 3 (lead): vnx/HSLC từ chối theo mã; chỉ ACTIVE/SUSPENDED lưu trữ được, kích hoạt lại về đúng trạng thái cũ sau verify OK; tenant ARCHIVED ra khỏi migrate/job/webhook/kiểm deploy; ACTIVE lỗi migration vẫn đỏ; đòi backup OK ≤26h + diễn tập OK ≤72h; không xoá dữ liệu"}
 {"at":"2026-10-17T11:12:03.099Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_FAIL","mission":"deploy-reuse-gates","detail":"FAIL d5173b9ae0e0ef70993937bb8a980b34a89b0941 2026-10-17T11:11:44.867Z"}
 {"at":"2026-10-17T11:13:10.061Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"org-archive-lifecycle","detail":"#887 @ 83ce65e94ccb → eb0f5a49ae91 (MERGE_ISOLATED · HIGH · gates success)"}
+{"at":"2026-10-17T11:14:23.453Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"eb0f5a49ae91 · run 39027904800 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39027904800"}
