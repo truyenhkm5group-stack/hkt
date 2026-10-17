@@ -15,7 +15,7 @@
                                                     ≤ 26 giờ · diễn tập khôi phục OK ≤ 72 giờ của CHÍNH CSDL này. Không xoá, không DROP.
    · `<mã> --reactivate --apply --confirm=<mã> [--timeout=<giây>]`
                                                     KÍCH HOẠT LẠI tổ chức ARCHIVED: migrate + đối chiếu sổ migration bằng CHÍNH checkDb của bước
-                                                    kiểm deploy (scripts/verify-migrations.ts), CHỈ KHỚP mới đặt ACTIVE; không khớp / hết giờ /
+                                                    kiểm deploy (scripts/verify-migrations.ts), CHỈ KHỚP mới về ĐÚNG trạng thái trước khi lưu trữ (ACTIVE / SUSPENDED; không đọc được ⇒ SUSPENDED); không khớp / hết giờ /
                                                     DEGRADED ⇒ VẪN ARCHIVED. `--timeout` = trần migrate (mặc định như bước kiểm, tối đa 900).
   `--archive` / `--reactivate` thiếu `--apply` ⇒ chạy thử MỘT tổ chức cho đúng hành động đó (chỉ đọc).
 
@@ -34,7 +34,7 @@ import "dotenv/config";
 import { sql } from "drizzle-orm";
 import { cancelOrganizationMigration, getDbForInspection, getPlatformDb, organizationMigrationDegraded, releaseOrganizationDb, type Db } from "@/db";
 import { listOrganizations } from "@/lib/platform/organizations";
-import { applyArchive, applyReactivate, lifecyclePlanLines, openForReactivation, planLifecycle, reactivateRefusals, type ReactivateVerify } from "@/lib/platform/org-lifecycle";
+import { applyArchive, applyReactivate, lifecyclePlanLines, openForReactivation, planLifecycle, priorStatusFromAudit, reactivateRefusals, restoreStatusFor, type ReactivateVerify } from "@/lib/platform/org-lifecycle";
 import { ORGANIZATION_CODE_PATTERN } from "@/lib/platform/types";
 import { rowsOf } from "@/lib/sql-rows";
 import { checkDb, readJournalEntries, verifyOrganizations, verifyOrgTimeoutMs } from "./verify-migrations";
@@ -158,7 +158,12 @@ async function main(): Promise<number> {
     await planOne(a.code, org?.isHome ?? false);
     if (a.action === "REACTIVATE" && org) {
       const r = reactivateRefusals(org);
-      tomTat(r.length ? `${a.code} · KHÔNG kích hoạt lại được — ${r.map((x) => x.text).join(" · ")}` : `${a.code} · KÍCH HOẠT LẠI ĐƯỢC: --apply sẽ migrate rồi đối chiếu sổ; chỉ khớp mới đặt ACTIVE`);
+      const t = restoreStatusFor(await priorStatusFromAudit(pdb, a.code));
+      tomTat(
+        r.length
+          ? `${a.code} · KHÔNG kích hoạt lại được — ${r.map((x) => x.text).join(" · ")}`
+          : `${a.code} · KÍCH HOẠT LẠI ĐƯỢC: --apply sẽ migrate rồi đối chiếu sổ; chỉ khớp mới về ${t.status}${t.fallback ? " (không đọc được trạng thái trước khi lưu trữ ⇒ mặc định hẹp)" : " (trạng thái trước khi lưu trữ)"}`,
+      );
     }
     return 0;
   }

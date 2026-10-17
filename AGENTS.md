@@ -634,8 +634,10 @@ deploy dừng, không phải cảnh báo.
     TRIỂN KHAI (sổ migration) không suy ra lẫn nhau. "Được chạy không" chỉ hỏi `isOperationalOrganization()`; tổ chức
     `ARCHIVED` không đăng nhập, không webhook / job / AI, không vào fan-out lẫn bước kiểm deploy, và `getDbFor()` từ chối mở
     nó — lối duy nhất là `openForReactivation()`. Tổ chức ACTIVE migrate hỏng LUÔN làm deploy đỏ: không có danh sách bỏ qua
-    thứ hai. Lưu trữ đòi không còn nghĩa vụ tiền + sao lưu OK ngoài máy + diễn tập khôi phục OK của CHÍNH CSDL ấy; kích hoạt
-    lại chỉ bật ACTIVE sau khi migrate + `checkDb` khớp. Không xoá dữ liệu, không DROP; sao lưu vẫn chạy cho tổ chức lưu trữ.
+    thứ hai. Lưu trữ chỉ từ ACTIVE / SUSPENDED, từ chối THEO MÃ mọi tổ chức trong sổ bảo vệ
+    (`lib/constants/org-archive-protection.ts`: nhà, HSLC), và đòi không còn nghĩa vụ tiền + sao lưu OK ngoài máy + diễn tập
+    khôi phục OK của CHÍNH CSDL ấy; kích hoạt lại chỉ đổi trạng thái sau khi migrate + `checkDb` khớp, về ĐÚNG trạng thái cũ
+    (không đọc được ⇒ SUSPENDED). Không xoá dữ liệu, không DROP; sao lưu vẫn chạy cho tổ chức lưu trữ.
 
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng

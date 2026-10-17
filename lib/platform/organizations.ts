@@ -1,4 +1,4 @@
-import { getPlatformDb, schema } from "@/db";
+import { getDbFor, getDbForInspection, getPlatformDb, schema, type Db } from "@/db";
 import type { Organization, OrganizationStatus, ModuleDefault } from "@/lib/platform/types";
 
 /**
@@ -112,6 +112,15 @@ export function isOperationalOrganization(org: Pick<Organization, "status">): bo
  */
 export function mayOpenOrganizationDb(org: Pick<Organization, "status">): boolean {
   return org.status !== "ARCHIVED";
+}
+
+/**
+ * CSDL của một tổ chức để ĐỌC cho báo cáo nền tảng (trang AI dùng chung, A/B model): tổ chức LƯU TRỮ đi handle CHỈ ĐỌC
+ * (`getDbForInspection` — không migrate, không dọn), còn lại đi đường của ứng dụng như cũ. Lược đồ của tổ chức lưu trữ có thể tụt
+ * sau mã nguồn; câu đọc hỏng thì bên gọi ghi lỗi thật của tổ chức đó, không bao giờ in 0.
+ */
+export async function organizationDbForReport(org: Pick<Organization, "code" | "isHome" | "status">): Promise<Db> {
+  return mayOpenOrganizationDb(org) ? getDbFor(org) : getDbForInspection(org);
 }
 
 /**
