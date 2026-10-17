@@ -3,7 +3,7 @@
   "mission_id": "p0-871-contact-memory",
   "title": "P0 #871 + ca Nguyễn Hà: không hỏi lại SĐT/địa chỉ đã biết khi khách đổi chủ đề/thêm món, 10 cái nem đúng quy cách, giữ giờ hẹn giao, không bỏ sót tạo đơn, hậu mãi đúng trạng thái",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "FAILED",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,11 +20,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-16T10:43:43.926Z",
-  "updated_at": "2026-10-17T01:03:27.335Z",
+  "updated_at": "2026-10-17T02:21:04.936Z",
   "last_heartbeat": "2026-10-17T00:25:40.242Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#878 → d11467d0ae66e6c80d29d7c16016fb17b58905c4"
+    "merged": "#878 → d11467d0ae66e6c80d29d7c16016fb17b58905c4",
+    "verify": "FAIL d11467d0ae66e6c80d29d7c16016fb17b58905c4 2026-10-17T02:20:47.468Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/38989255364"
   },
   "handoff": {
     "branch": "claude/p0-871-contact-memory",
