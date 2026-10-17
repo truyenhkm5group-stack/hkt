@@ -3,7 +3,7 @@
   "mission_id": "trace-by-order",
   "title": "conv-money-trace nhận mã đơn ngắn",
   "business_goal": "Truy vết đúng đơn sai của P0 khách cũ mua lại",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-token-budget",
@@ -23,12 +23,15 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-17T06:59:01.226Z",
-  "updated_at": "2026-10-17T07:01:48.022Z",
+  "updated_at": "2026-10-17T07:40:43.466Z",
   "last_heartbeat": "2026-10-17T06:59:34.459Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
     "evidence": []
+  },
+  "evidence": {
+    "merged": "#885 → 1e9ecbdf4c2c6b5947a6a82d7666c30b0f0a2d16"
   },
   "handoff": {
     "branch": "claude/trace-by-order",
