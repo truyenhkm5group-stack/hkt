@@ -3,7 +3,7 @@
   "mission_id": "org-archive-lifecycle",
   "title": "Lưu trữ / kích hoạt lại tổ chức thử (không xoá)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "FAILED",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-org-archive",
@@ -49,11 +49,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-17T09:54:06.061Z",
-  "updated_at": "2026-10-17T11:13:10.025Z",
+  "updated_at": "2026-10-17T11:32:24.272Z",
   "last_heartbeat": "2026-10-17T09:55:10.522Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#887 → eb0f5a49ae91e1d87cd2d41b61f95cd2128d6967"
+    "merged": "#887 → eb0f5a49ae91e1d87cd2d41b61f95cd2128d6967",
+    "verify": "FAIL eb0f5a49ae91e1d87cd2d41b61f95cd2128d6967 2026-10-17T11:32:06.010Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39027904800"
   },
   "handoff": {
     "branch": "claude/org-archive-lifecycle",
