@@ -9,14 +9,19 @@
  *  2. Đọc cờ ở CSDL control plane thật: không dòng ⇒ đóng; true ⇒ mở; danh sách ⇒ danh sách; giá trị lạ ⇒ đóng.
  *  3. DANH SÁCH ĐÓNG các lối vào giao diện tới `/api/connect/messenger/start` (bỏ chú thích): mỗi lối phải đứng sau cổng, và
  *     trang dựng nó phải lấy giá trị từ `directConnectFor` (máy chủ) — lối vào thứ tư mọc ra mà không qua cổng ⇒ đỏ.
+ *  4. ĐƯỜNG GHI cờ (`setDirectConnectOpen`, đóng MM-FU-712 — cửa hàng cho người duyệt Meta App Review): chỉ người vận hành, bắt
+ *     buộc lý do, mã cửa hàng phải có thật + đang hoạt động + không phải nhà, có nhật ký `FLAG_SET`; mở cho cửa hàng A KHÔNG mở
+ *     cho cửa hàng B.
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
-import { readDirectConnectOpen } from "@/lib/platform/direct-connect-flag";
-import { DIRECT_CONNECT_OPEN_KEY, DIRECT_CONNECT_SOON_LABEL, directConnectAllowed, parseDirectConnectOpen } from "@/lib/channels/direct-connect-shared";
+import type { SessionUser } from "@/lib/auth/session";
+import { getHomeOrganization } from "@/lib/platform/organizations";
+import { readDirectConnectOpen, setDirectConnectOpen } from "@/lib/platform/direct-connect-flag";
+import { DIRECT_CONNECT_MAX_ORGS, DIRECT_CONNECT_OPEN_KEY, DIRECT_CONNECT_SOON_LABEL, directConnectAllowed, directConnectModeOf, parseDirectConnectOpen, parseOrgCodeList } from "@/lib/channels/direct-connect-shared";
 
 const stripComments = (src: string) => src.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
@@ -86,4 +91,102 @@ export async function testDirectConnectGate() {
   }
   assert.ok(DIRECT_CONNECT_SOON_LABEL.includes("sắp mở"));
   console.log("  ✓ cổng nối thẳng Facebook: khách thấy «sắp mở» khi cờ đóng, người vận hành thấy nút thật · cờ true / danh sách workspace / vắng = đóng (CSDL thật) · 3 lối vào giao diện đều sau cổng, đọc từ máy chủ");
+}
+
+const DC_ORGS = ["dc-review-demo", "dc-khach-that", "dc-dinh-chi"] as const;
+
+/** 4. Đường ghi cờ — CSDL control plane thật; trả lại nguyên trạng cờ và xoá tổ chức thử trong finally. */
+export async function testDirectConnectWrite() {
+  // Hàm thuần đọc ô mã cửa hàng.
+  assert.deepEqual(parseOrgCodeList(" dc-a, dc-b\ndc-a ;dc-c "), { codes: ["dc-a", "dc-b", "dc-c"], invalid: [] }, "tách dấu phẩy / xuống dòng / chấm phẩy, bỏ trùng");
+  assert.deepEqual(parseOrgCodeList("DC-A, a, dc_b").invalid, ["DC-A", "a", "dc_b"], "chữ hoa / quá ngắn / gạch dưới ⇒ không hợp lệ, KHÔNG tự sửa");
+  assert.equal(directConnectModeOf(false), "CLOSED");
+  assert.equal(directConnectModeOf([]), "CLOSED", "danh sách rỗng là ĐÓNG");
+  assert.equal(directConnectModeOf(["x"]), "ORGS");
+  assert.equal(directConnectModeOf(true), "ALL");
+
+  const home = await getHomeOrganization();
+  const operator: SessionUser = { id: "dc-op", email: "op@nha.local", name: "Vận hành", role: "ADMIN", permissions: [], scope: "ALL", departmentCodes: [], positionId: null, organization: { code: home.code, name: home.name, isHome: true } };
+  const homeViewer: SessionUser = { ...operator, id: "dc-viewer", email: "xem@nha.local", role: "VIEWER", permissions: ["dashboard:view"] };
+  const reviewerAdmin: SessionUser = { ...operator, id: "dc-reviewer", email: "reviewer@demo.local", permissions: ["platform:operate"], organization: { code: "dc-review-demo", name: "Demo", isHome: false } };
+  const pdb = await getPlatformDb();
+  const truoc = await pdb.query.platformSettings.findFirst({ where: eq(schema.platformSettings.key, DIRECT_CONNECT_OPEN_KEY) });
+  const audits = async () =>
+    pdb.select().from(schema.platformAuditLog).where(and(eq(schema.platformAuditLog.action, "FLAG_SET"), eq(schema.platformAuditLog.subject, DIRECT_CONNECT_OPEN_KEY))).orderBy(schema.platformAuditLog.at);
+  const stored = async () => (await pdb.query.platformSettings.findFirst({ where: eq(schema.platformSettings.key, DIRECT_CONNECT_OPEN_KEY) }))?.value;
+  const dropOrgs = () => pdb.delete(schema.platformOrganizations).where(inArray(schema.platformOrganizations.code, [...DC_ORGS]));
+  try {
+    await dropOrgs();
+    await pdb.delete(schema.platformSettings).where(eq(schema.platformSettings.key, DIRECT_CONNECT_OPEN_KEY));
+    await pdb.insert(schema.platformOrganizations).values([
+      { code: "dc-review-demo", name: "Cửa hàng duyệt Meta" },
+      { code: "dc-khach-that", name: "Khách thật" },
+      { code: "dc-dinh-chi", name: "Đình chỉ", status: "SUSPENDED" },
+    ]);
+    const n0 = (await audits()).length;
+
+    // Không phải người vận hành — kể cả quản trị chính cửa hàng duyệt mang khoá platform:operate — không tự mở được cho mình.
+    for (const [who, label] of [
+      [homeViewer, "người nhà không có platform:operate"],
+      [reviewerAdmin, "quản trị cửa hàng duyệt (tổ chức không phải nhà)"],
+    ] as const) {
+      const r = await setDirectConnectOpen(who, { mode: "ORGS", orgCodes: "dc-review-demo", reason: "tự mở cho mình" });
+      assert.ok("error" in r, `${label} ⇒ từ chối`);
+    }
+    assert.equal(await stored(), undefined, "lượt bị từ chối không ghi cờ");
+    assert.equal((await audits()).length, n0, "lượt bị từ chối không ghi nhật ký");
+
+    // Đầu vào sai ⇒ từ chối CẢ lượt, không ghi phần đúng.
+    const tooMany = Array.from({ length: DIRECT_CONNECT_MAX_ORGS + 1 }, (_, i) => `dc-x${i}`).join(",");
+    for (const [input, why] of [
+      [{ mode: "ORGS", orgCodes: "dc-review-demo", reason: "ngắn" }, "lý do < 5 ký tự"],
+      [{ mode: "OPEN", orgCodes: "", reason: "chế độ lạ ở đây" }, "chế độ lạ"],
+      [{ mode: "ORGS", orgCodes: "", reason: "danh sách rỗng" }, "ORGS không mã nào"],
+      [{ mode: "ORGS", orgCodes: "dc-review-demo, DC-KHACH", reason: "có mã gõ hoa" }, "mã không hợp lệ"],
+      [{ mode: "ORGS", orgCodes: "dc-review-demo, dc-khong-co", reason: "có mã không tồn tại" }, "mã không tồn tại"],
+      [{ mode: "ORGS", orgCodes: "dc-dinh-chi", reason: "cửa hàng đình chỉ" }, "cửa hàng không ACTIVE"],
+      [{ mode: "ORGS", orgCodes: home.code, reason: "liệt kê tổ chức nhà" }, "tổ chức nhà"],
+      [{ mode: "ORGS", orgCodes: tooMany, reason: "quá trần danh sách" }, "quá trần"],
+    ] as const) {
+      const r = await setDirectConnectOpen(operator, input);
+      assert.ok("error" in r, `${why} ⇒ từ chối`);
+    }
+    assert.equal(await stored(), undefined, "đầu vào sai không ghi cờ");
+    assert.equal((await audits()).length, n0, "đầu vào sai không ghi nhật ký");
+
+    // Mở cho ĐÚNG cửa hàng duyệt: cờ dạng danh sách + một dòng nhật ký có trước / sau / lý do / người.
+    const ok = await setDirectConnectOpen(operator, { mode: "ORGS", orgCodes: "dc-review-demo", reason: "Cửa hàng cho người duyệt Meta App Review" });
+    assert.deepEqual(ok, { ok: true, changed: true, open: ["dc-review-demo"] });
+    assert.deepEqual(await readDirectConnectOpen(), ["dc-review-demo"]);
+    const log = (await audits()).slice(n0);
+    assert.equal(log.length, 1, "một lượt đổi = một dòng nhật ký");
+    assert.equal(log[0].before, null, "trước: chưa từng đặt");
+    assert.deepEqual(log[0].after, ["dc-review-demo"]);
+    assert.equal(log[0].actorEmail, "op@nha.local");
+    assert.match(log[0].reason ?? "", /Meta App Review/);
+
+    // Ranh giới tenant: cửa hàng duyệt thấy nút, khách thật KHÔNG.
+    const open = await readDirectConnectOpen();
+    assert.equal(directConnectAllowed({ operator: false, open, orgCode: "dc-review-demo" }), true, "cửa hàng duyệt thấy nút thật");
+    assert.equal(directConnectAllowed({ operator: false, open, orgCode: "dc-khach-that" }), false, "mở cho cửa hàng duyệt KHÔNG mở cho khách thật");
+    assert.equal(directConnectAllowed({ operator: false, open, orgCode: null }), false);
+
+    // Cùng tập mã (khác thứ tự) ⇒ không đổi, không thêm nhật ký.
+    await setDirectConnectOpen(operator, { mode: "ORGS", orgCodes: "dc-review-demo, dc-khach-that", reason: "thêm cửa hàng thứ hai" });
+    const same = await setDirectConnectOpen(operator, { mode: "ORGS", orgCodes: "dc-khach-that dc-review-demo", reason: "bấm lại cùng danh sách" });
+    assert.ok("ok" in same && !same.changed, "cùng tập mã (khác thứ tự) ⇒ không đổi");
+    assert.equal((await audits()).length, n0 + 2, "lượt không đổi không ghi nhật ký");
+
+    // Đóng ⇒ cửa hàng duyệt cũng «sắp mở»; ALL ⇒ mọi khách thấy nút.
+    const closed = await setDirectConnectOpen(operator, { mode: "CLOSED", orgCodes: "", reason: "Meta trả hồ sơ, đóng lại" });
+    assert.deepEqual(closed, { ok: true, changed: true, open: false });
+    assert.equal(directConnectAllowed({ operator: false, open: await readDirectConnectOpen(), orgCode: "dc-review-demo" }), false, "đóng ⇒ cửa hàng duyệt cũng thấy «sắp mở»");
+    const all = await setDirectConnectOpen(operator, { mode: "ALL", orgCodes: "dc-bo-qua", reason: "Meta đã duyệt Advanced Access" });
+    assert.deepEqual(all, { ok: true, changed: true, open: true }, "ALL bỏ qua ô mã cửa hàng");
+  } finally {
+    await pdb.delete(schema.platformSettings).where(eq(schema.platformSettings.key, DIRECT_CONNECT_OPEN_KEY));
+    if (truoc) await pdb.insert(schema.platformSettings).values({ key: truoc.key, value: truoc.value, updatedBy: truoc.updatedBy, updatedByEmail: truoc.updatedByEmail });
+    await dropOrgs();
+  }
+  console.log("  ✓ đường ghi cờ nối thẳng Facebook: chỉ người vận hành · lý do bắt buộc · mã cửa hàng có thật / hoạt động / không phải nhà · nhật ký FLAG_SET · mở cho cửa hàng duyệt không mở cho khách khác");
 }

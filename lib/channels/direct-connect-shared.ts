@@ -8,7 +8,8 @@
  *  · Người vận hành nền tảng (`platform:operate` ở tổ chức nhà — `platformOperatorDenial`, đọc qua `can()` có sẵn) vẫn thấy nút thật.
  *  · Mở bằng MỘT cờ nền tảng đọc ở máy chủ: `platform_settings['meta.direct-connect.open']`. Vắng mặt / đọc hỏng ⇒ ĐÓNG.
  *    Giá trị `true` ⇒ mở cho mọi khách (ngày MM-META-01 PASS). Giá trị là danh sách mã workspace ⇒ chỉ mở cho các workspace
- *    đó (để đội thử bằng Page có vai trò trong app, vd `hs-thien-nga-test`, mà không mở cho khách thật). Không cần deploy.
+ *    đó (để đội thử bằng Page có vai trò trong app, vd `hs-thien-nga-test`, hay cửa hàng cho người duyệt Meta App Review, mà
+ *    không mở cho khách thật). Không cần deploy. Đường ghi DUY NHẤT: `/platform` → `setDirectConnectOpen` (có nhật ký, 17/10/2026).
  * Không xoá mã, không đổi route `/api/connect/messenger/*` — cổng chỉ quyết có VẼ nút hay không.
  */
 export const DIRECT_CONNECT_OPEN_KEY = "meta.direct-connect.open";
@@ -24,6 +25,32 @@ export function parseDirectConnectOpen(raw: unknown): DirectConnectOpen {
   if (raw === true) return true;
   if (Array.isArray(raw)) return raw.filter((x): x is string => typeof x === "string" && x.length > 0);
   return false;
+}
+
+/** Ba lựa chọn người vận hành đặt cho cờ — `ORGS` là cách DUY NHẤT mở cho cửa hàng người duyệt Meta trước khi Meta duyệt. */
+export const DIRECT_CONNECT_MODES = ["CLOSED", "ORGS", "ALL"] as const;
+export type DirectConnectMode = (typeof DIRECT_CONNECT_MODES)[number];
+export const DIRECT_CONNECT_MODE_LABEL: Record<DirectConnectMode, string> = {
+  CLOSED: "Đóng — khách thấy «sắp mở»",
+  ORGS: "Chỉ các cửa hàng được liệt kê",
+  ALL: "Mở cho mọi cửa hàng",
+};
+/** Trần số mã trong danh sách: danh sách này dành cho cửa hàng thử / người duyệt, không phải đường mở dần cho khách. */
+export const DIRECT_CONNECT_MAX_ORGS = 10;
+
+export function directConnectModeOf(open: DirectConnectOpen): DirectConnectMode {
+  if (open === true) return "ALL";
+  return Array.isArray(open) && open.length ? "ORGS" : "CLOSED";
+}
+
+/**
+ * Ô chữ «mã cửa hàng» ⇒ danh sách mã. Tách theo dấu phẩy / khoảng trắng / xuống dòng, bỏ trùng. KHÔNG tự hạ chữ hoa: mã workspace
+ * là chữ thường và so khớp CHÍNH XÁC (`directConnectAllowed`), nên một mã gõ hoa là mã sai — báo ra thay vì sửa hộ.
+ */
+export function parseOrgCodeList(text: string): { codes: string[]; invalid: string[] } {
+  const ok = (c: string) => /^[a-z0-9][a-z0-9-]{1,62}$/.test(c);
+  const parts = [...new Set(text.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean))];
+  return { codes: parts.filter(ok), invalid: parts.filter((c) => !ok(c)) };
 }
 
 /** Người này có được thấy nút nối thẳng Facebook THẬT không. */
