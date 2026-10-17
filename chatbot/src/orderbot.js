@@ -24,7 +24,11 @@ import { isOrderSummaryReply } from "./bot.js";
 const SWEEP_MS = 5 * 60 * 1000;
 // Mau chu luc chu shop chot cho tung page — ap MOT lan khi khoi dong neu page chua khai (sua lai trong cai dat page van
 // duoc, khong bi de lai). Chu shop 02/10/2026: "mặc định page này chạy Q005" (Linh Tây Luxury CS1).
-const PAGE_DEFAULT_PRODUCT_SEED = [{ page: "linh tay luxury cs1", code: "Q005" }];
+// `force`: dat ca khi page DA co mau chu luc (chu shop chot doi mau) — van chi MOT lan moi page / ma.
+const PAGE_DEFAULT_PRODUCT_SEED = [
+  { page: "linh tay luxury cs1", code: "Q005" },
+  { page: "hoa tra fashion cs1", code: "Q002", force: true },
+];
 
 
 // Quet lai MOT lan cac hoi thoai co SDT 15 ngay qua cua page (chu shop 06/10/2026: "check cac don tren page nay don moi dien dung dia
@@ -604,7 +608,8 @@ export class OrderBot {
         const k = `${pid}:${s.code}`;
         if (daAp[k] || !cacTen.includes(s.page)) continue;
         daAp[k] = Date.now();
-        if (String(settings.get(pid).defaultProduct || "").trim()) continue;
+        const cu = String(settings.get(pid).defaultProduct || "").trim().toUpperCase();
+        if (cu && (!s.force || cu === s.code)) continue;
         settings.update(pid, { defaultProduct: s.code });
         log.info(`[orderbot] page ${ten}: dat mau chu luc ${s.code}`);
         out.push(pid);

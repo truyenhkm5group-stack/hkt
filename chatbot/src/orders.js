@@ -193,6 +193,11 @@ export const PAGE_BLOCKED_CODES = [{ page: "aura - thoi trang nu cao cap", codes
 // tu dong. Chu shop 13/10/2026 (AURA): sau khi chan Q005 bot lai chot "Dam Q004 mau Do" + anh Q004 — page chi co mau moi.
 export const PAGE_OFF_CATALOG = ["aura - thoi trang nu cao cap"];
 
+// Page chi ban MOT mau dam (chu shop 17/10/2026, Hoa Tra Fashion CS1: "page nay rep Q002 giong page Linh Tay Luxury").
+// Moi ma DAM khac (Q…) bi chan o page do: anh khach gui nhan dien ra mau dam khac (Q005 trong giong Q002) thi hieu la ma nay,
+// bot khong bao gia / gui anh / len don ma khac. Hang ban kem (X…, vd quan dinh hinh) van ban binh thuong.
+export const PAGE_ONLY_CODE = [{ page: "hoa tra fashion cs1", code: "Q002" }];
+
 const khongDauTen = (n) => String(n || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/\s+/g, " ").trim();
 
 /** Page ban mau moi chua co tren POS (theo ten page / ten Pancake). */
@@ -201,11 +206,19 @@ export function offCatalogPage(names) {
   return PAGE_OFF_CATALOG.some((p) => ten.includes(p));
 }
 
+/** Ma DUY NHAT page ban (theo ten page / ten Pancake), hoac "". */
+export function onlyCodeFor(names) {
+  const ten = (names || []).map(khongDauTen);
+  return PAGE_ONLY_CODE.find((r) => ten.includes(r.page))?.code || "";
+}
+
 /** Cac ma page KHONG ban (theo ten page / ten Pancake, khong dau). Page ngoai danh muc: MOI ma trong danh muc. */
 export function blockedCodesFor(names) {
   const ten = (names || []).map(khongDauTen);
   const ma = PAGE_BLOCKED_CODES.filter((r) => ten.includes(r.page)).flatMap((r) => r.codes);
   if (offCatalogPage(names)) ma.push(...catalog.products.map((p) => String(p.code || "")).filter(Boolean));
+  const chi = onlyCodeFor(names);
+  if (chi) ma.push(...catalog.products.map((p) => String(p.code || "").toUpperCase()).filter((c) => /^Q/.test(c) && c !== chi.toUpperCase()));
   return [...new Set(ma.map((c) => c.toUpperCase()))];
 }
 
