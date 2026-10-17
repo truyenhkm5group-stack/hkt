@@ -3,7 +3,7 @@
   "mission_id": "p0-repeat-buyer",
   "title": "P0 khách cũ mua lại: bình luận đi tiếp ở hộp thư cũ, lượt mua mới sau thời gian dài",
   "business_goal": "Khách cũ bình luận mua lại 1,5 kg ⇒ đơn MỚI 1,5 kg, dùng địa chỉ cũ, không hỏi lặp, không đụng đơn cũ",
-  "status": "INTEGRATING",
+  "status": "FAILED",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-token-budget",
@@ -29,7 +29,7 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-17T07:14:56.345Z",
-  "updated_at": "2026-10-17T08:47:45.390Z",
+  "updated_at": "2026-10-17T09:52:31.826Z",
   "last_heartbeat": "2026-10-17T08:06:08.201Z",
   "definition_of_done": [],
   "intake": {
@@ -37,7 +37,9 @@
     "evidence": []
   },
   "evidence": {
-    "merged": "#886 → 49ed8218a04e5ec725b8748e143189375d27b8fe"
+    "merged": "#886 → 49ed8218a04e5ec725b8748e143189375d27b8fe",
+    "verify": "FAIL 49ed8218a04e5ec725b8748e143189375d27b8fe 2026-10-17T09:52:11.802Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39018768171"
   },
   "handoff": {
     "branch": "claude/p0-repeat-buyer",

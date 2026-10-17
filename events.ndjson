@@ -1,4 +1,3 @@
-{"at":"2026-10-09T04:58:33.902Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"chi-tiet-don-khach-sach","detail":"#725 @ 13aed5f50bcb → 50293da6ee8a (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-09T04:59:06.567Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_DETECTED","mission":"pancake-counters-remaining","detail":"OVERLAP với chi-tiet-don-khach-sach: phạm vi app/(dashboard)/orders/ ↔ app/(dashboard)/orders/*/page.tsx, app/(dashboard)/orders/ ↔ app/(dashboard)/orders/manual-order-form.tsx ⇒ tuần tự hoá (--after=chi-tiet-don-khach-sach) hoặc khai cách tích hợp (--accept-overlap=\"…\")"}
 {"at":"2026-10-09T04:59:17.221Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"50293da6ee8a · run 37886395475 https://github.com/truyenhkm5group-stack/hkt/actions/runs/37886395475"}
 {"at":"2026-10-09T04:59:36.320Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"pancake-counters-remaining","detail":"RUNNING · 7 mẫu phạm vi · MEDIUM"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-17T08:42:51.210Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_FAIL","mission":"qa-external-drill","detail":"FAIL acafc4f5c7503900c48f0fa786d41180f7c4e6a7 2026-10-17T08:42:29.157Z"}
 {"at":"2026-10-17T08:47:45.440Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"p0-repeat-buyer","detail":"#886 @ a6ce6bfba08f → 49ed8218a04e (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-17T08:49:17.959Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"49ed8218a04e · run 39018768171 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39018768171"}
+{"at":"2026-10-17T09:52:31.869Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_FAIL","mission":"p0-repeat-buyer","detail":"FAIL 49ed8218a04e5ec725b8748e143189375d27b8fe 2026-10-17T09:52:11.802Z"}
