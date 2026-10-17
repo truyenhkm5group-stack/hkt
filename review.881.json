@@ -1,0 +1,8 @@
+{
+  "pr": 881,
+  "sha": "dceb75b0b2a6a61a9d8bd0b3d1ea4da8308d9525",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-17T03:43:28.918Z",
+  "note": "review độc lập PASS: so cây từ artifact cổng ghi; lọc lượt theo đầu nhánh cuối PR; fail-safe"
+}
