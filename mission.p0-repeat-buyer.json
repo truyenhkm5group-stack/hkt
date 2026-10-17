@@ -3,7 +3,7 @@
   "mission_id": "p0-repeat-buyer",
   "title": "P0 khách cũ mua lại: bình luận đi tiếp ở hộp thư cũ, lượt mua mới sau thời gian dài",
   "business_goal": "Khách cũ bình luận mua lại 1,5 kg ⇒ đơn MỚI 1,5 kg, dùng địa chỉ cũ, không hỏi lặp, không đụng đơn cũ",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P0",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-token-budget",
@@ -24,11 +24,25 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-17T07:14:56.345Z",
-  "updated_at": "2026-10-17T07:14:56.345Z",
-  "last_heartbeat": "2026-10-17T07:14:56.345Z",
+  "updated_at": "2026-10-17T07:15:21.588Z",
+  "last_heartbeat": "2026-10-17T07:15:21.588Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/p0-repeat-buyer",
+    "sha": "3e067cf419737890204b31c393ba0b6f9e32cdd8",
+    "at": "2026-10-17T07:15:21.588Z",
+    "actor": "DESKTOP-56TH98Y:wt-token-budget",
+    "title": "P0 khách cũ mua lại: bình luận «1,5 kg gửi đc cũ» đi tiếp ở hộp thư cũ, lời mua lượt trước không lọt sang đơn mới",
+    "summary": "",
+    "tests": [
+      "tests/p0-repeat-buyer.test.ts: ĐẠT (thuần + CSDL + 2 hội thoại chatTurn)",
+      "p0-855-cart · p0-855-delta · p0-863-cancel-flow · sales-cart-commitment · sales-next-best-action: ĐẠT",
+      "tsc: sạch (trừ qrcode của node_modules mượn)",
+      "eslint: sạch"
+    ]
   }
 }
