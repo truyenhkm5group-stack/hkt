@@ -60,6 +60,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       sha: ${{ steps.gom.outputs.sha }}
+      tree: ${{ steps.gom.outputs.tree }}
     steps:
       - name: Gom bốn nhánh cổng — đỏ nếu BẤT KỲ nhánh nào không xanh, và bốn SHA phải trùng
         id: gom
@@ -72,6 +73,10 @@ jobs:
           SHA_KIEM_THU: ${{ needs.kiem_thu.outputs.sha }}
           SHA_KIEM_THU_TOKEN: ${{ needs.kiem_thu_token.outputs.sha }}
           SHA_DUNG_BAN: ${{ needs.dung_ban.outputs.sha }}
+          TREE_TINH: ${{ needs.tinh.outputs.tree }}
+          TREE_KIEM_THU: ${{ needs.kiem_thu.outputs.tree }}
+          TREE_KIEM_THU_TOKEN: ${{ needs.kiem_thu_token.outputs.tree }}
+          TREE_DUNG_BAN: ${{ needs.dung_ban.outputs.tree }}
         run: |
           set -euo pipefail
           hong=0
@@ -89,6 +94,23 @@ jobs:
           fi
           echo "sha=$SHA_TINH" >> "$GITHUB_OUTPUT"
           echo "✓ Cả bốn nhánh xanh trên $SHA_TINH"
+          if [ -z "$TREE_TINH" ] || [ "$TREE_TINH" != "$TREE_KIEM_THU" ] || [ "$TREE_TINH" != "$TREE_KIEM_THU_TOKEN" ] || [ "$TREE_TINH" != "$TREE_DUNG_BAN" ]; then
+            echo "::error::Bốn nhánh cổng đứng trên các CÂY mã khác nhau — DỪNG."
+            exit 1
+          fi
+          echo "tree=$TREE_TINH" >> "$GITHUB_OUTPUT"
+          # Ghi lại CÂY mã mà cổng THẬT SỰ đã kiểm (chỉ tới được dòng này khi cả bốn nhánh xanh).
+          # `deploy-vps.yml::bang_chung` đọc tệp này để dùng lại bằng chứng khi squash đổi SHA mà
+          # không đổi cây. Tệp chỉ GHI NHẬN, không đổi kết quả của nhánh nào.
+          mkdir -p "$RUNNER_TEMP/tested-tree"
+          printf 'tree=%s\ncommit=%s\nrun_id=%s\nrun_attempt=%s\n' "$TREE_TINH" "$SHA_TINH" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/tested-tree/tested-tree.txt"
+      - name: Lưu cây mã đã qua cổng (bằng chứng cho deploy)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tested-tree-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/tested-tree/tested-tree.txt
+          retention-days: 30
+          if-no-files-found: error
 
   # ═══ NHÁNH 1 · TOÀN VẸN KHO + KIỂU DỮ LIỆU + CHUẨN MÃ NGUỒN (~3′) ═══
   tinh:
@@ -97,6 +119,7 @@ jobs:
     timeout-minutes: 20
     outputs:
       sha: ${{ steps.ghim.outputs.sha }}
+      tree: ${{ steps.ghim.outputs.tree }}
     steps:
       # BẢN ĐƯỢC KIỂM PHẢI LÀ BẢN ĐƯỢC DÙNG: ghim thẳng vào SHA thay vì tên nhánh. Nhánh có thể
       # được đẩy tiếp trong lúc workflow đang chạy (hai phiên làm việc song song), và khi đó "main"
@@ -111,6 +134,7 @@ jobs:
         run: |
           SHA="$(git rev-parse HEAD)"
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
           echo "Cổng đang kiểm $SHA"
       - uses: actions/setup-node@v4
         with:
@@ -135,6 +159,7 @@ jobs:
     timeout-minutes: 45
     outputs:
       sha: ${{ steps.ghim.outputs.sha }}
+      tree: ${{ steps.ghim.outputs.tree }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -142,7 +167,9 @@ jobs:
           fetch-depth: 2
       - name: Đọc SHA thật của bản đang kiểm
         id: ghim
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -179,6 +206,7 @@ jobs:
     timeout-minutes: 45
     outputs:
       sha: ${{ steps.ghim.outputs.sha }}
+      tree: ${{ steps.ghim.outputs.tree }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -186,7 +214,9 @@ jobs:
           fetch-depth: 2
       - name: Đọc SHA thật của bản đang kiểm
         id: ghim
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -206,6 +236,7 @@ jobs:
     timeout-minutes: 25
     outputs:
       sha: ${{ steps.ghim.outputs.sha }}
+      tree: ${{ steps.ghim.outputs.tree }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -213,7 +244,9 @@ jobs:
           fetch-depth: 2
       - name: Đọc SHA thật của bản đang kiểm
         id: ghim
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
           node-version: 22

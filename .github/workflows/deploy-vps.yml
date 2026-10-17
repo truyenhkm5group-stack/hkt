@@ -15,6 +15,10 @@ on:
         description: "Tạo lại file .env trên VPS từ Secrets (xoá .env cũ)"
         type: boolean
         default: false
+      force_gates:
+        description: "Ép chạy ĐỦ cổng trong lượt này: không dùng lại bằng chứng nào (cả theo cây lẫn theo SHA)"
+        type: boolean
+        default: false
 
 # ═══════════ KHOÁ ĐẶT Ở JOB `release`, KHÔNG Ở MỨC WORKFLOW ═══════════
 #
@@ -80,21 +84,104 @@ jobs:
     permissions:
       actions: read
       contents: read
+    # Hai đường bằng chứng, đúng MỘT đường được dùng: `cay` (cùng CÂY mã với lượt PR đã qua cổng — không phải
+    # chờ CI của push) rồi tới `tim` (cùng SHA đã xanh trên main). `cay` khớp thì `tim` BỊ BỎ QUA.
     outputs:
-      reuse: ${{ steps.tim.outputs.reuse }}
-      sha: ${{ steps.tim.outputs.sha }}
-      run_url: ${{ steps.tim.outputs.run_url }}
+      reuse: ${{ steps.cay.outputs.khop == 'true' && 'true' || steps.tim.outputs.reuse }}
+      sha: ${{ steps.cay.outputs.khop == 'true' && steps.cay.outputs.sha || steps.tim.outputs.sha }}
+      run_url: ${{ steps.cay.outputs.khop == 'true' && steps.cay.outputs.run_url || steps.tim.outputs.run_url }}
+      # Chỉ có giá trị khi `cay` khớp: CÂY mã cổng đã kiểm. Rỗng ⇒ đường `tim` (SHA khớp SHA).
+      tree: ${{ steps.cay.outputs.khop == 'true' && steps.cay.outputs.tree || '' }}
     steps:
-      - name: Tìm lượt cổng XANH của đúng SHA này trên main (dùng lại thay vì chạy lại)
-        id: tim
+      # ═══ DÙNG LẠI BẰNG CHỨNG THEO CÂY MÃ — SQUASH ĐỔI SHA NHƯNG KHÔNG ĐỔI NỘI DUNG ═══
+      #
+      # Gộp bằng squash tạo commit mới trên main (SHA khác đầu PR), nên `tim` phải chờ CI của push (~35′)
+      # dù chính CÂY mã ấy vừa qua cổng ở PR. `gates.yml` GHI LẠI cây mã mà nó thật sự checkout và kiểm
+      # (`git rev-parse HEAD^{tree}`, tệp `tested-tree.txt` trong artifact `tested-tree-<lượt>`, chỉ được
+      # tải lên khi cả bốn nhánh xanh). Bước này đọc lại tệp đó và so với cây của SHA đang triển khai.
+      #
+      # KHÔNG suy cây đã kiểm từ `refs/pull/N/merge` + giờ chạy: (1) chạy lại một lượt cũ giữ nguyên
+      # GITHUB_SHA cũ nhưng có `run_started_at` mới, nên ref tính lại (cây khác) vẫn qua phép so ngày;
+      # (2) GitHub xoá `refs/pull/N/merge` ngay khi PR đóng nên đường ấy gần như không bao giờ chạy.
+      #
+      # Điều kiện (đủ cả, thiếu một là KHÔNG dùng lại):
+      #   1. không `force_gates`, và triển khai từ `refs/heads/main`;
+      #   2. đúng MỘT PR đã gộp, `merge_commit_sha` = SHA này, nhánh gốc `main`;
+      #   3. lượt `ci.yml` sự kiện `pull_request` MỚI NHẤT (mọi lần chạy lại) trên ĐÚNG đầu nhánh cuối của PR (`head_sha` =
+      #      `head.sha`, `head_branch` = `head.ref`, cùng kho — PR từ fork không dùng lại), `completed` + `success`, và job
+      #      «gates / gates» của nó `success`. KHÔNG lọc theo `pull_requests[]`: GitHub xoá mảng ấy khi PR đã gộp (đo #878:
+      #      cả 7 lượt đều rỗng), mà deploy luôn chạy SAU khi gộp. Ràng buộc an toàn là phép so CÂY ở bước 5;
+      #   4. artifact `tested-tree` của lượt ấy tải được, khai đúng run_id / lần chạy;
+      #   5. CÂY ghi trong artifact BẰNG cây của SHA đang triển khai (`git/commits/$SHA`).
+      # `sha` xuất ra là COMMIT mà cổng đã kiểm (đọc từ artifact), không chép SHA đầu vào; `release` so CÂY.
+      - name: Tìm lượt cổng XANH của PR cho đúng CÂY mã này (dùng lại thay vì chờ / chạy lại)
+        id: cay
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.sha }}
           REPO: ${{ github.repository }}
           REF: ${{ github.ref }}
+          FORCE_GATES: ${{ inputs.force_gates && 'true' || 'false' }}
+        run: |
+          set -uo pipefail
+          echo "khop=false" >> "$GITHUB_OUTPUT"
+          lui() { echo "Không dùng lại bằng chứng theo cây: $1 — chạy cổng / hỏi CI của push như cũ."; exit 0; }
+          [ "$FORCE_GATES" = "true" ] && lui "force_gates được bật"
+          [ "$REF" = "refs/heads/main" ] || lui "triển khai từ $REF, không phải main"
+          api() { curl -fsS --max-time 20 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$REPO/$1"; }
+          cay_trien_khai="$(api "git/commits/$SHA" | jq -r '.tree.sha // empty' 2>/dev/null)" || cay_trien_khai=""
+          [ -n "$cay_trien_khai" ] || lui "không đọc được cây của $SHA"
+          prs="$(api "commits/$SHA/pulls" | jq -c --arg sha "$SHA" '[.[] | select(.merged_at != null and .merge_commit_sha == $sha and .base.ref == "main")]' 2>/dev/null)" || prs=""
+          [ -n "$prs" ] || lui "không hỏi được PR của $SHA"
+          [ "$(printf '%s' "$prs" | jq 'length')" = "1" ] || lui "không có đúng một PR đã gộp tạo ra $SHA"
+          pr="$(printf '%s' "$prs" | jq -r '.[0].number')"
+          nhanh_pr="$(printf '%s' "$prs" | jq -r '.[0].head.ref')"
+          dau_pr="$(printf '%s' "$prs" | jq -r '.[0].head.sha')"
+          kho_dau="$(printf '%s' "$prs" | jq -r '.[0].head.repo.full_name // empty')"
+          [ -n "$pr" ] && [ "$pr" != "null" ] && [ -n "$nhanh_pr" ] && [ "$nhanh_pr" != "null" ] && [ -n "$dau_pr" ] && [ "$dau_pr" != "null" ] || lui "thiếu số PR, nhánh hoặc đầu nhánh của PR"
+          [ "$kho_dau" = "$REPO" ] || lui "PR #$pr đến từ kho khác (${kho_dau:-vắng})"
+          luot="$(api "actions/workflows/ci.yml/runs?event=pull_request&branch=$nhanh_pr&per_page=100" | jq -r --arg dau "$dau_pr" --arg nhanh "$nhanh_pr" --arg kho "$REPO" '[.workflow_runs[] | select(.event == "pull_request" and .path == ".github/workflows/ci.yml" and .head_sha == $dau and .head_branch == $nhanh and (.head_repository.full_name // "") == $kho and .status == "completed" and .conclusion == "success")] | sort_by(.updated_at) | last | if . == null then empty else "\(.id) \(.run_attempt) \(.html_url)" end' 2>/dev/null)" || luot=""
+          [ -n "$luot" ] || lui "PR #$pr chưa có lượt ci.yml XANH trên đầu nhánh cuối ${dau_pr:0:12} (mọi lần chạy lại đều tính)"
+          luot_id="${luot%% *}"
+          luot_rest="${luot#* }"
+          luot_lan="${luot_rest%% *}"
+          luot_url="${luot_rest#* }"
+          cong="$(api "actions/runs/$luot_id/jobs?filter=latest&per_page=100" | jq -r '[.jobs[] | select(.name == "gates / gates")] | first | .conclusion // empty' 2>/dev/null)" || cong=""
+          [ "$cong" = "success" ] || lui "job «gates / gates» của lượt $luot_id không success (là '${cong:-vắng}')"
+          artifact="$(api "actions/runs/$luot_id/artifacts?per_page=100" | jq -r --arg ten "tested-tree-$luot_lan" '[.artifacts[] | select(.name == $ten and .expired == false)] | first | .id // empty' 2>/dev/null)" || artifact=""
+          [ -n "$artifact" ] || lui "lượt $luot_id (lần $luot_lan) không có artifact tested-tree còn hạn"
+          tmp="$(mktemp -d)"
+          curl -fsSL --max-time 60 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -o "$tmp/a.zip" "https://api.github.com/repos/$REPO/actions/artifacts/$artifact/zip" || lui "không tải được artifact $artifact"
+          ghi="$(unzip -p "$tmp/a.zip" tested-tree.txt 2>/dev/null)" || ghi=""
+          cay_da_kiem="$(printf '%s\n' "$ghi" | sed -n 's/^tree=//p' | head -n1)"
+          commit_da_kiem="$(printf '%s\n' "$ghi" | sed -n 's/^commit=//p' | head -n1)"
+          [ "$(printf '%s\n' "$ghi" | sed -n 's/^run_id=//p' | head -n1)" = "$luot_id" ] || lui "artifact không khai đúng run_id $luot_id"
+          [ "$(printf '%s\n' "$ghi" | sed -n 's/^run_attempt=//p' | head -n1)" = "$luot_lan" ] || lui "artifact không khai đúng lần chạy $luot_lan"
+          [ -n "$cay_da_kiem" ] && [ -n "$commit_da_kiem" ] || lui "artifact thiếu cây hoặc commit"
+          if [ "$cay_da_kiem" != "$cay_trien_khai" ]; then
+            lui "cây đã kiểm $cay_da_kiem khác cây triển khai $cay_trien_khai (main đã nhích giữa lúc PR kiểm và lúc gộp)"
+          fi
+          echo "::notice::dùng lại bằng chứng gates của run $luot_url (lần $luot_lan) cho cây $cay_trien_khai (commit đã kiểm $commit_da_kiem, PR #$pr)"
+          echo "khop=true" >> "$GITHUB_OUTPUT"
+          echo "sha=$commit_da_kiem" >> "$GITHUB_OUTPUT"
+          echo "tree=$cay_da_kiem" >> "$GITHUB_OUTPUT"
+          echo "run_url=$luot_url (cây $cay_da_kiem)" >> "$GITHUB_OUTPUT"
+      - name: Tìm lượt cổng XANH của đúng SHA này trên main (dùng lại thay vì chạy lại)
+        id: tim
+        if: ${{ steps.cay.outputs.khop != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+          FORCE_GATES: ${{ inputs.force_gates && 'true' || 'false' }}
         run: |
           set -uo pipefail
           echo "reuse=false" >> "$GITHUB_OUTPUT"
+          if [ "$FORCE_GATES" = "true" ]; then
+            echo "force_gates bật — không dùng lại bằng chứng nào; chạy cổng."
+            exit 0
+          fi
           if [ "$REF" != "refs/heads/main" ]; then
             echo "Triển khai từ $REF (không phải main) — không có bằng chứng CI của main để dùng lại; chạy cổng."
             exit 0
@@ -173,6 +260,7 @@ jobs:
     outputs:
       image: ${{ steps.build.outputs.image }}
       sha: ${{ steps.build.outputs.sha }}
+      tree: ${{ steps.build.outputs.tree }}
     steps:
       # BẢN ĐƯỢC KIỂM PHẢI LÀ BẢN ĐƯỢC TRIỂN KHAI: ghim thẳng vào SHA thay vì tên nhánh.
       # Nhánh có thể được đẩy tiếp trong lúc workflow đang chạy (hai phiên làm việc song song),
@@ -202,6 +290,7 @@ jobs:
           docker push "$IMAGE_LC"
           echo "image=$IMAGE_LC" >> "$GITHUB_OUTPUT"
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
           echo "Đã đẩy $IMAGE_LC"
 
   # ═══ JOB DUY NHẤT ĐỤNG TỚI MÁY CHỦ — VÀ JOB DUY NHẤT GIỮ KHOÁ ═══
@@ -249,6 +338,9 @@ jobs:
           # xanh mà `bang_chung` tìm được. Cả hai đều phải bằng SHA đang triển khai.
           GATES_SHA: ${{ needs.gates.result == 'success' && needs.gates.outputs.sha || needs.bang_chung.outputs.sha }}
           GATES_FROM: ${{ needs.gates.result == 'success' && 'chạy trong lượt này' || needs.bang_chung.outputs.run_url }}
+          # Đường bằng chứng theo CÂY (squash đổi SHA): cổng được dùng lại khai CÂY, không khai SHA trùng.
+          GATES_TREE: ${{ needs.gates.result != 'success' && needs.bang_chung.outputs.tree || '' }}
+          BUILD_TREE: ${{ needs.build_image.outputs.tree }}
           BUILD_SHA: ${{ needs.build_image.outputs.sha }}
           ERP_IMAGE: ${{ needs.build_image.outputs.image }}
           ERP_DEPLOY_SHA: ${{ github.sha }}
@@ -257,7 +349,14 @@ jobs:
           echo "cổng đã kiểm  : $GATES_SHA ($GATES_FROM)"
           echo "ảnh đã dựng   : $BUILD_SHA  ($ERP_IMAGE)"
           echo "sắp triển khai: $ERP_DEPLOY_SHA"
-          if [ "$GATES_SHA" != "$ERP_DEPLOY_SHA" ]; then
+          if [ -n "$GATES_TREE" ]; then
+            # Bằng chứng theo cây: commit squash KHÁC commit PR đã kiểm, nên so CÂY mã — cây của ảnh
+            # vừa dựng (đọc từ bản checkout của `build_image`) phải bằng cây mà cổng đã ghi lại.
+            echo "cây cổng đã kiểm: $GATES_TREE · cây ảnh đã dựng: $BUILD_TREE"
+            if [ -z "$BUILD_TREE" ] || [ "$GATES_TREE" != "$BUILD_TREE" ]; then
+              echo "::error::Cây cổng đã kiểm ($GATES_TREE) khác cây ảnh đã dựng (${BUILD_TREE:-vắng}) — DỪNG."; exit 1
+            fi
+          elif [ "$GATES_SHA" != "$ERP_DEPLOY_SHA" ]; then
             echo "::error::Cổng kiểm $GATES_SHA nhưng workflow đang triển khai $ERP_DEPLOY_SHA — DỪNG."; exit 1
           fi
           if [ "$BUILD_SHA" != "$ERP_DEPLOY_SHA" ]; then
