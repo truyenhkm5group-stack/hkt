@@ -1589,8 +1589,8 @@ jobs:
                     _dt="/root/backups/status/orgs/erp_org_qa/last-drill.json"
                     _dt_ok="$(find "$_dt" -mtime -14 2>/dev/null | head -1)"
                     _dt_kq="$(grep -o '"result":"[A-Z]*"' "$_dt" 2>/dev/null | head -1)"
-                    echo "[ops:tom-tat] tiền điều kiện: RAM dùng được ${_ram:-?} MB (≥ 700) · ổ trống ${_o:-?} MB (≥ 2048) · bản sao lưu qa ≤ 120 phút: $([ -n "$_ban" ] && echo có || echo KHÔNG) · diễn tập khôi phục qa: ${_dt_kq:-chưa có} $([ -n "$_dt_ok" ] && echo '(≤ 14 ngày)' || echo '(cũ / không có)')"
-                    if [ -z "$_ram" ] || [ "$_ram" -lt 700 ] || [ -z "$_o" ] || [ "$_o" -lt 2048 ] || [ -z "$_ban" ] || [ -z "$_dt_ok" ] || [ "$_dt_kq" != '"result":"OK"' ]; then
+                    echo "[ops:tom-tat] tiền điều kiện: RAM dùng được ${_ram:-?} MB (≥ 350, riêng tạo chỉ mục) · ổ trống ${_o:-?} MB (≥ 2048) · bản sao lưu qa ≤ 120 phút: $([ -n "$_ban" ] && echo có || echo KHÔNG) · diễn tập khôi phục qa: ${_dt_kq:-chưa có} $([ -n "$_dt_ok" ] && echo '(≤ 14 ngày)' || echo '(cũ / không có)')"
+                    if [ -z "$_ram" ] || [ "$_ram" -lt 350 ] || [ -z "$_o" ] || [ "$_o" -lt 2048 ] || [ -z "$_ban" ] || [ -z "$_dt_ok" ] || [ "$_dt_kq" != '"result":"OK"' ]; then
                       echo "::error::org-0245-index-preseed --apply: tiền điều kiện CHƯA đạt — KHÔNG ghi. Chạy restore-drill-org qa / chờ máy rảnh rồi thử lại."
                       exit 1
                     fi ;;
