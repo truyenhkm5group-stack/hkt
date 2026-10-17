@@ -591,7 +591,7 @@ function agentOrderOpts(ctx: ToolContext, state: ChatState, creating: boolean, q
 }
 
 /** Đơn `orderId` được tạo TRƯỚC mốc lượt mua hiện tại (`purchaseRoundStart`) — không có mốc ⇒ `false` (cả hội thoại là một lượt). */
-async function orderBeforeRound(orderId: string, state: Pick<ChatState, "pastOrders" | "roundStartAt">): Promise<boolean> {
+export async function orderBeforeRound(orderId: string, state: Pick<ChatState, "pastOrders" | "roundStartAt">): Promise<boolean> {
   const start = purchaseRoundStart(state);
   if (!start) return false;
   const db = await getDb();
@@ -1212,7 +1212,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         // Lõi đơn trả lại một đơn ĐÃ CÓ theo khoá (`reused`) mà đơn ấy tạo TRƯỚC lượt mua này ⇒ đó là đơn của lượt mua cũ: KHÔNG báo
         // «đã lên đơn» (review #886 — đúng triệu chứng 42f28794: khách thấy 1,5 kg, CSDL vẫn là đơn 1 kg cũ). Đơn mới của lượt này không bị chặn.
         if (!draft.orderId && "reused" in r && r.reused && (await orderBeforeRound(r.id, state))) {
-          return err("Đơn nháp: lỗi", "Khoá đơn trỏ tới ĐƠN CỦA LƯỢT MUA TRƯỚC — không dùng lại đơn cũ cho lượt mua này; chuyển nhân viên kiểm.", state);
+          return { ...err("Đơn nháp: lỗi", "Khoá đơn trỏ tới ĐƠN CỦA LƯỢT MUA TRƯỚC — không dùng lại đơn cũ cho lượt mua này; chuyển nhân viên kiểm.", state), requireHuman: "Khoá đơn trỏ tới đơn của lượt mua trước — người kiểm, không dùng lại đơn cũ" };
         }
         markOrderWritten(ctx.writeMark, r.id);
         draft.orderId = r.id;

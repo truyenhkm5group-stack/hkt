@@ -420,6 +420,11 @@ class SeqConflict extends Error {}
  */
 async function writeConversation(conversationId: string, patch: Partial<typeof schema.salesChatConversations.$inferInsert>, startedAt: Date): Promise<void> {
   const db = await getDb();
+  await db.update(schema.salesChatConversations).set(conversationSet(patch, startedAt)).where(eq(schema.salesChatConversations.id, conversationId));
+}
+
+/** Phần `set` của `writeConversation` — để một giao dịch (`carryCommentTurn`) ghi trạng thái bằng ĐÚNG luật đó, cùng giao dịch với tin chép. */
+function conversationSet(patch: Partial<typeof schema.salesChatConversations.$inferInsert>, startedAt: Date) {
   const cv = schema.salesChatConversations;
   const { state, ...rest } = patch;
   const ourCart = state ? ((state as ChatState).cart ?? null) : null;
@@ -427,7 +432,17 @@ async function writeConversation(conversationId: string, patch: Partial<typeof s
   // Mốc của bản trong CSDL = muộn hơn trong mốc giỏ và `cartRev` (ghi cả khi giỏ bị xoá) — giỏ đã XOÁ bởi lượt mới hơn cũng không bị dựng lại.
   const newerInDb = sql`greatest(coalesce(${cv.state}->'cart'->>'at', ''), coalesce(${cv.state}->>'cartRev', '')) > ${startedAt.toISOString()}`;
   const stateSql = state ? sql`${JSON.stringify({ ...state, orderSync: undefined, control: undefined, cart: undefined, cartRev: undefined })}::jsonb || jsonb_strip_nulls(jsonb_build_object('orderSync', ${cv.state}->'orderSync', 'control', ${cv.state}->'control', 'cart', CASE WHEN ${newerInDb} THEN ${cv.state}->'cart' ELSE ${JSON.stringify(ourCart)}::jsonb END, 'cartRev', CASE WHEN ${newerInDb} THEN ${cv.state}->'cartRev' ELSE ${JSON.stringify(ourRev)}::jsonb END))` : undefined;
-  await db.update(cv).set({ ...rest, ...(stateSql ? { state: stateSql } : {}), updatedAt: new Date() }).where(eq(cv.id, conversationId));
+  return { ...rest, ...(stateSql ? { state: stateSql } : {}), updatedAt: new Date() };
+}
+
+/**
+ * Lượt mua bị cắt mà còn ĐƠN NHÁP bot đã ghi (chưa chốt) ⇒ đơn đó nằm lại ở «Mới» cạnh đơn của lượt mới ⇒ cờ ROUND_ABANDONED (giữ khỏi vận
+ * đơn, người chọn đơn khách muốn) — không bao giờ để nhân viên thấy hai đơn «Mới» mà giao cả hai (review #886). Lỗi không chặn lượt.
+ */
+async function flagAbandonedDraft(st: ChatState, now: Date): Promise<void> {
+  const orderId = st.draft?.orderId;
+  if (!orderId || st.confirmed) return;
+  await flagOrderForReviewAsAgent(SALES_AGENT, orderId, { code: "ROUND_ABANDONED", note: "Khách quay lại sau thời gian dài / bình luận mua lại — bot mở lượt mua MỚI; nháp này thuộc lượt cũ", quote: null }, now).catch(() => undefined);
 }
 
 async function appendMessage(conversationId: string, seq: number, role: "user" | "assistant", content: AiBlock[]) {
@@ -1035,6 +1050,7 @@ async function chatTurnCore(
     if (!st0.confirmed) {
       const prevAt = lastCustomerTextAt(msgs);
       if (prevAt && now.getTime() - prevAt.getTime() > NEW_ROUND_GAP_MS) {
+        if (opts.channel !== "TEST") await flagAbandonedDraft(st0, now);
         const fresh = freshPurchaseRound(st0, conv.turns, now, new Date(now.getTime() - 1));
         await bump({ state: fresh as Record<string, unknown> });
         conv.state = fresh as Record<string, unknown>;
@@ -1883,19 +1899,36 @@ export async function carryCommentTurn(fromConversationId: string, toConversatio
   const fm = await loadMessages(fromConversationId);
   const lastUser = [...fm].reverse().find((m) => m.role === "user" && textOf(m.content).trim() && !m.content.some((b) => b.type === "tool_result"));
   if (!lastUser) return false;
-  const nhan = `[Khách bình luận trên bài viết lúc ${lastUser.at.toISOString()}]`;
+  const nhan = (at: Date) => `[Khách bình luận trên bài viết lúc ${at.toISOString()}]`;
+  // MỌI tin khách liền nhau của lượt bình luận («Cho 1,5kg» + «gửi đc cũ» tách hai tin — review #886), không chỉ tin cuối.
+  const iCuoi = fm.indexOf(lastUser);
+  let iDau = iCuoi;
+  while (iDau > 0 && fm[iDau - 1].role === "user" && !fm[iDau - 1].content.some((b) => b.type === "tool_result")) iDau--;
   const luot = fm
-    .filter((m) => m.seq >= lastUser.seq && (m.role === "user" ? m.seq === lastUser.seq : opts.botReplySent) && !m.content.some((b) => b.type === "tool_result" || b.type === "tool_use"))
-    .map((m) => ({ role: m.role, text: m.role === "user" ? `${nhan} ${textOf(m.content).trim()}` : textOf(m.content).trim() }))
-    .filter((m) => m.text);
+    .slice(iDau)
+    .filter((m) => (m.role === "user" ? m.seq <= lastUser.seq : opts.botReplySent) && !m.content.some((b) => b.type === "tool_result" || b.type === "tool_use"))
+    .map((m) => ({ role: m.role, text: m.role === "user" ? `${nhan(m.at)} ${textOf(m.content).trim()}` : textOf(m.content).trim() }))
+    .filter((m) => m.text && !/^\[[^\]]+\]\s*$/.test(m.text));
   const db = await getDb();
+  const ts = (to.state ?? {}) as ChatState;
+  const confirmedAt = ts.confirmed ? Date.parse(ts.confirmed.at) : NaN;
+  const dangChot = Number.isFinite(confirmedAt) && now.getTime() - confirmedAt < POST_ORDER_HANDOFF_MS;
   let tm = await loadMessages(toConversationId);
+  let catLuot = false;
   for (let lan = 0; ; lan++) {
-    if (tm.some((m) => m.role === "user" && textOf(m.content).startsWith(nhan))) return false;
+    if (tm.some((m) => m.role === "user" && textOf(m.content).startsWith(nhan(lastUser.at)))) return false;
     const base = tm[tm.length - 1]?.seq ?? 0;
+    const truocDo = lastCustomerTextAt(tm);
+    const imLau = !truocDo || now.getTime() - truocDo.getTime() > NEW_ROUND_GAP_MS;
+    catLuot = imLau && !dangChot && to.status !== "HANDOFF";
+    // Mốc lượt mua mới đặt TRƯỚC các tin vừa chép (chúng mang mốc ghi lúc này) để `customerTextsSince` đọc được lời mua của bình luận.
+    const fs = (from.state ?? {}) as ChatState;
+    const next = catLuot ? { ...freshPurchaseRound(ts, to.turns, now, new Date(now.getTime() - 1000)), ...(fs.cart?.selectedItems?.length ? { cart: fs.cart } : {}) } : null;
     try {
+      // Tin chép + trạng thái trong MỘT giao dịch (review #886): đụng seq ⇒ cả khối huỷ, thử lại với seq mới — không chép dở, không ghi nửa.
       await db.transaction(async (tx) => {
         await tx.insert(schema.salesChatMessages).values(luot.map((m, i) => ({ conversationId: toConversationId, seq: base + 1 + i, role: m.role, content: [{ type: "text" as const, text: m.text }] })));
+        if (next) await tx.update(schema.salesChatConversations).set(conversationSet({ state: next as Record<string, unknown> }, now)).where(eq(schema.salesChatConversations.id, toConversationId));
       });
       break;
     } catch (e) {
@@ -1903,17 +1936,7 @@ export async function carryCommentTurn(fromConversationId: string, toConversatio
       tm = await loadMessages(toConversationId);
     }
   }
-  const ts = (to.state ?? {}) as ChatState;
-  const confirmedAt = ts.confirmed ? Date.parse(ts.confirmed.at) : NaN;
-  const dangChot = Number.isFinite(confirmedAt) && now.getTime() - confirmedAt < POST_ORDER_HANDOFF_MS;
-  const truocDo = lastCustomerTextAt(tm);
-  const imLau = !truocDo || now.getTime() - truocDo.getTime() > NEW_ROUND_GAP_MS;
-  if (imLau && !dangChot && to.status !== "HANDOFF") {
-    // Mốc lượt mua mới đặt TRƯỚC các tin vừa chép (chúng mang mốc ghi lúc này) để `customerTextsSince` đọc được lời mua của bình luận.
-    const fs = (from.state ?? {}) as ChatState;
-    const next = { ...freshPurchaseRound(ts, to.turns, now, new Date(now.getTime() - 1000)), ...(fs.cart?.selectedItems?.length ? { cart: fs.cart } : {}) };
-    await writeConversation(toConversationId, { state: next as Record<string, unknown> }, now);
-  }
+  if (catLuot) await flagAbandonedDraft(ts, now);
   return true;
 }
 

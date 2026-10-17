@@ -17,7 +17,7 @@ import { customerTextsSince } from "@/lib/sales-chatbot/cart-commitment";
 import { carryCommentTurn, freshPurchaseRound, lastCustomerTextAt, NEW_ROUND_GAP_MS, openConversation, purchaseRoundStart } from "@/lib/sales-chatbot/engine";
 import { fanpageBotSendersForTests, fanpageVisitorKey } from "@/lib/sales-chatbot/fanpage";
 import { setPageRuntimeReaderForTests } from "@/lib/sales-chatbot/page-runtime";
-import { orderIdempotencyKey } from "@/lib/sales-chatbot/tools";
+import { orderBeforeRound, orderIdempotencyKey } from "@/lib/sales-chatbot/tools";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { runGoldenCases, say, type GoldenCase } from "./sales-agent-golden/harness";
 
@@ -133,6 +133,25 @@ async function testChepBinhLuan() {
   assert.equal(((r4.state ?? {}) as ChatState).roundStartAt, undefined, "người đang giữ ⇒ không cắt lượt mua");
   assert.ok(((r4.state ?? {}) as Record<string, unknown>).handoff, "không xoá dấu chuyển người");
   assert.ok((await tinCua(nguoi)).some((x) => /Cho 1,5 kg gửi đc cũ/.test(x.text)), "nhân viên vẫn thấy lời mua của bình luận trong hộp thư");
+
+  // (review #886 · 4) Bình luận tách HAI tin («Cho 1,5kg» rồi «gửi đc cũ») ⇒ chép CẢ HAI, không chỉ tin cuối.
+  const hai = await moi("inbox-hai-tin");
+  const bl5 = await moi("comment-5");
+  await db.insert(m).values([
+    { conversationId: bl5, seq: 2, role: "user", content: [{ type: "text", text: "Cho 1,5kg" }] },
+    { conversationId: bl5, seq: 3, role: "user", content: [{ type: "text", text: "gửi đc cũ" }] },
+    { conversationId: bl5, seq: 4, role: "assistant", content: [{ type: "text", text: "Dạ em nhắn riêng ạ" }] },
+  ]);
+  assert.equal(await carryCommentTurn(bl5, hai, now, { botReplySent: false }), true);
+  const tin5 = (await tinCua(hai)).filter((x) => x.role === "user").map((x) => x.text);
+  assert.ok(tin5.some((x) => /Cho 1,5kg/.test(x)) && tin5.some((x) => /gửi đc cũ/.test(x)), `cả hai tin của bình luận sang: ${JSON.stringify(tin5)}`);
+
+  // (review #886 · 2) Đơn tạo TRƯỚC mốc lượt mua hiện tại = đơn của lượt CŨ ⇒ save_order không được dùng lại (và chuyển người).
+  const maDon = `p0rb-don-${now.getTime()}`;
+  await db.insert(schema.orders).values({ id: maDon, insertedAt: new Date(now.getTime() - 30 * NGAY) });
+  assert.equal(await orderBeforeRound(maDon, { roundStartAt: new Date(now.getTime() - NGAY).toISOString() }), true, "đơn 30 ngày trước, lượt mua mở hôm qua ⇒ đơn lượt cũ");
+  assert.equal(await orderBeforeRound(maDon, { roundStartAt: new Date(now.getTime() - 40 * NGAY).toISOString() }), false, "đơn thuộc lượt hiện tại ⇒ dùng lại được (gọi lại)");
+  assert.equal(await orderBeforeRound(maDon, {}), false, "không có mốc lượt mua ⇒ không chặn");
   console.log("  ✓ bình luận mua lại của khách cũ: chép sang hộp thư cũ, lượt mua mới từ lúc bình luận, giỏ 1,5 kg đi theo · chạy lại không chép hai lần · đơn đang chốt / lượt mua đang chạy / người đang giữ không bị cắt · ALREADY không chép câu bot chưa gửi");
 }
 
@@ -171,7 +190,29 @@ async function testDuongThat() {
   assert.ok(!tin.some((x) => x.text === "Dạ em nhắn riêng ạ"), "ALREADY ⇒ không chép câu bot chưa gửi");
   const [row] = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, hopThu));
   assert.ok(((row.state ?? {}) as ChatState).roundStartAt, "hộp thư im 5 tháng ⇒ lượt mua mới");
-  console.log("  ✓ đường thật: deliverCommentReply (ALREADY) → carryIntoInbox → hộp thư cũ theo visitorKey");
+
+  // Ca THẬT 42f28794 (17/10): Meta / Pancake nhắn riêng TRƯỚC, hộp thư CHƯA có hội thoại ⇒ mở hội thoại hộp thư, lời mua đi vào đó.
+  const INBOX2 = `p0rb-inbox2-${now.getTime()}`;
+  const binhLuan2 = (await openConversation("FANPAGE", { visitorKey: `p0rb-cmt2-${now.getTime()}` })).id;
+  await db.insert(schema.salesChatMessages).values([
+    { conversationId: binhLuan2, seq: 2, role: "user", content: [{ type: "text", text: "Cho 1,5 kg gửi đc cũ" }] },
+    { conversationId: binhLuan2, seq: 3, role: "assistant", content: [{ type: "text", text: "Dạ em nhắn riêng chị ạ" }] },
+  ]);
+  const fetchGia2 = (async (url: string | URL) => {
+    if (/[/]messages[?]/.test(String(url))) return new Response(JSON.stringify({ messages: [{ id: "cmt-p0rb-2", private_reply_conversation: INBOX2 }] }), { status: 200 });
+    return new Response(JSON.stringify({ success: false }), { status: 500 });
+  }) as typeof fetch;
+  setPageRuntimeReaderForTests(async () => ({ [PAGE]: { mode: "LIVE" } }));
+  const r2 = await fanpageBotSendersForTests.deliverCommentReply({ pageId: PAGE, threadId: "cmt-thread-2", commentId: "cmt-p0rb-2", postId: "post-1", fromId: "cust-2", text: "Dạ em nhắn riêng chị ạ", imageIds: [], conversationId: binhLuan2 }, { fetch: fetchGia2, now: () => now }).finally(() => setPageRuntimeReaderForTests(null));
+  assert.equal(r2.kind, "ALREADY", JSON.stringify(r2));
+  const [moi2] = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.visitorKey, fanpageVisitorKey(PAGE, INBOX2)));
+  assert.ok(moi2, "hộp thư chưa có hội thoại ⇒ mở hội thoại hộp thư");
+  assert.notEqual(moi2.id, binhLuan2, "không chuyển hội thoại bình luận (mang câu bot chưa gửi) sang");
+  assert.equal(moi2.pageId, PAGE, "mở bằng đúng đường fanpage (page + luồng cho follow-up)");
+  const tin2 = await tinCua(moi2.id);
+  assert.ok(tin2.some((x) => x.role === "user" && /Cho 1,5 kg gửi đc cũ/.test(x.text)), "lời mua của bình luận có trong hội thoại hộp thư khi khách nhắn tới");
+  assert.ok(!tin2.some((x) => x.text === "Dạ em nhắn riêng chị ạ"), "không chép câu bot chưa gửi");
+  console.log("  ✓ đường thật: deliverCommentReply (ALREADY) → carryIntoInbox → hộp thư cũ theo visitorKey · hộp thư CHƯA có hội thoại ⇒ mở rồi chép (ca thật 42f28794)");
 }
 
 const CASES: GoldenCase[] = [

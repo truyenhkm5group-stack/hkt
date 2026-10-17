@@ -1017,12 +1017,19 @@ async function privateReplyInbox(pageId: string, threadId: string, commentId: st
  * lùi về trả lời công khai. (4) Gửi xong: tìm hộp thư vừa mở ⇒ ghi dấu ở hộp thư đó (khách nhắn tiếp được trả lời nhanh, tiếng
  * vọng không bị coi là nhân viên), chuyển hội thoại sang hộp thư ấy (giữ mạch), gửi ảnh của câu mẫu vào đó.
  */
-/** Hội thoại hộp thư ĐÃ CÓ của khách (khác hội thoại bình luận) ⇒ chép lượt bình luận sang (`carryCommentTurn`). Lỗi không làm hỏng lượt trả lời. */
+/**
+ * Lời mua trong bình luận đi tiếp ở HỘP THƯ (`carryCommentTurn`). Bot đã nhắn riêng (`botReplySent`) ⇒ hội thoại bình luận đã được chuyển
+ * sang hộp thư nếu hộp thư chưa có hội thoại; ở đây chỉ còn ca hộp thư ĐÃ CÓ. Pancake tự động / nhân viên nhắn riêng trước (ALREADY) ⇒ hộp
+ * thư thường CHƯA có hội thoại (ca thật 42f28794, 17/10: hội thoại hộp thư mở 50 giây SAU tin riêng của Meta) ⇒ mở nó bằng ĐÚNG đường mở hội
+ * thoại fanpage (`conversationFor`) rồi chép tin khách — không chuyển hội thoại bình luận sang, vì nó mang câu bot soạn mà không gửi. Lỗi
+ * không làm hỏng lượt trả lời.
+ */
 async function carryIntoInbox(pageId: string, inboxId: string, commentConversationId: string, now: Date, botReplySent: boolean): Promise<void> {
   try {
     const db = await getDb();
     const c = schema.salesChatConversations;
-    const [inbox] = await db.select({ id: c.id }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(pageId, inboxId)))).limit(1);
+    const [found] = await db.select({ id: c.id }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(pageId, inboxId)))).limit(1);
+    const inbox = found ?? (botReplySent ? null : await conversationFor(pageId, inboxId));
     if (inbox && inbox.id !== commentConversationId) await carryCommentTurn(commentConversationId, inbox.id, now, { botReplySent });
   } catch (e) {
     // Chỉ tên lỗi: thông điệp lỗi Drizzle mang cả tham số câu SQL (chữ khách) — không đưa vào log.
