@@ -3,6 +3,7 @@ import { drizzle as drizzlePg, type NodePgDatabase } from "drizzle-orm/node-post
 import { Pool } from "pg";
 import { probeActive, recordQuery } from "@/lib/perf/probe";
 import { currentOrganization } from "@/lib/platform/context";
+import { findOrganization, mayOpenOrganizationDb } from "@/lib/platform/organizations";
 import * as schema from "./schema";
 
 export type Db = NodePgDatabase<typeof schema>;
@@ -221,9 +222,35 @@ export async function getPlatformDb(): Promise<Db> {
   return getHomeDb();
 }
 
-/** CSDL của một tổ chức chỉ định TƯỜNG MINH — chỉ dùng trong `lib/platform/*` (cấp tổ chức, health). */
-export async function getDbFor(org: { code: string; isHome: boolean }): Promise<Db> {
-  return org.isHome ? getHomeDb() : getOrgDb(org.code);
+/**
+ * Tổ chức LƯU TRỮ (`ARCHIVED`) bị từ chối mở CSDL bằng đường của ứng dụng — mở = MIGRATE, mà tổ chức lưu trữ không tham gia
+ * migration (docs/tenant-lifecycle.md). Bên gọi (trang /platform, hỗ trợ, đo dùng) bắt lỗi này như mọi lỗi "không mở được" và in
+ * "chưa đo" — không bao giờ 0.
+ */
+export class OrganizationArchivedError extends Error {
+  readonly code = "ORG_ARCHIVED";
+  constructor(readonly orgCode: string) {
+    super(`Tổ chức «${orgCode}» đang LƯU TRỮ — không mở CSDL (mở = migrate). Kích hoạt lại qua ops org-lifecycle nếu cần.`);
+    this.name = "OrganizationArchivedError";
+  }
+}
+
+/**
+ * CSDL của một tổ chức chỉ định TƯỜNG MINH — chỉ dùng trong `lib/platform/*` (cấp tổ chức, health).
+ *
+ * ─── TỔ CHỨC LƯU TRỮ KHÔNG ĐƯỢC MỞ (= MIGRATE) Ở ĐÂY ───
+ * Hỏi sổ tổ chức (đệm 10 giây) TRƯỚC khi mở: `ARCHIVED` ⇒ ném `OrganizationArchivedError`, kể cả khi tiến trình đang giữ sẵn handle.
+ * Tổ chức không có trong sổ đi tiếp như cũ (bài kiểm dựng CSDL thử không qua sổ). Cờ `reactivation` là lối DUY NHẤT vượt qua —
+ * chỉ `lib/platform/org-lifecycle.ts` truyền nó (tests/org-lifecycle.test.ts quét mã nguồn), để migrate + đối chiếu sổ migration
+ * TRƯỚC khi đổi trạng thái về ACTIVE.
+ */
+export async function getDbFor(org: { code: string; isHome: boolean }, opts: { reactivation?: true } = {}): Promise<Db> {
+  if (org.isHome) return getHomeDb();
+  if (!opts.reactivation) {
+    const registered = await findOrganization(org.code);
+    if (registered && !mayOpenOrganizationDb(registered)) throw new OrganizationArchivedError(org.code);
+  }
+  return getOrgDb(org.code);
 }
 
 /**

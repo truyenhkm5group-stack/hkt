@@ -13,8 +13,8 @@
  * Không in khoá: màn hình chỉ biết khoá "có / không"; câu lỗi của nhà cung cấp đã che khoá trước khi lưu.
  */
 import { and, desc, eq, gte, inArray, ne, sql, type SQL } from "drizzle-orm";
-import { getDbFor, getPlatformDb, schema } from "@/db";
-import { findOrganization } from "@/lib/platform/organizations";
+import { getPlatformDb, schema } from "@/db";
+import { findOrganization, organizationDbForReport } from "@/lib/platform/organizations";
 import type { SessionUser } from "@/lib/auth/session";
 import { giaCuaModel } from "@/lib/ai/provider";
 import { defaultEnvReader, platformAiConfig, type EnvReader, type PlatformAiProviderName } from "@/lib/ai-usage/platform-ai";
@@ -382,7 +382,7 @@ async function readRoutingByModel(from: Date, wlExpr: SQL<string>): Promise<{ ro
     try {
       const org = await findOrganization(orgCode);
       if (!org) throw new Error("không tìm thấy tổ chức");
-      const db = await getDbFor(org);
+      const db = await organizationDbForReport(org);
       const o = schema.orders;
       const rows = await db
         .select({ conv: o.salesConversationId, n: sql<number>`count(*)::int` })

@@ -4,7 +4,7 @@ import { sql } from "drizzle-orm";
 import { getDbFor, getDbForInspection, organizationMigrationDegraded, type Db } from "@/db";
 import { PLATFORM_MODULES, moduleDependencyErrors, type ModuleDependencyError } from "@/lib/constants/platform-modules";
 import { getModuleRows } from "@/lib/platform/capabilities";
-import { FALLBACK_HOME_CODE, listOrganizations } from "@/lib/platform/organizations";
+import { FALLBACK_HOME_CODE, listOrganizations, mayOpenOrganizationDb } from "@/lib/platform/organizations";
 import type { Organization } from "@/lib/platform/types";
 import { buildModuleView } from "@/lib/queries/platform-modules";
 import { countStaleRunsOn, STALE_RUN_KIND_LABEL, STALE_RUN_KINDS } from "@/lib/workflow/stale";
@@ -170,6 +170,16 @@ async function checkOrganization(org: Organization, expected: number | null, mod
   };
   for (const e of health.dependencyErrors) health.problems.push(e.message);
   if (health.unknownModuleKeys.length) health.problems.push(`Dòng module mang khoá không có trong sổ: ${health.unknownModuleKeys.join(", ")} (bộ phân giải bỏ qua).`);
+
+  // Tổ chức LƯU TRỮ: không mở bằng đường của ứng dụng (mở = migrate — nó không tham gia migration). Không phải "vấn đề" của bảng:
+  // nó được liệt kê với trạng thái ARCHIVED, số đo để `null` kèm lý do (luật 42). Chế độ CHỈ ĐỌC (ops) vẫn đo được — không migrate.
+  if (mode === "APP" && !mayOpenOrganizationDb(org)) {
+    const why = "Tổ chức LƯU TRỮ — không mở CSDL (mở = migrate; tổ chức lưu trữ không tham gia migration). Kích hoạt lại qua ops org-lifecycle.";
+    health.connectNote = why;
+    health.migrationsNote = "Không đo — tổ chức lưu trữ.";
+    health.platformTablesNote = "Không đo — tổ chức lưu trữ.";
+    return health;
+  }
 
   let db: Db;
   try {

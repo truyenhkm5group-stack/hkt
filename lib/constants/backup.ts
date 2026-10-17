@@ -375,3 +375,24 @@ export function formatBackupSize(bytes: number | null): string {
   const mb = bytes / (1024 * 1024);
   return mb >= 1024 ? `${(mb / 1024).toFixed(1).replace(".", ",")} GB` : `${mb.toFixed(1).replace(".", ",")} MB`;
 }
+
+/**
+ * Hàm THUẦN: tách dòng tổng hợp CSDL tổ chức khác theo trạng thái VẬN HÀNH của tổ chức sở hữu (docs/tenant-lifecycle.md).
+ *
+ * Tổ chức LƯU TRỮ vẫn được sao lưu mỗi đêm / mỗi giờ (scripts/erp-backup.sh không xét trạng thái — dữ liệu lưu trữ phải có bản sao
+ * mới), nên nó vẫn được LIỆT KÊ; nhưng một bản hỏng của nó không phải "khách đang chạy bị hỏng sao lưu" — gộp vào một danh sách là
+ * làm người vận hành chạy đi sửa nhầm thứ tự. CSDL không khớp tổ chức nào trong sổ ⇒ coi như đang chạy (chưa biết thì không giấu).
+ */
+export function splitOrgBackupRowsByStatus(
+  summary: Pick<OrgBackupSummary, "organizations">,
+  ownerByDatabase: ReadonlyMap<string, { code: string; status: string }>,
+): { failingLive: string[]; archived: { database: string; code: string; result: BackupRunResult }[] } {
+  const failingLive: string[] = [];
+  const archived: { database: string; code: string; result: BackupRunResult }[] = [];
+  for (const row of summary.organizations) {
+    const owner = ownerByDatabase.get(row.database);
+    if (owner?.status === "ARCHIVED") archived.push({ database: row.database, code: owner.code, result: row.result });
+    else if (row.result !== "OK") failingLive.push(row.database);
+  }
+  return { failingLive, archived };
+}

@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
 import { secretsKeyState, type SecretsKeyState } from "@/lib/connectors/secrets";
-import { findOrganization, getHomeOrganization } from "@/lib/platform/organizations";
+import { findOrganization, getHomeOrganization, isOperationalOrganization } from "@/lib/platform/organizations";
 import { homeSalesRuntimeEnabled } from "@/lib/platform/home-sales-runtime";
 
 /**
@@ -118,7 +118,7 @@ export async function resolveUrlSecretOrganization(provider: WebhookProvider, to
   });
   if (!ok) return null;
   const org = await findOrganization(orgCode);
-  if (!org || org.status !== "ACTIVE") return null;
+  if (!org || !isOperationalOrganization(org)) return null;
   if (org.isHome) return HOME_SALES_URL_SECRET_PROVIDERS.includes(provider) && (await homeSalesRuntimeEnabled(org)) ? org.code : null;
   return org.code;
 }
@@ -134,7 +134,7 @@ export async function resolvePageOrganization(pageId: string): Promise<string | 
     const [row] = await pdb.select({ orgCode: schema.platformMessengerPages.orgCode }).from(schema.platformMessengerPages).where(eq(schema.platformMessengerPages.pageId, pageId)).limit(1);
     if (!row) return null;
     const org = await findOrganization(row.orgCode);
-    return org && org.status === "ACTIVE" ? org.code : null;
+    return org && isOperationalOrganization(org) ? org.code : null;
   } catch {
     return null;
   }

@@ -1,8 +1,8 @@
 import { DescriptionList, SectionCard } from "@/components/ui-bits";
-import { BACKUP_DRILL_MAX_AGE_DAYS, BACKUP_MAX_AGE_HOURS, ORG_BACKUP_RPO_ALERT_HOURS, formatBackupSize, type BackupRunRecord } from "@/lib/constants/backup";
+import { BACKUP_DRILL_MAX_AGE_DAYS, BACKUP_MAX_AGE_HOURS, ORG_BACKUP_RPO_ALERT_HOURS, formatBackupSize, splitOrgBackupRowsByStatus, type BackupRunRecord } from "@/lib/constants/backup";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
 import { HEALTH_LABEL, HEALTH_TONE } from "@/lib/queries/integration-health";
-import { getBackupHealth } from "@/lib/queries/backup-status";
+import { getBackupHealth, organizationOwnersByDatabase } from "@/lib/queries/backup-status";
 import { cn } from "@/lib/utils";
 
 const NHAN_KET_QUA: Record<BackupRunRecord["result"], string> = { OK: "đạt", PARTIAL: "một phần", FAILED: "THẤT BẠI" };
@@ -30,7 +30,9 @@ export async function BackupStatusCard() {
   // Tổ chức khác nhà: thẻ nói về CSDL CỦA CHÍNH NÓ (erp_org_…), không bao giờ về bản của nhà.
   const toChuc = b.target.scope === "ORGANIZATION" ? b.target.database : null;
   const o = b.organizations;
-  const hongToChuc = o ? o.organizations.filter((x) => x.result !== "OK") : [];
+  // Tổ chức LƯU TRỮ vẫn được sao lưu và vẫn liệt kê, nhưng tách khỏi danh sách "HỎNG" của khách đang chạy (docs/tenant-lifecycle.md).
+  const tach = o ? splitOrgBackupRowsByStatus(o, await organizationOwnersByDatabase()) : { failingLive: [], archived: [] };
+  const hongToChuc = tach.failingLive;
   return (
     <SectionCard
       id="sao-luu"
@@ -93,8 +95,8 @@ export async function BackupStatusCard() {
                 {
                   label: "CSDL tổ chức khác (lượt gần nhất)",
                   value: `${formatDateTime(o.finishedAt)} · ${o.organizations.length} CSDL · ${
-                    hongToChuc.length ? `HỎNG: ${hongToChuc.map((x) => x.database).join(", ")}` : "không CSDL nào hỏng"
-                  }${o.listError ? " · KHÔNG liệt kê được CSDL tổ chức" : ""}${o.missingDatabases.length ? ` · không sao lưu được: ${o.missingDatabases.join(", ")}` : ""}`,
+                    hongToChuc.length ? `HỎNG (tổ chức đang chạy): ${hongToChuc.join(", ")}` : "không CSDL nào của tổ chức đang chạy hỏng"
+                  }${tach.archived.length ? ` · LƯU TRỮ (vẫn sao lưu): ${tach.archived.map((x) => `${x.code} ${NHAN_KET_QUA[x.result]}`).join(", ")}` : ""}${o.listError ? " · KHÔNG liệt kê được CSDL tổ chức" : ""}${o.missingDatabases.length ? ` · không sao lưu được: ${o.missingDatabases.join(", ")}` : ""}`,
                 },
               ]
             : []),

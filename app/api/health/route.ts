@@ -4,7 +4,7 @@ import { degradedOrganizations, getDb, getPlatformDb } from "@/db";
 import { secretsKeyHealth } from "@/lib/connectors/secrets";
 import { HOME_EXPECTED_MODULES, MODULE_KEYS } from "@/lib/constants/platform-modules";
 import { getEnabledModules } from "@/lib/platform/capabilities";
-import { getHomeOrganization, FALLBACK_HOME_CODE } from "@/lib/platform/organizations";
+import { getHomeOrganization, FALLBACK_HOME_CODE, isOperationalOrganization, listOrganizations } from "@/lib/platform/organizations";
 import { redactedErrorMessage, runningVersion } from "@/lib/version";
 
 export const dynamic = "force-dynamic";
@@ -67,10 +67,22 @@ async function platformHealth() {
       homeResolved: home.isHome && home.status === "ACTIVE",
       homeModules: `${enabled.size}/${MODULE_KEYS.length}`,
       migrations: rows?.[0]?.n ?? null,
-      degradedMigration: degradedOrganizations().length > 0,
+      // Chỉ tổ chức ĐANG HOẠT ĐỘNG (hoặc không còn trong sổ — chưa biết thì vẫn báo): tổ chức vừa LƯU TRỮ / đình chỉ trong lúc tiến
+      // trình còn giữ cờ degraded của nó không được giữ cờ này bật tới lần khởi động sau.
+      degradedMigration: await anyOperationalDegraded(),
       ...secretsKeyHealth(),
     };
   } catch (error) {
     return { ok: false, error: redactedErrorMessage(error), ...secretsKeyHealth() };
   }
+}
+
+async function anyOperationalDegraded(): Promise<boolean> {
+  const degraded = degradedOrganizations();
+  if (!degraded.length) return false;
+  const orgs = await listOrganizations();
+  return degraded.some((d) => {
+    const org = orgs.find((o) => o.code === d.code);
+    return !org || isOperationalOrganization(org);
+  });
 }

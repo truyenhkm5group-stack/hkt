@@ -51,7 +51,7 @@ import { reconcileCareCoverage } from "@/lib/care/lifecycle";
 import { relinkUnmatchedStatementLines } from "@/lib/integrations/viettelpost/statement-db";
 import { getDb } from "@/db";
 import { currentOrganization, withOrganization } from "@/lib/platform/context";
-import { findOrganization } from "@/lib/platform/organizations";
+import { findOrganization, isOperationalOrganization } from "@/lib/platform/organizations";
 import { orgBillingStanding } from "@/lib/billing/standing";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { homeSalesRuntimeEnabled } from "@/lib/platform/home-sales-runtime";
@@ -1242,7 +1242,7 @@ export async function runJob(job: string, options: JobOptions) {
     giống lỗi hạ tầng. Tổ chức không có trong sổ vẫn đi tiếp để `withOrganization` ném ORG_UNKNOWN như trước.
   */
   const target = await findOrganization(orgCode);
-  if (target && target.status !== "ACTIVE") {
+  if (target && !isOperationalOrganization(target)) {
     const skipped: JobSkipped = { skipped: "ORG_INACTIVE", job, org: orgCode, status: target.status, detail: `Bỏ qua: tổ chức "${orgCode}" đang ${target.status} — không chạy job cho tới khi người vận hành bật lại.` };
     return skipped;
   }

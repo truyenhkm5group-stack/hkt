@@ -25,7 +25,9 @@
  * tiên của MỖI khách gánh cả lượt migrate, và một tổ chức migrate hỏng chỉ lộ ra khi khách chạm vào. Nên sau khi kiểm CSDL
  * nhà, script MỞ lần lượt CSDL của mọi tổ chức khách đang `ACTIVE` (mở = migrate, có khoá tư vấn theo CSDL — chạy cùng lúc
  * với ứng dụng vẫn an toàn) rồi đối chiếu sổ như với nhà. Tổ chức nào hỏng ⇒ in tên + lý do và mã thoát 1: người vận hành
- * thấy ở bước deploy, trước khách. Tổ chức đình chỉ / lưu trữ không mở (không ai dùng, không ai cần chờ).
+ * thấy ở bước deploy, trước khách. Tổ chức đình chỉ / lưu trữ không mở (không ai dùng, không ai cần chờ) — tập tổ chức là
+ * `fanOutOrganizationCodes` (vị ngữ `isOperationalOrganization`), KHÔNG một danh sách bỏ qua riêng: tổ chức ĐANG HOẠT ĐỘNG mà
+ * migrate hỏng LUÔN làm bước kiểm đỏ. Tổ chức lưu trữ chỉ quay lại tập này qua lượt kích hoạt lại đã đối chiếu sổ (docs/tenant-lifecycle.md).
  *
  * Chạy: docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/verify-migrations.ts
  */
@@ -34,10 +36,18 @@ import { sql } from "drizzle-orm";
 import { cancelOrganizationMigration, getDb, getDbFor, organizationMigrationDegraded, type Db } from "@/db";
 import { fanOutOrganizationCodes, listOrganizations } from "@/lib/platform/organizations";
 
-type JournalEntry = { idx: number; tag: string; when: number };
+export type JournalEntry = { idx: number; tag: string; when: number };
 
-/** Đối chiếu sổ với MỘT CSDL. Trả số mục thiếu (0 = khớp). */
-async function checkDb(label: string, db: Db, entries: readonly JournalEntry[]): Promise<number> {
+/** Sổ migration của mã nguồn đang chạy (đọc từ thư mục làm việc — trong container là /app). */
+export function readJournalEntries(file = "drizzle/meta/_journal.json"): JournalEntry[] {
+  return (JSON.parse(readFileSync(file, "utf8")) as { entries: JournalEntry[] }).entries;
+}
+
+/**
+ * Đối chiếu sổ với MỘT CSDL. Trả số mục thiếu (0 = khớp). Dùng lại ở lượt KÍCH HOẠT LẠI tổ chức lưu trữ (scripts/org-lifecycle.ts):
+ * tổ chức chỉ được bật lại khi CSDL của nó khớp sổ ĐÚNG như bước kiểm deploy đòi ở tổ chức đang chạy.
+ */
+export async function checkDb(label: string, db: Db, entries: readonly JournalEntry[]): Promise<number> {
   // `created_at` của drizzle chính là `when` trong sổ (miligiây). Đó là khoá để đối chiếu.
   const res = await db.execute(sql`select created_at from "drizzle"."__drizzle_migrations"`);
   const rows = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as Record<string, unknown>[];
@@ -163,7 +173,7 @@ export async function verifyOrganizations<T>(
 }
 
 async function main() {
-  const journal = JSON.parse(readFileSync("drizzle/meta/_journal.json", "utf8")) as { entries: JournalEntry[] };
+  const journal = { entries: readJournalEntries() };
   let failed = (await checkDb("nhà", await getDb(), journal.entries)) > 0;
 
   const codes = fanOutOrganizationCodes(await listOrganizations());

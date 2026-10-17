@@ -28,12 +28,13 @@
  * /platform/saas hoặc ops `--apply`) mới đổi nấc. Đọc CSDL từng tổ chức chỉ để ĐẾM — không trả tên, SĐT, nội dung tin.
  */
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
-import { getDbFor, getPlatformDb, schema } from "@/db";
+import { getPlatformDb, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { defaultEnvReader, platformAiConfig, type EnvReader } from "@/lib/ai-usage/platform-ai";
 import { giaCuaModel } from "@/lib/ai/provider";
 import { policyForWorkload, readPlatformAiPolicies, type PlatformAiPolicy } from "@/lib/ai-usage/platform-ai-policy";
-import { findOrganization } from "@/lib/platform/organizations";
+import { findOrganization, organizationDbForReport } from "@/lib/platform/organizations";
+import type { Organization } from "@/lib/platform/types";
 import { platformOperatorDenial } from "@/lib/platform-ui/module-toggle";
 import { AI_SALES_MIN_SAMPLE, rateOrNull } from "@/lib/sales-chatbot/performance-shared";
 import { rowsOf } from "@/lib/sql-rows";
@@ -465,8 +466,8 @@ async function readModelAb(now: Date, env: EnvReader): Promise<ModelAbReport | n
 }
 
 /** Hành vi bán hàng của các hội thoại cohort trong CSDL của MỘT tổ chức — chỉ đếm. */
-async function readOrgBehaviour(org: { code: string; isHome: boolean }, list: readonly (LedgerConv & { canary: boolean })[]): Promise<AbConversation[]> {
-  const db = await getDbFor(org);
+async function readOrgBehaviour(org: Pick<Organization, "code" | "isHome" | "status">, list: readonly (LedgerConv & { canary: boolean })[]): Promise<AbConversation[]> {
+  const db = await organizationDbForReport(org);
   const ids = list.map((c) => c.ref);
   const c = schema.salesChatConversations;
   const e = schema.salesConversationEvents;
@@ -533,8 +534,8 @@ async function readOrgBehaviour(org: { code: string; isHome: boolean }, list: re
  * Kết quả ghi đơn của các hội thoại cohort trong CSDL của MỘT tổ chức — chỉ đếm: đơn `origin = AI_ORDER_SYNC` gắn hội thoại
  * (ghi từ mốc cohort, không tính đơn đã xoá) và chuông «khách để SĐT mà máy chưa lên đơn».
  */
-async function readOrgSync(org: { code: string; isHome: boolean }, list: readonly (LedgerConv & { canary: boolean })[], since: Date): Promise<SyncConversation[]> {
-  const db = await getDbFor(org);
+async function readOrgSync(org: Pick<Organization, "code" | "isHome" | "status">, list: readonly (LedgerConv & { canary: boolean })[], since: Date): Promise<SyncConversation[]> {
+  const db = await organizationDbForReport(org);
   const ids = list.map((c) => c.ref);
   const o = schema.orders;
   const n = schema.notifications;

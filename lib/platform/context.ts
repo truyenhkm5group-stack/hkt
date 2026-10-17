@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { jwtVerify } from "jose";
 import { env } from "@/lib/env";
 import { SESSION_COOKIE } from "@/lib/constants/session";
-import { FALLBACK_HOME_CODE, findOrganization, getHomeOrganization } from "@/lib/platform/organizations";
+import { FALLBACK_HOME_CODE, findOrganization, getHomeOrganization, isOperationalOrganization } from "@/lib/platform/organizations";
 
 /**
  * ═══════════ NGỮ CẢNH TỔ CHỨC — "ĐANG CHẠY CHO AI" ═══════════
@@ -53,7 +53,7 @@ const als = holder.__erpOrgCtx;
 export async function withOrganization<T>(code: string, fn: () => Promise<T>): Promise<T> {
   const org = await findOrganization(code);
   if (!org) throw new OrgContextError("ORG_UNKNOWN", `Không có tổ chức "${code}".`);
-  if (org.status !== "ACTIVE") throw new OrgContextError("ORG_INACTIVE", `Tổ chức "${code}" đang ${org.status}.`);
+  if (!isOperationalOrganization(org)) throw new OrgContextError("ORG_INACTIVE", `Tổ chức "${code}" đang ${org.status}.`);
   return als.run({ code: org.code, isHome: org.isHome, source: "EXPLICIT" }, fn);
 }
 
@@ -91,7 +91,7 @@ export async function currentOrganization(): Promise<OrgContext> {
   if (claim === null) return homeContext("LEGACY_SESSION");
   const org = await findOrganization(claim);
   if (!org) throw new OrgContextError("ORG_UNKNOWN", `Phiên thuộc tổ chức "${claim}" nhưng tổ chức này không tồn tại.`);
-  if (org.status !== "ACTIVE") throw new OrgContextError("ORG_INACTIVE", `Tổ chức "${claim}" đang ${org.status}.`);
+  if (!isOperationalOrganization(org)) throw new OrgContextError("ORG_INACTIVE", `Tổ chức "${claim}" đang ${org.status}.`);
   return { code: org.code, isHome: org.isHome, source: "SESSION" };
 }
 

@@ -372,6 +372,7 @@ import { testCompanyOsSummaryDb, testCompanyOsSummaryPure } from "./company-os-s
 import { testOrgSummaryDb, testOrgSummaryPure } from "./org-summary.test";
 import { testOrgAiCutoverApply, testOrgAiCutoverPure } from "./org-ai-cutover.test";
 import { testOrgOffboardDb, testOrgOffboardPure, testWaitForNoConnections } from "./org-offboard.test";
+import { testOrgLifecycleDb, testOrgLifecyclePure } from "./org-lifecycle.test";
 import { testOrgOrderAuditPure } from "./org-order-audit.test";
 import { testMetaCapiDb, testMetaCapiPure } from "./meta-capi.test";
 import { testOrgCatalogDb, testOrgCatalogPure } from "./org-catalog.test";
@@ -2380,6 +2381,9 @@ async function main() {
   testOrgOffboardPure();
   await testWaitForNoConnections();
   await testOrgOffboardDb();
+  // ops org-lifecycle: LƯU TRỮ / KÍCH HOẠT LẠI tổ chức (17/10/2026) — không xoá, đứng ngoài migration / job / webhook, kích hoạt lại chỉ khi checkDb khớp (`lc-thu`, tự dọn).
+  testOrgLifecyclePure();
+  await testOrgLifecycleDb();
   // ops org-order-audit: hội thoại có SĐT ↔ đơn ERP của một ngày (HSLC 05/10/2026: POS 26 vs ERP 23).
   testOrgOrderAuditPure();
   // Bot HSLC sót tin vì Pancake 429 lúc gửi (10/10/2026): gửi lại đoạn bị từ chối · nhập lịch sử nhường · gửi bù có điều kiện.

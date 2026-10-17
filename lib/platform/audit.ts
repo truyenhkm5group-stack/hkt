@@ -80,7 +80,11 @@ export type PlatformAuditAction = "MODULE_ENABLE" | "MODULE_DISABLE" | "FEATURE_
   | "ORG_OFFBOARD"
   // Đối chiếu chỉ mục danh tính (08/10/2026, lib/platform/identity-reconcile.ts · ops `identity-reconcile --apply`): ghi bù dòng
   // email / SĐT ⇒ tổ chức cho tài khoản tạo trước bản vá P0 — một dòng mỗi tổ chức có ghi, CHỈ số đếm (không email / SĐT).
-  | "IDENTITY_RECONCILE";
+  | "IDENTITY_RECONCILE"
+  // LƯU TRỮ / KÍCH HOẠT LẠI một tổ chức (17/10/2026, lib/platform/org-lifecycle.ts · ops `org-lifecycle`): `archive:start|done|stopped`,
+  // `reactivate:start|done|stopped` — CHỈ trạng thái + số đếm + mốc sao lưu / diễn tập (không tên / email / SĐT). Không xoá dữ liệu.
+  | "ORG_ARCHIVE"
+  | "ORG_REACTIVATE";
 export type PlatformAuditSource = "UI" | "SCRIPT" | "MIGRATION" | "TEST";
 export type PlatformActor = { orgCode: string; userId: string; email: string } | null;
 
