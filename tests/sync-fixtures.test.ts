@@ -380,6 +380,7 @@ import { testAddressNormalizePure, testAddressNormalizeTools } from "./address-n
 import { testAddressWardExplicitPure, testAddressWardExplicitTools } from "./address-ward-explicit.test";
 import { testAddressReaskAudit } from "./address-reask-audit.test";
 import { testP0855Address } from "./p0-855-address.test";
+import { testP0871ContactMemory } from "./p0-871-contact-memory.test";
 import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
 import { testOutreachClearanceUnit } from "./outreach-clearance-unit.test";
 import { testPageUsageDb, testPageUsagePure, testPageUsageSource } from "./page-usage.test";
@@ -570,6 +571,8 @@ import { testSalesClaimGuard } from "./sales-claim-guard.test";
 import { testSalesQuoteIntegrity } from "./sales-quote-integrity.test";
 import { testSalesCartCommitment } from "./sales-cart-commitment.test";
 import { testP0855Cart } from "./p0-855-cart.test";
+import { testP0855Delta } from "./p0-855-delta.test";
+import { testP0863CancelFlow } from "./p0-863-cancel-flow.test";
 import { testConvMoneyTrace } from "./conv-money-trace.test";
 import { testSalesQuote640 } from "./sales-quote-640.test";
 import { testSalesNextBestAction } from "./sales-next-best-action.test";
@@ -2401,6 +2404,7 @@ async function main() {
   await testAddressWardExplicitTools();
   await testAddressReaskAudit();
   await testP0855Address(); // #855: địa giới cũ / «như cũ» / địa chỉ mới thắng / không hỏi lại SĐT · tên · địa chỉ · phường
+  await testP0871ContactMemory(); // #871: SĐT + địa chỉ đã biết không hỏi lại khi đổi chủ đề · câu mẫu cũng chịu hàng rào · hẹn giờ giao = ghi chú · hậu mãi không bán tiếp · gói tin trùng
   // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
   testVelocityUnifyPure();
   testOutreachClearanceUnit();
@@ -3081,6 +3085,11 @@ async function main() {
   // ghi đơn hạ / bỏ món ⇒ máy chủ từ chối; ma trận G1–G6 qua chatTurn thật — tổ chức THẬT `gd-food-cc1` / `gd-food-cc2`.
   await testSalesCartCommitment();
   await testP0855Cart();
+  // P0 #855 phần còn lại (sau #860 / #861): báo giá phải có căn cứ + tổng giỏ bị từ chối không tới khách, phủ nhận món bot đưa ra ⇒ người
+  // ngay lần đầu + giữ tuyến giao ORDER_REVIEW, lời nhắc khách cũ, không lặp câu xin lỗi — tổ chức THẬT `gd-food-p855d`.
+  await testP0855Delta();
+  // P0 #863 — tin phía page tới giữa lượt ⇒ bot không gửi · khách huỷ sau lỗi bot ⇒ xin lỗi cụ thể + đơn đã sửa · huỷ lần hai ⇒ vòng đời đơn — tổ chức THẬT `gd-food-p863`.
+  await testP0863CancelFlow();
   // P0 14/10/2026 — tổng tiền trong chữ bot = tổng máy chủ của giỏ hiện tại (ca «Châu Dương» 640k cho 1kg 280k) · lượt im không «nói rõ
   // hơn» (ca «Viet Nguyen Thi») · upsell chưa đồng ý không vào đơn · tin vọng lại / trùng không sinh tin — tổ chức THẬT `gd-food-q640`.
   await testSalesQuote640();

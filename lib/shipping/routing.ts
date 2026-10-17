@@ -11,7 +11,7 @@ import { MANUAL_ORDER_ID_PREFIX, manualOrderShortCode } from "@/lib/constants/ma
 import { manualOrderAmountDue, manualPaymentStatus, sumConfirmedPayments } from "@/lib/constants/order-payments";
 import { isServiceCode, nextFailedAttempts, parseShippingRoutingConfig, SHIPPING_ROUTING_LIMITS, SHIPPING_ROUTING_SETTING_KEY, type AutoAttemptState, type ShippingRoute, type ShippingRoutingConfig } from "@/lib/constants/shipping-routing";
 import { manualOrderGate, manualOrderOrgGate } from "@/lib/records/order-create";
-import { addressReviewOpenOf, canonicalProvince, canonicalWard, decideShippingRoute } from "@/lib/shipping/route";
+import { addressReviewOpenOf, canonicalProvince, canonicalWard, decideShippingRoute, orderReviewOpenOf } from "@/lib/shipping/route";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
 
@@ -109,6 +109,7 @@ export async function routedOrders(now = new Date()): Promise<{ rows: RoutedOrde
         updatedAt: order.updatedAt,
         auto,
         addressReviewOpen: addressReviewOpenOf(order.raw),
+        orderReviewOpen: orderReviewOpenOf(order.raw),
       },
       config,
       ready,

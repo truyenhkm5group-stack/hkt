@@ -11,7 +11,7 @@ import { attemptHoldsOrder, carrierCancelOf, carrierCreateOf, linesWeight, norma
 import { manualOrderAmountDue, manualPaymentStatus, sumConfirmedPayments } from "@/lib/constants/order-payments";
 import { isManualOrderId, manualOrderRaw, manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { isUniqueViolation } from "@/lib/db/unique-violation";
-import { addressReviewOpenOf } from "@/lib/shipping/route";
+import { addressReviewOpenOf, orderReviewOpenOf } from "@/lib/shipping/route";
 
 /**
  * ═══════════ LÕI TẠO VẬN ĐƠN TỪ ĐƠN ERP — MỌI HÃNG (POS tự chủ · docs/verticals/pos-tu-chu.md) ═══════════
@@ -42,6 +42,7 @@ export const BULK_MAX = 50;
 /** Trần một lượt in hàng loạt (trần tài liệu `printing-code` của Viettel Post; GHN cho tới 10.000). */
 export const PRINT_MAX = 100;
 /** Câu từ chối khi đơn còn cờ cần kiểm địa chỉ (#855). */
+export const ORDER_REVIEW_BLOCK = "Đơn còn cờ cần kiểm về món / giá / khách huỷ — gọi khách, xử lý rồi bấm «Xác nhận đơn» để gỡ cờ trước khi tạo vận đơn tự động / hàng loạt.";
 export const ADDRESS_REVIEW_BLOCK = "Địa chỉ đơn còn cờ cần kiểm (khách đổi địa chỉ / địa giới cũ chưa ghép) — kiểm địa chỉ rồi bấm «Xác nhận đơn» để gỡ cờ trước khi tạo vận đơn tự động / hàng loạt.";
 
 type OrderRow = typeof schema.orders.$inferSelect;
@@ -379,6 +380,8 @@ export async function autoCreateShipmentCore(job: string, carrier: CarrierKey, o
   if (!loaded.ok) return loaded;
   // #855: đơn còn cờ cần kiểm ĐỊA CHỈ đang mở ⇒ máy KHÔNG BAO GIỜ tạo vận đơn (chặn cứng ở lõi, không chỉ ở bước xếp tuyến).
   if (addressReviewOpenOf(loaded.order.raw)) return { ok: false, error: ADDRESS_REVIEW_BLOCK };
+  // #855: cờ cần kiểm MÓN / GIÁ / KHÁCH HUỶ (khách phủ nhận món bot tự thêm…) ⇒ máy cũng không tạo vận đơn.
+  if (orderReviewOpenOf(loaded.order.raw)) return { ok: false, error: ORDER_REVIEW_BLOCK };
   const blocked = eligibility(loaded.order, loaded.attempts);
   if (blocked) return { ok: false, error: blocked };
   const weightGrams = linesWeight(loaded.lines);
@@ -600,6 +603,10 @@ export async function bulkCreateCore(user: SessionUser, rawCarrier: unknown, raw
     // #855: tạo hàng loạt bỏ đơn còn cờ cần kiểm địa chỉ — người kiểm rồi «Xác nhận đơn» (gỡ cờ) hoặc tạo riêng ở trang đơn.
     if (addressReviewOpenOf(loaded.order.raw)) {
       rows.push({ orderId: id, ok: false, message: ADDRESS_REVIEW_BLOCK });
+      continue;
+    }
+    if (orderReviewOpenOf(loaded.order.raw)) {
+      rows.push({ orderId: id, ok: false, message: ORDER_REVIEW_BLOCK });
       continue;
     }
     const blocked = eligibility(loaded.order, loaded.attempts);

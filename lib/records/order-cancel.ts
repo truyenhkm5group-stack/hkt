@@ -38,6 +38,7 @@ import {
   type CancelPlanInput,
   type RescueResult,
 } from "@/lib/constants/order-cancel";
+import { sumConfirmedPayments } from "@/lib/constants/order-payments";
 import { canFlagOrderForReview, withReviewEntry } from "@/lib/constants/order-review";
 import { sendInboxMessages } from "@/lib/inbox/send";
 import { publish } from "@/lib/realtime/bus";
@@ -132,6 +133,9 @@ export async function loadCancelFacts(orderId: string): Promise<{ input: CancelP
       .orderBy(asc(s.createdAt)),
     db.select({ n: sql<number>`count(*)::int` }).from(schema.stockReceipts).where(and(eq(schema.stockReceipts.kind, "ISSUE"), eq(schema.stockReceipts.reference, orderId))),
   ]);
+  // Tiền ĐÃ THU (chứng từ đã xác nhận, trừ phiếu hoàn) — đơn đã thu tiền thì huỷ kèm hoàn tiền là việc của người (P0 #863).
+  const pays = await db.select({ kind: schema.orderPayments.kind, amount: schema.orderPayments.amount, status: schema.orderPayments.status }).from(schema.orderPayments).where(eq(schema.orderPayments.orderId, orderId));
+  const sums = sumConfirmedPayments(pays);
   const attempts: CancelAttemptInput[] = rows.map((r) => {
     const create = carrierCreateOf(r.raw);
     const adapter = create ? carrierAdapter(create.carrier ?? "VTP") : null;
@@ -145,7 +149,7 @@ export async function loadCancelFacts(orderId: string): Promise<{ input: CancelP
       carrierCancellable: adapter ? adapter.cancellable({ stage: r.stage, vtpStatus: r.vtpStatus }) : null,
     };
   });
-  return { input: { manual: isManualOrderId(order.id) && manualOrderRaw(order.raw) !== null, stage: order.stage, attempts, manualIssues: Number(issues[0]?.n ?? 0) }, shipmentIds: rows.map((r) => r.id) };
+  return { input: { manual: isManualOrderId(order.id) && manualOrderRaw(order.raw) !== null, stage: order.stage, attempts, manualIssues: Number(issues[0]?.n ?? 0), paid: Math.max(0, sums.receipts - sums.refunds) }, shipmentIds: rows.map((r) => r.id) };
 }
 
 const CARRIER_FAILURE: Record<Exclude<CarrierCancelOutcome["kind"], "ACCEPTED">, CancelBlockCode> = {
