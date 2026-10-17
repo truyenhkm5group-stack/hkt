@@ -2432,5 +2432,39 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 57: khoi cach noi chuyen giong nguoi that o moi page, khong mang con so vao prompt");
 }
 
+// ---- 58: page Hoa Tra Fashion CS1 chi ban Q002 (chu shop 17/10/2026, Nguyen Nu: bot doc anh ra Q005 va bao gia Q005)
+{
+  const { blockedCodesFor, onlyCodeFor } = await import("../src/orders.js");
+  const prevSp = catalog.products;
+  catalog.setProducts([
+    { id: "q2", code: "Q002", name: "Đầm Q002", note: "", price: { min: 499000, max: 499000 }, attributes: { "Màu": ["Đỏ", "Đen"] }, variations: [], images: [] },
+    { id: "q5", code: "Q005", name: "ĐẦM Q005", note: "", price: { min: 499000, max: 499000 }, attributes: { "Màu": ["Đỏ", "Đen", "Xanh"] }, variations: [], images: [] },
+    { id: "x1", code: "X001", name: "Quần định hình", note: "", price: { min: 79000, max: 79000 }, attributes: {}, variations: [], images: [] },
+  ]);
+  const ten = ["Hoa Trà Fashion", "Hoa Trà Fashion CS1"];
+  assert.equal(onlyCodeFor(ten), "Q002");
+  assert.deepEqual(blockedCodesFor(ten), ["Q005"], "chan dam khac, hang ban kem X001 van ban");
+  assert.equal(onlyCodeFor(["Linh Tây Luxury"]), "", "page khac khong anh huong");
+  // Mau chu luc dang Q001 -> doi sang Q002 MOT lan (force), chu shop doi lai thi khong ghi de nua
+  const ob = bot.orderBot;
+  ob._save = () => {};
+  bot.pageNames.set("PHOATRA", "Hoa Trà Fashion");
+  bot.pancakeNames?.set?.("PHOATRA", "Hoa Trà Fashion CS1");
+  if (!bot.pancakeNames?.get?.("PHOATRA")) bot.pageNames.set("PHOATRA", "Hoa Trà Fashion CS1");
+  settings.update("PHOATRA", { defaultProduct: "Q001" });
+  ob.seedDefaultProducts();
+  assert.equal(settings.get("PHOATRA").defaultProduct, "Q002", "doi mau chu luc sang Q002");
+  settings.update("PHOATRA", { defaultProduct: "Q003" });
+  ob.seedDefaultProducts();
+  assert.equal(settings.get("PHOATRA").defaultProduct, "Q003", "chi ap mot lan");
+  bot.pageNames.delete("PHOATRA");
+  bot.pancakeNames?.delete?.("PHOATRA");
+  delete ob._save;
+  catalog.setProducts(prevSp);
+  const src = fs.readFileSync(new URL("../src/bot.js", import.meta.url), "utf8");
+  assert.ok(/page chi ban \$\{chi\} -> hieu la \$\{chi\}/.test(src), "anh khop mau dam khac -> hieu la ma cua page");
+  console.log("OK 58: page Hoa Tra Fashion CS1 chi ban Q002 — chan dam khac, doi mau chu luc mot lan, anh khop Q005 hieu la Q002");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);

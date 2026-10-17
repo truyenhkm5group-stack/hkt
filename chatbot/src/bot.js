@@ -10,7 +10,7 @@ import { renderSystemPrompt } from "./prompt.js";
 import { settings } from "./settings.js";
 import { adBots } from "./adbots.js";
 import { extractAdIds, adBotPromptBlock, testImageRefs } from "./adpersona.js";
-import { orderSync, describeOrder, phonesInText, norm, blockedCodesFor, offCatalogPage } from "./orders.js";
+import { orderSync, describeOrder, phonesInText, norm, blockedCodesFor, offCatalogPage, onlyCodeFor } from "./orders.js";
 import { OrderBot } from "./orderbot.js";
 import { identifyProduct } from "./vision.js";
 import { transcribeVoiceMessages, voiceLabel, isAudioAttachment, hasCustomerVoice, VOICE_PROMPT_HINT } from "./voice.js";
@@ -2093,6 +2093,15 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     if (config.vision.enabled && lastUser?.role === "user" && lastUser.images?.length) {
       try {
         const idr = await identifyProduct(lastUser.images[lastUser.images.length - 1]);
+        // Page chi ban MOT mau dam: anh khop mau dam khac (mau trong giong nhau) = mau cua page (Hoa Tra CS1: Q005 -> Q002)
+        const chi = onlyCodeFor([this.pageNames.get(pageId), this.pancakeNames?.get(pageId)]);
+        if (chi && idr.matched && idr.code && String(idr.code).toUpperCase() !== chi && /^Q/i.test(idr.code)) {
+          log.info(`[${pageId}] ${conversationId}: anh khop ${idr.code} nhung page chi ban ${chi} -> hieu la ${chi}`);
+          const sp = catalog.products.find((p) => String(p.code || "").toUpperCase() === chi);
+          const mauCo = Object.values(sp?.attributes || {}).flat().map((x) => norm(x));
+          idr.code = chi;
+          if (idr.color && !mauCo.some((m) => m && (norm(idr.color).includes(m) || m.includes(norm(idr.color))))) idr.color = "";
+        }
         const verdict = idr.matched
           ? `KHỚP mẫu ${idr.code}${idr.color ? " màu " + idr.color : ""} (độ tin cậy: ${idr.confidence})`
           : `KHÔNG KHỚP mẫu nào của shop (độ tin cậy: ${idr.confidence})`;
