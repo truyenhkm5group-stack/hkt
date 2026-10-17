@@ -1,0 +1,8 @@
+{
+  "pr": 883,
+  "sha": "a1b9f67fe9bac40945048fc5a32d05574d73c56f",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-17T05:15:55.728Z",
+  "note": "review: diễn tập ĐẠT ≤120 phút (thay 14 ngày); giao dịch dài theo coalesce(xact_start, query_start); chữ 700→350; test khoá ba điểm"
+}
