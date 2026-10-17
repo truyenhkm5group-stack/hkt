@@ -1,4 +1,3 @@
-{"at":"2026-10-10T00:49:42.764Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","detail":"#761 @ 563e6136c492 → aefff81d8aab (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-10T00:50:31.101Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"aefff81d8aab · run 38010747204 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38010747204"}
 {"at":"2026-10-10T00:50:48.777Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"aefff81d8aab · run 38010755906 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38010755906"}
 {"at":"2026-10-10T02:21:52.985Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-sales-settings-v2","detail":"feat/ai-sales-settings-v2 @ 449049c4042a · 1 lệnh kiểm thử"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-17T12:01:02.354Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"OVERLAP_ACCEPTED","mission":"trace-carry-counter","detail":"OVERLAP_ACCEPTED với money-trace-since: phạm vi scripts/conv-money-trace.ts, tests/conv-money-trace.test.ts — cách tích hợp: chỉ thêm dòng C cuối scanPatterns"}
 {"at":"2026-10-17T12:01:02.354Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"OVERLAP_ACCEPTED","mission":"trace-carry-counter","detail":"OVERLAP_ACCEPTED với trace-by-order: phạm vi scripts/conv-money-trace.ts, tests/conv-money-trace.test.ts — cách tích hợp: chỉ thêm dòng C cuối scanPatterns"}
 {"at":"2026-10-17T12:01:25.107Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"HANDOFF","mission":"trace-carry-counter","detail":"claude/trace-carry-counter @ 42da96ac1b4d · 2 lệnh kiểm thử"}
+{"at":"2026-10-17T12:02:29.697Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"trace-carry-counter","detail":"#888 cho claude/trace-carry-counter @ 42da96ac1b4d"}
