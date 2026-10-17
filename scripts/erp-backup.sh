@@ -854,6 +854,11 @@ sao_luu_mot_to_chuc() { # $1=csdl $2=mốc $3=thư mục con (daily|manual|hourl
   xoay_vong "$goc/manual" "$csdl" "$GIU_BAN_TAY" || true
   xoay_vong "$goc/hourly" "$csdl" "$GIU_BAN_GIO" || true
 
+  # LƯỢT GIỜ (chủ shop duyệt 17/10/2026): bản này đã dump + kiểm toàn vẹn (pg_restore --list + bảng lõi) ⇒ nhả khoá đọc
+  # nặng (FD 8) và khoá vòng đời (FD 9) TRƯỚC bước đẩy ngoài máy. Đẩy Drive không đọc CSDL, không cần container đứng yên,
+  # nhưng từng kéo lượt giờ 10–70 phút trong khi giữ khoá ĐỘC QUYỀN ⇒ mọi ops đọc nặng / diễn tập hết 900 s chờ (16/10:
+  # 3 lượt liền). Khoá chống chạy trùng (FD 7, KHOA_SAO_LUU) vẫn giữ suốt lượt. Bản đêm / tay không đặt cờ ⇒ như cũ.
+  if [ "${NHA_KHOA_TRUOC_NGOAI_MAY:-0}" = "1" ]; then exec 8>&- 9>&-; fi
   day_ngoai_may_to_chuc "$csdl" "$sub" "$thu_muc/$ORG_FILE"
   if [ -n "$tep_tuan" ] && [ "$ORG_OFFSITE_STATE" = "OK" ]; then
     day_ngoai_may_to_chuc "$csdl" weekly "$tep_tuan"
@@ -1206,16 +1211,17 @@ cmd_sao_luu_gio_to_chuc() {
     bao "lượt giờ: một lượt sao lưu / diễn tập khác đang giữ $KHOA_SAO_LUU — bỏ lượt giờ này, giờ sau làm lại."
     return 0
   fi
-  giu_khoa 8 "$KHOA_DOC_DB" -x "$TRAN_CHO_KHOA_GIO_GIAY" || { loi "lượt giờ: hết ${TRAN_CHO_KHOA_GIO_GIAY}s chờ khoá đọc nặng — bỏ lượt."; return 75; }
-  giu_khoa 9 "$KHOA_VONG_DOI" -s "$TRAN_CHO_KHOA_GIO_GIAY" || { loi "lượt giờ: hết ${TRAN_CHO_KHOA_GIO_GIAY}s chờ khoá vòng đời (deploy?) — bỏ lượt."; return 75; }
-
   moc="$(gio_vn +%Y%m%d-%H%M)"
   mkdir -p "$STATUS_TO_CHUC" 2>/dev/null && chmod 755 "$STATUS_TO_CHUC" 2>/dev/null || true
   while IFS= read -r csdl; do
     [ -n "$csdl" ] || continue
+    # Khoá đọc nặng + vòng đời xin LẠI cho từng CSDL: sao_luu_mot_to_chuc nhả chúng ngay sau khi bản đã kiểm toàn vẹn
+    # (trước bước đẩy ngoài máy), nên ops / diễn tập chen được vào khoảng đẩy Drive. Bản hỏng thì khoá còn cầm ⇒ dùng lại.
+    giu_khoa 8 "$KHOA_DOC_DB" -x "$TRAN_CHO_KHOA_GIO_GIAY" || { loi "lượt giờ: hết ${TRAN_CHO_KHOA_GIO_GIAY}s chờ khoá đọc nặng trước $csdl — bỏ phần còn lại, giờ sau làm lại."; return 75; }
+    giu_khoa 9 "$KHOA_VONG_DOI" -s "$TRAN_CHO_KHOA_GIO_GIAY" || { loi "lượt giờ: hết ${TRAN_CHO_KHOA_GIO_GIAY}s chờ khoá vòng đời (deploy?) trước $csdl — bỏ phần còn lại."; return 75; }
     n=$((n + 1))
     bat_dau="$(bay_gio_utc)"
-    if sao_luu_mot_to_chuc "$csdl" "$moc" hourly; then
+    if NHA_KHOA_TRUOC_NGOAI_MAY=1 sao_luu_mot_to_chuc "$csdl" "$moc" hourly; then
       if [ "$ORG_OFFSITE_STATE" = "FAILED" ]; then
         ket="PARTIAL"; ly_do="CSDL $csdl đã sao lưu giờ và kiểm toàn vẹn (bản cục bộ giữ nguyên); phần hỏng: bản ngoài máy."
         hong="$hong $csdl(ngoài máy)"
