@@ -1,0 +1,8 @@
+{
+  "pr": 887,
+  "sha": "83ce65e94ccb3ad8b837ad74327ac66e09ebbf49",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-17T09:56:52.220Z",
+  "note": "review độc lập 2 vòng PASS + delta vòng 3 (lead): vnx/HSLC từ chối theo mã; chỉ ACTIVE/SUSPENDED lưu trữ được, kích hoạt lại về đúng trạng thái cũ sau verify OK; tenant ARCHIVED ra khỏi migrate/job/webhook/kiểm deploy; ACTIVE lỗi migration vẫn đỏ; đòi backup OK ≤26h + diễn tập OK ≤72h; không xoá dữ liệu"
+}
