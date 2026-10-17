@@ -285,12 +285,24 @@ export type StatedAddress = CustomerAddress & { messageIndex: number };
  * Đông nhé» — sửa không kèm đường; hay một địa chỉ khác hẳn) bị bỏ: khách đã sửa, phường cũ không còn là lời khai (review PR #848).
  * Thứ tự: mới nhất trước; không có ⇒ mảng rỗng. HÀM THUẦN.
  */
+/**
+ * Bỏ SĐT (kèm nhãn «SĐT», «số», «đt») khỏi một dòng khách gõ trước khi đọc địa chỉ (#871, ca «Ngọc Nguyễn»: SĐT + địa chỉ trong CÙNG một
+ * dòng ⇒ bộ đọc lấy SĐT làm SỐ NHÀ, địa chỉ khách ghi rõ không còn khớp dòng model chép). HÀM THUẦN.
+ */
+export function withoutPhones(line: string): string {
+  return line
+    .replace(/(?:(?:sđt|sdt|số điện thoại|so dien thoai|số đt|so dt|đt|dt|số|so|phone|tel)\s*[:.]?\s*)?(?:\+?84|0)[35789](?:[\s.-]?\d){8}(?!\d)/giu, " ")
+    .replace(/\s*[,;]\s*(?=[,;]|$)/g, "")
+    .replace(/^\s*[,;]\s*/, "")
+    .replace(/\s+/g, " ");
+}
+
 export function customerStatedAddresses(texts: readonly string[]): StatedAddress[] {
   const msgs = texts.map((t) => t.trim()).filter(Boolean);
   const out: StatedAddress[] = [];
   const seen = new Set<string>();
   const tryLine = (line: string, messageIndex: number) => {
-    const l = line.trim();
+    const l = withoutPhones(line).trim();
     if (!l || l.includes("?") || seen.has(l)) return;
     seen.add(l);
     const a = parseCustomerAddress(l);

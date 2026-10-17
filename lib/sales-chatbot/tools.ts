@@ -55,7 +55,8 @@ import { renderQuickReplyForSend } from "@/lib/sales-chatbot/quick-replies";
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import type { OrderSyncThreadState } from "@/lib/sales-chatbot/order-sync-shared";
 import { customerOrderStatus } from "@/lib/sales-chatbot/order-status-shared";
-import { classifyDeliveryQuestion, deliveryTimeAnswer, pickDeliveryOrder, staffDeliveryCommitment } from "@/lib/sales-chatbot/delivery-intent";
+import { classifyDeliveryQuestion, deliveryPreferenceNote, deliveryTimeAnswer, pickDeliveryOrder, staffDeliveryCommitment } from "@/lib/sales-chatbot/delivery-intent";
+import { futurePurchaseOnly, postSaleDropsIn } from "@/lib/sales-chatbot/post-sale-guard";
 import { LIFECYCLE_ORDER_LOOKBACK_DAYS } from "@/lib/sales-chatbot/lifecycle";
 import { fanpageVisitorKeyMirror } from "@/lib/pricing/ai-customer-identity";
 import type { PromptStamp } from "@/lib/sales-chatbot/prompt-stamp";
@@ -175,6 +176,11 @@ export type ChatState = {
    * món bot đề xuất. Engine ghi từ tin khách; công cụ ghi đơn đối chiếu (từ chối hạ / bỏ) và gắn mẫu mã khi đơn nháp lên.
    */
   cart?: CartCommitment;
+  /**
+   * MONG MUỐN GIỜ GIAO khách nói TRƯỚC KHI CHỐT (#871, «Giao sáng mai khoảng 9h») — engine ghi khi tin tới, `orderInput` chép vào ghi chú
+   * MỌI lượt ghi đơn (lên · sửa · chốt) để nó không mất khi model quên `delivery_note`. Không phải lịch giao: không ai hứa mốc này với khách.
+   */
+  deliveryPref?: { text: string; at: string; turn: number | null };
 };
 
 /** Công cụ QUY TRÌNH — luôn bật (không nằm trong `allowedTools` đã lưu của tổ chức, nên công cụ mới tới được mọi tổ chức). */
@@ -666,8 +672,10 @@ function noteRejectedTotals(state: ChatState, amounts: readonly (number | null)[
 }
 
 function orderInput(state: ChatState, draft: NonNullable<ChatState["draft"]>, priced: Priced, stage: "NEW" | "CONFIRMED", cfg: SalesChatbotConfig, channel: ChatChannel) {
+  const pref = state.deliveryPref && !draft.note.includes(state.deliveryPref.text) ? deliveryPreferenceNote(state.deliveryPref) : "";
   const notes = [
     draft.note,
+    pref,
     draft.packing ? `Đóng gói theo yêu cầu khách: «${draft.packing}»` : "",
     priced.ship.kind === "FREE_IF_AREA" ? "Miễn ship NẾU địa chỉ thuộc khu vực miễn ship — nhân viên kiểm địa chỉ trước khi giao." : priced.shippingFee === null ? "Phí ship: CHƯA BÁO — nhân viên cập nhật trước khi giao." : "",
   ].filter((x) => x.trim());
@@ -1059,6 +1067,10 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (name === "create_draft_order" && !existing && upsellEntry && !state.upsellSent && !state.upsellUnavailable) {
         return err("Đơn nháp: chưa mời thêm món", `Trước khi lên đơn phải mời thêm món ĐÚNG MỘT LẦN: gọi send_quick_reply với mã ${upsellEntry.code} (câu upsell kèm ảnh menu), rồi gọi lại create_draft_order và gửi tóm tắt chốt đơn trong cùng lượt.`, state);
       }
+      // «MUA TIẾP LẦN SAU» (#871, ca «Nguyễn Hà»): ý định TƯƠNG LAI không phải đơn — không mở đơn mới, không chuyển người (đứng TRƯỚC nhánh
+      // «đơn đã chốt» vì nhánh đó chuyển nhân viên khi khách muốn thêm đơn). CHỈ SAU CHỐT (review PR #878): trước chốt «chị lấy 2kg, tuần sau
+      // giao» là đơn thật kèm mong muốn ngày giao, chặn ở đây là đẩy khách về vòng tư vấn.
+      if (name === "create_draft_order" && state.confirmed && futurePurchaseOnly(ctx.lastUserText)) return err("Đơn nháp: khách hẹn mua lần sau", "Khách nói sẽ mua LẦN SAU — KHÔNG lên đơn mới. Cảm ơn khách ngắn gọn, không mời mua thêm.", state);
       // Đơn máy TỰ CHỐT (P0-A): khách sửa ngay sau đó ⇒ update_draft_order sửa chính đơn đã chốt (giữ «Đã xác nhận»). Còn lại như cũ.
       const editingConfirmed = Boolean(state.confirmed?.auto) && name === "update_draft_order" && Boolean(state.draft?.orderId || state.confirmed?.simulated);
       // Đơn chốt qua LỜI ĐỒNG Ý (không phải máy tự chốt) ⇒ sửa / thêm vào đơn là việc của NHÂN VIÊN — máy chủ ép chuyển người, không để tuỳ
@@ -1327,6 +1339,8 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const entry = code.success ? ctx.quickReplies?.find((q) => q.code.toLowerCase() === code.data.toLowerCase()) : undefined;
       if (!entry) return err("Câu mẫu: không có mã", "Không có câu mẫu với mã này — chỉ dùng mã trong danh sách CÂU MẪU.", state);
       if (entry.upsell && state.upsellSent) return err("Câu upsell đã gửi", "Câu upsell đã gửi trong hội thoại này — không gửi lại.", state);
+      // Hậu mãi (#871): đơn đã chốt ⇒ không mời mua thêm (khách đang chờ hàng / hỏi trạng thái / phàn nàn).
+      if (entry.upsell && state.confirmed) return err("Câu upsell: đơn đã chốt", "Đơn của khách ĐÃ CHỐT — không mời mua thêm. Trả lời đúng câu khách hỏi.", state);
       const pick = await renderQuickReplyForSend(entry.id, ctx.config);
       if (!pick && entry.upsell) state.upsellUnavailable = true;
       if (!pick) return err(`Câu mẫu ${entry.code}: thiếu số ERP`, "Câu mẫu này đang thiếu giá / tồn từ ERP — tự trả lời bằng công cụ giá / tồn, không dùng câu mẫu.", state);
@@ -1336,6 +1350,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (ctx.customerTexts && addressReaskVerdict(pick.text, addressKnowledge(state, ctx.customerTexts), ctx.turn ?? 0, { botTexts: ctx.recentSaid ?? [] })) {
         return err(`Câu mẫu ${entry.code}: xin lại thông tin đã có`, "Câu mẫu này xin SĐT / địa chỉ mà khách ĐÃ cho — không gửi. Dùng thông tin đã có và đi tiếp (khách hẹn giờ giao ⇒ ghi nhận, không hứa giờ).", state);
       }
+      if (state.confirmed && postSaleDropsIn(pick.text, ctx.lastUserText).length) return err(`Câu mẫu ${entry.code}: sai lúc sau chốt`, "Đơn ĐÃ CHỐT — câu mẫu này mời mua / xin chốt lại. KHÔNG gửi; trả lời đúng câu khách hỏi.", state);
       if (entry.upsell) {
         state.upsellSent = true;
         if (ctx.turn !== undefined) state.upsellTurn = ctx.turn;
