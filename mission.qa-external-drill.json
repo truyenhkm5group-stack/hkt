@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "mission_id": "qa-external-drill",
+  "title": "Ghi diễn tập khôi phục chạy ngoài VPS vào cổng (có đối chiếu)",
+  "business_goal": "Có diễn tập ĐẠT thật cho tổ chức khi VPS thiếu RAM, không hạ ngưỡng 700",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-token-budget",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/qa-external-drill",
+  "base_sha": "cbc8d8a884444f7f05bd7b59ff7e7acd5cf880bf",
+  "domains": [],
+  "owned_paths": [
+    "scripts/erp-backup.sh",
+    "tests/backup.test.ts",
+    ".github/workflows/ops-vps.yml"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-17T05:37:52.494Z",
+  "updated_at": "2026-10-17T05:37:52.494Z",
+  "last_heartbeat": "2026-10-17T05:37:52.494Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "MISSING",
+    "evidence": []
+  }
+}
