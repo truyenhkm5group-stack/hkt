@@ -1,0 +1,8 @@
+{
+  "pr": 894,
+  "sha": "12ecc5a442e77d2cc03c0b63b839067f259ee07e",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-18T07:01:20.115Z",
+  "note": "lead: gọi thẳng decideShippingRoute (cấu hình mặc định, không hãng) — không viết lại luật; in mã giữ của bước địa chỉ/cờ + ô tỉnh/xã có/trống; không địa chỉ"
+}
