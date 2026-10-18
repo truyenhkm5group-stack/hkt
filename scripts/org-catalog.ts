@@ -31,6 +31,7 @@ import { orgHasSyncedSource } from "@/lib/platform/capabilities";
 import { findOrganization, listOrganizations } from "@/lib/platform/organizations";
 import { parseSalesChatbotConfig, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { parseQuickReplySettings, QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
+import { triggerProductConflicts } from "@/lib/sales-chatbot/quick-reply-focus";
 import { rowsOf } from "@/lib/sql-rows";
 
 const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
@@ -132,6 +133,12 @@ export async function collectOrgCatalog(org: { code: string; name: string; isHom
   };
 }
 
+/** Cách hỏi gắn nhầm món của các câu mẫu đang bật (`quick-reply-focus.ts::triggerProductConflicts`), theo danh mục còn bán. HÀM THUẦN. */
+export function quickReplyConflicts(r: Pick<CatalogReport, "products" | "quickReplies">): { title: string; trigger: string; names: string[] }[] {
+  const products = r.products.filter((p) => !p.removed).map((p) => ({ name: p.name, skus: p.variants.map((v) => v.sku) }));
+  return r.quickReplies.flatMap((q) => triggerProductConflicts(q, products).map((c) => ({ title: q.title, ...c })));
+}
+
 /** `null` ⇒ `—` (CHƯA BIẾT), không bao giờ `0 ₫` (luật 42). */
 export const vnd = (n: number | null): string => (n === null ? "—" : `${n.toLocaleString("vi-VN")} ₫`);
 const onOff = (b: boolean): string => (b ? "BẬT" : "TẮT");
@@ -162,6 +169,8 @@ export function catalogLines(r: CatalogReport): string[] {
   out.push(`CÂU MẪU ĐANG BẬT (${r.quickReplies.length}):`);
   out.push(r.quickReplySettings ? `Câu mẫu: ${onOff(r.quickReplySettings.enabled)} · câu upsell (mời thêm món kèm ảnh menu): ${r.quickReplySettings.upsellSet ? "ĐÃ CHỌN" : r.quickReplySettings.upsellStale ? `ĐÃ CHỌN nhưng câu đó ${r.quickReplySettings.upsellStale.state === "INACTIVE" ? `«${r.quickReplySettings.upsellStale.title}» đang TẮT` : "đã bị xoá"} — bot coi như chưa có, sẽ tự gợi ý từng món` : "CHƯA CHỌN — bot sẽ tự gợi ý từng món"}` : "Câu mẫu: — (không đọc được cài đặt)");
   for (const q of r.quickReplies) out.push(`· ${q.upsell ? "[UPSELL] " : ""}${q.title} (${q.images} ảnh) [${q.triggers.join(" / ")}]: ${q.answer.replace(/\s+/g, " ").trim()}`);
+  // P0 18/10/2026: cách hỏi gọi tên món mà câu mẫu không nói tới — bot đã bỏ qua câu đó khi khách hỏi món kia; người nên gỡ cách hỏi.
+  for (const c of quickReplyConflicts(r)) out.push(`  ⚠ CÁCH HỎI GẮN NHẦM MÓN · ${c.title}: «${c.trigger}» gọi tên ${c.names.join(", ")}`);
   return out;
 }
 
@@ -171,9 +180,11 @@ export function catalogSummary(r: CatalogReport): string[] {
   const variants = live.flatMap((p) => p.variants);
   const activeLists = r.priceLists.filter((l) => l.active);
   const tiers = activeLists.reduce((s, l) => s + l.tiers.length, 0);
+  const conflicts = quickReplyConflicts(r);
   return [
     `Tổ chức ${r.org.code}: ${live.length} sản phẩm · ${variants.length} mẫu mã (${variants.filter((v) => v.price === null).length} chưa có giá · ${variants.filter((v) => v.hidden).length} ẩn · ${variants.filter((v) => v.addOnOnly).length} chỉ bán kèm) · nguồn ${r.syncedProducts === null ? "—" : r.syncedProducts ? "ĐỒNG BỘ" : "tạo tay"}`,
     `Bot: ${r.bot ? `${onOff(r.bot.enabled)} · giá sỉ ${onOff(r.bot.wholesalePricing)} · chốt không kiểm tồn ${onOff(r.bot.sellWithoutStockCheck)}` : "— (chưa có cấu hình)"} · bảng giá sỉ đang dùng ${activeLists.length} (${tiers} bậc) · câu mẫu đang bật ${r.quickReplies.length} · câu upsell ${r.quickReplySettings?.upsellSet ? `ĐÃ CHỌN (${r.quickReplies.find((q) => q.upsell)?.images ?? 0} ảnh)` : r.quickReplySettings?.upsellStale ? `TRỎ TỚI CÂU ${r.quickReplySettings.upsellStale.state === "INACTIVE" ? "ĐANG TẮT" : "ĐÃ XOÁ"}` : "CHƯA CHỌN"}`,
+    `Câu mẫu: cách hỏi gắn nhầm món ${conflicts.length} (ở ${new Set(conflicts.map((c) => c.title)).size} câu mẫu đang bật)`,
   ].map((l) => l.slice(0, SUMMARY_MAX_CHARS));
 }
 

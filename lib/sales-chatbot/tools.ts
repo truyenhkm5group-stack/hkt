@@ -53,6 +53,7 @@ import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/li
 import { quotedInText } from "@/lib/sales-chatbot/text";
 import { isMessagingChannel, type ChatChannel, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
 import { renderQuickReplyForSend } from "@/lib/sales-chatbot/quick-replies";
+import type { QuickReplyFocusGuard } from "@/lib/sales-chatbot/quick-reply-focus";
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import type { OrderSyncThreadState } from "@/lib/sales-chatbot/order-sync-shared";
 import { customerOrderStatus } from "@/lib/sales-chatbot/order-status-shared";
@@ -225,6 +226,8 @@ export type ToolContext = {
   state: ChatState;
   /** Câu mẫu đang bật, mã ngắn Q1… như trong lời nhắc (`quickReplyCatalog`). */
   quickReplies?: readonly { code: string; id: string; title: string; upsell: boolean }[];
+  /** Món khách đang hỏi (P0 18/10/2026, `quick-reply-focus.ts`) — câu mẫu không phải UPSELL nói về món khác thì không gửi. */
+  quickReplyFocus?: QuickReplyFocusGuard | null;
   /** Câu CUỐI khách gõ (chữ thô) — `confirm_order` đối chiếu lời xác nhận với câu này. */
   lastUserText: string;
   agent: OrderAgent;
@@ -1386,6 +1389,17 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const pick = await renderQuickReplyForSend(entry.id, ctx.config);
       if (!pick && entry.upsell) state.upsellUnavailable = true;
       if (!pick) return err(`Câu mẫu ${entry.code}: thiếu số ERP`, "Câu mẫu này đang thiếu giá / tồn từ ERP — tự trả lời bằng công cụ giá / tồn, không dùng câu mẫu.", state);
+      // MÓN ĐANG BÀN (P0 18/10/2026): câu mẫu thường nói về món khác ⇒ không gửi — trả lời đúng món đang bàn TRƯỚC. Mời thêm món khác
+      // chỉ qua câu UPSELL (cửa sổ lời mời ở trên), không bằng câu báo giá của món khác. Lời từ chối KHÔNG khẳng định khách đang hỏi gì
+      // (review: shop vừa mời nem thì «giá sao em» có thể là hỏi nem) — chỉ nói câu mẫu không khớp món đang bàn.
+      if (!entry.upsell && ctx.quickReplyFocus && !ctx.quickReplyFocus.fits(pick.entry)) {
+        const f = ctx.quickReplyFocus;
+        return err(
+          `Câu mẫu ${entry.code}: không khớp món đang bàn`,
+          `Câu mẫu này nói về ${f.coversOf(pick.entry).join(", ")} — không khớp món đang bàn${f.onTable.length ? ` (${f.onTable.join(", ")})` : " (khách đã từ chối món này)"}. KHÔNG gửi; đọc lại tin khách và trả lời bằng thông tin đúng món (giá / quy cách / tồn bằng công cụ).`,
+          state,
+        );
+      }
       if (repeatsRecent(pick.text, ctx.recentSaid ?? [])) return err(`Câu mẫu ${entry.code}: vừa gửi`, "Câu mẫu này shop VỪA gửi — khách đang trả lời nó. Đọc câu khách và đi tiếp, không gửi lại.", state);
       // #871: câu mẫu đi NGUYÊN VĂN tới khách, không qua hàng rào chữ của engine ⇒ cùng một phán quyết ở đây. Câu mẫu xin SĐT / địa chỉ
       // khách đã cho («mình cho em xin SĐT + địa chỉ chính xác để em check tuyến giao») thì không gửi.

@@ -573,6 +573,7 @@ import { testSalesQuoteIntegrity } from "./sales-quote-integrity.test";
 import { testSalesCartCommitment } from "./sales-cart-commitment.test";
 import { testP0855Cart } from "./p0-855-cart.test";
 import { testP0855Delta } from "./p0-855-delta.test";
+import { testP0QuickReplyFocus } from "./p0-quick-reply-focus.test";
 import { testP0RepeatBuyer } from "./p0-repeat-buyer.test";
 import { testP0863CancelFlow } from "./p0-863-cancel-flow.test";
 import { testConvMoneyTrace } from "./conv-money-trace.test";
@@ -3103,6 +3104,9 @@ async function main() {
   // P0 #868 (chủ shop 16/10/2026) — lời mời mua thêm THÔNG MINH: không còn cổng «chưa mời thêm món», một lời mời mỗi lượt mua, không mời lúc
   // khách gửi SĐT / địa chỉ / đã từ chối; khách đã chọn 2kg ⇒ không «1kg hay 2kg»; món kèm phải đủ điều kiện — thuần + chatTurn thật (`gd-food-nba`).
   await testSalesNextBestAction();
+  // P0 18/10/2026 (ca «ThanhPhương») — câu mẫu phải nói ĐÚNG món khách hỏi: «xin giá chả cá» không còn ra câu nem đang mang nhầm cách
+  // hỏi đó; page tự động nói chả cá · khách từ chối nem · khách hỏi hai món · model gửi câu mẫu sai món — thuần + chatTurn thật (`gd-food-qrf`).
+  await testP0QuickReplyFocus();
   // P0 11/10/2026 — ops sales-integrity-audit: giá bot ≠ giá đơn · giá tự đổi · xác nhận giả · chuyển người không ai nhận ·
   // địa chỉ chưa ghép · nhắc sau đơn chốt — thuần + CSDL thật (mã `erp-ia-`, tự dọn), tóm tắt không lọt PII.
   await testSalesIntegrityAudit();

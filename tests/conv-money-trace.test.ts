@@ -15,7 +15,7 @@ import { inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { CLAIM_SAFE_TEXT } from "@/lib/sales-chatbot/claim-guard";
 import { EMPTY_REPLY_TEXT } from "@/lib/sales-chatbot/engine";
-import { COMMENT_ALREADY_NOTE, COMMENT_CARRY_LABEL, fixedAmountsInTemplate, reviewCodesText, fixedTextKind, moneyOfToolResult, parseTraceArgs, scanPatterns, totalClaimsIn, traceConversation } from "../scripts/conv-money-trace";
+import { COMMENT_ALREADY_NOTE, COMMENT_CARRY_LABEL, fixedAmountsInTemplate, reviewCodesText, fixedTextKind, moneyOfToolResult, parseTraceArgs, quickReplyHead, scanPatterns, totalClaimsIn, traceConversation, wrongProductTemplate } from "../scripts/conv-money-trace";
 
 const PHONE = "0900003106";
 
@@ -136,8 +136,29 @@ async function testDb() {
   }
 }
 
+/** D (P0 18/10/2026): câu mẫu nem gửi cho «xin giá chả cá» ⇒ đếm; câu chả cá ⇒ không; khách chưa nói món ⇒ không đoán. */
+function testWrongProduct() {
+  const products = [
+    { name: "Chả cá thu", skus: ["CHA-CA-THU"] },
+    { name: "Nem hải sản tôm bề bề", skus: ["NEM-1"] },
+  ];
+  const t = (title: string, answer: string) => ({ title, answer, head: quickReplyHead(answer) });
+  const nem = t("Nem", "Nem hải sản tôm bề bề bên em giá {{giá:NEM-1}}/hộp 10 cái ạ");
+  const ca = t("Chả cá", "Dạ chả cá thu bên em hiện đang có giá {{giá:CHA-CA-THU}} ạ");
+  const tpls = [nem, ca];
+  const c = (text: string) => [{ who: "CUSTOMER" as const, text }];
+  assert.equal(wrongProductTemplate("Nem hải sản tôm bề bề bên em giá 120.000 ₫/hộp 10 cái ạ", c("xin giá chả cá"), tpls, products)?.title, "Nem");
+  assert.equal(wrongProductTemplate("Dạ chả cá thu bên em hiện đang có giá 280.000 ₫ ạ", c("xin giá chả cá"), tpls, products), null);
+  assert.equal(wrongProductTemplate("Nem hải sản tôm bề bề bên em giá 120.000 ₫/hộp 10 cái ạ", c("báo giá"), tpls, products), null, "chưa rõ khách hỏi món gì ⇒ không đếm");
+  assert.equal(wrongProductTemplate("Nem hải sản tôm bề bề bên em giá 120.000 ₫/hộp 10 cái ạ", c("nem bao nhiêu"), tpls, products), null);
+  assert.equal(wrongProductTemplate("Dạ em gửi mình menu ạ", c("xin giá chả cá"), tpls, products), null, "tin không phải câu mẫu");
+  const moiNem = [...c("chả cá thu giá sao em"), { who: "SHOP" as const, text: "Dạ chả cá thu 280k ạ. Chị lấy thêm nem hải sản không ạ?" }, ...c("giá sao em")];
+  assert.equal(wrongProductTemplate("Nem hải sản tôm bề bề bên em giá 120.000 ₫/hộp 10 cái ạ", moiNem, tpls, products), null, "shop vừa mời nem ⇒ câu nem không phải sai món");
+}
+
 export async function testConvMoneyTrace() {
   testPure();
+  testWrongProduct();
   testSource();
   await testDb();
   console.log("  ✓ ops conv-money-trace: TỔNG trong tin bot ≠ báo giá giỏ ⇒ LỆCH (640k thuộc tập tham chiếu, không thuộc báo giá); «nói rõ hơn» không có tin khách mới ⇒ đếm; câu mẫu có số tiền cố định; tóm tắt không lọt PII; chỉ đọc, khai đủ bốn chỗ");

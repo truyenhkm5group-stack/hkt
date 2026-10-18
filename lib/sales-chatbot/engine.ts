@@ -54,7 +54,8 @@ import { DEFAULT_SALES_CHATBOT_CONFIG, isMessagingChannel, isPublicChannel, pars
 import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib/sales-chatbot/playbook-shared";
 import { LESSONS_SETTING_KEY, lessonsPrompt, parseLessonsState } from "@/lib/sales-chatbot/lessons-shared";
 import { levelPromptFor } from "@/lib/sales-chatbot/levels";
-import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, quickReplyCatalog, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
+import type { FocusLine } from "@/lib/sales-chatbot/quick-reply-focus";
+import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, quickReplyCatalog, quickReplyFocus, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { customer360Prompt, loadCustomer360, preferReturning, reuseIntentOf } from "@/lib/sales-chatbot/customer-360";
@@ -1234,11 +1235,28 @@ async function chatTurnCore(
       conv.state = st as Record<string, unknown>;
       st0 = st;
     }
+    // Chữ KHÁCH của lượt mua hiện tại — căn cứ «khách đã gọi tên món» (lineBasisViolation, P0 14/10/2026) VÀ căn cứ MÓN KHÁCH ĐANG HỎI của
+    // câu mẫu (P0 18/10/2026). CHỈ lượt mua hiện tại (review PR #873): «Cho chị 1kg chả cá thu» của lượt mua TRƯỚC không phải căn cứ cho
+    // chả cá bot tự thêm ở lượt này. Cùng mốc với đường phủ nhận (`purchaseRoundStart`), tính MỘT lần, dùng cho câu mẫu, báo giá
+    // (calculate_cart) lẫn lên / sửa / chốt đơn.
+    const roundCustomerTexts = [...customerTextsSince(customerMsgsOf(msgs), purchaseRoundStart(st0)), text];
+    // MÓN ĐANG BÀN (P0 18/10/2026, ca «ThanhPhương»): «xin giá chả cá» khớp chữ câu mẫu NEM vì câu nem mang nhầm cách hỏi đó. Câu mẫu
+    // nói về món khác món đang bàn không được trả lời — ở bước khớp chữ, AI chọn mã, và công cụ `send_quick_reply`. Món đang bàn = món
+    // khách gọi tên + món shop nói tới / mời sau đó; khách chưa gọi tên món ⇒ món của câu shop / page gần nhất (tin tự động của page).
+    // Cùng cửa sổ lượt mua với `roundCustomerTexts`. Đọc lỗi ⇒ `null`, không lọc (như trước).
+    const roundSince = purchaseRoundStart(st0);
+    const focusLines: FocusLine[] = [
+      ...customerMsgsOf(msgs)
+        .filter((m) => !m.toolResult && m.text.trim() && (!roundSince || m.at.getTime() > roundSince.getTime()))
+        .map((m): FocusLine => ({ who: m.role === "user" ? "CUSTOMER" : "SHOP", text: m.text })),
+      { who: "CUSTOMER", text },
+    ];
+    const qrFocus = qrSettings.enabled ? await quickReplyFocus(focusLines, qrSettings.upsellReplyId).catch(() => null) : null;
     const quick0: QuickReplyStep = st0.priceDispute?.open
       ? { kind: "SKIP", reason: "Khách đang phản đối giá — AI báo lại theo báo giá máy chủ" }
       : postSale
         ? { kind: "SKIP", reason: `Khách ở giai đoạn ${CUSTOMER_PHASE_LABEL[phase!.phase]} — câu mẫu bán hàng sai ngữ cảnh, AI trả lời` }
-        : opts.context ? { kind: "SKIP", reason: "Có ngữ cảnh bài viết — AI đọc cùng ngữ cảnh" } : qrSettings.enabled ? await quickReplyByKeyword(text, { ordering: Boolean(st0.draft && !st0.confirmed), cfg, recent: recentSaid }) : { kind: "SKIP", reason: "Câu mẫu đang tắt" };
+        : opts.context ? { kind: "SKIP", reason: "Có ngữ cảnh bài viết — AI đọc cùng ngữ cảnh" } : qrSettings.enabled ? await quickReplyByKeyword(text, { ordering: Boolean(st0.draft && !st0.confirmed), cfg, recent: recentSaid, focus: qrFocus }) : { kind: "SKIP", reason: "Câu mẫu đang tắt" };
     // Khách hẹn giờ giao cho đơn đang lên (#871) ⇒ AI ghi chú giao hàng; câu mẫu không biết gì về đơn. (Câu mẫu xin lại SĐT / địa chỉ đã có
     // bị chặn ngay trước khi gửi — `quickReasks`, #872.)
     const quick: QuickReplyStep = deliveryPrefText && (st0.customer || st0.draft) && quick0.kind !== "SKIP" ? { kind: "SKIP", reason: "Khách hẹn giờ giao cho đơn đang lên — AI ghi chú giao hàng" } : quick0;
@@ -1302,7 +1320,7 @@ async function chatTurnCore(
         const inT = res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens;
         await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: quickProv.source, provider: quickProv.provider.name, model: res.model || quickProv.provider.model, requests: 1, inputTokens: inT, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || quickProv.provider.model, res.usage), status: "OK", actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id, workload: "quick_extract", ...usageDetail(res) }).catch(() => undefined);
         Object.assign(pre, { calls: 1, inTok: inT, outTok: res.usage.outputTokens });
-        if (pick && !repeatsRecent(pick.text, recentSaid) && !quickReasks(pick)) return sendQuick(pick, pre);
+        if (pick && !repeatsRecent(pick.text, recentSaid) && !quickReasks(pick) && (!qrFocus || qrFocus.answers(pick.entry))) return sendQuick(pick, pre);
       } catch (error) {
         if (error instanceof SeqConflict) throw error;
       }
@@ -1334,13 +1352,9 @@ async function chatTurnCore(
     // TỰ CHỐT KHI ĐỦ ĐƠN (P0-A, chủ shop 11/10/2026): theo công tắc «đơn đủ thông tin = đã xác nhận» của tổ chức. Lỗi đọc ⇒ TẮT (luồng xin xác nhận cũ).
     const autoConfirm = await loadAutoConfirmComplete().catch(() => false);
     const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }), postSale ? "" : customer360Prompt(c360, reuse), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), confirmedOrderPrompt(known), cartPromptOf(known, text, turnSeq, autoConfirm, prevTurn), postSale ? "" : knownContactPrompt(known, customerTexts), postSale ? postSalePrompt(phase!, phase!.shortCode) : "", recoveryPrompt(known), opts.context ?? ""].filter(Boolean).join("\n");
-    // Chữ KHÁCH của lượt mua hiện tại — căn cứ «khách đã gọi tên món» khi công cụ lên / chốt đơn (lineBasisViolation, P0 14/10/2026).
     // Chỉ CHỮ MUA (bỏ câu hỏi giá / câu từ chối / giả định — `buyingText`): gọi tên món trong «nem tôm bao nhiêu?» không phải căn cứ.
-    // (`customerTexts` — tin KHÁCH thô — dựng ở trên, trước bước câu mẫu: câu mẫu cũng chịu hàng rào thông tin nhận hàng, #871.)
-    // CĂN CỨ «khách đã gọi tên món» chỉ lấy chữ khách của LƯỢT MUA HIỆN TẠI (review PR #873): khách cũ cùng luồng Messenger — «Cho chị 1kg
-    // chả cá thu» của lượt mua TRƯỚC không phải căn cứ cho chả cá bot tự thêm ở lượt này. Cùng mốc với đường phủ nhận (`purchaseRoundStart`),
-    // tính MỘT lần, dùng cho cả báo giá (calculate_cart) lẫn lên / sửa / chốt đơn (`lineBasisViolation`).
-    const roundCustomerTexts = [...customerTextsSince(customerMsgsOf(msgs), purchaseRoundStart(st0)), text];
+    // (`customerTexts` — tin KHÁCH thô — và `roundCustomerTexts` dựng ở trên, trước bước câu mẫu: câu mẫu cũng chịu hàng rào thông tin
+    // nhận hàng, #871, và hàng rào món khách đang hỏi.)
     const customerSaid = buyingText(roundCustomerTexts);
     const deliveredImages: string[] = [];
     let deliveredReplyId: string | null = null;
@@ -1596,7 +1610,7 @@ async function chatTurnCore(
         for (const u of uses) {
           const confirmedBefore = Boolean(state.confirmed);
           const draftBefore = draftFingerprint(state.draft);
-          const r = await executeTool(u.name, u.input, { autoConfirm, prevTurn, conversationId: conv.id, customerSaid, customerTexts, roundCustomerTexts, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
+          const r = await executeTool(u.name, u.input, { autoConfirm, prevTurn, conversationId: conv.id, customerSaid, customerTexts, roundCustomerTexts, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, recentSaid, quickReplyFocus: qrFocus, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
           // Tổng máy chủ vừa tính vào sổ `seenTotals` — hàng rào chặn nói lại tổng của giỏ CŨ (review vòng 3).
           state = r.state;
           state = noteSeenTotals(state);
