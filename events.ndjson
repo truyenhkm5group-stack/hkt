@@ -1,4 +1,3 @@
-{"at":"2026-10-11T01:15:37.420Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"saas-value-snapshots","detail":"0241"}
 {"at":"2026-10-11T01:15:55.240Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RESERVED","mission":"inbox-unread-perf","detail":"0242"}
 {"at":"2026-10-11T01:19:04.805Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"saas-value-snapshots","detail":"feat/saas-value-snapshots @ 7f5f3a529475 · 1 lệnh kiểm thử"}
 {"at":"2026-10-11T01:19:20.835Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#794 @ 7f5f3a529475 · Đọc lõi chụp: ghi duy nhất qua hai tệp, chỉ đường JOB, ngày cũ không ghi, lỗi từng nguồn ⇒ NULL + source_errors; migration 0241 chỉ CREATE TABLE/INDEX/CHECK (không UPDATE/DELETE); khai bảng platform_* đủ ba chỗ"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-18T22:47:53.594Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#906 @ 283be11844c5 · review độc lập 7 vòng PASS @2b7ebadc (phiên code-erp-01); lead kiểm range-diff: delta chỉ là gỡ xung đột ops-vps.yml; chỉ thị chủ shop 19/10 «COMPANY-WIDE PROFIT GATE»; 0 kỳ lương đã chốt trên production, không migration, cấu hình mới chỉ khi người duyệt khai"}
 {"at":"2026-10-18T23:26:19.527Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"payroll-profit-gate","detail":"#906 @ 283be11844c5 → 68e18af90c99 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-18T23:27:48.945Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"68e18af90c99 · run 39176587980 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39176587980"}
+{"at":"2026-10-18T23:40:14.107Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"payroll-profit-gate","detail":"PASS 68e18af90c990489112c32aae1e97492cc04d352 2026-10-18T23:39:52.467Z"}

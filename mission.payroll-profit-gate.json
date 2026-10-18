@@ -3,7 +3,7 @@
   "mission_id": "payroll-profit-gate",
   "title": "P0 Lương: thưởng % lợi nhuận qua cổng lỗ lũy kế toàn công ty (HWM, quỹ trần, tạm tính ≠ đủ điều kiện)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -36,11 +36,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-18T18:34:21.066Z",
-  "updated_at": "2026-10-18T23:26:19.486Z",
+  "updated_at": "2026-10-18T23:40:14.067Z",
   "last_heartbeat": "2026-10-18T21:27:39.982Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#906 → 68e18af90c990489112c32aae1e97492cc04d352"
+    "merged": "#906 → 68e18af90c990489112c32aae1e97492cc04d352",
+    "verify": "PASS 68e18af90c990489112c32aae1e97492cc04d352 2026-10-18T23:39:52.467Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39176587980"
   },
   "handoff": {
     "branch": "claude/payroll-profit-gate",
