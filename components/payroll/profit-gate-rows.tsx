@@ -1,0 +1,63 @@
+import { InfoHint } from "@/components/info-hint";
+import { Money } from "@/components/ui-bits";
+import { MISSING_TEXT } from "@/lib/format";
+
+/**
+ * Dòng "thưởng % lợi nhuận chưa đủ điều kiện" trên phiếu lương — dùng CHUNG cho phiếu lương quản trị
+ * (`/payroll/payslip`) và phiếu người lao động tự xác nhận (`/my-payslip`), để hai tờ phiếu không bao
+ * giờ in hai số thực nhận khác nhau.
+ *
+ * Phần thưởng tạm tính KHÔNG được duyệt trả (cổng lỗ lũy kế toàn công ty / trần quỹ) in thành một
+ * dòng trừ kèm lý do, để các dòng cộng ra đúng số thực nhận và người nhận biết vì sao. Ảnh chụp đời cũ
+ * (không có `profitShare`) không in dòng nào — không đoán.
+ */
+export function ProfitGateRows({ share }: { share: { provisional: number | null; eligible: number | null; withheld: number | null; reasons: string[]; claims: unknown[] } | undefined }) {
+  if (!share || !share.claims.length) return null;
+  if (share.eligible === null) {
+    return (
+      <tr className="border-b">
+        <td className="py-1.5 pr-3">
+          <span className="inline-flex items-center gap-1">
+            Thưởng % lợi nhuận — chưa xét được điều kiện toàn công ty
+            {share.reasons.length ? <InfoHint>{share.reasons.join(" ")}</InfoHint> : null}
+          </span>
+        </td>
+        <td className="py-1.5 text-right tabular-nums text-muted-foreground">{MISSING_TEXT}</td>
+      </tr>
+    );
+  }
+  /*
+    MỘT dòng chênh CÓ DẤU = đủ điều kiện − tạm tính, để các dòng luôn cộng ra đúng số thực nhận — kể cả
+    khi một khoản bị giữ lại còn khoản kia vượt tạm tính (chứng từ muộn dương).
+  */
+  const chenh = share.provisional === null ? 0 : share.eligible - share.provisional;
+  if (chenh === 0) return null;
+  if (chenh > 0) {
+    return (
+      <tr className="border-b">
+        <td className="py-1.5 pr-3">
+          <span className="inline-flex items-center gap-1">
+            Thưởng % lợi nhuận đủ điều kiện vượt số tạm tính
+            <InfoHint>Lợi nhuận đem xét của tháng gồm chứng từ đến muộn của tháng đã khoá trước đó, nên phần đủ điều kiện lớn hơn số tạm tính theo lợi nhuận riêng của tháng.</InfoHint>
+          </span>
+        </td>
+        <td className="py-1.5 text-right tabular-nums">
+          <Money value={chenh} sign />
+        </td>
+      </tr>
+    );
+  }
+  return (
+    <tr className="border-b">
+      <td className="py-1.5 pr-3">
+        <span className="inline-flex items-center gap-1">
+          Thưởng % lợi nhuận chưa đủ điều kiện (không trả)
+          {share.reasons.length ? <InfoHint>{share.reasons.join(" ")}</InfoHint> : null}
+        </span>
+      </td>
+      <td className="py-1.5 text-right tabular-nums text-rose-700 dark:text-rose-400">
+        <Money value={chenh} sign />
+      </td>
+    </tr>
+  );
+}

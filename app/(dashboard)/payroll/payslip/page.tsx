@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { PayrollTabs } from "@/app/(dashboard)/payroll/tabs";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { InfoHint } from "@/components/info-hint";
+import { ProfitGateRows } from "@/components/payroll/profit-gate-rows";
 import { EmptyState, Money, SectionCard } from "@/components/ui-bits";
 import { can, requireUser } from "@/lib/auth/session";
 import { canOpenPayroll, payrollLineVisible, resolvePayrollScope } from "@/lib/auth/payroll-scope";
@@ -62,6 +63,13 @@ export default async function PayslipPage({ searchParams }: { searchParams: Prom
   /* Kỳ đã đóng băng: lấy dòng TỪ ẢNH CHỤP, không lấy từ bản tính sống. */
   const snapLine = state.frozen && state.snapshot && line ? state.snapshot.lines.find((l) => l.employeeId === line.employee.id) : undefined;
   const engine = snapLine?.engine ?? (line?.engine ? { ...line.engine.result, policy: [] } : null);
+  /*
+    THƯỞNG % LỢI NHUẬN SAU CỔNG LỖ LŨY KẾ TOÀN CÔNG TY. Kỳ đã khoá đọc ảnh chụp; ảnh chụp đời cũ
+    (chốt trước khi có cổng) không có khối này — khi ấy không in dòng nào, không đoán.
+    `src` cũng sửa một chỗ cũ: đường tính cũ từng in số SỐNG cả cho kỳ đã khoá.
+  */
+  const share = snapLine ? snapLine.profitShare : line?.profitShare;
+  const src = snapLine ?? line;
 
   return (
     <div className="space-y-5">
@@ -146,11 +154,12 @@ export default async function PayslipPage({ searchParams }: { searchParams: Prom
                         <Money value={engine.totalDeductions} />
                       </td>
                     </tr>
+                    <ProfitGateRows share={share} />
                     <StatutoryRow statutory={statutory} />
                     <tr className="border-t-2">
                       <td className="py-2 pr-3 text-right font-semibold">Thực nhận</td>
                       <td className="py-2 text-right tabular-nums font-semibold">
-                        <Money value={engine.netPay} className="text-base" />
+                        <Money value={src ? src.salary : engine.netPay} className="text-base" />
                       </td>
                     </tr>
                   </>
@@ -162,19 +171,19 @@ export default async function PayslipPage({ searchParams }: { searchParams: Prom
                     */}
                     <tr className="border-b">
                       <td className="py-1.5 pr-3">Lương cứng (phần thuộc kỳ)</td>
-                      <td className="py-1.5 text-right tabular-nums">{line.fixed === null ? MISSING_TEXT : formatVND(line.fixed)}</td>
+                      <td className="py-1.5 text-right tabular-nums">{src?.fixed === null || src?.fixed === undefined ? MISSING_TEXT : formatVND(src.fixed)}</td>
                     </tr>
                     <tr className="border-b">
-                      <td className="py-1.5 pr-3">Thưởng % lợi nhuận toàn shop</td>
-                      <td className="py-1.5 text-right tabular-nums">{formatVND(line.bonusTotal)}</td>
+                      <td className="py-1.5 pr-3">Thưởng % lợi nhuận toàn shop <span className="text-[11px] text-muted-foreground">(tạm tính)</span></td>
+                      <td className="py-1.5 text-right tabular-nums">{formatVND(src?.bonusTotal ?? null)}</td>
                     </tr>
                     <tr className="border-b">
-                      <td className="py-1.5 pr-3">Hoa hồng % lợi nhuận cá nhân</td>
-                      <td className="py-1.5 text-right tabular-nums">{line.bonusPersonal === null ? MISSING_TEXT : formatVND(line.bonusPersonal)}</td>
+                      <td className="py-1.5 pr-3">Hoa hồng % lợi nhuận cá nhân <span className="text-[11px] text-muted-foreground">(tạm tính)</span></td>
+                      <td className="py-1.5 text-right tabular-nums">{src?.bonusPersonal === null || src?.bonusPersonal === undefined ? MISSING_TEXT : formatVND(src.bonusPersonal)}</td>
                     </tr>
                     <tr className="border-b">
                       <td className="py-1.5 pr-3">Hoa hồng % doanh thu cá nhân</td>
-                      <td className="py-1.5 text-right tabular-nums">{formatVND(line.bonusRevenue)}</td>
+                      <td className="py-1.5 text-right tabular-nums">{formatVND(src?.bonusRevenue ?? null)}</td>
                     </tr>
                     {/* Điều chỉnh (tạm ứng, thưởng, quyết toán kỳ trước…) — kỳ đã khoá đọc từ ảnh chụp. */}
                     {((snapLine ? snapLine.legacyAdjustments : line.legacyAdjustments)?.items ?? []).map((a, i) => (
@@ -190,11 +199,12 @@ export default async function PayslipPage({ searchParams }: { searchParams: Prom
                         </td>
                       </tr>
                     ))}
+                    <ProfitGateRows share={share} />
                     <StatutoryRow statutory={statutory} />
                     <tr className="border-t-2">
                       <td className="py-2 pr-3 text-right font-semibold">Thực nhận</td>
                       <td className="py-2 text-right tabular-nums font-semibold">
-                        <Money value={line.salary} className="text-base" />
+                        <Money value={src?.salary ?? null} className="text-base" />
                       </td>
                     </tr>
                   </>

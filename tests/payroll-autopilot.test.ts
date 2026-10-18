@@ -158,16 +158,20 @@ export function testPayrollAutopilotPure() {
   const song = { employeeId: "e1", totalProfit: 60_000_000, personalProfit: 14_000_000, personalRevenue: 130_000_000, engine: null };
   const r1 = settlementFor(snap(), song);
   assert.ok(r1.status === "OK", "6. đường cũ quyết toán được");
-  if (r1.status === "OK") assert.equal(r1.delta, 2_800_000 + 1_300_000 - 3_000_000, "6. Δ = (20% × 14tr + 1% × 130tr) − (2tr + 1tr) = 1.100.000 — lương cứng KHÔNG quyết toán");
+  if (r1.status === "OK") assert.equal(r1.delta, 1_300_000 - 1_000_000, "6. Δ = 1% × 130tr − 1tr = 300.000 — CHỈ hoa hồng thông thường; 20% LN cá nhân đi qua cổng lợi nhuận toàn công ty, không truy lĩnh tự động; lương cứng KHÔNG quyết toán");
   const r2 = settlementFor(snap({ percentPersonal: 20 }), { ...song, personalProfit: -5_000_000, personalRevenue: 100_000_000 });
-  if (r2.status === "OK") assert.equal(r2.delta, -2_000_000, "6. LN cá nhân về âm (hoàn muộn) ⇒ TRUY THU phần hoa hồng đã trả, không trả hoa hồng âm");
+  assert.ok(r2.status === "OK", "6. đường cũ quyết toán được");
+  if (r2.status === "OK") assert.equal(r2.delta, 0, "6. LN cá nhân về âm (hoàn muộn) ⇒ KHÔNG truy thu thưởng % lợi nhuận đã chốt — chênh lệch vào lũy kế công ty tháng sau");
   assert.equal(settlementFor(snap({ carry: { monthKey: "2029-08", openingBalance: 0, openingReason: "", realProfit: 0, lossApplied: 0, commissionBase: 0, signedCommission: 0, closingBalance: 0 } }), song).status, "MANUAL", "6. có sổ lỗ lũy kế ⇒ người quyết toán, máy không đoán chuỗi số dư");
-  assert.equal(settlementFor(snap(), { ...song, personalProfit: null }).status, "UNKNOWN", "6. LN cá nhân CHƯA BIẾT ⇒ không quy về 0");
+  assert.equal(settlementFor(snap(), { ...song, personalProfit: null }).status, "OK", "6. LN cá nhân CHƯA BIẾT không chặn quyết toán hoa hồng doanh thu — phần lợi nhuận không quyết toán ở đây");
   assert.equal(settlementFor(snap(), null).status, "UNKNOWN", "6. người không còn trong sổ ⇒ nói ra");
   const eng = (amount: number | null, carry: unknown = null) => ({ policy: [], components: [{ code: "HH", label: "Hoa hồng", kind: "COMMISSION", amount, basisKey: null, basisValue: null, explain: [], carry: carry as null }], adjustments: [], grossEarnings: null, totalDeductions: null, netPay: null, segments: [] });
   const r3 = settlementFor(snap({ engine: eng(1_000_000) }), { ...song, engine: { components: [{ kind: "COMMISSION", amount: 1_400_000, carry: null }, { kind: "FIXED", amount: 9_000_000, carry: null }] } });
   if (r3.status === "OK") assert.equal(r3.delta, 400_000, "6. máy chung: chỉ chênh phần HOA HỒNG, không cộng lương cứng");
   assert.equal(settlementFor(snap({ engine: eng(1_000_000, { openingBalance: 0 }) }), song).status, "MANUAL", "6. hoa hồng máy chung có bù lỗ ⇒ người quyết toán");
+  const engLai = { ...eng(1_000_000), components: [{ ...eng(1_000_000).components[0], basisKey: "PROFIT_PERSONAL" }] };
+  const r4 = settlementFor(snap({ engine: engLai }), { ...song, engine: { components: [{ kind: "COMMISSION", amount: 1_400_000, carry: null, basisKey: "PROFIT_PERSONAL" }] } });
+  assert.ok(r4.status === "OK" && r4.delta === 0, "6. máy chung: hoa hồng tính trên LỢI NHUẬN không truy lĩnh tự động dù LN sống tăng — nó đi qua cổng lợi nhuận toàn công ty");
 
   console.log("  ✓ Lương tự động (thuần): VietQR đúng chuẩn · nội dung CK không trùng/lồng · khớp cả nội dung lẫn số tiền · nghỉ giữa tháng vẫn được trả · lịch máy theo giờ VN và không bao giờ ký thay · quyết toán bằng tỷ lệ đã chốt · im lặng ≠ đồng ý");
 }
@@ -312,9 +316,13 @@ export async function testPayrollAutopilotFlow(db: Db) {
   assert.equal((await db.select().from(schema.userMessages).where(and(eq(schema.userMessages.userId, `${P}an`), eq(schema.userMessages.kind, "PAYSLIP_PAID")))).length, 1, "F. An nhận tin đã chuyển");
 
   /* ── G · quyết toán kỳ trước: tỷ lệ đã chốt, không đụng dòng người nhập, chạy lại không nhân đôi ── */
-  // Dựng tình huống: ảnh chụp tháng 8 đã trả 500.000đ thưởng 10% LN toàn shop; tính lại hôm nay LN = 0.
+  // Dựng tình huống: ảnh chụp tháng 8 đã trả 500.000đ hoa hồng 1% DOANH THU cá nhân VÀ 500.000đ thưởng
+  // 10% LN toàn shop; tính lại hôm nay cả doanh thu lẫn LN đều về 0.
+  // Từ 19/10/2026 máy chỉ quyết toán HOA HỒNG THÔNG THƯỜNG: thưởng % lợi nhuận của kỳ đã khoá và đã
+  // trả KHÔNG bị truy thu tự động — chênh lệch lợi nhuận đi vào lũy kế công ty tháng sau qua cổng
+  // (docs/payroll-profit-gate.md §5).
   const anh = kySau.snapshot as PayrollSnapshot;
-  const anhSua = { ...anh, lines: anh.lines.map((l) => (l.employeeId === an.id ? { ...l, percentTotal: 10, totalProfit: 5_000_000, bonusTotal: 500_000 } : l)) };
+  const anhSua = { ...anh, lines: anh.lines.map((l) => (l.employeeId === an.id ? { ...l, percentTotal: 10, totalProfit: 5_000_000, bonusTotal: 500_000, percentRevenue: 1, personalRevenue: 50_000_000, bonusRevenue: 500_000 } : l)) };
   await db.update(schema.payrollPeriods).set({ snapshot: anhSua }).where(eq(schema.payrollPeriods.periodKey, aug.periodKey));
   await db.insert(schema.payrollAdjustments).values({ employeeId: an.id, periodKey: sep.periodKey, kind: "BONUS", label: "Thưởng tay", amount: 300_000, reason: "Người nhập", reference: `AUTO_SETTLEMENT:${aug.periodKey}`, createdBy: `${P}admin` });
   clearMemo();
@@ -325,7 +333,7 @@ export async function testPayrollAutopilotFlow(db: Db) {
   const may = dieuChinh.filter((r) => r.createdBy === null);
   assert.equal(may.length, 1, "G. chạy hai lần vẫn MỘT dòng của máy");
   assert.equal(may[0].kind, "DEDUCTION");
-  assert.equal(may[0].amount, 500_000, "G. truy thu đúng phần thưởng đã trả trên LN không còn");
+  assert.equal(may[0].amount, 500_000, "G. truy thu đúng 500.000đ HOA HỒNG DOANH THU — không phải 1.000.000đ: 500.000đ thưởng % LN đã trả KHÔNG bị máy truy thu");
   assert.ok(may[0].label.includes("truy thu") && may[0].reason.includes("tỷ lệ đã chốt"), "G. dòng nói rõ nó là gì và căn cứ");
   assert.equal(dieuChinh.filter((r) => r.createdBy === `${P}admin`).length, 1, "G. dòng NGƯỜI nhập (dù trùng mã tham chiếu) không bị máy xoá");
 

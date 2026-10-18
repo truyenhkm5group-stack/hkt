@@ -651,6 +651,23 @@ deploy dừng, không phải cảnh báo.
     có trần hữu hạn; ứng dụng chờ trần ngắn rồi phục vụ tạm / lùi ngắn. Sửa sự cố kiểu này bằng cách nâng trần hay loại tổ chức
     khỏi bước kiểm là che lỗi: tổ chức ĐANG HOẠT ĐỘNG mà lượt thật hỏng LUÔN làm bước kiểm đỏ.
 
+70. **THƯỞNG % LỢI NHUẬN ĐI QUA CỔNG LỖ LŨY KẾ TOÀN CÔNG TY** (`lib/payroll/profit-gate.ts`,
+    `docs/payroll-profit-gate.md`): mọi khoản tính trên LỢI NHUẬN — % LN toàn shop VÀ % LN cá nhân,
+    đường cũ lẫn máy chung — chỉ được duyệt từ quỹ `⌊max(0, B − (H − N)) × cap%⌋`, với N/H là lũy
+    kế và mốc cao nhất đã chia (High-Water Mark) của công ty, B là lợi nhuận tháng TRƯỚC thưởng lợi
+    nhuận và SAU mọi chi phí khác. Lãi của một người / phòng ban / tổ chức khách SaaS **không bao giờ**
+    là căn cứ vượt qua lỗ của công ty. Số dư mở sổ là KHAI BÁO có người duyệt, có phiên bản
+    (`settings: payroll.profit-gate`) — không tự đặt về 0, không tính ngược về quá khứ. Chưa khai /
+    thiếu chứng từ chi phí (cảnh báo `high`) / tháng trước chưa khoá / kỳ không phải tháng lịch ⇒ CHƯA
+    KẾT LUẬN (`null`, in "—") và CHẶN chốt — không có đường lùi về "trả như cũ". Số tạm tính theo
+    công thức cũ vẫn hiện cạnh số đủ điều kiện, không bị xoá. Mọi đường ra tiền (`salary`,
+    `snapshotNetPay`, lệnh chuyển, phiếu lương, CSV) đọc số ĐƯỢC DUYỆT; quyết toán tự động
+    (`settlement.ts`) KHÔNG sinh thêm hay truy thu thưởng % lợi nhuận của kỳ đã khoá. ERP **không tự
+    đo lại tháng đã khoá** (bản tính sống dùng giá vốn / giả định / hồ sơ HÔM NAY — trộn đổi giá với
+    chứng từ muộn); chứng từ muộn đi vào lũy kế bằng ĐIỀU CHỈNH LŨY KẾ tường minh có người duyệt, ghi
+    vào tháng còn mở, đúng một lần; mở khoá đi từ tháng khoá mới nhất trở về.
+    Khoản KHẤU TRỪ / TẠM ỨNG trên đại lượng lợi nhuận không phải thưởng và không đi qua cổng.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng
   `npm run db:generate`**: ảnh chụp `drizzle/meta/*_snapshot.json` chỉ tới `0032`, nên nó sinh migration

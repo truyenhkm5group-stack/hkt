@@ -3,6 +3,7 @@ import { TableToolsFor } from "@/components/data-table/table-tools";
 import { PageHeader } from "@/components/page-header";
 import { PayrollTabs } from "@/app/(dashboard)/payroll/tabs";
 import { PayrollSettingsForm } from "@/app/(dashboard)/payroll/settings/settings-form";
+import { ProfitGateForm } from "@/app/(dashboard)/payroll/settings/profit-gate-form";
 import { SectionCard } from "@/components/ui-bits";
 import { can, requireUser } from "@/lib/auth/session";
 import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
@@ -10,6 +11,7 @@ import { COMPENSATION_PROFIT_LABEL, COMPENSATION_PROFIT_RULES } from "@/lib/cons
 import { COST_COMPONENTS } from "@/lib/constants/cost-authority";
 import { DEFAULT_STATUTORY, STATUTORY_DEDUCTION_KEY, type StatutoryConfig } from "@/lib/constants/payroll-statutory";
 import { getCarryoverConfig } from "@/lib/queries/payroll-carryover";
+import { getProfitGateConfig } from "@/lib/queries/payroll-profit-gate";
 import { getRecognizedPayrollCost } from "@/lib/queries/payroll-cost";
 import { resolvePeriod, type SearchParams } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
@@ -34,10 +36,11 @@ export default async function PayrollSettingsPage({ searchParams }: { searchPara
   */
   if (!canAdministerPayroll(user, can(user, "payroll:manage"))) redirect("/payroll?forbidden=1");
   const period = resolvePeriod(raw, "month");
-  const [carryover, recognition, statutory] = await Promise.all([
+  const [carryover, recognition, statutory, profitGate] = await Promise.all([
     getCarryoverConfig(),
     getRecognizedPayrollCost(period),
     getSettingJson<StatutoryConfig>(STATUTORY_DEDUCTION_KEY, DEFAULT_STATUTORY),
+    getProfitGateConfig(),
   ]);
 
   return (
@@ -47,6 +50,8 @@ export default async function PayrollSettingsPage({ searchParams }: { searchPara
         description="Hai công tắc dưới đây đổi số tiền của người thật, nên mỗi lượt đổi cần người thứ hai duyệt và để lại một dòng nhật ký."
       />
       <PayrollTabs canManage />
+
+      <ProfitGateForm config={profitGate} canApprove={can(user, "payroll:approve")} />
 
       <PayrollSettingsForm
         carryover={carryover}

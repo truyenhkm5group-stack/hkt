@@ -86,8 +86,9 @@ export function FinalizedPeriodTable({ state, basis, drift }: { state: PayrollPe
                 <TableHead>Cơ chế lúc chốt</TableHead>
                 <TableHead className="text-right">LN cá nhân</TableHead>
                 <TableHead className="text-right">Lương cứng (thuộc kỳ)</TableHead>
-                <TableHead className="text-right">Thưởng % tổng</TableHead>
-                <TableHead className="text-right">Thưởng % cá nhân</TableHead>
+                <TableHead className="text-right">Thưởng % tổng <span className="font-normal text-muted-foreground">(tạm tính)</span></TableHead>
+                <TableHead className="text-right">Thưởng % cá nhân <span className="font-normal text-muted-foreground">(tạm tính)</span></TableHead>
+                <TableHead className="text-right">Thưởng LN <span className="font-normal text-muted-foreground">(đủ điều kiện)</span></TableHead>
                 <TableHead className="text-right">Thưởng % DT</TableHead>
                 <TableHead className="text-right">Tổng lương</TableHead>
               </TableRow>
@@ -124,6 +125,17 @@ export function FinalizedPeriodTable({ state, basis, drift }: { state: PayrollPe
                     <MoneyOrUnknown value={l.bonusPersonal} />
                   </TableCell>
                   <TableCell className="text-right">
+                    {/* Ảnh chụp đời cũ (chốt trước khi có cổng) không có ô này — in "—", không đoán. */}
+                    {l.profitShare ? (
+                      <>
+                        <MoneyOrUnknown value={l.profitShare.eligible} />
+                        {l.profitShare.withheld ? <div className="text-[11px] text-destructive" title={l.profitShare.reasons.join(" ")}>chưa đủ điều kiện {formatVND(l.profitShare.withheld, { compact: true })}</div> : null}
+                      </>
+                    ) : (
+                      <span className="text-xs text-muted-foreground" title="Kỳ chốt trước khi có cổng lỗ lũy kế toàn công ty">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
                     <Money value={l.bonusRevenue} className={l.bonusRevenue ? "" : "text-muted-foreground"} />
                   </TableCell>
                   <TableCell className="text-right">
@@ -132,7 +144,7 @@ export function FinalizedPeriodTable({ state, basis, drift }: { state: PayrollPe
                 </TableRow>
               ))}
               <TableRow className="bg-muted/40 font-bold hover:bg-muted/40">
-                <TableCell colSpan={7}>Tổng lương phải trả của kỳ</TableCell>
+                <TableCell colSpan={8}>Tổng lương phải trả của kỳ</TableCell>
                 <TableCell className="text-right">
                   <MoneyOrUnknown value={snap.totalSalary} className="text-base" />
                 </TableCell>

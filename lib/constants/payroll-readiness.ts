@@ -33,7 +33,10 @@ export type FinalizeBlocker = {
     | "CARRYOVER_OPENING_NOT_ESTABLISHED"
     | "ENGINE_INPUT_MISSING"
     | "ENGINE_POLICY_PROBLEM"
-    | "POLICY_BOOK_INVALID";
+    | "POLICY_BOOK_INVALID"
+    | "PROFIT_GATE_NOT_ESTABLISHED"
+    | "PROFIT_GATE_DATA_INCOMPLETE"
+    | "PROFIT_GATE_NOT_APPLICABLE";
   /** Nói ĐÚNG cái đang thiếu, và nói được phải làm gì. Không có "dữ liệu không hợp lệ". */
   message: string;
 };
@@ -72,6 +75,11 @@ export type ReadinessInput = {
    * đi làm được việc.
    */
   policyIssues?: readonly { message: string; blocking: boolean }[];
+  /**
+   * CỔNG LỖ LŨY KẾ TOÀN CÔNG TY (`lib/payroll/profit-gate.ts`). `hasProvisional` = còn ít nhất một
+   * khoản thưởng % lợi nhuận TẠM TÍNH khác 0 — không có thì cổng không có gì để xét và không chặn.
+   */
+  profitGate?: { status: string; established: boolean; message: string; hasProvisional: boolean };
 };
 
 export function payrollFinalizeBlockers(input: ReadinessInput): FinalizeBlocker[] {
@@ -144,6 +152,25 @@ export function payrollFinalizeBlockers(input: ReadinessInput): FinalizeBlocker[
   for (const issue of input.policyIssues ?? []) {
     if (!issue.blocking) continue;
     out.push({ code: "POLICY_BOOK_INVALID", message: issue.message });
+  }
+
+  /*
+    ═══ CỔNG LỢI NHUẬN TOÀN CÔNG TY ═══
+
+    Chặn khi còn thưởng % lợi nhuận tạm tính mà cổng CHƯA KẾT LUẬN được: chưa khai quy chế / số dư
+    lũy kế, thiếu chứng từ chi phí, kỳ không phải một tháng lịch, hoặc số dư dựng từ tháng còn nháp.
+    "Đã kết luận là chưa đủ điều kiện" (công ty còn lỗ lũy kế) KHÔNG chặn — đó là một câu trả lời,
+    và tiền được duyệt của kỳ ấy đúng là không gồm khoản thưởng.
+  */
+  const g = input.profitGate;
+  if (g && g.hasProvisional) {
+    if (g.status === "NOT_APPLICABLE") {
+      out.push({ code: "PROFIT_GATE_NOT_APPLICABLE", message: `Kỳ có thưởng % lợi nhuận phải chốt theo tháng lịch, trên cơ sở “Lợi nhuận tính lương”. ${g.message}` });
+    } else if (g.status === "DATA_INCOMPLETE") {
+      out.push({ code: "PROFIT_GATE_DATA_INCOMPLETE", message: g.message });
+    } else if (g.status === "NOT_ESTABLISHED" || !g.established) {
+      out.push({ code: "PROFIT_GATE_NOT_ESTABLISHED", message: `Thưởng % lợi nhuận chưa đủ căn cứ để duyệt: ${g.message}` });
+    }
   }
 
   for (const l of input.lines) {

@@ -32,8 +32,15 @@ import { listEmployees } from "@/lib/queries/payroll";
 import type { PayrollSnapshot } from "@/lib/queries/payroll-period";
 import type { PayrollActor } from "@/lib/payroll/run-service";
 
-/** Thực nhận của một dòng ảnh chụp: máy chung → `netPay`, đường cũ → `salary`. */
+/**
+ * Thực nhận của một dòng ảnh chụp — số ĐƯỢC DUYỆT, đã qua cổng lỗ lũy kế toàn công ty.
+ *
+ * Ảnh chụp có `profitShare` (chốt từ bản cổng lợi nhuận) ⇒ `salary` là con số duy nhất được trả, cho
+ * cả hai đường tính: `engine.netPay` là TẠM TÍNH (gồm cả phần thưởng lợi nhuận chưa đủ điều kiện).
+ * Ảnh chụp đời cũ giữ nguyên cách đọc cũ: máy chung → `netPay`, đường cũ → `salary`.
+ */
 export function snapshotNetPay(line: PayrollSnapshot["lines"][number]): number | null {
+  if (line.profitShare) return line.salary;
   return line.engine ? line.engine.netPay : line.salary;
 }
 
