@@ -25,20 +25,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T16:30:16.366Z",
-  "updated_at": "2026-10-18T17:05:00.979Z",
-  "last_heartbeat": "2026-10-18T17:05:00.979Z",
+  "updated_at": "2026-10-18T17:25:44.936Z",
+  "last_heartbeat": "2026-10-18T17:25:44.936Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/cau-mau-kiem-luu-main",
-    "sha": "e8435b7b48800b889ced14714b65ec542313e61d",
-    "at": "2026-10-18T17:05:00.979Z",
+    "sha": "1ede78f1cacc78507a101df5bb157a42d92df06c",
+    "at": "2026-10-18T17:25:44.936Z",
     "actor": "DESKTOP-56TH98Y:wt-cau-mau-kiem-luu",
     "title": "Câu mẫu sai món không tự tái xuất hiện + nút gỡ cách hỏi gắn nhầm món",
-    "summary": "Sửa theo review: câu trả lời có giá không làm gỡ oan; từ chế biến (giã…) vào danh sách thông dụng; gỡ không đè lần sửa đồng thời; bật hàng loạt báo đúng lỗi danh mục.",
+    "summary": "Sửa lỗi chặn review: từ chế biến chỉ chặn luật một từ; thêm luật tiền tố tên đầy đủ; test danh mục Chả cá hấp/chiên.",
     "tests": [
-      "15 bộ (p0-quick-reply-focus, self-service-journey, golden, sales-*, org-catalog, conv-money-trace, ops-log-leak…): ĐẠT",
+      "12 bộ câu mẫu + golden: ĐẠT",
+      "đột biến từ chế biến vào danh sách phân biệt + bỏ tiền tố: ĐỎ",
       "eslint: sạch",
-      "tsc: sạch (trừ qrcode máy này)"
+      "tsc: sạch"
     ]
   }
 }
