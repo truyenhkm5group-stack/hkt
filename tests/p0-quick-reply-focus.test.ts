@@ -20,8 +20,8 @@ import { getDb, schema } from "@/db";
 import { createProductCore } from "@/lib/records/product-create";
 import { SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { matchQuickReplyByKeyword, QUICK_REPLY_SETTING_KEY, type QuickReplyEntry } from "@/lib/sales-chatbot/quick-replies-shared";
-import { quickReplyByKeyword } from "@/lib/sales-chatbot/quick-replies";
-import { productFocusOf, productsNamedIn, quickReplyCovers, quickReplyFocusGuard, triggerProductConflicts, unavailableQuickReplyGuard, type FocusLine, type FocusProduct } from "@/lib/sales-chatbot/quick-reply-focus";
+import { bulkQuickReplies, insertLearned, quickReplyByKeyword, removeWrongProductTriggers, saveQuickReply, setQuickReplyActive } from "@/lib/sales-chatbot/quick-replies";
+import { consistentTriggers, productConsistencyError, productFocusOf, productsNamedIn, quickReplyCovers, quickReplyFocusGuard, triggerProductConflicts, unavailableQuickReplyGuard, type FocusLine, type FocusProduct } from "@/lib/sales-chatbot/quick-reply-focus";
 import { setSettingJson } from "@/lib/settings";
 import { runGoldenCases, say, tool, type GoldenCase, type GoldenHookCtx } from "./sales-agent-golden/harness";
 
@@ -88,6 +88,33 @@ function testThuan() {
   assert.deepEqual(productsNamedIn("món mực nhà mình có ngon không em", names), ["Chả mực giã tay"]);
   assert.deepEqual(productsNamedIn("có mắm không shop", names), ["Nước mắm cốt cá cơm truyền thống"]);
   assert.deepEqual(productsNamedIn("giá một hộp sao em", names), [], "«giá», «một», «hộp» không gọi tên món nào");
+  // Review #config-guard: câu có SỐ (giá, khối lượng) vẫn nhận một từ đuôi — trước đây «280k» làm lệch hai dãy từ và tắt luật.
+  assert.deepEqual(productsNamedIn("Chả cá 280k/1kg, còn mực thì 350k/1kg ạ", names), ["Chả cá thu", "Chả mực giã tay"]);
+  assert.deepEqual(productsNamedIn("Chả cá thu Hạ Long giã tay, 1kg 280k", names), ["Chả cá thu"], "«giã tay» là cách làm, không phải tên Chả mực");
+  // Review config-guard (lỗi chặn): món mà từ PHÂN BIỆT là từ chế biến («hấp», «chiên») vẫn nhận ra — tên đầy đủ, combo, câu mẫu không SKU.
+  const CAT2: FocusProduct[] = ["Chả cá thu", "Chả mực giã tay", "Chả chiên", "Chả cá hấp", "Chả cá chiên", "Nem hải sản tôm bề bề", "Ruốc bông (chà bông) cá thu nguyên chất"].map((name) => ({ name, skus: [] }));
+  const n2 = CAT2.map((p) => p.name);
+  assert.deepEqual(productsNamedIn("chả cá hấp còn không", n2), ["Chả cá hấp"]);
+  assert.deepEqual(productsNamedIn("chả cá chiên bao nhiêu", n2), ["Chả cá chiên"], "«chả cá chiên» không gọi tên «Chả chiên»");
+  assert.deepEqual(productsNamedIn("chả cá thu giá sao", n2), ["Chả cá thu"]);
+  assert.deepEqual([...productsNamedIn("1/2 kg chả chiên, 1/2 kg chả cá hấp", n2)].sort(), ["Chả chiên", "Chả cá hấp"].sort(), "combo hai món");
+  const hap = E("hap", "Chả cá hấp giá", ["chả cá hấp bao nhiêu", "xin giá chả cá thu"], "Chả cá hấp bên em 300k/kg ạ");
+  assert.deepEqual(quickReplyCovers(hap, CAT2), ["Chả cá hấp"], "câu mẫu chả cá hấp không SKU vẫn GẮN món (không thành câu chung)");
+  assert.deepEqual(triggerProductConflicts(hap, CAT2).map((c) => c.trigger), ["xin giá chả cá thu"], "cách hỏi chả cá thu trên câu hấp vẫn bị gắn cờ ⇒ nút gỡ gỡ nó");
+  const gThu = quickReplyFocusGuard([C("chả cá thu giá sao")], CAT2);
+  assert.ok(!gThu.fits(hap) && !gThu.answers(hap), "«chả cá thu giá sao» KHÔNG được trả lời bằng câu chả cá hấp");
+  const comboChien = E("cc", "Chả chiên giá", ["chả chiên"], "Chả chiên bên em 250k/kg ạ");
+  assert.ok(!quickReplyFocusGuard([C("1/2 kg chả chiên, 1/2 kg chả cá hấp")], CAT2).answers(comboChien), "câu một món không thay cả lượt cho combo hai món");
+  // Review #902 (CI đỏ thật ở inbox-composer): từ chỉ chung một món hàng không tự gọi tên món — kể cả khi chỉ một món mang nó ở đầu tên.
+  const CAT3 = ["Hàng riêng OSOAN-O-SOAN-A-4417", "Sản phẩm Y", "Món Z", "Nước mắm X"];
+  for (const t of ["còn hàng không", "sản phẩm này còn không", "món này giá sao", "hàng còn không shop", "đặc sản gì vậy"]) assert.deepEqual(productsNamedIn(t, CAT3), [], `«${t}» không gọi tên món nào`);
+  assert.deepEqual(productsNamedIn("hàng riêng osoan còn không", CAT3), ["Hàng riêng OSOAN-O-SOAN-A-4417"]);
+  assert.deepEqual(productsNamedIn("sản phẩm y bao nhiêu", CAT3), ["Sản phẩm Y"]);
+  assert.deepEqual(productsNamedIn("món z còn không", CAT3), ["Món Z"]);
+  assert.deepEqual(productsNamedIn("nước mắm x", CAT3), ["Nước mắm X"]);
+  assert.equal(productConsistencyError(E("ton", "Tồn chả mực", ["còn hàng không"], "Còn {{tồn:OS-NOREC}} hộp ạ."), CAT3.map((name) => ({ name, skus: [] }))), null, "câu mẫu tồn kho chung lưu được");
+  const giaChaCa = E("gcc", "Giá chả cá", ["chả cá bao nhiêu", "mực bao nhiêu", "món mực còn không"], "Chả cá 280k/1kg, còn mực thì 350k/1kg ạ");
+  assert.deepEqual(triggerProductConflicts(giaChaCa, PRODUCTS), [], "câu trả lời có giá nói cả mực ⇒ cách hỏi về mực KHÔNG bị coi là gắn nhầm");
   // Review #p0-quick-reply-evidence (lỗi chặn): ngành hàng / tên shop không phải tên món; màu / cỡ / thời tiết cũng vậy.
   for (const t of ["shop bán hải sản gì", "báo giá hải sản", "hai san", "Hải Sản Hạ Long xin chào", "nước mắm truyền thống không", "loại nguyên chất không", "cá cơm"]) {
     assert.ok(!productsNamedIn(t, names).includes("Nem hải sản tôm bề bề") && !productsNamedIn(t, names).some((n) => n.startsWith("Ruốc")), `«${t}» không gọi tên nem / ruốc: ${productsNamedIn(t, names).join(", ")}`);
@@ -178,6 +205,12 @@ function testThuan() {
   // «chà bông» không gọi tên chả cá / chả mực.
   assert.deepEqual(focusOf(["chà bông bao nhiêu"]).focus, []);
 
+  // Tự nạp / nhập: cách hỏi đề xuất sai món bị bỏ trước khi thêm vào câu mẫu cũ.
+  assert.deepEqual(consistentTriggers(A07, ["nem tôm bao nhiêu", "xin giá chả cá", "1 hộp ruốc tôm", "báo giá nhé"], PRODUCTS), ["nem tôm bao nhiêu", "báo giá nhé"]);
+  assert.equal(productConsistencyError(A01, PRODUCTS), null);
+  assert.match(productConsistencyError(A07, PRODUCTS) ?? "", /«xin giá chả cá» \(gọi tên Chả cá thu\)/);
+  const learnSrc = readFileSync("lib/sales-chatbot/quick-replies-learn.ts", "utf8");
+  assert.match(learnSrc, /mergeTriggers\(current, consistentTriggers\(/, "tự nạp lọc cách hỏi qua consistentTriggers trước khi thêm");
   // KIỂM TĨNH: cách hỏi gắn nhầm món trên câu nem — đúng ba cách hỏi gọi tên chả cá.
   assert.deepEqual(triggerProductConflicts(A07, PRODUCTS).map((x) => x.trigger), ["xin giá chả cá", "Xin giá chả cá nhé shop", "Báo giá chả cá thu?"]);
   assert.deepEqual(triggerProductConflicts(A01, PRODUCTS), []);
@@ -269,6 +302,42 @@ const CASES: GoldenCase[] = [
   },
 ];
 
+/**
+ * (chủ shop 18/10, chốt hoàn thành) CẤU HÌNH SAI KHÔNG ĐƯỢC TỰ TÁI XUẤT HIỆN: lưu / sửa · bật một câu · bật hàng loạt · câu AI soạn
+ * (tự bật) đều kiểm cách hỏi ↔ câu trả lời ↔ SKU cùng món; nút «Gỡ cách hỏi gắn nhầm món» gỡ ĐÚNG các cách hỏi đó, giữ câu mẫu / câu
+ * trả lời / cách hỏi khác, và ghi nhật ký trước / sau để khôi phục. Chạy ở ca cuối (sửa dữ liệu câu mẫu của tổ chức thử).
+ */
+async function testConfigPaths(ctx: GoldenHookCtx): Promise<void> {
+  const admin = await ctx.admin();
+  const db = await getDb();
+  const qr = schema.salesChatQuickReplies;
+  const bad = await saveQuickReply(admin, { title: "Nem sai", triggers: "nem bao nhiêu\nxin giá chả cá", answer: NEM, active: true });
+  assert.ok("error" in bad && /xin giá chả cá.*gọi tên Chả cá thu/.test(bad.error), JSON.stringify(bad));
+  const combo = await saveQuickReply(admin, { title: "Combo chả cá + nem", triggers: "1 chả cá 1 nem", answer: `${CHA_CA} ${NEM}`, active: true });
+  assert.ok("ok" in combo, `combo có câu trả lời nói CẢ HAI món ⇒ lưu được: ${JSON.stringify(combo)}`);
+  // Câu đang có (dữ liệu cũ) mang cách hỏi sai ⇒ không bật được, bật hàng loạt bỏ qua.
+  const [old] = await db.insert(qr).values({ title: "Nem cũ", triggers: ["nem hộp", "Báo giá chả cá thu?"], answer: NEM, active: false }).returning({ id: qr.id });
+  const act = await setQuickReplyActive(admin, old.id, true);
+  assert.ok("error" in act && /gọi tên Chả cá thu/.test(act.error), JSON.stringify(act));
+  const bulk = await bulkQuickReplies(admin, [old.id], "ACTIVATE");
+  assert.ok("ok" in bulk && bulk.changed === 0 && bulk.skipped === 1, JSON.stringify(bulk));
+  // Câu AI soạn: «tự bật» không bật câu có cách hỏi sai.
+  assert.equal(await insertLearned([{ title: "AI nem", triggers: ["xin giá chả cá"], answer: NEM }, { title: "AI nem đúng", triggers: ["nem hải sản bn"], answer: NEM }], { actorEmail: "bot", active: true }), 2);
+  const learned = await db.select({ title: qr.title, active: qr.active }).from(qr).where(sql`${qr.title} in ('AI nem', 'AI nem đúng')`);
+  assert.deepEqual(learned.map((r) => `${r.title}:${r.active}`).sort(), ["AI nem đúng:true", "AI nem:false"]);
+  // Nút dọn: chỉ gỡ cách hỏi gắn nhầm món; ghi nhật ký trước / sau.
+  const pruned = await removeWrongProductTriggers(admin);
+  assert.ok("ok" in pruned && pruned.triggers >= 3, JSON.stringify(pruned));
+  const after = new Map((await db.select({ title: qr.title, triggers: qr.triggers }).from(qr)).map((r) => [r.title, r.triggers ?? []]));
+  assert.deepEqual(after.get("A07 Nem hải sản tôm bề bề giá bao nhiêu"), ["nem bao nhiêu", "giá nem", "báo giá"], "A07 chỉ mất hai cách hỏi chả cá");
+  assert.deepEqual(after.get("Nem cũ"), ["nem hộp"]);
+  assert.deepEqual(after.get("A01 Báo giá chả cá thu"), ["giá chả cá thu", "Cha ca", "Xin giá chả cá thu?", "giá bao nhiêu 1kg"], "câu đúng không bị đụng");
+  const logs = await db.select({ detail: schema.auditLogs.detail }).from(schema.auditLogs).where(eq(schema.auditLogs.action, "SALES_QUICK_REPLY_TRIGGERS_PRUNE"));
+  assert.ok(logs.length >= 2 && logs.every((l) => Array.isArray((l.detail as { before?: { triggers?: unknown } } | null)?.before?.triggers)), "nhật ký giữ cách hỏi cũ để khôi phục");
+  const again = await removeWrongProductTriggers(admin);
+  assert.ok("ok" in again && again.triggers === 0 && again.skippedConcurrent === 0, "chạy lại không gỡ gì thêm");
+}
+
 async function testChatTurn() {
   const seen = new Set<string>();
   await runGoldenCases(CASES, {
@@ -277,8 +346,9 @@ async function testChatTurn() {
       await seed(ctx);
       await onlyActive(c.key === "qrf-cong-cu-sai-mon" || c.key === "qrf-shop-moi-nem" ? ["A07"] : ["A01", "A07"]);
     },
-    afterCase: async (c, _ctx, t) => {
+    afterCase: async (c, ctx, t) => {
       seen.add(c.key);
+      if (c.key === "qrf-shop-moi-nem") await testConfigPaths(ctx);
       const shown = t.turns.flatMap((x) => x.shown).join("\n");
       const results = JSON.stringify(t.turns.map((x) => x.rounds.map((r) => r.results)));
       assert.doesNotMatch(shown, /HẾT KỊCH BẢN/, `[${c.key}] ${shown}`);
@@ -318,6 +388,7 @@ async function testChatTurn() {
     },
   });
   assert.equal(seen.size, CASES.length, "mọi ca đều chạy");
+  assert.ok(seen.has("qrf-shop-moi-nem"), "ca chạy kiểm đường cấu hình (testConfigPaths) đã chạy");
 }
 
 export async function testP0QuickReplyFocus(): Promise<void> {

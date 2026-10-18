@@ -14,6 +14,7 @@ import {
   addQuickReplyImagesAction,
   autoLearnQuickRepliesNowAction,
   bulkQuickRepliesAction,
+  removeWrongProductTriggersAction,
   deleteQuickReplyAction,
   removeQuickReplyImageAction,
   saveQuickReplyAction,
@@ -256,6 +257,23 @@ export function QuickRepliesManager({ manage, settings, rows, autoLearnRun, shel
                 </div>
               ) : null}
             </div>
+            {manage && rows.some((r) => r.productConflicts.length) ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 p-2 text-xs" data-testid="quick-reply-prune">
+                <span className="text-destructive">
+                  {rows.reduce((n, r) => n + r.productConflicts.length, 0)} cách hỏi ở {rows.filter((r) => r.productConflicts.length).length} câu mẫu gọi tên món mà câu trả lời không nói tới — bot có thể báo sai món.
+                </span>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={pending}
+                  onClick={() => {
+                    if (window.confirm("Gỡ mọi cách hỏi gắn nhầm món? Câu mẫu, câu trả lời và ảnh giữ nguyên; nhật ký lưu danh sách cách hỏi cũ để khôi phục.")) act(() => removeWrongProductTriggersAction());
+                  }}
+                >
+                  Gỡ cách hỏi gắn nhầm món
+                </Button>
+              </div>
+            ) : null}
             <div className="divide-y text-sm" data-testid="quick-reply-list">
               {shown.map((r) => (
                 <div key={r.id} className="flex flex-col gap-2 py-3 lg:flex-row lg:items-start">

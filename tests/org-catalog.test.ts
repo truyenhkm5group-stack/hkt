@@ -53,7 +53,7 @@ export function testOrgCatalogPure() {
     ],
     priceLists: [{ id: "l1", name: "Sỉ chung", isDefault: true, active: true, tiers: [{ variantId: "erp-v1", variantLabel: "Chả cá thu · Size: 1kg", minQuantity: 10, unitPrice: 250_000 }] }, { id: "l2", name: "Cũ", isDefault: false, active: false, tiers: [] }],
     quickReplies: [{ title: "Bảng giá", triggers: ["giá", "bao nhiêu"], answer: "Chả cá thu 280k/kg\n  ship 25k", upsell: true, images: 1 }],
-    quickReplySettings: { enabled: true, upsellSet: true },
+    quickReplySettings: { enabled: true, upsellSet: true, autoLearn: false, autoActivate: false },
   };
   const lines = catalogLines(r);
   const all = lines.join("\n");
@@ -68,11 +68,11 @@ export function testOrgCatalogPure() {
   assert.ok(all.includes("Hướng dẫn thêm (20 ký tự): Giá sỉ hỏi nhân viên"));
 
   const sum = catalogSummary(r);
-  assert.deepEqual(sum, ["Tổ chức x: 1 sản phẩm · 2 mẫu mã (1 chưa có giá · 1 ẩn · 1 chỉ bán kèm) · nguồn tạo tay", "Bot: BẬT · giá sỉ TẮT · chốt không kiểm tồn BẬT · bảng giá sỉ đang dùng 1 (1 bậc) · câu mẫu đang bật 1 · câu upsell ĐÃ CHỌN (1 ảnh)", "Câu mẫu: cách hỏi gắn nhầm món 0 (ở 0 câu mẫu đang bật) · cụm chung trên câu một món 0 (ở 0 câu) — chạy thử, gỡ trên màn hình Câu trả lời mẫu"]);
+  assert.deepEqual(sum, ["Tổ chức x: 1 sản phẩm · 2 mẫu mã (1 chưa có giá · 1 ẩn · 1 chỉ bán kèm) · nguồn tạo tay", "Bot: BẬT · giá sỉ TẮT · chốt không kiểm tồn BẬT · bảng giá sỉ đang dùng 1 (1 bậc) · câu mẫu đang bật 1 · câu upsell ĐÃ CHỌN (1 ảnh)", "Câu mẫu: cách hỏi gắn nhầm món 0 (ở 0 câu mẫu đang bật) · cụm chung trên câu một món 0 (ở 0 câu) · tự nạp TẮT (tự bật TẮT) — chạy thử, gỡ trên màn hình Câu trả lời mẫu"]);
   // P0 18/10/2026: câu mẫu NEM mang cách hỏi «xin giá chả cá» ⇒ một dòng cảnh báo (phần mã hoá) + số đếm ở kênh tóm tắt.
   const nhamMon: CatalogReport = { ...r, products: [...r.products, { id: "erp-p9", name: "Nem hải sản tôm bề bề", code: null, manual: true, removed: false, variants: [{ id: "erp-v9", sku: "NEM-1", label: "Hộp 10 cái", price: 120_000, weightGrams: null, hidden: false, manual: true }] }], quickReplies: [...r.quickReplies, { title: "Nem giá", triggers: ["nem bao nhiêu", "xin giá chả cá"], answer: "Nem {{giá:NEM-1}}/hộp", upsell: false, images: 3 }] };
   assert.ok(catalogLines(nhamMon).includes("  ⚠ CÁCH HỎI GẮN NHẦM MÓN · Nem giá: «xin giá chả cá» gọi tên Chả cá thu"), catalogLines(nhamMon).join(" | "));
-  assert.equal(catalogSummary(nhamMon)[2], "Câu mẫu: cách hỏi gắn nhầm món 1 (ở 1 câu mẫu đang bật) · cụm chung trên câu một món 0 (ở 0 câu) — chạy thử, gỡ trên màn hình Câu trả lời mẫu");
+  assert.equal(catalogSummary(nhamMon)[2], "Câu mẫu: cách hỏi gắn nhầm món 1 (ở 1 câu mẫu đang bật) · cụm chung trên câu một món 0 (ở 0 câu) · tự nạp TẮT (tự bật TẮT) — chạy thử, gỡ trên màn hình Câu trả lời mẫu");
   // Cụm chung «báo giá» trên câu nem (một món) ⇒ liệt kê để gỡ; câu upsell không bị liệt kê.
   const chung: CatalogReport = { ...nhamMon, quickReplies: [...nhamMon.quickReplies, { title: "Nem 2", triggers: ["báo giá", "nem hộp mấy cái"], answer: "Nem {{giá:NEM-1}}/hộp", upsell: false, images: 0 }] };
   assert.deepEqual(genericSingleProductTriggers(chung).map((g) => `${g.title}:${g.trigger}:${g.product}`), ["Nem 2:báo giá:Nem hải sản tôm bề bề"]);
@@ -84,7 +84,7 @@ export function testOrgCatalogPure() {
   const khongCauHinh = catalogSummary({ ...r, bot: null, syncedProducts: null });
   assert.ok(khongCauHinh[0].endsWith("nguồn —") && khongCauHinh[1].startsWith("Bot: — (chưa có cấu hình)"), "chưa đọc được ⇒ —, không phải TẮT");
   assert.ok(catalogLines({ ...r, priceLists: [] }).some((l) => l.includes("chưa có bảng giá nào")), "không bảng giá ⇒ nói thẳng hệ quả");
-  const tat = { ...r, quickReplies: r.quickReplies.map((q) => ({ ...q, upsell: false })), quickReplySettings: { enabled: true, upsellSet: false, upsellStale: { title: "Menu cũ", state: "INACTIVE" as const } } };
+  const tat = { ...r, quickReplies: r.quickReplies.map((q) => ({ ...q, upsell: false })), quickReplySettings: { enabled: true, upsellSet: false, autoLearn: false, autoActivate: false, upsellStale: { title: "Menu cũ", state: "INACTIVE" as const } } };
   assert.ok(catalogLines(tat).some((l) => l.includes("ĐÃ CHỌN nhưng câu đó «Menu cũ» đang TẮT")), "câu upsell trỏ tới câu đang tắt ⇒ nói đúng tình huống, không gộp vào «chưa chọn»");
   assert.ok(catalogSummary(tat)[1].endsWith("câu upsell TRỎ TỚI CÂU ĐANG TẮT"));
 
@@ -139,12 +139,12 @@ export async function testOrgCatalogDb() {
       ], "mẫu mã đã gỡ không hiện; giá 0 ⇒ null; gram 0 ⇒ null");
       assert.deepEqual(r.priceLists.map((l) => [l.name, l.isDefault, l.tiers.map((t) => [t.variantLabel, t.minQuantity, t.unitPrice])]), [["Sỉ chung", true, [["Chả cá thu · Size: 1kg", 10, 250_000]]]]);
       assert.deepEqual(r.quickReplies, [{ title: "Bảng giá", triggers: ["giá"], answer: "Chả cá thu 280k/kg", upsell: false, images: 0 }], "chỉ câu mẫu đang bật");
-      assert.deepEqual(r.quickReplySettings, { enabled: true, upsellSet: false }, "chưa chọn câu upsell ⇒ nói thẳng");
+      assert.deepEqual(r.quickReplySettings, { enabled: true, upsellSet: false, autoLearn: false, autoActivate: false }, "chưa chọn câu upsell ⇒ nói thẳng");
       // Đã chọn câu upsell là câu đang TẮT ⇒ báo «trỏ tới câu đang tắt», không phải «chưa chọn».
       const [tatQr] = await db.select({ id: schema.salesChatQuickReplies.id }).from(schema.salesChatQuickReplies).where(eq(schema.salesChatQuickReplies.title, "Tắt rồi"));
       await db.insert(schema.settings).values({ key: "ai.salesChatbot.quickReplies", value: JSON.stringify({ enabled: true, aiMatch: true, upsellReplyId: tatQr.id }) });
       const r2 = await collectOrgCatalog({ code: ORG, name: "Danh mục thử", isHome: false }, view);
-      assert.deepEqual(r2.quickReplySettings, { enabled: true, upsellSet: false, upsellStale: { title: "Tắt rồi", state: "INACTIVE" } });
+      assert.deepEqual(r2.quickReplySettings, { enabled: true, upsellSet: false, autoLearn: false, autoActivate: false, upsellStale: { title: "Tắt rồi", state: "INACTIVE" } });
       const all = [...catalogLines(r), ...catalogSummary(r)].join("\n");
       assert.ok(!all.includes(BI_MAT) && !all.includes(SDT), `không dòng nào lộ tên khách / SĐT / câu đã tắt:\n${all}`);
       assert.equal(catalogSummary(r)[0], `Tổ chức ${ORG}: 2 sản phẩm · 2 mẫu mã (1 chưa có giá · 0 ẩn · 0 chỉ bán kèm) · nguồn tạo tay`);
