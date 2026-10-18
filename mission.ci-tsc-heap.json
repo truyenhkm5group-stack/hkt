@@ -3,7 +3,7 @@
   "mission_id": "ci-tsc-heap",
   "title": "Cổng CI thôi đỏ giả ở bước kiểm tra kiểu: tsc được 6 GB heap như bước dựng",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-ci-tsc",
@@ -22,9 +22,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-18T19:23:21.829Z",
-  "updated_at": "2026-10-18T19:24:35.884Z",
+  "updated_at": "2026-10-18T20:05:00.213Z",
   "last_heartbeat": "2026-10-18T19:23:49.470Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#905 → 1a130391546ca41583d4691c64b4716eaefe8d01"
+  },
   "handoff": {
     "branch": "claude/ci-tsc-heap",
     "sha": "6c7cfde6fe1bbbd12c24fcae4f821bbc90d7a5cd",
