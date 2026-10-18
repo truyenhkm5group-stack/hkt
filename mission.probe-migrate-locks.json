@@ -3,7 +3,7 @@
   "mission_id": "probe-migrate-locks",
   "title": "org-migrate-probe: ai giữ khoá migrate (chỉ đọc)",
   "business_goal": "Chẩn đoán khoá migrate qa cho worker org-migrate-coordination",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-token-budget",
@@ -20,11 +20,24 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T06:08:00.041Z",
-  "updated_at": "2026-10-18T06:08:00.041Z",
-  "last_heartbeat": "2026-10-18T06:08:00.041Z",
+  "updated_at": "2026-10-18T06:08:25.026Z",
+  "last_heartbeat": "2026-10-18T06:08:25.026Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/probe-migrate-locks",
+    "sha": "03542422b76cac57cf450518f56907eecee9afef",
+    "at": "2026-10-18T06:08:25.026Z",
+    "actor": "DESKTOP-56TH98Y:wt-token-budget",
+    "title": "org-migrate-probe chỉ ra ai đang giữ khoá migrate của tổ chức (chỉ đọc)",
+    "summary": "",
+    "tests": [
+      "câu khoá trên PGlite thật: thấy 1 dòng khi giữ khoá thử",
+      "ops-log-leak: ĐẠT (624 dòng sạch)",
+      "eslint: sạch"
+    ]
   }
 }
