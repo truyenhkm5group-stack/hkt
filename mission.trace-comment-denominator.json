@@ -23,8 +23,8 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-18T02:04:17.559Z",
-  "updated_at": "2026-10-18T02:17:49.820Z",
-  "last_heartbeat": "2026-10-18T02:17:49.820Z",
+  "updated_at": "2026-10-18T03:42:08.824Z",
+  "last_heartbeat": "2026-10-18T03:42:08.824Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
@@ -32,15 +32,15 @@
   },
   "handoff": {
     "branch": "claude/trace-comment-denominator",
-    "sha": "734e029e48e4aebec6ac66caf135cc978aaa670a",
-    "at": "2026-10-18T02:17:49.820Z",
+    "sha": "dd4ab74aa17692f754b2efc2be88cd3fa316a5bd",
+    "at": "2026-10-18T03:42:08.824Z",
     "actor": "DESKTOP-56TH98Y:wt-token-budget",
     "title": "conv-money-trace --scan in mẫu số của dòng C (bình luận trong kỳ · ALREADY · DONE không ghi chú)",
     "summary": "",
     "tests": [
       "tests/conv-money-trace.test.ts: ĐẠT",
-      "tests/ops-log-leak.test.ts: ĐẠT (622 dòng tóm tắt sạch)",
-      "eslint: sạch"
+      "tests/ops-log-leak.test.ts: ĐẠT",
+      "cập nhật từ main 005ddc3a (gồm #890 sửa test org-lifecycle chập chờn)"
     ]
   }
 }
