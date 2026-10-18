@@ -45,7 +45,7 @@ const CHAY_THANG = Boolean(process.argv[1] && process.argv[1].endsWith("shipping
 if (CHAY_THANG) process.env.ERP_READ_ONLY = "1";
 
 import "dotenv/config";
-import { and, desc, eq, gte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { getDbForInspection, schema, type Db } from "@/db";
 import { connectionStatusRows, pageTokensForOffboard, type ConnectionStatusRow } from "@/lib/connectors/service";
 import { PANCAKE_PAGES_API, scrubSecrets } from "@/lib/connectors/testers";
@@ -53,6 +53,7 @@ import { manualOrderShortCode, MANUAL_ORDER_ID_PREFIX } from "@/lib/constants/ma
 import { DEFAULT_SHIPPING_ROUTING, parseShippingRoutingConfig, SHIPPING_ROUTING_SETTING_KEY } from "@/lib/constants/shipping-routing";
 import { asArray, asRecord, fetchJson, IntegrationError, sleep } from "@/lib/integrations/http";
 import { openOrgPancakeClient } from "@/lib/integrations/pancake/org";
+import { legBaseCode } from "@/lib/integrations/viettelpost/statement";
 import { mapOrder, type MappedOrder } from "@/lib/integrations/pancake/mapper";
 import { withOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
@@ -76,6 +77,7 @@ export const PROBE_MIN_SAMPLE = 10;
 /** Cửa sổ ghép POS ↔ ERP theo ngày tạo. */
 export const MATCH_DAYS = 3;
 const MAX_ERP_ORDERS = 5_000;
+const MAX_ORPHAN_ROWS = 20_000;
 const DETAIL_MAX_LINES = 400;
 const CALL_GAP_MS = 300;
 const VN_OFFSET_MS = 7 * 3_600_000;
@@ -269,13 +271,43 @@ export type ProbeFacts = {
   carrierCreateActive: string[];
   fanpageActive: boolean;
   /** Vận đơn có mã ERP biết trong kỳ, theo dấu nguồn. */
-  shipments: { withCode: number; erpCreated: number; pancakeSynced: number; carrierOnlyNoOrder: number };
+  /**
+   * `carrierOnlyNoOrder` = vận đơn không gắn đơn, không dấu ERP / Pancake, KHÔNG phải chiều về và KHÔNG mang mã tham chiếu ERP (chắc
+   * chắn tạo ngoài ERP) · `legUnsure` = mang DÁNG mã chiều về (`legBaseCode`) mà ERP không có vận đơn gốc — không chắc ⇒ chỉ HINT ·
+   * `returnLegs` = chiều về của một vận đơn ERP đã biết (AGENTS §3 luật 7 — dòng riêng, order_id NULL theo quy ước) ⇒ LOẠI.
+   */
+  shipments: { withCode: number; erpCreated: number; pancakeSynced: number; carrierOnlyNoOrder: number; legUnsure: number; returnLegs: number };
   erpOrdersWithPosLink: number;
   landingPushedToPos: number;
   vtp: { packetsWindow: number; packetsAll: number; carrierEventsWindow: number; importBatches: number; statementLines: number };
   posApi: PosChannelFacts;
   pos: { sampleAsked: number; sampleRead: number; posOrders: number; withTracking: number; strongOrLink: number; doubleShipmentRisk: number };
 };
+
+export const ORPHAN_CLASSES = ["OUTSIDE", "RETURN_LEG", "LEG_UNSURE", "ERP_ECHO"] as const;
+export type OrphanClass = (typeof ORPHAN_CLASSES)[number];
+
+/**
+ * Một vận đơn KHÔNG gắn đơn, không dấu tạo ERP / Pancake: có thật là tạo NGOÀI ERP không? HÀM THUẦN.
+ *  ERP_ECHO — hãng gửi lại mã tham chiếu dạng ERP (`ERP<8 hex>-<n>`, chỉ ERP sinh) ⇒ ERP tạo, dòng đơn đã mất ⇒ LOẠI;
+ *  RETURN_LEG — chiều về (AGENTS §3 luật 7: mã gốc + `[số]P[số]`, dòng RIÊNG, order_id NULL theo quy ước): `legBaseCode` của mã, hoặc
+ *    `order_reference` khác mã, trỏ tới một vận đơn ERP ĐÃ BIẾT ⇒ LOẠI (không bao giờ đếm là «tạo ngoài ERP»);
+ *  LEG_UNSURE — mang DÁNG mã chiều về (`legBaseCode` khác rỗng — CHÍNH regex của bộ đọc tệp VTP, không viết luật thứ hai) mà ERP không có
+ *    vận đơn gốc ⇒ không chắc ⇒ chỉ HINT;
+ *  OUTSIDE — còn lại.
+ */
+export function classifyOrphanShipment(row: { code: string; orderReference: string | null; carrierReference: string | null }, knownCodes: ReadonlySet<string>): OrphanClass {
+  if (/^ERP[0-9A-F]{8}-\d+$/i.test((row.carrierReference ?? "").trim())) return "ERP_ECHO";
+  const code = row.code.trim().toUpperCase();
+  const base = legBaseCode(code);
+  const ref = (row.orderReference ?? "").trim().toUpperCase();
+  if ((base && knownCodes.has(base)) || (ref && ref !== code && knownCodes.has(ref))) return "RETURN_LEG";
+  if (base) return "LEG_UNSURE";
+  return "OUTSIDE";
+}
+
+/** Tổ chức nhà dùng credential MÔI TRƯỜNG (Pancake / Viettel Post), không dùng `org_connections` — phép đo này sẽ kết luận sai. */
+export const HOME_ORG_REFUSAL = "tổ chức NHÀ dùng credential môi trường (Pancake POS / Viettel Post), không qua org_connections — phép đo này chỉ dành cho tổ chức khách; với nhà dùng ops shipment-origin-audit";
 
 /**
  * Kết luận từng ĐƯỜNG tạo vận đơn kèm mức tin cậy. HÀM THUẦN. Không đường nào được «coi như có» khi thiếu căn cứ, và vắng mặt trong
@@ -297,18 +329,19 @@ export function concludeShippingSource(f: ProbeFacts): Conclusion[] {
   if (api.status === "READ" && api.withTracking > 0) out.push({ path: "POS_SHIPMENTS", verdict: "POS CÓ TẠO VẬN ĐƠN", strength: "MEASURED", why: `API POS cả kỳ: ${api.posOrders} đơn, ${api.withTracking} có mã vận đơn${cap} (ghép đơn ERP: LINK/HINT_STRONG ${api.strongOrLink} — gợi ý)` });
   else if (api.status === "READ") out.push({ path: "POS_SHIPMENTS", verdict: api.posOrders > 0 ? "CÓ ĐƠN POS, CHƯA THẤY MÃ VẬN ĐƠN" : "POS KHÔNG CÓ ĐƠN TRONG KỲ", strength: "MEASURED", why: `API POS cả kỳ: ${api.posOrders} đơn, 0 có mã vận đơn${cap}` });
   else if (p.sampleRead === 0) out.push({ path: "POS_SHIPMENTS", verdict: "CHƯA ĐO ĐƯỢC", strength: "UNKNOWN", why: `${api.status === "FAILED" ? "API POS lỗi; " : api.status === "NOT_CONNECTED" ? "không có khoá POS đang bật; " : ""}${p.sampleAsked ? `đọc được 0/${p.sampleAsked} hội thoại mẫu qua Pancake` : f.fanpageActive ? "không gọi Pancake (mẫu 0 / không hội thoại có mã page + mã hội thoại)" : "không có kết nối pancake-fanpage đang bật để đọc recent_orders"}` });
-  else if (p.withTracking > 0) out.push({ path: "POS_SHIPMENTS", verdict: "POS CÓ TẠO VẬN ĐƠN", strength: "MEASURED", why: `trong ${p.sampleRead} hội thoại mẫu: ${p.posOrders} đơn POS trong kỳ, ${p.withTracking} có mã vận đơn (ghép đơn ERP: LINK/HINT_STRONG ${p.strongOrLink} — gợi ý)` });
-  else if (p.posOrders > 0) out.push({ path: "POS_SHIPMENTS", verdict: "CÓ ĐƠN POS, CHƯA THẤY MÃ VẬN ĐƠN", strength: "MEASURED", why: `trong ${p.sampleRead} hội thoại mẫu: ${p.posOrders} đơn POS trong kỳ, 0 có mã vận đơn` });
-  else out.push({ path: "POS_SHIPMENTS", verdict: "MẪU KHÔNG THẤY ĐƠN POS", strength: p.sampleRead >= PROBE_MIN_SAMPLE ? "HINT" : "UNKNOWN", why: `${p.sampleRead} hội thoại mẫu đọc được, 0 đơn POS trong kỳ (vắng trong mẫu không chứng minh POS không dùng${p.sampleRead < PROBE_MIN_SAMPLE ? `; mẫu < ${PROBE_MIN_SAMPLE}` : ""})` });
+  else if (p.withTracking > 0) out.push({ path: "POS_SHIPMENTS", verdict: "POS CÓ TẠO VẬN ĐƠN", strength: "MEASURED", why: `trong ${p.sampleRead} hội thoại mẫu (CHỈ hội thoại đã có đơn ERP): ${p.posOrders} đơn POS trong kỳ, ${p.withTracking} có mã vận đơn (ghép đơn ERP: LINK/HINT_STRONG ${p.strongOrLink} — gợi ý)` });
+  else if (p.posOrders > 0) out.push({ path: "POS_SHIPMENTS", verdict: "CÓ ĐƠN POS, CHƯA THẤY MÃ VẬN ĐƠN", strength: "MEASURED", why: `trong ${p.sampleRead} hội thoại mẫu (CHỈ hội thoại đã có đơn ERP): ${p.posOrders} đơn POS trong kỳ, 0 có mã vận đơn` });
+  else out.push({ path: "POS_SHIPMENTS", verdict: "MẪU KHÔNG THẤY ĐƠN POS", strength: p.sampleRead >= PROBE_MIN_SAMPLE ? "HINT" : "UNKNOWN", why: `${p.sampleRead} hội thoại mẫu đọc được (CHỈ hội thoại đã có đơn ERP — đơn POS của hội thoại không có đơn ERP thì mẫu không thấy), 0 đơn POS trong kỳ (vắng trong mẫu không chứng minh POS không dùng${p.sampleRead < PROBE_MIN_SAMPLE ? `; mẫu < ${PROBE_MIN_SAMPLE}` : ""})` });
 
   const v = f.vtp;
   if (v.packetsAll > 0 || v.carrierEventsWindow > 0 || v.importBatches > 0 || v.statementLines > 0)
     out.push({ path: "VTP_WEBHOOK", verdict: v.packetsWindow > 0 || v.carrierEventsWindow > 0 ? "VIETTEL POST ĐANG BÁO VỀ" : "CÓ CHỨNG TỪ VIETTEL POST NHƯNG KỲ NÀY IM LẶNG", strength: "MEASURED", why: `gói webhook kỳ này ${v.packetsWindow} / mọi lúc ${v.packetsAll} · sự kiện hãng kỳ này ${v.carrierEventsWindow} · lượt nhập tệp ${v.importBatches} · dòng bảng kê ${v.statementLines}` });
   else out.push({ path: "VTP_WEBHOOK", verdict: "VIETTEL POST CHƯA TỪNG BÁO VỀ TỔ CHỨC NÀY", strength: "UNKNOWN", why: "0 gói webhook, 0 sự kiện hãng, 0 tệp nhập, 0 bảng kê. Viettel Post không cấp API đọc cho shop — ERP chỉ thấy khi URL webhook của tổ chức được dán vào tài khoản Viettel Post; không phân biệt được «chưa dán URL» với «không có vận đơn»" });
 
-  if (f.shipments.carrierOnlyNoOrder > 0) out.push({ path: "OUTSIDE_ERP", verdict: "CÓ VẬN ĐƠN TẠO NGOÀI ERP", strength: "MEASURED", why: `${f.shipments.carrierOnlyNoOrder} vận đơn trong kỳ chỉ có chứng từ hãng, không gắn đơn ERP — POS hay trang hãng thì ERP không tách được` });
+  if (f.shipments.carrierOnlyNoOrder > 0) out.push({ path: "OUTSIDE_ERP", verdict: "CÓ VẬN ĐƠN TẠO NGOÀI ERP", strength: "MEASURED", why: `${f.shipments.carrierOnlyNoOrder} vận đơn trong kỳ chỉ có chứng từ hãng, không gắn đơn ERP, không phải chiều về, không mang mã tham chiếu ERP — POS hay trang hãng thì ERP không tách được (đã loại ${f.shipments.returnLegs} chiều về của vận đơn đã biết; ${f.shipments.legUnsure} dáng chiều về không rõ gốc để riêng)` });
   else if (api.status === "READ" && api.withTracking > 0 && f.shipments.pancakeSynced === 0) out.push({ path: "OUTSIDE_ERP", verdict: "VẬN ĐƠN TẠO TRÊN POS, ERP KHÔNG THẤY", strength: "MEASURED", why: `API POS: ${api.withTracking} đơn có mã vận đơn trong kỳ, 0 vận đơn mang dấu Pancake về ERP` });
-  else if (p.withTracking > 0 && f.shipments.pancakeSynced === 0) out.push({ path: "OUTSIDE_ERP", verdict: "VẬN ĐƠN TẠO TRÊN POS, ERP KHÔNG THẤY", strength: "MEASURED", why: `${p.withTracking} đơn POS có mã vận đơn trong mẫu, 0 vận đơn mang dấu Pancake về ERP` });
+  else if (p.withTracking > 0 && f.shipments.pancakeSynced === 0) out.push({ path: "OUTSIDE_ERP", verdict: "VẬN ĐƠN TẠO TRÊN POS, ERP KHÔNG THẤY", strength: "MEASURED", why: `${p.withTracking} đơn POS có mã vận đơn trong mẫu (hội thoại đã có đơn ERP), 0 vận đơn mang dấu Pancake về ERP` });
+  else if (f.shipments.legUnsure > 0) out.push({ path: "OUTSIDE_ERP", verdict: "CÓ THỂ CÓ VẬN ĐƠN TẠO NGOÀI ERP", strength: "HINT", why: `${f.shipments.legUnsure} vận đơn không gắn đơn mang DÁNG mã chiều về mà ERP không có vận đơn gốc — có thể là chiều về của vận đơn tạo ngoài ERP, có thể không; không kết luận (đã loại ${f.shipments.returnLegs} chiều về của vận đơn đã biết)` });
   else out.push({ path: "OUTSIDE_ERP", verdict: "KHÔNG XÁC ĐỊNH ĐƯỢC", strength: "UNKNOWN", why: "ERP không có dấu vết vận đơn nào ngoài ERP; trang / app Viettel Post không để lại gì trong ERP khi webhook chưa nối" });
   return out;
 }
@@ -410,6 +443,8 @@ const num = (v: unknown) => Number(v ?? 0) || 0;
 
 /** Đọc + phân nhóm + in MỘT tổ chức. Trả bản số để bài kiểm đối chiếu. */
 export async function probeShippingSource(db: Db, opts: ProbeOptions, deps: ProbeDeps = {}): Promise<ProbeReport> {
+  // Nhà: kết nối nằm ở biến môi trường ⇒ «ERP không nối POS / không tạo vận đơn» sẽ là MEASURED SAI. Từ chối, không đo.
+  if (opts.isHome) throw new Error(`shipping-source-probe: ${HOME_ORG_REFUSAL}`);
   const { orgCode, days, sample, now } = opts;
   const from = new Date(now.getTime() - days * 86_400_000);
   const summary: string[] = [];
@@ -454,16 +489,36 @@ export async function probeShippingSource(db: Db, opts: ProbeOptions, deps: Prob
       pancake: sql<number>`count(*) filter (where (${s.raw} ? 'pancake') or ${s.lastPancakeSyncAt} is not null)::int`,
       vtpRaw: sql<number>`count(*) filter (where ${s.raw} ? 'vtp')::int`,
       noOrder: sql<number>`count(*) filter (where ${s.orderId} is null and coalesce(${s.trackingCode}, ${s.vtpOrderNumber}, '') <> '')::int`,
-      noOrderNoPancake: sql<number>`count(*) filter (where ${s.orderId} is null and coalesce(${s.trackingCode}, ${s.vtpOrderNumber}, '') <> '' and not (${s.raw} ? 'pancake') and not (${s.raw} ? 'carrierCreate'))::int`,
       erpOrder: sql<number>`count(*) filter (where ${s.orderId} like ${`${MANUAL_ORDER_ID_PREFIX}%`})::int`,
       cod: sql<number>`coalesce(sum(${s.codAmount}) filter (where coalesce(${s.trackingCode}, ${s.vtpOrderNumber}, '') <> ''), 0)::bigint`,
     })
     .from(s)
     .where(gte(s.createdAt, from));
+  // Vận đơn không gắn đơn, không dấu ERP / Pancake ⇒ phân loại bằng classifyOrphanShipment (loại chiều về + mã tham chiếu ERP).
+  const orphanRows = await db
+    .select({ code: sql<string>`coalesce(nullif(${s.trackingCode}, ''), ${s.vtpOrderNumber})`, orderReference: s.orderReference, carrierReference: sql<string | null>`coalesce(${s.raw}->'vtp'->>'ORDER_REFERENCE', ${s.raw}->'vtp'->>'order_reference')` })
+    .from(s)
+    .where(and(gte(s.createdAt, from), isNull(s.orderId), sql`coalesce(${s.trackingCode}, ${s.vtpOrderNumber}, '') <> ''`, sql`not (${s.raw} ? 'pancake')`, sql`not (${s.raw} ? 'carrierCreate')`))
+    .limit(MAX_ORPHAN_ROWS + 1);
+  const orphanTruncated = orphanRows.length > MAX_ORPHAN_ROWS;
+  const orphans = orphanRows.slice(0, MAX_ORPHAN_ROWS);
+  const candidates = [...new Set(orphans.flatMap((r) => [legBaseCode(String(r.code ?? "")), (r.orderReference ?? "").trim().toUpperCase()]).filter(Boolean))];
+  const knownCodes = new Set<string>();
+  for (let i = 0; i < candidates.length; i += 500) {
+    const part = candidates.slice(i, i + 500);
+    const hit = await db.select({ t: s.trackingCode, v: s.vtpOrderNumber }).from(s).where(or(inArray(s.trackingCode, part), inArray(s.vtpOrderNumber, part)));
+    for (const h of hit) for (const c of [h.t, h.v]) if (c) knownCodes.add(c.trim().toUpperCase());
+  }
+  const orphanCls = new Map<OrphanClass, number>();
+  for (const r of orphans) {
+    const cls = classifyOrphanShipment({ code: String(r.code ?? ""), orderReference: r.orderReference, carrierReference: r.carrierReference }, knownCodes);
+    bump(orphanCls, cls);
+    if (cls !== "OUTSIDE") detail.push(`  vận đơn không đơn ${String(r.code ?? "")} · ${cls}`);
+  }
   const se = schema.shipmentEvents;
   const evs = await db.select({ source: se.source, n: sql<number>`count(*)::int` }).from(se).where(gte(se.occurredAt, from)).groupBy(se.source);
   const carrierEventsWindow = evs.filter((e) => /^(VTP_|GHN_|GHTK_)/.test(e.source)).reduce((a, e) => a + num(e.n), 0);
-  say(`${orgCode} vận đơn ERP biết ${days} ngày: dòng ${num(sh?.total)} · có mã ${num(sh?.withCode)} (COD khai báo ${vnd(num(sh?.cod))}) · dấu tạo ERP có mã ${num(sh?.erpCreated)} (mọi lượt tạo ERP ${num(sh?.erpAttempts)}) · dấu Pancake ${num(sh?.pancake)} · bản DATA Viettel Post ${num(sh?.vtpRaw)} · gắn đơn ERP ${num(sh?.erpOrder)} · KHÔNG gắn đơn ${num(sh?.noOrder)} (không dấu ERP/Pancake ${num(sh?.noOrderNoPancake)}) · sự kiện hành trình theo nguồn: ${evs.map((e) => `${e.source} ${e.n}`).join(" · ") || "0"}`);
+  say(`${orgCode} vận đơn ERP biết ${days} ngày: dòng ${num(sh?.total)} · có mã ${num(sh?.withCode)} (COD khai báo ${vnd(num(sh?.cod))}) · dấu tạo ERP có mã ${num(sh?.erpCreated)} (mọi lượt tạo ERP ${num(sh?.erpAttempts)}) · dấu Pancake ${num(sh?.pancake)} · bản DATA Viettel Post ${num(sh?.vtpRaw)} · gắn đơn ERP ${num(sh?.erpOrder)} · KHÔNG gắn đơn ${num(sh?.noOrder)} (không dấu ERP/Pancake: ngoài ERP ${orphanCls.get("OUTSIDE") ?? 0} · chiều về của vận đơn đã biết ${orphanCls.get("RETURN_LEG") ?? 0} · dáng chiều về không rõ gốc ${orphanCls.get("LEG_UNSURE") ?? 0} · hãng gửi lại mã ERP ${orphanCls.get("ERP_ECHO") ?? 0}${orphanTruncated ? ` · CẮT ở ${MAX_ORPHAN_ROWS}` : ""}) · sự kiện hành trình theo nguồn: ${evs.map((e) => `${e.source} ${e.n}`).join(" · ") || "0"}`);
 
   // 4 · Viettel Post / hãng — chỉ webhook + tệp + bảng kê (không API đọc).
   const w = schema.webhookEvents;
@@ -628,7 +683,7 @@ export async function probeShippingSource(db: Db, opts: ProbeOptions, deps: Prob
     posOrgActive,
     carrierCreateActive,
     fanpageActive,
-    shipments: { withCode: num(sh?.withCode), erpCreated: num(sh?.erpCreated), pancakeSynced: num(sh?.pancake), carrierOnlyNoOrder: num(sh?.noOrderNoPancake) },
+    shipments: { withCode: num(sh?.withCode), erpCreated: num(sh?.erpCreated), pancakeSynced: num(sh?.pancake), carrierOnlyNoOrder: orphanCls.get("OUTSIDE") ?? 0, legUnsure: orphanCls.get("LEG_UNSURE") ?? 0, returnLegs: orphanCls.get("RETURN_LEG") ?? 0 },
     erpOrdersWithPosLink: num(od?.posLink),
     landingPushedToPos: num(land?.n),
     vtp: { packetsWindow: num(vtpHook?.win), packetsAll: num(vtpHook?.all), carrierEventsWindow, importBatches: num(imp?.n), statementLines: num(stm?.n) },
@@ -660,6 +715,11 @@ async function main() {
       exit = 1;
       continue;
     }
+    if (org.isHome) {
+      tomTat(`shipping-source-probe: bỏ qua «${org.code}» — ${HOME_ORG_REFUSAL}`);
+      exit = 1;
+      continue;
+    }
     const db: Db = await getDbForInspection({ code: org.code, isHome: org.isHome });
     const [ro] = rowsOf<Record<string, unknown>>(await db.execute(sql`show default_transaction_read_only`));
     if (String(ro?.default_transaction_read_only ?? "") !== "on") {
@@ -671,6 +731,7 @@ async function main() {
     try {
       await probeShippingSource(db, { orgCode: org.code, isHome: org.isHome, days: args.days, sample: args.sample, now: new Date() });
     } catch (e) {
+      // Câu lỗi đầy đủ chỉ đi vào phần MÃ HOÁ (ops chạy cả lượt trong ma_hoa_ket_qua); kênh tóm tắt công khai chỉ nhận LOẠI lỗi ngay dưới.
       console.error(`shipping-source-probe ${org.code} lỗi:`, e instanceof Error ? e.message : e);
       tomTat(`shipping-source-probe ${org.code}: LỖI ngoài phép đo (${tenLoi(e)}) — chi tiết trong phần mã hoá`);
       exit = 1;
@@ -682,6 +743,7 @@ async function main() {
 // Chỉ chạy khi được gọi THẲNG từ dòng lệnh — `import` từ bài kiểm không được kéo theo `process.exit`.
 if (CHAY_THANG) {
   main().catch((e) => {
+    // Như trên: câu lỗi chỉ vào phần MÃ HOÁ, tóm tắt công khai không mang nó.
     console.error("shipping-source-probe lỗi:", e instanceof Error ? e.message : e);
     tomTat("shipping-source-probe: LỖI ngoài phép đo — chi tiết trong phần mã hoá");
     process.stdout.write("", () => process.exit(1));

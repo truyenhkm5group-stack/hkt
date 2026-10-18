@@ -18,7 +18,9 @@ import { getDb, schema } from "@/db";
 import { mapOrder } from "@/lib/integrations/pancake/mapper";
 import {
   aggregatePos,
+  classifyOrphanShipment,
   concludeShippingSource,
+  HOME_ORG_REFUSAL,
   splitSummary,
   matchPosToErp,
   overallSentence,
@@ -44,7 +46,7 @@ const baseFacts = (over: Partial<ProbeFacts> = {}): ProbeFacts => ({
   posOrgActive: false,
   carrierCreateActive: [],
   fanpageActive: true,
-  shipments: { withCode: 0, erpCreated: 0, pancakeSynced: 0, carrierOnlyNoOrder: 0 },
+  shipments: { withCode: 0, erpCreated: 0, pancakeSynced: 0, carrierOnlyNoOrder: 0, legUnsure: 0, returnLegs: 0 },
   erpOrdersWithPosLink: 0,
   landingPushedToPos: 0,
   vtp: { packetsWindow: 0, packetsAll: 0, carrierEventsWindow: 0, importBatches: 0, statementLines: 0 },
@@ -135,8 +137,26 @@ function testPure() {
   assert.deepEqual([pathOf(api, "POS_SHIPMENTS").verdict, pathOf(api, "POS_SHIPMENTS").strength], ["POS KHÔNG CÓ ĐƠN TRONG KỲ", "MEASURED"]);
   assert.match(pathOf(baseFacts({ posOrgActive: true, posApi: { status: "READ", posOrders: 1000, withTracking: 900, strongOrLink: 0, doubleShipmentRisk: 0, truncated: true } }), "POS_SHIPMENTS").why, /CẮT/);
   // ERP có tạo ⇒ MEASURED đang dùng; kết nối bật mà không tạo ⇒ nói đúng như vậy.
-  assert.equal(pathOf(baseFacts({ shipments: { withCode: 3, erpCreated: 3, pancakeSynced: 0, carrierOnlyNoOrder: 0 } }), "ERP_CARRIER").verdict, "ĐANG DÙNG");
+  assert.equal(pathOf(baseFacts({ shipments: { withCode: 3, erpCreated: 3, pancakeSynced: 0, carrierOnlyNoOrder: 0, legUnsure: 0, returnLegs: 0 } }), "ERP_CARRIER").verdict, "ĐANG DÙNG");
   assert.equal(pathOf(baseFacts({ carrierCreateActive: ["viettelpost-carrier"] }), "ERP_CARRIER").verdict, "CÓ KẾT NỐI, KỲ NÀY KHÔNG TẠO");
+  // B1 — vận đơn không gắn đơn: chiều về (AGENTS §3 luật 7) KHÔNG BAO GIỜ là «tạo ngoài ERP».
+  const known = new Set(["PKE1506697767"]);
+  assert.equal(classifyOrphanShipment({ code: "PKE15066977671P1", orderReference: null, carrierReference: null }, known), "RETURN_LEG", "mã gốc + 1P1, gốc đã biết ⇒ chiều về, LOẠI");
+  assert.equal(classifyOrphanShipment({ code: "XYZ999", orderReference: "PKE1506697767", carrierReference: null }, known), "RETURN_LEG", "order_reference trỏ tới vận đơn đã biết ⇒ chiều về, LOẠI");
+  assert.equal(classifyOrphanShipment({ code: "PKE19999999991P1", orderReference: null, carrierReference: null }, known), "LEG_UNSURE", "dáng chiều về mà gốc không có trong ERP ⇒ không chắc");
+  assert.equal(classifyOrphanShipment({ code: "PKE1999999999", orderReference: null, carrierReference: "ERP42F28794-1" }, known), "ERP_ECHO", "hãng gửi lại mã tham chiếu ERP ⇒ ERP tạo");
+  assert.equal(classifyOrphanShipment({ code: "PKE1999999999", orderReference: "PKE1999999999", carrierReference: "778899" }, known), "OUTSIDE", "order_reference = chính mã không phải chiều về");
+  assert.equal(classifyOrphanShipment({ code: "PKE1506697767", orderReference: null, carrierReference: null }, known), "OUTSIDE", "mã chiều đi thường không khớp regex chiều về");
+  const onlyLegs = baseFacts({ shipments: { withCode: 4, erpCreated: 0, pancakeSynced: 0, carrierOnlyNoOrder: 0, legUnsure: 0, returnLegs: 4 } });
+  assert.equal(pathOf(onlyLegs, "OUTSIDE_ERP").strength, "UNKNOWN", "toàn chiều về của vận đơn đã biết ⇒ không có gì ngoài ERP để kết luận");
+  const unsure = pathOf(baseFacts({ shipments: { withCode: 2, erpCreated: 0, pancakeSynced: 0, carrierOnlyNoOrder: 0, legUnsure: 2, returnLegs: 0 } }), "OUTSIDE_ERP");
+  assert.deepEqual([unsure.verdict, unsure.strength], ["CÓ THỂ CÓ VẬN ĐƠN TẠO NGOÀI ERP", "HINT"]);
+  const outside = pathOf(baseFacts({ shipments: { withCode: 3, erpCreated: 0, pancakeSynced: 0, carrierOnlyNoOrder: 1, legUnsure: 1, returnLegs: 1 } }), "OUTSIDE_ERP");
+  assert.deepEqual([outside.verdict, outside.strength], ["CÓ VẬN ĐƠN TẠO NGOÀI ERP", "MEASURED"]);
+  assert.match(outside.why, /đã loại 1 chiều về/);
+  // Mẫu recent_orders chỉ lấy từ hội thoại đã có đơn ERP — câu căn cứ phải nói ra.
+  assert.match(pathOf(baseFacts({ pos: { sampleAsked: 20, sampleRead: 20, posOrders: 0, withTracking: 0, strongOrLink: 0, doubleShipmentRisk: 0 } }), "POS_SHIPMENTS").why, /CHỈ hội thoại đã có đơn ERP/);
+
   // Viettel Post có gói tin ⇒ MEASURED; chỉ có chứng từ cũ ⇒ «im lặng kỳ này».
   assert.equal(pathOf(baseFacts({ vtp: { packetsWindow: 4, packetsAll: 9, carrierEventsWindow: 0, importBatches: 0, statementLines: 0 } }), "VTP_WEBHOOK").verdict, "VIETTEL POST ĐANG BÁO VỀ");
   assert.equal(pathOf(baseFacts({ vtp: { packetsWindow: 0, packetsAll: 9, carrierEventsWindow: 0, importBatches: 0, statementLines: 0 } }), "VTP_WEBHOOK").verdict, "CÓ CHỨNG TỪ VIETTEL POST NHƯNG KỲ NÀY IM LẶNG");
@@ -150,6 +170,8 @@ function testSource() {
   assert.match(src, /connectionStatusRows\(db\)/, "kết nối đọc qua đường của service — không chạm bảng bí mật");
   assert.match(src, /bindReadOnlyOrgHandle\(org\)/, "API POS chỉ chạy sau khi gắn handle CHỈ ĐỌC (không migrate)");
   assert.match(src, /process\.stdout\.write\("", \(\) => process\.exit/, "xả stdout trước khi thoát");
+  assert.match(src, /if \(org\.isHome\) \{\n\s+tomTat\(`shipping-source-probe: bỏ qua/, "main từ chối tổ chức nhà TRƯỚC khi mở CSDL");
+  assert.match(src, /legBaseCode/, "chiều về nhận bằng CHÍNH legBaseCode, không luật thứ hai");
   assert.doesNotMatch(src, /\.(insert|update|delete)\(|\binsert into\b|\bupdate \w+ set\b/i, "script không câu ghi");
   assert.doesNotMatch(src, /\.post\(|createOrder|method: "POST"/, "Pancake CHỈ GET");
   assert.ok(!/\(\?<[=!]/.test(src), "không nhìn-ngược");
@@ -190,7 +212,13 @@ async function testDb() {
     await db.insert(schema.orders).values({ id: erpId, stage: "CONFIRMED", origin: "AI_AGENT", shipPhone: PHONE, shipProvince: "Thành phố Hà Nội", shipCommune: "Phường Ba Đình", moneyToCollect: 300_000, totalPriceAfterDiscount: 280_000, pageId: PAGE, conversationId: THREAD, insertedAt: new Date(now.getTime() - 2 * H) } as typeof schema.orders.$inferInsert);
     const rows = await db
       .insert(schema.shipments)
-      .values({ orderId: erpId, attemptNo: 1, carrier: "Viettel Post", trackingCode: erpCode, vtpOrderNumber: erpCode, raw: { carrierCreate: { state: "CREATED", carrier: "VTP", reference: `ERP${short}-1`, by: null, at: now.toISOString() } } } as typeof schema.shipments.$inferInsert)
+      .values([
+        { orderId: erpId, attemptNo: 1, carrier: "Viettel Post", trackingCode: erpCode, vtpOrderNumber: erpCode, raw: { carrierCreate: { state: "CREATED", carrier: "VTP", reference: `ERP${short}-1`, by: null, at: now.toISOString() } } },
+        // B1: chiều về của vận đơn ERP (dòng riêng, order_id NULL theo quy ước — AGENTS §3 luật 7) ⇒ KHÔNG được đếm «tạo ngoài ERP».
+        { orderId: null, carrier: "Viettel Post", trackingCode: `${erpCode}1P1`, vtpOrderNumber: `${erpCode}1P1`, orderReference: erpCode, raw: { vtp: { ORDER_REFERENCE: erpCode } } },
+        // Hãng gửi lại mã tham chiếu ERP ⇒ ERP tạo (dòng đơn mất) ⇒ cũng không phải ngoài ERP.
+        { orderId: null, carrier: "Viettel Post", trackingCode: `${erpCode}X`, vtpOrderNumber: `${erpCode}X`, raw: { vtp: { ORDER_REFERENCE: `ERP${short}-2` } } },
+      ] as (typeof schema.shipments.$inferInsert)[])
       .returning({ id: schema.shipments.id });
     shipIds.push(...rows.map((r) => r.id));
 
@@ -220,6 +248,10 @@ async function testDb() {
     const posLine = result.conclusions.find((c) => c.path === "POS_SHIPMENTS")!;
     assert.deepEqual([posLine.verdict, posLine.strength], ["POS CÓ TẠO VẬN ĐƠN", "MEASURED"]);
     assert.ok(result.facts.shipments.erpCreated >= 1);
+    assert.ok(result.facts.shipments.returnLegs >= 1, "chiều về của vận đơn ERP được nhận ra");
+    assert.ok(printed.some((l) => l.includes(`${erpCode}1P1 · RETURN_LEG`)), "chi tiết ghi chiều về là RETURN_LEG");
+    assert.ok(printed.some((l) => l.includes(`${erpCode}X · ERP_ECHO`)), "mã tham chiếu ERP từ hãng ⇒ ERP_ECHO");
+    assert.ok(!printed.some((l) => l.includes(`${erpCode}1P1 · OUTSIDE`) || l.includes(`${erpCode}X · OUTSIDE`)));
     assert.ok(printed.some((l) => l.includes(`MẪU POS ${tag}1`) && l.includes(posCode) && l.includes("HINT_STRONG") && l.includes(`#${short}`) && l.includes("RỦI RO HAI VẬN ĐƠN")), "chi tiết (phần mã hoá) có mã POS + mã vận đơn + mã đơn ngắn");
     const summary = printed.filter((l) => l.startsWith("[ops:tom-tat]"));
     assert.ok(summary.some((l) => /KẾT LUẬN POS_SHIPMENTS: POS CÓ TẠO VẬN ĐƠN \[MEASURED\]/.test(l)), summary.join("\n"));
@@ -229,6 +261,9 @@ async function testDb() {
       for (const leak of [PHONE, erpCode, posCode, short, `${tag}1`, THREAD, "tok-ssp"]) assert.ok(!l.includes(leak), `tóm tắt lọt «${leak}»: ${l}`);
     }
     for (const l of printed) assert.ok(!l.includes(PHONE) && !l.includes("tok-ssp"), `không in SĐT / token ở bất kỳ đâu: ${l}`);
+
+    // B2: tổ chức nhà dùng credential môi trường ⇒ từ chối, không ra kết luận MEASURED sai.
+    await assert.rejects(() => probeShippingSource(db, { orgCode: "home", isHome: true, days: 1, sample: 0, now }), (e: Error) => e.message.includes(HOME_ORG_REFUSAL));
 
     // --sample=0 ⇒ không gọi Pancake, POS CHƯA ĐO ĐƯỢC.
     asked.length = 0;
@@ -245,7 +280,7 @@ export async function testShippingSourceProbe() {
   testPure();
   testSource();
   await testDb();
-  console.log("  ✓ ops shipping-source-probe: vận đơn tạo ở đâu (ERP · POS · Viettel Post) — kết nối chở vận đơn, ERP → POS, đơn POS qua API (khoá tổ chức, handle chỉ đọc) / recent_orders mẫu, ghép LINK · HINT_STRONG · HINT_WEAK, COD khai báo theo hãng, rủi ro hai vận đơn, kết luận MEASURED / HINT / UNKNOWN; tóm tắt chỉ số đếm; chỉ đọc, khai đủ bốn chỗ");
+  console.log("  ✓ ops shipping-source-probe: vận đơn tạo ở đâu (ERP · POS · Viettel Post) — kết nối chở vận đơn, ERP → POS, đơn POS qua API (khoá tổ chức, handle chỉ đọc) / recent_orders mẫu, ghép LINK · HINT_STRONG · HINT_WEAK, COD khai báo theo hãng, rủi ro hai vận đơn, chiều về / mã tham chiếu ERP không bị đếm «ngoài ERP» (dáng chiều về không rõ gốc ⇒ HINT), tổ chức nhà bị từ chối, kết luận MEASURED / HINT / UNKNOWN; tóm tắt chỉ số đếm; chỉ đọc, khai đủ bốn chỗ");
 }
 
 if (process.argv[1] && /shipping-source-probe\.test\.ts$/.test(process.argv[1])) {
