@@ -272,9 +272,14 @@ async function setStatus(code: string, status: string) {
   invalidateOrganizations();
 }
 
+/**
+ * Hai dòng nhật ký của MỘT lượt (`*:start` rồi `*:done` / `*:stopped`) có thể mang CÙNG mốc `at` trên máy CI nhanh, và `id` là uuid
+ * ngẫu nhiên — xếp theo `at, id` thì thứ tự giữa hai dòng là tung đồng xu (CI 18/10/2026: `["reactivate:stopped","reactivate:start"]`).
+ * Dòng `:start` luôn được ghi TRƯỚC trong mã, nên khi trùng mốc nó đứng trước.
+ */
 async function auditSubjects(code: string, action: string): Promise<string[]> {
   const pdb = await getPlatformDb();
-  return rowsOf<{ subject: string }>(await pdb.execute(sql`select subject from platform_audit_log where target_org_code = ${code} and action = ${action} order by at, id`)).map((r) => r.subject);
+  return rowsOf<{ subject: string }>(await pdb.execute(sql`select subject from platform_audit_log where target_org_code = ${code} and action = ${action} order by at, (subject not like '%:start'), id`)).map((r) => r.subject);
 }
 
 async function cleanup() {
