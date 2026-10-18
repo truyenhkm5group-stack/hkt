@@ -1,8 +1,8 @@
 {
   "pr": 889,
-  "sha": "734e029e48e4aebec6ac66caf135cc978aaa670a",
+  "sha": "dd4ab74aa17692f754b2efc2be88cd3fa316a5bd",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-18T02:18:10.340Z",
-  "note": "review: nhóm do SQL xếp vào danh sách ĐÓNG 7 mã, TS chỉ in nhãn cố định + số; không giá trị cột chữ nào ra kênh tóm tắt; bài kiểm rò log không đổi"
+  "at": "2026-10-18T03:42:28.617Z",
+  "note": "như 734e029e + merge origin/main (mang #890 sửa bài kiểm chập chờn); diff so với main vẫn 2 tệp, nội dung không đổi"
 }
