@@ -1,4 +1,3 @@
-{"at":"2026-10-10T02:57:58.769Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"products-shell-v2","detail":"feat/products-shell-v2 @ 747635ee2047 · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T02:58:12.821Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#757 @ 747635ee2047 · Cập nhật nhánh lên main, mã không đổi; gates xanh lại"}
 {"at":"2026-10-10T03:06:22.756Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#756 @ 449049c4042a · Cập nhật nhánh lên main, mã không đổi; gates xanh lại"}
 {"at":"2026-10-10T03:07:12.335Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#757 @ 747635ee2047 · Cập nhật nhánh lên main, mã không đổi; gates xanh lại"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-18T02:04:17.651Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"OVERLAP_ACCEPTED","mission":"trace-comment-denominator","detail":"OVERLAP_ACCEPTED với money-trace-since: phạm vi scripts/conv-money-trace.ts, tests/conv-money-trace.test.ts — cách tích hợp: chỉ thêm dòng mẫu số cạnh dòng C"}
 {"at":"2026-10-18T02:04:17.651Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"OVERLAP_ACCEPTED","mission":"trace-comment-denominator","detail":"OVERLAP_ACCEPTED với trace-by-order: phạm vi scripts/conv-money-trace.ts, tests/conv-money-trace.test.ts — cách tích hợp: chỉ thêm dòng mẫu số cạnh dòng C"}
 {"at":"2026-10-18T02:04:17.651Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"OVERLAP_ACCEPTED","mission":"trace-comment-denominator","detail":"OVERLAP_ACCEPTED với trace-carry-counter: phạm vi scripts/conv-money-trace.ts, tests/conv-money-trace.test.ts — cách tích hợp: chỉ thêm dòng mẫu số cạnh dòng C"}
+{"at":"2026-10-18T02:04:38.866Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"HANDOFF","mission":"trace-comment-denominator","detail":"claude/trace-comment-denominator @ 20f323744eb8 · 2 lệnh kiểm thử"}

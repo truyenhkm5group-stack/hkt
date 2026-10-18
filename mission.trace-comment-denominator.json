@@ -3,7 +3,7 @@
   "mission_id": "trace-comment-denominator",
   "title": "conv-money-trace: mẫu số của dòng C",
   "business_goal": "Đọc được nghĩa C = 0 khi verify #886",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-token-budget",
@@ -21,11 +21,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T02:04:17.559Z",
-  "updated_at": "2026-10-18T02:04:17.559Z",
-  "last_heartbeat": "2026-10-18T02:04:17.559Z",
+  "updated_at": "2026-10-18T02:04:38.833Z",
+  "last_heartbeat": "2026-10-18T02:04:38.833Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/trace-comment-denominator",
+    "sha": "20f323744eb8239f1d1348498eb7e5391f862d15",
+    "at": "2026-10-18T02:04:38.833Z",
+    "actor": "DESKTOP-56TH98Y:wt-token-budget",
+    "title": "conv-money-trace --scan in mẫu số của dòng C (bình luận trong kỳ · ALREADY · DONE không ghi chú)",
+    "summary": "",
+    "tests": [
+      "tests/conv-money-trace.test.ts: ĐẠT (scanPatterns trên PGlite)",
+      "eslint: sạch"
+    ]
   }
 }
