@@ -1,0 +1,8 @@
+{
+  "pr": 889,
+  "sha": "20f323744eb8239f1d1348498eb7e5391f862d15",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-18T02:05:45.701Z",
+  "note": "review: chỉ đọc, chỉ số đếm — mẫu số dòng C theo trạng thái lưu thật của sales_chat_inbound (ALREADY = SKIPPED + câu lý do cố định); không in nội dung ghi chú; phần không lưu in «chưa ghi lại»"
+}
