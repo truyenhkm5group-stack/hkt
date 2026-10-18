@@ -278,9 +278,19 @@ async function run() {
   const paidThrough = new Date(Date.now() + 30 * 86_400_000 + 7 * 3_600_000).toISOString().slice(0, 10);
   await pdb.update(schema.platformSubscriptions).set({ billingEnabled: true, paidThrough }).where(eq(schema.platformSubscriptions.orgCode, U));
   invalidateSubscriptions();
-  // Mốc đọc = `now` + 1 giây: các khoản trừ ghi ở `now`, mốc cuối không tính — đọc theo đồng hồ thật thì lượt chạy vắt qua nửa đêm
-  // ngày cuối tháng (giờ VN) đọc nhầm kỳ mới và đỏ (review #648 L7, AGENTS mục 50).
-  const readAt = new Date(now.getTime() + 1_000);
+  // Mốc đọc dựng TỪ CHÍNH SỔ (AGENTS mục 50/65): số dư tính mọi dòng có `occurred_at` < mốc đọc, mà khoản trừ ghi ở `now` còn
+  // điều chỉnh tay (thu hồi tiền tặng, +1.000đ) ghi ở ĐỒNG HỒ THẬT lúc gọi. Mốc `now + 1 giây` chỉ đúng khi cả bài chạy dưới 1 giây;
+  // máy bận (cả bộ `npm test` lúc 23:00 giờ VN 18/10/2026) thì dòng thu hồi nằm SAU mốc đọc ⇒ balancePromoVnd = 510, không phải 0.
+  // Nên mốc = dòng sổ muộn nhất của hai tổ chức thử + 1 ms (không bao giờ sớm hơn `now + 1 giây` như trước).
+  const [lastLedger] = await pdb.select({ at: sql<Date | string | null>`max(${schema.platformAiLedgerEntries.occurredAt})` }).from(schema.platformAiLedgerEntries).where(inArray(schema.platformAiLedgerEntries.orgCode, [...ORGS]));
+  const lastAt = lastLedger?.at ? new Date(lastLedger.at) : now;
+  const readAt = new Date(Math.max(now.getTime() + 1_000, lastAt.getTime() + 1));
+  // Biên: đọc đúng TẠI mốc dòng cuối thì dòng ấy chưa tính (mốc cuối không tính) — phép đọc dưới đây không được dựa vào may mắn.
+  const beforeLast = (await readAiBalancePeriod(per.from, lastAt)).get(U);
+  const afterLast = (await readAiBalancePeriod(per.from, readAt)).get(U);
+  assert.ok(lastAt.getTime() >= now.getTime(), "dòng sổ muộn nhất không sớm hơn mốc bắt đầu bài");
+  assert.notEqual((beforeLast?.balanceCashVnd ?? 0) + (beforeLast?.balancePromoVnd ?? 0), (afterLast?.balanceCashVnd ?? 0) + (afterLast?.balancePromoVnd ?? 0), "đọc TẠI mốc dòng cuối sổ thì chưa thấy dòng ấy — mốc đọc phải đứng sau nó");
+  assert.equal(afterLast?.balancePromoVnd, 0, "đọc sau dòng cuối ⇒ tiền tặng đã thu hồi hết");
   await captureSaasSnapshot(readAt);
   const econ = await loadPricingEconomics(op, readAt);
   assert.ok(econ.ok, JSON.stringify(econ));
