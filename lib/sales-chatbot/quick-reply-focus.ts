@@ -264,3 +264,19 @@ export function triggerProductConflicts(entry: Pick<QuickReplyEntry, "title" | "
   const names = products.map((p) => p.name);
   return entry.triggers.map((trigger) => ({ trigger, names: productsNamedIn(trigger, names).filter((n) => !covers.includes(n)) })).filter((x) => x.names.length > 0);
 }
+
+/**
+ * Cách hỏi ĐỀ XUẤT (tự nạp · nhập) còn giữ được cho một câu mẫu: bỏ cách hỏi gọi tên món mà câu mẫu không nói tới — đường tự nạp từng
+ * thêm thẳng «xin giá chả cá» vào câu NEM (chủ shop 18/10/2026: «không cho cấu hình sai tự tái xuất hiện»). HÀM THUẦN.
+ */
+export function consistentTriggers(entry: Pick<QuickReplyEntry, "title" | "answer">, proposed: readonly string[], products: readonly FocusProduct[]): string[] {
+  return proposed.filter((t) => triggerProductConflicts({ ...entry, triggers: [t] }, products).length === 0);
+}
+
+/** Câu lỗi đọc được cho người sửa câu mẫu — `null` khi cách hỏi và câu trả lời nói cùng món. HÀM THUẦN. */
+export function productConsistencyError(entry: Pick<QuickReplyEntry, "title" | "answer" | "triggers">, products: readonly FocusProduct[]): string | null {
+  const c = triggerProductConflicts(entry, products);
+  if (!c.length) return null;
+  const shown = c.slice(0, 3).map((x) => `«${x.trigger}» (gọi tên ${x.names.join(", ")})`).join(" · ");
+  return `Cách hỏi ${shown}${c.length > 3 ? ` và ${c.length - 3} cách hỏi khác` : ""} nói về món mà câu trả lời không nhắc tới — bot sẽ báo sai món. Gỡ cách hỏi đó, hoặc thêm món ấy (kèm {{giá:SKU}}) vào câu trả lời.`;
+}

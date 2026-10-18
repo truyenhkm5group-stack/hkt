@@ -12,6 +12,7 @@ import {
   gate,
   quickReplyByKeyword,
   removeQuickReplyImage,
+  removeWrongProductTriggers,
   saveQuickReply,
   saveQuickReplySettings,
   setQuickReplyActive,
@@ -90,7 +91,16 @@ export async function bulkQuickRepliesAction(ids: string[], op: BulkQuickReplyOp
   if ("error" in r) return r;
   revalidatePath(PATH);
   const verb = op === "ACTIVATE" ? "Đã bật" : op === "DEACTIVATE" ? "Đã tắt" : "Đã xoá";
-  return { ok: true, message: `${verb} ${r.changed} câu mẫu${r.skipped ? ` · bỏ qua ${r.skipped} câu còn «[giá lấy từ ERP]» (sửa giá rồi mới bật)` : ""}` };
+  return { ok: true, message: `${verb} ${r.changed} câu mẫu${r.skipped ? ` · bỏ qua ${r.skipped} câu còn «[giá lấy từ ERP]» hoặc có cách hỏi gắn nhầm món (sửa rồi mới bật)` : ""}` };
+}
+
+/** Gỡ mọi cách hỏi gắn nhầm món (chủ shop 18/10/2026) — nhật ký giữ cách hỏi trước / sau của từng câu mẫu. */
+export async function removeWrongProductTriggersAction(): Promise<Result> {
+  const user = await requireUser();
+  const r = await removeWrongProductTriggers(user);
+  if ("error" in r) return r;
+  revalidatePath(PATH);
+  return { ok: true, message: r.triggers ? `Đã gỡ ${r.triggers} cách hỏi gắn nhầm món ở ${r.templates} câu mẫu` : "Không còn cách hỏi nào gắn nhầm món" };
 }
 
 /** Công tắc TỰ NẠP câu mẫu mỗi ngày (dùng AI) + tự bật câu mẫu AI soạn. */

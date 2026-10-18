@@ -20,8 +20,8 @@ import { getDb, schema } from "@/db";
 import { createProductCore } from "@/lib/records/product-create";
 import { SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { matchQuickReplyByKeyword, QUICK_REPLY_SETTING_KEY, type QuickReplyEntry } from "@/lib/sales-chatbot/quick-replies-shared";
-import { quickReplyByKeyword } from "@/lib/sales-chatbot/quick-replies";
-import { productFocusOf, productsNamedIn, quickReplyCovers, quickReplyFocusGuard, triggerProductConflicts, unavailableQuickReplyGuard, type FocusLine, type FocusProduct } from "@/lib/sales-chatbot/quick-reply-focus";
+import { bulkQuickReplies, insertLearned, quickReplyByKeyword, removeWrongProductTriggers, saveQuickReply, setQuickReplyActive } from "@/lib/sales-chatbot/quick-replies";
+import { consistentTriggers, productConsistencyError, productFocusOf, productsNamedIn, quickReplyCovers, quickReplyFocusGuard, triggerProductConflicts, unavailableQuickReplyGuard, type FocusLine, type FocusProduct } from "@/lib/sales-chatbot/quick-reply-focus";
 import { setSettingJson } from "@/lib/settings";
 import { runGoldenCases, say, tool, type GoldenCase, type GoldenHookCtx } from "./sales-agent-golden/harness";
 
@@ -178,6 +178,12 @@ function testThuan() {
   // «chà bông» không gọi tên chả cá / chả mực.
   assert.deepEqual(focusOf(["chà bông bao nhiêu"]).focus, []);
 
+  // Tự nạp / nhập: cách hỏi đề xuất sai món bị bỏ trước khi thêm vào câu mẫu cũ.
+  assert.deepEqual(consistentTriggers(A07, ["nem tôm bao nhiêu", "xin giá chả cá", "1 hộp ruốc tôm", "báo giá nhé"], PRODUCTS), ["nem tôm bao nhiêu", "báo giá nhé"]);
+  assert.equal(productConsistencyError(A01, PRODUCTS), null);
+  assert.match(productConsistencyError(A07, PRODUCTS) ?? "", /«xin giá chả cá» \(gọi tên Chả cá thu\)/);
+  const learnSrc = readFileSync("lib/sales-chatbot/quick-replies-learn.ts", "utf8");
+  assert.match(learnSrc, /mergeTriggers\(current, consistentTriggers\(/, "tự nạp lọc cách hỏi qua consistentTriggers trước khi thêm");
   // KIỂM TĨNH: cách hỏi gắn nhầm món trên câu nem — đúng ba cách hỏi gọi tên chả cá.
   assert.deepEqual(triggerProductConflicts(A07, PRODUCTS).map((x) => x.trigger), ["xin giá chả cá", "Xin giá chả cá nhé shop", "Báo giá chả cá thu?"]);
   assert.deepEqual(triggerProductConflicts(A01, PRODUCTS), []);
@@ -269,6 +275,42 @@ const CASES: GoldenCase[] = [
   },
 ];
 
+/**
+ * (chủ shop 18/10, chốt hoàn thành) CẤU HÌNH SAI KHÔNG ĐƯỢC TỰ TÁI XUẤT HIỆN: lưu / sửa · bật một câu · bật hàng loạt · câu AI soạn
+ * (tự bật) đều kiểm cách hỏi ↔ câu trả lời ↔ SKU cùng món; nút «Gỡ cách hỏi gắn nhầm món» gỡ ĐÚNG các cách hỏi đó, giữ câu mẫu / câu
+ * trả lời / cách hỏi khác, và ghi nhật ký trước / sau để khôi phục. Chạy ở ca cuối (sửa dữ liệu câu mẫu của tổ chức thử).
+ */
+async function testConfigPaths(ctx: GoldenHookCtx): Promise<void> {
+  const admin = await ctx.admin();
+  const db = await getDb();
+  const qr = schema.salesChatQuickReplies;
+  const bad = await saveQuickReply(admin, { title: "Nem sai", triggers: "nem bao nhiêu\nxin giá chả cá", answer: NEM, active: true });
+  assert.ok("error" in bad && /xin giá chả cá.*gọi tên Chả cá thu/.test(bad.error), JSON.stringify(bad));
+  const combo = await saveQuickReply(admin, { title: "Combo chả cá + nem", triggers: "1 chả cá 1 nem", answer: `${CHA_CA} ${NEM}`, active: true });
+  assert.ok("ok" in combo, `combo có câu trả lời nói CẢ HAI món ⇒ lưu được: ${JSON.stringify(combo)}`);
+  // Câu đang có (dữ liệu cũ) mang cách hỏi sai ⇒ không bật được, bật hàng loạt bỏ qua.
+  const [old] = await db.insert(qr).values({ title: "Nem cũ", triggers: ["nem hộp", "Báo giá chả cá thu?"], answer: NEM, active: false }).returning({ id: qr.id });
+  const act = await setQuickReplyActive(admin, old.id, true);
+  assert.ok("error" in act && /gọi tên Chả cá thu/.test(act.error), JSON.stringify(act));
+  const bulk = await bulkQuickReplies(admin, [old.id], "ACTIVATE");
+  assert.ok("ok" in bulk && bulk.changed === 0 && bulk.skipped === 1, JSON.stringify(bulk));
+  // Câu AI soạn: «tự bật» không bật câu có cách hỏi sai.
+  assert.equal(await insertLearned([{ title: "AI nem", triggers: ["xin giá chả cá"], answer: NEM }, { title: "AI nem đúng", triggers: ["nem hải sản bn"], answer: NEM }], { actorEmail: "bot", active: true }), 2);
+  const learned = await db.select({ title: qr.title, active: qr.active }).from(qr).where(sql`${qr.title} in ('AI nem', 'AI nem đúng')`);
+  assert.deepEqual(learned.map((r) => `${r.title}:${r.active}`).sort(), ["AI nem đúng:true", "AI nem:false"]);
+  // Nút dọn: chỉ gỡ cách hỏi gắn nhầm món; ghi nhật ký trước / sau.
+  const pruned = await removeWrongProductTriggers(admin);
+  assert.ok("ok" in pruned && pruned.triggers >= 3, JSON.stringify(pruned));
+  const after = new Map((await db.select({ title: qr.title, triggers: qr.triggers }).from(qr)).map((r) => [r.title, r.triggers ?? []]));
+  assert.deepEqual(after.get("A07 Nem hải sản tôm bề bề giá bao nhiêu"), ["nem bao nhiêu", "giá nem", "báo giá"], "A07 chỉ mất hai cách hỏi chả cá");
+  assert.deepEqual(after.get("Nem cũ"), ["nem hộp"]);
+  assert.deepEqual(after.get("A01 Báo giá chả cá thu"), ["giá chả cá thu", "Cha ca", "Xin giá chả cá thu?", "giá bao nhiêu 1kg"], "câu đúng không bị đụng");
+  const logs = await db.select({ detail: schema.auditLogs.detail }).from(schema.auditLogs).where(eq(schema.auditLogs.action, "SALES_QUICK_REPLY_TRIGGERS_PRUNE"));
+  assert.ok(logs.length >= 2 && logs.every((l) => Array.isArray((l.detail as { before?: { triggers?: unknown } } | null)?.before?.triggers)), "nhật ký giữ cách hỏi cũ để khôi phục");
+  const again = await removeWrongProductTriggers(admin);
+  assert.ok("ok" in again && again.triggers === 0, "chạy lại không gỡ gì thêm");
+}
+
 async function testChatTurn() {
   const seen = new Set<string>();
   await runGoldenCases(CASES, {
@@ -277,8 +319,9 @@ async function testChatTurn() {
       await seed(ctx);
       await onlyActive(c.key === "qrf-cong-cu-sai-mon" || c.key === "qrf-shop-moi-nem" ? ["A07"] : ["A01", "A07"]);
     },
-    afterCase: async (c, _ctx, t) => {
+    afterCase: async (c, ctx, t) => {
       seen.add(c.key);
+      if (c.key === "qrf-shop-moi-nem") await testConfigPaths(ctx);
       const shown = t.turns.flatMap((x) => x.shown).join("\n");
       const results = JSON.stringify(t.turns.map((x) => x.rounds.map((r) => r.results)));
       assert.doesNotMatch(shown, /HẾT KỊCH BẢN/, `[${c.key}] ${shown}`);
