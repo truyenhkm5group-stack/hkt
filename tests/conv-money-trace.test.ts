@@ -15,7 +15,7 @@ import { inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { CLAIM_SAFE_TEXT } from "@/lib/sales-chatbot/claim-guard";
 import { EMPTY_REPLY_TEXT } from "@/lib/sales-chatbot/engine";
-import { COMMENT_ALREADY_NOTE, COMMENT_CARRY_LABEL, fixedAmountsInTemplate, fixedTextKind, moneyOfToolResult, parseTraceArgs, scanPatterns, totalClaimsIn, traceConversation } from "../scripts/conv-money-trace";
+import { COMMENT_ALREADY_NOTE, COMMENT_CARRY_LABEL, fixedAmountsInTemplate, reviewCodesText, fixedTextKind, moneyOfToolResult, parseTraceArgs, scanPatterns, totalClaimsIn, traceConversation } from "../scripts/conv-money-trace";
 
 const PHONE = "0900003106";
 
@@ -24,6 +24,9 @@ function testPure() {
   assert.deepEqual(parseTraceArgs(["hslc", "--scan", "--days=7"]), { code: "hslc", conv: null, order: null, scan: true, days: 7 });
   assert.deepEqual(parseTraceArgs(["hslc-hmt-shop", "--order=42F28794"]), { code: "hslc-hmt-shop", conv: null, order: "42f28794", scan: false, days: 3 }, "chỉ mã đơn ngắn (org-order-audit in 8 ký tự cuối) ⇒ tự tìm hội thoại của đơn");
   assert.ok("error" in parseTraceArgs(["hslc-hmt-shop"]), "không --conv / --order / --scan ⇒ từ chối");
+  assert.equal(reviewCodesText({}), "đang mở không · người đã kiểm chưa");
+  assert.equal(reviewCodesText({ review: { entries: [{ code: "ADDRESS_UNRESOLVED", note: "Hà Nội" }, { code: "LA" }] } }), "đang mở ADDRESS_UNRESOLVED+KHAC · người đã kiểm chưa", "mã lạ ⇒ KHAC, không in ghi chú");
+  assert.equal(reviewCodesText({ review: null, reviewLog: [{ action: "CONFIRMED", byName: "Chị A", entries: [{ code: "ADDRESS_UNRESOLVED" }] }] }), "đang mở không · người đã kiểm CONFIRMED:ADDRESS_UNRESOLVED", "nhân viên bấm Xác nhận ⇒ cờ về null, lượt kiểm vào reviewLog; không in tên người bấm");
   assert.ok(readFileSync(path.join(__dirname, "..", "lib", "sales-chatbot", "engine.ts"), "utf8").includes(`\`${COMMENT_CARRY_LABEL}\${at.toISOString()}]\``), "nhãn đếm ở dòng C TRÙNG đúng nhãn carryCommentTurn gắn (đổi một bên thì dòng C đếm 0 mãi)");
   assert.ok(readFileSync(path.join(__dirname, "..", "lib", "sales-chatbot", "fanpage.ts"), "utf8").includes(`reason: "${COMMENT_ALREADY_NOTE} (Pancake tự động / nhân viên)`), "mẫu số ALREADY đếm đúng câu lý do fanpage.ts ghi vào dòng tin");
   assert.deepEqual(parseTraceArgs(["hslc", "--scan", "--since=2026-10-14T08:10Z"]), { code: "hslc", conv: null, order: null, scan: true, days: 3, since: new Date("2026-10-14T08:10:00Z") }, "--since đo đúng khoảng sau deploy");
