@@ -100,7 +100,8 @@ export async function removeWrongProductTriggersAction(): Promise<Result> {
   const r = await removeWrongProductTriggers(user);
   if ("error" in r) return r;
   revalidatePath(PATH);
-  return { ok: true, message: r.triggers ? `Đã gỡ ${r.triggers} cách hỏi gắn nhầm món ở ${r.templates} câu mẫu` : "Không còn cách hỏi nào gắn nhầm món" };
+  const busy = r.skippedConcurrent ? ` · bỏ qua ${r.skippedConcurrent} câu mẫu vừa có người sửa — bấm lại để kiểm` : "";
+  return { ok: true, message: r.triggers ? `Đã gỡ ${r.triggers} cách hỏi gắn nhầm món ở ${r.templates} câu mẫu${busy}` : `Không còn cách hỏi nào gắn nhầm món${busy}` };
 }
 
 /** Công tắc TỰ NẠP câu mẫu mỗi ngày (dùng AI) + tự bật câu mẫu AI soạn. */

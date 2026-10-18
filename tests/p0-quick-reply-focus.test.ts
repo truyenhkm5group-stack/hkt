@@ -88,6 +88,11 @@ function testThuan() {
   assert.deepEqual(productsNamedIn("món mực nhà mình có ngon không em", names), ["Chả mực giã tay"]);
   assert.deepEqual(productsNamedIn("có mắm không shop", names), ["Nước mắm cốt cá cơm truyền thống"]);
   assert.deepEqual(productsNamedIn("giá một hộp sao em", names), [], "«giá», «một», «hộp» không gọi tên món nào");
+  // Review #config-guard: câu có SỐ (giá, khối lượng) vẫn nhận một từ đuôi — trước đây «280k» làm lệch hai dãy từ và tắt luật.
+  assert.deepEqual(productsNamedIn("Chả cá 280k/1kg, còn mực thì 350k/1kg ạ", names), ["Chả cá thu", "Chả mực giã tay"]);
+  assert.deepEqual(productsNamedIn("Chả cá thu Hạ Long giã tay, 1kg 280k", names), ["Chả cá thu"], "«giã tay» là cách làm, không phải tên Chả mực");
+  const giaChaCa = E("gcc", "Giá chả cá", ["chả cá bao nhiêu", "mực bao nhiêu", "món mực còn không"], "Chả cá 280k/1kg, còn mực thì 350k/1kg ạ");
+  assert.deepEqual(triggerProductConflicts(giaChaCa, PRODUCTS), [], "câu trả lời có giá nói cả mực ⇒ cách hỏi về mực KHÔNG bị coi là gắn nhầm");
   // Review #p0-quick-reply-evidence (lỗi chặn): ngành hàng / tên shop không phải tên món; màu / cỡ / thời tiết cũng vậy.
   for (const t of ["shop bán hải sản gì", "báo giá hải sản", "hai san", "Hải Sản Hạ Long xin chào", "nước mắm truyền thống không", "loại nguyên chất không", "cá cơm"]) {
     assert.ok(!productsNamedIn(t, names).includes("Nem hải sản tôm bề bề") && !productsNamedIn(t, names).some((n) => n.startsWith("Ruốc")), `«${t}» không gọi tên nem / ruốc: ${productsNamedIn(t, names).join(", ")}`);
@@ -308,7 +313,7 @@ async function testConfigPaths(ctx: GoldenHookCtx): Promise<void> {
   const logs = await db.select({ detail: schema.auditLogs.detail }).from(schema.auditLogs).where(eq(schema.auditLogs.action, "SALES_QUICK_REPLY_TRIGGERS_PRUNE"));
   assert.ok(logs.length >= 2 && logs.every((l) => Array.isArray((l.detail as { before?: { triggers?: unknown } } | null)?.before?.triggers)), "nhật ký giữ cách hỏi cũ để khôi phục");
   const again = await removeWrongProductTriggers(admin);
-  assert.ok("ok" in again && again.triggers === 0, "chạy lại không gỡ gì thêm");
+  assert.ok("ok" in again && again.triggers === 0 && again.skippedConcurrent === 0, "chạy lại không gỡ gì thêm");
 }
 
 async function testChatTurn() {
@@ -361,6 +366,7 @@ async function testChatTurn() {
     },
   });
   assert.equal(seen.size, CASES.length, "mọi ca đều chạy");
+  assert.ok(seen.has("qrf-shop-moi-nem"), "ca chạy kiểm đường cấu hình (testConfigPaths) đã chạy");
 }
 
 export async function testP0QuickReplyFocus(): Promise<void> {

@@ -400,7 +400,9 @@ export async function bulkQuickReplies(user: SessionUser, rawIds: readonly strin
     const active = op === "ACTIVATE";
     // Bật hàng loạt bỏ qua câu còn «[giá lấy từ ERP]» VÀ câu có cách hỏi gắn nhầm món (đọc danh mục lỗi ⇒ không bật câu nào gắn món mù).
     const products = active ? await loadFocusProducts().catch(() => null) : [];
-    const blocked = active ? rows.filter((r) => r.answer.includes(NEEDS_EDIT) || products === null || productConsistencyError({ title: r.title, triggers: r.triggers ?? [], answer: r.answer }, products) !== null) : [];
+    // Không đọc được danh mục ⇒ báo ĐÚNG lý do (review), không đổ cho cách hỏi gắn nhầm.
+    if (active && products === null) return { error: "Không đọc được danh mục để kiểm cách hỏi với sản phẩm — chưa bật câu nào, thử lại sau." };
+    const blocked = active ? rows.filter((r) => r.answer.includes(NEEDS_EDIT) || productConsistencyError({ title: r.title, triggers: r.triggers ?? [], answer: r.answer }, products ?? []) !== null) : [];
     skipped = blocked.length;
     const target = rows.filter((r) => r.active !== active && !blocked.includes(r)).map((r) => r.id);
     if (target.length) changed = (await db.update(qr).set({ active }).where(inArray(qr.id, target)).returning({ id: qr.id })).length;
@@ -451,7 +453,7 @@ export async function removeQuickReplyImage(user: SessionUser, imageId: string):
  * những cách hỏi gọi tên món mà câu mẫu không nói tới (`triggerProductConflicts`); không xoá câu mẫu, không đụng câu trả lời / ảnh /
  * cách hỏi khác. Mỗi câu mẫu một dòng nhật ký mang danh sách cách hỏi TRƯỚC / SAU — đủ để khôi phục. Đọc danh mục lỗi ⇒ không gỡ gì.
  */
-export async function removeWrongProductTriggers(user: SessionUser): Promise<{ ok: true; templates: number; triggers: number } | { error: string }> {
+export async function removeWrongProductTriggers(user: SessionUser): Promise<{ ok: true; templates: number; triggers: number; skippedConcurrent: number } | { error: string }> {
   const g = await gate(user);
   if (!g.ok) return { error: g.error };
   const products = await loadFocusProducts().catch(() => null);
@@ -460,17 +462,27 @@ export async function removeWrongProductTriggers(user: SessionUser): Promise<{ o
   const rows = await db.select({ id: qr.id, title: qr.title, triggers: qr.triggers, answer: qr.answer }).from(qr);
   let templates = 0;
   let triggers = 0;
+  let skippedConcurrent = 0;
   for (const r of rows) {
     const before = r.triggers ?? [];
     const drop = new Set(triggerProductConflicts({ title: r.title, triggers: before, answer: r.answer }, products).map((c) => c.trigger));
     if (!drop.size) continue;
     const after = before.filter((t) => !drop.has(t));
-    await db.update(qr).set({ triggers: after }).where(eq(qr.id, r.id));
+    // Chỉ ghi khi cách hỏi / câu trả lời vẫn đúng như lúc đọc (review): người vừa sửa câu này trong lúc bấm thì KHÔNG đè — bỏ qua và báo.
+    const done = await db
+      .update(qr)
+      .set({ triggers: after })
+      .where(and(eq(qr.id, r.id), sql`to_jsonb(${qr.triggers}) = ${JSON.stringify(before)}::jsonb`, eq(qr.answer, r.answer), eq(qr.title, r.title)))
+      .returning({ id: qr.id });
+    if (!done.length) {
+      skippedConcurrent += 1;
+      continue;
+    }
     await audit({ userId: user.id, userEmail: user.email, action: "SALES_QUICK_REPLY_TRIGGERS_PRUNE", entity: "SALES_QUICK_REPLY", entityId: r.id, before: { title: r.title, triggers: before }, after: { triggers: after, removed: [...drop] } });
     templates += 1;
     triggers += before.length - after.length;
   }
-  return { ok: true, templates, triggers };
+  return { ok: true, templates, triggers, skippedConcurrent };
 }
 
 /** Lưu MỘT PHẦN cài đặt — gộp với bản đang lưu (bật / tắt một công tắc không xoá câu upsell đã chọn). */

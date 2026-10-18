@@ -64,6 +64,19 @@ const rawTokens = (s: string) =>
     .filter((w) => w && !/^\d/.test(w) && w !== "kg" && w !== "g");
 
 /**
+ * Từ CÓ DẤU của CHỮ cần đọc — KHÔNG lọc số / đơn vị, để thẳng hàng từng vị trí với `foldVi(text).split(" ")` (review: lọc «280k»,
+ * «1kg» ở một bên làm hai dãy lệch độ dài ⇒ luật một từ đuôi tắt với MỌI câu có giá ⇒ cách hỏi đúng bị coi là gắn nhầm món).
+ */
+const rawWords = (s: string) =>
+  s
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}%]+/gu, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+
+/**
  * Từ đuôi quá thông dụng để làm CĂN CỨ gọi tên món: số đếm, bao bì, tính từ khen hàng, từ hay gặp trong câu chat, và — review #p0-quick-
  * reply-evidence — ngành hàng / tên shop («hải sản»: «Hải Sản Hạ Long xin chào» không gọi tên Nem hải sản), màu, cỡ, thời tiết («màu
  * trắng còn không» không gọi tên «Áo sơ mi trắng»; «trời nắng» không gọi tên «Cá thu một nắng»).
@@ -73,6 +86,8 @@ const TAIL_STOP = new Set([
   ...["trắng", "đen", "đỏ", "xanh", "vàng", "hồng", "tím", "nâu", "xám", "kem", "cam", "ghi", "bạc", "màu", "sọc", "kẻ", "hoa"],
   ...["vừa", "nhẹ", "dày", "mỏng", "dài", "ngắn", "rộng", "xl", "xxl", "m", "l", "s"],
   ...["nắng", "mưa", "lạnh", "nóng", "gió", "mát"],
+  // Cách chế biến — mô tả món, không phải tên món («chả cá thu giã tay» không gọi tên «Chả mực giã tay»).
+  ...["giã", "chiên", "hấp", "nướng", "luộc", "rán", "xay", "sấy", "rim", "kho", "hun", "khói", "ướp", "tẩm", "sống", "chín", "đông", "lạnh"],
   ...["shop", "tiệm", "quán", "cửa", "việt", "nam", "hà", "nội", "long", "hạ", "sài", "gòn"],
 ]);
 /** Cùng danh sách, BỎ DẤU (cho cặp từ đuôi so bỏ dấu) + «gia» vì bỏ dấu thì «giá» ≡ «giã». */
@@ -92,7 +107,7 @@ export function productsNamedIn(text: string, names: readonly string[]): string[
   const said = foldVi(text).split(" ").filter(Boolean);
   if (!said.length) return [];
   const toks = uniq(names).map((n) => ({ n, t: nameTokens(n) })).filter((x) => x.t.length);
-  const rawSaid = rawTokens(text);
+  const rawSaid = rawWords(text);
   const rawCount = new Map<string, number>();
   for (const { n } of toks) for (const w of new Set(rawTokens(n))) rawCount.set(w, (rawCount.get(w) ?? 0) + 1);
   const foldCount = new Map<string, number>();
