@@ -444,8 +444,30 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
     .select({ n: sql<number>`count(*)::int` })
     .from(o)
     .where(sql`exists (select 1 from jsonb_array_elements(coalesce(${o.raw}->'review'->'entries', '[]'::jsonb)) e where e->>'code' = 'ROUND_ABANDONED' and e->>'at' >= ${from.toISOString()})`);
+  // MẪU SỐ của dòng C — chỉ từ thứ ĐÃ LƯU (sales_chat_inbound: kind · status · note). Nhánh ALREADY ghi SKIPPED + đúng câu lý do cố định;
+  // nhánh bot nhắn riêng THÀNH CÔNG không có dấu riêng (DONE, ghi chú rỗng hoặc cảnh báo — chung trạng thái với nhánh khác) ⇒ in đúng tên
+  // nhóm lưu được, không gọi nó là «đã nhắn». «Khách đã có hội thoại hộp thư» KHÔNG được lưu ở đâu ⇒ in «chưa ghi lại», không suy đoán.
+  const ib = schema.salesChatInbound;
+  // Nhóm do SQL xếp vào một danh sách ĐÓNG (không giá trị cột chữ nào ra khỏi CSDL); ngoài danh sách ⇒ KHAC.
+  const nhom = await db
+    .select({
+      k: sql<string>`case when ${ib.status} = 'SKIPPED' and ${ib.note} like ${`${COMMENT_ALREADY_NOTE}%`} then 'ALREADY' when ${ib.status} = 'DONE' and ${ib.note} is null then 'DONE_TRONG' when ${ib.status} = 'DONE' then 'DONE_CO_GHI_CHU' when ${ib.status} = 'SKIPPED' then 'BO_QUA_KHAC' when ${ib.status} = 'DEAD' then 'HONG' when ${ib.status} in ('PENDING', 'PROCESSING') then 'DANG_CHO' else 'KHAC' end`,
+      n: sql<number>`count(*)::int`,
+    })
+    .from(ib)
+    .where(and(eq(ib.kind, "COMMENT"), gte(ib.createdAt, from)))
+    .groupBy(sql`1`);
+  const dem = (k: (typeof COMMENT_GROUPS)[number]) => Number(nhom.find((r) => r.k === k)?.n ?? 0);
+  const tong = COMMENT_GROUPS.reduce((s, k) => s + dem(k), 0);
+  tomTat(`C mẫu số: tin bình luận trong kỳ ${tong} · Pancake / nhân viên đã nhắn riêng TRƯỚC (ALREADY) ${dem("ALREADY")} · DONE không ghi chú ${dem("DONE_TRONG")} · DONE có ghi chú ${dem("DONE_CO_GHI_CHU")} · bỏ qua lý do khác ${dem("BO_QUA_KHAC")} · hỏng ${dem("HONG")} · đang chờ ${dem("DANG_CHO")} · KHÁC ${dem("KHAC")} · trong đó khách ĐÃ có hội thoại hộp thư: chưa ghi lại — không đếm được`);
   tomTat(`C bình luận mua lại chép sang hộp thư: ${carried?.n ?? 0} tin / ${carried?.convs ?? 0} hội thoại · đơn gắn cờ ROUND_ABANDONED: ${abandoned?.n ?? 0}`);
 }
+
+/** Đầu câu lý do fanpage.ts::deliverCommentReply ghi vào dòng tin khi bình luận ĐÃ được nhắn riêng (ALREADY) — bài kiểm đối chiếu. */
+export const COMMENT_ALREADY_NOTE = "Bình luận đã được nhắn riêng";
+
+/** Danh sách ĐÓNG các nhóm của mẫu số dòng C (SQL xếp; ngoài danh sách ⇒ KHAC). */
+const COMMENT_GROUPS = ["ALREADY", "DONE_TRONG", "DONE_CO_GHI_CHU", "BO_QUA_KHAC", "HONG", "DANG_CHO", "KHAC"] as const;
 
 /** Nhãn đầu tin khách mà `carryCommentTurn` (lib/sales-chatbot/engine.ts) gắn khi chép lượt bình luận sang hộp thư. */
 export const COMMENT_CARRY_LABEL = "[Khách bình luận trên bài viết lúc ";
