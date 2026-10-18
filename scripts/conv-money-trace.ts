@@ -49,7 +49,8 @@ import { findOrganization } from "@/lib/platform/organizations";
 import { CLAIM_SAFE_TEXT, extractVndAmounts } from "@/lib/sales-chatbot/claim-guard";
 import { EMPTY_REPLY_TEXT, loadSalesChatbotConfig, SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { catalogReferenceAmounts } from "@/lib/sales-chatbot/quote";
-import { listQuickReplies } from "@/lib/sales-chatbot/quick-replies";
+import { listQuickReplies, loadFocusProducts } from "@/lib/sales-chatbot/quick-replies";
+import { fitsFocus, productFocusOf, quickReplyCovers, type FocusProduct } from "@/lib/sales-chatbot/quick-reply-focus";
 import { parsePlaceholders } from "@/lib/sales-chatbot/quick-replies-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { DEFAULT_SHIPPING_ROUTING } from "@/lib/constants/shipping-routing";
@@ -170,6 +171,21 @@ export function quickReplyHead(answer: string): string {
   const ph = parsePlaceholders(answer)[0];
   const head = ph ? answer.slice(0, answer.indexOf(ph.raw)) : answer;
   return foldVi(head).replace(/\s+/g, " ").trim().slice(0, 40);
+}
+
+/**
+ * D — CÂU MẪU SAI MÓN (P0 18/10/2026, ca «ThanhPhương»): tin bot vừa gửi trùng đầu câu của câu mẫu nào, và mọi câu mẫu trùng đều nói về
+ * món KHÁC món khách đang hỏi (cùng luật `quick-reply-focus.ts` của lượt sống) ⇒ trả câu mẫu đó; không trùng / đúng món / chưa rõ món ⇒
+ * `null`. Đầu câu ngắn hơn 12 ký tự không dùng (trùng nhầm). HÀM THUẦN.
+ */
+export function wrongProductTemplate<T extends { title: string; answer: string; head: string }>(sent: string, customerTexts: readonly string[], shopText: string | null, templates: readonly T[], products: readonly FocusProduct[]): T | null {
+  const head = foldVi(sent).replace(/\s+/g, " ").trim().slice(0, 40);
+  const hits = templates.filter((t) => t.head.length >= 12 && head.startsWith(t.head));
+  if (!hits.length) return null;
+  const focus = productFocusOf(customerTexts, shopText, products);
+  if (!focus.focus.length && !focus.declined.length) return null;
+  const wrong = hits.filter((t) => !fitsFocus(quickReplyCovers(t, products), focus));
+  return wrong.length === hits.length ? wrong[0] : null;
 }
 
 /** Số tiền CỐ ĐỊNH gõ trong câu mẫu (ngoài ô điền giá) — câu mẫu không đi qua báo giá giỏ. HÀM THUẦN. */
@@ -416,26 +432,52 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   const m = schema.salesChatMessages;
   const A = { total: 0, noNew: 0, convs: new Set<string>() };
   const B = { msgs: 0, convs: new Set<string>(), noQuote: 0 };
+  const D = { msgs: 0, convs: new Set<string>(), images: 0, byTitle: new Map<string, number>() };
+  const tpls = (await listQuickReplies().catch(() => [])).map((r) => ({ title: r.title, answer: r.answer, head: quickReplyHead(r.answer), images: r.images.length }));
+  const products = await loadFocusProducts().catch(() => [] as FocusProduct[]);
+  const checkD = (conv: string, sent: string, said: readonly string[], shop: string | null) => {
+    const w = wrongProductTemplate(sent, said, shop, tpls, products);
+    if (!w) return;
+    D.msgs += 1;
+    D.convs.add(conv);
+    if (w.images) D.images += 1;
+    D.byTitle.set(w.title, (D.byTitle.get(w.title) ?? 0) + 1);
+  };
   for (let i = 0; i < ids.length; i += 200) {
     const rows = await db.select({ conv: m.conversationId, seq: m.seq, role: m.role, content: m.content }).from(m).where(and(inArray(m.conversationId, ids.slice(i, i + 200)), gte(m.createdAt, from))).orderBy(asc(m.conversationId), asc(m.seq));
     let cur = "";
     let userSince = false;
     let quoteTotal: number | null = null;
+    let said: string[] = [];
+    let shopText: string | null = null;
     for (const r of rows) {
-      if (r.conv !== cur) [cur, userSince, quoteTotal] = [r.conv, false, null];
+      if (r.conv !== cur) [cur, userSince, quoteTotal, said, shopText] = [r.conv, false, null, [], null];
       if (r.role === "user") {
-        if (textOf(r.content)) userSince = true;
+        if (textOf(r.content)) {
+          userSince = true;
+          said.push(textOf(r.content));
+        }
         for (const b of blocksOf(r.content)) {
           if (b.type !== "tool_result" || b.isError) continue;
           const mo = moneyOfToolResult(b.content);
           if (mo && (mo.total !== null || mo.subtotal !== null) && mo.lines.length) quoteTotal = mo.total ?? mo.subtotal;
           // Câu mẫu gửi qua công cụ là một tin bot tới khách — sau nó, «nói rõ hơn» không có tin khách mới là câu thừa.
-          if (mo?.deliver) userSince = false;
+          if (mo?.deliver) {
+            userSince = false;
+            checkD(r.conv, mo.deliver, said, shopText);
+            shopText = mo.deliver;
+          }
         }
         continue;
       }
       const t = textOf(r.content);
-      if (!t || t.startsWith(SHOP_SAID)) continue;
+      if (!t) continue;
+      if (t.startsWith(SHOP_SAID)) {
+        shopText = t;
+        continue;
+      }
+      checkD(r.conv, t, said, shopText);
+      shopText = t;
       if (t === EMPTY_REPLY_TEXT) {
         A.total += 1;
         if (!userSince) {
@@ -455,9 +497,12 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   console.log(`Quét ${span} tới ${now.toISOString()} · ${ids.length} hội thoại`);
   console.log(`  mẫu A (≤ 20): ${[...A.convs].slice(0, 20).join(" ") || "—"}`);
   console.log(`  mẫu B (≤ 20): ${[...B.convs].slice(0, 20).join(" ") || "—"}`);
+  console.log(`  mẫu D (≤ 20): ${[...D.convs].slice(0, 20).join(" ") || "—"}`);
+  for (const [title, n] of [...D.byTitle.entries()].sort((a, b) => b[1] - a[1])) console.log(`  D câu mẫu «${title}»: ${n} tin`);
   tomTat(`conv-money-trace quét ${span}: ${ids.length}${convs.length > TRACE_MAX_SCAN_CONVERSATIONS ? "+" : ""} hội thoại`);
   tomTat(`A câu «nói rõ hơn» của engine: ${A.total} tin · KHÔNG có tin khách mới kể từ tin bot trước ${A.noNew} tin / ${A.convs.size} hội thoại`);
   tomTat(`B tin bot có số TỔNG ≠ tổng giỏ / nháp máy chủ ngay trước: ${B.msgs} tin / ${B.convs.size} hội thoại · số TỔNG khi chưa có giỏ / nháp nào ${B.noQuote} tin`);
+  tomTat(`D câu mẫu nói về món KHÁC món khách đang hỏi: ${D.msgs} tin / ${D.convs.size} hội thoại · kèm ảnh ${D.images} tin · ${D.byTitle.size} câu mẫu khác nhau · ${tpls.length} câu mẫu · ${products.length} sản phẩm`);
   // C — P0 khách cũ mua lại (#886): lượt bình luận ĐÃ CHÉP sang hộp thư (`carryCommentTurn` gắn nhãn cố định ở đầu tin khách) và đơn được
   // gắn cờ ROUND_ABANDONED trong kỳ. Chỉ số đếm. Nhãn gõ lại ở đây (không import) vì ops lấy script từ main nhưng lib từ ảnh đang chạy;
   // tests/conv-money-trace.test.ts đối chiếu đúng chuỗi này với engine.ts.

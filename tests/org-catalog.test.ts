@@ -68,7 +68,11 @@ export function testOrgCatalogPure() {
   assert.ok(all.includes("Hướng dẫn thêm (20 ký tự): Giá sỉ hỏi nhân viên"));
 
   const sum = catalogSummary(r);
-  assert.deepEqual(sum, ["Tổ chức x: 1 sản phẩm · 2 mẫu mã (1 chưa có giá · 1 ẩn · 1 chỉ bán kèm) · nguồn tạo tay", "Bot: BẬT · giá sỉ TẮT · chốt không kiểm tồn BẬT · bảng giá sỉ đang dùng 1 (1 bậc) · câu mẫu đang bật 1 · câu upsell ĐÃ CHỌN (1 ảnh)"]);
+  assert.deepEqual(sum, ["Tổ chức x: 1 sản phẩm · 2 mẫu mã (1 chưa có giá · 1 ẩn · 1 chỉ bán kèm) · nguồn tạo tay", "Bot: BẬT · giá sỉ TẮT · chốt không kiểm tồn BẬT · bảng giá sỉ đang dùng 1 (1 bậc) · câu mẫu đang bật 1 · câu upsell ĐÃ CHỌN (1 ảnh)", "Câu mẫu: cách hỏi gắn nhầm món 0 (ở 0 câu mẫu đang bật)"]);
+  // P0 18/10/2026: câu mẫu NEM mang cách hỏi «xin giá chả cá» ⇒ một dòng cảnh báo (phần mã hoá) + số đếm ở kênh tóm tắt.
+  const nhamMon: CatalogReport = { ...r, products: [...r.products, { id: "erp-p9", name: "Nem hải sản tôm bề bề", code: null, manual: true, removed: false, variants: [{ id: "erp-v9", sku: "NEM-1", label: "Hộp 10 cái", price: 120_000, weightGrams: null, hidden: false, manual: true }] }], quickReplies: [...r.quickReplies, { title: "Nem giá", triggers: ["nem bao nhiêu", "xin giá chả cá"], answer: "Nem {{giá:NEM-1}}/hộp", upsell: false, images: 3 }] };
+  assert.ok(catalogLines(nhamMon).includes("  ⚠ CÁCH HỎI GẮN NHẦM MÓN · Nem giá: «xin giá chả cá» gọi tên Chả cá thu"), catalogLines(nhamMon).join(" | "));
+  assert.equal(catalogSummary(nhamMon)[2], "Câu mẫu: cách hỏi gắn nhầm món 1 (ở 1 câu mẫu đang bật)");
   for (const s of sum) {
     assert.ok(s.length <= SUMMARY_MAX_CHARS);
     for (const w of ["Chả cá", "280", "250", "Bảng giá [", "Hải sản", "nhân viên"]) assert.ok(!s.includes(w), `kênh tóm tắt không mang tên / giá / chữ của shop: ${w}`);

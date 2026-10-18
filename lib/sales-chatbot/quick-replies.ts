@@ -35,6 +35,7 @@ import {
   type QuickReplyEntry,
   type QuickReplySettings,
 } from "@/lib/sales-chatbot/quick-replies-shared";
+import { quickReplyFocusGuard, triggerProductConflicts, type FocusProduct, type QuickReplyFocusGuard } from "@/lib/sales-chatbot/quick-reply-focus";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { setSettingJson } from "@/lib/settings";
@@ -66,6 +67,8 @@ export type QuickReplyRow = {
   images: QuickReplyImageMeta[];
   /** Câu mẫu còn «[giá lấy từ ERP]» (gợi ý AI chưa sửa) — không bật được tới khi người thay bằng chỗ trống. */
   needsEdit: boolean;
+  /** Cách hỏi gọi tên món mà câu mẫu KHÔNG nói tới (P0 18/10/2026) — bot không dùng câu mẫu này khi khách hỏi món đó; người nên gỡ. */
+  productConflicts: { trigger: string; names: string[] }[];
 };
 
 export const NEEDS_EDIT = "[giá lấy từ ERP]";
@@ -77,6 +80,7 @@ export async function listQuickReplies(): Promise<QuickReplyRow[]> {
   const imgs = rows.length
     ? await db.select({ id: qi.id, quickReplyId: qi.quickReplyId, contentType: qi.contentType, bytes: qi.bytes }).from(qi).where(inArray(qi.quickReplyId, rows.map((r) => r.id))).orderBy(asc(qi.position), asc(qi.createdAt))
     : [];
+  const products = rows.length ? await loadFocusProducts().catch(() => []) : [];
   return rows.map((r) => ({
     id: r.id,
     title: r.title,
@@ -89,7 +93,38 @@ export async function listQuickReplies(): Promise<QuickReplyRow[]> {
     updatedAt: r.updatedAt,
     images: imgs.filter((i) => i.quickReplyId === r.id).map((i) => ({ id: i.id, contentType: i.contentType, bytes: i.bytes })),
     needsEdit: r.answer.includes(NEEDS_EDIT),
+    productConflicts: triggerProductConflicts({ title: r.title, answer: r.answer, triggers: r.triggers ?? [] }, products),
   }));
+}
+
+/** Sản phẩm đang bán (tên + SKU mẫu mã còn bán) — căn cứ nhận diện MÓN trong chữ khách và trong câu mẫu (`quick-reply-focus.ts`). */
+export async function loadFocusProducts(): Promise<FocusProduct[]> {
+  const db = await getDb();
+  const pv = schema.productVariants;
+  const p = schema.products;
+  const rows = await db
+    .select({ id: p.id, name: p.name, sku: pv.sku })
+    .from(p)
+    .leftJoin(pv, and(eq(pv.productId, p.id), eq(pv.isRemoved, false)))
+    .where(eq(p.isRemoved, false))
+    .limit(5000);
+  const by = new Map<string, { name: string; skus: string[] }>();
+  for (const r of rows) {
+    if (!r.name?.trim()) continue;
+    const cur = by.get(r.id) ?? { name: r.name, skus: [] };
+    if (r.sku) cur.skus.push(r.sku);
+    by.set(r.id, cur);
+  }
+  return [...by.values()];
+}
+
+/**
+ * Bộ lọc MÓN KHÁCH ĐANG HỎI cho một lượt (P0 18/10/2026): đọc danh mục một lần. Lỗi đọc ⇒ `null` (không lọc — như trước bản vá; bước
+ * khớp chữ vẫn chạy, không chặn khách).
+ */
+export async function quickReplyFocus(customerTexts: readonly string[], shopText: string | null): Promise<QuickReplyFocusGuard | null> {
+  const products = await loadFocusProducts().catch(() => null);
+  return products?.length ? quickReplyFocusGuard(customerTexts, shopText, products) : null;
 }
 
 export async function activeEntries(): Promise<QuickReplyEntry[]> {
@@ -159,7 +194,7 @@ async function pickOf(entry: QuickReplyEntry, method: QuickReplyPick["method"], 
  * BƯỚC 1 (0 token): đang đặt hàng / khách báo đã chuyển khoản ⇒ `SKIP`; khớp chữ thắng rõ ⇒ `ANSWER`; còn lại ⇒ `NO_MATCH` kèm ứng viên cho bước AI
  * đọc hiểu (hai câu ngang điểm ⇒ chỉ hai câu đó; không khớp ⇒ mọi câu đang bật).
  */
-export async function quickReplyByKeyword(text: string, opts: { ordering: boolean; cfg: Pick<SalesChatbotConfig, "shippingFee">; recent?: readonly string[] }): Promise<QuickReplyStep> {
+export async function quickReplyByKeyword(text: string, opts: { ordering: boolean; cfg: Pick<SalesChatbotConfig, "shippingFee">; recent?: readonly string[]; focus?: QuickReplyFocusGuard | null }): Promise<QuickReplyStep> {
   if (opts.ordering) return { kind: "SKIP", reason: "Khách đang đặt hàng" };
   // KHÁCH BÁO ĐÃ TRẢ TIỀN (P0 10/10/2026 — claim-guard.ts): ảnh chuyển khoản / «ck rồi» ⇒ KHÔNG câu mẫu nào được trả lời —
   // câu mẫu không biết gì về đơn hay tiền, và một câu «khách báo đã CK» học từ nhân viên (đã đối soát) gửi nguyên văn thành
@@ -168,8 +203,14 @@ export async function quickReplyByKeyword(text: string, opts: { ordering: boolea
   if (looksLikeOrdering(text)) return { kind: "SKIP", reason: "Câu khách có dấu hiệu chốt đơn" };
   // Nhiều tin liên tiếp ⇒ một câu mẫu chỉ trả lời được một ý — chatbot đầy đủ trả lời ĐỦ từng câu (vẫn dùng câu mẫu được).
   if (isMultiPart(text)) return { kind: "SKIP", reason: "Khách nhắn nhiều câu liên tiếp" };
-  const entries = await activeEntries();
-  if (entries.length === 0) return { kind: "SKIP", reason: "Chưa có câu mẫu nào đang bật" };
+  const all = await activeEntries();
+  if (all.length === 0) return { kind: "SKIP", reason: "Chưa có câu mẫu nào đang bật" };
+  // MÓN KHÁCH ĐANG HỎI (P0 18/10/2026, «xin giá chả cá» ⇒ câu mẫu nem): câu mẫu nói về món KHÁC bị loại TRƯỚC khi khớp chữ — kể cả
+  // khỏi danh sách ứng viên của AI đọc hiểu. Câu mẫu thay CẢ lượt trả lời nên phải nói đủ mọi món khách đang hỏi (`answers`). Không
+  // còn câu nào ⇒ chatbot đầy đủ trả lời (công cụ giá đọc đúng món).
+  const focus = opts.focus;
+  const entries = focus ? all.filter((e) => focus.answers(e)) : all;
+  if (entries.length === 0) return { kind: "SKIP", reason: "Không câu mẫu nào nói đúng món khách hỏi" };
   const m = matchQuickReplyByKeyword(text, entries);
   // Khách hỏi SỈ ⇒ khớp chữ «chả cá thu giá» sẽ trả giá LẺ — nhường AI đọc hiểu (nó biết câu báo giá lẻ không khớp).
   if (m.kind === "MATCH" && !looksWholesale(text)) {

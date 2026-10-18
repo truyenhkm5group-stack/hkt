@@ -38,6 +38,8 @@ export type QuickReplyView = {
   updatedAt: string;
   images: { id: string; contentType: string; bytes: number }[];
   needsEdit: boolean;
+  /** Cách hỏi gọi tên món mà câu mẫu KHÔNG nói tới (P0 18/10/2026) — bot bỏ qua câu này khi khách hỏi món đó; nên gỡ cách hỏi. */
+  productConflicts: { trigger: string; names: string[] }[];
 };
 
 type Draft = { id: string | null; title: string; triggers: string; answer: string; active: boolean };
@@ -271,6 +273,11 @@ export function QuickRepliesManager({ manage, settings, rows, autoLearnRun, shel
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground">Khách hỏi: {r.triggers.join(" · ")}</p>
+                    {r.productConflicts.length ? (
+                      <p className="text-xs text-destructive" data-testid="quick-reply-product-conflict">
+                        Cách hỏi nhắc tới món khác món của câu này: {r.productConflicts.map((c) => `«${c.trigger}» (${c.names.join(", ")})`).join(" · ")} — bot không dùng câu này khi khách hỏi món đó. Nên gỡ cách hỏi này hoặc chuyển sang câu mẫu của đúng món.
+                      </p>
+                    ) : null}
                     <p className="whitespace-pre-wrap">{r.answer}</p>
                     {r.images.length ? (
                       <div className="flex flex-wrap gap-2 pt-1">
