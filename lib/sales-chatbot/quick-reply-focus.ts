@@ -64,6 +64,19 @@ const rawTokens = (s: string) =>
     .filter((w) => w && !/^\d/.test(w) && w !== "kg" && w !== "g");
 
 /**
+ * Từ CÓ DẤU của CHỮ cần đọc — KHÔNG lọc số / đơn vị, để thẳng hàng từng vị trí với `foldVi(text).split(" ")` (review: lọc «280k»,
+ * «1kg» ở một bên làm hai dãy lệch độ dài ⇒ luật một từ đuôi tắt với MỌI câu có giá ⇒ cách hỏi đúng bị coi là gắn nhầm món).
+ */
+const rawWords = (s: string) =>
+  s
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}%]+/gu, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+
+/**
  * Từ đuôi quá thông dụng để làm CĂN CỨ gọi tên món: số đếm, bao bì, tính từ khen hàng, từ hay gặp trong câu chat, và — review #p0-quick-
  * reply-evidence — ngành hàng / tên shop («hải sản»: «Hải Sản Hạ Long xin chào» không gọi tên Nem hải sản), màu, cỡ, thời tiết («màu
  * trắng còn không» không gọi tên «Áo sơ mi trắng»; «trời nắng» không gọi tên «Cá thu một nắng»).
@@ -74,7 +87,14 @@ const TAIL_STOP = new Set([
   ...["vừa", "nhẹ", "dày", "mỏng", "dài", "ngắn", "rộng", "xl", "xxl", "m", "l", "s"],
   ...["nắng", "mưa", "lạnh", "nóng", "gió", "mát"],
   ...["shop", "tiệm", "quán", "cửa", "việt", "nam", "hà", "nội", "long", "hạ", "sài", "gòn"],
+  ...["phẩm", "món", "mẫu", "riêng", "đồ"],
 ]);
+/**
+ * Từ CÁCH CHẾ BIẾN — CHỈ chặn luật MỘT từ đuôi («chả cá thu giã tay» không gọi tên «Chả mực giã tay»). KHÔNG đưa vào danh sách xét từ
+ * PHÂN BIỆT của cặp từ / tiền tố tên (review config-guard): với «Chả cá hấp» cạnh «Chả cá thu», «hấp» CHÍNH LÀ từ phân biệt — chặn nó thì
+ * cả tên đầy đủ «chả cá hấp» cũng không còn nhận ra, câu mẫu chả cá hấp thành câu chung và được trả lời cho «chả cá thu giá sao».
+ */
+const COOK_WORDS = new Set(["giã", "chiên", "hấp", "nướng", "luộc", "rán", "xay", "sấy", "rim", "kho", "hun", "khói", "ướp", "tẩm", "sống", "chín", "đông", "lạnh"]);
 /** Cùng danh sách, BỎ DẤU (cho cặp từ đuôi so bỏ dấu) + «gia» vì bỏ dấu thì «giá» ≡ «giã». */
 const TAIL_STOP_FOLD = new Set([...[...TAIL_STOP].map((w) => foldVi(w)), "gia"]);
 
@@ -82,7 +102,14 @@ const TAIL_STOP_FOLD = new Set([...[...TAIL_STOP].map((w) => foldVi(w)), "gia"])
  * Từ ĐẦU quá thông dụng để một mình gọi tên món dù danh mục chỉ có một món mang nó («ship nước ngoài», «chả cá luộc nước sôi» không gọi
  * tên «Nước mắm…»; «chả cá thu» không gọi tên «Cá thu một nắng» nhờ luật lồng nhau bên dưới) ⇒ cần thêm từ thứ hai của tên đứng liền.
  */
-const GENERIC_HEADS = new Set(["nuoc", "ca", "banh", "tra", "bot", "dau", "muoi", "sot", "hat", "rau", "thit", "com", "xoi", "che", "sua", "kem", "mam", "bo", "ga", "do", "set", "combo", "goi", "hop", "tui", "ao", "quan", "vay", "dam", "giay", "dep", "mu", "kinh", "son"]);
+const GENERIC_HEADS = new Set([
+  ...["nuoc", "ca", "banh", "tra", "bot", "dau", "muoi", "sot", "hat", "rau", "thit", "com", "xoi", "che", "sua", "kem", "mam", "bo", "ga", "do", "set", "combo", "goi", "hop", "tui", "ao", "quan", "vay", "dam", "giay", "dep", "mu", "kinh", "son"],
+  // Từ CHỈ CHUNG một món hàng (review #902, CI đỏ thật: «còn hàng không» gọi tên «Hàng riêng …» vì đó là món duy nhất bắt đầu bằng
+  // «hàng»): «hàng», «sản phẩm», «món», «mẫu», «loại», «đặc sản» không bao giờ tự mình là tên món.
+  ...["hang", "san", "pham", "mon", "mau", "loai", "dac"],
+]);
+/** Từ chỉ CHUNG một món hàng có thể đứng nối nhau ở đầu tên («sản phẩm», «đặc sản», «mẫu hàng») — bỏ qua cả cụm rồi mới đòi từ riêng. */
+const GENERIC_ITEM_WORDS = new Set(["hang", "san", "pham", "mon", "mau", "loai", "dac"]);
 
 /**
  * Các món được GỌI TÊN trong chữ (xem đầu tệp). Mỗi lần khớp là một ĐOẠN từ (kéo dài tới hết các từ liền sau còn thuộc tên); món mà
@@ -92,7 +119,7 @@ export function productsNamedIn(text: string, names: readonly string[]): string[
   const said = foldVi(text).split(" ").filter(Boolean);
   if (!said.length) return [];
   const toks = uniq(names).map((n) => ({ n, t: nameTokens(n) })).filter((x) => x.t.length);
-  const rawSaid = rawTokens(text);
+  const rawSaid = rawWords(text);
   const rawCount = new Map<string, number>();
   for (const { n } of toks) for (const w of new Set(rawTokens(n))) rawCount.set(w, (rawCount.get(w) ?? 0) + 1);
   const foldCount = new Map<string, number>();
@@ -112,13 +139,25 @@ export function productsNamedIn(text: string, names: readonly string[]): string[
       let j: number;
       if (group.length === 1) {
         if (GENERIC_HEADS.has(t[0]) && t.length > 1) {
-          if (said[i + 1] !== t[1]) continue;
-          j = i + 1;
+          // Mọi từ CHUNG đầu tên («sản phẩm», «hàng») phải khớp liền, rồi thêm TỪ RIÊNG đầu tiên của tên («Sản phẩm Y» cần «sản phẩm y»).
+          let q = 1;
+          while (q < t.length && GENERIC_ITEM_WORDS.has(t[q])) q++;
+          const need = Math.min(q + 1, t.length);
+          if (!t.slice(0, need).every((w, x) => said[i + x] === w)) continue;
+          j = i + need - 1;
         } else j = i;
       } else {
         j = i + 1;
         while (j < said.length && shared.has(said[j])) j++;
-        if (!(j < said.length && own.has(said[j]))) continue;
+        if (!(j < said.length && own.has(said[j]))) {
+          // TIỀN TỐ tên đầy đủ (review config-guard): «chả cá thu» / «chả cá hấp» cạnh nhau — «cá» không riêng món nào nên luật trên
+          // trượt; khách gõ liền ≥ 2 từ ĐẦU của tên và đúng MỘT món trong nhóm có tiền tố ấy ⇒ gọi tên món đó.
+          let k = 0;
+          while (i + k < said.length && k < t.length && said[i + k] === t[k]) k++;
+          const sameStart = group.filter((x) => k <= x.t.length && x.t.slice(0, k).every((w, q) => w === t[q]));
+          if (k < 2 || sameStart.length !== 1) continue;
+          j = i + k - 1;
+        }
       }
       while (j + 1 < said.length && inName.has(said[j + 1])) j++;
       spans.push([i, j]);
@@ -140,7 +179,7 @@ export function productsNamedIn(text: string, names: readonly string[]): string[
     // = Nước mắm…). So CÓ DẤU nên «giá» không bao giờ thành «giã»; khách gõ không dấu thì không nhận (chỉ tốn token, không sai món).
     if (!spans.length && rawSaid.length === said.length) {
       // Đủ dài (≥ 3 chữ cái) để không phải một âm tiết đệm / cỡ áo.
-      const one = new Set(rawTokens(n).slice(1).filter((w) => [...w].length >= 3 && !TAIL_STOP.has(w) && rawCount.get(w) === 1));
+      const one = new Set(rawTokens(n).slice(1).filter((w) => [...w].length >= 3 && !TAIL_STOP.has(w) && !COOK_WORDS.has(w) && rawCount.get(w) === 1));
       rawSaid.forEach((w, i) => {
         if (one.has(w)) spans.push([i, i]);
       });
@@ -263,4 +302,20 @@ export function triggerProductConflicts(entry: Pick<QuickReplyEntry, "title" | "
   if (!covers.length) return [];
   const names = products.map((p) => p.name);
   return entry.triggers.map((trigger) => ({ trigger, names: productsNamedIn(trigger, names).filter((n) => !covers.includes(n)) })).filter((x) => x.names.length > 0);
+}
+
+/**
+ * Cách hỏi ĐỀ XUẤT (tự nạp · nhập) còn giữ được cho một câu mẫu: bỏ cách hỏi gọi tên món mà câu mẫu không nói tới — đường tự nạp từng
+ * thêm thẳng «xin giá chả cá» vào câu NEM (chủ shop 18/10/2026: «không cho cấu hình sai tự tái xuất hiện»). HÀM THUẦN.
+ */
+export function consistentTriggers(entry: Pick<QuickReplyEntry, "title" | "answer">, proposed: readonly string[], products: readonly FocusProduct[]): string[] {
+  return proposed.filter((t) => triggerProductConflicts({ ...entry, triggers: [t] }, products).length === 0);
+}
+
+/** Câu lỗi đọc được cho người sửa câu mẫu — `null` khi cách hỏi và câu trả lời nói cùng món. HÀM THUẦN. */
+export function productConsistencyError(entry: Pick<QuickReplyEntry, "title" | "answer" | "triggers">, products: readonly FocusProduct[]): string | null {
+  const c = triggerProductConflicts(entry, products);
+  if (!c.length) return null;
+  const shown = c.slice(0, 3).map((x) => `«${x.trigger}» (gọi tên ${x.names.join(", ")})`).join(" · ");
+  return `Cách hỏi ${shown}${c.length > 3 ? ` và ${c.length - 3} cách hỏi khác` : ""} nói về món mà câu trả lời không nhắc tới — bot sẽ báo sai món. Gỡ cách hỏi đó, hoặc thêm món ấy (kèm {{giá:SKU}}) vào câu trả lời.`;
 }

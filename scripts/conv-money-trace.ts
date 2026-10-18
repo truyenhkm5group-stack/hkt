@@ -242,6 +242,9 @@ export const QUICK_REPLAY_VARIANTS: { key: string; lines: FocusLine[] }[] = [
   { key: "page chả cá → Xin giá 1 kg", lines: [{ who: "SHOP", text: "[Shop đã nhắn] Chả cá thu Hạ Long nhà làm, nhắn shop để được báo giá ạ" }, { who: "CUSTOMER", text: "Xin giá 1 kg" }] },
   { key: "từ chối nem → báo giá", lines: [{ who: "CUSTOMER", text: "chả cá thu" }, { who: "CUSTOMER", text: "không lấy nem đâu em" }, { who: "CUSTOMER", text: "báo giá" }] },
   ...["Giá bao nhiêu 1kg ạ", "xin giá", "giá sao shop", "Cho mình 1kg"].map((t) => ({ key: `hỏi chung: ${t}`, lines: [{ who: "CUSTOMER" as const, text: t }] })),
+  // Chủ shop 18/10 (chốt hoàn thành): ruốc · combo nhiều món · khách cũ mua lại.
+  ...["ruốc tôm 250g bao nhiêu", "ruốc cá thu còn không", "1 kg chả mực giã tay, 1 Nem hải sản tôm bề bề", "cho mình 1kg chả cá với 1 hộp ruốc tôm", "lấy như lần trước nhé", "cho chị 1kg như đợt trước"].map((t) => ({ key: t, lines: [{ who: "CUSTOMER" as const, text: t }] })),
+  { key: "khách cũ: đơn trước chả cá → lấy như lần trước", lines: [{ who: "SHOP", text: "Dạ chị đặt lại chả cá thu 1kg như đơn trước ạ?" }, { who: "CUSTOMER", text: "lấy như lần trước nhé" }] },
   { key: "shop mời nem → giá sao em", lines: [{ who: "CUSTOMER", text: "chả cá thu giá sao em" }, { who: "SHOP", text: "Dạ chả cá thu 1kg 280.000đ ạ. Chị lấy thêm nem hải sản không ạ?" }, { who: "CUSTOMER", text: "giá sao em" }] },
 ];
 

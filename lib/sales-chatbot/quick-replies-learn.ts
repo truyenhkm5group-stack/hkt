@@ -28,7 +28,8 @@ import { MEDIA_ONLY_NOTE, PAGE_REPLY } from "@/lib/sales-chatbot/fanpage";
 import { homeRuntimeIdleReason } from "@/lib/sales-chatbot/page-runtime";
 import { publishedPlaybookText } from "@/lib/sales-chatbot/playbook";
 import { stripPrices } from "@/lib/sales-chatbot/playbook-shared";
-import { insertLearned, loadQuickReplySettings, NEEDS_EDIT, unknownSkus } from "@/lib/sales-chatbot/quick-replies";
+import { insertLearned, loadFocusProducts, loadQuickReplySettings, NEEDS_EDIT, unknownSkus } from "@/lib/sales-chatbot/quick-replies";
+import { consistentTriggers } from "@/lib/sales-chatbot/quick-reply-focus";
 import {
   mergeTriggers,
   mineUnansweredQuestions,
@@ -177,12 +178,15 @@ export async function autoLearnQuickReplies(opts: { now?: Date; force?: boolean;
     const plan = parseAutoLearnPlan(out, codes);
 
     // 1. Thêm cách hỏi vào câu mẫu đã có — đọc lại từng dòng ngay trước khi ghi (người có thể vừa sửa).
+    // Cách hỏi đề xuất gọi tên món mà câu mẫu không nói tới ⇒ BỎ (chủ shop 18/10/2026: «xin giá chả cá» từng được thêm thẳng vào câu
+    // NEM, và sẽ được nạp lại sau khi người gỡ). Đọc danh mục lỗi ⇒ lượt này không thêm cách hỏi nào.
+    const focusProducts = await loadFocusProducts().catch(() => null);
     let extended = 0;
-    for (const ex of plan.extend) {
-      const [row] = await db.select({ triggers: qr.triggers }).from(qr).where(eq(qr.id, ex.id)).limit(1);
+    for (const ex of focusProducts === null ? [] : plan.extend) {
+      const [row] = await db.select({ title: qr.title, answer: qr.answer, triggers: qr.triggers }).from(qr).where(eq(qr.id, ex.id)).limit(1);
       if (!row) continue;
       const current = row.triggers ?? [];
-      const next = mergeTriggers(current, ex.triggers, QUICK_REPLY_AUTO_LEARN.maxExtendPerEntry);
+      const next = mergeTriggers(current, consistentTriggers({ title: row.title, answer: row.answer }, ex.triggers, focusProducts ?? []), QUICK_REPLY_AUTO_LEARN.maxExtendPerEntry);
       if (next.length === current.length) continue;
       await db.update(qr).set({ triggers: next }).where(eq(qr.id, ex.id));
       extended += next.length - current.length;
