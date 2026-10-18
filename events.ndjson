@@ -1,4 +1,3 @@
-{"at":"2026-10-10T03:11:17.162Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","detail":"#764 @ 33047767937f → 629e3890af64 (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-10T03:12:02.752Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","detail":"#765 @ 8644fe4a447a → b3cc7eb6b821 (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-10T03:12:45.730Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","detail":"#767 @ 269f18b28274 → c5988e501db3 (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-10T03:15:31.390Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"c5988e501db3 · run 38019906888 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38019906888"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-18T02:17:49.853Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"HANDOFF","mission":"trace-comment-denominator","detail":"claude/trace-comment-denominator @ 734e029e48e4 · 3 lệnh kiểm thử"}
 {"at":"2026-10-18T02:18:26.638Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#889 @ 734e029e48e4 · review: nhóm do SQL xếp vào danh sách ĐÓNG 7 mã, TS chỉ in nhãn cố định + số; không giá trị cột chữ nào ra kênh tóm tắt; bài kiểm rò log không đổi"}
 {"at":"2026-10-18T02:59:02.810Z","actor":"DESKTOP-56TH98Y:wt-olc-order","kind":"OVERLAP_DETECTED","mission":"org-lifecycle-test-order","detail":"OVERLAP với org-archive-lifecycle: phạm vi tests/org-lifecycle.test.ts ⇒ tuần tự hoá (--after=org-archive-lifecycle) hoặc khai cách tích hợp (--accept-overlap=\"…\")"}
+{"at":"2026-10-18T03:00:07.817Z","actor":"DESKTOP-56TH98Y:wt-olc-order","kind":"CLAIM","mission":"org-lifecycle-test-order","detail":"PLANNING · 1 mẫu phạm vi · MEDIUM"}
