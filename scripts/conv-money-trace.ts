@@ -472,7 +472,8 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   const from = since ?? new Date(now.getTime() - days * 86_400_000);
   const span = since ? `từ ${since.toISOString()}` : `${days} ngày`;
   const c = schema.salesChatConversations;
-  const convs = await db.select({ id: c.id }).from(c).where(gte(c.updatedAt, from)).limit(TRACE_MAX_SCAN_CONVERSATIONS + 1);
+  // Kênh TEST (khung thử của chủ shop, ops kiểm trực tiếp `org-ai-cutover --probe-set`) không phải khách thật ⇒ ngoài phép đo.
+  const convs = await db.select({ id: c.id }).from(c).where(and(gte(c.updatedAt, from), sql`${c.channel} <> 'TEST'`)).limit(TRACE_MAX_SCAN_CONVERSATIONS + 1);
   const ids = convs.slice(0, TRACE_MAX_SCAN_CONVERSATIONS).map((x) => x.id);
   const m = schema.salesChatMessages;
   const A = { total: 0, noNew: 0, convs: new Set<string>() };
