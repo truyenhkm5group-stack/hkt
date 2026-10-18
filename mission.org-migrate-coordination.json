@@ -3,7 +3,7 @@
   "mission_id": "org-migrate-coordination",
   "title": "Mỗi tổ chức một lượt migrate: bước kiểm deploy chờ và báo đúng kết quả lượt thật (sổ trạng thái 0248)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-migrate-lock",
@@ -36,7 +36,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T07:32:40.354Z",
-  "updated_at": "2026-10-18T07:32:40.354Z",
-  "last_heartbeat": "2026-10-18T07:32:40.354Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-18T07:33:12.751Z",
+  "last_heartbeat": "2026-10-18T07:33:12.751Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/org-migrate-coordination",
+    "sha": "1d79956239d2ae2babeb1af108790685e261ad8d",
+    "at": "2026-10-18T07:33:12.751Z",
+    "actor": "DESKTOP-56TH98Y:wt-migrate-lock",
+    "title": "Mỗi tổ chức một lượt migrate: bước kiểm deploy chờ và báo đúng kết quả lượt thật (sổ trạng thái 0248)",
+    "summary": "",
+    "tests": [
+      "typecheck sạch (tsc --noEmit) · lint sạch (eslint) · npm test: TẤT CẢ KIỂM THỬ ĐẠT trên commit 1d7995623 · org-migrate-isolation: hai tiến trình cùng mở qa ⇒ một lượt, người đến sau chờ + nhận kết quả thật; lượt quá trần ⇒ DEGRADED + lý do của lượt đó (không LOCK_BUSY); tiếp quản RUNNING mồ côi; tổ chức ACTIVE hỏng ⇒ ERROR; hết ngân sách ⇒ CHƯA KIỂM; PGlite ghi dòng DONE · migration-serve-compat / upgrade-path / restore-drill / offboard / org-lifecycle đạt · build KHÔNG chạy (không chạm ranh giới client)"
+    ]
+  }
 }
