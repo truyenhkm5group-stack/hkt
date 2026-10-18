@@ -444,8 +444,27 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
     .select({ n: sql<number>`count(*)::int` })
     .from(o)
     .where(sql`exists (select 1 from jsonb_array_elements(coalesce(${o.raw}->'review'->'entries', '[]'::jsonb)) e where e->>'code' = 'ROUND_ABANDONED' and e->>'at' >= ${from.toISOString()})`);
+  // MẪU SỐ của dòng C — chỉ từ thứ ĐÃ LƯU (sales_chat_inbound: kind · status · note). Nhánh ALREADY ghi SKIPPED + đúng câu lý do cố định;
+  // nhánh bot nhắn riêng THÀNH CÔNG không có dấu riêng (DONE, ghi chú rỗng hoặc cảnh báo — chung trạng thái với nhánh khác) ⇒ in đúng tên
+  // nhóm lưu được, không gọi nó là «đã nhắn». «Khách đã có hội thoại hộp thư» KHÔNG được lưu ở đâu ⇒ in «chưa ghi lại», không suy đoán.
+  const ib = schema.salesChatInbound;
+  const nhom = await db
+    .select({
+      nhom: sql<string>`case when ${ib.status} = 'SKIPPED' and ${ib.note} like ${`${COMMENT_ALREADY_NOTE}%`} then 'ALREADY' when ${ib.status} = 'DONE' and ${ib.note} is null then 'DONE_NO_NOTE' else ${ib.status} || case when ${ib.note} is null then '' else '+NOTE' end end`,
+      n: sql<number>`count(*)::int`,
+    })
+    .from(ib)
+    .where(and(eq(ib.kind, "COMMENT"), gte(ib.createdAt, from)))
+    .groupBy(sql`1`);
+  const tong = nhom.reduce((s, r) => s + Number(r.n), 0);
+  const ten = (k: string) => Number(nhom.find((r) => r.nhom === k)?.n ?? 0);
+  const khac = nhom.filter((r) => !["ALREADY", "DONE_NO_NOTE"].includes(r.nhom)).map((r) => `${r.nhom} ${r.n}`).join(" · ") || "0";
+  tomTat(`C mẫu số: tin bình luận trong kỳ ${tong} · Pancake / nhân viên đã nhắn riêng TRƯỚC (ALREADY) ${ten("ALREADY")} · DONE không ghi chú ${ten("DONE_NO_NOTE")} · khác: ${khac} · trong đó khách ĐÃ có hội thoại hộp thư: chưa ghi lại — không đếm được`);
   tomTat(`C bình luận mua lại chép sang hộp thư: ${carried?.n ?? 0} tin / ${carried?.convs ?? 0} hội thoại · đơn gắn cờ ROUND_ABANDONED: ${abandoned?.n ?? 0}`);
 }
+
+/** Đầu câu lý do fanpage.ts::deliverCommentReply ghi vào dòng tin khi bình luận ĐÃ được nhắn riêng (ALREADY) — bài kiểm đối chiếu. */
+export const COMMENT_ALREADY_NOTE = "Bình luận đã được nhắn riêng";
 
 /** Nhãn đầu tin khách mà `carryCommentTurn` (lib/sales-chatbot/engine.ts) gắn khi chép lượt bình luận sang hộp thư. */
 export const COMMENT_CARRY_LABEL = "[Khách bình luận trên bài viết lúc ";
