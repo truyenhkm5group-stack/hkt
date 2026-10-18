@@ -579,6 +579,7 @@ import { testConvMoneyTrace } from "./conv-money-trace.test";
 import { testSalesQuote640 } from "./sales-quote-640.test";
 import { testSalesNextBestAction } from "./sales-next-best-action.test";
 import { testUpsellOfferAudit } from "./upsell-offer-audit.test";
+import { testShipmentOriginAudit } from "./shipment-origin-audit.test";
 import { testSalesIntegrityAudit } from "./sales-integrity-audit.test";
 import { testCartIntentAudit } from "./cart-intent-audit.test";
 import { testFollowupLifecycle } from "./followup-lifecycle.test";
@@ -3114,6 +3115,9 @@ async function main() {
   // P0 #868 — ops upsell-offer-audit: phễu + upsell (sổ sự kiện) và lời mời đọc từ chữ đã gửi (mời lặp · sau từ chối · sau khi đã chọn) —
   // thuần + CSDL thật (tự dọn), chỉ đọc, khai đủ bốn chỗ.
   await testUpsellOfferAudit();
+  // Chủ shop 18/10/2026 (HSLC) — ops shipment-origin-audit: vận đơn do ERP · POS/Pancake · hay ngoài ERP tạo (chỉ hãng, không đơn) —
+  // thuần + CSDL thật (tự dọn), «đã có vận đơn dù ERP đang giữ» hỏi bằng decideShippingRoute, tóm tắt chỉ số đếm, chỉ đọc.
+  await testShipmentOriginAudit();
   // P0 11/10/2026 (KimThu Le) — vòng đời khách dùng chung + follow-up đọc lại ngay trước khi gửi (đơn thật · chứng từ thu ·
   // từ chối nhận tin · người / nguồn khác vừa nhắn), khoá gửi chống trùng, vết quyết định — tổ chức THẬT `fu-life` (tự cấp, tự dọn).
   await testFollowupLifecycle();
