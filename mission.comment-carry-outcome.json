@@ -3,7 +3,7 @@
   "mission_id": "comment-carry-outcome",
   "title": "Ghi mã kết quả đưa lời mua của bình luận sang hộp thư",
   "business_goal": "Đo được ca #886 trên production",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-token-budget",
@@ -24,11 +24,25 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T04:29:45.884Z",
-  "updated_at": "2026-10-18T04:29:45.884Z",
-  "last_heartbeat": "2026-10-18T04:29:45.884Z",
+  "updated_at": "2026-10-18T04:30:07.125Z",
+  "last_heartbeat": "2026-10-18T04:30:07.125Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/comment-carry-outcome",
+    "sha": "1487952510e3cf893bbb34194fa72dbd9f0d1694",
+    "at": "2026-10-18T04:30:07.125Z",
+    "actor": "DESKTOP-56TH98Y:wt-token-budget",
+    "title": "Mỗi lần đưa lời mua của bình luận sang hộp thư đều để lại mã kết quả",
+    "summary": "",
+    "tests": [
+      "tests/p0-repeat-buyer.test.ts: ĐẠT (MOVED · EXISTING_INBOX · OPENED_NEW qua đường thật)",
+      "conv-money-trace · ops-log-leak (623 dòng sạch): ĐẠT",
+      "p0-855-cart/delta · p0-863 · sales-cart-commitment · sales-next-best-action: ĐẠT",
+      "tsc · eslint: sạch"
+    ]
   }
 }
