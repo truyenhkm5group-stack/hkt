@@ -3,7 +3,7 @@
   "mission_id": "quick-reply-denominator",
   "title": "Mẫu số đo câu mẫu + phát lại + chạy thử dọn cách hỏi",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-cau-mau-mau-so",
@@ -21,7 +21,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T13:36:50.071Z",
-  "updated_at": "2026-10-18T13:36:50.071Z",
-  "last_heartbeat": "2026-10-18T13:36:50.071Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-18T13:37:16.623Z",
+  "last_heartbeat": "2026-10-18T13:37:16.623Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/cau-mau-mau-so",
+    "sha": "9329252320a216af45594e061ef9b3593aa0445c",
+    "at": "2026-10-18T13:37:16.623Z",
+    "actor": "DESKTOP-56TH98Y:wt-cau-mau-mau-so",
+    "title": "Mẫu số đo câu mẫu + phát lại + chạy thử dọn cách hỏi",
+    "summary": "Script-only, chỉ đọc: D mẫu số, --replay-quick, chạy thử cụm chung trên câu một món. Không cần deploy (ops lấy script từ main, lib đã có từ #898).",
+    "tests": [
+      "org-catalog pure+db: ĐẠT",
+      "conv-money-trace (quickDecisionAt + biến thể + parse --replay-quick): ĐẠT",
+      "ops-log-leak: ĐẠT",
+      "eslint: sạch",
+      "tsc: sạch (trừ qrcode máy này)"
+    ]
+  }
 }
