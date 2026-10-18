@@ -1,0 +1,8 @@
+{
+  "pr": 893,
+  "sha": "85e44a4bd19529175194a2df6853b6e3e02a8a93",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-18T06:14:10.575Z",
+  "note": "lead: chỉ đọc; cờ kiểm theo danh sách ĐÓNG (ngoài ⇒ KHAC), lượt người đã kiểm chỉ mã + hành động; giữ khỏi vận đơn tính bằng addressReviewOpenOf/orderReviewOpenOf của tuyến giao; không ghi chú, không tên"
+}
