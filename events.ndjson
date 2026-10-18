@@ -1,4 +1,3 @@
-{"at":"2026-10-10T15:33:35.961Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"ai-sales-knowledge","detail":"#782 cho feat/ai-sales-knowledge @ 23840099e176"}
 {"at":"2026-10-10T15:34:04.747Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#782 @ 23840099e176 · Cấu hình rỗng ⇒ lời nhắc y hệt (12 golden không đổi); khuyến mãi không vào phép tính tiền (quét mã nguồn); không chạm withModelFallback; form vẫn 4 nhóm"}
 {"at":"2026-10-10T15:34:48.160Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"STATUS","mission":"ai-fallback-tenant","detail":"BACKLOG → RUNNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-10T15:34:48.160Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"ai-fallback-tenant","detail":"OVERLAP_ACCEPTED với ai-provider-failover: phạm vi lib/sales-chatbot/engine.ts — cách tích hợp: ai-sales-knowledge (#782) chỉ thêm một dòng lời nhắc trong engine.ts, F2 sửa withModelFallback — khác vùng"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-18T10:21:56.962Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#896 @ dfb94c7159e4 · lead: tìm hội thoại theo MỐC GIỜ (--at/--window ≤120′), không nhận tên khách ở ô arg (kho PUBLIC); chữ tin chỉ ở phần mã hoá, tóm tắt chỉ số đếm"}
 {"at":"2026-10-18T10:24:40.961Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_FAIL","mission":"org-migrate-coordination","detail":"FAIL f2d4014857ab804d83dc3465946f9f26f0c1251a 2026-10-18T10:24:19.325Z"}
 {"at":"2026-10-18T10:42:09.402Z","actor":"DESKTOP-56TH98Y:wt-ship-origin","kind":"HANDOFF","mission":"shipment-origin-audit","detail":"claude/shipment-origin-audit @ e572c26a419f · 1 lệnh kiểm thử"}
+{"at":"2026-10-18T10:45:41.784Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"shipment-origin-audit","detail":"#897 cho claude/shipment-origin-audit @ e572c26a419f"}
