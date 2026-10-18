@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { sql } from "drizzle-orm";
 import { getDbFor, getDbForInspection, organizationMigrationDegraded, type Db } from "@/db";
+import { readOrgMigrationStatus } from "@/db/migrate";
+import { describeOrgMigrateStatus } from "@/lib/constants/org-migrate-coordination";
 import { PLATFORM_MODULES, moduleDependencyErrors, type ModuleDependencyError } from "@/lib/constants/platform-modules";
 import { getModuleRows } from "@/lib/platform/capabilities";
 import { FALLBACK_HOME_CODE, listOrganizations, mayOpenOrganizationDb } from "@/lib/platform/organizations";
@@ -179,6 +181,13 @@ async function checkOrganization(org: Organization, expected: number | null, mod
     health.migrationsNote = "Không đo — tổ chức lưu trữ.";
     health.platformTablesNote = "Không đo — tổ chức lưu trữ.";
     return health;
+  }
+
+  // Lượt migrate gần nhất (sổ bền ở CSDL nhà, db/migrate.ts::coordinateOrgMigration): đang chạy / hỏng thì người vận hành thấy AI chạy,
+  // từ bao giờ, hạn tới đâu, vì sao — kể cả khi chính lượt mở dưới đây không mở được CSDL.
+  if (!org.isHome) {
+    const run = await readOrgMigrationStatus(org.code);
+    if (run.status && run.status.state !== "DONE") health.problems.push(`Lượt migrate ${describeOrgMigrateStatus(run.status)}`);
   }
 
   let db: Db;

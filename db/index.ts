@@ -24,9 +24,10 @@ type Holder = {
   /** Tổ chức đang phục vụ bằng LƯỢC ĐỒ CŨ sau một lượt migrate hết giờ (`DEGRADED_MIGRATION`, db/migrate.ts::orgMigrationDegradeCheck). */
   orgDegraded?: Map<string, OrgDegradedState>;
 };
-type OrgDegradedState = { since: number; reason: string; missing: string[]; nextRetryAt: number; attempts: number; retrying: boolean };
+/** `holderRunIds` = lượt của tiến trình KHÁC mà lượt thử của mình đã gặp — lượt thử lại nền nhận kết quả của chúng thay vì chạy lượt thứ hai. */
+type OrgDegradedState = { since: number; reason: string; missing: string[]; nextRetryAt: number; attempts: number; retrying: boolean; holderRunIds: Set<string> };
 /** `migratePid` = mã tiến trình máy chủ của kết nối ĐANG migrate (chỉ Postgres thật) — để `cancelOrganizationMigration` huỷ được câu đang chạy. */
-type OrgHandle = { db?: Db; pending?: Promise<Db>; pool?: Pool; pglite?: unknown; migratePid?: number };
+type OrgHandle = { db?: Db; pending?: Promise<Db>; pool?: Pool; pglite?: unknown; migratePid?: number; abort?: AbortController };
 const holder = globalThis as unknown as { __erpDb?: Holder };
 if (!holder.__erpDb) holder.__erpDb = {};
 
@@ -427,15 +428,17 @@ async function getOrgDb(code: string): Promise<Db> {
         db = createPg(url, Math.max(1, Number(process.env.PGPOOL_MAX_ORG) || 2), (p) => (handle.pool = p));
       }
       // CSDL tổ chức tự áp bộ migration khi mở lần đầu trong tiến trình (idempotent, có khoá).
-      const { migrateOrganizationDb, orgMigrateRetryAfterMs, orgMigrationDegradeCheck, orgMigrateDegradedRetryMs } = await import("./migrate");
+      const { migrateOrganizationDb, orgMigrateRetryAfterMs, orgMigrationDegradeCheck, orgMigrateDegradedRetryAfterMs, OrgMigrateError } = await import("./migrate");
       const { migrationErrorText } = await import("@/lib/constants/migration-serve-compat");
       let failure: { error: unknown } | null = null;
+      handle.abort = new AbortController();
       try {
-        await migrateOrganizationDb(db, { pool: handle.pool, onMigrating: (pid) => (handle.migratePid = pid) });
+        await migrateOrganizationDb(db, { orgCode: code, pool: handle.pool, onMigrating: (pid) => (handle.migratePid = pid), signal: handle.abort.signal, cancelUrl: handle.pool ? url : undefined });
       } catch (error) {
         failure = { error };
       } finally {
         handle.migratePid = undefined;
+        handle.abort = undefined;
       }
       if (failure) {
         const { error } = failure;
@@ -444,7 +447,11 @@ async function getOrgDb(code: string): Promise<Db> {
         const check = await orgMigrationDegradeCheck(db, error);
         if (check.serve) {
           const now = Date.now();
-          const st: OrgDegradedState = { since: now, reason: check.reason, missing: check.missing, nextRetryAt: now + orgMigrateDegradedRetryMs(), attempts: 1, retrying: false };
+          // Người điều phối KHÁC còn đang chạy ⇒ đọc lại sau ít phút (không phải 6 giờ), và lượt thử lại nhận kết quả của ĐÚNG lượt ấy.
+          // Chỉ lượt CÒN ĐANG CHẠY (HOLDER_RUNNING / LOCK_BUSY) mới đáng nhận ở lượt thử lại; lượt đã kết thúc (HOLDER_FAILED) vừa được nhận rồi.
+          const holderRunIds = new Set<string>();
+          if (error instanceof OrgMigrateError && error.holderStatus?.state === "RUNNING") holderRunIds.add(error.holderStatus.runId);
+          const st: OrgDegradedState = { since: now, reason: check.reason, missing: check.missing, nextRetryAt: now + orgMigrateDegradedRetryAfterMs(error), attempts: 1, retrying: false, holderRunIds };
           (holder.__erpDb!.orgDegraded ??= new Map()).set(code, st);
           console.warn(
             `[org-migrate] DEGRADED_MIGRATION «${code}»: migrate hết giờ, PHỤC VỤ BẰNG LƯỢC ĐỒ CŨ — thiếu ${check.missing.join(", ")} · thử lại lúc ${new Date(st.nextRetryAt).toISOString()} · lỗi: ${check.reason}`,
@@ -494,16 +501,32 @@ function maybeRetryDegraded(code: string, h: OrgHandle): void {
     const m = await import("./migrate");
     const { migrationErrorText } = await import("@/lib/constants/migration-serve-compat");
     st.nextRetryAt = Date.now() + m.orgMigrateDegradedRetryMs();
+    // Mỗi lượt đã thấy chỉ được đưa vào ĐÚNG MỘT lượt thử lại — nhận một lần rồi thôi; giữ mãi thì cứ 6 giờ lại «nhận» đúng thất bại cũ
+    // và không bao giờ migrate lại (nhịp «thử lại mỗi 6 giờ» chết).
+    const adoptRunIds = new Set(st.holderRunIds);
+    st.holderRunIds.clear();
+    h.abort = new AbortController();
     try {
-      await m.migrateOrganizationDb(db, { pool: h.pool, onMigrating: (pid) => (h.migratePid = pid) });
+      const out = await m.migrateOrganizationDb(db, {
+        orgCode: code,
+        pool: h.pool,
+        onMigrating: (pid) => (h.migratePid = pid),
+        adoptRunIds,
+        signal: h.abort.signal,
+        cancelUrl: h.pool ? organizationDatabaseUrl({ code, isHome: false }) : undefined,
+      });
       holder.__erpDb!.orgDegraded?.delete(code);
-      console.log(`[org-migrate] «${code}» migrate xong ở lượt thử thứ ${st.attempts} — hết DEGRADED_MIGRATION.`);
+      const by = out.kind === "ADOPTED" ? ` (lượt của ${out.status.holder.role} pid ${out.status.holder.osPid}@${out.status.holder.host})` : "";
+      console.log(`[org-migrate] «${code}» migrate xong ở lượt thử thứ ${st.attempts}${by} — hết DEGRADED_MIGRATION.`);
     } catch (error) {
+      if (error instanceof m.OrgMigrateError && error.holderStatus?.state === "RUNNING") st.holderRunIds.add(error.holderStatus.runId);
+      st.nextRetryAt = Date.now() + m.orgMigrateDegradedRetryAfterMs(error);
       st.reason = migrationErrorText(error);
       console.warn(`[org-migrate] DEGRADED_MIGRATION «${code}»: lượt thử thứ ${st.attempts} hỏng — vẫn phục vụ bằng lược đồ cũ · thử lại lúc ${new Date(st.nextRetryAt).toISOString()} · lỗi: ${st.reason}`);
     } finally {
       st.retrying = false;
       h.migratePid = undefined;
+      h.abort = undefined;
     }
   })().catch(() => undefined);
 }
@@ -530,12 +553,21 @@ export function degradedOrganizations(): OrgMigrationDegraded[] {
  */
 export async function cancelOrganizationMigration(code: string): Promise<boolean> {
   const h = holder.__erpDb!.orgs?.get(code);
+  // Lượt đang CHỜ người điều phối khác cũng phải dừng: không thì sau trần của bước kiểm nó vẫn có thể tiếp quản và chạy một lượt VERIFY
+  // không ai nhìn kết quả (db/migrate.ts::coordinateOrgMigration kiểm tín hiệu trước mỗi lần thử khoá và ngay sau khi cầm khoá).
+  h?.abort?.abort();
   if (!h?.pool || !h.migratePid) return false;
+  // Qua một kết nối RIÊNG, như lệnh tự huỷ của lượt: bể của tổ chức chỉ có PGPOOL_MAX_ORG (mặc định 2) chỗ và một chỗ đang chạy migration.
+  const { Client } = await import("pg");
+  const c = new Client({ connectionString: organizationDatabaseUrl({ code, isHome: false }), connectionTimeoutMillis: 10_000 });
   try {
-    const r = await h.pool.query<{ ok: boolean }>("select pg_cancel_backend($1) as ok", [h.migratePid]);
+    await c.connect();
+    const r = await c.query<{ ok: boolean }>("select pg_cancel_backend($1) as ok", [h.migratePid]);
     return r.rows[0]?.ok === true;
   } catch {
     return false;
+  } finally {
+    await c.end().catch(() => undefined);
   }
 }
 

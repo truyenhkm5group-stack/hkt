@@ -97,6 +97,7 @@ export const OFFBOARD_TABLES: Readonly<Record<ControlPlaneTable, TableSpec>> = {
   platform_auth_failures: { disposition: "DELETE", why: "Lỗi đăng nhập của tổ chức (định danh đã băm + bản che) — dữ liệu người, đi cùng tổ chức; dòng không quy được về tổ chức nào (org_code NULL) không bị đụng.", where: byCode },
   platform_tenant_value_snapshots: { disposition: "DELETE", why: "Ảnh giá trị theo ngày, khoá theo MÃ (số đếm + tiền, không dữ liệu người) — để lại thì tổ chức đăng ký lại cùng mã thừa kế lịch sử giá trị của tổ chức cũ.", where: byCode },
   platform_tenant_health_daily: { disposition: "DELETE", why: "Sức khoẻ / rủi ro rời bỏ theo ngày, khoá theo MÃ (chỉ mã lý do) — mã được dùng lại.", where: byCode },
+  platform_org_migration_status: { disposition: "DELETE", why: "Trạng thái lượt migrate gần nhất của CSDL tổ chức (khoá theo MÃ) — CSDL đã xoá thì trạng thái vô nghĩa, để lại thì tổ chức đăng ký lại cùng mã thấy lượt migrate của tổ chức cũ.", where: byCode },
 };
 
 /** Thứ tự XOÁ trong giao dịch: bảng con trước, dòng tổ chức rồi mới tới tài khoản (khoá ngoài `platform_organizations.account_id`). */
@@ -114,6 +115,7 @@ export const OFFBOARD_DELETE_ORDER: readonly ControlPlaneTable[] = [
   "platform_tenant_usage_daily",
   "platform_tenant_value_snapshots",
   "platform_tenant_health_daily",
+  "platform_org_migration_status",
   "platform_org_pricing",
   "platform_price_pins",
   "platform_subscriptions",

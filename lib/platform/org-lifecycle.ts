@@ -518,7 +518,7 @@ export async function priorStatusFromAudit(exec: Exec, code: string): Promise<st
   }
 }
 
-export type ReactivateVerify = (code: string) => Promise<{ status: "OK" | "MISSING" | "DEGRADED" | "ERROR" | "TIMEOUT"; detail?: string }>;
+export type ReactivateVerify = (code: string) => Promise<{ status: "OK" | "MISSING" | "DEGRADED" | "ERROR" | "TIMEOUT" | "NOT_CHECKED"; detail?: string }>;
 
 export type ReactivateResult =
   | { outcome: "NOT_FOUND"; lines: string[] }

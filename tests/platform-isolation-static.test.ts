@@ -109,6 +109,8 @@ type LoaiHolder = "THEO_TO_CHUC" | "NEN_TANG";
 const HOLDER_DA_KHAI: Record<string, { loai: LoaiHolder; lyDo: string }> = {
   "db/index.ts::__erpDb": { loai: "NEN_TANG", lyDo: "Handle/bể CSDL — nhà là một handle, tổ chức khác nằm trong `orgs: Map<mã, …>`; không chứa dòng dữ liệu nào." },
   "db/migrate.ts::__erpMigrated": { loai: "NEN_TANG", lyDo: "Lời hứa migration của CSDL nhà lúc khởi động; CSDL tổ chức khác migrate khi mở handle." },
+  "db/migrate.ts::__erpOrgMigrateRole": { loai: "NEN_TANG", lyDo: "Vai trò của TIẾN TRÌNH khi điều phối migrate (APP / VERIFY / SCRIPT — bước kiểm deploy tự đặt VERIFY); một nhãn của tiến trình, không dữ liệu nghiệp vụ của tổ chức nào." },
+  "db/migrate.ts::__erpOrgMigrateToken": { loai: "NEN_TANG", lyDo: "Mã ngẫu nhiên của TIẾN TRÌNH (sinh một lần khi nạp mô-đun) để phân biệt tiến trình mới với tiến trình cũ cùng pid + tên máy; không dữ liệu nghiệp vụ." },
   "lib/cache.ts::__erpMemo": { loai: "THEO_TO_CHUC", lyDo: "Khoá đệm của tổ chức khác nhà mang tiền tố `org:<mã>:` do chính `memo()` thêm (ISO-01)." },
   "lib/cache.ts::__erpJobNen": { loai: "NEN_TANG", lyDo: "Bộ đếm 'đang trong job nền' chỉ đổi xoá cứng/mềm của đệm — sai lệch tệ nhất là một lượt đánh dấu cũ (ISO-26, chấp nhận)." },
   "lib/realtime/bus.ts::erpBus": { loai: "THEO_TO_CHUC", lyDo: "Sự kiện đóng dấu `org`; SSE chỉ nghe qua `subscribeOrganization` (ISO-08)." },

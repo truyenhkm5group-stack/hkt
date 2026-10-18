@@ -12245,3 +12245,49 @@ export const reDeposits = pgTable(
     check("re_deposits_customer_check", sql`length(btrim(${t.customerName})) BETWEEN 1 AND 160`),
   ],
 );
+
+/**
+ * TRẠNG THÁI LƯỢT MIGRATE CỦA TỪNG TỔ CHỨC (0248 · chủ shop 18/10/2026) — mặt phẳng điều khiển, chỉ thật ở CSDL NHÀ.
+ *
+ * Mỗi tổ chức MỘT dòng: lượt migrate gần nhất. Chỉ NGƯỜI ĐIỀU PHỐI (tiến trình đang cầm khoá tư vấn migrate của CSDL tổ chức đó —
+ * db/migrate.ts::coordinateOrgMigration) ghi; mọi tiến trình khác (ứng dụng, bước kiểm deploy, script) ĐỌC để chờ đúng lượt đang chạy
+ * và báo ĐÚNG kết quả của nó, thay vì mở lượt thứ hai hay báo thời gian chờ khoá của chính mình như kết quả của tổ chức.
+ *  · `deadline_at` = hạn TỰ KHAI (now() + trần lượt) — người điều phối tự huỷ câu đang chạy khi quá hạn; người chờ chờ tới hạn + biên.
+ *  · RUNNING ⇔ `finished_at` NULL. Khoá đã nhả mà dòng còn RUNNING ⇒ người điều phối đã chết ⇒ tiến trình kế tiếp tiếp quản
+ *    (`takeover_of` mô tả lượt bị bỏ dở).
+ *  · `holder_*` = vai trò (APP | VERIFY | SCRIPT) + pid hệ điều hành + tên máy (trong docker là mã container) — không bí mật, không dữ
+ *    liệu người. `reason` là câu lỗi gốc của migration (SQLSTATE + câu Postgres), ≤ 500 ký tự.
+ */
+export const platformOrgMigrationStatus = pgTable(
+  "platform_org_migration_status",
+  {
+    orgCode: text("org_code").primaryKey(),
+    runId: text("run_id").notNull(),
+    state: text("state").notNull(),
+    holderRole: text("holder_role").notNull(),
+    holderPid: integer("holder_pid").notNull(),
+    holderHost: text("holder_host").notNull(),
+    /** Mã ngẫu nhiên của tiến trình (sinh khi nạp mô-đun) — pid + tên máy trùng lại sau khi container khởi động lại. */
+    holderToken: text("holder_token"),
+    startedAt: ts("started_at").notNull(),
+    deadlineAt: ts("deadline_at").notNull(),
+    finishedAt: ts("finished_at"),
+    targetTag: text("target_tag"),
+    missingTags: jsonb("missing_tags").$type<string[]>().notNull().default([]),
+    timedOut: boolean("timed_out").notNull().default(false),
+    reason: text("reason"),
+    takeoverOf: text("takeover_of"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check("platform_org_migration_status_state_check", sql`${t.state} IN ('RUNNING','DONE','DEGRADED','FAILED')`),
+    check("platform_org_migration_status_role_check", sql`${t.holderRole} IN ('APP','VERIFY','SCRIPT')`),
+    check("platform_org_migration_status_finished_check", sql`(${t.state} = 'RUNNING') = (${t.finishedAt} IS NULL)`),
+    check("platform_org_migration_status_deadline_check", sql`${t.deadlineAt} > ${t.startedAt}`),
+    check("platform_org_migration_status_missing_check", sql`jsonb_typeof(${t.missingTags}) = 'array'`),
+    check("platform_org_migration_status_host_check", sql`length(${t.holderHost}) <= 120`),
+    check("platform_org_migration_status_token_check", sql`${t.holderToken} IS NULL OR length(${t.holderToken}) <= 64`),
+    check("platform_org_migration_status_reason_check", sql`${t.reason} IS NULL OR length(${t.reason}) <= 500`),
+    check("platform_org_migration_status_takeover_check", sql`${t.takeoverOf} IS NULL OR length(${t.takeoverOf}) <= 300`),
+  ],
+);

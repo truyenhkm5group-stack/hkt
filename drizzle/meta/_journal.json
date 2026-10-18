@@ -1730,6 +1730,13 @@
       "when": 1791488000000,
       "tag": "0247_sales_chat_inbound_text_hash_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 248,
+      "version": "7",
+      "when": 1791574437000,
+      "tag": "0248_org_migration_status",
+      "breakpoints": true
     }
   ]
 }

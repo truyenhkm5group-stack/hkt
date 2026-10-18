@@ -23,8 +23,8 @@
  *
  * CSDL tổ chức khách migrate LƯỜI — lần đầu một tiến trình mở nó. Không có bước này thì sau mỗi lần deploy, request đầu
  * tiên của MỖI khách gánh cả lượt migrate, và một tổ chức migrate hỏng chỉ lộ ra khi khách chạm vào. Nên sau khi kiểm CSDL
- * nhà, script MỞ lần lượt CSDL của mọi tổ chức khách đang `ACTIVE` (mở = migrate, có khoá tư vấn theo CSDL — chạy cùng lúc
- * với ứng dụng vẫn an toàn) rồi đối chiếu sổ như với nhà. Tổ chức nào hỏng ⇒ in tên + lý do và mã thoát 1: người vận hành
+ * nhà, script MỞ lần lượt CSDL của mọi tổ chức khách đang `ACTIVE` (mở = migrate, điều phối theo CSDL — chạy cùng lúc với ứng
+ * dụng vẫn an toàn: chỉ MỘT tiến trình chạy lượt migrate, tiến trình kia chờ và nhận kết quả) rồi đối chiếu sổ như với nhà. Tổ chức nào hỏng ⇒ in tên + lý do và mã thoát 1: người vận hành
  * thấy ở bước deploy, trước khách. Tổ chức đình chỉ / lưu trữ không mở (không ai dùng, không ai cần chờ) — tập tổ chức là
  * `fanOutOrganizationCodes` (vị ngữ `isOperationalOrganization`), KHÔNG một danh sách bỏ qua riêng: tổ chức ĐANG HOẠT ĐỘNG mà
  * migrate hỏng LUÔN làm bước kiểm đỏ. Tổ chức lưu trữ chỉ quay lại tập này qua lượt kích hoạt lại đã đối chiếu sổ (docs/tenant-lifecycle.md).
@@ -34,6 +34,8 @@
 import { readFileSync } from "node:fs";
 import { sql } from "drizzle-orm";
 import { cancelOrganizationMigration, getDb, getDbFor, organizationMigrationDegraded, type Db } from "@/db";
+import { currentOrgMigrateHolder, readOrgMigrationStatus, setOrgMigrateRole } from "@/db/migrate";
+import { describeOrgMigrateStatus, ORG_MIGRATE_HOLDER_MARGIN_MS, orgMigrateRunTimeoutMs, sameProcess, type OrgMigrateHolder, type OrgMigrateStatus } from "@/lib/constants/org-migrate-coordination";
 import { fanOutOrganizationCodes, listOrganizations } from "@/lib/platform/organizations";
 
 export type JournalEntry = { idx: number; tag: string; when: number };
@@ -78,17 +80,33 @@ export async function checkDb(label: string, db: Db, entries: readonly JournalEn
 }
 
 /**
- * ═══ TRẦN THỜI GIAN MỖI TỔ CHỨC (sự cố 12/10/2026) ═══
+ * ═══ TRẦN THỜI GIAN MỖI TỔ CHỨC (sự cố 12/10/2026) VÀ CHỜ ĐÚNG LƯỢT ĐANG CHẠY (sự cố 18/10/2026) ═══
  *
- * Sau deploy #792, CSDL `qa` chạy câu dẫn xuất của 0245 tới trần 600 giây; script này mở tổ chức TUẦN TỰ và chờ vô hạn, nên treo tới
- * khi SSH của workflow deploy hết giờ ⇒ deploy đỏ mà smoke KHÔNG chạy, và các tổ chức đứng sau `qa` chưa được kiểm. Nay mỗi tổ chức
- * có trần (`VERIFY_ORG_MIGRATE_TIMEOUT_S`, mặc định 150 giây — DÀI HƠN trần chờ khoá migrate 120 giây, để khi ứng dụng đang cầm khoá
- * của tổ chức đó thì bước kiểm nhận LOCK_BUSY ⇒ DEGRADED_MIGRATION có lý do, thay vì một TIMEOUT không nói gì): quá trần ⇒ in ✗, HUỶ câu
- * migration đang chạy của chính tiến trình này
- * (`cancelOrganizationMigration`), ĐI TIẾP tổ chức sau, và cuối cùng thoát 1 — deploy vẫn đỏ đúng nghĩa (install-vps.sh ghi
- * MIGRATIONS_UNAPPLIED=1 rồi chạy tiếp smoke như mọi lần verify hỏng), chỉ là không treo.
+ * 12/10: CSDL `qa` chạy câu dẫn xuất của 0245 tới trần 600 giây; script mở tổ chức TUẦN TỰ và chờ vô hạn ⇒ treo tới khi SSH của workflow
+ * deploy hết giờ. Từ đó mỗi tổ chức có trần; quá trần ⇒ in ✗, HUỶ câu migration đang chạy CỦA CHÍNH TIẾN TRÌNH NÀY
+ * (`cancelOrganizationMigration`), đi tiếp tổ chức sau, cuối cùng thoát 1 (install-vps.sh ghi MIGRATIONS_UNAPPLIED=1 rồi chạy tiếp smoke).
+ *
+ * 18/10: trần cũ (150 giây) được chọn «dài hơn trần chờ khoá 120 giây» để khi ứng dụng đang migrate thì bước kiểm nhận LOCK_BUSY — tức là
+ * báo THỜI GIAN CHỜ CỦA CHÍNH NÓ thay cho kết quả lượt migrate thật đang chạy trong ứng dụng. Nay bước kiểm có vai trò VERIFY
+ * (`setOrgMigrateRole`) và việc mở tổ chức đi qua `coordinateOrgMigration` (db/migrate.ts): thấy tiến trình khác đang migrate ⇒ CHỜ lượt đó
+ * tới hạn tự khai + biên, rồi báo ĐÚNG kết quả của nó (OK · DEGRADED kèm lý do CỦA lượt đó · lỗi), ghi rõ AI chạy — không bao giờ chạy lượt
+ * thứ hai. Vì vậy trần mỗi tổ chức DẪN XUẤT từ trần lượt (`orgMigrateRunTimeoutMs()` + 2 × biên): dù chính bước kiểm chạy lượt (bị tự huỷ
+ * ở trần lượt) hay chờ lượt của người khác (tối đa hạn của họ + biên), trần này chỉ là lưới an toàn cuối. Ghi đè `VERIFY_ORG_MIGRATE_TIMEOUT_S`.
+ *
+ * NGÂN SÁCH TỔNG (`VERIFY_TOTAL_BUDGET_S`, mặc định 900 giây): chờ đúng lượt thật có thể dài tới trần lượt, nên nhiều tổ chức chậm cùng lúc
+ * không được kéo bước kiểm quá giờ SSH của deploy (35 phút, gồm ~9 phút dựng). Hết ngân sách ⇒ tổ chức còn lại in «CHƯA KIỂM» và bước kiểm
+ * ĐỎ — không bao giờ coi là khớp.
  */
-export const VERIFY_ORG_TIMEOUT_DEFAULT_S = 150;
+export function verifyOrgTimeoutMs(env: Record<string, string | undefined> = process.env): number {
+  const s = Number((env.VERIFY_ORG_MIGRATE_TIMEOUT_S || "").trim());
+  return Number.isFinite(s) && s > 0 ? s * 1000 : orgMigrateRunTimeoutMs(env) + 2 * ORG_MIGRATE_HOLDER_MARGIN_MS;
+}
+
+export const VERIFY_TOTAL_BUDGET_DEFAULT_S = 900;
+export function verifyTotalBudgetMs(env: Record<string, string | undefined> = process.env): number {
+  const s = Number((env.VERIFY_TOTAL_BUDGET_S || "").trim());
+  return (Number.isFinite(s) && s > 0 ? s : VERIFY_TOTAL_BUDGET_DEFAULT_S) * 1000;
+}
 
 /*
  * ═══ DEGRADED_MIGRATION (chủ shop 12/10/2026, «Serve with old schema») ═══
@@ -97,19 +115,21 @@ export const VERIFY_ORG_TIMEOUT_DEFAULT_S = 150;
  * migration áp xong.
  */
 
-export function verifyOrgTimeoutMs(env: Record<string, string | undefined> = process.env): number {
-  const s = Number((env.VERIFY_ORG_MIGRATE_TIMEOUT_S || "").trim());
-  return (Number.isFinite(s) && s > 0 ? s : VERIFY_ORG_TIMEOUT_DEFAULT_S) * 1000;
-}
-
-export type OrgVerifyStatus = "OK" | "MISSING" | "DEGRADED" | "ERROR" | "TIMEOUT";
-export type OrgVerifyResult = { code: string; status: OrgVerifyStatus; seconds: number; detail?: string };
+export type OrgVerifyStatus = "OK" | "MISSING" | "DEGRADED" | "ERROR" | "TIMEOUT" | "NOT_CHECKED";
+export type OrgVerifyResult = { code: string; status: OrgVerifyStatus; seconds: number; detail?: string; run?: string };
 
 const HET_GIO = Symbol("het-gio");
 
+/** Một dòng về LƯỢT MIGRATE gần nhất của tổ chức — ai chạy, trạng thái, bao lâu, lý do. HÀM THUẦN. */
+export function runStatusLine(code: string, status: OrgMigrateStatus | null, self: OrgMigrateHolder | null, readError?: string | null): string {
+  if (!status) return `[migrations]   «${code}» · lượt migrate: ${readError ? `chưa đọc được trạng thái (${readError})` : "chưa có lượt nào được ghi (không còn gì để áp từ khi có sổ trạng thái)"}`;
+  const other = self !== null && !sameProcess(status.holder, self);
+  return `[migrations]   «${code}» · lượt migrate: ${describeOrgMigrateStatus(status)}${other ? " — do tiến trình KHÁC chạy; bước kiểm chờ và nhận kết quả, không chạy lượt thứ hai" : ""}`;
+}
+
 /**
- * Mở + đối chiếu từng tổ chức, MỖI tổ chức một trần thời gian. Tiêm phụ thuộc (mở · đối chiếu · huỷ · ghi log) để bài kiểm chạy được
- * không cần Postgres. Một tổ chức hỏng / quá trần KHÔNG chặn tổ chức sau.
+ * Mở + đối chiếu từng tổ chức, MỖI tổ chức một trần thời gian, cả lượt một ngân sách. Tiêm phụ thuộc (mở · đối chiếu · huỷ · trạng thái
+ * lượt · ghi log · đồng hồ) để bài kiểm chạy được không cần Postgres. Một tổ chức hỏng / quá trần KHÔNG chặn tổ chức sau.
  */
 export async function verifyOrganizations<T>(
   codes: readonly string[],
@@ -119,20 +139,42 @@ export async function verifyOrganizations<T>(
     cancel: (code: string) => Promise<boolean>;
     /** Tổ chức đang phục vụ bằng lược đồ cũ sau lượt mở này — `null` = không. */
     degraded?: (code: string) => { reason: string; missing: readonly string[] } | null;
+    /** Trạng thái bền của lượt migrate gần nhất (CSDL nhà) — in kèm mọi kết quả. */
+    runStatus?: (code: string) => Promise<{ status: OrgMigrateStatus | null; error: string | null }>;
+    self?: OrgMigrateHolder;
     timeoutMs: number;
+    budgetMs?: number;
+    now?: () => number;
     log?: (line: string) => void;
     error?: (line: string) => void;
   },
 ): Promise<OrgVerifyResult[]> {
   const log = deps.log ?? ((l: string) => console.log(l));
   const error = deps.error ?? ((l: string) => console.error(l));
+  const now = deps.now ?? Date.now;
+  const begun = now();
   const out: OrgVerifyResult[] = [];
+  const describeRun = async (code: string): Promise<string | undefined> => {
+    if (!deps.runStatus) return undefined;
+    const r = await deps.runStatus(code).catch((e: unknown) => ({ status: null, error: e instanceof Error ? e.message : String(e) }));
+    const line = runStatusLine(code, r.status, deps.self ?? null, r.error);
+    log(line);
+    return line;
+  };
   for (const code of codes) {
+    const left = deps.budgetMs === undefined ? deps.timeoutMs : deps.budgetMs - (now() - begun);
+    if (left <= 0) {
+      const detail = `CHƯA KIỂM — hết ngân sách ${Math.round((deps.budgetMs ?? 0) / 1000)} giây của bước kiểm (các tổ chức trước đã dùng hết khi chờ lượt migrate thật). Không phải «khớp».`;
+      error(`[migrations] ✗ tổ chức «${code}»: ${detail}`);
+      out.push({ code, status: "NOT_CHECKED", seconds: 0, detail });
+      continue;
+    }
+    const timeoutMs = Math.min(deps.timeoutMs, left);
     const started = Date.now();
     const secs = () => (Date.now() - started) / 1000;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const hetGio = new Promise<typeof HET_GIO>((resolve) => {
-      timer = setTimeout(() => resolve(HET_GIO), deps.timeoutMs);
+      timer = setTimeout(() => resolve(HET_GIO), timeoutMs);
     });
     const work = (async () => {
       const db = await deps.open(code);
@@ -144,23 +186,23 @@ export async function verifyOrganizations<T>(
         // Lời hứa `work` vẫn có người nghe (Promise.race đã gắn) — nó hỏng muộn sau lệnh huỷ cũng không thành lỗi không ai bắt.
         work.catch(() => undefined);
         const sent = await deps.cancel(code).catch(() => false);
-        const detail = `quá ${Math.round(deps.timeoutMs / 1000)} giây chưa mở / migrate xong (migration chạy lâu, hoặc tiến trình khác đang giữ khoá migrate của tổ chức này)${sent ? " — đã gửi lệnh HUỶ câu migration đang chạy của bước kiểm" : ""}. Đi tiếp tổ chức sau.`;
+        const detail = `quá ${Math.round(timeoutMs / 1000)} giây chưa mở / migrate xong${sent ? " — đã gửi lệnh HUỶ câu migration đang chạy của chính bước kiểm" : " — bước kiểm không chạy lượt nào để huỷ (xem dòng «lượt migrate»: ai đang chạy, hạn tới đâu)"}. Đi tiếp tổ chức sau.`;
         error(`[migrations] ✗ tổ chức «${code}»: ${detail}`);
-        out.push({ code, status: "TIMEOUT", seconds: secs(), detail });
+        out.push({ code, status: "TIMEOUT", seconds: secs(), detail, run: await describeRun(code) });
       } else {
         const dg = deps.degraded?.(code) ?? null;
         if (dg) {
           const detail = `DEGRADED_MIGRATION — đang phục vụ bằng LƯỢC ĐỒ CŨ, thiếu ${dg.missing.join(", ")}; lý do: ${dg.reason}`;
           error(`[migrations] ✗ tổ chức «${code}»: ${detail}`);
-          out.push({ code, status: "DEGRADED", seconds: secs(), detail });
+          out.push({ code, status: "DEGRADED", seconds: secs(), detail, run: await describeRun(code) });
         } else {
-          out.push({ code, status: r > 0 ? "MISSING" : "OK", seconds: secs() });
+          out.push({ code, status: r > 0 ? "MISSING" : "OK", seconds: secs(), run: await describeRun(code) });
         }
       }
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e);
       error(`[migrations] ✗ tổ chức «${code}»: không mở / migrate được — ${detail}`);
-      out.push({ code, status: "ERROR", seconds: secs(), detail });
+      out.push({ code, status: "ERROR", seconds: secs(), detail, run: await describeRun(code) });
     } finally {
       if (timer) clearTimeout(timer);
     }
@@ -173,18 +215,30 @@ export async function verifyOrganizations<T>(
 }
 
 async function main() {
+  // Vai trò của tiến trình TRƯỚC khi mở tổ chức nào: lượt migrate do bước kiểm chạy được ghi là VERIFY, và khi ứng dụng đang migrate thì
+  // bước kiểm CHỜ tới hạn tự khai của ứng dụng (không bị trần chờ ngắn của ứng dụng cắt ngang).
+  setOrgMigrateRole("VERIFY");
   const journal = { entries: readJournalEntries() };
   let failed = (await checkDb("nhà", await getDb(), journal.entries)) > 0;
 
   const codes = fanOutOrganizationCodes(await listOrganizations());
   const timeoutMs = verifyOrgTimeoutMs();
-  if (codes.length) console.log(`[migrations] ${codes.length} tổ chức khách đang hoạt động — mở (và migrate) lần lượt từng CSDL, trần ${Math.round(timeoutMs / 1000)} giây mỗi tổ chức.`);
+  const budgetMs = verifyTotalBudgetMs();
+  if (codes.length) {
+    console.log(
+      `[migrations] ${codes.length} tổ chức khách đang hoạt động — mở (và migrate, hoặc CHỜ lượt đang chạy của tiến trình khác) lần lượt từng CSDL, ` +
+        `trần ${Math.round(timeoutMs / 1000)} giây mỗi tổ chức · ngân sách ${Math.round(budgetMs / 1000)} giây cả lượt · trần một lượt migrate ${Math.round(orgMigrateRunTimeoutMs() / 1000)} giây.`,
+    );
+  }
   const results = await verifyOrganizations(codes, {
     open: (code) => getDbFor({ code, isHome: false }),
     check: (code, db, openedSeconds) => checkDb(`tổ chức «${code}» (${openedSeconds.toFixed(1)} giây)`, db, journal.entries),
     cancel: (code) => cancelOrganizationMigration(code),
     degraded: (code) => organizationMigrationDegraded(code),
+    runStatus: (code) => readOrgMigrationStatus(code),
+    self: currentOrgMigrateHolder(),
     timeoutMs,
+    budgetMs,
   });
   if (results.some((r) => r.status !== "OK")) failed = true;
 

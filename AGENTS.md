@@ -639,6 +639,18 @@ deploy dừng, không phải cảnh báo.
     khôi phục OK của CHÍNH CSDL ấy; kích hoạt lại chỉ đổi trạng thái sau khi migrate + `checkDb` khớp, về ĐÚNG trạng thái cũ
     (không đọc được ⇒ SUSPENDED). Không xoá dữ liệu, không DROP; sao lưu vẫn chạy cho tổ chức lưu trữ.
 
+76. **MỘT TỔ CHỨC, MỘT LƯỢT MIGRATE — NGƯỜI ĐẾN SAU CHỜ VÀ BÁO KẾT QUẢ CỦA LƯỢT THẬT** (`db/migrate.ts::coordinateOrgMigration`,
+    `lib/constants/org-migrate-coordination.ts`, bảng `platform_org_migration_status` ở CSDL nhà): ai cầm khoá tư vấn của CSDL tổ
+    chức là người điều phối DUY NHẤT; nó ghi RUNNING (vai trò · pid · máy · HẠN tự khai) rồi DONE / DEGRADED / FAILED + lý do TRƯỚC
+    khi nhả khoá, và tự huỷ câu đang chạy khi quá trần lượt. Tiến trình thấy khoá bận KHÔNG mở lượt thứ hai và KHÔNG báo thời gian
+    chờ khoá của chính mình như kết quả của tổ chức: nó chờ tới hạn của người điều phối + biên rồi nhận kết quả của lượt ấy, kèm
+    tên người chạy (deploy 18/10/2026: bước kiểm báo «Tiến trình khác đang migrate…» trong khi lượt thật của `qa` đang chạy trong
+    ứng dụng và không ai ghi nó kết thúc ra sao). «Nhận kết quả» chỉ khi sổ của CHÍNH mình đọc được và đủ — DONE của người khác
+    chỉ nói họ áp xong sổ của HỌ; mỗi lượt chỉ được nhận MỘT lần; lượt hỏng của tiến trình khác cho cùng đích thì lùi theo
+    `ORG_MIGRATE_BACKOFF_MS`, không chạy lại ngay. Khoá đã nhả mà dòng còn RUNNING ⇒ tiếp quản, ghi rõ lượt bị bỏ dở. Mọi chờ đều
+    có trần hữu hạn; ứng dụng chờ trần ngắn rồi phục vụ tạm / lùi ngắn. Sửa sự cố kiểu này bằng cách nâng trần hay loại tổ chức
+    khỏi bước kiểm là che lỗi: tổ chức ĐANG HOẠT ĐỘNG mà lượt thật hỏng LUÔN làm bước kiểm đỏ.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng
   `npm run db:generate`**: ảnh chụp `drizzle/meta/*_snapshot.json` chỉ tới `0032`, nên nó sinh migration
