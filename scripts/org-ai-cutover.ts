@@ -61,8 +61,8 @@ if (CHAY_THANG && !CO_GHI) process.env.ERP_READ_ONLY = "1";
 import "dotenv/config";
 import { createHash, createSign } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { and, eq, gte, sql } from "drizzle-orm";
-import { getDbForInspection, getPlatformDb, schema } from "@/db";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
+import { getDb, getDbForInspection, getPlatformDb, schema } from "@/db";
 import { giaCuaModel } from "@/lib/ai/provider";
 import { platformChatAi } from "@/lib/ai-builder/provider";
 import { readOrgAiControl, SCRIPT_AI_CREDIT_MAX_USD, SCRIPT_AI_LIMIT_KEY, setOrgAiLimitAsOperator, type OrgAiControl, type OrgAiLimitScriptResult } from "@/lib/ai-usage/control";
@@ -77,7 +77,10 @@ import { platformAudit } from "@/lib/platform/audit";
 import { withOrganization } from "@/lib/platform/context";
 import { findOrganization, listOrganizations } from "@/lib/platform/organizations";
 import { DEFAULT_SALES_CHATBOT_CONFIG, effectiveFallback, parseSalesChatbotConfig, SALES_CHATBOT_SETTING_KEY, salesChatbotConfigZ, type SalesBotConnector } from "@/lib/sales-chatbot/config";
+import { extractVndAmounts } from "@/lib/sales-chatbot/claim-guard";
 import { chatTurn, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
+import { loadFocusProducts } from "@/lib/sales-chatbot/quick-replies";
+import { productsNamedIn } from "@/lib/sales-chatbot/quick-reply-focus";
 import { saveChatbotEngineAsOperator } from "@/lib/sales-chatbot/settings";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -621,15 +624,15 @@ export function cutoverVerdict(rows: readonly UsageGroup[]): { salesPlatform: nu
   return out;
 }
 
-export type CutoverArgs = { ok: true; code: string; mode: "AUDIT" | "APPLY" | "PROBE"; credit: number | null; since: Date | null } | { ok: false; error: string };
+export type CutoverArgs = { ok: true; code: string; mode: "AUDIT" | "APPLY" | "PROBE"; credit: number | null; since: Date | null; probeSet?: "quick-reply" } | { ok: false; error: string };
 
 /** Ô arg ⇒ chế độ. Cờ lạ / lặp / sai cặp ⇒ lỗi cách dùng — không đoán ý (gõ nhầm `--credits` mà vẫn chạy `--apply` là chuyển mù). Thông điệp không lặp lại giá trị đã gõ. */
 export function parseCutoverArgs(args: readonly string[]): CutoverArgs {
   const positional = args.filter((a) => !a.startsWith("--"));
   const flags = args.filter((a) => a.startsWith("--"));
   if (positional.length !== 1) return { ok: false, error: positional.length ? "chỉ nhận MỘT mã tổ chức" : "thiếu mã tổ chức" };
-  const known = (f: string) => f === "--apply" || f === "--apply-probe" || f.startsWith("--credit=") || f.startsWith("--since=");
-  if (flags.some((f) => !known(f))) return { ok: false, error: "cờ lạ — chỉ nhận --apply, --credit=<USD>, --apply-probe, --since=<ISO>" };
+  const known = (f: string) => f === "--apply" || f === "--apply-probe" || f.startsWith("--credit=") || f.startsWith("--since=") || f === "--probe-set=quick-reply";
+  if (flags.some((f) => !known(f))) return { ok: false, error: "cờ lạ — chỉ nhận --apply, --credit=<USD>, --apply-probe, --since=<ISO>, --probe-set=quick-reply" };
   if (new Set(flags.map((f) => f.split("=")[0])).size !== flags.length) return { ok: false, error: "mỗi cờ chỉ một lần" };
   const apply = flags.includes("--apply");
   const probe = flags.includes("--apply-probe");
@@ -638,6 +641,8 @@ export function parseCutoverArgs(args: readonly string[]): CutoverArgs {
   const sinceRaw = flags.find((f) => f.startsWith("--since="))?.slice("--since=".length);
   if (creditRaw !== undefined && !apply) return { ok: false, error: "--credit chỉ đi cùng --apply (đặt credit rồi chuyển trong CÙNG một lượt)" };
   if (sinceRaw !== undefined && !probe) return { ok: false, error: "--since chỉ đi cùng --apply-probe" };
+  const probeSet = flags.includes("--probe-set=quick-reply");
+  if (probeSet && !probe) return { ok: false, error: "--probe-set chỉ đi cùng --apply-probe" };
   let credit: number | null = null;
   if (creditRaw !== undefined) {
     if (!/^\d{1,4}(?:\.\d{1,2})?$/.test(creditRaw)) return { ok: false, error: "--credit phải là số USD dạng 150 hoặc 117.5 (dấu chấm, tối đa 2 chữ số thập phân)" };
@@ -649,7 +654,41 @@ export function parseCutoverArgs(args: readonly string[]): CutoverArgs {
     since = new Date(sinceRaw);
     if (!sinceRaw || Number.isNaN(since.getTime())) return { ok: false, error: "--since phải là mốc ISO, ví dụ 2026-10-08T04:00:00Z" };
   }
-  return { ok: true, code: positional[0], mode: apply ? "APPLY" : probe ? "PROBE" : "AUDIT", credit, since };
+  return { ok: true, code: positional[0], mode: apply ? "APPLY" : probe ? "PROBE" : "AUDIT", credit, since, ...(probeSet ? { probeSet: "quick-reply" as const } : {}) };
+}
+
+/**
+ * `--apply-probe --probe-set=quick-reply` (chủ shop 18/10/2026, «sau deploy xác minh HSLC TRỰC TIẾP»): mỗi ca một hội thoại THỬ (kênh TEST
+ * — không nhắn khách thật, công cụ ghi chỉ mô phỏng, không đơn / khách thật), chạy chatTurn THẬT trên mã đang chạy, máy chấm câu bot. Script
+ * KHÔNG ghi thẳng bảng nào (luật của script — chỉ qua lõi `openConversation` / `chatTurn`), nên hội thoại thử ở lại kênh TEST như lượt thử
+ * cũ; conv-money-trace bỏ kênh TEST khỏi phép đo. Ca «lời chào page mang tên shop» cần chèn tin page ⇒ nằm ở bài kiểm thuần + biến thể
+ * của `conv-money-trace --replay-quick`, không ở đây. Chữ khách là chữ TỰ DỰNG. `mustName` / `mustNotName` so với TÊN
+ * sản phẩm của danh mục; `noDefault` = không được báo giá ĐÚNG MỘT món khi khách chưa nói món; `onlyItems` = giỏ / đơn nháp không được
+ * có món khác (không tự thêm món). HSLC-tính (tên món của shop) — tổ chức khác thì ca thiếu món in «KHÔNG ÁP DỤNG», không phải ĐẠT.
+ */
+export type QuickReplyProbeCase = { key: string; say: string[]; mustName?: RegExp; mustNotName?: RegExp; noDefault?: boolean; onlyItems?: RegExp };
+export const QUICK_REPLY_PROBE_CASES: QuickReplyProbeCase[] = [
+  { key: "hoi-cha-ca", say: ["xin giá chả cá"], mustName: /^Chả cá/i, mustNotName: /^Nem/i },
+  { key: "hoi-cha-muc", say: ["chả mực giá sao shop"], mustName: /^Chả mực/i, mustNotName: /^(Nem|Chả cá)/i },
+  { key: "hoi-nem", say: ["nem bao nhiêu"], mustName: /^Nem/i },
+  { key: "hoi-chung-bao-gia", say: ["báo giá"], noDefault: true },
+  { key: "hoi-chung-1kg", say: ["giá bao nhiêu 1kg ạ"], noDefault: true },
+  { key: "hoi-chung-ten-shop", say: ["Hải Sản Hạ Long báo giá giúp mình"], noDefault: true, mustNotName: /^Nem/i },
+  { key: "chon-cha-ca-khong-tu-them", say: ["cho mình 1kg chả cá thu"], mustName: /^Chả cá/i, onlyItems: /^Chả cá/i },
+];
+
+export type ProbeVerdict = "PASS" | "FAIL" | "N/A";
+/** Chấm một câu bot — HÀM THUẦN. `items` = tên món trong giỏ / đơn nháp sau lượt. */
+export function judgeProbe(c: QuickReplyProbeCase, reply: string, names: readonly string[], items: readonly string[]): { verdict: ProbeVerdict; why: string } {
+  const needed = [c.mustName, c.mustNotName, c.onlyItems].filter((r): r is RegExp => Boolean(r));
+  if (c.mustName && !names.some((n) => c.mustName!.test(n))) return { verdict: "N/A", why: "danh mục không có món của ca này" };
+  if (!reply.trim()) return { verdict: "FAIL", why: "bot không trả lời" };
+  const named = productsNamedIn(reply, names);
+  if (c.mustName && !named.some((n) => c.mustName!.test(n))) return { verdict: "FAIL", why: `không nói món khách hỏi (nói: ${named.join(", ") || "không món nào"})` };
+  if (c.mustNotName && named.some((n) => c.mustNotName!.test(n))) return { verdict: "FAIL", why: `nói SAI món: ${named.filter((n) => c.mustNotName!.test(n)).join(", ")}` };
+  if (c.noDefault && named.length === 1 && extractVndAmounts(reply).length > 0) return { verdict: "FAIL", why: `khách chưa nói món mà bot báo giá MỘT món: ${named[0]}` };
+  if (c.onlyItems && items.some((n) => !c.onlyItems!.test(n))) return { verdict: "FAIL", why: `giỏ / đơn có món khách không chọn: ${items.filter((n) => !c.onlyItems!.test(n)).join(", ")}` };
+  return { verdict: needed.length || c.noDefault ? "PASS" : "N/A", why: "đúng" };
 }
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300);
@@ -1258,6 +1297,46 @@ async function audit(org: Org): Promise<number> {
   return 0;
 }
 
+async function probeQuickReplies(org: Org): Promise<number> {
+  const out = await withOrganization(org.code, async () => {
+    const names = (await loadFocusProducts()).map((p) => p.name);
+    const db = await getDb();
+    const c = schema.salesChatConversations;
+    const res: { key: string; verdict: ProbeVerdict; why: string; reply: string; quick: number; ai: number }[] = [];
+    for (const k of QUICK_REPLY_PROBE_CASES) {
+      const conv = await openConversation("TEST", { createdBy: null });
+      try {
+        let reply = "";
+        for (const text of k.say) {
+          const turn = await chatTurn(conv.id, text, { channel: "TEST", actorId: null });
+          if (!turn.ok) throw new Error(turn.error);
+          const msgs = turn.view.messages;
+          const lastUser = msgs.map((x) => x.role).lastIndexOf("user");
+          reply = msgs.slice(lastUser + 1).filter((x) => x.role === "assistant").map((x) => x.text).join("\n");
+        }
+        const [row] = await db.select({ state: c.state, quick: c.quickReplies, ai: c.aiCalls }).from(c).where(eq(c.id, conv.id));
+        // Món trong giỏ / đơn nháp: theo mẫu mã (tên sản phẩm của danh mục), và theo nhãn khách nói khi chưa gắn mẫu mã.
+        const st = (row?.state ?? {}) as { cart?: { selectedItems?: { label?: string; variantId?: string | null }[] }; draft?: { lines?: { variantId: string }[] } };
+        const vids = [...(st.cart?.selectedItems ?? []).map((x) => x.variantId ?? ""), ...(st.draft?.lines ?? []).map((x) => x.variantId)].filter(Boolean);
+        const pv = schema.productVariants;
+        const pr = schema.products;
+        const byVariant = vids.length ? (await db.select({ name: pr.name }).from(pv).innerJoin(pr, eq(pr.id, pv.productId)).where(inArray(pv.id, vids))).map((x) => x.name) : [];
+        const items = [...byVariant, ...(st.cart?.selectedItems ?? []).filter((x) => !x.variantId).flatMap((x) => productsNamedIn(x.label ?? "", names))];
+        const j = judgeProbe(k, reply, names, items);
+        res.push({ key: k.key, ...j, reply, quick: Number(row?.quick ?? 0), ai: Number(row?.ai ?? 0) });
+      } catch (e) {
+        res.push({ key: k.key, verdict: "FAIL", why: `lỗi lượt: ${errorText(e)}`, reply: "", quick: 0, ai: 0 });
+      }
+    }
+    return res;
+  });
+  for (const r of out) console.log(`Ca ${r.key}: ${r.verdict} — ${r.why} · câu mẫu ${r.quick} · lời gọi AI ${r.ai} · bot: «${r.reply.replace(/\s+/g, " ").slice(0, 400)}»`);
+  const dem = (v: ProbeVerdict) => out.filter((r) => r.verdict === v).length;
+  tomTat(`Kiểm câu mẫu trực tiếp (kênh TEST, không nhắn khách thật, không đơn thật): ${out.length} ca · ĐẠT ${dem("PASS")} · TRƯỢT ${dem("FAIL")} · KHÔNG ÁP DỤNG ${dem("N/A")}${dem("FAIL") ? ` · ca trượt: ${out.filter((r) => r.verdict === "FAIL").map((r) => r.key).join(", ")}` : ""}`);
+  tomTat(`Kiểm câu mẫu trực tiếp: trả lời bằng câu mẫu ${out.filter((r) => r.quick > 0).length} ca · có gọi AI ${out.filter((r) => r.ai > 0).length} ca`);
+  return dem("FAIL") ? 1 : 0;
+}
+
 async function probe(org: Org, since: Date | null): Promise<number> {
   const t = await withOrganization(org.code, async () => {
     // Máy làm ⇒ không mang tên người (luật 34 / 36); dấu vết nằm ở nhật ký nền tảng của lượt chuyển.
@@ -1303,6 +1382,7 @@ async function main(): Promise<number> {
     return 64;
   }
   if (a.mode === "APPLY") return applyCutover(org, a.credit, realDeps());
+  if (a.mode === "PROBE" && a.probeSet === "quick-reply") return probeQuickReplies(org);
   if (a.mode === "PROBE") return probe(org, a.since);
   return audit(org);
 }
