@@ -26,24 +26,20 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-18T14:46:38.590Z",
-  "updated_at": "2026-10-18T15:13:52.197Z",
-  "last_heartbeat": "2026-10-18T15:06:45.156Z",
+  "updated_at": "2026-10-18T15:41:47.428Z",
+  "last_heartbeat": "2026-10-18T15:41:47.428Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/cau-mau-can-cu",
-    "sha": "8b355c7085b8ad56e8e2c6fa6d403b827b58a8da",
-    "at": "2026-10-18T15:06:45.156Z",
+    "sha": "b8d0c50381051b1840999f3798f8f6dfb886f448",
+    "at": "2026-10-18T15:41:47.428Z",
     "actor": "DESKTOP-56TH98Y:wt-cau-mau-can-cu",
     "title": "Câu mẫu một món chỉ trả lời khi có căn cứ món + lỗi danh mục chặn",
-    "summary": "Sửa theo review FAIL: cặp đuôi cần từ phân biệt (hải sản/tên shop không phải tên Nem), stopword màu/cỡ/thời tiết, ngữ cảnh bài viết vào căn cứ, bộ lọc đóng để lại log + dấu, E bỏ TEST + responseMs an toàn.",
+    "summary": "Dựng lại ảnh chụp vàng cho câu lời nhắc CHƯA RÕ MÓN — chỉ đổi prompts.",
     "tests": [
-      "p0-quick-reply-focus: ĐẠT",
-      "14 bộ có câu mẫu: ĐẠT",
-      "đột biến bỏ từ phân biệt: ĐỎ",
-      "đột biến bỏ luật căn cứ: ĐỎ",
-      "đột biến lỗi danh mục thả lọc: ĐỎ",
-      "eslint: sạch",
-      "tsc: sạch (trừ qrcode máy này)"
+      "sales-agent-golden: ĐẠT sau update.ts",
+      "soát 19 ảnh chụp: chỉ khác câu lời nhắc mới, 0 trường khác",
+      "p0-quick-reply-focus + 14 bộ câu mẫu: ĐẠT (lượt trước)"
     ]
   }
 }
