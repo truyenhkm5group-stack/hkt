@@ -1,4 +1,3 @@
-{"at":"2026-10-10T15:25:45.488Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"sync-runner-lock","detail":"#781 cho fix/sync-runner-lock @ 54638353b308"}
 {"at":"2026-10-10T15:26:05.742Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#781 @ 54638353b308 · Đọc báo cáo + diff: khoá giữ đồng bộ trước await, releaseJob theo danh tính; release chỉ main + environment; agent-run không giữ token, mã việc qua env kiểm dạng; còn rủi ro GITHUB_ENV trước bước đẩy (ghi lại, việc sau)"}
 {"at":"2026-10-10T15:32:55.196Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-sales-knowledge","detail":"feat/ai-sales-knowledge @ 23840099e176 · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T15:33:35.961Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"ai-sales-knowledge","detail":"#782 cho feat/ai-sales-knowledge @ 23840099e176"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-18T10:18:48.305Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"OVERLAP_ACCEPTED","mission":"trace-by-time","detail":"OVERLAP_ACCEPTED với trace-route-hold: phạm vi scripts/conv-money-trace.ts — cách tích hợp: chỉ thêm nhánh --at"}
 {"at":"2026-10-18T10:19:15.388Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"HANDOFF","mission":"trace-by-time","detail":"claude/trace-by-name @ dfb94c7159e4 · 2 lệnh kiểm thử"}
 {"at":"2026-10-18T10:21:31.834Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"trace-by-time","detail":"#896 cho claude/trace-by-name @ dfb94c7159e4"}
+{"at":"2026-10-18T10:21:56.962Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#896 @ dfb94c7159e4 · lead: tìm hội thoại theo MỐC GIỜ (--at/--window ≤120′), không nhận tên khách ở ô arg (kho PUBLIC); chữ tin chỉ ở phần mã hoá, tóm tắt chỉ số đếm"}

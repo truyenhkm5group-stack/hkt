@@ -1,0 +1,8 @@
+{
+  "pr": 896,
+  "sha": "dfb94c7159e4614d9b39166d9f42cdaee63bfd8f",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-18T10:21:35.632Z",
+  "note": "lead: tìm hội thoại theo MỐC GIỜ (--at/--window ≤120′), không nhận tên khách ở ô arg (kho PUBLIC); chữ tin chỉ ở phần mã hoá, tóm tắt chỉ số đếm"
+}
