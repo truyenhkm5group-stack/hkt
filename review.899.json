@@ -1,0 +1,8 @@
+{
+  "pr": 899,
+  "sha": "9329252320a216af45594e061ef9b3593aa0445c",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-18T13:39:39.786Z",
+  "note": "lead: chỉ đọc; mẫu số D (tin khách · câu mẫu đủ điều kiện · tin bot là câu mẫu · luật món đổi quyết định · khớp trần sai · sau luật vẫn sai) + --replay-quick tất định (không AI, không gửi tin); tóm tắt chỉ số đếm; hàm lib đều có trong image e0cecc5c"
+}
