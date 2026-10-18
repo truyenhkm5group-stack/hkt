@@ -3,7 +3,7 @@
   "mission_id": "org-migrate-coordination",
   "title": "Mỗi tổ chức một lượt migrate: bước kiểm deploy chờ và báo đúng kết quả lượt thật (sổ trạng thái 0248)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-migrate-lock",
@@ -38,9 +38,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-18T07:32:40.354Z",
-  "updated_at": "2026-10-18T09:18:46.883Z",
+  "updated_at": "2026-10-18T10:00:21.789Z",
   "last_heartbeat": "2026-10-18T09:17:01.243Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#895 → f2d4014857ab804d83dc3465946f9f26f0c1251a"
+  },
   "handoff": {
     "branch": "claude/org-migrate-coordination",
     "sha": "861c08010dc428ecc5d314fea2e0080b66844892",
