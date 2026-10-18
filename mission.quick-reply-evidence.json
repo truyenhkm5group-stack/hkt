@@ -3,7 +3,7 @@
   "mission_id": "quick-reply-evidence",
   "title": "Câu mẫu một món chỉ trả lời khi có căn cứ món + lỗi danh mục chặn",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-cau-mau-can-cu",
@@ -26,9 +26,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-18T14:46:38.590Z",
-  "updated_at": "2026-10-18T15:41:47.428Z",
+  "updated_at": "2026-10-18T16:14:41.343Z",
   "last_heartbeat": "2026-10-18T15:41:47.428Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#900 → e548e31c44996633e9e5839a22a44d413f02d624"
+  },
   "handoff": {
     "branch": "claude/cau-mau-can-cu",
     "sha": "b8d0c50381051b1840999f3798f8f6dfb886f448",
