@@ -3,7 +3,7 @@
   "mission_id": "quick-reply-evidence",
   "title": "Câu mẫu một món chỉ trả lời khi có căn cứ món + lỗi danh mục chặn",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-cau-mau-can-cu",
@@ -24,7 +24,34 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T14:46:38.590Z",
-  "updated_at": "2026-10-18T14:46:38.590Z",
-  "last_heartbeat": "2026-10-18T14:46:38.590Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-18T14:47:08.489Z",
+  "last_heartbeat": "2026-10-18T14:47:08.489Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/cau-mau-can-cu",
+    "sha": "f40851c440a56b808460fd0aebe37e8a2cce2118",
+    "at": "2026-10-18T14:47:08.489Z",
+    "actor": "DESKTOP-56TH98Y:wt-cau-mau-can-cu",
+    "title": "Câu mẫu một món chỉ trả lời khi có căn cứ món + lỗi danh mục chặn",
+    "summary": "Chủ shop chốt 18/10: câu mẫu một món chỉ tự trả lời khi có căn cứ món; lỗi danh mục ⇒ bộ lọc đóng; offered chỉ lời mời một món ở câu shop gần nhất; đo E tốc độ/token. Cần deploy.",
+    "tests": [
+      "p0-quick-reply-focus: ĐẠT",
+      "self-service-journey: ĐẠT",
+      "sales-next-best-action: ĐẠT",
+      "sales-claim-guard: ĐẠT",
+      "sales-quote-640: ĐẠT",
+      "p0-855 + golden: ĐẠT",
+      "p0-871 + golden: ĐẠT",
+      "ai-customer-send: ĐẠT",
+      "saas-l5-billing-trial: ĐẠT",
+      "org-catalog: ĐẠT",
+      "conv-money-trace: ĐẠT",
+      "ops-log-leak: ĐẠT",
+      "p0-repeat-buyer: ĐẠT",
+      "đột biến bỏ luật căn cứ: ĐỎ",
+      "đột biến lỗi danh mục thả lọc: ĐỎ",
+      "eslint: sạch",
+      "tsc: sạch (trừ qrcode máy này)"
+    ]
+  }
 }
