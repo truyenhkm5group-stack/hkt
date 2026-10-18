@@ -1,0 +1,8 @@
+{
+  "pr": 891,
+  "sha": "1487952510e3cf893bbb34194fa72dbd9f0d1694",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-18T04:31:25.267Z",
+  "note": "lead: ghi kết quả đưa bình luận sang hộp thư bằng mã ĐÓNG (MOVED/EXISTING_INBOX/OPENED_NEW/ALREADY_COPIED/NO_INBOX/FAILED) + số tin chép vào state hội thoại bình luận, không dữ liệu khách, không migration; lỗi ghi không làm hỏng lượt trả lời; quét in theo danh sách đóng"
+}
