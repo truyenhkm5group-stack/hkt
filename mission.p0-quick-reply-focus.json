@@ -25,27 +25,27 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T11:21:14.826Z",
-  "updated_at": "2026-10-18T11:21:38.463Z",
-  "last_heartbeat": "2026-10-18T11:21:38.463Z",
+  "updated_at": "2026-10-18T11:36:20.249Z",
+  "last_heartbeat": "2026-10-18T11:36:20.249Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/cau-mau-dung-mon",
-    "sha": "94d69f484e83739620f29734f9f6dc0f8f97e7fe",
-    "at": "2026-10-18T11:21:38.463Z",
+    "sha": "caafafbe03e3217ba47780afd7a178d3b1e3dda9",
+    "at": "2026-10-18T11:36:20.249Z",
     "actor": "DESKTOP-56TH98Y:wt-cau-mau-dung-mon",
     "title": "P0 câu mẫu đúng món khách hỏi (ThanhPhương)",
-    "summary": "P0 HSLC ThanhPhương: câu mẫu nem mang nhầm cách hỏi «xin giá chả cá» ⇒ khớp chữ trả báo giá nem. Lõi: khoá món khách đang hỏi ở khớp chữ / AI chọn mã / send_quick_reply; cảnh báo cách hỏi gắn nhầm ở màn hình + org-catalog; dòng D ở conv-money-trace --scan. Cần deploy rồi đo production.",
+    "summary": "Sửa theo review: món đang bàn = khách hỏi ∪ shop mời sau đó; lời từ chối trung tính; NB2 từ đầu thông dụng + tên lồng nhau; NB3 miễn UPSELL ở khớp chữ.",
     "tests": [
-      "npx tsx p0-quick-reply-focus: ĐẠT (thuần + chatTurn PGlite 4 ca)",
-      "org-catalog pure+db: ĐẠT",
+      "p0-quick-reply-focus (thuần + 5 ca chatTurn PGlite): ĐẠT",
+      "org-catalog: ĐẠT",
       "conv-money-trace: ĐẠT",
       "ops-log-leak: ĐẠT",
       "sales-next-best-action: ĐẠT",
       "p0-repeat-buyer: ĐẠT",
-      "đột biến bỏ lọc khớp chữ: ĐỎ (nem 120.000 ₫)",
-      "đột biến bỏ chặn send_quick_reply: ĐỎ",
-      "eslint tệp đổi: sạch",
-      "tsc: sạch (trừ gói qrcode chưa cài ở máy này)"
+      "đột biến bỏ offered: ĐỎ",
+      "đột biến bỏ từ đầu thông dụng: ĐỎ",
+      "eslint: sạch",
+      "tsc: sạch (trừ qrcode chưa cài máy này)"
     ]
   }
 }
