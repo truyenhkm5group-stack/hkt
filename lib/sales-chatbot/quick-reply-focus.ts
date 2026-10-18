@@ -63,8 +63,20 @@ const rawTokens = (s: string) =>
     .split(" ")
     .filter((w) => w && !/^\d/.test(w) && w !== "kg" && w !== "g");
 
-/** Từ đuôi quá thông dụng để một mình gọi tên món (số đếm, bao bì, tính từ khen hàng, từ hay gặp trong câu chat). */
-const TAIL_STOP = new Set(["một", "hai", "ba", "bốn", "năm", "loại", "hộp", "gói", "túi", "chai", "lít", "size", "nhà", "làm", "ngon", "đặc", "biệt", "truyền", "thống", "nguyên", "chất", "tay", "cơm", "biển", "hải", "sản", "tươi", "sạch", "khô", "mới", "to", "nhỏ", "lớn", "thơm", "cay", "ngọt", "giòn", "hàng", "chính", "hãng", "set", "combo", "vị", "kèm", "quà", "cao", "cấp", "và", "với", "của", "cho"]);
+/**
+ * Từ đuôi quá thông dụng để làm CĂN CỨ gọi tên món: số đếm, bao bì, tính từ khen hàng, từ hay gặp trong câu chat, và — review #p0-quick-
+ * reply-evidence — ngành hàng / tên shop («hải sản»: «Hải Sản Hạ Long xin chào» không gọi tên Nem hải sản), màu, cỡ, thời tiết («màu
+ * trắng còn không» không gọi tên «Áo sơ mi trắng»; «trời nắng» không gọi tên «Cá thu một nắng»).
+ */
+const TAIL_STOP = new Set([
+  ...["một", "hai", "ba", "bốn", "năm", "loại", "hộp", "gói", "túi", "chai", "lít", "size", "nhà", "làm", "ngon", "đặc", "biệt", "truyền", "thống", "nguyên", "chất", "tay", "cơm", "biển", "hải", "sản", "tươi", "sạch", "khô", "mới", "to", "nhỏ", "lớn", "thơm", "cay", "ngọt", "giòn", "hàng", "chính", "hãng", "set", "combo", "vị", "kèm", "quà", "cao", "cấp", "và", "với", "của", "cho"],
+  ...["trắng", "đen", "đỏ", "xanh", "vàng", "hồng", "tím", "nâu", "xám", "kem", "cam", "ghi", "bạc", "màu", "sọc", "kẻ", "hoa"],
+  ...["vừa", "nhẹ", "dày", "mỏng", "dài", "ngắn", "rộng", "xl", "xxl", "m", "l", "s"],
+  ...["nắng", "mưa", "lạnh", "nóng", "gió", "mát"],
+  ...["shop", "tiệm", "quán", "cửa", "việt", "nam", "hà", "nội", "long", "hạ", "sài", "gòn"],
+]);
+/** Cùng danh sách, BỎ DẤU (cho cặp từ đuôi so bỏ dấu) + «gia» vì bỏ dấu thì «giá» ≡ «giã». */
+const TAIL_STOP_FOLD = new Set([...[...TAIL_STOP].map((w) => foldVi(w)), "gia"]);
 
 /**
  * Từ ĐẦU quá thông dụng để một mình gọi tên món dù danh mục chỉ có một món mang nó («ship nước ngoài», «chả cá luộc nước sôi» không gọi
@@ -83,6 +95,10 @@ export function productsNamedIn(text: string, names: readonly string[]): string[
   const rawSaid = rawTokens(text);
   const rawCount = new Map<string, number>();
   for (const { n } of toks) for (const w of new Set(rawTokens(n))) rawCount.set(w, (rawCount.get(w) ?? 0) + 1);
+  const foldCount = new Map<string, number>();
+  for (const { t } of toks) for (const w of new Set(t)) foldCount.set(w, (foldCount.get(w) ?? 0) + 1);
+  // Từ PHÂN BIỆT: chỉ một món trong danh mục mang nó, và không thuộc danh sách thông dụng.
+  const discriminates = (w: string) => !TAIL_STOP_FOLD.has(w) && foldCount.get(w) === 1;
   const hits: { n: string; spans: [number, number][] }[] = [];
   for (const { n, t } of toks) {
     const group = toks.filter((x) => x.t[0] === t[0]);
@@ -108,21 +124,23 @@ export function productsNamedIn(text: string, names: readonly string[]): string[
       spans.push([i, j]);
     }
     // Gọi bằng PHẦN ĐUÔI của tên, bỏ từ đầu («món mực giã đó» = Chả mực giã tay, «tôm bề bề» = Nem hải sản tôm bề bề): ít nhất HAI từ
-    // LIỀN NHAU đúng thứ tự trong tên. Một từ đuôi đứng một mình không đủ («giá» ≡ «giã» khi bỏ dấu).
+    // LIỀN NHAU đúng thứ tự trong tên, VÀ trong đoạn có ít nhất một từ PHÂN BIỆT (review: «hải sản» là ngành hàng / tên shop, không phải
+    // tên Nem; «cá cơm», «truyền thống», «nguyên chất» cũng vậy). Một từ đuôi đứng một mình không đủ («giá» ≡ «giã» khi bỏ dấu).
     if (!spans.length) {
       for (let i = 0; i + 1 < said.length; i++) {
         for (let k = 1; k + 1 < t.length; k++) {
           if (said[i] !== t[k] || said[i + 1] !== t[k + 1]) continue;
           let j = i + 1;
           while (j + 1 < said.length && k + (j - i) + 1 < t.length && said[j + 1] === t[k + (j - i) + 1]) j++;
-          spans.push([i, j]);
+          if (said.slice(i, j + 1).some(discriminates)) spans.push([i, j]);
         }
       }
     }
     // MỘT từ đuôi CÓ DẤU, chỉ một món trong danh mục mang nó, không phải từ thông dụng («món mực nhà mình» = Chả mực giã tay, «mắm»
     // = Nước mắm…). So CÓ DẤU nên «giá» không bao giờ thành «giã»; khách gõ không dấu thì không nhận (chỉ tốn token, không sai món).
     if (!spans.length && rawSaid.length === said.length) {
-      const one = new Set(rawTokens(n).slice(1).filter((w) => !TAIL_STOP.has(w) && rawCount.get(w) === 1));
+      // Đủ dài (≥ 3 chữ cái) để không phải một âm tiết đệm / cỡ áo.
+      const one = new Set(rawTokens(n).slice(1).filter((w) => [...w].length >= 3 && !TAIL_STOP.has(w) && rawCount.get(w) === 1));
       rawSaid.forEach((w, i) => {
         if (one.has(w)) spans.push([i, i]);
       });

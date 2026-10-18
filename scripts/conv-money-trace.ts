@@ -578,7 +578,9 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   tomTat(`B tin bot có số TỔNG ≠ tổng giỏ / nháp máy chủ ngay trước: ${B.msgs} tin / ${B.convs.size} hội thoại · số TỔNG khi chưa có giỏ / nháp nào ${B.noQuote} tin`);
   tomTat(`D câu mẫu nói về món KHÁC món khách đang hỏi: ${D.msgs} tin / ${D.convs.size} hội thoại · kèm ảnh ${D.images} tin · ${D.byTitle.size} câu mẫu khác nhau · ${tpls.length} câu mẫu · ${products.length} sản phẩm`);
   tomTat(`D mẫu số: tin khách ${N.customer} · câu mẫu được xét (khớp chữ có ứng viên, trần trên) ${N.eligible} · tin bot là câu mẫu ${N.sends} · luật món đổi quyết định ${N.changed} · khớp trần sẽ sai món ${N.wrongBefore} · sau luật vẫn sai ${N.wrongAfter} (câu mẫu đang bật ${active.length})`);
-  tomTat(`D mặc định / nhường AI: khớp trần mặc định một món khi CHƯA rõ món ${N.defaultBefore} · sau luật câu mẫu tự trả lời ${N.quickAfter} / ${N.eligible} được xét · nhường AI ${N.eligible - N.quickAfter}`);
+  const cvq = schema.salesChatConversations;
+  const [closed] = await db.select({ n: sql<number>`count(*)::int` }).from(cvq).where(sql`${cvq.state}->'quickGuardClosed'->>'at' >= ${from.toISOString()}`);
+  tomTat(`D mặc định / nhường AI: khớp trần mặc định một món khi CHƯA rõ món ${N.defaultBefore} · sau luật câu mẫu tự trả lời ${N.quickAfter} / ${N.eligible} được xét · nhường AI ${N.eligible - N.quickAfter} · hội thoại câu mẫu tạm dừng vì lỗi danh mục ${closed?.n ?? 0}`);
   // C — P0 khách cũ mua lại (#886): lượt bình luận ĐÃ CHÉP sang hộp thư (`carryCommentTurn` gắn nhãn cố định ở đầu tin khách) và đơn được
   // gắn cờ ROUND_ABANDONED trong kỳ. Chỉ số đếm. Nhãn gõ lại ở đây (không import) vì ops lấy script từ main nhưng lib từ ảnh đang chạy;
   // tests/conv-money-trace.test.ts đối chiếu đúng chuỗi này với engine.ts.
@@ -635,11 +637,11 @@ export async function scanAiPerformance(db: Db, orgCode: string, from: Date, to:
     .select({
       mode: sql<string>`case ${ev.payload}->>'mode' when 'AI' then 'AI' when 'QUICK_REPLY' then 'QUICK_REPLY' when 'SYSTEM' then 'SYSTEM' else 'KHAC' end`,
       n: sql<number>`count(*)::int`,
-      p50: sql<number | null>`percentile_cont(0.5) within group (order by (${ev.payload}->>'responseMs')::numeric)`,
-      p90: sql<number | null>`percentile_cont(0.9) within group (order by (${ev.payload}->>'responseMs')::numeric)`,
+      p50: sql<number | null>`percentile_cont(0.5) within group (order by case when (${ev.payload}->>'responseMs') ~ '^[0-9]+([.][0-9]+)?$' then (${ev.payload}->>'responseMs')::numeric end)`,
+      p90: sql<number | null>`percentile_cont(0.9) within group (order by case when (${ev.payload}->>'responseMs') ~ '^[0-9]+([.][0-9]+)?$' then (${ev.payload}->>'responseMs')::numeric end)`,
     })
     .from(ev)
-    .where(and(eq(ev.type, "ai.replied"), gte(ev.occurredAt, from), lte(ev.occurredAt, to)))
+    .where(and(eq(ev.type, "ai.replied"), sql`${ev.channel} <> 'TEST'`, gte(ev.occurredAt, from), lte(ev.occurredAt, to)))
     .groupBy(sql`1`);
   const sec = (ms: number | null | undefined) => (typeof ms === "number" && Number.isFinite(ms) ? `${(ms / 1000).toFixed(1)}s` : "—");
   const total = byMode.reduce((s, r) => s + Number(r.n), 0);

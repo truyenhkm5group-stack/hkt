@@ -1247,6 +1247,8 @@ async function chatTurnCore(
     // Cùng cửa sổ lượt mua với `roundCustomerTexts`. Chưa xác định được món ⇒ câu mẫu gắn món không tự trả lời.
     const roundSince = purchaseRoundStart(st0);
     const focusLines: FocusLine[] = [
+      // Ngữ cảnh bài viết / quảng cáo của lượt bình luận (review): bài gọi tên món là căn cứ món — đứng TRƯỚC mọi tin của lượt.
+      ...(opts.context ? [{ who: "SHOP" as const, text: opts.context }] : []),
       ...customerMsgsOf(msgs)
         .filter((m) => !m.toolResult && m.text.trim() && (!roundSince || m.at.getTime() > roundSince.getTime()))
         .map((m): FocusLine => ({ who: m.role === "user" ? "CUSTOMER" : "SHOP", text: m.text })),
@@ -1254,6 +1256,14 @@ async function chatTurnCore(
     ];
     // Lỗi ⇒ bộ lọc ĐÓNG (chủ shop 18/10/2026), không bao giờ «không lọc».
     const qrFocus = qrSettings.enabled ? await quickReplyFocus(focusLines, qrSettings.upsellReplyId).catch(() => unavailableQuickReplyGuard(qrSettings.upsellReplyId ? [qrSettings.upsellReplyId] : [])) : null;
+    // Bộ lọc ĐÓNG không được im lặng (review): một tổ chức có thể lặng lẽ đi 100% AI. Ghi log + dấu trên hội thoại (ops conv-money-trace đếm).
+    if (qrFocus?.unavailable) {
+      console.warn(`[sales-chatbot] câu mẫu tạm dừng: không đọc được danh mục — bộ lọc đóng (hội thoại ${conv.id})`);
+      const st: ChatState = { ...st0, quickGuardClosed: { at: now.toISOString(), turn: turnSeq } };
+      await bump({ state: st as Record<string, unknown> });
+      conv.state = st as Record<string, unknown>;
+      st0 = st;
+    }
     const quick0: QuickReplyStep = st0.priceDispute?.open
       ? { kind: "SKIP", reason: "Khách đang phản đối giá — AI báo lại theo báo giá máy chủ" }
       : postSale
