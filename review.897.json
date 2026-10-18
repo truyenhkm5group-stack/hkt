@@ -1,0 +1,8 @@
+{
+  "pr": 897,
+  "sha": "e572c26a419fa93e5a9e139ba48814ce9769b460",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-18T10:45:45.516Z",
+  "note": "review độc lập PASS-WITH-NITS: chỉ đọc (ERP_READ_ONLY + kiểm phiên read-only + getDbForInspection, không gọi hãng); tóm tắt chỉ số đếm, mã vận đơn/đơn chỉ ở phần mã hoá, SĐT không bao giờ in; phân loại đóng, yêu cầu ERP chưa xác nhận ⇒ UNKNOWN; không đếm trùng gói webhook"
+}
