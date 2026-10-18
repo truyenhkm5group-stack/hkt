@@ -1,5 +1,3 @@
-{"at":"2026-10-10T08:14:09.911Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"owner-requirements-ledger","detail":"RUNNING · 1 mẫu phạm vi · MEDIUM"}
-{"at":"2026-10-10T08:19:08.985Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"industry-terms","detail":"RUNNING · 5 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-10T08:19:08.985Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"industry-terms","detail":"OVERLAP_ACCEPTED với products-shell-v2: phạm vi app/(dashboard)/products/ ↔ app/(dashboard)/products/page.tsx, app/(dashboard)/products/ ↔ app/(dashboard)/products/shell-product-list.tsx — cách tích hợp: products-shell-v2 đã gộp + deploy (#757); chỉ đổi nhãn thuộc tính theo hồ sơ ngành, không đổi dữ liệu"}
 {"at":"2026-10-10T08:30:22.695Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"owner-requirements-ledger","detail":"docs/owner-requirements-ledger @ 17450e56fb31 · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T08:30:59.204Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"owner-requirements-ledger","detail":"#773 cho docs/owner-requirements-ledger @ 17450e56fb31"}
@@ -2998,3 +2996,5 @@
 {"at":"2026-10-18T05:03:42.529Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"comment-carry-outcome","detail":"#891 @ 1487952510e3 → 66c011defc36 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-18T05:04:53.979Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"66c011defc36 · run 39099287335 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39099287335"}
 {"at":"2026-10-18T05:22:52.151Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_FAIL","mission":"comment-carry-outcome","detail":"FAIL 66c011defc3682e8937dc3b2a47b31f188e5f75b 2026-10-18T05:22:35.718Z"}
+{"at":"2026-10-18T06:08:00.145Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"CLAIM","mission":"probe-migrate-locks","detail":"PLANNING · 1 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-18T06:08:00.145Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"OVERLAP_ACCEPTED","mission":"probe-migrate-locks","detail":"OVERLAP_ACCEPTED với org-migrate-isolation: phạm vi scripts/org-migrate-probe.ts — cách tích hợp: chỉ thêm probeLocks đọc pg_locks/pg_stat_activity"}
