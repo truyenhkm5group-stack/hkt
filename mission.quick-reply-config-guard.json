@@ -3,7 +3,7 @@
   "mission_id": "quick-reply-config-guard",
   "title": "Câu mẫu sai món không tự tái xuất hiện + nút gỡ cách hỏi gắn nhầm món",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-cau-mau-kiem-luu",
@@ -25,7 +25,24 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T16:30:16.366Z",
-  "updated_at": "2026-10-18T16:30:16.366Z",
-  "last_heartbeat": "2026-10-18T16:30:16.366Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-18T16:30:42.320Z",
+  "last_heartbeat": "2026-10-18T16:30:42.320Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/cau-mau-kiem-luu-main",
+    "sha": "89d4369d492174b622a4980a89cc80c7d56023d2",
+    "at": "2026-10-18T16:30:42.320Z",
+    "actor": "DESKTOP-56TH98Y:wt-cau-mau-kiem-luu",
+    "title": "Câu mẫu sai món không tự tái xuất hiện + nút gỡ cách hỏi gắn nhầm món",
+    "summary": "Chủ shop 18/10 mục 2–4: kiểm nhất quán khi lưu/bật/tự nạp, câu AI soạn sai không tự bật, nút Gỡ cách hỏi gắn nhầm món (audit trước/sau). Cần deploy.",
+    "tests": [
+      "p0-quick-reply-focus (+ đường cấu hình thật): ĐẠT",
+      "org-catalog: ĐẠT",
+      "self-service-journey: ĐẠT",
+      "conv-money-trace: ĐẠT",
+      "14 bộ câu mẫu trên nhánh gốc: ĐẠT",
+      "eslint: sạch",
+      "tsc: sạch (trừ qrcode máy này)"
+    ]
+  }
 }
