@@ -31,6 +31,8 @@ import {
   type PayrollBasis,
 } from "@/lib/constants/payroll";
 import { PAYROLL_ENGINE_VERSION } from "@/lib/payroll/engine";
+import { PROFIT_GATE_CALC_VERSION } from "@/lib/constants/payroll-profit-gate";
+import type { ProfitGateSnapshot, ProfitGateStatus } from "@/lib/payroll/profit-gate";
 import { isFrozen, normalizePayrollStatus, type PayrollRunStatus } from "@/lib/constants/payroll-lifecycle";
 import type { Period } from "@/lib/search-params";
 import type { PayrollReport } from "@/lib/queries/payroll";
@@ -76,6 +78,11 @@ export type PayrollSnapshot = {
   attributionCoverage: PayrollReport["marketers"]["attributionCoverage"];
   costWarnings: PayrollReport["marketers"]["costWarnings"];
   payrollCovered: boolean;
+  /**
+   * CỔNG LỖ LŨY KẾ TOÀN CÔNG TY lúc chốt. `undefined` = ảnh chụp ĐỜI CŨ (chốt trước khi có cổng) —
+   * sổ lũy kế khi ấy dựng lại từ chính những con số đã chụp (`lockedMonthFigures`), không tính lại.
+   */
+  profitGate?: ProfitGateSnapshot;
   lines: {
     employeeId: string;
     name: string;
@@ -94,6 +101,16 @@ export type PayrollSnapshot = {
     bonusPersonal: number | null;
     bonusRevenue: number;
     salary: number | null;
+    /** Lương theo công thức chính sách, CHƯA qua cổng. `undefined` = ảnh chụp đời cũ (khi ấy = `salary`). */
+    provisionalSalary?: number | null;
+    /** Thưởng % lợi nhuận: tạm tính · đủ điều kiện · chưa đủ điều kiện + lý do. `undefined` = ảnh chụp đời cũ. */
+    profitShare?: {
+      provisional: number | null;
+      eligible: number | null;
+      withheld: number | null;
+      reasons: string[];
+      claims: { key: string; label: string; provisional: number | null; demand: number | null; eligible: number | null; withheld: number | null; reason: string | null }[];
+    };
     /**
      * SỔ LỖ LŨY KẾ CỦA ĐƯỜNG TÍNH CŨ, CHỤP LẠI NGUYÊN VẸN.
      *
@@ -160,6 +177,23 @@ export function buildPayrollSnapshot(report: PayrollReport, period: Period, key:
     attributionCoverage: report.marketers.attributionCoverage,
     costWarnings: report.marketers.costWarnings,
     payrollCovered: report.marketers.payrollCovered,
+    profitGate: {
+      calcVersion: PROFIT_GATE_CALC_VERSION,
+      policyVersion: report.profitGate.policy?.version ?? null,
+      monthKey: report.profitGate.result.monthKey ?? "",
+      status: report.profitGate.result.status as ProfitGateStatus,
+      established: report.profitGate.result.established,
+      periodBase: report.profitGate.ownBase,
+      lateAdjustments: report.profitGate.lateAdjustments,
+      openingCumulative: report.profitGate.result.openingCumulative,
+      openingHighWater: report.profitGate.result.openingHighWater,
+      eligibleProfit: report.profitGate.result.eligibleProfit,
+      poolCap: report.profitGate.result.poolCap,
+      allocatedTotal: report.profitGate.result.allocatedTotal,
+      closingCumulative: report.profitGate.result.closingCumulative,
+      closingHighWater: report.profitGate.result.closingHighWater,
+      paidToDate: report.profitGate.result.paidToDate,
+    },
     lines: report.lines.map((l) => ({
       employeeId: l.employee.id,
       name: l.employee.name,
@@ -177,6 +211,14 @@ export function buildPayrollSnapshot(report: PayrollReport, period: Period, key:
       bonusPersonal: l.bonusPersonal,
       bonusRevenue: l.bonusRevenue,
       salary: l.salary,
+      provisionalSalary: l.provisionalSalary,
+      profitShare: {
+        provisional: l.profitShare.provisional,
+        eligible: l.profitShare.eligible,
+        withheld: l.profitShare.withheld,
+        reasons: l.profitShare.reasons,
+        claims: l.profitShare.claims.map((c) => ({ key: c.key, label: c.label, provisional: c.provisional, demand: c.demand, eligible: c.eligible, withheld: c.withheld, reason: c.reason })),
+      },
       legacyAdjustments: l.legacyAdjustments,
       employmentClip: l.employmentClip,
       carry: l.carry
@@ -337,6 +379,10 @@ export function payrollDrift(snapshot: PayrollSnapshot, live: PayrollReport): Pa
   };
   add("totalProfit", "Lợi nhuận tổng kỳ", snapshot.totalProfit, live.totalProfit);
   add("totalSalary", "Tổng lương phải trả", snapshot.totalSalary, live.totalSalary);
+  if (snapshot.profitGate) {
+    add("profitGateBase", "Lợi nhuận đem xét cổng thưởng", snapshot.profitGate.periodBase, live.profitGate.ownBase);
+    add("profitGateAllocated", "Thưởng % lợi nhuận đủ điều kiện", snapshot.profitGate.allocatedTotal, live.profitGate.result.allocatedTotal);
+  }
   add("paid", "Đã trả trong kỳ", snapshot.paid.amount, live.paid.amount);
   const liveById = new Map(live.lines.map((l) => [l.employee.id, l]));
   for (const s of snapshot.lines) {

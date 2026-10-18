@@ -89,6 +89,8 @@ function snapshotRows(snapshot: PayrollSnapshot, live: readonly PayrollLine[]) {
       bonusPersonal: s.bonusPersonal,
       bonusRevenue: s.bonusRevenue,
       salary: s.salary,
+      // Ảnh chụp đời cũ (chốt trước cổng lợi nhuận) không có khối này ⇒ ba cột thưởng LN để TRỐNG.
+      gateShare: s.profitShare ? { provisional: s.profitShare.provisional, eligible: s.profitShare.eligible, withheld: s.profitShare.withheld, reasons: s.profitShare.reasons } : null,
       // Ảnh chụp đời cũ (`undefined`) chưa gồm điều chỉnh trong `salary` — ô để TRỐNG, không tự tính lại.
       legacyAdjustments: s.legacyAdjustments ?? null,
       /*
@@ -174,6 +176,14 @@ export async function GET(request: NextRequest) {
     "Điều chỉnh (đ)",
     "Tổng lương (đ)",
     /*
+      BA CỘT CỦA CỔNG LỖ LŨY KẾ TOÀN CÔNG TY (`docs/payroll-profit-gate.md`). "Tổng lương" ở trên đã là
+      số ĐƯỢC DUYỆT (chỉ gồm phần đủ điều kiện); hai cột "Thưởng % LN" phía trước là TẠM TÍNH. Ô trống
+      = chưa kết luận được / ảnh chụp đời cũ — không phải 0.
+    */
+    "Thưởng % LN tạm tính (đ)",
+    "Thưởng % LN đủ điều kiện (đ)",
+    "Thưởng % LN chưa đủ điều kiện (đ)",
+    /*
       BẢY CỘT BÙ TRỪ LỖ LŨY KẾ.
 
       Cột "HH có dấu" GIỮ SỐ ÂM trong tệp, dù tiền phải trả bằng 0. Bỏ dấu đi để "bảng tính cho
@@ -199,12 +209,14 @@ export async function GET(request: NextRequest) {
     "Chính sách lương",
     "Tổng thu nhập (đ)",
     "Tổng khấu trừ (đ)",
-    "Thực nhận (đ)",
+    "Thực nhận tạm tính — máy chung (đ)",
     "Ghi chú",
   ];
   const out = [header.join(",")];
   for (const l of lines) {
     const ghiChu: string[] = [];
+    const gs = "gateShare" in l ? l.gateShare : { provisional: l.profitShare.provisional, eligible: l.profitShare.eligible, withheld: l.profitShare.withheld, reasons: l.profitShare.reasons };
+    for (const r of gs?.reasons ?? []) ghiChu.push(`Thưởng % LN: ${r}`);
     if (l.fixed === null) ghiChu.push("Lương cứng CHƯA BIẾT: kỳ không có mốc đầu/cuối nên không chia theo ngày được.");
     if (l.bonusPersonal === null) ghiChu.push(report.cashRatioReason ?? "Thưởng theo LN cá nhân CHƯA BIẾT.");
     if (l.carry && !l.carry.openingEstablished) ghiChu.push(`Số dư lỗ đầu tháng CHƯA ĐỦ CĂN CỨ ĐỂ CHỐT: ${l.carry.openingReason}`);
@@ -238,13 +250,16 @@ export async function GET(request: NextRequest) {
         l.bonusRevenue,
         l.legacyAdjustments ? l.legacyAdjustments.total : "",
         l.salary ?? "",
+        gs?.provisional ?? "",
+        gs?.eligible ?? "",
+        gs?.withheld ?? "",
         l.carry?.monthKey ?? "không áp dụng",
         l.carry?.openingBalance ?? "",
         l.carry?.realProfit ?? "",
         l.carry?.lossApplied ?? "",
         l.carry?.commissionBase ?? "",
         l.carry?.signedCommission ?? "",
-        l.carry ? (l.bonusPersonal ?? "") : "",
+        l.carry ? (l.bonusPersonal ?? "") : "", // tạm tính trước cổng toàn công ty — phần được duyệt ở cột "đủ điều kiện"
         l.carry?.closingBalance ?? "",
         l.carry?.openingReason ?? "",
         chinhSach,

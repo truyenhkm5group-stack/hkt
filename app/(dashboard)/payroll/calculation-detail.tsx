@@ -175,7 +175,7 @@ export function CalculationDetail({ engine, employeeName }: { engine: EmployeeEn
             </tr>
             <tr>
               <td colSpan={3} className="py-1.5 pr-3 text-right font-semibold">
-                Thực nhận
+                Thực nhận tạm tính (trước cổng lợi nhuận toàn công ty)
               </td>
               <td className="py-1.5 text-right tabular-nums font-semibold">
                 <Money value={result.netPay} />

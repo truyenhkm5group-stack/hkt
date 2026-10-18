@@ -21,6 +21,8 @@ import { PayrollTabs } from "@/app/(dashboard)/payroll/tabs";
 import { RunWorkflow } from "@/app/(dashboard)/payroll/run-workflow";
 import { CalculationDetail } from "@/app/(dashboard)/payroll/calculation-detail";
 import { ProfitBreakdown } from "@/app/(dashboard)/payroll/profit-breakdown";
+import { ProfitGatePanel } from "@/app/(dashboard)/payroll/profit-gate-panel";
+import { PROFIT_GATE_LOSS_MESSAGE } from "@/lib/constants/payroll-profit-gate";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Money, SectionCard } from "@/components/ui-bits";
@@ -47,6 +49,7 @@ import {
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import {
   getPayrollReport,
+  profitGateReadiness,
   listAdAccounts,
   listPagesForConfig,
   unassignedMarketerSpend,
@@ -133,6 +136,7 @@ export default async function PayrollPage({
       engineProblems: l.engine?.result.problems ?? [],
     })),
     policyIssues,
+    profitGate: profitGateReadiness(report),
   });
   const qs = new URLSearchParams({
     period: period.key,
@@ -150,7 +154,7 @@ export default async function PayrollPage({
     ? marketersVisible.find((x) => (x.marketerId ?? "none") === selected)
     : null;
   // `null` = lương cứng của kỳ CHƯA BIẾT (kỳ không có mốc đầu/cuối) ⇒ tổng lương cũng chưa biết.
-  const totalSalary = !report.fixedBasis.bounded ? null : viewAll ? report.totalSalary : lines.reduce((t, l) => t + (l.salary ?? 0), 0);
+  const totalSalary = !report.fixedBasis.bounded ? null : viewAll ? report.totalSalary : lines.some((l) => l.salary === null) ? null : lines.reduce((t, l) => t + (l.salary ?? 0), 0);
   const fixedTotal = report.fixedBasis.bounded ? lines.reduce((t, l) => t + (l.fixed ?? 0), 0) : null;
   const fixedMonthlyTotal = lines.reduce((t, l) => t + l.fixedMonthly, 0);
   /** Nhân sự chưa có liên kết tài khoản ⇒ chính họ không xem được dòng lương của mình. */
@@ -340,6 +344,16 @@ export default async function PayrollPage({
       ) : null}
       {viewAll ? <ProductOwnersForm config={report.marketers.config} products={products} pages={(await pagesForConfig).map((p) => ({ pageId: p.pageId, name: p.name, orders: p.orders, sales: p.sales }))} marketers={lines.filter((l) => l.employee.department === "Marketing").map((l) => ({ id: l.employee.id, name: l.employee.shortName || l.employee.name }))} canWrite={canManage} /> : null}
 
+      {/*
+        ĐIỀU KIỆN THƯỞNG LỢI NHUẬN TOÀN CÔNG TY — đứng TRƯỚC mọi con số lương. Người chỉ xem lương
+        của mình không thấy số tài chính toàn công ty, nhưng vẫn thấy ĐÚNG câu vì sao thưởng của mình
+        chưa được duyệt (ở dòng lương bên dưới).
+      */}
+      {viewAll ? <ProfitGatePanel gate={report.profitGate} settingsHref={canManage ? "/payroll/settings" : null} /> : null}
+      {!viewAll && report.profitGate.result.status === "NO_ELIGIBLE_PROFIT" && (report.profitGate.result.lossToRecover ?? 0) > 0 && lines.some((l) => (l.profitShare.provisional ?? 0) > 0) ? (
+        <div className="rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm font-semibold text-destructive">{PROFIT_GATE_LOSS_MESSAGE}</div>
+      ) : null}
+
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <MetricCard
           label="Lợi nhuận tổng kỳ"
@@ -514,8 +528,9 @@ export default async function PayrollPage({
         title="Bảng lương"
         hint={
           <>
-            <p>Lương cứng cộng thưởng theo lợi nhuận và doanh thu.</p>
-            <p className="mt-1">Lương = lương cứng + % lợi nhuận tổng + % lợi nhuận cá nhân + % doanh thu cá nhân · thưởng chỉ tính khi lợi nhuận dương</p>
+            <p>Lương cứng cộng hoa hồng thông thường và thưởng % lợi nhuận ĐỦ ĐIỀU KIỆN.</p>
+            <p className="mt-1">Thực nhận được duyệt = lương cứng + % doanh thu cá nhân + điều chỉnh + thưởng % lợi nhuận đủ điều kiện. “Tạm tính” là con số theo công thức cũ (lợi nhuận của riêng kỳ × %) — chỉ để đối chiếu, không dùng để trả.</p>
+            <p className="mt-1">Lợi nhuận đóng góp cá nhân là chỉ số đo người; nó KHÔNG phải căn cứ vượt qua điều kiện lỗ lũy kế của công ty.</p>
           </>
         }
         padded={false}
@@ -527,14 +542,20 @@ export default async function PayrollPage({
                 <TableHead>Nhân sự</TableHead>
                 <TableHead>Cơ chế</TableHead>
                 <TableHead className="text-right">LN tổng</TableHead>
-                <TableHead className="text-right">LN cá nhân</TableHead>
+                <TableHead className="text-right" title="Lợi nhuận quy kết cho người này — chỉ số đo người, không phải căn cứ vượt qua lỗ lũy kế của công ty">
+                  LN đóng góp <span className="font-normal text-muted-foreground">(cá nhân)</span>
+                </TableHead>
                 <TableHead className="text-right" title="Lương cứng khai theo THÁNG, chia theo số ngày chồng lấn của kỳ đang xem">
                   Lương cứng <span className="font-normal text-muted-foreground">(thuộc kỳ)</span>
                 </TableHead>
-                <TableHead className="text-right">Thưởng % tổng</TableHead>
-                <TableHead className="text-right">Thưởng % cá nhân</TableHead>
+                <TableHead className="text-right" title="Theo công thức: lợi nhuận của riêng kỳ × % — CHƯA xét lỗ lũy kế toàn công ty">
+                  Thưởng % LN <span className="font-normal text-muted-foreground">(tạm tính)</span>
+                </TableHead>
+                <TableHead className="text-right" title="Phần thưởng % lợi nhuận được duyệt sau cổng lỗ lũy kế toàn công ty và trần quỹ thưởng">
+                  Thưởng LN <span className="font-normal text-muted-foreground">(đủ điều kiện)</span>
+                </TableHead>
                 <TableHead className="text-right">Thưởng % DT</TableHead>
-                <TableHead className="text-right">Tổng lương</TableHead>
+                <TableHead className="text-right">Thực nhận <span className="font-normal text-muted-foreground">(được duyệt)</span></TableHead>
                 {canManage ? <TableHead className="w-20" /> : null}
               </TableRow>
             </TableHeader>
@@ -650,19 +671,43 @@ export default async function PayrollPage({
                         </>
                       )}
                     </TableCell>
+                    {/*
+                      TẠM TÍNH và ĐỦ ĐIỀU KIỆN đứng cạnh nhau, cố ý: giấu số tạm tính thì người ta không
+                      biết mình bị giữ lại bao nhiêu; chỉ in số tạm tính thì đó là trả trước khi xét.
+                    */}
                     <TableCell className="text-right">
-                      <Money
-                        value={l.bonusTotal}
-                        className={l.bonusTotal ? "" : "text-muted-foreground"}
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {l.bonusPersonal === null ? (
+                      {l.profitShare.provisional === null ? (
                         <span className="text-xs text-muted-foreground" title={report.cashRatioReason ?? undefined}>
                           —
                         </span>
                       ) : (
-                        <Money value={l.bonusPersonal} className={l.bonusPersonal ? "" : "text-muted-foreground"} />
+                        <Money value={l.profitShare.provisional} className={l.profitShare.provisional ? "" : "text-muted-foreground"} />
+                      )}
+                      {l.profitShare.claims.length > 1 ? (
+                        <div className="text-[11px] text-muted-foreground">{l.profitShare.claims.map((c) => `${c.label.split(" · ").slice(1).join(" · ")} ${c.provisional === null ? "—" : formatVND(c.provisional, { compact: true })}`).join(" + ")}</div>
+                      ) : l.profitShare.claims.length === 1 ? (
+                        <div className="text-[11px] text-muted-foreground">{l.profitShare.claims[0].label.split(" · ").slice(1).join(" · ")}</div>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {!l.profitShare.claims.length ? (
+                        <span className="text-xs text-muted-foreground">không có</span>
+                      ) : l.profitShare.eligible === null ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300">
+                          chưa xét được
+                          <InfoHint label="Vì sao chưa xét được">{l.profitShare.reasons.join(" ") || report.profitGate.result.message}</InfoHint>
+                        </span>
+                      ) : (
+                        <>
+                          <Money value={l.profitShare.eligible} className={cn("font-semibold", l.profitShare.eligible ? "" : "text-muted-foreground")} />
+                          {!report.profitGate.result.established ? <div className="text-[11px] text-amber-700 dark:text-amber-300" title={report.profitGate.result.message}>mô phỏng — chưa duyệt được</div> : null}
+                          {l.profitShare.withheld ? (
+                            <div className="inline-flex items-center gap-1 text-[11px] text-destructive">
+                              chưa đủ điều kiện {formatVND(l.profitShare.withheld, { compact: true })}
+                              <InfoHint label="Lý do chưa đủ điều kiện">{l.profitShare.reasons.join(" ")}</InfoHint>
+                            </div>
+                          ) : null}
+                        </>
                       )}
                     </TableCell>
                     <TableCell className="text-right">
@@ -675,6 +720,11 @@ export default async function PayrollPage({
                     </TableCell>
                     <TableCell className="text-right">
                       {l.salary === null ? <span className="text-xs text-muted-foreground">—</span> : <Money value={l.salary} className="text-base font-bold" />}
+                      {l.provisionalSalary !== null && l.provisionalSalary !== l.salary ? (
+                        <div className="text-[11px] text-muted-foreground" title="Theo công thức cũ, chưa qua cổng lỗ lũy kế toàn công ty — không dùng để trả">
+                          tạm tính {formatVND(l.provisionalSalary, { compact: true })}
+                        </div>
+                      ) : null}
                       {l.legacyAdjustments && l.legacyAdjustments.total !== 0 ? (
                         <div className="text-[11px] text-muted-foreground" title={l.legacyAdjustments.items.map((a) => `${a.label}: ${formatVND(a.amount)}`).join(" · ")}>
                           gồm điều chỉnh {formatVND(l.legacyAdjustments.total, { compact: true })}
@@ -702,15 +752,17 @@ export default async function PayrollPage({
                     {fixedTotal === null ? <span className="text-xs font-normal text-muted-foreground">—</span> : <Money value={fixedTotal} />}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Money
-                      value={lines.reduce((s, l) => s + l.bonusTotal, 0)}
-                    />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {lines.some((l) => l.bonusPersonal === null) ? (
+                    {lines.some((l) => l.profitShare.provisional === null) ? (
                       <span className="text-xs font-normal text-muted-foreground">—</span>
                     ) : (
-                      <Money value={lines.reduce((s, l) => s + (l.bonusPersonal ?? 0), 0)} />
+                      <Money value={lines.reduce((s, l) => s + (l.profitShare.provisional ?? 0), 0)} />
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {lines.some((l) => l.profitShare.eligible === null) ? (
+                      <span className="text-xs font-normal text-muted-foreground">—</span>
+                    ) : (
+                      <Money value={lines.reduce((s, l) => s + (l.profitShare.eligible ?? 0), 0)} />
                     )}
                   </TableCell>
                   <TableCell className="text-right">
@@ -813,7 +865,11 @@ export default async function PayrollPage({
                           {c.signedCommission === null ? chuaBiet : <Money value={c.signedCommission} className={c.signedCommission < 0 ? "text-destructive" : c.signedCommission ? "" : "text-muted-foreground"} />}
                         </TableCell>
                         <TableCell className="text-right">
-                          {l.bonusPersonal === null ? chuaBiet : <Money value={l.bonusPersonal} className={cn("font-bold", l.bonusPersonal ? "" : "text-muted-foreground")} />}
+                          {/* PHẢI TRẢ = phần ĐỦ ĐIỀU KIỆN qua cổng lợi nhuận toàn công ty, không phải số tạm tính. */}
+                          {(() => {
+                            const hh = l.profitShare.claims.find((x) => x.key === `${l.employee.id}:PERSONAL`)?.eligible ?? (l.employee.percentPersonal > 0 ? null : 0);
+                            return hh === null ? chuaBiet : <Money value={hh} className={cn("font-bold", hh ? "" : "text-muted-foreground")} />;
+                          })()}
                         </TableCell>
                         <TableCell className="text-right">
                           {c.closingBalance === null ? chuaBiet : <Money value={c.closingBalance} className={c.closingBalance ? "text-destructive" : "text-muted-foreground"} />}
@@ -1036,7 +1092,10 @@ export default async function PayrollPage({
             marketer={selectedMarketer}
             carry={lines.find((l) => l.employee.id === selectedMarketer.marketerId)?.carry ?? null}
             commissionPercent={lines.find((l) => l.employee.id === selectedMarketer.marketerId)?.employee.percentPersonal ?? 0}
-            commission={lines.find((l) => l.employee.id === selectedMarketer.marketerId)?.bonusPersonal ?? null}
+            commission={(() => {
+              const l = lines.find((x) => x.employee.id === selectedMarketer.marketerId);
+              return l ? (l.profitShare.claims.find((c) => c.key === `${l.employee.id}:PERSONAL`)?.eligible ?? (l.employee.percentPersonal > 0 ? null : 0)) : null;
+            })()}
             periodQs={qs}
           />
           <SectionCard

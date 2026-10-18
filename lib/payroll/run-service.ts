@@ -33,8 +33,11 @@ import {
   type PayrollBasis,
 } from "@/lib/constants/payroll";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
-import { getPayrollReport } from "@/lib/queries/payroll";
-import { LEGACY_CARRY_COMPONENT, monthKeyOf, rateToBp } from "@/lib/constants/payroll-carryover";
+import { getPayrollReport, profitGateReadiness } from "@/lib/queries/payroll";
+import { LEGACY_CARRY_COMPONENT, monthKeyOf, rateToBp, wholeMonthKey } from "@/lib/constants/payroll-carryover";
+import { getProfitGateConfig } from "@/lib/queries/payroll-profit-gate";
+import { PAYROLL_PROFIT_GATE_KEY } from "@/lib/constants/payroll-profit-gate";
+import type { PayrollSnapshot } from "@/lib/queries/payroll-period";
 import { payrollFinalizeBlockers } from "@/lib/constants/payroll-readiness";
 import { PAYROLL_ACTION_SPEC, canTransition, isFrozen, normalizePayrollStatus, type PayrollRunAction } from "@/lib/constants/payroll-lifecycle";
 import { buildPayrollSnapshot } from "@/lib/queries/payroll-period";
@@ -118,6 +121,7 @@ export async function calculatePayrollPeriodAs(actor: PayrollActor, input: Calcu
       toAt,
       report.lines.map((l) => ({ id: l.employee.id, name: l.employee.shortName || l.employee.name })),
     ),
+    profitGate: profitGateReadiness(report),
   });
   if (blockers.length) {
     return { error: `Chưa đủ căn cứ để chốt kỳ này:\n· ${blockers.map((b) => b.message).join("\n· ")}` };
@@ -142,7 +146,9 @@ export async function calculatePayrollPeriodAs(actor: PayrollActor, input: Calcu
         commissionBase: c.commissionBase ?? 0,
         commissionRateBp: rateToBp(l.employee.percentPersonal),
         signedCommission: c.signedCommission ?? 0,
-        payableCommission: l.bonusPersonal ?? 0,
+        // Tiền hoa hồng PHẢI TRẢ là phần ĐỦ ĐIỀU KIỆN qua cổng lợi nhuận toàn công ty, không phải số
+        // tạm tính — sổ ghi đúng con số đi vào phiếu lương.
+        payableCommission: l.profitShare.claims.find((c) => c.key === `${l.employee.id}:PERSONAL`)?.eligible ?? 0,
         closingBalance: c.closingBalance ?? 0,
         // Ghi NHÁP: nghĩa vụ chỉ thành chính thức khi kỳ được KHOÁ (xem `lib/actions/payroll-run.ts`).
         status: "DRAFT" as const,
@@ -304,6 +310,41 @@ export async function transitionPayrollRunAs(actor: PayrollActor, input: Transit
   if (!canTransition(current, action)) {
     return { error: `Kỳ đang ở trạng thái “${current}” nên không làm được việc “${spec.label}”.` };
   }
+  /*
+    MỞ KHOÁ ĐI TỪ THÁNG KHOÁ MỚI NHẤT TRỞ VỀ (cổng lỗ lũy kế, `docs/payroll-profit-gate.md` §5).
+
+    Lũy kế toàn công ty là một CHUỖI: tháng sau đã khoá đứng trên số dư cuối của tháng này. Mở khoá
+    rồi tính lại tháng này khi tháng sau vẫn khoá là đổi nền dưới chân một kỳ đã chốt — và một điều
+    chỉnh lũy kế đã ghi ở tháng sau cho chứng từ của tháng này sẽ bị đếm hai lần.
+  */
+  /*
+    DUYỆT / KHOÁ PHẢI KÝ TRÊN ĐÚNG TẬP ĐIỀU CHỈNH LŨY KẾ (review độc lập vòng 5).
+
+    Ảnh chụp dựng lúc TÍNH; khoá chỉ đóng băng ảnh ấy. Một điều chỉnh ghi vào tháng này SAU lần tính
+    (thường là lúc soát — đúng lúc người ta phát hiện chứng từ muộn) không có trong ảnh, và khi tháng
+    đã khoá thì sổ thôi đọc cấu hình cho nó: khoản ấy biến mất im lặng. Nên tập mã điều chỉnh trong
+    ảnh phải BẰNG tập trong sổ, không thì bắt tính lại trước.
+  */
+  const thangCong = basis === "profit1" ? wholeMonthKey(row.periodStart, row.periodEnd) : null;
+  if (action === "UNLOCK" && basis === "profit1") {
+    const [sau] = await db
+      .select({ periodKey: p.periodKey })
+      .from(p)
+      .where(and(eq(p.basis, "profit1"), inArray(p.status, ["LOCKED", "PAID", "FINAL"]), sql`${p.periodStart} > ${row.periodEnd}`))
+      .limit(1);
+    if (sau) return { error: `Kỳ sau (${sau.periodKey}) đã khoá. Lũy kế lợi nhuận toàn công ty là một chuỗi theo tháng — mở khoá kỳ mới nhất trước rồi mới tới kỳ này.` };
+    /*
+      ĐIỀU CHỈNH LŨY KẾ VỀ CHÍNH THÁNG NÀY đang chờ ở một tháng còn mở (review độc lập vòng 6): mở khoá
+      rồi tính lại tháng này thì bản tính mới đã gồm chứng từ ấy, và tháng ghi vẫn cộng điều chỉnh —
+      đếm hai lần. Muốn mở khoá thì ghi một dòng NGƯỢC DẤU trước để tổng chờ về 0.
+    */
+    if (thangCong) {
+      const cho = (await getProfitGateConfig()).adjustments.filter((a) => a.aboutMonth === thangCong).reduce((t, a) => t + (Number(a.amount) || 0), 0);
+      if (cho !== 0) {
+        return { error: `Đang có điều chỉnh lũy kế ${cho.toLocaleString("vi-VN")} ₫ về chứng từ của tháng ${thangCong}, ghi ở một tháng còn mở. Mở khoá rồi tính lại tháng ${thangCong} sẽ đếm chứng từ ấy hai lần — ghi một dòng ngược dấu (Lương → Cấu hình) trước.` };
+      }
+    }
+  }
 
   const luc = new Date();
   const ketQua = await db.transaction(async (tx) => {
@@ -313,6 +354,50 @@ export async function transitionPayrollRunAs(actor: PayrollActor, input: Transit
     const now = normalizePayrollStatus(again?.status);
     if (!canTransition(now, action)) {
       return { error: `Kỳ vừa đổi sang trạng thái “${now}” (một người khác vừa thao tác) nên “${spec.label}” không còn hợp lệ. Mở lại trang để xem trạng thái mới.` } as const;
+    }
+    /*
+      DUYỆT / KHOÁ PHẢI KÝ TRÊN ĐÚNG TẬP ĐIỀU CHỈNH LŨY KẾ (review độc lập vòng 5–6).
+
+      Ảnh chụp dựng lúc TÍNH; khoá chỉ đóng băng ảnh ấy. Một điều chỉnh ghi vào tháng này SAU lần tính
+      (thường là lúc soát) không có trong ảnh, và khi tháng đã khoá thì sổ thôi đọc cấu hình cho nó:
+      khoản ấy biến mất im lặng. Nên tập mã trong ảnh phải BẰNG tập trong sổ. Kiểm TRONG giao dịch, dưới
+      CÙNG khoá tên với lượt ghi sổ (`ghiSoCong`) — kiểm ở ngoài thì một điều chỉnh lọt vào giữa lượt
+      kiểm và lượt khoá. Thứ tự khoá cố định (kỳ lương → sổ cổng) nên không tự khoá chéo.
+    */
+    if ((action === "APPROVE" || action === "LOCK") && thangCong) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext('erp:payroll-profit-gate'))`);
+      const [cfgRow] = await tx.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, PAYROLL_PROFIT_GATE_KEY)).limit(1);
+      let dieuChinh: { id: string; monthKey: string }[] = [];
+      try {
+        const raw = cfgRow ? (JSON.parse(cfgRow.value) as { adjustments?: { id: string; monthKey: string }[] }) : {};
+        dieuChinh = Array.isArray(raw.adjustments) ? raw.adjustments : [];
+      } catch {
+        return { error: "Ô cấu hình quy chế chia thưởng không đọc được — không duyệt / khoá trên một sổ không đọc được." } as const;
+      }
+      const [anhRow] = await tx.select({ snapshot: p.snapshot }).from(p).where(and(eq(p.periodKey, periodKey), eq(p.basis, basis))).limit(1);
+      const trongSo = dieuChinh.filter((a) => a.monthKey === thangCong).map((a) => a.id).sort();
+      const trongAnh = ((anhRow?.snapshot as PayrollSnapshot | null)?.profitGate?.lateAdjustments ?? []).map((a) => a.id).sort();
+      if (trongSo.join(",") !== trongAnh.join(",")) {
+        return { error: `Có điều chỉnh lũy kế ghi vào tháng ${thangCong} SAU lần tính gần nhất (sổ ${trongSo.length} dòng, ảnh chụp ${trongAnh.length} dòng). Bấm “Tính lại” để ảnh chụp mang đủ điều chỉnh rồi mới ${spec.label.toLowerCase()}.` } as const;
+      }
+    }
+    /*
+      MỞ KHOÁ: kiểm LẠI tổng điều chỉnh đang chờ về tháng này TRONG giao dịch, dưới khoá tên của sổ —
+      một điều chỉnh về tháng này lưu đúng lúc người khác mở khoá không được lọt qua (review vòng 7).
+    */
+    if (action === "UNLOCK" && thangCong) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext('erp:payroll-profit-gate'))`);
+      const [cfgRow] = await tx.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, PAYROLL_PROFIT_GATE_KEY)).limit(1);
+      let cho = 0;
+      try {
+        const raw = cfgRow ? (JSON.parse(cfgRow.value) as { adjustments?: { aboutMonth: string | null; amount: number }[] }) : {};
+        cho = (Array.isArray(raw.adjustments) ? raw.adjustments : []).filter((a) => a.aboutMonth === thangCong).reduce((t, a) => t + (Number(a.amount) || 0), 0);
+      } catch {
+        return { error: "Ô cấu hình quy chế chia thưởng không đọc được — không mở khoá trên một sổ không đọc được." } as const;
+      }
+      if (cho !== 0) {
+        return { error: `Đang có điều chỉnh lũy kế ${cho.toLocaleString("vi-VN")} ₫ về chứng từ của tháng ${thangCong}. Ghi một dòng ngược dấu (Lương → Cấu hình) trước khi mở khoá.` } as const;
+      }
     }
 
     /*

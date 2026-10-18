@@ -28,6 +28,9 @@ import { DEFAULT_PAYROLL_CARRYOVER, PAYROLL_CARRYOVER_KEY, type PayrollCarryover
 import { DEFAULT_STATUTORY, STATUTORY_DEDUCTION_KEY, STATUTORY_STATES, type StatutoryConfig } from "@/lib/constants/payroll-statutory";
 import { DEFAULT_PAYROLL_RECOGNITION, PAYROLL_RECOGNITION_KEY, type PayrollRecognitionConfig } from "@/lib/queries/payroll-cost";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
+import { DEFAULT_PROFIT_GATE_CONFIG, PAYROLL_PROFIT_GATE_KEY, type ProfitGateConfig, type ProfitGateLedgerAdjustment, type ProfitGatePolicy } from "@/lib/constants/payroll-profit-gate";
+import { monthPeriodKey } from "@/lib/queries/payroll-profit-gate";
+import { randomUUID } from "node:crypto";
 import { getPolicyVersion, nextVersionNumber, overlappingActiveVersions, userNamesByIds } from "@/lib/queries/payroll-policies";
 import { frozenPeriodRuns } from "@/lib/queries/payroll-engine";
 import { PAYROLL_RUN_STATUS_LABEL } from "@/lib/constants/payroll-lifecycle";
@@ -878,6 +881,206 @@ export async function savePayrollStatutoryConfig(input: unknown): Promise<Policy
     await setSettingJson(STATUTORY_DEDUCTION_KEY, sau);
     await audit({ userId: guard.id, userEmail: guard.email, action: "PAYROLL_STATUTORY_STATE", entity: "SETTINGS", entityId: STATUTORY_DEDUCTION_KEY, before: truoc, after: sau });
     revalidatePath("/payroll/payslip");
+    revalidate();
+    return { ok: true };
+  });
+}
+
+// ═════════════════════════ QUY CHẾ CHIA THƯỞNG LỢI NHUẬN ═════════════════════════
+
+/**
+ * ═══ KHAI QUY CHẾ CỔNG LỖ LŨY KẾ TOÀN CÔNG TY (`docs/payroll-profit-gate.md`) ═══
+ *
+ * Đây là quyết định đổi tiền của người thật, nên nó đòi đủ bốn thứ mà chủ shop yêu cầu: NGÀY HIỆU
+ * LỰC (tháng mở sổ), PHIÊN BẢN QUY CHẾ (tự tăng, bản cũ giữ nguyên trong `history`), NGƯỜI PHÊ DUYỆT
+ * (người bấm, phải có cả quyền khai báo LẪN quyền duyệt lương) và NHẬT KÝ (`audit`, kèm trước/sau).
+ *
+ * Không có giá trị mặc định nào cho số dư hay quỹ thưởng: cả hai là con số kế toán / quyết định kinh
+ * doanh (AGENTS.md mục 38). Không ghi vào kỳ nào đã khoá — kỳ đã khoá đọc ảnh chụp của chính nó.
+ */
+/**
+ * ĐỌC – SỬA – GHI SỔ QUY CHẾ TRONG MỘT GIAO DỊCH CẦM KHOÁ TÊN.
+ *
+ * Quy chế và các dòng điều chỉnh nằm chung một ô `settings`. Hai lượt lưu gần nhau (một quy chế mới
+ * và một điều chỉnh, hay hai điều chỉnh) mà cùng đọc rồi cùng ghi cả ô thì lượt sau xoá mất dòng của
+ * lượt trước — một khoản lũy kế biến mất không dấu vết. Khoá tên tự nhả khi giao dịch kết thúc.
+ */
+type GateTx = Parameters<Parameters<Awaited<ReturnType<typeof getDb>>["transaction"]>[0]>[0];
+async function ghiSoCong(
+  mutate: (cur: ProfitGateConfig, tx: GateTx) => Promise<ProfitGateConfig | { error: string }> | ProfitGateConfig | { error: string },
+): Promise<{ truoc: ProfitGateConfig; sau: ProfitGateConfig } | { error: string }> {
+  const db = await getDb();
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('erp:payroll-profit-gate'))`);
+    const [row] = await tx.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, PAYROLL_PROFIT_GATE_KEY)).limit(1);
+    let raw: Partial<ProfitGateConfig> = {};
+    try {
+      raw = row ? (JSON.parse(row.value) as Partial<ProfitGateConfig>) : {};
+    } catch {
+      return { error: "Ô cấu hình quy chế chia thưởng không đọc được — không ghi đè lên nó." };
+    }
+    const truoc: ProfitGateConfig = { active: raw.active ?? null, history: Array.isArray(raw.history) ? raw.history : [], adjustments: Array.isArray(raw.adjustments) ? raw.adjustments : [] };
+    const sau = await mutate(truoc, tx);
+    if ("error" in sau) return sau;
+    const text = JSON.stringify(sau);
+    await tx.insert(schema.settings).values({ key: PAYROLL_PROFIT_GATE_KEY, value: text }).onConflictDoUpdate({ target: schema.settings.key, set: { value: text, updatedAt: new Date() } });
+    return { truoc, sau };
+  });
+}
+
+const profitGateSchema = z
+  .object({
+    openingMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Tháng mở sổ phải dạng YYYY-MM"),
+    openingCumulative: z.coerce.number().int("Số dư lũy kế là số nguyên VND").min(-1e13).max(1e13),
+    openingHighWater: z.coerce.number().int("Mốc cao nhất đã chia là số nguyên VND").min(0, "Mốc cao nhất đã chia không âm"),
+    openingPaidBonus: z.coerce.number().int().min(0, "Thưởng đã chi không âm").default(0),
+    poolCapPercent: z.coerce.number().gt(0, "Quỹ thưởng tối đa phải lớn hơn 0%").max(100, "Quỹ thưởng tối đa không vượt 100% lợi nhuận đủ điều kiện"),
+    regulationRef: z.string().trim().min(3, "Ghi số hiệu / tên quy chế thưởng đang áp dụng").max(200),
+    reason: z.string().trim().min(10, "Ghi căn cứ của số dư (biên bản đối soát, báo cáo tài chính…) — tối thiểu 10 ký tự").max(1000),
+  })
+  .refine((v) => v.openingHighWater >= Math.max(0, v.openingCumulative), {
+    message:
+      "Mốc cao nhất đã chia phải ≥ max(0, lợi nhuận lũy kế). Khai mốc thấp hơn lũy kế là cho phép chia lại phần lãi trước mốc mở sổ — đúng thứ quy chế này sinh ra để chặn.",
+    path: ["openingHighWater"],
+  });
+
+export async function saveProfitGatePolicy(input: unknown): Promise<PolicyActionResult> {
+  return withApprovalExecution(async () => {
+    const guard = await requireManage();
+    if ("error" in guard) return guard;
+    if (!can(guard, "payroll:approve")) return { error: "Khai quy chế chia thưởng lợi nhuận là một lượt PHÊ DUYỆT — cần quyền “Duyệt lương”." };
+    const parsed = profitGateSchema.safeParse(input);
+    if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+    const d = parsed.data;
+    const truoc = await getSettingJson<ProfitGateConfig>(PAYROLL_PROFIT_GATE_KEY, DEFAULT_PROFIT_GATE_CONFIG);
+    const history = Array.isArray(truoc.history) ? truoc.history : [];
+    const ban: ProfitGatePolicy = {
+      version: history.reduce((m, h) => Math.max(m, h.version), 0) + 1,
+      openingMonth: d.openingMonth,
+      openingCumulative: d.openingCumulative,
+      openingHighWater: d.openingHighWater,
+      openingPaidBonus: d.openingPaidBonus,
+      poolCapPercent: d.poolCapPercent,
+      regulationRef: d.regulationRef,
+      reason: d.reason,
+      approvedById: guard.id,
+      approvedByEmail: guard.email,
+      approvedAt: new Date().toISOString(),
+    };
+
+    const cong = await guardSecondApproval({
+      group: "PAYROLL_EDIT",
+      action: "payroll.profit-gate.policy",
+      entity: "SETTINGS",
+      entityId: PAYROLL_PROFIT_GATE_KEY,
+      summary: `Quy chế chia thưởng lợi nhuận v${ban.version}: mở sổ ${ban.openingMonth}, lũy kế ${ban.openingCumulative.toLocaleString("vi-VN")} ₫, quỹ tối đa ${ban.poolCapPercent}% LN đủ điều kiện`,
+      amount: null,
+      payload: d,
+    });
+    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+
+    const ghi = await ghiSoCong((cur) => {
+      const moi: ProfitGatePolicy = { ...ban, version: cur.history.reduce((m, h) => Math.max(m, h.version), 0) + 1 };
+      return { active: moi, history: [...cur.history, moi], adjustments: cur.adjustments };
+    });
+    if ("error" in ghi) return ghi;
+    await audit({
+      userId: guard.id,
+      userEmail: guard.email,
+      action: "PAYROLL_PROFIT_GATE_POLICY",
+      entity: "SETTINGS",
+      entityId: PAYROLL_PROFIT_GATE_KEY,
+      before: ghi.truoc.active,
+      after: ghi.sau.active,
+      reason: `${d.regulationRef} — ${d.reason}`,
+    });
+    revalidate();
+    return { ok: true };
+  });
+}
+
+/**
+ * ═══ GHI MỘT ĐIỀU CHỈNH LŨY KẾ (chứng từ đến muộn của tháng đã khoá) ═══
+ *
+ * Kỳ đã khoá bất biến và ERP không tự đo lại nó (xem `lib/constants/payroll-profit-gate.ts`). Khoản
+ * hoàn / chi phí đến muộn của một tháng đã khoá đi vào lũy kế bằng dòng này: ghi vào một tháng CÒN
+ * MỞ, có lý do, người duyệt, nhật ký. Chỉ thêm — sai thì ghi một dòng ngược dấu, không sửa không xoá.
+ */
+const profitGateAdjustmentSchema = z.object({
+  monthKey: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Tháng ghi phải dạng YYYY-MM"),
+  // BẮT BUỘC: chứng từ của một tháng CHƯA khoá thì bản tính của chính tháng ấy đã gồm nó — ghi thêm
+  // ở đây là đếm hai lần (review độc lập vòng 5).
+  aboutMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Tháng chứng từ (đã khoá) phải dạng YYYY-MM"),
+  amount: z.coerce.number().int("Số tiền là số nguyên VND").refine((v) => v !== 0, "Số tiền điều chỉnh phải khác 0").refine((v) => Math.abs(v) <= 1e12, "Số tiền quá lớn"),
+  reason: z.string().trim().min(10, "Ghi rõ chứng từ nào đến muộn và vì sao (tối thiểu 10 ký tự)").max(1000),
+});
+
+export async function saveProfitGateAdjustment(input: unknown): Promise<PolicyActionResult> {
+  return withApprovalExecution(async () => {
+    const guard = await requireManage();
+    if ("error" in guard) return guard;
+    if (!can(guard, "payroll:approve")) return { error: "Ghi điều chỉnh lũy kế là một lượt PHÊ DUYỆT — cần quyền “Duyệt lương”." };
+    const parsed = profitGateAdjustmentSchema.safeParse(input);
+    if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+    const d = parsed.data;
+    const truoc = await getSettingJson<ProfitGateConfig>(PAYROLL_PROFIT_GATE_KEY, DEFAULT_PROFIT_GATE_CONFIG);
+    if (!truoc.active) return { error: "Chưa khai quy chế chia thưởng lợi nhuận — không có sổ lũy kế nào để điều chỉnh." };
+    if (d.monthKey < truoc.active.openingMonth) return { error: `Tháng ghi ${d.monthKey} nằm trước mốc mở sổ ${truoc.active.openingMonth}.` };
+    // Tháng GHI phải còn mở: ghi vào tháng đã khoá là viết lại một kỳ đã chốt (AGENTS.md mục 21).
+    const db = await getDb();
+    const p = schema.payrollPeriods;
+    const [ky] = await db.select({ status: p.status }).from(p).where(and(eq(p.periodKey, monthPeriodKey(d.monthKey)), eq(p.basis, "profit1"))).limit(1);
+    if (ky && ["LOCKED", "PAID", "FINAL"].includes(ky.status)) {
+      return { error: `Tháng ${d.monthKey} đã khoá — kỳ đã khoá là bất biến. Ghi điều chỉnh vào tháng đang mở.` };
+    }
+    if (d.aboutMonth >= d.monthKey) return { error: `Tháng chứng từ (${d.aboutMonth}) phải SỚM HƠN tháng ghi (${d.monthKey}).` };
+    const [kyChungTu] = await db.select({ status: p.status }).from(p).where(and(eq(p.periodKey, monthPeriodKey(d.aboutMonth)), eq(p.basis, "profit1"))).limit(1);
+    if (!kyChungTu || !["LOCKED", "PAID", "FINAL"].includes(kyChungTu.status)) {
+      return { error: `Tháng chứng từ ${d.aboutMonth} CHƯA khoá — bản tính của chính tháng ấy đã gồm chứng từ này; ghi điều chỉnh là đếm hai lần.` };
+    }
+    const dong: ProfitGateLedgerAdjustment = {
+      id: randomUUID(),
+      monthKey: d.monthKey,
+      aboutMonth: d.aboutMonth,
+      amount: d.amount,
+      reason: d.reason,
+      approvedById: guard.id,
+      approvedByEmail: guard.email,
+      approvedAt: new Date().toISOString(),
+    };
+    const cong = await guardSecondApproval({
+      group: "PAYROLL_EDIT",
+      action: "payroll.profit-gate.adjustment",
+      entity: "SETTINGS",
+      entityId: PAYROLL_PROFIT_GATE_KEY,
+      summary: `Điều chỉnh lũy kế ${d.amount.toLocaleString("vi-VN")} ₫ vào tháng ${d.monthKey} (chứng từ tháng ${d.aboutMonth})`,
+      amount: Math.abs(d.amount),
+      payload: d,
+    });
+    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+    const ghi = await ghiSoCong(async (cur, tx) => {
+      if (!cur.active) return { error: "Quy chế vừa bị gỡ — không ghi điều chỉnh." };
+      // Kiểm LẠI trong khoá: tháng ghi có thể vừa bị khoá giữa lượt kiểm ở trên và lượt ghi này.
+      const [kyTrong] = await tx.select({ status: p.status }).from(p).where(and(eq(p.periodKey, monthPeriodKey(d.monthKey)), eq(p.basis, "profit1"))).limit(1);
+      if (kyTrong && ["LOCKED", "PAID", "FINAL"].includes(kyTrong.status)) return { error: `Tháng ${d.monthKey} vừa được khoá — ghi điều chỉnh vào tháng đang mở.` };
+      // …và tháng chứng từ vẫn còn khoá: một lượt mở khoá xen giữa thì bản tính lại sẽ gồm chính chứng từ này.
+      const [ctTrong] = await tx.select({ status: p.status }).from(p).where(and(eq(p.periodKey, monthPeriodKey(d.aboutMonth)), eq(p.basis, "profit1"))).limit(1);
+      if (!ctTrong || !["LOCKED", "PAID", "FINAL"].includes(ctTrong.status)) return { error: `Tháng chứng từ ${d.aboutMonth} vừa được mở khoá — bản tính lại của nó sẽ gồm chứng từ này; không ghi điều chỉnh.` };
+      return { ...cur, adjustments: [...cur.adjustments, dong] };
+    });
+    if ("error" in ghi) return ghi;
+    await audit({
+      userId: guard.id,
+      userEmail: guard.email,
+      action: "PAYROLL_PROFIT_GATE_ADJUSTMENT",
+      entity: "SETTINGS",
+      entityId: PAYROLL_PROFIT_GATE_KEY,
+      before: null,
+      after: dong,
+      reason: d.reason,
+    });
     revalidate();
     return { ok: true };
   });

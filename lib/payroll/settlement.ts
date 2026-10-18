@@ -37,8 +37,17 @@
  *     lại hoa hồng mà không tính lại cả chuỗi số dư là trả hai lần cho cùng một khoản lỗ. Người quyết.
  *   · `UNKNOWN` — một con số dùng để tính đang CHƯA BIẾT (mục 42). Không quy về 0.
  *
+ * ─── THƯỞNG % LỢI NHUẬN KHÔNG QUYẾT TOÁN TỰ ĐỘNG (19/10/2026) ───
+ *
+ * Bản trước tính lại `max(LN sống, 0) × %` cho kỳ đã khoá rồi truy lĩnh phần chênh — một đường phát
+ * sinh thưởng lợi nhuận MỚI đi vòng qua cổng lỗ lũy kế toàn công ty (`lib/payroll/profit-gate.ts`),
+ * và theo chiều ngược lại là truy thu thưởng của một kỳ đã chốt và đã chi. Nay chênh lệch LỢI NHUẬN
+ * của tháng đã khoá đi vào lũy kế công ty của tháng sau (`LateAdjustment`) và được cổng xét MỘT lần;
+ * quyết toán ở đây chỉ còn phần hoa hồng THÔNG THƯỜNG (doanh thu, số đơn…), không phụ thuộc lợi nhuận.
+ *
  * Hàm THUẦN: không đọc CSDL, không đọc đồng hồ.
  */
+import { isProfitLinked } from "@/lib/constants/payroll-profit-gate";
 import type { PayrollSnapshot } from "@/lib/queries/payroll-period";
 
 type SnapLine = PayrollSnapshot["lines"][number];
@@ -49,7 +58,7 @@ export type LiveLineForSettlement = {
   totalProfit: number;
   personalProfit: number | null;
   personalRevenue: number | null;
-  engine: { components: { kind: string; amount: number | null; carry: unknown }[] } | null;
+  engine: { components: { kind: string; amount: number | null; carry: unknown; basisKey?: string | null }[] } | null;
 };
 
 export type SettlementResult =
@@ -65,10 +74,12 @@ export type SettlementResult =
 
 const VARIABLE_KINDS = new Set(["COMMISSION", "PROFIT_SHARE"]);
 
-function sumVariable(components: readonly { kind: string; amount: number | null }[]): number | null {
+/** Chỉ hoa hồng THÔNG THƯỜNG — khoản tính trên lợi nhuận đi qua cổng, không quyết toán ở đây. */
+function sumVariable(components: readonly { kind: string; amount: number | null; basisKey?: string | null }[]): number | null {
   let t = 0;
   for (const c of components) {
     if (!VARIABLE_KINDS.has(c.kind)) continue;
+    if (isProfitLinked(c.kind, c.basisKey ?? null)) continue;
     if (c.amount === null) return null;
     t += c.amount;
   }
@@ -95,7 +106,7 @@ export function settlementFor(snap: SnapLine, live: LiveLineForSettlement | null
       status: "OK",
       delta: after - before,
       explain: [
-        { label: "Hoa hồng / chia lợi nhuận", before, after },
+        { label: "Hoa hồng thông thường (không tính trên lợi nhuận)", before, after },
         { label: "Lợi nhuận cá nhân", before: snap.personalProfit, after: live.personalProfit },
         { label: "Doanh thu cá nhân", before: snap.personalRevenue, after: live.personalRevenue },
       ],
@@ -106,23 +117,19 @@ export function settlementFor(snap: SnapLine, live: LiveLineForSettlement | null
   if (snap.carry) {
     return { ...base, status: "MANUAL", reason: "Kỳ ấy áp sổ lỗ lũy kế: số dư mang sang đã chốt theo số tạm tính, nên quyết toán phải do người làm." };
   }
-  if (snap.bonusPersonal === null || (snap.percentPersonal > 0 && live.personalProfit === null)) {
-    return { ...base, status: "UNKNOWN", reason: "Lợi nhuận cá nhân của kỳ ấy CHƯA BIẾT." };
-  }
-  const bonusTotal = pct(live.totalProfit, snap.percentTotal);
-  const bonusPersonal = pct(live.personalProfit ?? 0, snap.percentPersonal);
   const bonusRevenue = pct(live.personalRevenue ?? 0, snap.percentRevenue);
-  const after = bonusTotal + bonusPersonal + bonusRevenue;
-  const before = snap.bonusTotal + snap.bonusPersonal + snap.bonusRevenue;
+  const after = bonusRevenue;
+  const before = snap.bonusRevenue;
   return {
     ...base,
     status: "OK",
     delta: after - before,
     explain: [
-      ...(snap.percentTotal ? [{ label: `Lợi nhuận toàn shop (× ${snap.percentTotal}%)`, before: snap.totalProfit, after: live.totalProfit }] : []),
-      ...(snap.percentPersonal ? [{ label: `Lợi nhuận cá nhân (× ${snap.percentPersonal}%)`, before: snap.personalProfit, after: live.personalProfit }] : []),
       ...(snap.percentRevenue ? [{ label: `Doanh thu cá nhân (× ${snap.percentRevenue}%)`, before: snap.personalRevenue, after: live.personalRevenue }] : []),
-      { label: "Tổng thưởng / hoa hồng", before, after },
+      { label: "Hoa hồng thông thường", before, after },
+      ...(snap.percentTotal || snap.percentPersonal
+        ? [{ label: "Thưởng % lợi nhuận — KHÔNG quyết toán tự động: chênh lệch lợi nhuận vào lũy kế công ty tháng sau, qua cổng", before: snap.bonusTotal + (snap.bonusPersonal ?? 0), after: null }]
+        : []),
     ],
   };
 }

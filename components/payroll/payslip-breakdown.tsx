@@ -1,4 +1,5 @@
 import { InfoHint } from "@/components/info-hint";
+import { ProfitGateRows } from "@/components/payroll/profit-gate-rows";
 import { Money } from "@/components/ui-bits";
 import { PAYROLL_COMPONENT_KIND_LABEL, type PayrollComponentKind } from "@/lib/constants/payroll-components";
 import { MISSING_TEXT } from "@/lib/format";
@@ -33,14 +34,16 @@ export function PayslipBreakdown({ line, statutory }: { line: PayrollSnapshot["l
                   </td>
                 </tr>
               ))}
+              <ProfitGateRows share={line.profitShare} />
               <StatutoryRow statutory={statutory} />
-              <NetRow value={engine.netPay} />
+              {/* Ảnh chụp có cổng lợi nhuận ⇒ `salary` là số ĐƯỢC DUYỆT; `netPay` là tạm tính (gồm cả phần chưa đủ điều kiện). */}
+              <NetRow value={line.profitShare ? line.salary : engine.netPay} />
             </>
           ) : (
             <>
               <Row label={line.employmentClip ? `Lương cứng (${line.employmentClip.days} ngày làm, ${line.employmentClip.from} → ${line.employmentClip.to})` : "Lương cứng (phần thuộc kỳ)"} value={line.fixed} />
-              <Row label={`Thưởng ${line.percentTotal}% lợi nhuận toàn shop`} value={line.bonusTotal} hideZero={!line.percentTotal} />
-              <Row label={`Hoa hồng ${line.percentPersonal}% lợi nhuận cá nhân`} value={line.bonusPersonal} hideZero={!line.percentPersonal} />
+              <Row label={`Thưởng ${line.percentTotal}% lợi nhuận toàn shop${line.profitShare ? " (tạm tính)" : ""}`} value={line.bonusTotal} hideZero={!line.percentTotal} />
+              <Row label={`Hoa hồng ${line.percentPersonal}% lợi nhuận cá nhân${line.profitShare ? " (tạm tính)" : ""}`} value={line.bonusPersonal} hideZero={!line.percentPersonal} />
               <Row label={`Hoa hồng ${line.percentRevenue}% doanh thu cá nhân`} value={line.bonusRevenue} hideZero={!line.percentRevenue} />
               {(line.legacyAdjustments?.items ?? []).map((a, i) => (
                 <tr key={`adj-${i}`} className="border-b">
@@ -55,6 +58,7 @@ export function PayslipBreakdown({ line, statutory }: { line: PayrollSnapshot["l
                   </td>
                 </tr>
               ))}
+              <ProfitGateRows share={line.profitShare} />
               <StatutoryRow statutory={statutory} />
               <NetRow value={line.salary} />
             </>

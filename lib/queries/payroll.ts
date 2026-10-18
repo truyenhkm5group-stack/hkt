@@ -6,7 +6,7 @@ import { employmentWindow } from "@/lib/constants/payroll-employment";
 import type { CostMode } from "@/lib/constants/estimated-cost";
 import { PAYROLL_COMPONENT_SIGN, type PayrollComponentKind } from "@/lib/constants/payroll-components";
 import { loadAdjustments } from "@/lib/queries/payroll-policies";
-import { vnDateKey } from "@/lib/format";
+import { vnDateKey, vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { CONFIRMED_STAGES } from "@/lib/queries/expenses";
 import { adMarketerMap } from "@/lib/integrations/facebook/ads-index";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
@@ -33,6 +33,10 @@ import { getCarryoverConfig, resolveOpeningMany, type OpeningBasis, type Opening
 import { computeEngineLines, type EmployeeEngineResult } from "@/lib/queries/payroll-engine";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
+import { isProfitLinked, isRegularVariable, type ProfitGatePolicy } from "@/lib/constants/payroll-profit-gate";
+import { eligibleProfitOf, evaluateProfitGate, type LateAdjustment, type ProfitGateAllocation, type ProfitGateClaim, type ProfitGateOpening, type ProfitGateResult } from "@/lib/payroll/profit-gate";
+import { getProfitGateConfig, resolveGateOpening } from "@/lib/queries/payroll-profit-gate";
+import { monthPeriod } from "@/lib/constants/payroll-autopilot";
 
 export async function listEmployees(): Promise<Employee[]> {
   const list = await getSettingJson<{ list: Employee[] }>(
@@ -837,8 +841,19 @@ export type PayrollLine = {
   /** `null` = CHƯA BIẾT (không quy đổi được LN cá nhân sang cơ sở dòng tiền), khác hẳn 0. */
   bonusPersonal: number | null;
   bonusRevenue: number;
-  /** `null` khi một phần bất kỳ chưa biết — một phần chưa biết thì tổng cũng chưa biết. */
+  /**
+   * THỰC NHẬN ĐƯỢC DUYỆT — lương cứng + hoa hồng thông thường + điều chỉnh + phần thưởng % lợi nhuận
+   * ĐỦ ĐIỀU KIỆN qua cổng lỗ lũy kế toàn công ty (`profitShare.eligible`). `null` khi một phần bất kỳ
+   * chưa biết — kể cả khi thưởng lợi nhuận còn CHƯA XÉT ĐƯỢC.
+   */
   salary: number | null;
+  /**
+   * LƯƠNG THEO CÔNG THỨC CHÍNH SÁCH, CHƯA QUA CỔNG (tạm tính) — đúng con số bảng lương in trước bản
+   * cổng lợi nhuận. Giữ lại để đối chiếu cũ/mới và để thấy được chênh lệch; KHÔNG dùng để trả tiền.
+   */
+  provisionalSalary: number | null;
+  /** Thưởng % lợi nhuận của người này: tạm tính · đủ điều kiện · chưa đủ điều kiện + lý do. */
+  profitShare: PayrollProfitShare;
   /**
    * BÙ TRỪ LỖ LŨY KẾ CỦA CHÍNH NGƯỜI NÀY (chủ shop chốt 15/09/2026).
    *
@@ -873,6 +888,52 @@ export type PayrollLine = {
   /** Phần kỳ người này thật sự làm, khi bị ngày vào / ngày nghỉ cắt bớt — để màn hình nói "chỉ tính N ngày". */
   employmentClip: { from: string; to: string; days: number } | null;
 };
+
+/**
+ * THƯỞNG % LỢI NHUẬN CỦA MỘT NGƯỜI SAU CỔNG LỖ LŨY KẾ TOÀN CÔNG TY (`lib/payroll/profit-gate.ts`).
+ *
+ * Bốn con số tách bạch, cố ý không gộp: tạm tính theo công thức · đề nghị (phần % LN toàn công ty tính
+ * trên LN đủ điều kiện) · đủ điều kiện được duyệt · chưa đủ điều kiện. `null` = CHƯA KẾT LUẬN ĐƯỢC.
+ */
+export type PayrollProfitShare = {
+  provisional: number | null;
+  demand: number | null;
+  eligible: number | null;
+  withheld: number | null;
+  reasons: string[];
+  claims: ProfitGateAllocation[];
+};
+
+/** Cổng lợi nhuận của cả kỳ — đủ để màn hình hiện bảy con số minh bạch. */
+export type PayrollProfitGate = {
+  result: ProfitGateResult;
+  policy: ProfitGatePolicy | null;
+  /** Lợi nhuận tính lương − hoa hồng thông thường của RIÊNG kỳ này (chưa gồm điều chỉnh muộn). */
+  ownBase: number | null;
+  /** Hoa hồng thông thường (không phụ thuộc lợi nhuận) đã trừ khỏi cơ sở. */
+  regularVariable: number | null;
+
+  /** Điều chỉnh lũy kế TƯỜNG MINH ghi vào kỳ này (chứng từ đến muộn của tháng đã khoá). */
+  lateAdjustments: LateAdjustment[];
+  simulatedMonths: string[];
+};
+
+/**
+ * CỔNG CHẠY THẾ NÀO TRONG MỘT LƯỢT TÍNH.
+ *  · `resolve` — màn hình / chốt kỳ: tự dựng số dư lũy kế từ quy chế + các tháng trước.
+ *  · `given`   — mô phỏng một tháng trước trên số dư đã cho (không dựng lại chuỗi — tránh đệ quy).
+ *  · `off`     — chỉ cần lợi nhuận đem xét (đo chứng từ đến muộn của tháng đã khoá).
+ */
+export type PayrollGateMode = { mode: "resolve" } | { mode: "given"; opening: ProfitGateOpening } | { mode: "off" };
+
+/**
+ * Kỳ BÁO CÁO trọn một tháng lịch từ khoá `YYYY-MM` — dựng từ `monthPeriod` của lương tự động và cùng
+ * `vnStartOfDay` / `vnEndOfDay` mà đường chốt kỳ dùng, để khoá kỳ và mốc giờ không lệch nhau.
+ */
+export function monthReportPeriod(monthKey: string): Period {
+  const mp = monthPeriod(monthKey);
+  return { key: "custom", from: vnStartOfDay(mp.fromKey), to: vnEndOfDay(mp.toKey), fromKey: mp.fromKey, toKey: mp.toKey, label: `Tháng ${monthKey}` };
+}
 
 /** Một dòng bù trừ lỗ lũy kế, đủ để chủ shop đọc mà không cần mở thêm màn hình nào. */
 export type PayrollCarryLine = {
@@ -944,6 +1005,8 @@ export type PayrollReport = {
    */
   paid: { amount: number; count: number; perPerson: false; missingWhat: string };
   marketers: MarketerReport;
+  /** Cổng lỗ lũy kế toàn công ty cho thưởng % lợi nhuận (`docs/payroll-profit-gate.md`). */
+  profitGate: PayrollProfitGate;
 };
 
 /**
@@ -983,6 +1046,7 @@ async function salaryPaidInPeriod(period: Period): Promise<{ amount: number; cou
 export async function getPayrollReport(
   period: Period,
   basis: PayrollBasis,
+  gateMode: PayrollGateMode = { mode: "resolve" },
 ): Promise<PayrollReport> {
   const [marketers, employees, cash, paid, carryConfig] = await Promise.all([
     getMarketerReport(period, basis),
@@ -1192,7 +1256,10 @@ export async function getPayrollReport(
         bonusTotal,
         bonusPersonal,
         bonusRevenue,
+        // TẠM TÍNH ở đây; cổng lợi nhuận bên dưới mới quyết `salary` được duyệt.
         salary: engine ? engine.result.netPay : legacySalary,
+        provisionalSalary: engine ? engine.result.netPay : legacySalary,
+        profitShare: { provisional: 0, demand: 0, eligible: 0, withheld: 0, reasons: [], claims: [] } as PayrollProfitShare,
         carry,
         engine,
         legacyAdjustments,
@@ -1200,25 +1267,192 @@ export async function getPayrollReport(
       };
     });
   /*
-    THÙ LAO BIẾN ĐỔI = phần tính TỪ lợi nhuận. Với người đi máy chung, đó là các thành phần loại
-    `COMMISSION` / `PROFIT_SHARE`; với người còn ở đường cũ, đó là hai ô % lợi nhuận.
+    ═══════════ CỔNG LỖ LŨY KẾ TOÀN CÔNG TY CHO THƯỞNG % LỢI NHUẬN ═══════════
 
-    Một người CHƯA BIẾT ⇒ tổng CHƯA BIẾT, và do đó lợi nhuận kế toán cũng chưa biết. Cộng phần đã
-    biết rồi gọi đó là tổng là khẳng định phần chưa biết bằng 0.
+    Đặc tả `docs/payroll-profit-gate.md`. Bốn bước, theo đúng thứ tự:
+
+      1. CƠ SỞ: lợi nhuận tính lương (đã trừ giá vốn, quảng cáo, vận chuyển, hoàn, vận hành, lương cố
+         định theo nguồn ghi nhận) − hoa hồng THÔNG THƯỜNG mà bảng lương tính ra (doanh thu, số đơn,
+         KPI, thưởng nóng…). Thưởng % lợi nhuận KHÔNG nằm trong cơ sở — nó được tính TỪ cơ sở, nên
+         không có vòng lặp công thức.
+      2. SỐ DƯ: lũy kế toàn công ty đầu tháng, từ quy chế đã duyệt + các tháng đã khoá.
+      3. ĐỀ NGHỊ: từng khoản thưởng % lợi nhuận; phần % LN toàn công ty tính trên LN ĐỦ ĐIỀU KIỆN.
+      4. PHÂN BỔ: tổng không vượt quỹ; phần còn lại là "chưa đủ điều kiện" kèm lý do.
+
+    Lợi nhuận CÁ NHÂN của một MKTer không bao giờ là căn cứ vượt qua cổng: nó chỉ chia phần quỹ mà
+    cả công ty đã sinh ra.
   */
-  const variableCompensation = lines.every((l) => (l.engine ? l.engine.result.netPay !== null : l.bonusPersonal !== null))
-    ? lines.reduce((t, l) => {
-        if (l.engine) {
-          return (
-            t +
-            l.engine.result.components
-              .filter((c) => c.kind === "COMMISSION" || c.kind === "PROFIT_SHARE")
-              .reduce((x, c) => x + (c.amount ?? 0), 0)
-          );
-        }
-        return t + l.bonusTotal + (l.bonusPersonal ?? 0);
-      }, 0)
-    : null;
+  const regularParts: (number | null)[] = [];
+  for (const l of lines) {
+    if (l.engine) {
+      for (const c of [...l.engine.result.components, ...l.engine.result.adjustments]) {
+        if (isRegularVariable(c.kind, c.basisKey)) regularParts.push(c.amount);
+      }
+    } else {
+      regularParts.push(l.bonusRevenue);
+      for (const a of l.legacyAdjustments?.items ?? []) if (isRegularVariable(a.kind, null)) regularParts.push(a.amount);
+    }
+  }
+  /*
+    QUYẾT TOÁN TỰ ĐỘNG (`AUTO_SETTLEMENT:`) là phần hoa hồng thông thường của tháng TRƯỚC truy lĩnh /
+    truy thu vào tháng này — một chi phí thù lao của tháng ghi nó. Doanh thu muộn sinh ra nó đã vào
+    lũy kế qua điều chỉnh muộn, nên không trừ nó ở đây là cộng lãi mà không cộng chi phí đi kèm.
+  */
+  /*
+    Chỉ dòng do MÁY tạo (`createdBy` rỗng), đúng hai loại máy quyết toán dùng, của người CÓ MẶT trong
+    kỳ. Mã tham chiếu là ô chữ người gõ được: một dòng người nhập mang cùng mã (thưởng tay, tạm ứng)
+    không được tính thành hoa hồng thông thường lần hai.
+  */
+  const coMat = new Set(activeEmployees.map((e) => e.id));
+  for (const [empId, rows] of adjustmentRows ?? new Map()) {
+    if (!coMat.has(empId)) continue;
+    for (const r of rows) {
+      if (!String(r.reference ?? "").startsWith("AUTO_SETTLEMENT:") || r.createdBy !== null || (r.kind !== "ADJUSTMENT" && r.kind !== "DEDUCTION")) continue;
+      regularParts.push((PAYROLL_COMPONENT_SIGN[r.kind as PayrollComponentKind] ?? 1) * Math.abs(Number(r.amount) || 0));
+    }
+  }
+  const regularVariable = regularParts.some((v) => v === null) ? null : regularParts.reduce<number>((t, v) => t + (v ?? 0), 0);
+  const ownBase = basis === "profit1" && regularVariable !== null ? totalProfit - regularVariable : null;
+  const applicable: { ok: true } | { ok: false; reason: string } =
+    basis !== "profit1"
+      ? { ok: false, reason: "Thưởng % lợi nhuận chỉ xét trên cơ sở “Lợi nhuận tính lương”. Cơ sở đang xem để tham khảo — số thưởng ở đây chỉ là TẠM TÍNH." }
+      : !carryMonth
+        ? { ok: false, reason: "Thưởng % lợi nhuận chỉ xét theo THÁNG LỊCH: số dư lỗ lũy kế toàn công ty là một chuỗi theo tháng, cộng lại theo một kỳ khác là làm mất đúng phần lỗ phải bù. Kỳ đang xem không phải trọn một tháng — số thưởng ở đây chỉ là TẠM TÍNH." }
+        : { ok: true };
+
+  let gateOpening: ProfitGateOpening | null = null;
+  let gateProblem: string | null = null;
+  let gatePolicy: ProfitGatePolicy | null = null;
+  let lateAdjustments: LateAdjustment[] = [];
+  let simulatedMonths: string[] = [];
+  if (applicable.ok && carryMonth && gateMode.mode === "resolve") {
+    const r = await resolveGateOpening(carryMonth, {
+      simulate: async (m, opening) => (await getPayrollReport(monthReportPeriod(m), "profit1", { mode: "given", opening })).profitGate.result,
+    });
+    gateOpening = r.opening;
+    gateProblem = r.problem;
+    gatePolicy = r.policy;
+    simulatedMonths = r.simulatedMonths;
+  } else if (gateMode.mode === "given") {
+    gateOpening = gateMode.opening;
+    gatePolicy = (await getProfitGateConfig()).active;
+  }
+  /*
+    ĐIỀU CHỈNH LŨY KẾ TƯỜNG MINH ghi vào ĐÚNG tháng này (kỳ đang mở — tháng đã khoá đọc ảnh chụp, không
+    đi qua đây). Một dòng cộng vào lợi nhuận đem xét một lần; khoá tháng là chụp nguyên văn các dòng ấy.
+  */
+  if (applicable.ok && carryMonth && gateMode.mode !== "off") {
+    lateAdjustments = (await getProfitGateConfig()).adjustments.filter((a) => a.monthKey === carryMonth);
+  }
+  const periodBase = ownBase === null ? null : ownBase + lateAdjustments.reduce((t, a) => t + (Number(a.amount) || 0), 0);
+
+  /*
+    ĐỀ NGHỊ CHO PHẦN % LỢI NHUẬN TOÀN CÔNG TY: tính trên LN ĐỦ ĐIỀU KIỆN, không trên LN của kỳ.
+    Máy chung tính lại một lượt với đại lượng `PROFIT_SHOP` = LN đủ điều kiện (bậc thang, ngưỡng…
+    không chia tỷ lệ tuyến tính được); chỉ chạy khi thật sự có thành phần như vậy và hai số khác nhau.
+  */
+  const E = applicable.ok && gateMode.mode !== "off" ? eligibleProfitOf(gateOpening, periodBase) : null;
+  const shopEngine =
+    E !== null && E !== totalProfit && [...engineLines.values()].some((x) => x.result.components.some((c) => c.basisKey === "PROFIT_SHOP"))
+      ? await computeEngineLines(
+          period,
+          {
+            profitShop: E,
+            perPerson: new Map(
+              activeEmployees.map((e) => {
+                const mm = marketers.marketers.find((x) => x.marketerId === e.id);
+                return [e.id, { profitPersonal: mm && cashRatio !== null ? Math.round(mm.personalProfit * cashRatio) : null, revenuePersonal: mm ? mm.attributedRevenue : null, ordersPersonal: mm ? mm.attributedOrders : null }] as const;
+              }),
+            ),
+          },
+          activeEmployees.map((e) => e.id),
+        )
+      : null;
+
+  const claims: ProfitGateClaim[] = [];
+  for (const l of lines) {
+    const id = l.employee.id;
+    const ten = l.employee.shortName || l.employee.name;
+    if (l.engine) {
+      const lai = shopEngine?.get(id);
+      for (const c of l.engine.result.components) {
+        if (!isProfitLinked(c.kind, c.basisKey)) continue;
+        const demand =
+          c.basisKey === "PROFIT_SHOP"
+            ? E === null
+              ? null
+              : E === totalProfit
+                ? c.amount
+                : (lai?.result.components.find((x) => x.code === c.code)?.amount ?? null)
+            : c.amount;
+        claims.push({ key: `${id}:${c.code}`, employeeId: id, label: `${ten} · ${c.label}`, provisional: c.amount, demand });
+      }
+      continue;
+    }
+    if (l.employee.percentTotal > 0) {
+      claims.push({
+        key: `${id}:SHOP`,
+        employeeId: id,
+        label: `${ten} · ${l.employee.percentTotal}% LN toàn công ty`,
+        provisional: l.bonusTotal,
+        demand: E === null ? null : Math.round(Math.max(E, 0) * (l.employee.percentTotal / 100)),
+      });
+    }
+    if (l.employee.percentPersonal > 0) {
+      claims.push({ key: `${id}:PERSONAL`, employeeId: id, label: `${ten} · ${l.employee.percentPersonal}% LN cá nhân`, provisional: l.bonusPersonal, demand: l.bonusPersonal });
+    }
+  }
+
+  const gateResult = evaluateProfitGate({
+    monthKey: carryMonth,
+    applicable: gateMode.mode === "off" ? { ok: false, reason: "Lượt đo lợi nhuận đem xét — không xét thưởng." } : applicable,
+    policy: gatePolicy,
+    opening: gateOpening,
+    openingProblem: gateProblem,
+    periodBase,
+    costIssues: marketers.costWarnings.filter((w) => w.severity === "high").map((w) => w.title),
+    claims,
+  });
+  const theoNguoi = new Map<string, ProfitGateAllocation[]>();
+  for (const a of gateResult.allocations) theoNguoi.set(a.employeeId, [...(theoNguoi.get(a.employeeId) ?? []), a]);
+  const sumN = (xs: (number | null)[]) => (xs.some((x) => x === null) ? null : xs.reduce<number>((t, x) => t + (x ?? 0), 0));
+  for (const l of lines) {
+    const mine = theoNguoi.get(l.employee.id) ?? [];
+    const provisional = sumN(mine.map((a) => a.provisional));
+    const eligible = sumN(mine.map((a) => a.eligible));
+    l.profitShare = {
+      provisional,
+      demand: sumN(mine.map((a) => a.demand)),
+      eligible,
+      withheld: sumN(mine.map((a) => a.withheld)),
+      reasons: [...new Set(mine.map((a) => a.reason).filter((x): x is string => Boolean(x)))],
+      claims: mine,
+    };
+    /*
+      TIỀN ĐƯỢC DUYỆT = tạm tính − phần thưởng lợi nhuận tạm tính + phần ĐỦ ĐIỀU KIỆN.
+      Chưa kết luận được phần thưởng ⇒ cả dòng là CHƯA BIẾT: in tạm tính là trả trước khi xét, in 0
+      là nói người ta không được thưởng — cả hai đều là một khẳng định không có căn cứ.
+    */
+    /*
+      SỐ DƯ CÒN MÔ PHỎNG (tháng trước chưa khoá) ⇒ phần thưởng "đủ điều kiện" chỉ để XEM — chưa phải
+      số được duyệt, nên thực nhận được duyệt của người có khoản ấy cũng là CHƯA KẾT LUẬN.
+    */
+    // `demand` / `eligible` CHƯA BIẾT (cổng chưa kết luận) không phải "có khoản": người có tạm tính bằng
+    // 0 không có gì để chặn. Tạm tính CHƯA BIẾT thì có (`null !== 0`).
+    const coKhoan = mine.some((a) => a.provisional !== 0 || (a.demand ?? 0) !== 0 || (a.eligible ?? 0) !== 0);
+    l.salary =
+      l.provisionalSalary === null || provisional === null || eligible === null || (coKhoan && !gateResult.established)
+        ? null
+        : l.provisionalSalary - provisional + eligible;
+  }
+
+  /*
+    THÙ LAO BIẾN ĐỔI = hoa hồng thông thường + thưởng % lợi nhuận ĐỦ ĐIỀU KIỆN. Một phần CHƯA BIẾT ⇒
+    tổng CHƯA BIẾT, và do đó lợi nhuận kế toán cũng chưa biết. Cộng phần đã biết rồi gọi đó là tổng
+    là khẳng định phần chưa biết bằng 0.
+  */
+  const eligibleTotal = sumN(lines.map((l) => l.profitShare.eligible));
+  const variableCompensation = regularVariable === null || eligibleTotal === null ? null : regularVariable + eligibleTotal;
 
   return {
     basis,
@@ -1237,6 +1471,22 @@ export async function getPayrollReport(
       monthlyTotal: lines.reduce((s, l) => s + l.fixedMonthly, 0),
     },
     marketers,
+    profitGate: { result: gateResult, policy: gatePolicy, ownBase, regularVariable, lateAdjustments, simulatedMonths },
+  };
+}
+
+/**
+ * Đầu vào cổng chốt kỳ từ bản tính — một chỗ, để màn hình và server action đọc CÙNG một câu.
+ */
+export function profitGateReadiness(report: Pick<PayrollReport, "profitGate">) {
+  const r = report.profitGate.result;
+  return {
+    status: r.status,
+    established: r.established,
+    message: r.message,
+    // Một khoản bằng 0 ở tạm tính vẫn có thể có đề nghị / phần đủ điều kiện khác 0 (điều chỉnh muộn
+    // dương trên một tháng lỗ) — mọi khoản khác 0 ở BẤT KỲ cột nào đều phải đi qua cổng.
+    hasProvisional: r.allocations.some((a) => a.provisional !== 0 || (a.demand ?? 0) !== 0 || (a.eligible ?? 0) !== 0),
   };
 }
 

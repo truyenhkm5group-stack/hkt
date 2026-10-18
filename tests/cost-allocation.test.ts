@@ -14,6 +14,7 @@ import { getMarketingDaily } from "@/lib/queries/marketing-daily";
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { clearMemo } from "@/lib/cache";
 import { PAYROLL_CALC_VERSION, PAYROLL_EMPLOYEES_KEY, payrollPeriodKey } from "@/lib/constants/payroll";
+import { DEFAULT_PROFIT_GATE_CONFIG, PAYROLL_PROFIT_GATE_KEY } from "@/lib/constants/payroll-profit-gate";
 import { getMarketerReport, getPayrollReport } from "@/lib/queries/payroll";
 import { PAYROLL_RECOGNITION_KEY } from "@/lib/queries/payroll-cost";
 import { buildPayrollSnapshot, getPayrollPeriodState, payrollDrift } from "@/lib/queries/payroll-period";
@@ -572,7 +573,18 @@ async function testPayrollLogisticsAdjustment(db: Db) {
     clearMemo();
   };
   const nhanSuTruocDo = await getSettingJson<unknown>(PAYROLL_EMPLOYEES_KEY, null);
+  const congTruocDo = await getSettingJson<unknown>(PAYROLL_PROFIT_GATE_KEY, null);
   await donDep();
+  /*
+    Thưởng % lợi nhuận nay đi qua CỔNG LỖ LŨY KẾ TOÀN CÔNG TY (`docs/payroll-profit-gate.md`): chưa
+    khai quy chế thì thưởng là "chưa xét được" và tổng lương là CHƯA BIẾT. Bộ này đo đường CƯỚC ĐIỀU
+    CHỈNH, không đo cổng — nên khai một quy chế "công ty không lỗ lũy kế, quỹ 100%": khi ấy thưởng đủ
+    điều kiện ĐÚNG BẰNG 10% lợi nhuận tính lương, và mọi phép so dưới đây giữ nguyên nghĩa.
+  */
+  await setSettingJson(PAYROLL_PROFIT_GATE_KEY, {
+    active: { version: 1, openingMonth: "2027-11", openingCumulative: 0, openingHighWater: 0, openingPaidBonus: 0, poolCapPercent: 100, regulationRef: "kiểm thử cước", reason: "bài kiểm cước điều chỉnh", approvedById: null, approvedByEmail: "kiem-thu@erp", approvedAt: "2027-10-31T00:00:00.000Z" },
+    history: [],
+  });
   // 10% lợi nhuận tổng, không lương cứng ⇒ tổng lương = đúng 10% lợi nhuận tính lương (khi dương).
   await setSettingJson(PAYROLL_EMPLOYEES_KEY, {
     list: [{ id: "pl-emp-1", name: "Nhân sự kiểm thử cước", shortName: "KTC", department: "Quản lý", aliases: [], accountIds: [], userEmail: "", fixed: 0, percentTotal: 10, percentPersonal: 0, percentRevenue: 0, active: true, note: "" }],
@@ -605,7 +617,16 @@ async function testPayrollLogisticsAdjustment(db: Db) {
   await db.insert(schema.expenses).values({ id: "pl-ship-dup", category: "SHIPPING", description: "Cước tháng 11 gõ tay (trùng vận đơn)", amount: 500_000, occurredAt: d("2027-11-12"), costSource: "MANUAL" });
   const m1 = await chup(MO);
   assert.equal(m1.luong.totalProfit, m0.luong.totalProfit, "kỳ mở: khoản trùng vận đơn không được trừ vào lợi nhuận tính lương");
-  assert.equal(m1.luong.totalSalary, m0.luong.totalSalary, "kỳ mở: và không đổi lương");
+  assert.equal(m1.dong?.bonusTotal, m0.dong?.bonusTotal, "kỳ mở: và không đổi thưởng TẠM TÍNH");
+  /*
+    Nhưng khoản bị loại là TIỀN THẬT NẰM NGOÀI PHÉP TÍNH (cảnh báo mức `high`) — dữ liệu sai lệch chưa
+    đối soát. Cổng lỗ lũy kế toàn công ty KHÔNG kết luận thưởng % lợi nhuận trên con số ấy: thực nhận
+    được duyệt là CHƯA BIẾT cho tới khi người xử lý khoản trùng (docs/payroll-profit-gate.md §3).
+  */
+  assert.equal(m1.luong.profitGate.result.status, "DATA_INCOMPLETE", "kỳ mở: khoản trùng chưa xử lý ⇒ cổng chưa kết luận");
+  assert.equal(m1.luong.totalSalary, null, "kỳ mở: và thực nhận được duyệt là CHƯA BIẾT — không trả thưởng trên số chưa đối soát");
+  // Người xử lý khoản trùng (xoá dòng gõ tay) ⇒ trở lại đúng như trước.
+  await db.delete(schema.expenses).where(sql`${schema.expenses.id} = 'pl-ship-dup'`);
 
   // Khoản ĐIỀU CHỈNH có lý do: một cước, một phí hoàn.
   await db.insert(schema.expenses).values([
@@ -630,7 +651,8 @@ async function testPayrollLogisticsAdjustment(db: Db) {
   );
   assert.equal(m2.luong.marketers.totals.logisticsAdjustmentUnallocated, 0, "kỳ mở: có đơn gửi ⇒ chia hết xuống mã");
   assert.equal((m1.dong?.bonusTotal ?? 0) - (m2.dong?.bonusTotal ?? 0), 120_000, "kỳ mở: thưởng 10% lợi nhuận tổng giảm ĐÚNG 1.200.000 × 10%");
-  assert.equal((m1.luong.totalSalary ?? 0) - (m2.luong.totalSalary ?? 0), 120_000, "kỳ mở: tổng lương giảm đúng khoản điều chỉnh × tỷ lệ");
+  assert.equal(m2.luong.profitGate.result.status, "ELIGIBLE", "kỳ mở: khoản điều chỉnh CÓ LÝ DO là chi phí đã ghi nhận — không chặn cổng");
+  assert.equal((m0.luong.totalSalary ?? 0) - (m2.luong.totalSalary ?? 0), 120_000, "kỳ mở: tổng lương giảm đúng khoản điều chỉnh × tỷ lệ");
 
   // Kỳ 15–18/11: có hai khoản điều chỉnh nhưng KHÔNG có đơn nào ⇒ không có căn cứ chia xuống mã.
   // Khoản ấy phải ở lại CẤP SHOP và vẫn bị trừ — không được lặng lẽ biến khỏi lợi nhuận tính lương.
@@ -648,6 +670,15 @@ async function testPayrollLogisticsAdjustment(db: Db) {
   );
 
   /* ══ KỲ ĐÃ KHOÁ ══ */
+  /*
+    Tháng 11 còn MỞ, nên số dư lũy kế đầu tháng 12 chỉ là MÔ PHỎNG và thực nhận được duyệt của tháng 12
+    là CHƯA KẾT LUẬN (luật 70). Phần này đo ẢNH CHỤP và đề xuất điều chỉnh, không đo cổng — nên khai
+    một phiên bản quy chế mở sổ từ tháng 12 (lũy kế 0).
+  */
+  await setSettingJson(PAYROLL_PROFIT_GATE_KEY, {
+    active: { version: 2, openingMonth: "2027-12", openingCumulative: 0, openingHighWater: 0, openingPaidBonus: 0, poolCapPercent: 100, regulationRef: "kiểm thử cước", reason: "bài kiểm cước điều chỉnh — kỳ khoá", approvedById: null, approvedByEmail: "kiem-thu@erp", approvedAt: "2027-11-30T00:00:00.000Z" },
+    history: [],
+  });
   const k0 = await chup(KHOA);
   assert.ok(k0.luong.totalProfit > 2_000_000, "tiền đề: lợi nhuận tính lương tháng 12 dương");
   const anh = buildPayrollSnapshot(k0.luong, KHOA, khoaKy!);
@@ -682,6 +713,7 @@ async function testPayrollLogisticsAdjustment(db: Db) {
 
   await donDep();
   await setSettingJson(PAYROLL_EMPLOYEES_KEY, nhanSuTruocDo ?? { list: [] });
+  await setSettingJson(PAYROLL_PROFIT_GATE_KEY, congTruocDo ?? DEFAULT_PROFIT_GATE_CONFIG);
   clearMemo();
   console.log(
     "✓ Bảng lương trừ cước / phí hoàn điều chỉnh tay có lý do: kỳ mở — lợi nhuận tính lương giảm đúng khoản engine báo, bằng độ giảm của Báo cáo lợi nhuận, thưởng giảm đúng khoản × tỷ lệ; khoản không khai điều chỉnh không đổi một đồng · kỳ đã khoá — ảnh chụp không đổi một đồng, phần chênh chỉ hiện ở đề xuất điều chỉnh",
