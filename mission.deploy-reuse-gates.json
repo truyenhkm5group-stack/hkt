@@ -3,7 +3,7 @@
   "mission_id": "deploy-reuse-gates",
   "title": "CI/CD: deploy dùng lại bằng chứng gates khi cây (tree) commit gộp trùng merge ref PR đã kiểm — bỏ chạy lại gates trùng",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,13 +20,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-17T03:16:14.367Z",
-  "updated_at": "2026-10-18T11:09:37.690Z",
-  "last_heartbeat": "2026-10-17T03:42:13.688Z",
+  "updated_at": "2026-10-18T11:12:24.106Z",
+  "last_heartbeat": "2026-10-18T11:12:24.106Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#881 → d5173b9ae0e0ef70993937bb8a980b34a89b0941",
     "verify": "PASS 95b6c8fec989b54e5e3abcc28566d7b8bfb2aec1 2026-10-18T11:09:19.079Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39121089122"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39121089122",
+    "done": "deploy dùng lại bằng chứng gates theo cây: #887 17,7′ · #891 ~19′ · #895 22,6′ · 39121089122 13,1′ (gates skipped) so với 63–77′ trước đó; verify PASS @95b6c8fe"
   },
   "handoff": {
     "branch": "claude/deploy-reuse-gates",
