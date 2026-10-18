@@ -3,7 +3,7 @@
   "mission_id": "ai-balance-test-clock",
   "title": "Bài kiểm Số dư AI: mốc đọc dựng từ chính sổ, không theo now+1s",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-aibal-clock",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T17:50:44.165Z",
-  "updated_at": "2026-10-18T17:50:44.165Z",
-  "last_heartbeat": "2026-10-18T17:50:44.165Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-18T18:38:06.888Z",
+  "last_heartbeat": "2026-10-18T18:38:06.888Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/ai-balance-test-clock",
+    "sha": "b2052468d7f4dc7278926f1623ab0d5c36a52866",
+    "at": "2026-10-18T18:38:06.888Z",
+    "actor": "DESKTOP-56TH98Y:wt-aibal-clock",
+    "title": "Bài kiểm Số dư AI: mốc đọc dựng từ chính sổ, không theo now+1s",
+    "summary": "",
+    "tests": [
+      "Tái hiện xác định (chèn 1,5s trước dòng thu hồi ⇒ đỏ 510≠0; sau sửa xanh); typecheck + lint sạch; npm test đầy đủ in TẤT CẢ KIỂM THỬ ĐẠT"
+    ]
+  }
 }
