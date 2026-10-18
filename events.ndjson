@@ -1,4 +1,3 @@
-{"at":"2026-10-10T21:26:01.227Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"avatar-pancake-shape","detail":"fix/avatar-pancake-shape @ e244baf96af9 · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T21:26:36.313Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"avatar-pancake-shape","detail":"#793 cho fix/avatar-pancake-shape @ e244baf96af9"}
 {"at":"2026-10-10T21:26:55.338Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#793 @ e244baf96af9 · Chỉ script ops + bài kiểm + khai ops-vps; CSDL chỉ đọc, Pancake chỉ GET, không Graph/facebook.com; bài kiểm chứng minh không giá trị nào lọt ra dòng in"}
 {"at":"2026-10-10T21:34:26.992Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"saas-value-core","detail":"feat/saas-value-core @ 8ca933d322b0 · 1 lệnh kiểm thử"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-18T17:41:26.435Z","actor":"DESKTOP-56TH98Y:wt-hslc-ship","kind":"HANDOFF","mission":"hslc-shipping-source","detail":"claude/hslc-shipping-source @ 1d8188aad75c · 1 lệnh kiểm thử"}
 {"at":"2026-10-18T17:43:54.545Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"hslc-shipping-source","detail":"#903 cho claude/hslc-shipping-source @ 1d8188aad75c"}
 {"at":"2026-10-18T17:44:21.028Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#903 @ 1d8188aad75c · review độc lập 2 vòng PASS-WITH-NITS: chỉ đọc (CSDL read-only, Pancake chỉ GET bằng khoá của tổ chức, không ghi/không đăng ký webhook); khoá/SĐT không bao giờ in; chiều về (legBaseCode) + mã ERP vọng lại bị loại khỏi «tạo ngoài ERP», dáng chiều về không rõ gốc chỉ HINT; tổ chức nhà bị từ chối; COD ghi rõ là khai báo"}
+{"at":"2026-10-18T17:47:25.782Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"342cb66bffd5 · run 39151153889 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39151153889"}
