@@ -1,0 +1,8 @@
+{
+  "pr": 903,
+  "sha": "1d8188aad75c43696c286c702d074e9e49b11b4e",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-18T17:43:58.424Z",
+  "note": "review độc lập 2 vòng PASS-WITH-NITS: chỉ đọc (CSDL read-only, Pancake chỉ GET bằng khoá của tổ chức, không ghi/không đăng ký webhook); khoá/SĐT không bao giờ in; chiều về (legBaseCode) + mã ERP vọng lại bị loại khỏi «tạo ngoài ERP», dáng chiều về không rõ gốc chỉ HINT; tổ chức nhà bị từ chối; COD ghi rõ là khai báo"
+}
