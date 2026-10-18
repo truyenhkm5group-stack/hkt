@@ -3,7 +3,7 @@
   "mission_id": "trace-route-hold",
   "title": "conv-money-trace --order: hỏi tuyến giao bằng decideShippingRoute",
   "business_goal": "Không còn kết luận nhầm «không giữ» cho đơn thiếu xã",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-token-budget",
@@ -20,11 +20,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T06:59:43.771Z",
-  "updated_at": "2026-10-18T06:59:43.771Z",
-  "last_heartbeat": "2026-10-18T06:59:43.771Z",
+  "updated_at": "2026-10-18T07:00:11.008Z",
+  "last_heartbeat": "2026-10-18T07:00:11.008Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/trace-route-hold",
+    "sha": "12ecc5a442e77d2cc03c0b63b839067f259ee07e",
+    "at": "2026-10-18T07:00:11.008Z",
+    "actor": "DESKTOP-56TH98Y:wt-token-budget",
+    "title": "conv-money-trace --order hỏi tuyến giao bằng CHÍNH decideShippingRoute (NO_WARD)",
+    "summary": "",
+    "tests": [
+      "conv-money-trace · ops-log-leak (625 dòng sạch): ĐẠT",
+      "tsc · eslint: sạch"
+    ]
   }
 }
