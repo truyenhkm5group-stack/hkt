@@ -135,6 +135,8 @@ alter table "return_dispositions" drop constraint if exists "return_dispositions
 alter table "return_dispositions" add constraint "return_dispositions_value_check" check (("disposition" = 'WRITE_OFF' or ("unit_cost_estimate" is null and "value_estimate" is null and "cost_basis" is null)) and ("value_estimate" is null or "value_estimate" >= 0) and ("cost_basis" is null or "cost_basis" in ('RECEIPT', 'ORDER_SNAPSHOT', 'VARIANT_DEFAULT', 'UNKNOWN'))) not valid;
 -- 0247: chỉ mục chữ chuẩn hoá của PAGE_REPLY.
 drop index if exists "sales_chat_inbound_page_reply_text_hash_idx";
+-- 0248: bảng trạng thái lượt migrate (mặt phẳng điều khiển).
+drop table if exists "platform_org_migration_status";
 -- Gỡ dòng sổ của 0245 VÀ mọi migration sau nó (mốc của 0245 = mốc nhỏ nhất trong nhóm đã áp sau 0244).
 delete from "drizzle"."__drizzle_migrations" where created_at >= ${MOC_0245};
 `;

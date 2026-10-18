@@ -58,6 +58,16 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/migration-serve-compat.test.ts",
   },
+  {
+    tag: "0248_org_migration_status",
+    why:
+      "Chỉ TẠO một bảng mặt phẳng điều khiển mới (platform_org_migration_status) — không thêm / đổi / xoá cột của bảng nào mã đang đọc. " +
+      "Bảng chỉ được đọc / ghi ở CSDL NHÀ (sổ trạng thái trong db/migrate.ts); bản ở CSDL tổ chức không đường nào chạm tới, kể cả bước " +
+      "dọn `platform_*` — bước đó chỉ chạy SAU một lượt migrate thành công, tức là khi bảng đã có. CSDL tổ chức thiếu 0248 vì lượt migrate " +
+      "hết giờ vẫn phục vụ được y như trước.",
+    addedColumns: {},
+    proof: "tests/org-migrate-isolation.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */
@@ -69,13 +79,16 @@ export function serveCompatAvoidColumns(table: string): ReadonlySet<string> {
 
 /**
  * Lỗi migrate có phải HẾT GIỜ không (điều kiện 1). SQLSTATE 57014 = statement timeout / bị huỷ (`pg_cancel_backend`); 55P03 = lock
- * timeout; `OrgMigrateError` LOCK_BUSY = chờ khoá migrate của chính tổ chức quá trần. drizzle bọc lỗi pg (`cause`) nên đọc cả hai tầng.
- * HÀM THUẦN.
+ * timeout; `OrgMigrateError` LOCK_BUSY = người khác giữ khoá migrate quá hạn; `OrgMigrateError` mang `timedOut` = lượt quá trần
+ * (RUN_TIMEOUT), lượt của người điều phối khác còn đang chạy (HOLDER_RUNNING), hoặc lượt của người điều phối khác đã kết thúc vì HẾT GIỜ
+ * (HOLDER_FAILED — cờ lấy từ trạng thái người đó ghi, db/migrate.ts::coordinateOrgMigration). drizzle bọc lỗi pg (`cause`) nên đọc cả
+ * hai tầng. HÀM THUẦN.
  */
 export function isMigrationTimeoutError(error: unknown): boolean {
   for (let e: unknown = error, depth = 0; e && depth < 4; e = (e as { cause?: unknown }).cause, depth++) {
-    const o = e as { code?: unknown; phase?: unknown; name?: unknown };
-    if (o.name === "OrgMigrateError" && o.phase === "LOCK_BUSY") return true;
+    const o = e as { code?: unknown; phase?: unknown; name?: unknown; timedOut?: unknown };
+    if (o.name === "OrgMigrateError" && (o.phase === "LOCK_BUSY" || o.timedOut === true)) return true;
+    if (o.name === "OrgMigrateError") return false;
     if (o.code === "57014" || o.code === "55P03") return true;
   }
   return false;
@@ -86,6 +99,9 @@ export function isMigrationTimeoutError(error: unknown): boolean {
  * (log production 12/10 chỉ còn «Failed query: -- Dẫn xuất TẤT ĐỊNH…»). Lấy lỗi SÂU NHẤT trong chuỗi `cause`, kèm SQLSTATE. HÀM THUẦN.
  */
 export function migrationErrorText(error: unknown): string {
+  // Lỗi của tầng điều phối (db/migrate.ts) đã tự mang câu gốc + người chạy trong message — lấy nguyên, không đào xuống lỗi pg bên trong
+  // (đào xuống thì mất «lượt của ai, quá trần nào»).
+  if ((error as { name?: unknown } | null)?.name === "OrgMigrateError" && error instanceof Error) return error.message.slice(0, 300);
   let deepest: unknown = error;
   for (let e: unknown = error, depth = 0; e && depth < 4; e = (e as { cause?: unknown }).cause, depth++) deepest = e;
   const code = (deepest as { code?: unknown })?.code;
