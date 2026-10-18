@@ -1,0 +1,8 @@
+{
+  "pr": 905,
+  "sha": "6c7cfde6fe1bbbd12c24fcae4f821bbc90d7a5cd",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-18T19:24:39.746Z",
+  "note": "lead: chỉ thêm NODE_OPTIONS=--max-old-space-size=6144 cho bước tsc (cùng mức bước dựng) — #903/#904 đỏ heap OOM ở tsc khi hai nhánh kiểm thử xanh"
+}
