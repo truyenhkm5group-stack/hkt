@@ -40,7 +40,9 @@ import {
   maskProjectNumber,
   minimumCredit,
   monthlyBasis,
+  judgeProbe,
   parseCutoverArgs,
+  QUICK_REPLY_PROBE_CASES,
   platformCandidateModels,
   platformPriceRatio,
   PLATFORM_ENGINE_PATCH,
@@ -556,6 +558,22 @@ export function testOrgAiCutoverPure() {
   assert.deepEqual(ok(["--credit=117.5", "--apply", ORG]).credit, 117.5, "thứ tự cờ không quan trọng");
   assert.equal(ok([ORG, "--apply", `--credit=${SCRIPT_AI_CREDIT_MAX_USD}`]).credit, SCRIPT_AI_CREDIT_MAX_USD, "đúng trần đường ops là được");
   assert.deepEqual(ok([ORG, "--apply-probe", "--since=2026-10-08T04:00:00Z"]).since, new Date("2026-10-08T04:00:00Z"));
+  // Kiểm câu mẫu trực tiếp (chủ shop 18/10/2026): chỉ đi cùng --apply-probe; máy chấm câu bot bằng tên danh mục.
+  assert.equal(ok([ORG, "--apply-probe", "--probe-set=quick-reply"]).probeSet, "quick-reply");
+  assert.match(sai2([ORG, "--probe-set=quick-reply"]), /chỉ đi cùng --apply-probe/);
+  sai2([ORG, "--apply-probe", "--probe-set=khac"]);
+  const DM = ["Chả cá thu", "Chả mực giã tay", "Nem hải sản tôm bề bề"];
+  const ca = (k: string) => QUICK_REPLY_PROBE_CASES.find((x) => x.key === k)!;
+  assert.equal(judgeProbe(ca("hoi-cha-ca"), "Dạ chả cá thu bên em 1kg giá 280.000 ₫ ạ", DM, []).verdict, "PASS");
+  assert.equal(judgeProbe(ca("hoi-cha-ca"), "Nem hải sản giá 120.000 ₫/1 hộp 10 cái", DM, []).verdict, "FAIL", "đúng lỗi ThanhPhương ⇒ TRƯỢT");
+  assert.equal(judgeProbe(ca("hoi-cha-muc"), "Dạ chả mực giã tay 400.000 ₫/kg ạ", DM, []).verdict, "PASS");
+  assert.equal(judgeProbe(ca("hoi-chung-bao-gia"), "Dạ anh/chị hỏi giá món nào ạ? Bên em có chả cá thu, chả mực, nem hải sản", DM, []).verdict, "PASS");
+  assert.equal(judgeProbe(ca("hoi-chung-bao-gia"), "Dạ chả cá thu bên em 1kg giá 280.000 ₫ ạ", DM, []).verdict, "FAIL", "chưa rõ món mà báo giá một món ⇒ TRƯỢT");
+  assert.equal(judgeProbe(ca("hoi-chung-ten-shop"), "Nem hải sản giá 120.000 ₫", DM, []).verdict, "FAIL", "tên shop «Hải Sản…» không phải căn cứ món nem");
+  assert.equal(judgeProbe(ca("chon-cha-ca-khong-tu-them"), "Dạ chả cá thu 1kg 280.000 ₫, mình dùng thêm chả mực không ạ?", DM, ["Chả cá thu"]).verdict, "PASS", "lời mời thêm món hợp lệ");
+  assert.equal(judgeProbe(ca("chon-cha-ca-khong-tu-them"), "Dạ chả cá thu 1kg ạ", DM, ["Chả cá thu", "Chả mực giã tay"]).verdict, "FAIL", "tự thêm món vào giỏ ⇒ TRƯỢT");
+  assert.equal(judgeProbe(ca("hoi-cha-ca"), "", DM, []).verdict, "FAIL", "bot im ⇒ TRƯỢT");
+  assert.equal(judgeProbe(ca("hoi-cha-ca"), "Dạ áo sơ mi 300.000 ₫", ["Áo sơ mi"], []).verdict, "N/A", "tổ chức không bán món của ca ⇒ KHÔNG ÁP DỤNG, không phải ĐẠT");
   assert.match(sai2([ORG, "--credit=150"]), /chỉ đi cùng --apply/, "--credit không kèm --apply ⇒ lỗi cách dùng");
   sai2([ORG, "--apply-probe", "--credit=150"]);
   for (const c of ["0", "0.00", "1001", "-5", "", " 150"]) sai2([ORG, "--apply", `--credit=${c}`]);

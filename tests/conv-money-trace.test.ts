@@ -15,7 +15,7 @@ import { inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { CLAIM_SAFE_TEXT } from "@/lib/sales-chatbot/claim-guard";
 import { EMPTY_REPLY_TEXT } from "@/lib/sales-chatbot/engine";
-import { COMMENT_ALREADY_NOTE, COMMENT_CARRY_LABEL, fixedAmountsInTemplate, reviewCodesText, fixedTextKind, moneyOfToolResult, parseTraceArgs, quickReplyHead, scanPatterns, totalClaimsIn, traceConversation, wrongProductTemplate } from "../scripts/conv-money-trace";
+import { COMMENT_ALREADY_NOTE, COMMENT_CARRY_LABEL, fixedAmountsInTemplate, reviewCodesText, fixedTextKind, moneyOfToolResult, parseTraceArgs, QUICK_REPLAY_VARIANTS, quickDecisionAt, quickReplyHead, scanAiPerformance, scanPatterns, totalClaimsIn, traceConversation, wrongProductTemplate } from "../scripts/conv-money-trace";
 
 const PHONE = "0900003106";
 
@@ -128,6 +128,11 @@ async function testDb() {
     const s3 = p3.filter((l) => l.startsWith("[ops:tom-tat]")).join("\n");
     assert.match(s3, /KHÔNG có tin khách mới kể từ tin bot trước [1-9]\d* tin/, s3);
     assert.match(s3, /≠ tổng giỏ \/ nháp máy chủ ngay trước: [1-9]\d* tin/, s3);
+    // E (chủ shop 18/10): tốc độ + chi phí trả lời — chạy thật trên CSDL thử (sổ sự kiện + sổ AI nền tảng), chỉ số đếm.
+    const p4 = await capture(() => scanAiPerformance(db, "khong-co-to-chuc", new Date(Date.now() - 86_400_000), new Date()));
+    const s4 = p4.filter((l) => l.startsWith("[ops:tom-tat]")).join(" | ");
+    assert.match(s4, /E lượt bot trả lời .* QUICK_REPLY \d+/, s4);
+    assert.match(s4, /E lời gọi AI bot bán hàng: /, s4);
     for (const p of [...p1, ...p2, ...p3]) assert.ok(!p.includes(PHONE) && !p.includes("Bình Thạnh") && !p.includes("Quận 12") && !p.includes("chả mực ạ"), `không lọt SĐT / địa chỉ / chữ tin: ${p}`);
     for (const p of [s1, s2, s3]) assert.ok(!p.includes(money) && !p.includes(empty), "kênh tóm tắt không in mã hội thoại");
   } finally {
@@ -154,6 +159,26 @@ function testWrongProduct() {
   assert.equal(wrongProductTemplate("Dạ em gửi mình menu ạ", c("xin giá chả cá"), tpls, products), null, "tin không phải câu mẫu");
   const moiNem = [...c("chả cá thu giá sao em"), { who: "SHOP" as const, text: "Dạ chả cá thu 280k ạ. Chị lấy thêm nem hải sản không ạ?" }, ...c("giá sao em")];
   assert.equal(wrongProductTemplate("Nem hải sản tôm bề bề bên em giá 120.000 ₫/hộp 10 cái ạ", moiNem, tpls, products), null, "shop vừa mời nem ⇒ câu nem không phải sai món");
+
+  // Phát lại tất định (mẫu số + --replay-quick): câu nem mang «xin giá chả cá» ⇒ trần sai món, sau luật không.
+  const entries = [
+    { id: "nem", title: "Nem", triggers: ["nem bao nhiêu", "xin giá chả cá", "báo giá"], answer: "Nem hải sản tôm bề bề bên em giá {{giá:NEM-1}}/hộp" },
+    { id: "ca", title: "Chả cá", triggers: ["Cha ca"], answer: "Dạ chả cá thu bên em giá {{giá:CHA-CA-THU}} ạ" },
+  ];
+  const d1 = quickDecisionAt(c("xin giá chả cá"), entries, products);
+  assert.deepEqual(d1, { eligible: true, raw: "MATCH «Nem»", after: "MATCH «Chả cá»", changed: true, wrongBefore: true, wrongAfter: false, defaultBefore: false, quickAfter: true });
+  assert.deepEqual(quickDecisionAt(c("nem bao nhiêu"), entries, products), { eligible: true, raw: "MATCH «Nem»", after: "MATCH «Nem»", changed: false, wrongBefore: false, wrongAfter: false, defaultBefore: false, quickAfter: true });
+  // «báo giá» không ai nói món ⇒ khớp trần MẶC ĐỊNH nem (không phải «sai món»), sau luật nhường AI.
+  assert.deepEqual(quickDecisionAt(c("báo giá"), entries, products), { eligible: true, raw: "MATCH «Nem»", after: "NONE", changed: true, wrongBefore: false, wrongAfter: false, defaultBefore: true, quickAfter: false });
+  assert.equal(quickDecisionAt(c("Chị 0961003107, 9 Hai Bà Trưng"), entries, products).eligible, false, "tin chốt đơn ⇒ câu mẫu không được xét (như lượt sống)");
+  assert.equal(quickDecisionAt(c("thời tiết đẹp"), entries, products).eligible, false);
+  for (const v of QUICK_REPLAY_VARIANTS) assert.equal(quickDecisionAt(v.lines, entries, products).wrongAfter, false, `biến thể «${v.key}» không bao giờ sai món sau luật`);
+  assert.deepEqual(parseTraceArgs(["hslc", "--replay-quick=419a66d8-3079-4cdd-bb7a-802c386493f9,d1a2fd9d-eeac-466a-bcc3-e50823cdd586"]), { code: "hslc", conv: null, order: null, scan: false, days: 3, replayQuick: ["419a66d8-3079-4cdd-bb7a-802c386493f9", "d1a2fd9d-eeac-466a-bcc3-e50823cdd586"] });
+  assert.ok("error" in parseTraceArgs(["hslc", "--replay-quick=khong-phai-uuid"]));
+  const w = parseTraceArgs(["hslc", "--scan", "--since=2026-10-17T13:12Z", "--until=2026-10-18T13:12Z"]);
+  assert.ok(!("error" in w) && w.until?.toISOString() === "2026-10-18T13:12:00.000Z");
+  assert.ok("error" in parseTraceArgs(["hslc", "--scan", "--until=2026-10-18T13:12Z"]), "--until cần --since");
+  assert.ok("error" in parseTraceArgs(["hslc", "--scan", "--since=2026-10-18T13:12Z", "--until=2026-10-18T13:00Z"]), "--until phải sau --since");
 }
 
 export async function testConvMoneyTrace() {

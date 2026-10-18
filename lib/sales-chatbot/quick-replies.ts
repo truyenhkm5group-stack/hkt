@@ -35,7 +35,7 @@ import {
   type QuickReplyEntry,
   type QuickReplySettings,
 } from "@/lib/sales-chatbot/quick-replies-shared";
-import { quickReplyFocusGuard, triggerProductConflicts, type FocusLine, type FocusProduct, type QuickReplyFocusGuard } from "@/lib/sales-chatbot/quick-reply-focus";
+import { productConsistencyError, quickReplyFocusGuard, triggerProductConflicts, unavailableQuickReplyGuard, type FocusLine, type FocusProduct, type QuickReplyFocusGuard } from "@/lib/sales-chatbot/quick-reply-focus";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { setSettingJson } from "@/lib/settings";
@@ -119,12 +119,13 @@ export async function loadFocusProducts(): Promise<FocusProduct[]> {
 }
 
 /**
- * Bộ lọc MÓN KHÁCH ĐANG HỎI cho một lượt (P0 18/10/2026): đọc danh mục một lần. Lỗi đọc ⇒ `null` (không lọc — như trước bản vá; bước
- * khớp chữ vẫn chạy, không chặn khách).
+ * Bộ lọc MÓN ĐANG BÀN cho một lượt (P0 18/10/2026): đọc danh mục một lần. Đọc LỖI ⇒ bộ lọc ĐÓNG (`unavailableQuickReplyGuard` — chủ
+ * shop 18/10: lỗi không được biến thành «không lọc»); danh mục rỗng (tổ chức chưa có sản phẩm) ⇒ không câu mẫu nào gắn món, lọc không đổi gì.
  */
-export async function quickReplyFocus(lines: readonly FocusLine[], upsellReplyId: string | null): Promise<QuickReplyFocusGuard | null> {
+export async function quickReplyFocus(lines: readonly FocusLine[], upsellReplyId: string | null): Promise<QuickReplyFocusGuard> {
+  const ids = upsellReplyId ? [upsellReplyId] : [];
   const products = await loadFocusProducts().catch(() => null);
-  return products?.length ? quickReplyFocusGuard(lines, products, upsellReplyId ? [upsellReplyId] : []) : null;
+  return products === null ? unavailableQuickReplyGuard(ids) : quickReplyFocusGuard(lines, products, ids);
 }
 
 export async function activeEntries(): Promise<QuickReplyEntry[]> {
@@ -209,8 +210,9 @@ export async function quickReplyByKeyword(text: string, opts: { ordering: boolea
   // khỏi danh sách ứng viên của AI đọc hiểu. Câu mẫu thay CẢ lượt trả lời nên phải nói đủ mọi món khách đang hỏi (`answers`). Không
   // còn câu nào ⇒ chatbot đầy đủ trả lời (công cụ giá đọc đúng món).
   const focus = opts.focus;
+  if (focus?.unavailable) return { kind: "SKIP", reason: "Không đọc được danh mục — câu mẫu tạm dừng, AI trả lời" };
   const entries = focus ? all.filter((e) => focus.answers(e)) : all;
-  if (entries.length === 0) return { kind: "SKIP", reason: "Không câu mẫu nào nói đúng món khách hỏi" };
+  if (entries.length === 0) return { kind: "SKIP", reason: focus && !focus.onTable.length ? "Chưa xác định khách hỏi món nào — AI đọc ngữ cảnh / hỏi lại" : "Không câu mẫu nào nói đúng món khách hỏi" };
   const m = matchQuickReplyByKeyword(text, entries);
   // Khách hỏi SỈ ⇒ khớp chữ «chả cá thu giá» sẽ trả giá LẺ — nhường AI đọc hiểu (nó biết câu báo giá lẻ không khớp).
   if (m.kind === "MATCH" && !looksWholesale(text)) {
@@ -322,6 +324,9 @@ export async function saveQuickReply(user: SessionUser, input: { id?: string | n
   if (!v.ok) return { error: v.error };
   const missing = await unknownSkus(v.value.answer);
   if (missing.length) return { error: `Không có mẫu mã SKU: ${missing.join(", ")} — kiểm lại mã trong chỗ trống.` };
+  // Cách hỏi ↔ câu trả lời ↔ SKU phải nói CÙNG món (chủ shop 18/10/2026). Đọc danh mục lỗi ⇒ không lưu mù.
+  const consistency = await consistencyCheck(v.value);
+  if (consistency) return { error: consistency };
   const db = await getDb();
   const active = Boolean(input.active) && !v.value.answer.includes(NEEDS_EDIT);
   if (input.id) {
@@ -337,13 +342,24 @@ export async function saveQuickReply(user: SessionUser, input: { id?: string | n
   return { ok: true, id: row.id };
 }
 
+/** Lưu / bật câu mẫu: cách hỏi gọi tên món mà câu trả lời không nói tới ⇒ câu lỗi; đọc danh mục lỗi ⇒ câu lỗi (không lưu mù). */
+async function consistencyCheck(d: { title: string; triggers: readonly string[]; answer: string }): Promise<string | null> {
+  const products = await loadFocusProducts().catch(() => null);
+  if (products === null) return "Không đọc được danh mục để kiểm cách hỏi với sản phẩm — thử lại sau.";
+  return productConsistencyError(d, products);
+}
+
 export async function setQuickReplyActive(user: SessionUser, id: string, active: boolean): Promise<{ ok: true } | { error: string }> {
   const g = await gate(user);
   if (!g.ok) return { error: g.error };
   const db = await getDb();
-  const [row] = await db.select({ answer: qr.answer }).from(qr).where(eq(qr.id, id)).limit(1);
+  const [row] = await db.select({ title: qr.title, triggers: qr.triggers, answer: qr.answer }).from(qr).where(eq(qr.id, id)).limit(1);
   if (!row) return { error: "Không còn câu mẫu này." };
   if (active && row.answer.includes(NEEDS_EDIT)) return { error: "Câu trả lời còn «[giá lấy từ ERP]» — sửa thành {{giá:SKU}} (hoặc bỏ giá) rồi mới bật." };
+  if (active) {
+    const consistency = await consistencyCheck({ title: row.title, triggers: row.triggers ?? [], answer: row.answer });
+    if (consistency) return { error: consistency };
+  }
   await db.update(qr).set({ active }).where(eq(qr.id, id));
   await audit({ userId: user.id, userEmail: user.email, action: active ? "SALES_QUICK_REPLY_ACTIVATE" : "SALES_QUICK_REPLY_DEACTIVATE", entity: "SALES_QUICK_REPLY", entityId: id });
   return { ok: true };
@@ -372,7 +388,7 @@ export async function bulkQuickReplies(user: SessionUser, rawIds: readonly strin
   if (ids.length === 0) return { error: "Chưa chọn câu mẫu nào." };
   if (ids.length > QUICK_REPLY_LIMITS.bulk) return { error: `Mỗi lần tối đa ${QUICK_REPLY_LIMITS.bulk} câu mẫu.` };
   const db = await getDb();
-  const rows = await db.select({ id: qr.id, title: qr.title, answer: qr.answer, active: qr.active }).from(qr).where(inArray(qr.id, ids));
+  const rows = await db.select({ id: qr.id, title: qr.title, triggers: qr.triggers, answer: qr.answer, active: qr.active }).from(qr).where(inArray(qr.id, ids));
   if (rows.length === 0) return { error: "Không còn câu mẫu nào trong số đã chọn." };
   let changed = 0;
   let skipped = 0;
@@ -382,7 +398,11 @@ export async function bulkQuickReplies(user: SessionUser, rawIds: readonly strin
     if (settings.upsellReplyId && rows.some((r) => r.id === settings.upsellReplyId)) await setSettingJson(QUICK_REPLY_SETTING_KEY, { ...settings, upsellReplyId: null });
   } else {
     const active = op === "ACTIVATE";
-    const blocked = active ? rows.filter((r) => r.answer.includes(NEEDS_EDIT)) : [];
+    // Bật hàng loạt bỏ qua câu còn «[giá lấy từ ERP]» VÀ câu có cách hỏi gắn nhầm món (đọc danh mục lỗi ⇒ không bật câu nào gắn món mù).
+    const products = active ? await loadFocusProducts().catch(() => null) : [];
+    // Không đọc được danh mục ⇒ báo ĐÚNG lý do (review), không đổ cho cách hỏi gắn nhầm.
+    if (active && products === null) return { error: "Không đọc được danh mục để kiểm cách hỏi với sản phẩm — chưa bật câu nào, thử lại sau." };
+    const blocked = active ? rows.filter((r) => r.answer.includes(NEEDS_EDIT) || productConsistencyError({ title: r.title, triggers: r.triggers ?? [], answer: r.answer }, products ?? []) !== null) : [];
     skipped = blocked.length;
     const target = rows.filter((r) => r.active !== active && !blocked.includes(r)).map((r) => r.id);
     if (target.length) changed = (await db.update(qr).set({ active }).where(inArray(qr.id, target)).returning({ id: qr.id })).length;
@@ -426,6 +446,43 @@ export async function removeQuickReplyImage(user: SessionUser, imageId: string):
   if (!row) return { error: "Không còn ảnh này." };
   await audit({ userId: user.id, userEmail: user.email, action: "SALES_QUICK_REPLY_IMAGE_REMOVE", entity: "SALES_QUICK_REPLY", entityId: row.quickReplyId });
   return { ok: true };
+}
+
+/**
+ * DỌN cách hỏi GẮN NHẦM MÓN (chủ shop 18/10/2026) — nút trên màn hình Câu trả lời mẫu, người có `ai_sales:manage` bấm. Chỉ gỡ đúng
+ * những cách hỏi gọi tên món mà câu mẫu không nói tới (`triggerProductConflicts`); không xoá câu mẫu, không đụng câu trả lời / ảnh /
+ * cách hỏi khác. Mỗi câu mẫu một dòng nhật ký mang danh sách cách hỏi TRƯỚC / SAU — đủ để khôi phục. Đọc danh mục lỗi ⇒ không gỡ gì.
+ */
+export async function removeWrongProductTriggers(user: SessionUser): Promise<{ ok: true; templates: number; triggers: number; skippedConcurrent: number } | { error: string }> {
+  const g = await gate(user);
+  if (!g.ok) return { error: g.error };
+  const products = await loadFocusProducts().catch(() => null);
+  if (products === null) return { error: "Không đọc được danh mục — chưa gỡ gì, thử lại sau." };
+  const db = await getDb();
+  const rows = await db.select({ id: qr.id, title: qr.title, triggers: qr.triggers, answer: qr.answer }).from(qr);
+  let templates = 0;
+  let triggers = 0;
+  let skippedConcurrent = 0;
+  for (const r of rows) {
+    const before = r.triggers ?? [];
+    const drop = new Set(triggerProductConflicts({ title: r.title, triggers: before, answer: r.answer }, products).map((c) => c.trigger));
+    if (!drop.size) continue;
+    const after = before.filter((t) => !drop.has(t));
+    // Chỉ ghi khi cách hỏi / câu trả lời vẫn đúng như lúc đọc (review): người vừa sửa câu này trong lúc bấm thì KHÔNG đè — bỏ qua và báo.
+    const done = await db
+      .update(qr)
+      .set({ triggers: after })
+      .where(and(eq(qr.id, r.id), sql`to_jsonb(${qr.triggers}) = ${JSON.stringify(before)}::jsonb`, eq(qr.answer, r.answer), eq(qr.title, r.title)))
+      .returning({ id: qr.id });
+    if (!done.length) {
+      skippedConcurrent += 1;
+      continue;
+    }
+    await audit({ userId: user.id, userEmail: user.email, action: "SALES_QUICK_REPLY_TRIGGERS_PRUNE", entity: "SALES_QUICK_REPLY", entityId: r.id, before: { title: r.title, triggers: before }, after: { triggers: after, removed: [...drop] } });
+    templates += 1;
+    triggers += before.length - after.length;
+  }
+  return { ok: true, templates, triggers, skippedConcurrent };
 }
 
 /** Lưu MỘT PHẦN cài đặt — gộp với bản đang lưu (bật / tắt một công tắc không xoá câu upsell đã chọn). */
@@ -487,7 +544,9 @@ export async function insertLearned(clean: readonly QuickReplyDraft[], opts: { a
   });
   const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(qr);
   const room = Math.max(0, QUICK_REPLY_LIMITS.entries - Number(n));
-  const rows = fresh.slice(0, room).map((c) => ({ ...c, active: opts.active && !c.answer.includes(NEEDS_EDIT), source: "LEARNED" as const, createdBy: opts.actorEmail }));
+  // Câu AI soạn có cách hỏi gắn nhầm món KHÔNG BAO GIỜ tự bật (kể cả khi shop bật «tự bật») — nằm chờ người duyệt.
+  const products = opts.active ? await loadFocusProducts().catch(() => null) : [];
+  const rows = fresh.slice(0, room).map((c) => ({ ...c, active: opts.active && !c.answer.includes(NEEDS_EDIT) && products !== null && productConsistencyError(c, products) === null, source: "LEARNED" as const, createdBy: opts.actorEmail }));
   if (rows.length) await db.insert(qr).values(rows);
   return rows.length;
 }

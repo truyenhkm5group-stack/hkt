@@ -42,16 +42,16 @@ if (CHAY_THANG) process.env.ERP_READ_ONLY = "1";
 
 import "dotenv/config";
 import { createHash } from "node:crypto";
-import { and, asc, eq, gte, inArray, like, or, sql, type SQL } from "drizzle-orm";
-import { getDbForInspection, schema, type Db } from "@/db";
+import { and, asc, eq, gte, inArray, like, lte, or, sql, type SQL } from "drizzle-orm";
+import { getDbForInspection, getPlatformDb, schema, type Db } from "@/db";
 import { withOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
-import { CLAIM_SAFE_TEXT, extractVndAmounts } from "@/lib/sales-chatbot/claim-guard";
+import { CLAIM_SAFE_TEXT, extractVndAmounts, paymentSignalInCustomerText } from "@/lib/sales-chatbot/claim-guard";
 import { EMPTY_REPLY_TEXT, loadSalesChatbotConfig, SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { catalogReferenceAmounts } from "@/lib/sales-chatbot/quote";
-import { listQuickReplies, loadFocusProducts } from "@/lib/sales-chatbot/quick-replies";
-import { fitsFocus, productFocusOf, quickReplyCovers, type FocusLine, type FocusProduct } from "@/lib/sales-chatbot/quick-reply-focus";
-import { parsePlaceholders } from "@/lib/sales-chatbot/quick-replies-shared";
+import { listQuickReplies, loadFocusProducts, loadQuickReplySettings } from "@/lib/sales-chatbot/quick-replies";
+import { fitsFocus, productFocusOf, quickReplyCovers, quickReplyFocusGuard, type FocusLine, type FocusProduct } from "@/lib/sales-chatbot/quick-reply-focus";
+import { isMultiPart, looksLikeOrdering, looksWholesale, matchQuickReplyByKeyword, parsePlaceholders, type KeywordMatch, type QuickReplyEntry } from "@/lib/sales-chatbot/quick-replies-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { DEFAULT_SHIPPING_ROUTING } from "@/lib/constants/shipping-routing";
 import { addressReviewOpenOf, decideShippingRoute, orderReviewOpenOf } from "@/lib/shipping/route";
@@ -66,11 +66,12 @@ const vnd = (n: number | null | undefined) => (typeof n === "number" && Number.i
 export const TRACE_DEFAULT_SCAN_DAYS = 3;
 export const TRACE_MAX_SCAN_DAYS = 30;
 export const TRACE_MAX_SCAN_CONVERSATIONS = 3000;
-const USAGE = `<mã tổ chức> --conv=<uuid> [--order=<mã ngắn>] | <mã tổ chức> --scan [--days=1..${TRACE_MAX_SCAN_DAYS} | --since=<ISO UTC>]`;
+export const TRACE_MAX_REPLAY_CONVERSATIONS = 10;
+const USAGE = `<mã tổ chức> --conv=<uuid> [--order=<mã ngắn>] | <mã tổ chức> --scan [--days=1..${TRACE_MAX_SCAN_DAYS} | --since=<ISO UTC>] | <mã tổ chức> --replay-quick=<uuid>[,<uuid>…]`;
 
 // ─────────────────────────── PHẦN THUẦN ───────────────────────────
 
-export type TraceArgs = { code: string; conv: string | null; order: string | null; scan: boolean; days: number; since?: Date; at?: Date; windowMin?: number };
+export type TraceArgs = { code: string; conv: string | null; order: string | null; scan: boolean; days: number; since?: Date; until?: Date; at?: Date; windowMin?: number; replayQuick?: string[] };
 
 export function parseTraceArgs(argv: readonly string[]): TraceArgs | { error: string } {
   const code = (argv.find((a) => !a.startsWith("--")) ?? "").trim();
@@ -92,7 +93,15 @@ export function parseTraceArgs(argv: readonly string[]): TraceArgs | { error: st
   const rawWin = val("window");
   const windowMin = rawWin === undefined ? 15 : Number(rawWin);
   if (!Number.isInteger(windowMin) || windowMin < 1 || windowMin > 120) return { error: "--window phải là số phút nguyên 1..120" };
-  if (!scan && !conv && !order && !at) return { error: "cần --conv=<uuid>, --order=<mã ngắn>, --at=<mốc UTC> hoặc --scan" };
+  // `--replay-quick=<uuid>,…` (P0 18/10/2026): PHÁT LẠI TẤT ĐỊNH bước câu mẫu của từng tin khách — bộ khớp chữ trần (như trước #898) và sau
+  // luật món đang bàn, trên câu mẫu + danh mục ĐANG có. Không gọi AI, không tạo hội thoại / tin nào, không ghi gì; kèm một bộ biến thể cố định.
+  const rawReplay = val("replay-quick");
+  let replayQuick: string[] | undefined;
+  if (rawReplay !== undefined) {
+    replayQuick = rawReplay.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+    if (!replayQuick.length || replayQuick.length > TRACE_MAX_REPLAY_CONVERSATIONS || !replayQuick.every((x) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(x))) return { error: `--replay-quick nhận 1..${TRACE_MAX_REPLAY_CONVERSATIONS} mã hội thoại uuid, cách nhau dấu phẩy` };
+  }
+  if (!scan && !conv && !order && !at && !replayQuick) return { error: "cần --conv=<uuid>, --order=<mã ngắn>, --at=<mốc UTC>, --replay-quick=<uuid,…> hoặc --scan" };
   const rawDays = val("days");
   const days = rawDays === undefined ? TRACE_DEFAULT_SCAN_DAYS : Number(rawDays);
   if (!Number.isInteger(days) || days < 1 || days > TRACE_MAX_SCAN_DAYS) return { error: `--days phải là số nguyên 1..${TRACE_MAX_SCAN_DAYS}` };
@@ -103,7 +112,14 @@ export function parseTraceArgs(argv: readonly string[]): TraceArgs | { error: st
     since = new Date(rawSince);
     if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?Z$/.test(rawSince) || Number.isNaN(since.getTime())) return { error: "--since phải là mốc UTC dạng 2026-10-14T08:10Z" };
   }
-  return { code, conv: conv?.toLowerCase() ?? null, order: order?.toLowerCase() ?? null, scan, days, ...(since ? { since } : {}), ...(at ? { at, windowMin } : {}) };
+  // `--until=<ISO UTC>` (cùng `--since`): đóng cửa sổ quét — so HAI cửa sổ dài bằng nhau trước / sau một lượt deploy (dòng D, E).
+  const rawUntil = val("until");
+  let until: Date | undefined;
+  if (rawUntil !== undefined) {
+    until = new Date(rawUntil);
+    if (!since || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?Z$/.test(rawUntil) || Number.isNaN(until.getTime()) || until.getTime() <= since.getTime()) return { error: "--until cần --since và phải là mốc UTC SAU --since" };
+  }
+  return { code, conv: conv?.toLowerCase() ?? null, order: order?.toLowerCase() ?? null, scan, days, ...(since ? { since } : {}), ...(until ? { until } : {}), ...(at ? { at, windowMin } : {}), ...(replayQuick ? { replayQuick } : {}) };
 }
 
 type Block = { type?: unknown; text?: unknown; name?: unknown; input?: unknown; id?: unknown; toolUseId?: unknown; content?: unknown; isError?: unknown };
@@ -187,6 +203,50 @@ export function wrongProductTemplate<T extends { title: string; answer: string; 
   const wrong = hits.filter((t) => !fitsFocus(quickReplyCovers(t, products), focus));
   return wrong.length === hits.length ? wrong[0] : null;
 }
+
+/**
+ * MẪU SỐ của dòng D + PHÁT LẠI: bước câu mẫu khớp chữ cho MỘT tin khách, trước và sau luật món đang bàn (#898). `eligible` = tin qua
+ * được các luật bỏ qua THEO CHỮ của lượt sống (báo đã chuyển khoản · dấu hiệu chốt · nhiều câu) và bộ khớp chữ trần có ứng viên; luật
+ * bỏ qua theo TRẠNG THÁI (đơn nháp đang lên, hậu mãi, ngữ cảnh bài viết…) không dựng lại được ở đây — số này là TRẦN TRÊN của lượt sống.
+ * `wrongBefore` = câu thắng của bộ khớp trần nói về món khác món đang bàn; `wrongAfter` = như vậy sau luật — phải luôn là `false`.
+ */
+export type QuickDecision = { eligible: boolean; raw: string; after: string; changed: boolean; wrongBefore: boolean; wrongAfter: boolean; defaultBefore: boolean; quickAfter: boolean };
+
+const matchLabel = (m: KeywordMatch) => (m.kind === "MATCH" ? `MATCH «${m.entry.title}»` : m.kind === "AMBIGUOUS" ? `AMBIGUOUS ${m.entries.map((e) => `«${e.title}»`).join(" | ")}` : "NONE");
+
+export function quickDecisionAt(lines: readonly FocusLine[], entries: readonly QuickReplyEntry[], products: readonly FocusProduct[], upsellIds: readonly string[] = []): QuickDecision {
+  const text = lines[lines.length - 1]?.text ?? "";
+  const skipped = !text.trim() || Boolean(paymentSignalInCustomerText(text)) || looksLikeOrdering(text) || isMultiPart(text);
+  const raw = skipped ? ({ kind: "NONE" } as KeywordMatch) : matchQuickReplyByKeyword(text, entries);
+  const g = quickReplyFocusGuard(lines, products, upsellIds);
+  const after = skipped ? ({ kind: "NONE" } as KeywordMatch) : matchQuickReplyByKeyword(text, entries.filter((e) => g.answers(e)));
+  const sends = (m: KeywordMatch) => m.kind === "MATCH" && !looksWholesale(text);
+  return {
+    eligible: raw.kind !== "NONE",
+    raw: matchLabel(raw),
+    after: matchLabel(after),
+    changed: matchLabel(raw) !== matchLabel(after),
+    // SAI MÓN = đã biết món đang bàn mà câu mẫu nói món khác. MẶC ĐỊNH KHÔNG CĂN CỨ = chưa biết món nào mà câu mẫu gắn món tự trả lời
+    // (chủ shop 18/10: không mặc định món bán chạy) — hai lỗi khác nhau, đếm riêng.
+    wrongBefore: sends(raw) && raw.kind === "MATCH" && g.onTable.length > 0 && !g.fits(raw.entry),
+    wrongAfter: sends(after) && after.kind === "MATCH" && (g.onTable.length > 0 ? !g.fits(after.entry) : g.coversOf(after.entry).length > 0),
+    defaultBefore: sends(raw) && raw.kind === "MATCH" && g.onTable.length === 0 && g.coversOf(raw.entry).length > 0,
+    quickAfter: sends(after),
+  };
+}
+
+/** Biến thể cố định cho `--replay-quick` (cách khách HSLC hỏi thật + các ca chủ shop nêu). Chữ TỰ DỰNG — không phải tin khách. */
+export const QUICK_REPLAY_VARIANTS: { key: string; lines: FocusLine[] }[] = [
+  ...["xin giá chả cá", "Xin giá chả cá nhé shop", "Báo giá chả cá thu?", "cho xin giá chả cá thu", "chả cá bao nhiêu 1kg", "xin gia cha ca", "nem bao nhiêu", "giá nem", "ruốc tôm bao nhiêu", "1 hộp ruốc tôm", "giá chả cá với nem sao shop", "báo giá", "Xin giá 1 kg", "chả mực giá sao"].map((t) => ({ key: t, lines: [{ who: "CUSTOMER" as const, text: t }] })),
+  { key: "page chả cá → báo giá", lines: [{ who: "SHOP", text: "[Shop đã nhắn] Chả cá thu Hạ Long nhà làm, nhắn shop để được báo giá ạ" }, { who: "CUSTOMER", text: "báo giá" }] },
+  { key: "page chả cá → Xin giá 1 kg", lines: [{ who: "SHOP", text: "[Shop đã nhắn] Chả cá thu Hạ Long nhà làm, nhắn shop để được báo giá ạ" }, { who: "CUSTOMER", text: "Xin giá 1 kg" }] },
+  { key: "từ chối nem → báo giá", lines: [{ who: "CUSTOMER", text: "chả cá thu" }, { who: "CUSTOMER", text: "không lấy nem đâu em" }, { who: "CUSTOMER", text: "báo giá" }] },
+  ...["Giá bao nhiêu 1kg ạ", "xin giá", "giá sao shop", "Cho mình 1kg"].map((t) => ({ key: `hỏi chung: ${t}`, lines: [{ who: "CUSTOMER" as const, text: t }] })),
+  // Chủ shop 18/10 (chốt hoàn thành): ruốc · combo nhiều món · khách cũ mua lại.
+  ...["ruốc tôm 250g bao nhiêu", "ruốc cá thu còn không", "1 kg chả mực giã tay, 1 Nem hải sản tôm bề bề", "cho mình 1kg chả cá với 1 hộp ruốc tôm", "lấy như lần trước nhé", "cho chị 1kg như đợt trước"].map((t) => ({ key: t, lines: [{ who: "CUSTOMER" as const, text: t }] })),
+  { key: "khách cũ: đơn trước chả cá → lấy như lần trước", lines: [{ who: "SHOP", text: "Dạ chị đặt lại chả cá thu 1kg như đơn trước ạ?" }, { who: "CUSTOMER", text: "lấy như lần trước nhé" }] },
+  { key: "shop mời nem → giá sao em", lines: [{ who: "CUSTOMER", text: "chả cá thu giá sao em" }, { who: "SHOP", text: "Dạ chả cá thu 1kg 280.000đ ạ. Chị lấy thêm nem hải sản không ạ?" }, { who: "CUSTOMER", text: "giá sao em" }] },
+];
 
 /** Số tiền CỐ ĐỊNH gõ trong câu mẫu (ngoài ô điền giá) — câu mẫu không đi qua báo giá giỏ. HÀM THUẦN. */
 export function fixedAmountsInTemplate(answer: string): number[] {
@@ -427,15 +487,33 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   const from = since ?? new Date(now.getTime() - days * 86_400_000);
   const span = since ? `từ ${since.toISOString()}` : `${days} ngày`;
   const c = schema.salesChatConversations;
-  const convs = await db.select({ id: c.id }).from(c).where(gte(c.updatedAt, from)).limit(TRACE_MAX_SCAN_CONVERSATIONS + 1);
+  // Kênh TEST (khung thử của chủ shop, ops kiểm trực tiếp `org-ai-cutover --probe-set`) không phải khách thật ⇒ ngoài phép đo.
+  const convs = await db.select({ id: c.id }).from(c).where(and(gte(c.updatedAt, from), sql`${c.channel} <> 'TEST'`)).limit(TRACE_MAX_SCAN_CONVERSATIONS + 1);
   const ids = convs.slice(0, TRACE_MAX_SCAN_CONVERSATIONS).map((x) => x.id);
   const m = schema.salesChatMessages;
   const A = { total: 0, noNew: 0, convs: new Set<string>() };
   const B = { msgs: 0, convs: new Set<string>(), noQuote: 0 };
   const D = { msgs: 0, convs: new Set<string>(), images: 0, byTitle: new Map<string, number>() };
-  const tpls = (await listQuickReplies().catch(() => [])).map((r) => ({ title: r.title, answer: r.answer, head: quickReplyHead(r.answer), images: r.images.length }));
+  const rowsQr = await listQuickReplies().catch(() => []);
+  const tpls = rowsQr.map((r) => ({ title: r.title, answer: r.answer, head: quickReplyHead(r.answer), images: r.images.length }));
   const products = await loadFocusProducts().catch(() => [] as FocusProduct[]);
+  // MẪU SỐ (chủ shop 18/10: «0/39 chưa phải nghiệm thu»): số tin khách mà câu mẫu ĐƯỢC XÉT, cùng câu mẫu đang bật + câu upsell hôm nay.
+  const active: QuickReplyEntry[] = rowsQr.filter((r) => r.active).map((r) => ({ id: r.id, title: r.title, triggers: r.triggers, answer: r.answer }));
+  const upsellId = (await loadQuickReplySettings().catch(() => null))?.upsellReplyId ?? null;
+  const N = { customer: 0, eligible: 0, changed: 0, wrongBefore: 0, wrongAfter: 0, sends: 0, defaultBefore: 0, quickAfter: 0 };
+  const countDecision = (lines: readonly FocusLine[]) => {
+    const d = quickDecisionAt(lines, active, products, upsellId ? [upsellId] : []);
+    N.customer += 1;
+    if (d.eligible) N.eligible += 1;
+    if (d.changed) N.changed += 1;
+    if (d.wrongBefore) N.wrongBefore += 1;
+    if (d.defaultBefore) N.defaultBefore += 1;
+    if (d.quickAfter) N.quickAfter += 1;
+    if (d.wrongAfter) N.wrongAfter += 1;
+  };
   const checkD = (conv: string, sent: string, lines: readonly FocusLine[]) => {
+    const head = foldVi(sent).replace(/\s+/g, " ").trim().slice(0, 40);
+    if (tpls.some((t) => t.head.length >= 12 && head.startsWith(t.head))) N.sends += 1;
     const w = wrongProductTemplate(sent, lines, tpls, products);
     if (!w) return;
     D.msgs += 1;
@@ -444,7 +522,7 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
     D.byTitle.set(w.title, (D.byTitle.get(w.title) ?? 0) + 1);
   };
   for (let i = 0; i < ids.length; i += 200) {
-    const rows = await db.select({ conv: m.conversationId, seq: m.seq, role: m.role, content: m.content }).from(m).where(and(inArray(m.conversationId, ids.slice(i, i + 200)), gte(m.createdAt, from))).orderBy(asc(m.conversationId), asc(m.seq));
+    const rows = await db.select({ conv: m.conversationId, seq: m.seq, role: m.role, content: m.content }).from(m).where(and(inArray(m.conversationId, ids.slice(i, i + 200)), gte(m.createdAt, from), lte(m.createdAt, now))).orderBy(asc(m.conversationId), asc(m.seq));
     let cur = "";
     let userSince = false;
     let quoteTotal: number | null = null;
@@ -455,6 +533,7 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
         if (textOf(r.content)) {
           userSince = true;
           lines.push({ who: "CUSTOMER", text: textOf(r.content) });
+          countDecision(lines);
         }
         for (const b of blocksOf(r.content)) {
           if (b.type !== "tool_result" || b.isError) continue;
@@ -502,6 +581,10 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   tomTat(`A câu «nói rõ hơn» của engine: ${A.total} tin · KHÔNG có tin khách mới kể từ tin bot trước ${A.noNew} tin / ${A.convs.size} hội thoại`);
   tomTat(`B tin bot có số TỔNG ≠ tổng giỏ / nháp máy chủ ngay trước: ${B.msgs} tin / ${B.convs.size} hội thoại · số TỔNG khi chưa có giỏ / nháp nào ${B.noQuote} tin`);
   tomTat(`D câu mẫu nói về món KHÁC món khách đang hỏi: ${D.msgs} tin / ${D.convs.size} hội thoại · kèm ảnh ${D.images} tin · ${D.byTitle.size} câu mẫu khác nhau · ${tpls.length} câu mẫu · ${products.length} sản phẩm`);
+  tomTat(`D mẫu số: tin khách ${N.customer} · câu mẫu được xét (khớp chữ có ứng viên, trần trên) ${N.eligible} · tin bot là câu mẫu ${N.sends} · luật món đổi quyết định ${N.changed} · khớp trần sẽ sai món ${N.wrongBefore} · sau luật vẫn sai ${N.wrongAfter} (câu mẫu đang bật ${active.length})`);
+  const cvq = schema.salesChatConversations;
+  const [closed] = await db.select({ n: sql<number>`count(*)::int` }).from(cvq).where(sql`${cvq.state}->'quickGuardClosed'->>'at' >= ${from.toISOString()}`);
+  tomTat(`D mặc định / nhường AI: khớp trần mặc định một món khi CHƯA rõ món ${N.defaultBefore} · sau luật câu mẫu tự trả lời ${N.quickAfter} / ${N.eligible} được xét · nhường AI ${N.eligible - N.quickAfter} · hội thoại câu mẫu tạm dừng vì lỗi danh mục ${closed?.n ?? 0}`);
   // C — P0 khách cũ mua lại (#886): lượt bình luận ĐÃ CHÉP sang hộp thư (`carryCommentTurn` gắn nhãn cố định ở đầu tin khách) và đơn được
   // gắn cờ ROUND_ABANDONED trong kỳ. Chỉ số đếm. Nhãn gõ lại ở đây (không import) vì ops lấy script từ main nhưng lib từ ảnh đang chạy;
   // tests/conv-money-trace.test.ts đối chiếu đúng chuỗi này với engine.ts.
@@ -545,6 +628,103 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   const kqDem = (k: string) => Number(kq.find((r) => r.k === k)?.n ?? 0);
   const kqTin = kq.reduce((s, r) => s + Number(r.tin), 0);
   tomTat(`C kết quả chép: chuyển cả hội thoại ${kqDem("MOVED")} · chép sang hộp thư ĐÃ CÓ ${kqDem("EXISTING_INBOX")} · mở hộp thư rồi chép ${kqDem("OPENED_NEW")} · đã chép từ trước ${kqDem("ALREADY_COPIED")} · không có hộp thư ${kqDem("NO_INBOX")} · lỗi ${kqDem("FAILED")} · KHÁC ${kqDem("KHAC")} · tin đã chép ${kqTin}`);
+}
+
+/**
+ * E — TỐC ĐỘ + CHI PHÍ TRẢ LỜI (chủ shop 18/10: «không đánh đổi chất lượng bán hàng lấy tiết kiệm token» — nên phải ĐO cả hai chiều):
+ * lượt bot trả lời theo chế độ (sổ sự kiện `ai.replied`: AI · QUICK_REPLY · SYSTEM) kèm trung vị / p90 thời gian phản hồi; lời gọi AI
+ * của bot bán hàng theo loại việc (sổ AI nền tảng `platform_ai_usage`: số lời gọi, token vào / ra, trung vị độ trễ). Chỉ đọc, chỉ số đếm.
+ */
+export async function scanAiPerformance(db: Db, orgCode: string, from: Date, to: Date): Promise<void> {
+  const ev = schema.salesConversationEvents;
+  const byMode = await db
+    .select({
+      mode: sql<string>`case ${ev.payload}->>'mode' when 'AI' then 'AI' when 'QUICK_REPLY' then 'QUICK_REPLY' when 'SYSTEM' then 'SYSTEM' else 'KHAC' end`,
+      n: sql<number>`count(*)::int`,
+      p50: sql<number | null>`percentile_cont(0.5) within group (order by case when (${ev.payload}->>'responseMs') ~ '^[0-9]+([.][0-9]+)?$' then (${ev.payload}->>'responseMs')::numeric end)`,
+      p90: sql<number | null>`percentile_cont(0.9) within group (order by case when (${ev.payload}->>'responseMs') ~ '^[0-9]+([.][0-9]+)?$' then (${ev.payload}->>'responseMs')::numeric end)`,
+    })
+    .from(ev)
+    .where(and(eq(ev.type, "ai.replied"), sql`${ev.channel} <> 'TEST'`, gte(ev.occurredAt, from), lte(ev.occurredAt, to)))
+    .groupBy(sql`1`);
+  const sec = (ms: number | null | undefined) => (typeof ms === "number" && Number.isFinite(ms) ? `${(ms / 1000).toFixed(1)}s` : "—");
+  const total = byMode.reduce((s, r) => s + Number(r.n), 0);
+  tomTat(
+    `E lượt bot trả lời ${from.toISOString()} → ${to.toISOString()}: ${total} · ${["QUICK_REPLY", "AI", "SYSTEM", "KHAC"]
+      .map((k) => {
+        const r = byMode.find((x) => x.mode === k);
+        return `${k} ${r ? Number(r.n) : 0}${r ? ` (trung vị ${sec(Number(r.p50))} · p90 ${sec(Number(r.p90))})` : ""}`;
+      })
+      .join(" · ")}`,
+  );
+  const pdb = await getPlatformDb();
+  const u = schema.platformAiUsage;
+  const byWork = await pdb
+    .select({
+      w: sql<string>`case when ${u.workload} is null then 'KHONG_KHAI' when ${u.workload} = 'sales_chatbot' then 'sales_chatbot' when ${u.workload} = 'quick_extract' then 'quick_extract' else 'KHAC' end`,
+      calls: sql<number>`coalesce(sum(${u.requests}), 0)::int`,
+      inTok: sql<number>`coalesce(sum(${u.inputTokens}), 0)::bigint`,
+      outTok: sql<number>`coalesce(sum(${u.outputTokens}), 0)::bigint`,
+      p50: sql<number | null>`percentile_cont(0.5) within group (order by ${u.latencyMs})`,
+    })
+    .from(u)
+    .where(and(eq(u.orgCode, orgCode), eq(u.feature, "sales_chatbot"), eq(u.status, "OK"), gte(u.at, from), lte(u.at, to)))
+    .groupBy(sql`1`);
+  tomTat(
+    `E lời gọi AI bot bán hàng: ${byWork.length ? byWork.map((r) => `${r.w} ${Number(r.calls)} lời gọi · token vào ${Number(r.inTok)} · ra ${Number(r.outTok)} · trung vị ${sec(Number(r.p50))}`).join(" | ") : "0"}`,
+  );
+}
+
+/**
+ * `--replay-quick`: mỗi tin khách của các hội thoại được chọn (theo thứ tự, cùng dòng shop / page xen giữa) + bộ biến thể cố định ⇒ quyết
+ * định câu mẫu trước / sau luật món đang bàn, trên câu mẫu + danh mục ĐANG có. Chỉ đọc. Chữ khách KHÔNG in (băm); tên câu mẫu là nội
+ * dung shop ⇒ phần mã hoá; [ops:tom-tat] chỉ số đếm.
+ */
+async function replayQuick(db: Db, convIds: readonly string[]): Promise<void> {
+  const rowsQr = await listQuickReplies().catch(() => []);
+  const active: QuickReplyEntry[] = rowsQr.filter((r) => r.active).map((r) => ({ id: r.id, title: r.title, triggers: r.triggers, answer: r.answer }));
+  const products = await loadFocusProducts().catch(() => [] as FocusProduct[]);
+  const upsellId = (await loadQuickReplySettings().catch(() => null))?.upsellReplyId ?? null;
+  const ups = upsellId ? [upsellId] : [];
+  const m = schema.salesChatMessages;
+  const T = { turns: 0, eligible: 0, changed: 0, wrongBefore: 0, wrongAfter: 0, found: 0, defaultBefore: 0 };
+  for (const id of convIds) {
+    const rows = await db.select({ seq: m.seq, role: m.role, content: m.content }).from(m).where(eq(m.conversationId, id)).orderBy(asc(m.seq)).limit(400);
+    if (rows.length) T.found += 1;
+    console.log(`— Phát lại câu mẫu · hội thoại ${id} · ${rows.length} tin`);
+    const lines: FocusLine[] = [];
+    for (const r of rows) {
+      const t = textOf(r.content);
+      if (!t) continue;
+      if (r.role !== "user") {
+        lines.push({ who: "SHOP", text: t });
+        continue;
+      }
+      if (blocksOf(r.content).some((b) => b.type === "tool_result")) continue;
+      lines.push({ who: "CUSTOMER", text: t });
+      const d = quickDecisionAt(lines, active, products, ups);
+      T.turns += 1;
+      if (d.eligible) T.eligible += 1;
+      if (d.changed) T.changed += 1;
+      if (d.wrongBefore) T.wrongBefore += 1;
+      if (d.defaultBefore) T.defaultBefore += 1;
+      if (d.wrongAfter) T.wrongAfter += 1;
+      if (d.eligible) console.log(`  khách #${r.seq} (băm ${hashText(t)}) · trần: ${d.raw} · sau luật: ${d.after}${d.wrongBefore ? " · TRẦN SAI MÓN" : ""}${d.defaultBefore ? " · TRẦN MẶC ĐỊNH MÓN" : ""}${d.wrongAfter ? " · SAU LUẬT VẪN SAI MÓN" : ""}`);
+    }
+  }
+  const V = { n: 0, changed: 0, wrongBefore: 0, wrongAfter: 0, defaultBefore: 0 };
+  console.log("— Biến thể cố định:");
+  for (const v of QUICK_REPLAY_VARIANTS) {
+    const d = quickDecisionAt(v.lines, active, products, ups);
+    V.n += 1;
+    if (d.changed) V.changed += 1;
+    if (d.wrongBefore) V.wrongBefore += 1;
+    if (d.defaultBefore) V.defaultBefore += 1;
+    if (d.wrongAfter) V.wrongAfter += 1;
+    console.log(`  «${v.key}» · trần: ${d.raw} · sau luật: ${d.after}${d.wrongBefore ? " · TRẦN SAI MÓN" : ""}${d.defaultBefore ? " · TRẦN MẶC ĐỊNH MÓN" : ""}${d.wrongAfter ? " · SAU LUẬT VẪN SAI MÓN" : ""}`);
+  }
+  tomTat(`replay-quick: ${T.found}/${convIds.length} hội thoại · tin khách ${T.turns} · câu mẫu được xét ${T.eligible} · luật món đổi quyết định ${T.changed} · khớp trần sai món ${T.wrongBefore} · khớp trần mặc định món ${T.defaultBefore} · sau luật vẫn sai ${T.wrongAfter}`);
+  tomTat(`replay-quick biến thể: ${V.n} · luật món đổi quyết định ${V.changed} · khớp trần sai món ${V.wrongBefore} · khớp trần mặc định món ${V.defaultBefore} · sau luật vẫn sai ${V.wrongAfter} · câu mẫu đang bật ${active.length} · sản phẩm ${products.length}`);
 }
 
 /** Đầu câu lý do fanpage.ts::deliverCommentReply ghi vào dòng tin khi bình luận ĐÃ được nhắn riêng (ALREADY) — bài kiểm đối chiếu. */
@@ -611,7 +791,11 @@ async function main() {
   await bindReadOnlyOrgHandle({ code: org.code, isHome: org.isHome }, db);
   let ok = true;
   await withOrganization(org.code, async () => {
-    if (args.scan) await scanPatterns(db, args.days, new Date(), args.since);
+    if (args.scan) {
+      const now = args.until ?? new Date();
+      await scanPatterns(db, args.days, now, args.since);
+      await scanAiPerformance(db, org.code, args.since ?? new Date(now.getTime() - args.days * 86_400_000), now);
+    }
     // Chỉ có mã đơn ngắn (8 ký tự ĐẦU sau «erp-» như màn hình đơn, hoặc 8 ký tự CUỐI như org-order-audit in) ⇒ tìm hội thoại của đơn.
     let conv = args.conv;
     if (!conv && args.order) {
@@ -624,6 +808,7 @@ async function main() {
     }
     if (!conv && args.at) await listAround(db, args.at, args.windowMin ?? 15);
     if (conv) ok = await traceConversation(db, conv, args.order, await loadCtx(db));
+    if (args.replayQuick) await replayQuick(db, args.replayQuick);
   });
   process.stdout.write("", () => process.exit(ok ? 0 : 1));
 }
