@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "quick-reply-evidence",
+  "title": "Câu mẫu một món chỉ trả lời khi có căn cứ món + lỗi danh mục chặn",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-cau-mau-can-cu",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/cau-mau-can-cu",
+  "base_sha": "2a1c9ddaebc56b9573b04158624451696313bc7d",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/quick-reply-focus.ts",
+    "lib/sales-chatbot/quick-replies.ts",
+    "lib/sales-chatbot/engine.ts",
+    "lib/sales-chatbot/tools.ts",
+    "scripts/conv-money-trace.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-18T14:46:38.590Z",
+  "updated_at": "2026-10-18T14:46:38.590Z",
+  "last_heartbeat": "2026-10-18T14:46:38.590Z",
+  "definition_of_done": []
+}
