@@ -19,10 +19,12 @@
     "org-archive-lifecycle"
   ],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    890
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-18T03:00:07.726Z",
-  "updated_at": "2026-10-18T03:00:29.218Z",
+  "updated_at": "2026-10-18T03:01:09.177Z",
   "last_heartbeat": "2026-10-18T03:00:29.218Z",
   "definition_of_done": [],
   "handoff": {
