@@ -35,7 +35,7 @@ import {
   type QuickReplyEntry,
   type QuickReplySettings,
 } from "@/lib/sales-chatbot/quick-replies-shared";
-import { quickReplyFocusGuard, triggerProductConflicts, type FocusLine, type FocusProduct, type QuickReplyFocusGuard } from "@/lib/sales-chatbot/quick-reply-focus";
+import { quickReplyFocusGuard, triggerProductConflicts, unavailableQuickReplyGuard, type FocusLine, type FocusProduct, type QuickReplyFocusGuard } from "@/lib/sales-chatbot/quick-reply-focus";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { setSettingJson } from "@/lib/settings";
@@ -119,12 +119,13 @@ export async function loadFocusProducts(): Promise<FocusProduct[]> {
 }
 
 /**
- * Bộ lọc MÓN KHÁCH ĐANG HỎI cho một lượt (P0 18/10/2026): đọc danh mục một lần. Lỗi đọc ⇒ `null` (không lọc — như trước bản vá; bước
- * khớp chữ vẫn chạy, không chặn khách).
+ * Bộ lọc MÓN ĐANG BÀN cho một lượt (P0 18/10/2026): đọc danh mục một lần. Đọc LỖI ⇒ bộ lọc ĐÓNG (`unavailableQuickReplyGuard` — chủ
+ * shop 18/10: lỗi không được biến thành «không lọc»); danh mục rỗng (tổ chức chưa có sản phẩm) ⇒ không câu mẫu nào gắn món, lọc không đổi gì.
  */
-export async function quickReplyFocus(lines: readonly FocusLine[], upsellReplyId: string | null): Promise<QuickReplyFocusGuard | null> {
+export async function quickReplyFocus(lines: readonly FocusLine[], upsellReplyId: string | null): Promise<QuickReplyFocusGuard> {
+  const ids = upsellReplyId ? [upsellReplyId] : [];
   const products = await loadFocusProducts().catch(() => null);
-  return products?.length ? quickReplyFocusGuard(lines, products, upsellReplyId ? [upsellReplyId] : []) : null;
+  return products === null ? unavailableQuickReplyGuard(ids) : quickReplyFocusGuard(lines, products, ids);
 }
 
 export async function activeEntries(): Promise<QuickReplyEntry[]> {
@@ -209,8 +210,9 @@ export async function quickReplyByKeyword(text: string, opts: { ordering: boolea
   // khỏi danh sách ứng viên của AI đọc hiểu. Câu mẫu thay CẢ lượt trả lời nên phải nói đủ mọi món khách đang hỏi (`answers`). Không
   // còn câu nào ⇒ chatbot đầy đủ trả lời (công cụ giá đọc đúng món).
   const focus = opts.focus;
+  if (focus?.unavailable) return { kind: "SKIP", reason: "Không đọc được danh mục — câu mẫu tạm dừng, AI trả lời" };
   const entries = focus ? all.filter((e) => focus.answers(e)) : all;
-  if (entries.length === 0) return { kind: "SKIP", reason: "Không câu mẫu nào nói đúng món khách hỏi" };
+  if (entries.length === 0) return { kind: "SKIP", reason: focus && !focus.onTable.length ? "Chưa xác định khách hỏi món nào — AI đọc ngữ cảnh / hỏi lại" : "Không câu mẫu nào nói đúng món khách hỏi" };
   const m = matchQuickReplyByKeyword(text, entries);
   // Khách hỏi SỈ ⇒ khớp chữ «chả cá thu giá» sẽ trả giá LẺ — nhường AI đọc hiểu (nó biết câu báo giá lẻ không khớp).
   if (m.kind === "MATCH" && !looksWholesale(text)) {
