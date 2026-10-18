@@ -3,7 +3,7 @@
   "mission_id": "qa-external-drill",
   "title": "Ghi diễn tập khôi phục chạy ngoài VPS vào cổng (có đối chiếu)",
   "business_goal": "Có diễn tập ĐẠT thật cho tổ chức khi VPS thiếu RAM, không hạ ngưỡng 700",
-  "status": "FAILED",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-token-budget",
@@ -24,7 +24,7 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-17T05:37:52.494Z",
-  "updated_at": "2026-10-17T08:42:51.159Z",
+  "updated_at": "2026-10-18T11:10:02.324Z",
   "last_heartbeat": "2026-10-17T05:52:14.932Z",
   "definition_of_done": [],
   "intake": {
@@ -33,8 +33,8 @@
   },
   "evidence": {
     "merged": "#884 → acafc4f5c7503900c48f0fa786d41180f7c4e6a7",
-    "verify": "FAIL acafc4f5c7503900c48f0fa786d41180f7c4e6a7 2026-10-17T08:42:29.157Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39013572125"
+    "verify": "PASS 95b6c8fec989b54e5e3abcc28566d7b8bfb2aec1 2026-10-18T11:09:43.638Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39121089122"
   },
   "handoff": {
     "branch": "claude/qa-external-drill",
