@@ -1,8 +1,8 @@
 {
   "pr": 900,
-  "sha": "8b355c7085b8ad56e8e2c6fa6d403b827b58a8da",
+  "sha": "b8d0c50381051b1840999f3798f8f6dfb886f448",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-18T15:13:56.049Z",
-  "note": "review độc lập 2 vòng (3+4) PASS-WITH-NITS: câu mẫu riêng một món chỉ dùng khi đã xác lập món (đuôi tên phải có từ phân biệt; tên shop/nơi chốn/màu/size/thời tiết không kéo món); câu hỏi chung không mặc định; lỗi danh mục ⇒ đóng + ghi lại; đột biến bỏ điều kiện phân biệt ⇒ ĐỎ"
+  "at": "2026-10-18T15:42:23.479Z",
+  "note": "như 8b355c70 + tạo lại ảnh chụp hội thoại vàng (19 tệp, chỉ khác câu luật B1 trong prompt; bỏ câu đó ⇒ khớp từng byte HEAD)"
 }
