@@ -34,13 +34,13 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T18:34:21.066Z",
-  "updated_at": "2026-10-18T21:24:32.179Z",
-  "last_heartbeat": "2026-10-18T21:24:32.179Z",
+  "updated_at": "2026-10-18T21:27:39.982Z",
+  "last_heartbeat": "2026-10-18T21:27:39.982Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/payroll-profit-gate",
-    "sha": "041fe57e71d4a9272f5ff4c1b726ba75feebbdeb",
-    "at": "2026-10-18T21:24:32.179Z",
+    "sha": "283be11844c50970675cd1a792550113445bf1ee",
+    "at": "2026-10-18T21:27:39.982Z",
     "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
     "title": "Thưởng % lợi nhuận chỉ phát sinh khi công ty đã bù hết lỗ lũy kế: cổng toàn công ty có High-Water Mark, quỹ trần, số tạm tính hiện cạnh số được duyệt",
     "summary": "",
@@ -50,8 +50,9 @@
       "npm test (ẩn danh): TẤT CẢ KIỂM THỬ ĐẠT",
       "npm test (GITHUB_TOKEN giả): TẤT CẢ KIỂM THỬ ĐẠT",
       "npm run build: 0",
-      "review độc lập 7 vòng: PASS 2b7ebadcbf1 (+ đổi tên monthReportPeriod)",
-      "kiểm đột biến 26/26 đỏ"
+      "review độc lập 7 vòng: PASS",
+      "kiểm đột biến 26/26 đỏ",
+      "rebase #903-905: gỡ 2 xung đột ops-vps.yml giữ cả hai bên, ops-log-leak + tsc xanh"
     ]
   }
 }
