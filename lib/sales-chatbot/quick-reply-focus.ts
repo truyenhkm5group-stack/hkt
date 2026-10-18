@@ -87,6 +87,7 @@ const TAIL_STOP = new Set([
   ...["vừa", "nhẹ", "dày", "mỏng", "dài", "ngắn", "rộng", "xl", "xxl", "m", "l", "s"],
   ...["nắng", "mưa", "lạnh", "nóng", "gió", "mát"],
   ...["shop", "tiệm", "quán", "cửa", "việt", "nam", "hà", "nội", "long", "hạ", "sài", "gòn"],
+  ...["phẩm", "món", "mẫu", "riêng", "đồ"],
 ]);
 /**
  * Từ CÁCH CHẾ BIẾN — CHỈ chặn luật MỘT từ đuôi («chả cá thu giã tay» không gọi tên «Chả mực giã tay»). KHÔNG đưa vào danh sách xét từ
@@ -101,7 +102,14 @@ const TAIL_STOP_FOLD = new Set([...[...TAIL_STOP].map((w) => foldVi(w)), "gia"])
  * Từ ĐẦU quá thông dụng để một mình gọi tên món dù danh mục chỉ có một món mang nó («ship nước ngoài», «chả cá luộc nước sôi» không gọi
  * tên «Nước mắm…»; «chả cá thu» không gọi tên «Cá thu một nắng» nhờ luật lồng nhau bên dưới) ⇒ cần thêm từ thứ hai của tên đứng liền.
  */
-const GENERIC_HEADS = new Set(["nuoc", "ca", "banh", "tra", "bot", "dau", "muoi", "sot", "hat", "rau", "thit", "com", "xoi", "che", "sua", "kem", "mam", "bo", "ga", "do", "set", "combo", "goi", "hop", "tui", "ao", "quan", "vay", "dam", "giay", "dep", "mu", "kinh", "son"]);
+const GENERIC_HEADS = new Set([
+  ...["nuoc", "ca", "banh", "tra", "bot", "dau", "muoi", "sot", "hat", "rau", "thit", "com", "xoi", "che", "sua", "kem", "mam", "bo", "ga", "do", "set", "combo", "goi", "hop", "tui", "ao", "quan", "vay", "dam", "giay", "dep", "mu", "kinh", "son"],
+  // Từ CHỈ CHUNG một món hàng (review #902, CI đỏ thật: «còn hàng không» gọi tên «Hàng riêng …» vì đó là món duy nhất bắt đầu bằng
+  // «hàng»): «hàng», «sản phẩm», «món», «mẫu», «loại», «đặc sản» không bao giờ tự mình là tên món.
+  ...["hang", "san", "pham", "mon", "mau", "loai", "dac"],
+]);
+/** Từ chỉ CHUNG một món hàng có thể đứng nối nhau ở đầu tên («sản phẩm», «đặc sản», «mẫu hàng») — bỏ qua cả cụm rồi mới đòi từ riêng. */
+const GENERIC_ITEM_WORDS = new Set(["hang", "san", "pham", "mon", "mau", "loai", "dac"]);
 
 /**
  * Các món được GỌI TÊN trong chữ (xem đầu tệp). Mỗi lần khớp là một ĐOẠN từ (kéo dài tới hết các từ liền sau còn thuộc tên); món mà
@@ -131,8 +139,12 @@ export function productsNamedIn(text: string, names: readonly string[]): string[
       let j: number;
       if (group.length === 1) {
         if (GENERIC_HEADS.has(t[0]) && t.length > 1) {
-          if (said[i + 1] !== t[1]) continue;
-          j = i + 1;
+          // Mọi từ CHUNG đầu tên («sản phẩm», «hàng») phải khớp liền, rồi thêm TỪ RIÊNG đầu tiên của tên («Sản phẩm Y» cần «sản phẩm y»).
+          let q = 1;
+          while (q < t.length && GENERIC_ITEM_WORDS.has(t[q])) q++;
+          const need = Math.min(q + 1, t.length);
+          if (!t.slice(0, need).every((w, x) => said[i + x] === w)) continue;
+          j = i + need - 1;
         } else j = i;
       } else {
         j = i + 1;

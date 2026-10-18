@@ -105,6 +105,14 @@ function testThuan() {
   assert.ok(!gThu.fits(hap) && !gThu.answers(hap), "«chả cá thu giá sao» KHÔNG được trả lời bằng câu chả cá hấp");
   const comboChien = E("cc", "Chả chiên giá", ["chả chiên"], "Chả chiên bên em 250k/kg ạ");
   assert.ok(!quickReplyFocusGuard([C("1/2 kg chả chiên, 1/2 kg chả cá hấp")], CAT2).answers(comboChien), "câu một món không thay cả lượt cho combo hai món");
+  // Review #902 (CI đỏ thật ở inbox-composer): từ chỉ chung một món hàng không tự gọi tên món — kể cả khi chỉ một món mang nó ở đầu tên.
+  const CAT3 = ["Hàng riêng OSOAN-O-SOAN-A-4417", "Sản phẩm Y", "Món Z", "Nước mắm X"];
+  for (const t of ["còn hàng không", "sản phẩm này còn không", "món này giá sao", "hàng còn không shop", "đặc sản gì vậy"]) assert.deepEqual(productsNamedIn(t, CAT3), [], `«${t}» không gọi tên món nào`);
+  assert.deepEqual(productsNamedIn("hàng riêng osoan còn không", CAT3), ["Hàng riêng OSOAN-O-SOAN-A-4417"]);
+  assert.deepEqual(productsNamedIn("sản phẩm y bao nhiêu", CAT3), ["Sản phẩm Y"]);
+  assert.deepEqual(productsNamedIn("món z còn không", CAT3), ["Món Z"]);
+  assert.deepEqual(productsNamedIn("nước mắm x", CAT3), ["Nước mắm X"]);
+  assert.equal(productConsistencyError(E("ton", "Tồn chả mực", ["còn hàng không"], "Còn {{tồn:OS-NOREC}} hộp ạ."), CAT3.map((name) => ({ name, skus: [] }))), null, "câu mẫu tồn kho chung lưu được");
   const giaChaCa = E("gcc", "Giá chả cá", ["chả cá bao nhiêu", "mực bao nhiêu", "món mực còn không"], "Chả cá 280k/1kg, còn mực thì 350k/1kg ạ");
   assert.deepEqual(triggerProductConflicts(giaChaCa, PRODUCTS), [], "câu trả lời có giá nói cả mực ⇒ cách hỏi về mực KHÔNG bị coi là gắn nhầm");
   // Review #p0-quick-reply-evidence (lỗi chặn): ngành hàng / tên shop không phải tên món; màu / cỡ / thời tiết cũng vậy.
