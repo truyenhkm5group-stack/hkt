@@ -1898,13 +1898,14 @@ export function lastCustomerTextAt(msgs: readonly { role: "user" | "assistant"; 
  *  · Tin chép trong MỘT giao dịch (đụng seq ⇒ cả khối huỷ, thử lại với seq mới — không chép dở); trạng thái ghi qua `writeConversation`
  *    (giữ orderSync / control / mốc giỏ). Chạy lại không chép hai lần. Không đụng đơn nào.
  */
-export async function carryCommentTurn(fromConversationId: string, toConversationId: string, now: Date, opts: { botReplySent: boolean }): Promise<boolean> {
-  if (fromConversationId === toConversationId) return false;
+export async function carryCommentTurn(fromConversationId: string, toConversationId: string, now: Date, opts: { botReplySent: boolean }): Promise<{ copied: number; already: boolean }> {
+  const khong = { copied: 0, already: false };
+  if (fromConversationId === toConversationId) return khong;
   const [from, to] = await Promise.all([loadConversation(fromConversationId), loadConversation(toConversationId)]);
-  if (!from || !to) return false;
+  if (!from || !to) return khong;
   const fm = await loadMessages(fromConversationId);
   const lastUser = [...fm].reverse().find((m) => m.role === "user" && textOf(m.content).trim() && !m.content.some((b) => b.type === "tool_result"));
-  if (!lastUser) return false;
+  if (!lastUser) return khong;
   const nhan = (at: Date) => `[Khách bình luận trên bài viết lúc ${at.toISOString()}]`;
   // MỌI tin khách liền nhau của lượt bình luận («Cho 1,5kg» + «gửi đc cũ» tách hai tin — review #886), không chỉ tin cuối.
   const iCuoi = fm.indexOf(lastUser);
@@ -1922,7 +1923,7 @@ export async function carryCommentTurn(fromConversationId: string, toConversatio
   let tm = await loadMessages(toConversationId);
   let catLuot = false;
   for (let lan = 0; ; lan++) {
-    if (tm.some((m) => m.role === "user" && textOf(m.content).startsWith(nhan(lastUser.at)))) return false;
+    if (tm.some((m) => m.role === "user" && textOf(m.content).startsWith(nhan(lastUser.at)))) return { copied: 0, already: true };
     const base = tm[tm.length - 1]?.seq ?? 0;
     const truocDo = lastCustomerTextAt(tm);
     const imLau = !truocDo || now.getTime() - truocDo.getTime() > NEW_ROUND_GAP_MS;
@@ -1943,7 +1944,25 @@ export async function carryCommentTurn(fromConversationId: string, toConversatio
     }
   }
   if (catLuot) await flagAbandonedDraft(ts, now);
-  return true;
+  return { copied: luot.length, already: false };
+}
+
+/**
+ * Kết quả đưa lời mua của MỘT bình luận sang hộp thư — mã ĐÓNG, không dữ liệu khách — để đo được ca #886 trên production
+ * (conv-money-trace --scan, dòng «C kết quả chép»). Trước đây chỉ đếm được tin ĐÃ chép, nên «0» không phân biệt được «không có ca» với
+ * «có ca mà không chạy». MOVED = hội thoại bình luận thành hội thoại hộp thư (hộp thư chưa có hội thoại, bot đã nhắn riêng) · EXISTING_INBOX
+ * = chép sang hội thoại hộp thư ĐÃ CÓ (khách cũ) · OPENED_NEW = mở hội thoại hộp thư rồi chép (ALREADY) · ALREADY_COPIED = lượt này đã chép
+ * từ trước (webhook lặp) · NO_INBOX = không tìm / mở được hội thoại hộp thư · FAILED = lỗi.
+ */
+export const COMMENT_CARRY_OUTCOMES = ["MOVED", "EXISTING_INBOX", "OPENED_NEW", "ALREADY_COPIED", "NO_INBOX", "FAILED"] as const;
+export type CommentCarryOutcome = (typeof COMMENT_CARRY_OUTCOMES)[number];
+
+/** Ghi kết quả vào `state.commentCarry` của hội thoại bình luận (qua `writeConversation`). Lỗi không làm hỏng lượt trả lời. */
+export async function recordCommentCarry(conversationId: string, outcome: CommentCarryOutcome, copied: number, now: Date): Promise<void> {
+  const conv = await loadConversation(conversationId);
+  if (!conv) return;
+  const st = (conv.state ?? {}) as ChatState;
+  await writeConversation(conversationId, { state: { ...st, commentCarry: { outcome, copied, at: now.toISOString() } } as Record<string, unknown> }, now);
 }
 
 /** Tin lưu trữ ⇒ dạng `customerTextsSince` đọc (chữ thô, mốc, cờ kết quả công cụ). HÀM THUẦN. */

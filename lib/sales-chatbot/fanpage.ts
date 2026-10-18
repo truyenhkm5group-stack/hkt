@@ -36,7 +36,7 @@ import { publish } from "@/lib/realtime/bus";
 import { describeNetworkFailure, isNetworkFailure } from "@/lib/connectors/net-error";
 import { PANCAKE_PAGES_API, scrubSecrets } from "@/lib/connectors/testers";
 import { chunkText } from "@/lib/messaging/providers";
-import { AI_DOWN_HANDOFF_REASON, appendContextMessages, carryCommentTurn, chatTurn, conversationView, describeCustomerImages, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
+import { AI_DOWN_HANDOFF_REASON, appendContextMessages, carryCommentTurn, chatTurn, conversationView, recordCommentCarry, type CommentCarryOutcome, describeCustomerImages, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
 import { ALREADY_REPLIED_NOTE, alreadyRepliedRows, CONV_OPEN_FAILED_NOTE, HANDOFF_SILENT_NOTE, DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX, deadLetter, dueForClaim, releaseWithBackoff } from "@/lib/sales-chatbot/inbound-retry";
 import { readQuickReplyImage, rememberPancakeContent } from "@/lib/sales-chatbot/quick-replies";
 import { loadPollState, savePollState } from "@/lib/sales-chatbot/pancake-poll";
@@ -1030,8 +1030,17 @@ async function carryIntoInbox(pageId: string, inboxId: string, commentConversati
     const c = schema.salesChatConversations;
     const [found] = await db.select({ id: c.id }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(pageId, inboxId)))).limit(1);
     const inbox = found ?? (botReplySent ? null : await conversationFor(pageId, inboxId));
-    if (inbox && inbox.id !== commentConversationId) await carryCommentTurn(commentConversationId, inbox.id, now, { botReplySent });
+    let outcome: CommentCarryOutcome = "NO_INBOX";
+    let copied = 0;
+    if (inbox && inbox.id === commentConversationId) outcome = "MOVED";
+    else if (inbox) {
+      const r = await carryCommentTurn(commentConversationId, inbox.id, now, { botReplySent });
+      copied = r.copied;
+      outcome = r.already ? "ALREADY_COPIED" : found ? "EXISTING_INBOX" : "OPENED_NEW";
+    }
+    await recordCommentCarry(commentConversationId, outcome, copied, now);
   } catch (e) {
+    await recordCommentCarry(commentConversationId, "FAILED", 0, now).catch(() => undefined);
     // Chỉ tên lỗi: thông điệp lỗi Drizzle mang cả tham số câu SQL (chữ khách) — không đưa vào log.
     console.warn(`[fanpage] không chép được lượt bình luận sang hộp thư: ${e instanceof Error ? e.name : "lỗi"}`);
   }
@@ -1071,7 +1080,10 @@ async function deliverCommentReply(input: CommentReplyInput, deps: FanpageDeps):
   }
   const after = await privateReplyInbox(pageId, threadId, commentId, token, fetchImpl);
   const inboxId = after.inboxId;
-  if (!inboxId) return { kind: "SENT", inboxId: null, warning: input.imageIds.length ? "Đã nhắn riêng; chưa tìm được hộp thư để gửi ảnh" : null };
+  if (!inboxId) {
+    await recordCommentCarry(input.conversationId, "NO_INBOX", 0, now()).catch(() => undefined);
+    return { kind: "SENT", inboxId: null, warning: input.imageIds.length ? "Đã nhắn riêng; chưa tìm được hộp thư để gửi ảnh" : null };
+  }
   await db.insert(t).values({ pageId, threadId: inboxId, messageId: `bot-out:${randomUUID()}`, text: normalizeEcho(text), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
   // Giữ mạch: hội thoại của bình luận đi tiếp ở hộp thư (bỏ qua nếu hộp thư đã có hội thoại riêng — khoá UNIQUE).
   const c = schema.salesChatConversations;
