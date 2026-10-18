@@ -3,7 +3,7 @@
   "mission_id": "p0-871-contact-memory",
   "title": "P0 #871 + ca Nguyễn Hà: không hỏi lại SĐT/địa chỉ đã biết khi khách đổi chủ đề/thêm món, 10 cái nem đúng quy cách, giữ giờ hẹn giao, không bỏ sót tạo đơn, hậu mãi đúng trạng thái",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,13 +20,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-16T10:43:43.926Z",
-  "updated_at": "2026-10-18T11:11:35.801Z",
-  "last_heartbeat": "2026-10-17T00:25:40.242Z",
+  "updated_at": "2026-10-18T11:15:10.771Z",
+  "last_heartbeat": "2026-10-18T11:15:10.771Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#878 → d11467d0ae66e6c80d29d7c16016fb17b58905c4",
     "verify": "PASS 95b6c8fec989b54e5e3abcc28566d7b8bfb2aec1 2026-10-18T11:11:17.022Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39121089122"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39121089122",
+    "done": "address-reask-audit hslc-hmt-shop từ 17/10 09:50Z: hỏi lại địa chỉ 0/30, phường rõ vẫn hỏi 0/17, trung vị 0 câu tới lúc lên đơn (n=21); verify PASS @95b6c8fe"
   },
   "handoff": {
     "branch": "claude/p0-871-contact-memory",
