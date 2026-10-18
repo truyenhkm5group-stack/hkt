@@ -1,0 +1,8 @@
+{
+  "pr": 898,
+  "sha": "caafafbe03e3217ba47780afd7a178d3b1e3dda9",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-18T11:41:15.884Z",
+  "note": "review độc lập 2 vòng PASS: món khách hỏi (∪ món shop vừa mời) khoá câu mẫu được trả lời; khớp từ khoá + AI chọn phải phủ đủ; công cụ từ chối câu mẫu sai món (trừ UPSELL); bộ so tên chặt hơn (giá≠giã, từ đầu phổ biến cần từ thứ hai); đột biến bỏ lọc/bỏ từ chối ⇒ ĐỎ"
+}
