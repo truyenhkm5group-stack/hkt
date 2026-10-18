@@ -3,7 +3,7 @@
   "mission_id": "trace-by-time",
   "title": "conv-money-trace --at: tìm hội thoại theo mốc giờ",
   "business_goal": "Truy vết P0 ThanhPhương",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-token-budget",
@@ -21,11 +21,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T10:18:48.186Z",
-  "updated_at": "2026-10-18T10:18:48.186Z",
-  "last_heartbeat": "2026-10-18T10:18:48.186Z",
+  "updated_at": "2026-10-18T10:19:15.343Z",
+  "last_heartbeat": "2026-10-18T10:19:15.343Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/trace-by-name",
+    "sha": "dfb94c7159e4614d9b39166d9f42cdaee63bfd8f",
+    "at": "2026-10-18T10:19:15.343Z",
+    "actor": "DESKTOP-56TH98Y:wt-token-budget",
+    "title": "conv-money-trace --at: tìm hội thoại theo mốc giờ (không nhận tên khách)",
+    "summary": "",
+    "tests": [
+      "conv-money-trace · ops-log-leak (626 dòng sạch): ĐẠT",
+      "eslint: sạch"
+    ]
   }
 }
