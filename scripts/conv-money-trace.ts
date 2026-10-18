@@ -69,7 +69,7 @@ const USAGE = `<mã tổ chức> --conv=<uuid> [--order=<mã ngắn>] | <mã t�
 
 // ─────────────────────────── PHẦN THUẦN ───────────────────────────
 
-export type TraceArgs = { code: string; conv: string | null; order: string | null; scan: boolean; days: number; since?: Date };
+export type TraceArgs = { code: string; conv: string | null; order: string | null; scan: boolean; days: number; since?: Date; at?: Date; windowMin?: number };
 
 export function parseTraceArgs(argv: readonly string[]): TraceArgs | { error: string } {
   const code = (argv.find((a) => !a.startsWith("--")) ?? "").trim();
@@ -80,7 +80,18 @@ export function parseTraceArgs(argv: readonly string[]): TraceArgs | { error: st
   const order = (val("order") ?? "").replace(/^#/, "") || null;
   if (order !== null && !/^[0-9a-f]{8}$/i.test(order)) return { error: "--order phải là mã ngắn 8 ký tự (vd 91F3641C)" };
   const scan = argv.includes("--scan");
-  if (!scan && !conv && !order) return { error: "cần --conv=<uuid>, --order=<mã ngắn> hoặc --scan" };
+  // `--at=<ISO UTC> [--window=phút]`: tìm hội thoại theo MỐC GIỜ chủ shop báo («khoảng 17:06») — KHÔNG nhận tên khách ở ô arg (kho PUBLIC,
+  // ô arg hiện ở trang lượt chạy). Danh sách + chữ tin chỉ ở phần MÃ HOÁ; [ops:tom-tat] chỉ số đếm.
+  const rawAt = val("at");
+  let at: Date | undefined;
+  if (rawAt !== undefined) {
+    at = new Date(rawAt);
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?Z$/.test(rawAt) || Number.isNaN(at.getTime())) return { error: "--at phải là mốc UTC dạng 2026-10-18T10:06Z" };
+  }
+  const rawWin = val("window");
+  const windowMin = rawWin === undefined ? 15 : Number(rawWin);
+  if (!Number.isInteger(windowMin) || windowMin < 1 || windowMin > 120) return { error: "--window phải là số phút nguyên 1..120" };
+  if (!scan && !conv && !order && !at) return { error: "cần --conv=<uuid>, --order=<mã ngắn>, --at=<mốc UTC> hoặc --scan" };
   const rawDays = val("days");
   const days = rawDays === undefined ? TRACE_DEFAULT_SCAN_DAYS : Number(rawDays);
   if (!Number.isInteger(days) || days < 1 || days > TRACE_MAX_SCAN_DAYS) return { error: `--days phải là số nguyên 1..${TRACE_MAX_SCAN_DAYS}` };
@@ -91,7 +102,7 @@ export function parseTraceArgs(argv: readonly string[]): TraceArgs | { error: st
     since = new Date(rawSince);
     if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?Z$/.test(rawSince) || Number.isNaN(since.getTime())) return { error: "--since phải là mốc UTC dạng 2026-10-14T08:10Z" };
   }
-  return { code, conv: conv?.toLowerCase() ?? null, order: order?.toLowerCase() ?? null, scan, days, ...(since ? { since } : {}) };
+  return { code, conv: conv?.toLowerCase() ?? null, order: order?.toLowerCase() ?? null, scan, days, ...(since ? { since } : {}), ...(at ? { at, windowMin } : {}) };
 }
 
 type Block = { type?: unknown; text?: unknown; name?: unknown; input?: unknown; id?: unknown; toolUseId?: unknown; content?: unknown; isError?: unknown };
@@ -498,6 +509,23 @@ export const COMMENT_ALREADY_NOTE = "Bình luận đã được nhắn riêng";
 /** Danh sách ĐÓNG các nhóm của mẫu số dòng C (SQL xếp; ngoài danh sách ⇒ KHAC). */
 const COMMENT_GROUPS = ["ALREADY", "DONE_TRONG", "DONE_CO_GHI_CHU", "BO_QUA_KHAC", "HONG", "DANG_CHO", "KHAC"] as const;
 
+/** Hội thoại có tin trong [at − w, at + w] — mã hội thoại + từng tin trong cửa sổ (vai · giờ · 160 ký tự) ở phần MÃ HOÁ; tóm tắt chỉ số đếm. */
+async function listAround(db: Db, at: Date, windowMin: number): Promise<void> {
+  const m = schema.salesChatMessages;
+  const from = new Date(at.getTime() - windowMin * 60_000);
+  const to = new Date(at.getTime() + windowMin * 60_000);
+  const rows = await db.select({ conv: m.conversationId, seq: m.seq, role: m.role, content: m.content, at: m.createdAt }).from(m).where(and(gte(m.createdAt, from), sql`${m.createdAt} <= ${to}`)).orderBy(asc(m.conversationId), asc(m.seq)).limit(2000);
+  const convs = [...new Set(rows.map((r) => r.conv))];
+  tomTat(`conv-money-trace --at=${at.toISOString()} ±${windowMin}′: ${convs.length} hội thoại · ${rows.length} tin trong cửa sổ`);
+  for (const c of convs) {
+    console.log(`— hội thoại ${c}`);
+    for (const r of rows.filter((x) => x.conv === c)) {
+      const t = textOf(r.content).replace(/\s+/g, " ").trim();
+      if (t) console.log(`  ${r.at.toISOString()} ${r.role === "assistant" ? "BOT " : "KHÁCH"} #${r.seq} ${t.slice(0, 160)}`);
+    }
+  }
+}
+
 /**
  * Cờ cần kiểm của đơn — chỉ MÃ, không chữ ghi chú, không tên người: cờ ĐANG MỞ (`raw.review.entries`) và các lượt NGƯỜI ĐÃ KIỂM
  * (`raw.reviewLog` — bấm «Xác nhận đơn» / «Huỷ đơn» xoá cờ khỏi `review` và chuyển vào đây, order-review.ts::withReviewResolved). Mã trong
@@ -550,6 +578,7 @@ async function main() {
       if (convs.length !== 1) ok = false;
       else conv = convs[0];
     }
+    if (!conv && args.at) await listAround(db, args.at, args.windowMin ?? 15);
     if (conv) ok = await traceConversation(db, conv, args.order, await loadCtx(db));
   });
   process.stdout.write("", () => process.exit(ok ? 0 : 1));
