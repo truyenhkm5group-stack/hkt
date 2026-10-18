@@ -3,7 +3,7 @@
   "mission_id": "quick-reply-evidence",
   "title": "Câu mẫu một món chỉ trả lời khi có căn cứ món + lỗi danh mục chặn",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-cau-mau-can-cu",
@@ -26,11 +26,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-18T14:46:38.590Z",
-  "updated_at": "2026-10-18T16:14:41.343Z",
+  "updated_at": "2026-10-18T16:39:17.488Z",
   "last_heartbeat": "2026-10-18T15:41:47.428Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#900 → e548e31c44996633e9e5839a22a44d413f02d624"
+    "merged": "#900 → e548e31c44996633e9e5839a22a44d413f02d624",
+    "verify": "PASS e548e31c44996633e9e5839a22a44d413f02d624 2026-10-18T16:38:54.587Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39144930655"
   },
   "handoff": {
     "branch": "claude/cau-mau-can-cu",
