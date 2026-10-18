@@ -29,6 +29,7 @@ import "dotenv/config";
 import { readFileSync } from "node:fs";
 import { sql, type SQL } from "drizzle-orm";
 import { getDbForInspection, type Db } from "@/db";
+import { orgMigrateLockKey } from "@/db/migrate";
 import { findOrganization } from "@/lib/platform/organizations";
 import { latestCustomerTurnUnhandledFor } from "@/lib/sales-chatbot/response-ownership-ledger";
 import { rowsOf } from "@/lib/sql-rows";
@@ -249,8 +250,35 @@ async function main() {
     tomTat(`org-migrate-probe ${org.code}: DỪNG · phiên CSDL KHÔNG ở chế độ chỉ đọc — không đọc gì`);
     return 1;
   }
+  await probeLocks(db, org.code);
   await probeOrganization(db, org.code, args.top);
   return 0;
+}
+
+/**
+ * AI ĐANG GIỮ KHOÁ MIGRATE của tổ chức (chủ shop 18/10/2026, P2 qa 0245): CHỈ ĐỌC pg_stat_activity + pg_locks của CHÍNH CSDL này — không
+ * huỷ, không kill, không nhả khoá. Khoá migrate là advisory lock cặp `orgMigrateLockKey(tên CSDL)` (db/migrate.ts, `objsubid` 2). Kênh
+ * [ops:tom-tat] chỉ số đếm + tuổi (giây) + tên ứng dụng (application_name, do mã đặt — không phải dữ liệu khách); pid, trạng thái, sự kiện
+ * chờ và 80 ký tự đầu câu lệnh ở phần mã hoá.
+ */
+async function probeLocks(db: Db, code: string): Promise<void> {
+  const [dbn] = rowsOf<{ name: string }>(await db.execute(sql`select current_database() as name`));
+  const [cls, obj] = orgMigrateLockKey(String(dbn?.name ?? ""));
+  const giu = rowsOf<{ pid: number; granted: boolean; app: string | null; state: string | null; wait: string | null; xact_s: number | null; query_s: number | null; q: string | null }>(
+    await db.execute(sql`select l.pid, l.granted, a.application_name as app, a.state, a.wait_event_type || ':' || coalesce(a.wait_event, '') as wait,
+      extract(epoch from now() - a.xact_start)::int as xact_s, extract(epoch from now() - a.query_start)::int as query_s, left(a.query, 80) as q
+      from pg_locks l left join pg_stat_activity a on a.pid = l.pid
+      where l.locktype = 'advisory' and l.classid = (${cls}::bigint)::oid and l.objid = ((${obj}::bigint) & 4294967295)::oid and l.objsubid = 2`),
+  );
+  const [dai] = rowsOf<{ n: number; lau: number | null }>(
+    await db.execute(sql`select count(*)::int as n, max(extract(epoch from now() - coalesce(xact_start, query_start)))::int as lau from pg_stat_activity
+      where datname = current_database() and pid <> pg_backend_pid() and state <> 'idle'`),
+  );
+  console.log(`— khoá migrate (${cls}, ${obj}): ${giu.length} dòng`);
+  for (const r of giu) console.log(`  pid ${r.pid} · ${r.granted ? "ĐANG GIỮ" : "đang chờ"} · ${r.app ?? "?"} · ${r.state ?? "?"} · chờ ${r.wait ?? "—"} · giao dịch ${r.xact_s ?? "?"} s · câu ${r.query_s ?? "?"} s · ${r.q ?? ""}`);
+  const dangGiu = giu.filter((r) => r.granted);
+  const ungDung = dangGiu.map((r) => `${String(r.app ?? "?").replace(/[^A-Za-z0-9 ._-]/g, "").slice(0, 24) || "?"} ${r.xact_s ?? "?"} s`).join(", ") || "—";
+  tomTat(`org-migrate-probe ${code} khoá migrate: đang giữ ${dangGiu.length} (${ungDung}) · đang chờ ${giu.length - dangGiu.length} · phiên khác đang chạy trên CSDL ${dai?.n ?? 0} (lâu nhất ${dai?.lau ?? "—"} s)`);
 }
 
 /** Xả stdout trước khi thoát — `process.exit` ngay sau `console.log` có thể cắt mất dòng tóm tắt cuối khi stdout là ống. */
