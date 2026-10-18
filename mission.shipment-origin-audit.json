@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "shipment-origin-audit",
+  "title": "Ops shipment-origin-audit: vận đơn nào tạo qua ERP, POS/Pancake hay ngoài ERP (chỉ đọc)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-ship-origin",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/shipment-origin-audit",
+  "base_sha": "5c9d1e1354a1a8452a62e51caba91c2962ad237c",
+  "domains": [],
+  "owned_paths": [
+    "scripts/shipment-origin-audit.ts",
+    "tests/shipment-origin-audit.test.ts",
+    "tests/sync-fixtures.test.ts",
+    "tests/platform-isolation-static.test.ts",
+    ".github/workflows/ops-vps.yml"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-18T09:44:01.589Z",
+  "updated_at": "2026-10-18T09:44:01.589Z",
+  "last_heartbeat": "2026-10-18T09:44:01.589Z",
+  "definition_of_done": []
+}
