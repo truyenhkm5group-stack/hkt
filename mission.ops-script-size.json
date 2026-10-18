@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "ops-script-size",
+  "title": "P0 HOTFIX: ops-vps chết 'Argument list too long' sau #906 — rút kịch bản SSH dưới 128 KiB + chặn ở CI",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/ops-script-size",
+  "base_sha": "68e18af90c990489112c32aae1e97492cc04d352",
+  "domains": [],
+  "owned_paths": [
+    ".github/workflows/ops-vps.yml",
+    "docs/ops-vps-script-notes.md",
+    "tests/ops-script-size.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-18T23:45:27.587Z",
+  "updated_at": "2026-10-18T23:45:27.587Z",
+  "last_heartbeat": "2026-10-18T23:45:27.587Z",
+  "definition_of_done": []
+}
