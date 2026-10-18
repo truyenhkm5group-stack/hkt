@@ -17,7 +17,7 @@ import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
-import { catalogLines, catalogSummary, collectOrgCatalog, SUMMARY_MAX_CHARS, variantLabel, vnd, type CatalogReport } from "@/scripts/org-catalog";
+import { catalogLines, catalogSummary, collectOrgCatalog, genericSingleProductTriggers, SUMMARY_MAX_CHARS, variantLabel, vnd, type CatalogReport } from "@/scripts/org-catalog";
 
 const ORG = "os-cat";
 const BI_MAT = "BI-MAT-ORG-CAT";
@@ -68,11 +68,15 @@ export function testOrgCatalogPure() {
   assert.ok(all.includes("Hướng dẫn thêm (20 ký tự): Giá sỉ hỏi nhân viên"));
 
   const sum = catalogSummary(r);
-  assert.deepEqual(sum, ["Tổ chức x: 1 sản phẩm · 2 mẫu mã (1 chưa có giá · 1 ẩn · 1 chỉ bán kèm) · nguồn tạo tay", "Bot: BẬT · giá sỉ TẮT · chốt không kiểm tồn BẬT · bảng giá sỉ đang dùng 1 (1 bậc) · câu mẫu đang bật 1 · câu upsell ĐÃ CHỌN (1 ảnh)", "Câu mẫu: cách hỏi gắn nhầm món 0 (ở 0 câu mẫu đang bật)"]);
+  assert.deepEqual(sum, ["Tổ chức x: 1 sản phẩm · 2 mẫu mã (1 chưa có giá · 1 ẩn · 1 chỉ bán kèm) · nguồn tạo tay", "Bot: BẬT · giá sỉ TẮT · chốt không kiểm tồn BẬT · bảng giá sỉ đang dùng 1 (1 bậc) · câu mẫu đang bật 1 · câu upsell ĐÃ CHỌN (1 ảnh)", "Câu mẫu: cách hỏi gắn nhầm món 0 (ở 0 câu mẫu đang bật) · cụm chung trên câu một món 0 (ở 0 câu) — chạy thử, gỡ trên màn hình Câu trả lời mẫu"]);
   // P0 18/10/2026: câu mẫu NEM mang cách hỏi «xin giá chả cá» ⇒ một dòng cảnh báo (phần mã hoá) + số đếm ở kênh tóm tắt.
   const nhamMon: CatalogReport = { ...r, products: [...r.products, { id: "erp-p9", name: "Nem hải sản tôm bề bề", code: null, manual: true, removed: false, variants: [{ id: "erp-v9", sku: "NEM-1", label: "Hộp 10 cái", price: 120_000, weightGrams: null, hidden: false, manual: true }] }], quickReplies: [...r.quickReplies, { title: "Nem giá", triggers: ["nem bao nhiêu", "xin giá chả cá"], answer: "Nem {{giá:NEM-1}}/hộp", upsell: false, images: 3 }] };
   assert.ok(catalogLines(nhamMon).includes("  ⚠ CÁCH HỎI GẮN NHẦM MÓN · Nem giá: «xin giá chả cá» gọi tên Chả cá thu"), catalogLines(nhamMon).join(" | "));
-  assert.equal(catalogSummary(nhamMon)[2], "Câu mẫu: cách hỏi gắn nhầm món 1 (ở 1 câu mẫu đang bật)");
+  assert.equal(catalogSummary(nhamMon)[2], "Câu mẫu: cách hỏi gắn nhầm món 1 (ở 1 câu mẫu đang bật) · cụm chung trên câu một món 0 (ở 0 câu) — chạy thử, gỡ trên màn hình Câu trả lời mẫu");
+  // Cụm chung «báo giá» trên câu nem (một món) ⇒ liệt kê để gỡ; câu upsell không bị liệt kê.
+  const chung: CatalogReport = { ...nhamMon, quickReplies: [...nhamMon.quickReplies, { title: "Nem 2", triggers: ["báo giá", "nem hộp mấy cái"], answer: "Nem {{giá:NEM-1}}/hộp", upsell: false, images: 0 }] };
+  assert.deepEqual(genericSingleProductTriggers(chung).map((g) => `${g.title}:${g.trigger}:${g.product}`), ["Nem 2:báo giá:Nem hải sản tôm bề bề"]);
+  assert.ok(catalogLines(chung).includes("  ⚠ CỤM CHUNG TRÊN CÂU MỘT MÓN · Nem 2: «báo giá» ⇒ mặc định Nem hải sản tôm bề bề"));
   for (const s of sum) {
     assert.ok(s.length <= SUMMARY_MAX_CHARS);
     for (const w of ["Chả cá", "280", "250", "Bảng giá [", "Hải sản", "nhân viên"]) assert.ok(!s.includes(w), `kênh tóm tắt không mang tên / giá / chữ của shop: ${w}`);
