@@ -1,4 +1,3 @@
-{"at":"2026-10-10T03:15:31.390Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"c5988e501db3 · run 38019906888 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38019906888"}
 {"at":"2026-10-10T03:40:36.362Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-sales-settings-v2","detail":"feat/ai-sales-settings-v2 @ 220c4d7e21cc · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T03:40:50.520Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#756 @ 220c4d7e21cc · Cập nhật nhánh lên main, mã không đổi; gates xanh lại"}
 {"at":"2026-10-10T03:41:30.098Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ai-sales-settings-v2","detail":"#756 @ 220c4d7e21cc → cbfa1d7a649d (MERGE_NOW · MEDIUM · gates success)"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-18T03:00:07.817Z","actor":"DESKTOP-56TH98Y:wt-olc-order","kind":"CLAIM","mission":"org-lifecycle-test-order","detail":"PLANNING · 1 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-18T03:00:29.250Z","actor":"DESKTOP-56TH98Y:wt-olc-order","kind":"HANDOFF","mission":"org-lifecycle-test-order","detail":"claude/org-lifecycle-test-order @ 7983614d4dd9 · 1 lệnh kiểm thử"}
 {"at":"2026-10-18T03:01:09.212Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"org-lifecycle-test-order","detail":"#890 cho claude/org-lifecycle-test-order @ 7983614d4dd9"}
+{"at":"2026-10-18T03:01:39.183Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#890 @ 7983614d4dd9 · lead: chỉ đổi thứ tự xếp khi trùng mốc (dòng :start trước) — không đổi giá trị kỳ vọng"}

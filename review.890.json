@@ -1,0 +1,8 @@
+{
+  "pr": 890,
+  "sha": "7983614d4dd9ab40f06eba7f49af0ab08c43bac8",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-18T03:01:23.007Z",
+  "note": "lead: chỉ đổi thứ tự xếp khi trùng mốc (dòng :start trước) — không đổi giá trị kỳ vọng"
+}
