@@ -24,6 +24,9 @@ function testPure() {
   assert.deepEqual(parseTraceArgs(["hslc", "--scan", "--days=7"]), { code: "hslc", conv: null, order: null, scan: true, days: 7 });
   assert.deepEqual(parseTraceArgs(["hslc-hmt-shop", "--order=42F28794"]), { code: "hslc-hmt-shop", conv: null, order: "42f28794", scan: false, days: 3 }, "chỉ mã đơn ngắn (org-order-audit in 8 ký tự cuối) ⇒ tự tìm hội thoại của đơn");
   assert.ok("error" in parseTraceArgs(["hslc-hmt-shop"]), "không --conv / --order / --scan ⇒ từ chối");
+  assert.deepEqual(parseTraceArgs(["hslc-hmt-shop", "--at=2026-10-18T10:06Z", "--window=20"]), { code: "hslc-hmt-shop", conv: null, order: null, scan: false, days: 3, at: new Date("2026-10-18T10:06Z"), windowMin: 20 }, "tìm theo MỐC GIỜ, không theo tên khách");
+  assert.ok("error" in parseTraceArgs(["hslc-hmt-shop", "--at=17:06"]), "--at phải là mốc UTC đầy đủ");
+  assert.ok("error" in parseTraceArgs(["hslc-hmt-shop", "--at=2026-10-18T10:06Z", "--window=999"]), "--window có trần");
   assert.equal(reviewCodesText({}), "đang mở không · người đã kiểm chưa");
   assert.equal(reviewCodesText({ review: { entries: [{ code: "ADDRESS_UNRESOLVED", note: "Hà Nội" }, { code: "LA" }] } }), "đang mở ADDRESS_UNRESOLVED+KHAC · người đã kiểm chưa", "mã lạ ⇒ KHAC, không in ghi chú");
   assert.equal(reviewCodesText({ review: null, reviewLog: [{ action: "CONFIRMED", byName: "Chị A", entries: [{ code: "ADDRESS_UNRESOLVED" }] }] }), "đang mở không · người đã kiểm CONFIRMED:ADDRESS_UNRESOLVED", "nhân viên bấm Xác nhận ⇒ cờ về null, lượt kiểm vào reviewLog; không in tên người bấm");
