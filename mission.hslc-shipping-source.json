@@ -3,7 +3,7 @@
   "mission_id": "hslc-shipping-source",
   "title": "Ops shipping-source-probe: vận đơn HSLC đang được tạo ở đâu — ERP · Pancake POS · Viettel Post (chỉ đọc)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-hslc-ship",
@@ -24,7 +24,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T13:55:24.174Z",
-  "updated_at": "2026-10-18T13:55:24.174Z",
-  "last_heartbeat": "2026-10-18T13:55:24.174Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-18T15:00:41.745Z",
+  "last_heartbeat": "2026-10-18T15:00:41.745Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/hslc-shipping-source",
+    "sha": "8b9e4a98478bf0629bb4509a11fbab170ebcf0c5",
+    "at": "2026-10-18T15:00:41.745Z",
+    "actor": "DESKTOP-56TH98Y:wt-hslc-ship",
+    "title": "Ops shipping-source-probe: vận đơn HSLC đang được tạo ở đâu — ERP · Pancake POS · Viettel Post (chỉ đọc)",
+    "summary": "",
+    "tests": [
+      "typecheck sạch · lint sạch · npm test TẤT CẢ KIỂM THỬ ĐẠT (EXIT=0) trên commit 8b9e4a98 · tests/shipping-source-probe.test.ts: thuần (đối số, hãng, order_link, ghép LINK/HINT_STRONG/HINT_WEAK, gom COD khai báo + rủi ro hai vận đơn, kết luận MEASURED/HINT/UNKNOWN, chia dòng tóm tắt) + CSDL thật với Pancake giả + quét nguồn (chỉ đọc, chỉ GET, tóm tắt không lọt SĐT/mã) · ops-log-leak xanh (69 mã hoá, 0 lọt) · platform-isolation-static xanh. Chưa chạy ops trên production."
+    ]
+  }
 }
