@@ -3,7 +3,7 @@
   "mission_id": "org-lifecycle-test-order",
   "title": "Bài kiểm vòng đời tổ chức thôi đỏ ngẫu nhiên khi hai dòng nhật ký trùng mốc",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-olc-order",
@@ -24,9 +24,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-18T03:00:07.726Z",
-  "updated_at": "2026-10-18T03:01:09.177Z",
+  "updated_at": "2026-10-18T03:40:02.070Z",
   "last_heartbeat": "2026-10-18T03:00:29.218Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#890 → 005ddc3a4b66f536a6ecd8f193b4ac83d85eeabf"
+  },
   "handoff": {
     "branch": "claude/org-lifecycle-test-order",
     "sha": "7983614d4dd9ab40f06eba7f49af0ab08c43bac8",
