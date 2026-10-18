@@ -31,7 +31,7 @@ import { orgHasSyncedSource } from "@/lib/platform/capabilities";
 import { findOrganization, listOrganizations } from "@/lib/platform/organizations";
 import { parseSalesChatbotConfig, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { parseQuickReplySettings, QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
-import { triggerProductConflicts } from "@/lib/sales-chatbot/quick-reply-focus";
+import { productsNamedIn, quickReplyCovers, triggerProductConflicts } from "@/lib/sales-chatbot/quick-reply-focus";
 import { rowsOf } from "@/lib/sql-rows";
 
 const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
@@ -139,6 +139,18 @@ export function quickReplyConflicts(r: Pick<CatalogReport, "products" | "quickRe
   return r.quickReplies.flatMap((q) => triggerProductConflicts(q, products).map((c) => ({ title: q.title, ...c })));
 }
 
+/** Cụm CHUNG (không gọi tên món nào) trên câu mẫu KHÔNG phải upsell chỉ nói đúng MỘT món. HÀM THUẦN. */
+export function genericSingleProductTriggers(r: Pick<CatalogReport, "products" | "quickReplies">): { title: string; trigger: string; product: string }[] {
+  const products = r.products.filter((p) => !p.removed).map((p) => ({ name: p.name, skus: p.variants.map((v) => v.sku) }));
+  const names = products.map((p) => p.name);
+  return r.quickReplies.flatMap((q) => {
+    if (q.upsell) return [];
+    const covers = quickReplyCovers(q, products);
+    if (covers.length !== 1) return [];
+    return q.triggers.filter((t) => productsNamedIn(t, names).length === 0).map((trigger) => ({ title: q.title, trigger, product: covers[0] }));
+  });
+}
+
 /** `null` ⇒ `—` (CHƯA BIẾT), không bao giờ `0 ₫` (luật 42). */
 export const vnd = (n: number | null): string => (n === null ? "—" : `${n.toLocaleString("vi-VN")} ₫`);
 const onOff = (b: boolean): string => (b ? "BẬT" : "TẮT");
@@ -171,6 +183,9 @@ export function catalogLines(r: CatalogReport): string[] {
   for (const q of r.quickReplies) out.push(`· ${q.upsell ? "[UPSELL] " : ""}${q.title} (${q.images} ảnh) [${q.triggers.join(" / ")}]: ${q.answer.replace(/\s+/g, " ").trim()}`);
   // P0 18/10/2026: cách hỏi gọi tên món mà câu mẫu không nói tới — bot đã bỏ qua câu đó khi khách hỏi món kia; người nên gỡ cách hỏi.
   for (const c of quickReplyConflicts(r)) out.push(`  ⚠ CÁCH HỎI GẮN NHẦM MÓN · ${c.title}: «${c.trigger}» gọi tên ${c.names.join(", ")}`);
+  // CHẠY THỬ dọn cách hỏi (chủ shop 18/10): cụm CHUNG không gọi tên món nào, gắn trên câu mẫu chỉ nói MỘT món ⇒ mặc định câu hỏi chung
+  // về đúng một SKU. Chỉ LIỆT KÊ — gỡ trên màn hình Câu trả lời mẫu (ghi hộ CSDL tổ chức khách không đi qua ops).
+  for (const g of genericSingleProductTriggers(r)) out.push(`  ⚠ CỤM CHUNG TRÊN CÂU MỘT MÓN · ${g.title}: «${g.trigger}» ⇒ mặc định ${g.product}`);
   return out;
 }
 
@@ -181,10 +196,11 @@ export function catalogSummary(r: CatalogReport): string[] {
   const activeLists = r.priceLists.filter((l) => l.active);
   const tiers = activeLists.reduce((s, l) => s + l.tiers.length, 0);
   const conflicts = quickReplyConflicts(r);
+  const generic = genericSingleProductTriggers(r);
   return [
     `Tổ chức ${r.org.code}: ${live.length} sản phẩm · ${variants.length} mẫu mã (${variants.filter((v) => v.price === null).length} chưa có giá · ${variants.filter((v) => v.hidden).length} ẩn · ${variants.filter((v) => v.addOnOnly).length} chỉ bán kèm) · nguồn ${r.syncedProducts === null ? "—" : r.syncedProducts ? "ĐỒNG BỘ" : "tạo tay"}`,
     `Bot: ${r.bot ? `${onOff(r.bot.enabled)} · giá sỉ ${onOff(r.bot.wholesalePricing)} · chốt không kiểm tồn ${onOff(r.bot.sellWithoutStockCheck)}` : "— (chưa có cấu hình)"} · bảng giá sỉ đang dùng ${activeLists.length} (${tiers} bậc) · câu mẫu đang bật ${r.quickReplies.length} · câu upsell ${r.quickReplySettings?.upsellSet ? `ĐÃ CHỌN (${r.quickReplies.find((q) => q.upsell)?.images ?? 0} ảnh)` : r.quickReplySettings?.upsellStale ? `TRỎ TỚI CÂU ${r.quickReplySettings.upsellStale.state === "INACTIVE" ? "ĐANG TẮT" : "ĐÃ XOÁ"}` : "CHƯA CHỌN"}`,
-    `Câu mẫu: cách hỏi gắn nhầm món ${conflicts.length} (ở ${new Set(conflicts.map((c) => c.title)).size} câu mẫu đang bật)`,
+    `Câu mẫu: cách hỏi gắn nhầm món ${conflicts.length} (ở ${new Set(conflicts.map((c) => c.title)).size} câu mẫu đang bật) · cụm chung trên câu một món ${generic.length} (ở ${new Set(generic.map((g) => g.title)).size} câu) — chạy thử, gỡ trên màn hình Câu trả lời mẫu`,
   ].map((l) => l.slice(0, SUMMARY_MAX_CHARS));
 }
 
