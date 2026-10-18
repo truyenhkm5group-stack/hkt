@@ -54,6 +54,7 @@ import { DEFAULT_SALES_CHATBOT_CONFIG, isMessagingChannel, isPublicChannel, pars
 import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib/sales-chatbot/playbook-shared";
 import { LESSONS_SETTING_KEY, lessonsPrompt, parseLessonsState } from "@/lib/sales-chatbot/lessons-shared";
 import { levelPromptFor } from "@/lib/sales-chatbot/levels";
+import type { FocusLine } from "@/lib/sales-chatbot/quick-reply-focus";
 import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, quickReplyCatalog, quickReplyFocus, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
@@ -1239,11 +1240,18 @@ async function chatTurnCore(
     // chả cá bot tự thêm ở lượt này. Cùng mốc với đường phủ nhận (`purchaseRoundStart`), tính MỘT lần, dùng cho câu mẫu, báo giá
     // (calculate_cart) lẫn lên / sửa / chốt đơn.
     const roundCustomerTexts = [...customerTextsSince(customerMsgsOf(msgs), purchaseRoundStart(st0)), text];
-    // MÓN KHÁCH ĐANG HỎI (P0 18/10/2026, ca «ThanhPhương»): «xin giá chả cá» khớp chữ câu mẫu NEM vì câu nem mang nhầm cách hỏi đó. Câu mẫu
-    // nói về món khác món khách hỏi không được trả lời — ở bước khớp chữ, AI chọn mã, và công cụ `send_quick_reply`. Khách chưa gọi tên
-    // món ⇒ món của câu shop / page vừa nói (tin tự động của page). Đọc lỗi ⇒ `null`, không lọc (như trước).
-    const lastShopText = [...msgs].reverse().map((m) => (m.role === "assistant" ? textOf(m.content) : "")).find(Boolean) ?? null;
-    const qrFocus = qrSettings.enabled ? await quickReplyFocus(roundCustomerTexts, lastShopText).catch(() => null) : null;
+    // MÓN ĐANG BÀN (P0 18/10/2026, ca «ThanhPhương»): «xin giá chả cá» khớp chữ câu mẫu NEM vì câu nem mang nhầm cách hỏi đó. Câu mẫu
+    // nói về món khác món đang bàn không được trả lời — ở bước khớp chữ, AI chọn mã, và công cụ `send_quick_reply`. Món đang bàn = món
+    // khách gọi tên + món shop nói tới / mời sau đó; khách chưa gọi tên món ⇒ món của câu shop / page gần nhất (tin tự động của page).
+    // Cùng cửa sổ lượt mua với `roundCustomerTexts`. Đọc lỗi ⇒ `null`, không lọc (như trước).
+    const roundSince = purchaseRoundStart(st0);
+    const focusLines: FocusLine[] = [
+      ...customerMsgsOf(msgs)
+        .filter((m) => !m.toolResult && m.text.trim() && (!roundSince || m.at.getTime() > roundSince.getTime()))
+        .map((m): FocusLine => ({ who: m.role === "user" ? "CUSTOMER" : "SHOP", text: m.text })),
+      { who: "CUSTOMER", text },
+    ];
+    const qrFocus = qrSettings.enabled ? await quickReplyFocus(focusLines, qrSettings.upsellReplyId).catch(() => null) : null;
     const quick0: QuickReplyStep = st0.priceDispute?.open
       ? { kind: "SKIP", reason: "Khách đang phản đối giá — AI báo lại theo báo giá máy chủ" }
       : postSale

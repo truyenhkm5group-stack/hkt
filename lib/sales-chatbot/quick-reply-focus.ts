@@ -8,7 +8,8 @@
  *
  * Luật (lõi, mọi tổ chức): MÓN KHÁCH ĐANG HỎI là món khách gọi tên ở tin MỚI NHẤT có gọi tên món trong lượt mua hiện tại
  * (bỏ mệnh đề từ chối — «không lấy nem» không phải đang hỏi nem); khách chưa gọi tên món nào thì lấy món của câu shop / page
- * vừa nói (tin tự động của page giới thiệu chả cá ⇒ «cho giá» là hỏi giá chả cá). MÓN CỦA CÂU MẪU = mã SKU trong chỗ trống
+ * vừa nói (tin tự động của page giới thiệu chả cá ⇒ «cho giá» là hỏi giá chả cá); món shop nói tới / mời SAU tin khách đó cũng là món
+ * ĐANG BÀN (shop mời nem, khách «giá sao em» là hỏi giá nem — không khoá cứng vào món khách nói trước). MÓN CỦA CÂU MẪU = mã SKU trong chỗ trống
  * `{{giá:SKU}}` / `{{tồn:SKU}}` + tên món trong tiêu đề / câu trả lời. Câu mẫu nói về món KHÁC mọi món khách đang hỏi ⇒
  * không được trả lời câu đó (khớp chữ · AI chọn mã · công cụ `send_quick_reply`) — lượt rơi về bước sau (AI đọc hiểu / chatbot
  * đầy đủ), tức là tốn token chứ không bán sai món. Câu mẫu không gắn món nào (ship, địa chỉ, cảm ơn, menu chung) không bị ảnh hưởng.
@@ -17,7 +18,7 @@
  * Nhận diện tên món (`productsNamedIn`) CHẶT HƠN `namedProductsIn` của giỏ: bỏ dấu thì «giá» = «giã», nên «xin giá chả cá» đủ hai từ
  * («chả» + «gia») của «Chả mực giã tay». Ở đây: từ ĐẦU của tên + từ PHÂN BIỆT đứng LIỀN SAU nó (bỏ qua từ chung của cả nhóm cùng từ
  * đầu) — «chả cá» ⇒ Chả cá thu, «chả mực» ⇒ Chả mực giã tay, «ruốc bông tôm» ⇒ Ruốc bông tôm; từ đầu chỉ một món có ⇒ đủ tự nó
- * («nem»). Nhận thiếu chỉ làm câu mẫu không bị lọc (như trước bản vá); nhận thừa chỉ làm câu mẫu bị loại (tốn token, không sai món).
+ * («nem») — trừ từ đầu quá thông dụng («nước», «cá»…) cần thêm từ thứ hai. Nhận thiếu chỉ làm câu mẫu không bị lọc (như trước bản vá); nhận thừa chỉ làm câu mẫu bị loại (tốn token, không sai món).
  */
 import { mentionText } from "@/lib/sales-chatbot/cart-commitment";
 import { parsePlaceholders, type QuickReplyEntry } from "@/lib/sales-chatbot/quick-replies-shared";
@@ -26,8 +27,15 @@ import { foldVi } from "@/lib/sales-chatbot/text";
 /** Một sản phẩm đang bán: tên (để nhận diện trong chữ) + mã SKU các mẫu mã (để đọc chỗ trống của câu mẫu). */
 export type FocusProduct = { name: string; skus: readonly string[] };
 
-/** Món khách đang hỏi. `source` = căn cứ: chữ khách · câu shop / page vừa nói · không có. `declined` = món khách đã từ chối trong lượt. */
-export type ProductFocus = { focus: string[]; declined: string[]; source: "CUSTOMER" | "SHOP" | "NONE" };
+/** Một dòng của lượt mua (cũ ⇒ mới): tin KHÁCH, hoặc câu SHOP / page / bot. */
+export type FocusLine = { who: "CUSTOMER" | "SHOP"; text: string };
+
+/**
+ * Món đang bàn. `focus` = món khách gọi tên (hoặc, khách chưa gọi tên món nào, món của câu shop / page gần nhất); `offered` = món SHOP
+ * nói tới / mời SAU tin khách gọi tên đó (review #p0-quick-reply-focus: shop mời nem, khách «giá sao em» là hỏi giá nem — khoá cứng vào
+ * món khách nói trước là cùng lỗi theo chiều ngược lại); `declined` = món khách đã từ chối trong lượt. `source` = căn cứ của `focus`.
+ */
+export type ProductFocus = { focus: string[]; offered: string[]; declined: string[]; source: "CUSTOMER" | "SHOP" | "NONE" };
 
 const uniq = (xs: readonly string[]) => [...new Set(xs)];
 const PLACEHOLDER_STRIP_RE = /\{\{[^}]*\}\}/g;
@@ -38,32 +46,48 @@ const nameTokens = (name: string) =>
     .split(" ")
     .filter((w) => w && !/^\d/.test(w) && w !== "kg" && w !== "g");
 
-/** Các món được GỌI TÊN trong chữ (xem đầu tệp). HÀM THUẦN. */
+/**
+ * Từ ĐẦU quá thông dụng để một mình gọi tên món dù danh mục chỉ có một món mang nó («ship nước ngoài», «chả cá luộc nước sôi» không gọi
+ * tên «Nước mắm…»; «chả cá thu» không gọi tên «Cá thu một nắng» nhờ luật lồng nhau bên dưới) ⇒ cần thêm từ thứ hai của tên đứng liền.
+ */
+const GENERIC_HEADS = new Set(["nuoc", "ca", "banh", "tra", "bot", "dau", "muoi", "sot", "hat", "rau", "thit", "com", "xoi", "che", "sua", "kem", "mam", "bo", "ga", "do", "set", "combo", "goi", "hop", "tui", "ao", "quan", "vay", "dam", "giay", "dep", "mu", "kinh", "son"]);
+
+/**
+ * Các món được GỌI TÊN trong chữ (xem đầu tệp). Mỗi lần khớp là một ĐOẠN từ (kéo dài tới hết các từ liền sau còn thuộc tên); món mà
+ * mọi đoạn của nó nằm GỌN trong đoạn dài hơn của món khác thì bỏ («chả cá thu» chứa «cá thu» của «Cá thu một nắng»). HÀM THUẦN.
+ */
 export function productsNamedIn(text: string, names: readonly string[]): string[] {
   const said = foldVi(text).split(" ").filter(Boolean);
   if (!said.length) return [];
   const toks = uniq(names).map((n) => ({ n, t: nameTokens(n) })).filter((x) => x.t.length);
-  const out: string[] = [];
+  const hits: { n: string; spans: [number, number][] }[] = [];
   for (const { n, t } of toks) {
     const group = toks.filter((x) => x.t[0] === t[0]);
-    if (group.length === 1) {
-      if (said.includes(t[0])) out.push(n);
-      continue;
-    }
+    const inName = new Set(t);
     // Từ chung của cả nhóm cùng từ đầu («bong» của hai loại ruốc bông) được bỏ qua; từ ngay sau đó phải là từ RIÊNG của món này.
     const shared = new Set(t.filter((w) => group.every((x) => x.t.includes(w))));
     const own = new Set(t.filter((w) => !shared.has(w) && group.filter((x) => x.t.includes(w)).length === 1));
+    const spans: [number, number][] = [];
     for (let i = 0; i < said.length; i++) {
       if (said[i] !== t[0]) continue;
-      let j = i + 1;
-      while (j < said.length && shared.has(said[j])) j++;
-      if (j < said.length && own.has(said[j])) {
-        out.push(n);
-        break;
+      let j: number;
+      if (group.length === 1) {
+        if (GENERIC_HEADS.has(t[0]) && t.length > 1) {
+          if (said[i + 1] !== t[1]) continue;
+          j = i + 1;
+        } else j = i;
+      } else {
+        j = i + 1;
+        while (j < said.length && shared.has(said[j])) j++;
+        if (!(j < said.length && own.has(said[j]))) continue;
       }
+      while (j + 1 < said.length && inName.has(said[j + 1])) j++;
+      spans.push([i, j]);
     }
+    if (spans.length) hits.push({ n, spans });
   }
-  return out;
+  const inside = (a: [number, number], b: [number, number]) => b[0] <= a[0] && a[1] <= b[1] && b[1] - b[0] > a[1] - a[0];
+  return hits.filter((h) => !h.spans.every((sp) => hits.some((o) => o !== h && o.spans.some((os) => inside(sp, os))))).map((h) => h.n);
 }
 
 /** Món một câu mẫu nói tới: SKU trong chỗ trống + tên món trong tiêu đề / câu trả lời (KHÔNG đọc cách hỏi — đó là thứ cần kiểm). */
@@ -75,63 +99,86 @@ export function quickReplyCovers(entry: Pick<QuickReplyEntry, "title" | "answer"
 }
 
 /**
- * Món khách đang hỏi. `customerTexts` cũ ⇒ mới (phần tử cuối = tin hiện tại), chỉ trong LƯỢT MUA hiện tại; `shopText` = câu shop /
- * page / bot gần nhất. Món được gọi tên trong mệnh đề từ chối vào `declined`, trừ khi khách gọi tên lại nó ở mệnh đề không từ chối.
+ * Món đang bàn từ các dòng của LƯỢT MUA hiện tại (cũ ⇒ mới; dòng cuối = tin khách hiện tại). Món được gọi tên trong mệnh đề từ chối vào
+ * `declined`, trừ khi khách gọi tên lại nó ở mệnh đề không từ chối; món đã từ chối không bao giờ vào `focus` / `offered`.
  */
-export function productFocusOf(customerTexts: readonly string[], shopText: string | null, products: readonly FocusProduct[]): ProductFocus {
+export function productFocusOf(lines: readonly FocusLine[], products: readonly FocusProduct[]): ProductFocus {
   const names = products.map((p) => p.name);
-  if (!names.length) return { focus: [], declined: [], source: "NONE" };
+  if (!names.length) return { focus: [], offered: [], declined: [], source: "NONE" };
   const positive: string[] = [];
   const negative: string[] = [];
   let focus: string[] = [];
-  for (let i = customerTexts.length - 1; i >= 0; i--) {
-    const t = customerTexts[i] ?? "";
-    if (!t.trim()) continue;
-    const said = productsNamedIn(mentionText([t]), names);
+  const shopAfter: string[][] = [];
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const { who, text } = lines[i] ?? { who: "CUSTOMER", text: "" };
+    if (!text.trim()) continue;
+    if (who === "SHOP") {
+      if (!focus.length) shopAfter.push(productsNamedIn(text, names));
+      continue;
+    }
+    const said = productsNamedIn(mentionText([text]), names);
     positive.push(...said);
-    negative.push(...productsNamedIn(t, names).filter((n) => !said.includes(n)));
+    negative.push(...productsNamedIn(text, names).filter((n) => !said.includes(n)));
     if (!focus.length && said.length) focus = said;
   }
   const declined = uniq(negative).filter((n) => !positive.includes(n));
-  if (focus.length) return { focus: uniq(focus), declined, source: "CUSTOMER" };
-  const shop = shopText ? productsNamedIn(shopText, names).filter((n) => !declined.includes(n)) : [];
-  return shop.length ? { focus: uniq(shop), declined, source: "SHOP" } : { focus: [], declined, source: "NONE" };
+  const keep = (xs: readonly string[]) => uniq(xs).filter((n) => !declined.includes(n));
+  if (focus.length) {
+    const f = uniq(focus);
+    return { focus: f, offered: keep(shopAfter.flat()).filter((n) => !f.includes(n)), declined, source: "CUSTOMER" };
+  }
+  // Khách chưa gọi tên món nào trong lượt ⇒ câu shop / page GẦN NHẤT có gọi tên món.
+  const shop = keep(shopAfter.find((x) => keep(x).length) ?? []);
+  return shop.length ? { focus: shop, offered: [], declined, source: "SHOP" } : { focus: [], offered: [], declined, source: "NONE" };
 }
 
+/** Mọi món đang bàn: khách hỏi + shop vừa nói / mời sau đó. */
+const onTable = (f: ProductFocus) => uniq([...f.focus, ...f.offered]);
+
 /**
- * Câu mẫu có được trả lời khách lúc này không: không gắn món nào ⇒ được; có món khách đang hỏi ⇒ phải nói tới ít nhất một món đó;
- * chưa rõ khách hỏi món gì ⇒ không được nói ĐÚNG những món khách vừa từ chối.
+ * Câu mẫu có được gửi lúc này không (công cụ `send_quick_reply`): không gắn món nào ⇒ được; có món đang bàn ⇒ phải nói tới ít nhất một
+ * món đó; chưa rõ món nào ⇒ không được nói ĐÚNG những món khách vừa từ chối.
  */
 export function fitsFocus(covers: readonly string[], f: ProductFocus): boolean {
   if (!covers.length) return true;
-  if (f.focus.length) return covers.some((c) => f.focus.includes(c));
+  const table = onTable(f);
+  if (table.length) return covers.some((c) => table.includes(c));
   if (f.declined.length) return covers.some((c) => !f.declined.includes(c));
   return true;
 }
 
 /**
- * Câu mẫu có trả lời ĐỦ món khách đang hỏi không — cho bước câu mẫu THAY cả lượt trả lời (khớp chữ · AI chọn mã): khách hỏi «giá chả
- * cá với nem» thì câu báo giá chả cá chỉ trả lời nửa câu ⇒ không đủ, để chatbot đầy đủ trả lời cả hai. Công cụ `send_quick_reply` dùng
- * `fitsFocus` (model gửi được hai câu mẫu, mỗi câu một món).
+ * Câu mẫu có trả lời ĐỦ mọi món đang bàn không — cho bước câu mẫu THAY cả lượt trả lời (khớp chữ · AI chọn mã): khách hỏi «giá chả cá
+ * với nem», hay shop vừa mời nem rồi khách hỏi «giá sao em», thì câu báo giá một món chỉ trả lời nửa câu (hoặc đoán) ⇒ không đủ, để
+ * chatbot đầy đủ đọc ngữ cảnh. Chặt hơn `fitsFocus` (model gửi được hai câu mẫu, mỗi câu một món).
  */
 export function answersFocus(covers: readonly string[], f: ProductFocus): boolean {
-  if (!covers.length || !f.focus.length) return fitsFocus(covers, f);
-  return f.focus.every((n) => covers.includes(n));
+  const table = onTable(f);
+  if (!covers.length || !table.length) return fitsFocus(covers, f);
+  return table.every((n) => covers.includes(n));
 }
 
-/** Bộ lọc dựng MỘT lần mỗi lượt: món khách đang hỏi + phép thử từng câu mẫu (nhớ kết quả theo mã câu mẫu). */
+/** Bộ lọc dựng MỘT lần mỗi lượt: món đang bàn + phép thử từng câu mẫu (nhớ kết quả theo mã câu mẫu). `exemptIds` = câu UPSELL. */
 type EntryKey = Pick<QuickReplyEntry, "id" | "title" | "answer">;
-export type QuickReplyFocusGuard = { focus: ProductFocus; fits: (entry: EntryKey) => boolean; answers: (entry: EntryKey) => boolean; coversOf: (entry: EntryKey) => string[] };
+export type QuickReplyFocusGuard = { focus: ProductFocus; fits: (entry: EntryKey) => boolean; answers: (entry: EntryKey) => boolean; coversOf: (entry: EntryKey) => string[]; onTable: string[] };
 
-export function quickReplyFocusGuard(customerTexts: readonly string[], shopText: string | null, products: readonly FocusProduct[]): QuickReplyFocusGuard {
-  const focus = productFocusOf(customerTexts, shopText, products);
+export function quickReplyFocusGuard(lines: readonly FocusLine[], products: readonly FocusProduct[], exemptIds: readonly string[] = []): QuickReplyFocusGuard {
+  const focus = productFocusOf(lines, products);
   const memo = new Map<string, string[]>();
   const coversOf = (e: EntryKey) => {
     let c = memo.get(e.id);
     if (!c) memo.set(e.id, (c = quickReplyCovers(e, products)));
     return c;
   };
-  return { focus, coversOf, fits: (e) => fitsFocus(coversOf(e), focus), answers: (e) => answersFocus(coversOf(e), focus) };
+  // Câu UPSELL đi theo cửa sổ lời mời riêng (next-best-action.ts) ở mọi đường — cùng miễn trừ với công cụ `send_quick_reply`.
+  const exempt = new Set(exemptIds);
+  return {
+    focus,
+    onTable: onTable(focus),
+    coversOf,
+    fits: (e) => exempt.has(e.id) || fitsFocus(coversOf(e), focus),
+    answers: (e) => exempt.has(e.id) || answersFocus(coversOf(e), focus),
+  };
 }
 
 /**

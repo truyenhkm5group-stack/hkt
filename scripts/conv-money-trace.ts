@@ -50,7 +50,7 @@ import { CLAIM_SAFE_TEXT, extractVndAmounts } from "@/lib/sales-chatbot/claim-gu
 import { EMPTY_REPLY_TEXT, loadSalesChatbotConfig, SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { catalogReferenceAmounts } from "@/lib/sales-chatbot/quote";
 import { listQuickReplies, loadFocusProducts } from "@/lib/sales-chatbot/quick-replies";
-import { fitsFocus, productFocusOf, quickReplyCovers, type FocusProduct } from "@/lib/sales-chatbot/quick-reply-focus";
+import { fitsFocus, productFocusOf, quickReplyCovers, type FocusLine, type FocusProduct } from "@/lib/sales-chatbot/quick-reply-focus";
 import { parsePlaceholders } from "@/lib/sales-chatbot/quick-replies-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { DEFAULT_SHIPPING_ROUTING } from "@/lib/constants/shipping-routing";
@@ -178,11 +178,11 @@ export function quickReplyHead(answer: string): string {
  * món KHÁC món khách đang hỏi (cùng luật `quick-reply-focus.ts` của lượt sống) ⇒ trả câu mẫu đó; không trùng / đúng món / chưa rõ món ⇒
  * `null`. Đầu câu ngắn hơn 12 ký tự không dùng (trùng nhầm). HÀM THUẦN.
  */
-export function wrongProductTemplate<T extends { title: string; answer: string; head: string }>(sent: string, customerTexts: readonly string[], shopText: string | null, templates: readonly T[], products: readonly FocusProduct[]): T | null {
+export function wrongProductTemplate<T extends { title: string; answer: string; head: string }>(sent: string, lines: readonly FocusLine[], templates: readonly T[], products: readonly FocusProduct[]): T | null {
   const head = foldVi(sent).replace(/\s+/g, " ").trim().slice(0, 40);
   const hits = templates.filter((t) => t.head.length >= 12 && head.startsWith(t.head));
   if (!hits.length) return null;
-  const focus = productFocusOf(customerTexts, shopText, products);
+  const focus = productFocusOf(lines, products);
   if (!focus.focus.length && !focus.declined.length) return null;
   const wrong = hits.filter((t) => !fitsFocus(quickReplyCovers(t, products), focus));
   return wrong.length === hits.length ? wrong[0] : null;
@@ -435,8 +435,8 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   const D = { msgs: 0, convs: new Set<string>(), images: 0, byTitle: new Map<string, number>() };
   const tpls = (await listQuickReplies().catch(() => [])).map((r) => ({ title: r.title, answer: r.answer, head: quickReplyHead(r.answer), images: r.images.length }));
   const products = await loadFocusProducts().catch(() => [] as FocusProduct[]);
-  const checkD = (conv: string, sent: string, said: readonly string[], shop: string | null) => {
-    const w = wrongProductTemplate(sent, said, shop, tpls, products);
+  const checkD = (conv: string, sent: string, lines: readonly FocusLine[]) => {
+    const w = wrongProductTemplate(sent, lines, tpls, products);
     if (!w) return;
     D.msgs += 1;
     D.convs.add(conv);
@@ -448,14 +448,13 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
     let cur = "";
     let userSince = false;
     let quoteTotal: number | null = null;
-    let said: string[] = [];
-    let shopText: string | null = null;
+    let lines: FocusLine[] = [];
     for (const r of rows) {
-      if (r.conv !== cur) [cur, userSince, quoteTotal, said, shopText] = [r.conv, false, null, [], null];
+      if (r.conv !== cur) [cur, userSince, quoteTotal, lines] = [r.conv, false, null, []];
       if (r.role === "user") {
         if (textOf(r.content)) {
           userSince = true;
-          said.push(textOf(r.content));
+          lines.push({ who: "CUSTOMER", text: textOf(r.content) });
         }
         for (const b of blocksOf(r.content)) {
           if (b.type !== "tool_result" || b.isError) continue;
@@ -464,8 +463,8 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
           // Câu mẫu gửi qua công cụ là một tin bot tới khách — sau nó, «nói rõ hơn» không có tin khách mới là câu thừa.
           if (mo?.deliver) {
             userSince = false;
-            checkD(r.conv, mo.deliver, said, shopText);
-            shopText = mo.deliver;
+            checkD(r.conv, mo.deliver, lines);
+            lines.push({ who: "SHOP", text: mo.deliver });
           }
         }
         continue;
@@ -473,11 +472,11 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
       const t = textOf(r.content);
       if (!t) continue;
       if (t.startsWith(SHOP_SAID)) {
-        shopText = t;
+        lines.push({ who: "SHOP", text: t });
         continue;
       }
-      checkD(r.conv, t, said, shopText);
-      shopText = t;
+      checkD(r.conv, t, lines);
+      lines.push({ who: "SHOP", text: t });
       if (t === EMPTY_REPLY_TEXT) {
         A.total += 1;
         if (!userSince) {

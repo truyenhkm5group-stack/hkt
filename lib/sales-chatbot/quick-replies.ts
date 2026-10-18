@@ -35,7 +35,7 @@ import {
   type QuickReplyEntry,
   type QuickReplySettings,
 } from "@/lib/sales-chatbot/quick-replies-shared";
-import { quickReplyFocusGuard, triggerProductConflicts, type FocusProduct, type QuickReplyFocusGuard } from "@/lib/sales-chatbot/quick-reply-focus";
+import { quickReplyFocusGuard, triggerProductConflicts, type FocusLine, type FocusProduct, type QuickReplyFocusGuard } from "@/lib/sales-chatbot/quick-reply-focus";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { setSettingJson } from "@/lib/settings";
@@ -122,9 +122,9 @@ export async function loadFocusProducts(): Promise<FocusProduct[]> {
  * Bộ lọc MÓN KHÁCH ĐANG HỎI cho một lượt (P0 18/10/2026): đọc danh mục một lần. Lỗi đọc ⇒ `null` (không lọc — như trước bản vá; bước
  * khớp chữ vẫn chạy, không chặn khách).
  */
-export async function quickReplyFocus(customerTexts: readonly string[], shopText: string | null): Promise<QuickReplyFocusGuard | null> {
+export async function quickReplyFocus(lines: readonly FocusLine[], upsellReplyId: string | null): Promise<QuickReplyFocusGuard | null> {
   const products = await loadFocusProducts().catch(() => null);
-  return products?.length ? quickReplyFocusGuard(customerTexts, shopText, products) : null;
+  return products?.length ? quickReplyFocusGuard(lines, products, upsellReplyId ? [upsellReplyId] : []) : null;
 }
 
 export async function activeEntries(): Promise<QuickReplyEntry[]> {

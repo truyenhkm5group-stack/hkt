@@ -1389,13 +1389,14 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const pick = await renderQuickReplyForSend(entry.id, ctx.config);
       if (!pick && entry.upsell) state.upsellUnavailable = true;
       if (!pick) return err(`Câu mẫu ${entry.code}: thiếu số ERP`, "Câu mẫu này đang thiếu giá / tồn từ ERP — tự trả lời bằng công cụ giá / tồn, không dùng câu mẫu.", state);
-      // MÓN KHÁCH ĐANG HỎI (P0 18/10/2026): câu mẫu thường nói về món khác ⇒ không gửi — trả lời đúng món khách hỏi TRƯỚC. Mời thêm món
-      // khác chỉ qua câu UPSELL (cửa sổ lời mời ở trên), không bằng câu báo giá của món khác.
+      // MÓN ĐANG BÀN (P0 18/10/2026): câu mẫu thường nói về món khác ⇒ không gửi — trả lời đúng món đang bàn TRƯỚC. Mời thêm món khác
+      // chỉ qua câu UPSELL (cửa sổ lời mời ở trên), không bằng câu báo giá của món khác. Lời từ chối KHÔNG khẳng định khách đang hỏi gì
+      // (review: shop vừa mời nem thì «giá sao em» có thể là hỏi nem) — chỉ nói câu mẫu không khớp món đang bàn.
       if (!entry.upsell && ctx.quickReplyFocus && !ctx.quickReplyFocus.fits(pick.entry)) {
         const f = ctx.quickReplyFocus;
         return err(
-          `Câu mẫu ${entry.code}: sai món khách hỏi`,
-          `Câu mẫu này nói về ${f.coversOf(pick.entry).join(", ")} — khách đang hỏi ${f.focus.focus.length ? f.focus.focus.join(", ") : "món khác (đã từ chối món này)"}. KHÔNG gửi; trả lời đúng món khách hỏi trước (giá / quy cách / tồn bằng công cụ).`,
+          `Câu mẫu ${entry.code}: không khớp món đang bàn`,
+          `Câu mẫu này nói về ${f.coversOf(pick.entry).join(", ")} — không khớp món đang bàn${f.onTable.length ? ` (${f.onTable.join(", ")})` : " (khách đã từ chối món này)"}. KHÔNG gửi; đọc lại tin khách và trả lời bằng thông tin đúng món (giá / quy cách / tồn bằng công cụ).`,
           state,
         );
       }
