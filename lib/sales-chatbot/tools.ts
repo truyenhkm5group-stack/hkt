@@ -1396,7 +1396,11 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         const f = ctx.quickReplyFocus;
         return err(
           `Câu mẫu ${entry.code}: không khớp món đang bàn`,
-          `Câu mẫu này nói về ${f.coversOf(pick.entry).join(", ")} — không khớp món đang bàn${f.onTable.length ? ` (${f.onTable.join(", ")})` : " (khách đã từ chối món này)"}. KHÔNG gửi; đọc lại tin khách và trả lời bằng thông tin đúng món (giá / quy cách / tồn bằng công cụ).`,
+          f.unavailable
+            ? "Máy chủ chưa đọc được danh mục để biết câu mẫu này nói về món nào — KHÔNG gửi; trả lời bằng công cụ giá / quy cách / tồn."
+            : f.onTable.length
+              ? `Câu mẫu này nói về ${f.coversOf(pick.entry).join(", ")} — không khớp món đang bàn (${f.onTable.join(", ")}). KHÔNG gửi; đọc lại tin khách và trả lời bằng thông tin đúng món (giá / quy cách / tồn bằng công cụ).`
+              : `Câu mẫu này nói về ${f.coversOf(pick.entry).join(", ")} nhưng CHƯA xác định khách hỏi món nào. KHÔNG gửi, KHÔNG mặc định món: đọc lại ngữ cảnh; vẫn chưa rõ ⇒ hỏi khách đúng một câu ngắn món nào.`,
           state,
         );
       }
