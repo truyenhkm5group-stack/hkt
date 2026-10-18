@@ -26,18 +26,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-18T13:55:24.174Z",
-  "updated_at": "2026-10-18T17:43:54.505Z",
-  "last_heartbeat": "2026-10-18T17:41:26.396Z",
+  "updated_at": "2026-10-18T20:21:50.277Z",
+  "last_heartbeat": "2026-10-18T20:21:50.277Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/hslc-shipping-source",
-    "sha": "1d8188aad75c43696c286c702d074e9e49b11b4e",
-    "at": "2026-10-18T17:41:26.396Z",
+    "sha": "1ae188a7f664c72c1f43a792010629a7c423b219",
+    "at": "2026-10-18T20:21:50.277Z",
     "actor": "DESKTOP-56TH98Y:wt-hslc-ship",
     "title": "Ops shipping-source-probe: vận đơn HSLC đang được tạo ở đâu — ERP · Pancake POS · Viettel Post (chỉ đọc)",
     "summary": "",
     "tests": [
-      "Sửa sau rà soát độc lập (B1 chiều về không còn bị đếm ngoài ERP · B2 tổ chức nhà bị từ chối) trên 1d8188aa: typecheck + lint sạch · npm test TẤT CẢ KIỂM THỬ ĐẠT (EXIT=0; lượt trước đó đỏ một lần ở tests/ai-balance-usage.test.ts balancePromoVnd 510≠0 — tệp không thuộc nhánh, chạy riêng đạt, lượt chạy lại đạt ⇒ nghi phụ thuộc đồng hồ/thứ tự) · tests/shipping-source-probe.test.ts thêm 6 ca classifyOrphanShipment + 3 ca kết luận OUTSIDE_ERP + dòng chiều về / mã tham chiếu ERP trong CSDL thật + từ chối isHome · ops-log-leak xanh. Chưa chạy ops production."
+      "như bản đã review + merge origin/main (mang #905: tsc 6 GB heap) qua update-branch; nội dung nhánh không đổi"
     ]
   }
 }
