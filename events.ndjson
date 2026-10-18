@@ -1,4 +1,3 @@
-{"at":"2026-10-11T01:10:14.952Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MIGRATION_RELEASED","mission":"order-cancel-consistency","detail":"0241 — #786 không cần migration (lưu ở orders.raw.cancellation) — số 0241 để inbox-unread-perf (#792) dùng"}
 {"at":"2026-10-11T01:13:41.855Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"owner-approve-792","detail":"BLOCKED · 1 mẫu phạm vi · HIGH"}
 {"at":"2026-10-11T01:13:41.855Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"owner-approve-792","detail":"OVERLAP_ACCEPTED với ai-balance-v1: điểm nóng SERIAL drizzle/ — cách tích hợp: sứ mệnh quyết định"}
 {"at":"2026-10-11T01:13:41.855Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"owner-approve-792","detail":"OVERLAP_ACCEPTED với inbox-read-v3: phạm vi drizzle/0242_sales_chat_last_inbound.sql ↔ drizzle/ · điểm nóng SERIAL drizzle/ — cách tích hợp: sứ mệnh quyết định"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-18T19:25:02.967Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#905 @ 6c7cfde6fe1b · lead: chỉ thêm NODE_OPTIONS=--max-old-space-size=6144 cho bước tsc (cùng mức bước dựng) — #903/#904 đỏ heap OOM ở tsc khi hai nhánh kiểm thử xanh"}
 {"at":"2026-10-18T20:05:00.255Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ci-tsc-heap","detail":"#905 @ 6c7cfde6fe1b → 1a130391546c (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-18T20:06:28.648Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"1a130391546c · run 39161759994 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39161759994"}
+{"at":"2026-10-18T20:20:00.340Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"ci-tsc-heap","detail":"PASS 1a130391546ca41583d4691c64b4716eaefe8d01 2026-10-18T20:19:36.972Z"}
