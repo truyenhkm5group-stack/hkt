@@ -91,6 +91,20 @@ function testThuan() {
   // Review #config-guard: câu có SỐ (giá, khối lượng) vẫn nhận một từ đuôi — trước đây «280k» làm lệch hai dãy từ và tắt luật.
   assert.deepEqual(productsNamedIn("Chả cá 280k/1kg, còn mực thì 350k/1kg ạ", names), ["Chả cá thu", "Chả mực giã tay"]);
   assert.deepEqual(productsNamedIn("Chả cá thu Hạ Long giã tay, 1kg 280k", names), ["Chả cá thu"], "«giã tay» là cách làm, không phải tên Chả mực");
+  // Review config-guard (lỗi chặn): món mà từ PHÂN BIỆT là từ chế biến («hấp», «chiên») vẫn nhận ra — tên đầy đủ, combo, câu mẫu không SKU.
+  const CAT2: FocusProduct[] = ["Chả cá thu", "Chả mực giã tay", "Chả chiên", "Chả cá hấp", "Chả cá chiên", "Nem hải sản tôm bề bề", "Ruốc bông (chà bông) cá thu nguyên chất"].map((name) => ({ name, skus: [] }));
+  const n2 = CAT2.map((p) => p.name);
+  assert.deepEqual(productsNamedIn("chả cá hấp còn không", n2), ["Chả cá hấp"]);
+  assert.deepEqual(productsNamedIn("chả cá chiên bao nhiêu", n2), ["Chả cá chiên"], "«chả cá chiên» không gọi tên «Chả chiên»");
+  assert.deepEqual(productsNamedIn("chả cá thu giá sao", n2), ["Chả cá thu"]);
+  assert.deepEqual([...productsNamedIn("1/2 kg chả chiên, 1/2 kg chả cá hấp", n2)].sort(), ["Chả chiên", "Chả cá hấp"].sort(), "combo hai món");
+  const hap = E("hap", "Chả cá hấp giá", ["chả cá hấp bao nhiêu", "xin giá chả cá thu"], "Chả cá hấp bên em 300k/kg ạ");
+  assert.deepEqual(quickReplyCovers(hap, CAT2), ["Chả cá hấp"], "câu mẫu chả cá hấp không SKU vẫn GẮN món (không thành câu chung)");
+  assert.deepEqual(triggerProductConflicts(hap, CAT2).map((c) => c.trigger), ["xin giá chả cá thu"], "cách hỏi chả cá thu trên câu hấp vẫn bị gắn cờ ⇒ nút gỡ gỡ nó");
+  const gThu = quickReplyFocusGuard([C("chả cá thu giá sao")], CAT2);
+  assert.ok(!gThu.fits(hap) && !gThu.answers(hap), "«chả cá thu giá sao» KHÔNG được trả lời bằng câu chả cá hấp");
+  const comboChien = E("cc", "Chả chiên giá", ["chả chiên"], "Chả chiên bên em 250k/kg ạ");
+  assert.ok(!quickReplyFocusGuard([C("1/2 kg chả chiên, 1/2 kg chả cá hấp")], CAT2).answers(comboChien), "câu một món không thay cả lượt cho combo hai món");
   const giaChaCa = E("gcc", "Giá chả cá", ["chả cá bao nhiêu", "mực bao nhiêu", "món mực còn không"], "Chả cá 280k/1kg, còn mực thì 350k/1kg ạ");
   assert.deepEqual(triggerProductConflicts(giaChaCa, PRODUCTS), [], "câu trả lời có giá nói cả mực ⇒ cách hỏi về mực KHÔNG bị coi là gắn nhầm");
   // Review #p0-quick-reply-evidence (lỗi chặn): ngành hàng / tên shop không phải tên món; màu / cỡ / thời tiết cũng vậy.

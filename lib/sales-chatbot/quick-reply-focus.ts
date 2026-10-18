@@ -86,10 +86,14 @@ const TAIL_STOP = new Set([
   ...["trắng", "đen", "đỏ", "xanh", "vàng", "hồng", "tím", "nâu", "xám", "kem", "cam", "ghi", "bạc", "màu", "sọc", "kẻ", "hoa"],
   ...["vừa", "nhẹ", "dày", "mỏng", "dài", "ngắn", "rộng", "xl", "xxl", "m", "l", "s"],
   ...["nắng", "mưa", "lạnh", "nóng", "gió", "mát"],
-  // Cách chế biến — mô tả món, không phải tên món («chả cá thu giã tay» không gọi tên «Chả mực giã tay»).
-  ...["giã", "chiên", "hấp", "nướng", "luộc", "rán", "xay", "sấy", "rim", "kho", "hun", "khói", "ướp", "tẩm", "sống", "chín", "đông", "lạnh"],
   ...["shop", "tiệm", "quán", "cửa", "việt", "nam", "hà", "nội", "long", "hạ", "sài", "gòn"],
 ]);
+/**
+ * Từ CÁCH CHẾ BIẾN — CHỈ chặn luật MỘT từ đuôi («chả cá thu giã tay» không gọi tên «Chả mực giã tay»). KHÔNG đưa vào danh sách xét từ
+ * PHÂN BIỆT của cặp từ / tiền tố tên (review config-guard): với «Chả cá hấp» cạnh «Chả cá thu», «hấp» CHÍNH LÀ từ phân biệt — chặn nó thì
+ * cả tên đầy đủ «chả cá hấp» cũng không còn nhận ra, câu mẫu chả cá hấp thành câu chung và được trả lời cho «chả cá thu giá sao».
+ */
+const COOK_WORDS = new Set(["giã", "chiên", "hấp", "nướng", "luộc", "rán", "xay", "sấy", "rim", "kho", "hun", "khói", "ướp", "tẩm", "sống", "chín", "đông", "lạnh"]);
 /** Cùng danh sách, BỎ DẤU (cho cặp từ đuôi so bỏ dấu) + «gia» vì bỏ dấu thì «giá» ≡ «giã». */
 const TAIL_STOP_FOLD = new Set([...[...TAIL_STOP].map((w) => foldVi(w)), "gia"]);
 
@@ -133,7 +137,15 @@ export function productsNamedIn(text: string, names: readonly string[]): string[
       } else {
         j = i + 1;
         while (j < said.length && shared.has(said[j])) j++;
-        if (!(j < said.length && own.has(said[j]))) continue;
+        if (!(j < said.length && own.has(said[j]))) {
+          // TIỀN TỐ tên đầy đủ (review config-guard): «chả cá thu» / «chả cá hấp» cạnh nhau — «cá» không riêng món nào nên luật trên
+          // trượt; khách gõ liền ≥ 2 từ ĐẦU của tên và đúng MỘT món trong nhóm có tiền tố ấy ⇒ gọi tên món đó.
+          let k = 0;
+          while (i + k < said.length && k < t.length && said[i + k] === t[k]) k++;
+          const sameStart = group.filter((x) => k <= x.t.length && x.t.slice(0, k).every((w, q) => w === t[q]));
+          if (k < 2 || sameStart.length !== 1) continue;
+          j = i + k - 1;
+        }
       }
       while (j + 1 < said.length && inName.has(said[j + 1])) j++;
       spans.push([i, j]);
@@ -155,7 +167,7 @@ export function productsNamedIn(text: string, names: readonly string[]): string[
     // = Nước mắm…). So CÓ DẤU nên «giá» không bao giờ thành «giã»; khách gõ không dấu thì không nhận (chỉ tốn token, không sai món).
     if (!spans.length && rawSaid.length === said.length) {
       // Đủ dài (≥ 3 chữ cái) để không phải một âm tiết đệm / cỡ áo.
-      const one = new Set(rawTokens(n).slice(1).filter((w) => [...w].length >= 3 && !TAIL_STOP.has(w) && rawCount.get(w) === 1));
+      const one = new Set(rawTokens(n).slice(1).filter((w) => [...w].length >= 3 && !TAIL_STOP.has(w) && !COOK_WORDS.has(w) && rawCount.get(w) === 1));
       rawSaid.forEach((w, i) => {
         if (one.has(w)) spans.push([i, i]);
       });
