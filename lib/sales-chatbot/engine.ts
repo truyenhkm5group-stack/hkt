@@ -54,7 +54,7 @@ import { DEFAULT_SALES_CHATBOT_CONFIG, isMessagingChannel, isPublicChannel, pars
 import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib/sales-chatbot/playbook-shared";
 import { LESSONS_SETTING_KEY, lessonsPrompt, parseLessonsState } from "@/lib/sales-chatbot/lessons-shared";
 import { levelPromptFor } from "@/lib/sales-chatbot/levels";
-import type { FocusLine } from "@/lib/sales-chatbot/quick-reply-focus";
+import { unavailableQuickReplyGuard, type FocusLine } from "@/lib/sales-chatbot/quick-reply-focus";
 import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, quickReplyCatalog, quickReplyFocus, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
@@ -199,6 +199,7 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
     IMAGE_PROMPT_RULE,
     "QUY TRÌNH BÁN — đi đúng thứ tự, mỗi lần chuyển bước gọi set_sales_stage:",
     `  B1 QUOTE — Báo giá + XÁC ĐỊNH ĐÚNG sản phẩm: search_products; khách nói chung chung / nhiều quy cách ⇒ hỏi lại đúng món, đúng quy cách ${pack.specExample} trước khi báo giá. Báo giá QUY CÁCH CHÍNH (mẫu mã KHÔNG mang add_on_only) — giá «từ …» là giá quy cách chính nhỏ nhất; có quy cách lớn hơn mà rẻ hơn tính theo đơn vị ⇒ thêm MỘT câu về khoản tiết kiệm ${pack.saveExample} (chỉ khi khách CHƯA chọn quy cách). Gợi ý số lượng theo nhu cầu khách nói (nhà mấy người, biếu, ăn dần) — hướng tới quy cách lớn hơn khi hợp lý.`,
+    "  CHƯA RÕ MÓN (khách hỏi giá / hỏi chung mà KHÔNG gọi tên món, và tin page / shop, bài viết, bình luận, lịch sử lượt mua này cũng không nói món): KHÔNG mặc định món bán chạy. Đọc lại ngữ cảnh trước; vẫn chưa rõ và shop bán nhiều món ⇒ hỏi ĐÚNG MỘT câu ngắn khách hỏi món nào (có thể nêu 2–3 món chính), chưa báo giá, chưa gửi câu mẫu của một món.",
     `  MẪU MÃ CHỈ BÁN KÈM (search_products trả add_on_only: true): KHÔNG báo giá riêng, KHÔNG chào như món chính, KHÔNG lên đơn chỉ có mẫu mã này (máy chủ chặn). Khách hỏi riêng đúng mẫu mã bán kèm ⇒ nói quy cách nhỏ nhất bán riêng + giá rồi hỏi chốt. Khách ĐÃ có món chính và muốn thêm ${pack.addOnExample} ⇒ thêm dòng mẫu mã bán kèm vào đơn và đọc tổng mới theo calculate_cart / đơn nháp.`,
     "  B2 CONSULT — Tư vấn + xử lý phản đối (chê đắt, phân vân, so sánh) theo sổ tay; không giảm giá ngoài giá ERP.",
     "  B3 INFO — Lấy SĐT, ĐỊA CHỈ (họ tên: tên Facebook nếu có — KHÔNG xin): có khối KHÁCH CŨ ⇒ KHÔNG xin lại, làm theo «CÁCH LÀM» của khối rồi đi thẳng B5. Không có ⇒ hỏi; khách cho SĐT ⇒ lookup_customer; khách cũ ⇒ hỏi «giao về địa chỉ cũ … phải không ạ?» (chỉ gợi ý, khách xác nhận mới dùng) rồi create_customer.",
@@ -1243,15 +1244,26 @@ async function chatTurnCore(
     // MÓN ĐANG BÀN (P0 18/10/2026, ca «ThanhPhương»): «xin giá chả cá» khớp chữ câu mẫu NEM vì câu nem mang nhầm cách hỏi đó. Câu mẫu
     // nói về món khác món đang bàn không được trả lời — ở bước khớp chữ, AI chọn mã, và công cụ `send_quick_reply`. Món đang bàn = món
     // khách gọi tên + món shop nói tới / mời sau đó; khách chưa gọi tên món ⇒ món của câu shop / page gần nhất (tin tự động của page).
-    // Cùng cửa sổ lượt mua với `roundCustomerTexts`. Đọc lỗi ⇒ `null`, không lọc (như trước).
+    // Cùng cửa sổ lượt mua với `roundCustomerTexts`. Chưa xác định được món ⇒ câu mẫu gắn món không tự trả lời.
     const roundSince = purchaseRoundStart(st0);
     const focusLines: FocusLine[] = [
+      // Ngữ cảnh bài viết / quảng cáo của lượt bình luận (review): bài gọi tên món là căn cứ món — đứng TRƯỚC mọi tin của lượt.
+      ...(opts.context ? [{ who: "SHOP" as const, text: opts.context }] : []),
       ...customerMsgsOf(msgs)
         .filter((m) => !m.toolResult && m.text.trim() && (!roundSince || m.at.getTime() > roundSince.getTime()))
         .map((m): FocusLine => ({ who: m.role === "user" ? "CUSTOMER" : "SHOP", text: m.text })),
       { who: "CUSTOMER", text },
     ];
-    const qrFocus = qrSettings.enabled ? await quickReplyFocus(focusLines, qrSettings.upsellReplyId).catch(() => null) : null;
+    // Lỗi ⇒ bộ lọc ĐÓNG (chủ shop 18/10/2026), không bao giờ «không lọc».
+    const qrFocus = qrSettings.enabled ? await quickReplyFocus(focusLines, qrSettings.upsellReplyId).catch(() => unavailableQuickReplyGuard(qrSettings.upsellReplyId ? [qrSettings.upsellReplyId] : [])) : null;
+    // Bộ lọc ĐÓNG không được im lặng (review): một tổ chức có thể lặng lẽ đi 100% AI. Ghi log + dấu trên hội thoại (ops conv-money-trace đếm).
+    if (qrFocus?.unavailable) {
+      console.warn(`[sales-chatbot] câu mẫu tạm dừng: không đọc được danh mục — bộ lọc đóng (hội thoại ${conv.id})`);
+      const st: ChatState = { ...st0, quickGuardClosed: { at: now.toISOString(), turn: turnSeq } };
+      await bump({ state: st as Record<string, unknown> });
+      conv.state = st as Record<string, unknown>;
+      st0 = st;
+    }
     const quick0: QuickReplyStep = st0.priceDispute?.open
       ? { kind: "SKIP", reason: "Khách đang phản đối giá — AI báo lại theo báo giá máy chủ" }
       : postSale
