@@ -3,7 +3,7 @@
   "mission_id": "probe-migrate-locks",
   "title": "org-migrate-probe: ai giữ khoá migrate (chỉ đọc)",
   "business_goal": "Chẩn đoán khoá migrate qa cho worker org-migrate-coordination",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-token-budget",
@@ -22,12 +22,15 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-18T06:08:00.041Z",
-  "updated_at": "2026-10-18T06:09:36.363Z",
+  "updated_at": "2026-10-18T06:42:03.381Z",
   "last_heartbeat": "2026-10-18T06:08:25.026Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "PARTIAL",
     "evidence": []
+  },
+  "evidence": {
+    "merged": "#892 → 896d82ea1a38dd0f699263611638512f4ddd3e90"
   },
   "handoff": {
     "branch": "claude/probe-migrate-locks",
