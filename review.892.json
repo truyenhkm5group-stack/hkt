@@ -1,0 +1,8 @@
+{
+  "pr": 892,
+  "sha": "03542422b76cac57cf450518f56907eecee9afef",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-18T06:09:42.061Z",
+  "note": "lead: chỉ đọc pg_locks/pg_stat_activity của CSDL tổ chức (cặp khoá orgMigrateLockKey, objsubid 2); không kill/nhả khoá; tóm tắt chỉ số đếm + tuổi + tên ứng dụng đã lọc; chi tiết ở phần mã hoá"
+}
