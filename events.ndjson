@@ -1,4 +1,3 @@
-{"at":"2026-10-10T09:08:45.569Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"pipeline-env-agent-creds","detail":"OVERLAP_ACCEPTED với acceptance-section-12: điểm nóng SERIAL .github/ — cách tích hợp: acceptance-section-12 (#750) đang nháp, chỉ docs; .github/ đi tuần tự — PR này gộp riêng, không cùng lô"}
 {"at":"2026-10-10T09:11:49.801Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"sec-caddy-ghn-ghtk","detail":"fix/caddy-redact-ghn-ghtk @ 645f9a45c4ef · 1 lệnh kiểm thử"}
 {"at":"2026-10-10T09:12:31.231Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"sec-caddy-ghn-ghtk","detail":"#774 cho fix/caddy-redact-ghn-ghtk @ 645f9a45c4ef"}
 {"at":"2026-10-10T09:13:04.711Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#774 @ 645f9a45c4ef · Một dòng regex Caddyfile (thêm ghn-org/ ghtk-org/) + bài kiểm dẫn xuất từ cây route; deploy tự caddy validate rồi reload, tệp sai thì Caddy cũ chạy tiếp"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-18T06:14:06.094Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"trace-order-review","detail":"#893 cho claude/trace-order-review @ 85e44a4bd195"}
 {"at":"2026-10-18T06:14:30.928Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#893 @ 85e44a4bd195 · lead: chỉ đọc; cờ kiểm theo danh sách ĐÓNG (ngoài ⇒ KHAC), lượt người đã kiểm chỉ mã + hành động; giữ khỏi vận đơn tính bằng addressReviewOpenOf/orderReviewOpenOf của tuyến giao; không ghi chú, không tên"}
 {"at":"2026-10-18T06:42:03.418Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"probe-migrate-locks","detail":"#892 @ 03542422b76c → 896d82ea1a38 (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-18T06:54:57.111Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"trace-order-review","detail":"#893 @ 85e44a4bd195 → 87c506848361 (MERGE_NOW · MEDIUM · gates success)"}
