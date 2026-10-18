@@ -1,0 +1,8 @@
+{
+  "pr": 902,
+  "sha": "1ede78f1cacc78507a101df5bb157a42d92df06c",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-18T17:29:57.194Z",
+  "note": "review độc lập 3 vòng PASS-WITH-NITS: tự nạp không gắn/không tự bật cách hỏi sai món; lưu/bật từ chối xung đột; nút gỡ chỉ gỡ cách hỏi sai, chống ghi đè đồng thời, có nhật ký khôi phục; so tên: từ chế biến chỉ ở luật đuôi một từ, luật tiền tố tên đầy đủ — đối chiếu 350 câu với #900: 0 khớp sai mới"
+}
