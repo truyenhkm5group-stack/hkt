@@ -71,7 +71,7 @@ async function testChepBinhLuan() {
   ]);
   await db.update(c).set({ state: { cart: cart(1500) } as Record<string, unknown> }).where(eq(c.id, binhLuan));
 
-  assert.equal(await carryCommentTurn(binhLuan, hopThu, now, { botReplySent: true }), true);
+  assert.ok((await carryCommentTurn(binhLuan, hopThu, now, { botReplySent: true })).copied > 0);
   const [row] = await db.select().from(c).where(eq(c.id, hopThu));
   const st = (row.state ?? {}) as ChatState;
   const tin = await tinCua(hopThu);
@@ -81,9 +81,9 @@ async function testChepBinhLuan() {
   assert.equal(st.cart?.selectedItems?.[0]?.quantity, 1500, "giỏ của bình luận (1,5 kg) đi theo, không phải giỏ cũ 1 kg");
   assert.ok(tin.some((x) => x.role === "assistant" && x.text === "Dạ em nhắn riêng chị ạ"), "tin bot của lượt bình luận cũng sang (bot không nhắn lại điều đã nói)");
   const soTin = tin.length;
-  assert.equal(await carryCommentTurn(binhLuan, hopThu, new Date(now.getTime() + 60_000), { botReplySent: true }), false, "chạy lại (webhook lặp) không chép hai lần");
+  assert.deepEqual(await carryCommentTurn(binhLuan, hopThu, new Date(now.getTime() + 60_000), { botReplySent: true }), { copied: 0, already: true }, "chạy lại (webhook lặp) không chép hai lần");
   assert.equal((await tinCua(hopThu)).length, soTin);
-  assert.equal(await carryCommentTurn(hopThu, hopThu, now, { botReplySent: true }), false, "cùng một hội thoại ⇒ không làm gì");
+  assert.deepEqual(await carryCommentTurn(hopThu, hopThu, now, { botReplySent: true }), { copied: 0, already: false }, "cùng một hội thoại ⇒ không làm gì");
 
   // Hộp thư đang có đơn bot CHỐT trong POST_ORDER_HANDOFF_MS ⇒ chỉ chép tin, KHÔNG xoá lượt mua đang chạy (không đụng đơn đang giao).
   const dangChot = await moi("inbox-chot");
@@ -91,7 +91,7 @@ async function testChepBinhLuan() {
   await db.update(c).set({ state: { confirmed: chot, cart: cart(1000) } as Record<string, unknown> }).where(eq(c.id, dangChot));
   const bl2 = await moi("comment-2");
   await db.insert(m).values({ conversationId: bl2, seq: 2, role: "user", content: [{ type: "text", text: "Cho thêm 1kg nhé" }] });
-  assert.equal(await carryCommentTurn(bl2, dangChot, now, { botReplySent: true }), true);
+  assert.ok((await carryCommentTurn(bl2, dangChot, now, { botReplySent: true })).copied > 0);
   const [r2] = await db.select().from(c).where(eq(c.id, dangChot));
   const s2 = (r2.state ?? {}) as ChatState;
   assert.equal(s2.confirmed?.orderId, "o-dang-giao", "đơn đang chạy giữ nguyên");
@@ -109,7 +109,7 @@ async function testChepBinhLuan() {
     { conversationId: bl3, seq: 2, role: "user", content: [{ type: "text", text: "còn hàng không shop" }] },
     { conversationId: bl3, seq: 3, role: "assistant", content: [{ type: "text", text: "Dạ còn ạ" }] },
   ]);
-  assert.equal(await carryCommentTurn(bl3, dangMua, now, { botReplySent: false }), true);
+  assert.ok((await carryCommentTurn(bl3, dangMua, now, { botReplySent: false })).copied > 0);
   const [r3] = await db.select().from(c).where(eq(c.id, dangMua));
   const s3 = (r3.state ?? {}) as ChatState;
   assert.equal(s3.draft?.orderId, "o-nhap", "nháp của lượt mua đang chạy giữ nguyên");
@@ -128,7 +128,7 @@ async function testChepBinhLuan() {
   await db.update(c).set({ status: "HANDOFF", state: { cart: cart(1000), handoff: { reason: "x" } } as Record<string, unknown> }).where(eq(c.id, nguoi));
   const bl4 = await moi("comment-4");
   await db.insert(m).values({ conversationId: bl4, seq: 2, role: "user", content: [{ type: "text", text: "Cho 1,5 kg gửi đc cũ" }] });
-  assert.equal(await carryCommentTurn(bl4, nguoi, now, { botReplySent: true }), true);
+  assert.ok((await carryCommentTurn(bl4, nguoi, now, { botReplySent: true })).copied > 0);
   const [r4] = await db.select().from(c).where(eq(c.id, nguoi));
   assert.equal(((r4.state ?? {}) as ChatState).roundStartAt, undefined, "người đang giữ ⇒ không cắt lượt mua");
   assert.ok(((r4.state ?? {}) as Record<string, unknown>).handoff, "không xoá dấu chuyển người");
@@ -142,7 +142,7 @@ async function testChepBinhLuan() {
     { conversationId: bl5, seq: 3, role: "user", content: [{ type: "text", text: "gửi đc cũ" }] },
     { conversationId: bl5, seq: 4, role: "assistant", content: [{ type: "text", text: "Dạ em nhắn riêng ạ" }] },
   ]);
-  assert.equal(await carryCommentTurn(bl5, hai, now, { botReplySent: false }), true);
+  assert.ok((await carryCommentTurn(bl5, hai, now, { botReplySent: false })).copied > 0);
   const tin5 = (await tinCua(hai)).filter((x) => x.role === "user").map((x) => x.text);
   assert.ok(tin5.some((x) => /Cho 1,5kg/.test(x)) && tin5.some((x) => /gửi đc cũ/.test(x)), `cả hai tin của bình luận sang: ${JSON.stringify(tin5)}`);
 
@@ -160,7 +160,7 @@ async function testChepBinhLuan() {
     { conversationId: bl6, seq: 2, role: "user", content: [{ type: "text", text: "Cho 1kg" }], createdAt: new Date(now.getTime() - 120 * NGAY) },
     { conversationId: bl6, seq: 3, role: "user", content: [{ type: "text", text: "Cho 1,5 kg gửi đc cũ" }] },
   ]);
-  assert.equal(await carryCommentTurn(bl6, hopCu, now, { botReplySent: false }), true);
+  assert.ok((await carryCommentTurn(bl6, hopCu, now, { botReplySent: false })).copied > 0);
   const tin6 = (await tinCua(hopCu)).filter((x) => x.role === "user").map((x) => x.text);
   assert.ok(tin6.some((x) => /Cho 1,5 kg gửi đc cũ/.test(x)), "bình luận mới sang");
   assert.ok(!tin6.some((x) => /\] Cho 1kg$/.test(x)), `bình luận 4 tháng trước KHÔNG sang: ${JSON.stringify(tin6)}`);
@@ -203,6 +203,8 @@ async function testDuongThat() {
   assert.ok(!tin.some((x) => x.text === "Dạ em nhắn riêng ạ"), "ALREADY ⇒ không chép câu bot chưa gửi");
   const [row] = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, hopThu));
   assert.ok(((row.state ?? {}) as ChatState).roundStartAt, "hộp thư im 5 tháng ⇒ lượt mua mới");
+  const [blRow] = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, binhLuan));
+  assert.deepEqual({ ...(((blRow.state ?? {}) as ChatState).commentCarry ?? {}), at: undefined }, { outcome: "EXISTING_INBOX", copied: 1, at: undefined }, "kết quả ghi lại: chép sang hộp thư ĐÃ CÓ, 1 tin");
 
   // Ca THẬT 42f28794 (17/10): Meta / Pancake nhắn riêng TRƯỚC, hộp thư CHƯA có hội thoại ⇒ mở hội thoại hộp thư, lời mua đi vào đó.
   const INBOX2 = `p0rb-inbox2-${now.getTime()}`;
@@ -225,7 +227,26 @@ async function testDuongThat() {
   const tin2 = await tinCua(moi2.id);
   assert.ok(tin2.some((x) => x.role === "user" && /Cho 1,5 kg gửi đc cũ/.test(x.text)), "lời mua của bình luận có trong hội thoại hộp thư khi khách nhắn tới");
   assert.ok(!tin2.some((x) => x.text === "Dạ em nhắn riêng chị ạ"), "không chép câu bot chưa gửi");
-  console.log("  ✓ đường thật: deliverCommentReply (ALREADY) → carryIntoInbox → hộp thư cũ theo visitorKey · hộp thư CHƯA có hội thoại ⇒ mở rồi chép (ca thật 42f28794)");
+  const [bl2Row] = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, binhLuan2));
+  assert.equal(((bl2Row.state ?? {}) as ChatState).commentCarry?.outcome, "OPENED_NEW", "kết quả ghi lại: mở hộp thư rồi chép");
+
+  // Bot TỰ nhắn riêng (SENT), hộp thư chưa có hội thoại ⇒ hội thoại bình luận được CHUYỂN thành hội thoại hộp thư ⇒ kết quả MOVED.
+  const INBOX3 = `p0rb-inbox3-${now.getTime()}`;
+  const binhLuan3 = (await openConversation("FANPAGE", { visitorKey: `p0rb-cmt3-${now.getTime()}` })).id;
+  await db.insert(schema.salesChatMessages).values({ conversationId: binhLuan3, seq: 2, role: "user", content: [{ type: "text", text: "Cho 2kg" }] });
+  let docLan = 0;
+  const fetchGia3 = (async (url: string | URL, init?: RequestInit) => {
+    if ((init?.method ?? "GET") === "POST") return new Response(JSON.stringify({ success: true, id: "m-p0rb-3" }), { status: 200 });
+    docLan += 1;
+    return new Response(JSON.stringify({ messages: [{ id: "cmt-p0rb-3", ...(docLan > 1 ? { private_reply_conversation: INBOX3 } : {}) }] }), { status: 200 });
+  }) as typeof fetch;
+  setPageRuntimeReaderForTests(async () => ({ [PAGE]: { mode: "LIVE" } }));
+  const r3 = await fanpageBotSendersForTests.deliverCommentReply({ pageId: PAGE, threadId: "cmt-thread-3", commentId: "cmt-p0rb-3", postId: "post-1", fromId: "cust-3", text: "Dạ em nhắn riêng ạ", imageIds: [], conversationId: binhLuan3 }, { fetch: fetchGia3, now: () => now }).finally(() => setPageRuntimeReaderForTests(null));
+  assert.equal(r3.kind, "SENT", JSON.stringify(r3));
+  const [bl3Row] = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, binhLuan3));
+  assert.equal(bl3Row.visitorKey, fanpageVisitorKey(PAGE, INBOX3), "hội thoại bình luận thành hội thoại hộp thư");
+  assert.equal(((bl3Row.state ?? {}) as ChatState).commentCarry?.outcome, "MOVED", "kết quả ghi lại: chuyển cả hội thoại");
+  console.log("  ✓ đường thật: deliverCommentReply (ALREADY) → carryIntoInbox → hộp thư cũ theo visitorKey · hộp thư CHƯA có hội thoại ⇒ mở rồi chép (ca thật 42f28794) · bot tự nhắn riêng ⇒ MOVED · mỗi lần đều ghi mã kết quả");
 }
 
 const CASES: GoldenCase[] = [

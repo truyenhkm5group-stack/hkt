@@ -461,6 +461,20 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   const tong = COMMENT_GROUPS.reduce((s, k) => s + dem(k), 0);
   tomTat(`C mẫu số: tin bình luận trong kỳ ${tong} · Pancake / nhân viên đã nhắn riêng TRƯỚC (ALREADY) ${dem("ALREADY")} · DONE không ghi chú ${dem("DONE_TRONG")} · DONE có ghi chú ${dem("DONE_CO_GHI_CHU")} · bỏ qua lý do khác ${dem("BO_QUA_KHAC")} · hỏng ${dem("HONG")} · đang chờ ${dem("DANG_CHO")} · KHÁC ${dem("KHAC")} · trong đó khách ĐÃ có hội thoại hộp thư: chưa ghi lại — không đếm được`);
   tomTat(`C bình luận mua lại chép sang hộp thư: ${carried?.n ?? 0} tin / ${carried?.convs ?? 0} hội thoại · đơn gắn cờ ROUND_ABANDONED: ${abandoned?.n ?? 0}`);
+  // Kết quả TỪNG lần đưa bình luận sang hộp thư (`state.commentCarry` — engine.ts::recordCommentCarry, mã ĐÓNG; ngoài danh sách ⇒ KHAC).
+  const cvc = schema.salesChatConversations;
+  const kq = await db
+    .select({
+      k: sql<string>`case ${cvc.state}->'commentCarry'->>'outcome' when 'MOVED' then 'MOVED' when 'EXISTING_INBOX' then 'EXISTING_INBOX' when 'OPENED_NEW' then 'OPENED_NEW' when 'ALREADY_COPIED' then 'ALREADY_COPIED' when 'NO_INBOX' then 'NO_INBOX' when 'FAILED' then 'FAILED' else 'KHAC' end`,
+      n: sql<number>`count(*)::int`,
+      tin: sql<number>`coalesce(sum(case when (${cvc.state}->'commentCarry'->>'copied') ~ '^[0-9]+$' then (${cvc.state}->'commentCarry'->>'copied')::int else 0 end), 0)::int`,
+    })
+    .from(cvc)
+    .where(sql`${cvc.state}->'commentCarry'->>'at' >= ${from.toISOString()}`)
+    .groupBy(sql`1`);
+  const kqDem = (k: string) => Number(kq.find((r) => r.k === k)?.n ?? 0);
+  const kqTin = kq.reduce((s, r) => s + Number(r.tin), 0);
+  tomTat(`C kết quả chép: chuyển cả hội thoại ${kqDem("MOVED")} · chép sang hộp thư ĐÃ CÓ ${kqDem("EXISTING_INBOX")} · mở hộp thư rồi chép ${kqDem("OPENED_NEW")} · đã chép từ trước ${kqDem("ALREADY_COPIED")} · không có hộp thư ${kqDem("NO_INBOX")} · lỗi ${kqDem("FAILED")} · KHÁC ${kqDem("KHAC")} · tin đã chép ${kqTin}`);
 }
 
 /** Đầu câu lý do fanpage.ts::deliverCommentReply ghi vào dòng tin khi bình luận ĐÃ được nhắn riêng (ALREADY) — bài kiểm đối chiếu. */

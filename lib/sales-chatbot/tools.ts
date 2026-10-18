@@ -116,6 +116,8 @@ export type ChatState = {
   cartRev?: string;
   /** Mốc bắt đầu lượt mua mới KHÔNG do bot chốt đơn mở ra (khách quay lại sau `NEW_ROUND_GAP_MS` · bình luận mua lại mang sang hộp thư) — `purchaseRoundStart`. */
   roundStartAt?: string;
+  /** Kết quả đưa lời mua của bình luận sang hộp thư (`recordCommentCarry` — engine.ts), chỉ trên hội thoại BÌNH LUẬN. */
+  commentCarry?: { outcome: string; copied: number; at: string };
   /** Mọi TỔNG / tiền hàng máy chủ đã tính cho các giỏ / đơn nháp trong hội thoại (`noteSeenTotals`) — hàng rào chặn nói lại tổng của giỏ CŨ. */
   seenTotals?: number[];
   /**
