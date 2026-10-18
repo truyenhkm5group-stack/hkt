@@ -52,6 +52,7 @@ import { catalogReferenceAmounts } from "@/lib/sales-chatbot/quote";
 import { listQuickReplies } from "@/lib/sales-chatbot/quick-replies";
 import { parsePlaceholders } from "@/lib/sales-chatbot/quick-replies-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
+import { addressReviewOpenOf, orderReviewOpenOf } from "@/lib/shipping/route";
 import { rowsOf } from "@/lib/sql-rows";
 
 /** Tên lỗi in được ra kênh công khai: CHỈ dạng «<nhóm đã biết>: <lý do>» của tools.ts, không chữ số, không ngoặc trích / @. Tên lỗi sau
@@ -361,6 +362,9 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
     const its = items.filter((i) => i.orderId === r.id);
     console.log(`— Đơn ${shortOrder(r.id)} · ${r.stage} · ${r.at?.toISOString() ?? "?"} · nối ${r.sc === conv.id ? "khoá bot" : "ô đơn / mã ngắn"} · tiền hàng ${vnd(Number(r.totalPrice ?? 0))} · giảm ${vnd(Number(r.discount ?? 0))} · sau giảm ${vnd(Number(r.total ?? 0))} · ship ${vnd(Number(r.fee ?? 0))} · COD ${vnd(r.cod === null ? null : Number(r.cod))} · báo giá lưu ${rq ? `${vnd(rq.subtotal)} / tổng ${vnd(rq.total ?? null)}` : "—"}`);
     for (const i of its) console.log(`    ${i.variantId ? variantLabel(i.variantId) : i.productName} × ${i.quantity} @ ${vnd(Number(i.unitPrice ?? 0))} · giảm/cái ${vnd(Number(i.discountEach ?? 0))} · giảm dòng ${vnd(Number(i.totalDiscount ?? 0))} · thành tiền ${vnd(i.lineTotal === null ? null : Number(i.lineTotal))}${i.isBonus ? " · TẶNG" : ""}`);
+    // CỜ CẦN KIỂM + GIỮ KHỎI VẬN ĐƠN (chủ shop 18/10/2026, ca 42f28794 «đã xác nhận mà thiếu xã»): mã cờ (danh sách đóng của
+    // order-review, ngoài danh sách ⇒ KHAC), số mục đã có người gỡ, và hai câu hỏi của tuyến giao bằng ĐÚNG hàm của nó. Chỉ mã + có/không.
+    tomTat(`đơn ${shortOrder(r.id)}: ${r.stage} · cờ kiểm ${reviewCodesText(raw)} · giữ khỏi vận đơn vì ĐỊA CHỈ ${addressReviewOpenOf(raw) ? "CÓ" : "KHÔNG"} · vì MÓN / GIÁ / HUỶ ${orderReviewOpenOf(raw) ? "CÓ" : "KHÔNG"}`);
   }
 
   // 7. Câu mẫu có số tiền cố định.
@@ -482,6 +486,21 @@ export const COMMENT_ALREADY_NOTE = "Bình luận đã được nhắn riêng";
 
 /** Danh sách ĐÓNG các nhóm của mẫu số dòng C (SQL xếp; ngoài danh sách ⇒ KHAC). */
 const COMMENT_GROUPS = ["ALREADY", "DONE_TRONG", "DONE_CO_GHI_CHU", "BO_QUA_KHAC", "HONG", "DANG_CHO", "KHAC"] as const;
+
+/**
+ * Cờ cần kiểm của đơn — chỉ MÃ, không chữ ghi chú, không tên người: cờ ĐANG MỞ (`raw.review.entries`) và các lượt NGƯỜI ĐÃ KIỂM
+ * (`raw.reviewLog` — bấm «Xác nhận đơn» / «Huỷ đơn» xoá cờ khỏi `review` và chuyển vào đây, order-review.ts::withReviewResolved). Mã trong
+ * danh sách ĐÓNG giữ nguyên, ngoài danh sách ⇒ KHAC. HÀM THUẦN.
+ */
+export function reviewCodesText(raw: Record<string, unknown>): string {
+  const dong = new Set(["CUSTOMER_CANCELLED", "ADDRESS_UNRESOLVED", "CANCEL_BLOCKED", "PRICE_DISPUTED", "PRICE_MISMATCH", "UPSELL_UNCONSENTED", "ROUND_ABANDONED"]);
+  const ma = (xs: unknown): string[] => (Array.isArray(xs) ? xs : []).map((e) => (e && typeof e === "object" && dong.has(String((e as { code?: unknown }).code ?? "")) ? String((e as { code: unknown }).code) : "KHAC"));
+  const review = raw.review && typeof raw.review === "object" ? (raw.review as { entries?: unknown }) : null;
+  const mo = ma(review?.entries);
+  const log = Array.isArray(raw.reviewLog) ? (raw.reviewLog as Record<string, unknown>[]) : [];
+  const daKiem = log.map((l) => `${l?.action === "CONFIRMED" || l?.action === "CANCELLED" ? String(l.action) : "KHAC"}:${ma(l?.entries).join("+") || "—"}`);
+  return `đang mở ${mo.join("+") || "không"} · người đã kiểm ${daKiem.join(", ") || "chưa"}`;
+}
 
 /** Nhãn đầu tin khách mà `carryCommentTurn` (lib/sales-chatbot/engine.ts) gắn khi chép lượt bình luận sang hộp thư. */
 export const COMMENT_CARRY_LABEL = "[Khách bình luận trên bài viết lúc ";
