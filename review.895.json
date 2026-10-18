@@ -1,0 +1,8 @@
+{
+  "pr": 895,
+  "sha": "861c08010dc428ecc5d314fea2e0080b66844892",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-18T09:18:50.523Z",
+  "note": "review độc lập 2 vòng PASS + delta cuối (lead): một tổ chức một lượt migrate có trạng thái bền (0248 platform_org_migration_status); bước verify CHỜ lượt đang chạy và báo kết quả thật + người chạy; không chạy lại lượt vừa hỏng (lùi 30′ theo đồng hồ CSDL); trần lượt 660 s huỷ có kiểm soát; tổ chức ACTIVE hỏng thật vẫn ĐỎ"
+}
