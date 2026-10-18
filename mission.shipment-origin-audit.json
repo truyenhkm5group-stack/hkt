@@ -3,7 +3,7 @@
   "mission_id": "shipment-origin-audit",
   "title": "Ops shipment-origin-audit: vận đơn nào tạo qua ERP, POS/Pancake hay ngoài ERP (chỉ đọc)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-ship-origin",
@@ -24,7 +24,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T09:44:01.589Z",
-  "updated_at": "2026-10-18T09:44:01.589Z",
-  "last_heartbeat": "2026-10-18T09:44:01.589Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-18T10:42:09.361Z",
+  "last_heartbeat": "2026-10-18T10:42:09.361Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/shipment-origin-audit",
+    "sha": "e572c26a419fa93e5a9e139ba48814ce9769b460",
+    "at": "2026-10-18T10:42:09.361Z",
+    "actor": "DESKTOP-56TH98Y:wt-ship-origin",
+    "title": "Ops shipment-origin-audit: vận đơn nào tạo qua ERP, POS/Pancake hay ngoài ERP (chỉ đọc)",
+    "summary": "",
+    "tests": [
+      "typecheck sạch · lint sạch · npm test TẤT CẢ KIỂM THỬ ĐẠT (sau commit e572c26a4) · tests/shipment-origin-audit.test.ts: thuần đủ sáu nhóm (ERP_CREATED/POS_OR_PANCAKE/CARRIER_ONLY_NO_ORDER/CARRIER_ONLY/CONFLICT 5 kiểu/UNKNOWN), soát arg, CSDL thật tự dọn (NO_WARD giữ mà có vận đơn, gói GHTK không khớp, gợi ý SĐT), tóm tắt không lọt mã/SĐT · ops-log-leak + ops-concurrency xanh"
+    ]
+  }
 }
