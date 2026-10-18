@@ -3,7 +3,7 @@
   "mission_id": "hslc-shipping-source",
   "title": "Ops shipping-source-probe: vận đơn HSLC đang được tạo ở đâu — ERP · Pancake POS · Viettel Post (chỉ đọc)",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-hslc-ship",
@@ -26,13 +26,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-18T13:55:24.174Z",
-  "updated_at": "2026-10-18T22:22:26.949Z",
-  "last_heartbeat": "2026-10-18T20:21:50.277Z",
+  "updated_at": "2026-10-18T22:24:25.611Z",
+  "last_heartbeat": "2026-10-18T22:24:25.611Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#903 → 1bf09546d635debecd75060ffec47fe983b37ecd",
     "verify": "PASS 1bf09546d635debecd75060ffec47fe983b37ecd 2026-10-18T22:22:03.337Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39171033380"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39171033380",
+    "done": "#903 lên production 1bf09546 (deploy 39171033380 XANH, verify PASS); chạy thật run 39165959552 trên 3 tổ chức HSLC: ERP không tạo vận đơn [MEASURED], ERP không nối POS [MEASURED], mẫu POS không thấy đơn [HINT], Viettel Post chưa từng báo về [UNKNOWN] ⇒ vận đơn tạo ở nơi ERP không thấy; giữ nguyên quy trình"
   },
   "handoff": {
     "branch": "claude/hslc-shipping-source",
