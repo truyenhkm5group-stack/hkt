@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "trace-order-review",
+  "title": "conv-money-trace --order: cờ kiểm + giữ khỏi vận đơn",
+  "business_goal": "Trả lời đơn 42f28794 có đang bị giữ khỏi vận đơn không",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-token-budget",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/trace-order-review",
+  "base_sha": "66c011defc3682e8937dc3b2a47b31f188e5f75b",
+  "domains": [],
+  "owned_paths": [
+    "scripts/conv-money-trace.ts",
+    "tests/conv-money-trace.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-18T06:12:34.145Z",
+  "updated_at": "2026-10-18T06:12:34.145Z",
+  "last_heartbeat": "2026-10-18T06:12:34.145Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "PARTIAL",
+    "evidence": []
+  }
+}
