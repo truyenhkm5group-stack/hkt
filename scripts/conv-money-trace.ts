@@ -52,7 +52,8 @@ import { catalogReferenceAmounts } from "@/lib/sales-chatbot/quote";
 import { listQuickReplies } from "@/lib/sales-chatbot/quick-replies";
 import { parsePlaceholders } from "@/lib/sales-chatbot/quick-replies-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
-import { addressReviewOpenOf, orderReviewOpenOf } from "@/lib/shipping/route";
+import { DEFAULT_SHIPPING_ROUTING } from "@/lib/constants/shipping-routing";
+import { addressReviewOpenOf, decideShippingRoute, orderReviewOpenOf } from "@/lib/shipping/route";
 import { rowsOf } from "@/lib/sql-rows";
 
 /** Tên lỗi in được ra kênh công khai: CHỈ dạng «<nhóm đã biết>: <lý do>» của tools.ts, không chữ số, không ngoặc trích / @. Tên lỗi sau
@@ -354,7 +355,7 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
   const conds: SQL[] = [eq(o.salesConversationId, conv.id)];
   for (const id of [conv.orderId, conv.draftOrderId, draft?.orderId, confirmed?.orderId]) if (id) conds.push(eq(o.id, id));
   if (orderShort) conds.push(like(o.id, `erp-${orderShort}%`));
-  const orders = await db.select({ id: o.id, stage: sql<string>`${o.stage}::text`, at: o.insertedAt, total: o.totalPriceAfterDiscount, totalPrice: o.totalPrice, discount: o.totalDiscount, fee: o.shippingFee, cod: o.cod, raw: o.raw, sc: o.salesConversationId }).from(o).where(or(...conds)).limit(20);
+  const orders = await db.select({ id: o.id, stage: sql<string>`${o.stage}::text`, at: o.insertedAt, total: o.totalPriceAfterDiscount, totalPrice: o.totalPrice, discount: o.totalDiscount, fee: o.shippingFee, cod: o.cod, raw: o.raw, sc: o.salesConversationId, province: o.shipProvince, ward: o.shipCommune }).from(o).where(or(...conds)).limit(20);
   const items = orders.length ? await db.select().from(schema.orderItems).where(inArray(schema.orderItems.orderId, orders.map((r) => r.id))) : [];
   for (const r of orders) {
     const raw = (r.raw ?? {}) as Record<string, unknown>;
@@ -364,7 +365,17 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
     for (const i of its) console.log(`    ${i.variantId ? variantLabel(i.variantId) : i.productName} × ${i.quantity} @ ${vnd(Number(i.unitPrice ?? 0))} · giảm/cái ${vnd(Number(i.discountEach ?? 0))} · giảm dòng ${vnd(Number(i.totalDiscount ?? 0))} · thành tiền ${vnd(i.lineTotal === null ? null : Number(i.lineTotal))}${i.isBonus ? " · TẶNG" : ""}`);
     // CỜ CẦN KIỂM + GIỮ KHỎI VẬN ĐƠN (chủ shop 18/10/2026, ca 42f28794 «đã xác nhận mà thiếu xã»): mã cờ (danh sách đóng của
     // order-review, ngoài danh sách ⇒ KHAC), số mục đã có người gỡ, và hai câu hỏi của tuyến giao bằng ĐÚNG hàm của nó. Chỉ mã + có/không.
-    tomTat(`đơn ${shortOrder(r.id)}: ${r.stage} · cờ kiểm ${reviewCodesText(raw)} · giữ khỏi vận đơn vì ĐỊA CHỈ ${addressReviewOpenOf(raw) ? "CÓ" : "KHÔNG"} · vì MÓN / GIÁ / HUỶ ${orderReviewOpenOf(raw) ? "CÓ" : "KHÔNG"}`);
+    // Tuyến giao hỏi bằng CHÍNH decideShippingRoute (lib/shipping/route.ts) — không viết lại luật. Cấu hình hãng / cân / vận đơn đã có
+    // KHÔNG xét ở đây (mặc định, không hãng nào bật), nên chỉ đọc mã giữ của các bước ĐỊA CHỈ + CỜ; bước sau đó in «không giữ vì địa chỉ /
+    // cờ». Ô xã trống ⇒ NO_WARD, kể cả khi KHÔNG có cờ (người chốt tay không gắn cờ — đúng thiết kế). Chỉ mã, không địa chỉ.
+    const tuyen = decideShippingRoute(
+      { isErp: true, stage: r.stage, province: String(r.province ?? ""), ward: String(r.ward ?? ""), hasLiveShipment: false, weightGrams: null, confirmedAt: null, updatedAt: new Date(), auto: null, addressReviewOpen: addressReviewOpenOf(raw), orderReviewOpen: orderReviewOpenOf(raw) },
+      DEFAULT_SHIPPING_ROUTING,
+      new Set(),
+      new Date(),
+    );
+    const giu = tuyen.kind === "HOLD" && ["NOT_CONFIRMED", "ADDRESS_REVIEW", "ORDER_REVIEW", "NO_PROVINCE", "NO_WARD"].includes(tuyen.code) ? tuyen.code : "không giữ vì địa chỉ / cờ (bước hãng / cân không xét ở đây)";
+    tomTat(`đơn ${shortOrder(r.id)}: ${r.stage} · cờ kiểm ${reviewCodesText(raw)} · ô tỉnh ${String(r.province ?? "").trim() ? "có" : "TRỐNG"} · ô xã ${String(r.ward ?? "").trim() ? "có" : "TRỐNG"} · tuyến giao: ${giu}`);
   }
 
   // 7. Câu mẫu có số tiền cố định.
