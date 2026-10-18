@@ -410,11 +410,7 @@ jobs:
                 -e 's/((token|access_token|api_key|apikey|secret|password|key)=)[^&[:space:]"]+/\1•••/gI'
             }
 
-            # chay_voi_arg LỆNH… — chạy LỆNH với ô "arg" TÁCH THÀNH NHIỀU tham số ("--from X --apply").
-            # KHÔNG qua `sh -c`: tham số đi thẳng vào argv của `docker exec`, không shell thứ hai nào
-            # đọc lại chúng. Tách theo khoảng trắng là CHỦ Ý, nên phải SOÁT trước: chỉ chữ, số,
-            # khoảng trắng và `= : . _ , / @ + -` — không còn ký tự glob, nháy, `$`, `;`, `|`, `&`,
-            # `(`, `<`, `\` hay dòng mới. Lỗi thì in ĐỘ DÀI, không in nội dung.
+            # Chú thích đầy đủ: docs/ops-vps-script-notes.md — mục `if: contains(format(' {0} ', env.OPS_THAO_TAC_MA_HOA), format(' {0} ', inputs.action))`.
             kiem_arg() {
               case "$ARG" in
                 *[!A-Za-z0-9\ =:._,/@+-]*)
@@ -593,22 +589,7 @@ jobs:
                 echo "── Thư mục lớn ──"
                 du -sh /var/lib/docker /var/lib/containerd /root/backups /root/erp 2>/dev/null | sort -h ;;
               docker-prune)
-                # ═══ GIẢI PHÓNG Ổ ĐĨA — CHỈ ẢNH DOCKER, KHÔNG ĐỤNG MỘT BYTE DỮ LIỆU NÀO ═══
-                #
-                # SỰ CỐ #242/#243 (12/09/2026): ổ đĩa đầy 100% (39G/39G, 0 byte trống). Deploy #242
-                # chết lúc giải nén image; #243 chết SỚM HƠN — `git pull` trên VPS không ghi nổi
-                # loose object. Tức là bản sửa nằm trong `install-vps.sh` KHÔNG THỂ tới được máy
-                # chủ, vì máy chủ quá đầy để tải nó về. Thao tác này là lối ra khỏi vòng luẩn quẩn
-                # đó: workflow vận hành nhúng thẳng script qua SSH, không cần `git pull`.
-                #
-                # NGUYÊN NHÂN: `docker image prune -f` chỉ xoá ảnh KHÔNG TAG, trong khi mỗi lần
-                # deploy để lại một ảnh `ghcr.io/<kho>:<sha>` CÓ TAG (~2,6 GB). Đo được ngày
-                # 12/09: 12 ảnh như vậy, 26,33 GB có thể thu hồi trên tổng 31,74 GB.
-                #
-                # VÌ SAO AN TOÀN: không có dữ liệu nào ở đây. CSDL nằm trong volume Docker (không
-                # đụng), sao lưu ở /root/backups (không đụng), mã nguồn ở /root/erp (không đụng).
-                # Ảnh Docker là hiện vật KÉO LẠI ĐƯỢC từ GHCR. Và Docker TỪ CHỐI xoá ảnh của
-                # container đang chạy, nên thao tác này không thể làm sập bản đang chạy.
+                # Chú thích đầy đủ: docs/ops-vps-script-notes.md — mục `docker-prune)`.
                 echo "── TRƯỚC ──"; df -h /; docker system df; echo
                 # 1. Mọi tag theo SHA của kho này. Ảnh đang chạy sống tiếp nhờ tag `erp-app:local`.
                 { docker images --format '{{.Repository}}:{{.Tag}}' | grep '^ghcr\.io/truyenhkm5group-stack/hkt:' || true; } | while read -r tag_cu; do
@@ -665,12 +646,7 @@ jobs:
                 fetch_script profit-verify.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/profit-verify.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/profit-verify.ts ;;
               marketing-calibrate)
-                # CHỈ ĐỌC. In bảng theo ngày rồi tự đối chiếu với báo cáo lợi nhuận chuẩn, nguồn chi
-                # quảng cáo và kết quả vận đơn; thoát khác 0 khi có phát hiện xếp loại BUG.
-                #
-                # Bảng theo ngày chỉ có SỐ TỔNG HỢP nên đi thẳng ra log. `--explain` thì liệt kê TỪNG
-                # ĐƠN kèm tên người chốt ⇒ nó là một thao tác riêng (`marketing-explain`) đi qua
-                # `ma_hoa_ket_qua`; ở đây bị từ chối, để không ai lỡ in bản rõ bằng thói quen cũ.
+                # Chú thích đầy đủ: docs/ops-vps-script-notes.md — mục `marketing-calibrate)`.
                 case "$ARG" in
                   *--explain*)
                     echo "::error::--explain liệt kê từng đơn kèm tên người chốt — dùng thao tác marketing-explain (kết quả mã hoá, xem docs/ops-doc-ket-qua.md). KHÔNG chạy."
@@ -758,14 +734,7 @@ jobs:
                 fetch_script perf-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/perf-probe.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/perf-probe.ts ;;
               session-revoke-e2e)
-                # NGHIỆM THU THU HỒI PHIÊN — ĐÂY LÀ MỘT THAO TÁC GHI.
-                #
-                # `session-verify` chỉ đọc, nên nó trả lời được "migration đã áp chưa" mà KHÔNG trả
-                # lời được câu quan trọng nhất: thu hồi có chặn được một lượt gọi đang chạy không.
-                # Câu đó cần một lượt GHI, nên nó cần một tài khoản dành riêng.
-                #
-                # Script tự chặn: không tìm thấy tài khoản QA, hoặc vai trò khác VIEWER, thì DỪNG
-                # trước khi ghi một dòng nào. Không có nhánh nào chạm tới tài khoản nhân viên thật.
+                # Chú thích đầy đủ: docs/ops-vps-script-notes.md — mục `session-revoke-e2e)`.
                 fetch_script session-revocation-e2e.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/session-revocation-e2e.ts'
                 docker exec -e QA_SESSION_EMAIL="${ARG:-qa-session-test@vnxcommerce.com}" erp-app npx tsx --tsconfig tsconfig.json scripts/session-revocation-e2e.ts ;;
               session-verify)
@@ -1321,11 +1290,7 @@ jobs:
                 chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/order-outcome-explain.ts ;;
               set-setting)
                 fetch_script set-setting.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/set-setting.ts'
-                # arg: <khoá> <json> [--test-lark] — JSON có thể nằm trong nháy đơn như tài liệu cũ
-                # hướng dẫn ('{"a":1}'). Bản cũ đưa cả chuỗi vào `sh -c "… $ARG"` nên chính shell của
-                # container bóc nháy — và cũng chạy mọi `$(…)`/`;` lọt vào. Nay tách bằng mở rộng tham
-                # số của shell (không đánh giá gì), bóc đúng MỘT cặp nháy đơn bao ngoài, rồi truyền
-                # ba mảnh thành ba phần tử argv.
+                # Chú thích đầy đủ: docs/ops-vps-script-notes.md — mục `set-setting)`.
                 SS_KHOA="${ARG%%[[:space:]]*}"
                 SS_JSON="${ARG#"$SS_KHOA"}"
                 SS_CO=""
@@ -1343,13 +1308,7 @@ jobs:
                   docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/set-setting.ts "$SS_KHOA" $SS_CO
                 fi ;;
               run-job)
-                # arg: "<job> [--cờ=giá-trị …]" — tách thành argv SAU khi soát ký tự, không qua `sh -c`.
-                #
-                # Job là BẤT KỲ job nào của lib/sync/jobs.ts, và vài job in dữ liệu cá nhân
-                # (`landing-sheet preview=1` in dòng mẫu của sheet: tên, địa chỉ khách;
-                # `marketing-digest` trả tên marketer) ⇒ MÃ HOÁ CẢ THAO TÁC, không dựa vào danh sách
-                # job "an toàn" — job thêm sau quên khai sẽ rơi về phía KÍN. Log còn: tên job, trạng
-                # thái, bốn con số đếm (kênh tóm tắt của scripts/sync.ts).
+                # Chú thích đầy đủ: docs/ops-vps-script-notes.md — mục `run-job)`.
                 kiem_arg
                 ma_hoa_ket_qua chay_voi_arg docker exec erp-app npm run --silent sync -- ;;
               vtp-web-probe)
@@ -1572,19 +1531,13 @@ jobs:
                 # kỳ đối chiếu, bảng đếm trạng thái, phép chứng minh không ghi và kết luận cổng.
                 ma_hoa_ket_qua docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/payroll-reconcile.ts $ARG ;;
               payroll-profit-gate-audit)
-                # ═══ ĐỐI SOÁT THƯỞNG % LỢI NHUẬN — CÔNG THỨC CŨ ↔ CỔNG LỖ LŨY KẾ TOÀN CÔNG TY ═══
-                # (docs/payroll-profit-gate.md §7). CHỈ ĐỌC do POSTGRES ép: script đặt
-                # ERP_READ_ONLY=1 trước khi nạp @/db rồi hỏi lại phiên, DỪNG nếu không phải chỉ đọc.
-                # Số dư mở sổ trong arg là GIẢ ĐỊNH của phép đo, không ghi vào đâu.
-                # Cùng bộ lọc tham số với payroll-reconcile (cổng đọc tiền của người thật); "-" có
-                # trong bộ cho số dư âm.
+                # Chỉ đọc · mã hoá · tham số như payroll-reconcile — docs/payroll-profit-gate.md §7.
                 case "$ARG" in
                   *[!A-Za-z0-9\ =:._/-]*)
                     echo "::error::Tham số chứa ký tự không cho phép. Chỉ nhận chữ, số và = : . _ / - (ví dụ: --from-month 2026-06 --to-month 2026-10 --opening -50000000 --cap 40)"
                     exit 1 ;;
                 esac
                 fetch_script payroll-profit-gate-audit.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/payroll-profit-gate-audit.ts'
-                # Tên + thưởng của TỪNG NGƯỜI ⇒ MÃ HOÁ. Log chỉ còn kỳ đo, trạng thái, số khoản bị giữ.
                 ma_hoa_ket_qua docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/payroll-profit-gate-audit.ts $ARG ;;
               backup)
                 # ═══ MỘT LUẬT SAO LƯU, DÙNG CHUNG VỚI CRON ═══
