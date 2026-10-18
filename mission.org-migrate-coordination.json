@@ -36,18 +36,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T07:32:40.354Z",
-  "updated_at": "2026-10-18T08:28:57.075Z",
-  "last_heartbeat": "2026-10-18T08:28:57.075Z",
+  "updated_at": "2026-10-18T09:17:01.243Z",
+  "last_heartbeat": "2026-10-18T09:17:01.243Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/org-migrate-coordination",
-    "sha": "c3f249bafc8eccbfaa68184d32dbae44f14f8bf7",
-    "at": "2026-10-18T08:28:57.075Z",
+    "sha": "861c08010dc428ecc5d314fea2e0080b66844892",
+    "at": "2026-10-18T09:17:01.243Z",
     "actor": "DESKTOP-56TH98Y:wt-migrate-lock",
     "title": "Mỗi tổ chức một lượt migrate: bước kiểm deploy chờ và báo đúng kết quả lượt thật (sổ trạng thái 0248)",
     "summary": "",
     "tests": [
-      "typecheck sạch · lint sạch · npm test: TẤT CẢ KIỂM THỬ ĐẠT trên c3f249baf (rebase trên origin/main 87c506848, 0248 không va số) · B1: lượt thử lại nhận kết quả MỘT lần rồi lượt kế tiếp CHẠY · B2: DONE của người khác + sổ của mình còn thiếu / không đọc được ⇒ tự chạy · NB1 nhả khoá hỏng ⇒ ném + release(err) · NB3 lùi liên tiến trình cùng đích · NB4 AbortSignal ⇒ không tiếp quản / không chạy · NB6 RUNNING QUÁ HẠN · NB2 huỷ qua pg.Client riêng · NB8 sàn 60 s · build không chạy (không chạm ranh giới client)"
+      "typecheck sạch · lint sạch · npm test: TẤT CẢ KIỂM THỬ ĐẠT trên 861c08010 (một commit, rebase trên origin/main 5c9d1e135, 0248 không va số) · vòng 2: BACKOFF mang retryAfterMs = phần còn lại cửa sổ (đồng hồ CSDL, sàn = nhịp khoá bận) cho cả lùi lẫn DEGRADED · sameProcess so holder_token (container khởi động lại cùng pid + tên máy ⇒ vẫn là tiến trình khác) · cancelOrganizationMigration qua pg.Client riêng · build không chạy (không chạm ranh giới client)"
     ]
   }
 }
