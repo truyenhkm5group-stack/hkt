@@ -3,7 +3,7 @@
   "mission_id": "ops-script-size",
   "title": "P0 HOTFIX: ops-vps chết 'Argument list too long' sau #906 — rút kịch bản SSH dưới 128 KiB + chặn ở CI",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -22,7 +22,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T23:45:27.587Z",
-  "updated_at": "2026-10-18T23:45:27.587Z",
-  "last_heartbeat": "2026-10-18T23:45:27.587Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-18T23:45:50.516Z",
+  "last_heartbeat": "2026-10-18T23:45:50.516Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/ops-script-size",
+    "sha": "bdba5b0103fd89c7788a0f4e9448c9631acbfa38",
+    "at": "2026-10-18T23:45:50.516Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "Vận hành ERP trên VPS chạy lại được: kịch bản SSH thôi vượt giới hạn 128 KiB",
+    "summary": "",
+    "tests": [
+      "ops-script-size: 123.826/125.000",
+      "ops-log-leak (phân loại · mã hoá · tóm tắt · chống chèn lệnh · inputs): xanh",
+      "npm test đầy đủ: đang chạy"
+    ]
+  }
 }
