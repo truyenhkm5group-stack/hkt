@@ -24,18 +24,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-18T13:55:24.174Z",
-  "updated_at": "2026-10-18T15:00:41.745Z",
-  "last_heartbeat": "2026-10-18T15:00:41.745Z",
+  "updated_at": "2026-10-18T17:41:26.396Z",
+  "last_heartbeat": "2026-10-18T17:41:26.396Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/hslc-shipping-source",
-    "sha": "8b9e4a98478bf0629bb4509a11fbab170ebcf0c5",
-    "at": "2026-10-18T15:00:41.745Z",
+    "sha": "1d8188aad75c43696c286c702d074e9e49b11b4e",
+    "at": "2026-10-18T17:41:26.396Z",
     "actor": "DESKTOP-56TH98Y:wt-hslc-ship",
     "title": "Ops shipping-source-probe: vận đơn HSLC đang được tạo ở đâu — ERP · Pancake POS · Viettel Post (chỉ đọc)",
     "summary": "",
     "tests": [
-      "typecheck sạch · lint sạch · npm test TẤT CẢ KIỂM THỬ ĐẠT (EXIT=0) trên commit 8b9e4a98 · tests/shipping-source-probe.test.ts: thuần (đối số, hãng, order_link, ghép LINK/HINT_STRONG/HINT_WEAK, gom COD khai báo + rủi ro hai vận đơn, kết luận MEASURED/HINT/UNKNOWN, chia dòng tóm tắt) + CSDL thật với Pancake giả + quét nguồn (chỉ đọc, chỉ GET, tóm tắt không lọt SĐT/mã) · ops-log-leak xanh (69 mã hoá, 0 lọt) · platform-isolation-static xanh. Chưa chạy ops trên production."
+      "Sửa sau rà soát độc lập (B1 chiều về không còn bị đếm ngoài ERP · B2 tổ chức nhà bị từ chối) trên 1d8188aa: typecheck + lint sạch · npm test TẤT CẢ KIỂM THỬ ĐẠT (EXIT=0; lượt trước đó đỏ một lần ở tests/ai-balance-usage.test.ts balancePromoVnd 510≠0 — tệp không thuộc nhánh, chạy riêng đạt, lượt chạy lại đạt ⇒ nghi phụ thuộc đồng hồ/thứ tự) · tests/shipping-source-probe.test.ts thêm 6 ca classifyOrphanShipment + 3 ca kết luận OUTSIDE_ERP + dòng chiều về / mã tham chiếu ERP trong CSDL thật + từ chối isHome · ops-log-leak xanh. Chưa chạy ops production."
     ]
   }
 }
