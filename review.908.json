@@ -1,0 +1,8 @@
+{
+  "pr": 908,
+  "sha": "6a103e0b4ecec586714986a02f5af4c77d082151",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-19T05:00:49.829Z",
+  "note": "review độc lập 7 vòng PASS: một lời mời sau chốt mỗi lượt mua do máy chủ quyết, ghép cuối câu xác nhận; thêm món vào đơn đã chốt chỉ khi khách gọi tên trong phần mua hoặc trả lời 'có' ngắn (danh sách đóng, so chữ có dấu) ngay lượt sau câu hỏi duy nhất; fuzz 266 câu 0 dương tính giả; đồng hồ AI đúng; giá theo bảng giá khách; tổng mới kèm phí ship khi chưa biết"
+}
