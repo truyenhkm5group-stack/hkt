@@ -36,6 +36,9 @@ import { getSettingJson } from "@/lib/settings";
 import { isProfitLinked, isRegularVariable, type ProfitGatePolicy } from "@/lib/constants/payroll-profit-gate";
 import { eligibleProfitOf, evaluateProfitGate, type LateAdjustment, type ProfitGateAllocation, type ProfitGateClaim, type ProfitGateOpening, type ProfitGateResult } from "@/lib/payroll/profit-gate";
 import { getProfitGateConfig, resolveGateOpening } from "@/lib/queries/payroll-profit-gate";
+import { allocateCompanyToCodes, codeBonusClaims, codeLedgerStep, type CodeBonusClaim, type CodeLedgerRow, type CodeMonthProfit, type CodePending, type CodeState } from "@/lib/payroll/code-ledger";
+import { buildCodeSegmentsFor, loadCodeBook, loadWeightConfirmations, type CodeFacts } from "@/lib/queries/payroll-code-ledger";
+import type { CodeWeightConfirmation } from "@/lib/constants/payroll-code";
 import { monthPeriod } from "@/lib/constants/payroll-autopilot";
 
 export async function listEmployees(): Promise<Employee[]> {
@@ -852,6 +855,12 @@ export type PayrollLine = {
    * cổng lợi nhuận. Giữ lại để đối chiếu cũ/mới và để thấy được chênh lệch; KHÔNG dùng để trả tiền.
    */
   provisionalSalary: number | null;
+  /**
+   * PHẦN THƯỞNG THEO MÃ (OWNER / SUPPORT) TẠM TÍNH đã cộng vào `provisionalSalary` — `docs/payroll-code-ledger.md`.
+   * Tách riêng vì nó không nằm trong thành phần nào của chính sách: phiếu lương in nó thành một dòng, bảng
+   * chuyển đổi trừ nó ra để so đúng công thức cũ. 0 = không có khoản theo mã.
+   */
+  codeBonusProvisional: number;
   /** Thưởng % lợi nhuận của người này: tạm tính · đủ điều kiện · chưa đủ điều kiện + lý do. */
   profitShare: PayrollProfitShare;
   /**
@@ -916,6 +925,28 @@ export type PayrollProfitGate = {
   /** Điều chỉnh lũy kế TƯỜNG MINH ghi vào kỳ này (chứng từ đến muộn của tháng đã khoá). */
   lateAdjustments: LateAdjustment[];
   simulatedMonths: string[];
+  /** Lợi nhuận từng mã của RIÊNG kỳ này — thứ ảnh chụp lưu để sổ mã các tháng sau dựng lại. `null` = không xét. */
+  codes: CodeMonthProfit[] | null;
+  /** Sổ mã + chia thưởng OWNER / SUPPORT (`docs/payroll-code-ledger.md`). */
+  codeLedger: PayrollCodeLedger;
+};
+
+/**
+ * SỔ LỢI NHUẬN THEO MÃ CỦA KỲ (Payroll V2). `rows = null` = lũy kế của mã CHƯA BIẾT (`problem`).
+ * `allocated` = phần lợi nhuận đủ điều kiện của CÔNG TY phân xuống mã (`null` = cổng chưa kết luận).
+ */
+export type PayrollCodeLedger = {
+  applicable: boolean;
+  rows: CodeLedgerRow[] | null;
+  allocated: Record<string, number> | null;
+  claims: CodeBonusClaim[];
+  pending: CodePending[];
+  problem: string | null;
+  /** Số phân công / điều khoản ĐÃ DUYỆT có hiệu lực trong kỳ — 0 thì sổ mã chỉ để xem. */
+  assignmentCount: number;
+  termsCount: number;
+  /** Lời xác nhận trọng số (mã × tháng) đang áp cho kỳ này. */
+  confirmations: CodeWeightConfirmation[];
 };
 
 /**
@@ -924,7 +955,7 @@ export type PayrollProfitGate = {
  *  · `given`   — mô phỏng một tháng trước trên số dư đã cho (không dựng lại chuỗi — tránh đệ quy).
  *  · `off`     — chỉ cần lợi nhuận đem xét (đo chứng từ đến muộn của tháng đã khoá).
  */
-export type PayrollGateMode = { mode: "resolve" } | { mode: "given"; opening: ProfitGateOpening } | { mode: "off" };
+export type PayrollGateMode = { mode: "resolve" } | { mode: "given"; opening: ProfitGateOpening; codeOpening: Map<string, CodeState> | null } | { mode: "off" };
 
 /**
  * Kỳ BÁO CÁO trọn một tháng lịch từ khoá `YYYY-MM` — dựng từ `monthPeriod` của lương tự động và cùng
@@ -1259,6 +1290,7 @@ export async function getPayrollReport(
         // TẠM TÍNH ở đây; cổng lợi nhuận bên dưới mới quyết `salary` được duyệt.
         salary: engine ? engine.result.netPay : legacySalary,
         provisionalSalary: engine ? engine.result.netPay : legacySalary,
+        codeBonusProvisional: 0,
         profitShare: { provisional: 0, demand: 0, eligible: 0, withheld: 0, reasons: [], claims: [] } as PayrollProfitShare,
         carry,
         engine,
@@ -1325,17 +1357,26 @@ export async function getPayrollReport(
   let gatePolicy: ProfitGatePolicy | null = null;
   let lateAdjustments: LateAdjustment[] = [];
   let simulatedMonths: string[] = [];
+  let codeOpening: Map<string, CodeState> | null = null;
+  let codeProblem: string | null = null;
   if (applicable.ok && carryMonth && gateMode.mode === "resolve") {
     const r = await resolveGateOpening(carryMonth, {
-      simulate: async (m, opening) => (await getPayrollReport(monthReportPeriod(m), "profit1", { mode: "given", opening })).profitGate.result,
+      simulate: async (m, opening, codeOpeningOfMonth) => {
+        const sim = await getPayrollReport(monthReportPeriod(m), "profit1", { mode: "given", opening, codeOpening: codeOpeningOfMonth });
+        return { result: sim.profitGate.result, codes: sim.profitGate.codes };
+      },
     });
     gateOpening = r.opening;
     gateProblem = r.problem;
     gatePolicy = r.policy;
     simulatedMonths = r.simulatedMonths;
+    codeOpening = r.codeOpening;
+    codeProblem = r.codeProblem;
   } else if (gateMode.mode === "given") {
     gateOpening = gateMode.opening;
     gatePolicy = (await getProfitGateConfig()).active;
+    codeOpening = gateMode.codeOpening;
+    codeProblem = gateMode.codeOpening ? null : "Sổ mã của tháng trước chưa dựng được.";
   }
   /*
     ĐIỀU CHỈNH LŨY KẾ TƯỜNG MINH ghi vào ĐÚNG tháng này (kỳ đang mở — tháng đã khoá đọc ảnh chụp, không
@@ -1403,6 +1444,150 @@ export async function getPayrollReport(
     }
   }
 
+  /*
+    ═══════════ SỔ LỢI NHUẬN THEO MÃ + THƯỞNG OWNER / SUPPORT (Payroll V2) ═══════════
+
+    Đặc tả `docs/payroll-code-ledger.md`. Lợi nhuận mã là `marketers.products[].profit` — tính MỘT
+    lần, cùng con số trang Hiệu quả marketer in. Ba bước: sổ mã (lũy kế + HWM riêng từng mã) → phân
+    bổ lợi nhuận đủ điều kiện của CÔNG TY xuống mã → chia OWNER X% / SUPPORT Y% × trọng số. Khoản thưởng
+    theo mã đi vào CÙNG cổng với mọi khoản thưởng % lợi nhuận khác, nên trần quỹ công ty áp chung một lần.
+  */
+  const codeApplicable = applicable.ok && Boolean(carryMonth) && gateMode.mode !== "off" && period.from !== null && period.to !== null;
+  const codes: CodeMonthProfit[] | null = codeApplicable ? marketers.products.map((p) => ({ productId: p.productId, code: p.code, profit: p.profit })) : null;
+  const codeLedger: PayrollCodeLedger = { applicable: codeApplicable, rows: null, allocated: null, claims: [], pending: [], problem: codeProblem, assignmentCount: 0, termsCount: 0, confirmations: [] };
+  const maCua = (pid: string) => marketers.products.find((p) => p.productId === pid)?.code || pid;
+  if (!codeApplicable && gateMode.mode !== "off") {
+    /*
+      KỲ KHÔNG XÉT ĐƯỢC THƯỞNG THEO MÃ (không phải trọn tháng lịch, hoặc cơ sở khác "Lợi nhuận tính
+      lương") mà có phân công hiệu lực: khoản ấy là CHƯA BIẾT, không phải 0. Im lặng bỏ đi thì thực
+      nhận in ra một con số tự tin thiếu đúng khoản thưởng (AGENTS.md mục 42).
+    */
+    const book = await loadCodeBook(period.from, period.to);
+    codeLedger.assignmentCount = book.assignments.length;
+    codeLedger.termsCount = book.terms.length;
+    const ly = applicable.ok ? "Thưởng theo mã chỉ xét theo trọn THÁNG LỊCH." : applicable.reason;
+    for (const a of book.assignments) {
+      const tu = period.from && period.from.getTime() > a.from.getTime() ? period.from : a.from;
+      const den = a.to ?? period.to ?? new Date();
+      codeLedger.pending.push({ productId: a.productId, code: maCua(a.productId), employeeId: a.employeeId, segment: { from: tu, to: period.to && den.getTime() > period.to.getTime() ? period.to : den }, reason: `Thưởng theo mã của kỳ đang xem CHƯA XÉT ĐƯỢC — ${ly}`, provisional: null });
+    }
+  }
+  if (codeApplicable && codes && period.from && period.to) {
+    const [book, confirmations] = await Promise.all([loadCodeBook(period.from, period.to), carryMonth ? loadWeightConfirmations(carryMonth) : Promise.resolve([])]);
+    codeLedger.assignmentCount = book.assignments.length;
+    codeLedger.termsCount = book.terms.length;
+    codeLedger.confirmations = confirmations;
+    const daXacNhan = new Map<string, Set<string>>();
+    for (const c of confirmations) for (const f of c.fingerprints) daXacNhan.set(c.productId, (daXacNhan.get(c.productId) ?? new Set<string>()).add(f));
+    const step = codeOpening ? codeLedgerStep(codeOpening, codes) : null;
+    codeLedger.rows = step?.rows ?? null;
+    const allocated = step && E !== null ? allocateCompanyToCodes(step.rows, E) : null;
+    codeLedger.allocated = allocated ? Object.fromEntries(allocated) : null;
+    const tenNv = new Map(employees.map((e) => [e.id, e.shortName || e.name] as const));
+    const nameOf = (id: string) => tenNv.get(id) ?? id;
+    const dong = new Map(lines.map((l) => [l.employee.id, l] as const));
+    /*
+      Người CÓ khoản % LỢI NHUẬN CÁ NHÂN trong hợp đồng: LN cá nhân chính là LN các mã họ đẩy — cộng
+      thêm thưởng theo mã là trả hai lần cho cùng một đồng lợi nhuận. Xét theo HỢP ĐỒNG (có thành phần
+      ấy không), không theo số tháng này: tháng LN cá nhân âm ra 0 ₫ không làm hợp đồng biến mất.
+    */
+    const coLnCaNhan = new Set(
+      lines
+        .filter((l) => (l.engine ? l.engine.result.components.some((c) => c.basisKey === "PROFIT_PERSONAL" && isProfitLinked(c.kind, c.basisKey)) : l.employee.percentPersonal > 0))
+        .map((l) => l.employee.id),
+    );
+    const factsOf = (r: MarketerReport): Map<string, CodeFacts> => {
+      const out = new Map<string, CodeFacts>();
+      const lay = (pid: string) => {
+        const f = out.get(pid) ?? { revenue: 0, adSpendByEmployee: new Map<string, number>(), revenueByEmployee: new Map<string, number>(), unattributedAdSpend: 0, unattributedRevenue: 0 };
+        out.set(pid, f);
+        return f;
+      };
+      for (const p of r.products) lay(p.productId).revenue = p.revenue;
+      for (const m of r.marketers) {
+        for (const pl of m.products) {
+          const f = lay(pl.productId);
+          // Nhóm "Chưa gán marketer": tiền / doanh thu có thật nhưng chưa biết của ai — trọng số thiếu phần ấy.
+          if (!m.marketerId) {
+            f.unattributedAdSpend += pl.adSpend;
+            f.unattributedRevenue += pl.attributedRevenue;
+            continue;
+          }
+          f.adSpendByEmployee.set(m.marketerId, (f.adSpendByEmployee.get(m.marketerId) ?? 0) + pl.adSpend);
+          f.revenueByEmployee.set(m.marketerId, (f.revenueByEmployee.get(m.marketerId) ?? 0) + pl.attributedRevenue);
+        }
+      }
+      return out;
+    };
+    const coPhanCong = new Set(book.assignments.map((a) => a.productId));
+    if (!step && coPhanCong.size) {
+      for (const a of book.assignments) {
+        codeLedger.pending.push({
+          productId: a.productId,
+          code: maCua(a.productId),
+          employeeId: a.employeeId,
+          segment: { from: period.from, to: period.to },
+          reason: `Lũy kế lợi nhuận của mã chưa dựng được — ${codeProblem ?? "thiếu số dư đầu kỳ."}`,
+          provisional: null,
+        });
+      }
+    }
+    const canChia = (step?.rows ?? []).filter((r) => coPhanCong.has(r.productId) && r.eligible > 0);
+    const doan = await buildCodeSegmentsFor(
+      canChia.map((r) => r.productId),
+      { from: period.from, to: period.to },
+      book,
+      factsOf(marketers),
+      async (p) => factsOf(await getMarketerReport(p, "profit1")),
+    );
+    for (const row of canChia) {
+      const segments = doan.get(row.productId) ?? null;
+      if (!segments) {
+        for (const a of book.assignments.filter((x) => x.productId === row.productId)) {
+          codeLedger.pending.push({ productId: row.productId, code: row.code, employeeId: a.employeeId, segment: { from: period.from, to: period.to }, reason: `Mã ${row.code}: đổi phân công / điều khoản giữa tháng nhưng không đoạn nào có doanh thu giao thành công để biết phần của từng đoạn — ERP không chia đều.`, provisional: null });
+        }
+        continue;
+      }
+      const out = codeBonusClaims({
+        productId: row.productId,
+        code: row.code,
+        eligible: row.eligible,
+        allocated: allocated ? (allocated.get(row.productId) ?? 0) : null,
+        segments,
+        assignments: book.assignments,
+        terms: book.terms,
+        nameOf,
+        confirmedFingerprints: daXacNhan.get(row.productId),
+      });
+      codeLedger.pending.push(...out.pending);
+      for (const c of out.claims) {
+        const why = !dong.has(c.employeeId)
+          ? `${nameOf(c.employeeId)} không có trong bảng lương kỳ này (chưa khai nhân sự, đã nghỉ hoặc chưa vào làm) — khoản thưởng theo mã không có dòng lương để vào.`
+          : coLnCaNhan.has(c.employeeId)
+            ? `${nameOf(c.employeeId)} đang hưởng % lợi nhuận CÁ NHÂN — cộng thêm thưởng theo mã là trả hai lần cho cùng lợi nhuận. Chủ shop phải chọn một trong hai.`
+            : null;
+        if (why) {
+          codeLedger.pending.push({ productId: c.productId, code: c.code, employeeId: c.employeeId, segment: c.segment, reason: why, provisional: c.provisional });
+          continue;
+        }
+        codeLedger.claims.push(c);
+        claims.push({ key: c.key, employeeId: c.employeeId, label: c.label, provisional: c.provisional, demand: c.demand });
+        const l = dong.get(c.employeeId);
+        /*
+          Khoản theo mã là thành phần MỚI, chưa nằm trong lương theo công thức cũ — cộng vào tạm tính
+          để phép "tạm tính − phần LN tạm tính + phần đủ điều kiện" bên dưới đúng cho cả dòng, và ghi
+          RIÊNG ở `codeBonusProvisional` để phiếu lương / CSV in nó thành một dòng (các dòng cộng ra
+          đúng thực nhận) và bảng chuyển đổi so đúng công thức cũ.
+        */
+        if (l) {
+          l.codeBonusProvisional += c.provisional;
+          if (l.provisionalSalary !== null) l.provisionalSalary += c.provisional;
+        }
+      }
+    }
+  }
+  const codePendingBy = new Set(codeLedger.pending.map((p) => p.employeeId));
+
   const gateResult = evaluateProfitGate({
     monthKey: carryMonth,
     applicable: gateMode.mode === "off" ? { ok: false, reason: "Lượt đo lợi nhuận đem xét — không xét thưởng." } : applicable,
@@ -1440,8 +1625,13 @@ export async function getPayrollReport(
     // `demand` / `eligible` CHƯA BIẾT (cổng chưa kết luận) không phải "có khoản": người có tạm tính bằng
     // 0 không có gì để chặn. Tạm tính CHƯA BIẾT thì có (`null !== 0`).
     const coKhoan = mine.some((a) => a.provisional !== 0 || (a.demand ?? 0) !== 0 || (a.eligible ?? 0) !== 0);
+    // Khoản thưởng theo mã đang CHỜ ĐỐI SOÁT ⇒ thực nhận được duyệt chưa kết luận được: in số thiếu
+    // khoản ấy là khẳng định nó bằng 0.
+    if (codePendingBy.has(l.employee.id)) {
+      l.profitShare.reasons.push("Có khoản thưởng theo mã đang chờ đối soát (PENDING_RECONCILIATION) — xem tab Lợi nhuận theo mã.");
+    }
     l.salary =
-      l.provisionalSalary === null || provisional === null || eligible === null || (coKhoan && !gateResult.established)
+      l.provisionalSalary === null || provisional === null || eligible === null || (coKhoan && !gateResult.established) || codePendingBy.has(l.employee.id)
         ? null
         : l.provisionalSalary - provisional + eligible;
   }
@@ -1471,14 +1661,14 @@ export async function getPayrollReport(
       monthlyTotal: lines.reduce((s, l) => s + l.fixedMonthly, 0),
     },
     marketers,
-    profitGate: { result: gateResult, policy: gatePolicy, ownBase, regularVariable, lateAdjustments, simulatedMonths },
+    profitGate: { result: gateResult, policy: gatePolicy, ownBase, regularVariable, lateAdjustments, simulatedMonths, codes, codeLedger },
   };
 }
 
 /**
  * Đầu vào cổng chốt kỳ từ bản tính — một chỗ, để màn hình và server action đọc CÙNG một câu.
  */
-export function profitGateReadiness(report: Pick<PayrollReport, "profitGate">) {
+export function profitGateReadiness(report: { profitGate: Pick<PayrollProfitGate, "result"> & { codeLedger?: Pick<PayrollCodeLedger, "pending"> } }) {
   const r = report.profitGate.result;
   return {
     status: r.status,
@@ -1487,6 +1677,7 @@ export function profitGateReadiness(report: Pick<PayrollReport, "profitGate">) {
     // Một khoản bằng 0 ở tạm tính vẫn có thể có đề nghị / phần đủ điều kiện khác 0 (điều chỉnh muộn
     // dương trên một tháng lỗ) — mọi khoản khác 0 ở BẤT KỲ cột nào đều phải đi qua cổng.
     hasProvisional: r.allocations.some((a) => a.provisional !== 0 || (a.demand ?? 0) !== 0 || (a.eligible ?? 0) !== 0),
+    codePending: (report.profitGate.codeLedger?.pending ?? []).map((p) => p.reason),
   };
 }
 

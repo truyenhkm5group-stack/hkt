@@ -36,7 +36,8 @@ export type FinalizeBlocker = {
     | "POLICY_BOOK_INVALID"
     | "PROFIT_GATE_NOT_ESTABLISHED"
     | "PROFIT_GATE_DATA_INCOMPLETE"
-    | "PROFIT_GATE_NOT_APPLICABLE";
+    | "PROFIT_GATE_NOT_APPLICABLE"
+    | "PROFIT_CODE_PENDING";
   /** Nói ĐÚNG cái đang thiếu, và nói được phải làm gì. Không có "dữ liệu không hợp lệ". */
   message: string;
 };
@@ -79,7 +80,7 @@ export type ReadinessInput = {
    * CỔNG LỖ LŨY KẾ TOÀN CÔNG TY (`lib/payroll/profit-gate.ts`). `hasProvisional` = còn ít nhất một
    * khoản thưởng % lợi nhuận TẠM TÍNH khác 0 — không có thì cổng không có gì để xét và không chặn.
    */
-  profitGate?: { status: string; established: boolean; message: string; hasProvisional: boolean };
+  profitGate?: { status: string; established: boolean; message: string; hasProvisional: boolean; codePending?: readonly string[] };
 };
 
 export function payrollFinalizeBlockers(input: ReadinessInput): FinalizeBlocker[] {
@@ -171,6 +172,14 @@ export function payrollFinalizeBlockers(input: ReadinessInput): FinalizeBlocker[
     } else if (g.status === "NOT_ESTABLISHED" || !g.established) {
       out.push({ code: "PROFIT_GATE_NOT_ESTABLISHED", message: `Thưởng % lợi nhuận chưa đủ căn cứ để duyệt: ${g.message}` });
     }
+  }
+
+  /*
+    THƯỞNG THEO MÃ CHỜ ĐỐI SOÁT (`docs/payroll-code-ledger.md`): thiếu căn cứ chia (trọng số, điều
+    khoản Y%, sổ mã) hoặc xung đột với % lợi nhuận cá nhân. ERP không chia đều, không bỏ qua — chặn.
+  */
+  for (const reason of new Set(g?.codePending ?? [])) {
+    out.push({ code: "PROFIT_CODE_PENDING", message: reason });
   }
 
   for (const l of input.lines) {

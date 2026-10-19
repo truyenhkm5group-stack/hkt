@@ -12291,3 +12291,100 @@ export const platformOrgMigrationStatus = pgTable(
     check("platform_org_migration_status_takeover_check", sql`${t.takeoverOf} IS NULL OR length(${t.takeoverOf}) <= 300`),
   ],
 );
+
+/**
+ * ═══════════ PHÂN CÔNG MKTer ↔ MÃ SẢN PHẨM — NHIỀU-NHIỀU, CÓ HIỆU LỰC THEO THỜI GIAN ═══════════
+ *
+ * Đặc tả: `docs/payroll-code-ledger.md`. Chủ shop giao 19/10/2026 (Payroll V2).
+ *
+ * Một mã có tối đa MỘT `OWNER` tại một thời điểm (kiểm ở server action dưới khoá tên — ràng buộc
+ * loại trừ khoảng thời gian cần `btree_gist`, không chắc có trên mọi môi trường) và nhiều `SUPPORT`;
+ * một MKTer tham gia nhiều mã với vai trò khác nhau. Lợi nhuận mã tính MỘT lần (`getMarketerReport`
+ * → `products[]`); bảng này chỉ quyết ai được CHIA phần thưởng của mã ấy, không đổi cách quy kết đơn.
+ *
+ * Không ghi đè: đổi tỷ lệ / người = kết thúc dòng cũ (`effective_to`) + thêm dòng mới. Dòng đã dùng
+ * cho một kỳ đã khoá vẫn nằm đó, ảnh chụp kỳ mang phần thưởng đã tính.
+ *
+ * `employee_id` là khoá nhân sự trong sổ lương (`settings: payroll.employees`) — cùng khoá với
+ * `marketer_profit_carryover`, vì một MKTer có thể chưa có tài khoản ERP.
+ */
+export const productMarketerAssignments = pgTable(
+  "product_marketer_assignments",
+  {
+    id: id(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "restrict" }),
+    employeeId: text("employee_id").notNull(),
+    /** `OWNER` phụ trách mã · `SUPPORT` đẩy cùng. */
+    role: text("role").notNull(),
+    /** OWNER: X% lợi nhuận đủ điều kiện được phân bổ của mã (×100, 10% ⇒ 1000). */
+    ownerRateBp: integer("owner_rate_bp"),
+    /** SUPPORT: cách lấy trọng số trong quỹ hỗ trợ — `MANUAL` · `AD_SPEND` · `ATTRIBUTED_REVENUE`. */
+    weightMethod: text("weight_method"),
+    /** SUPPORT + MANUAL: trọng số đã duyệt (×100). Tổng các SUPPORT của mã trong cùng đoạn phải = 10000. */
+    weightBp: integer("weight_bp"),
+    effectiveFrom: ts("effective_from").notNull(),
+    effectiveTo: ts("effective_to"),
+    /** Số hiệu quy chế / phiên bản chính sách dòng này áp theo — để đối chiếu với hợp đồng. */
+    policyRef: text("policy_ref").notNull().default(""),
+    /** `APPROVED` · `REVOKED` (huỷ một dòng nhập nhầm; kỳ đã khoá đọc ảnh chụp, không đọc bảng này). */
+    status: text("status").notNull().default("APPROVED"),
+    note: text("note").notNull().default(""),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    approvedBy: text("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: ts("approved_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("product_marketer_assignments_product_idx").on(t.productId, t.effectiveFrom),
+    index("product_marketer_assignments_employee_idx").on(t.employeeId, t.effectiveFrom),
+    check("product_marketer_assignments_role_check", sql`${t.role} IN ('OWNER', 'SUPPORT')`),
+    check("product_marketer_assignments_status_check", sql`${t.status} IN ('APPROVED', 'REVOKED')`),
+    check("product_marketer_assignments_range_check", sql`${t.effectiveTo} IS NULL OR ${t.effectiveTo} >= ${t.effectiveFrom}`),
+    check(
+      "product_marketer_assignments_owner_check",
+      sql`${t.role} <> 'OWNER' OR (${t.ownerRateBp} IS NOT NULL AND ${t.ownerRateBp} BETWEEN 0 AND 10000 AND ${t.weightMethod} IS NULL AND ${t.weightBp} IS NULL)`,
+    ),
+    check(
+      "product_marketer_assignments_support_check",
+      sql`${t.role} <> 'SUPPORT' OR (${t.ownerRateBp} IS NULL AND ${t.weightMethod} IN ('MANUAL', 'AD_SPEND', 'ATTRIBUTED_REVENUE') AND ((${t.weightMethod} = 'MANUAL') = (${t.weightBp} IS NOT NULL)) AND (${t.weightBp} IS NULL OR ${t.weightBp} BETWEEN 0 AND 10000))`,
+    ),
+  ],
+);
+
+/**
+ * ═══════════ ĐIỀU KHOẢN THƯỞNG THEO MÃ — Y% QUỸ HỖ TRỢ VÀ TRẦN THƯỞNG ═══════════
+ *
+ * `product_id` rỗng = điều khoản MẶC ĐỊNH của công ty; dòng của một mã cụ thể THẮNG dòng mặc định
+ * trong cùng khoảng thời gian (ưu tiên: mã > công ty). Có hiệu lực theo thời gian, không ghi đè.
+ */
+export const productBonusTerms = pgTable(
+  "product_bonus_terms",
+  {
+    id: id(),
+    productId: text("product_id").references(() => products.id, { onDelete: "restrict" }),
+    /** Y%: quỹ thưởng của các SUPPORT = LN đủ điều kiện được phân bổ của mã × Y% (×100). */
+    supportPoolBp: integer("support_pool_bp").notNull(),
+    /** Trần tổng thưởng theo mã mỗi tháng (VND). `NULL` = không trần riêng (vẫn chịu quỹ công ty). */
+    maxBonusAmount: integer("max_bonus_amount"),
+    effectiveFrom: ts("effective_from").notNull(),
+    effectiveTo: ts("effective_to"),
+    policyRef: text("policy_ref").notNull().default(""),
+    status: text("status").notNull().default("APPROVED"),
+    note: text("note").notNull().default(""),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    approvedBy: text("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: ts("approved_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("product_bonus_terms_product_idx").on(t.productId, t.effectiveFrom),
+    check("product_bonus_terms_status_check", sql`${t.status} IN ('APPROVED', 'REVOKED')`),
+    check("product_bonus_terms_range_check", sql`${t.effectiveTo} IS NULL OR ${t.effectiveTo} >= ${t.effectiveFrom}`),
+    check("product_bonus_terms_pool_check", sql`${t.supportPoolBp} BETWEEN 0 AND 10000`),
+    check("product_bonus_terms_cap_check", sql`${t.maxBonusAmount} IS NULL OR ${t.maxBonusAmount} >= 0`),
+  ],
+);

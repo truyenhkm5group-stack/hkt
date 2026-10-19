@@ -31,6 +31,7 @@ import { testCostDoubleCount } from "./cost-double-count.test";
 import { testPayrollCostPreservation } from "./payroll-cost-preservation.test";
 import { testPayrollCarryover } from "./payroll-carryover.test";
 import { testPayrollProfitGate } from "./payroll-profit-gate.test";
+import { testPayrollCodeLedger } from "./payroll-code-ledger.test";
 import { testOpsScriptSize } from "./ops-script-size.test";
 import { testDataTruth } from "./data-truth.test";
 import { testPayrollCogsCutoff } from "./payroll-cogs-cutoff.test";
@@ -2476,6 +2477,7 @@ async function main() {
   await testPayrollCostPreservation(db);
   await testPayrollCarryover(db);
   await testPayrollProfitGate(db);
+  await testPayrollCodeLedger(db);
   testOpsScriptSize();
   await testDataTruth(db);
   await testPayrollCogsCutoff(db);

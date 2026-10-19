@@ -193,6 +193,7 @@ export function buildPayrollSnapshot(report: PayrollReport, period: Period, key:
       closingCumulative: report.profitGate.result.closingCumulative,
       closingHighWater: report.profitGate.result.closingHighWater,
       paidToDate: report.profitGate.result.paidToDate,
+      codes: report.profitGate.codes ?? undefined,
     },
     lines: report.lines.map((l) => ({
       employeeId: l.employee.id,

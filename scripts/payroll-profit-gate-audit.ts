@@ -15,6 +15,11 @@
  * Kèm đối chiếu ba cơ sở lợi nhuận (tính lương · danh nghĩa · dòng tiền) để thấy Payroll và Tài chính
  * đang nói hai con số khác nhau ở đâu, và bảng lương "Toàn bộ" (`?period=all`) in gì.
  *
+ * PAYROLL V2 (`docs/payroll-code-ledger.md`): thêm SỔ MÃ GIẢ ĐỊNH — mọi mã bắt đầu ở 0 tại tháng đầu
+ * kỳ đo, lũy kế + HWM từng mã, phân bổ lợi nhuận đủ điều kiện (giả định) của công ty xuống mã, phép
+ * ĐỐI SOÁT Σ LN mã ↔ LN công ty từng tháng, và thưởng OWNER GIẢ ĐỊNH theo chủ mã đang khai
+ * (`--owner-pct`, mặc định 0 = không tính) để đặt cạnh % LN cá nhân của công thức cũ.
+ *
  * KHÔNG ghi gì: Postgres ép chỉ đọc (`ERP_READ_ONLY=1` đặt TRƯỚC khi nạp `@/db`, rồi hỏi lại phiên).
  * Số dư mở sổ ở đây là GIẢ ĐỊNH của phép đo, KHÔNG phải số dư đã đối soát — quy chế thật do người có
  * quyền duyệt lương khai ở Lương → Cấu hình.
@@ -24,6 +29,7 @@ process.env.ERP_READ_ONLY = "1";
 
 import { compareMonthKey, monthKeyOf } from "@/lib/constants/payroll-carryover";
 import { eligibleProfitOf, evaluateProfitGate, nextOpening, type ProfitGateClaim, type ProfitGateOpening } from "@/lib/payroll/profit-gate";
+import { allocateCompanyToCodes, codeLedgerStep, type CodeState } from "@/lib/payroll/code-ledger";
 import { getCashProfitReport } from "@/lib/queries/profit-cash";
 import { getPayrollReport, monthReportPeriod } from "@/lib/queries/payroll";
 import { monthsBetween } from "@/lib/queries/payroll-profit-gate";
@@ -44,6 +50,7 @@ async function main() {
   const toMonth = arg("to-month", monthKeyOf(new Date()));
   const opening0 = Number(arg("opening", "0"));
   const cap = Number(arg("cap", "100"));
+  const ownerPct = Number(arg("owner-pct", "0"));
   if (!/^\d{4}-\d{2}$/.test(fromMonth) || !/^\d{4}-\d{2}$/.test(toMonth) || compareMonthKey(fromMonth, toMonth) > 0) throw new Error("Tháng không hợp lệ");
   if (!Number.isFinite(opening0) || !Number.isFinite(cap) || cap <= 0 || cap > 100) throw new Error("--opening / --cap không hợp lệ");
   tomTat(`Kỳ đo ${fromMonth} → ${toMonth} · số dư mở sổ GIẢ ĐỊNH ${tien(opening0)} · quỹ tối đa ${cap}%`);
@@ -52,6 +59,8 @@ async function main() {
   const perEmp = new Map<string, { name: string; provisional: number; eligible: number }>();
   let tongTamTinh = 0;
   let tongDuDieuKien = 0;
+  let codeState = new Map<string, CodeState>();
+  const ownerV2 = new Map<string, { name: string; legacyPersonal: number; ownerBonus: number }>();
   console.log("\n═══ THEO THÁNG ═══");
   for (const m of monthsBetween(fromMonth, toMonth)) {
     const p = monthReportPeriod(m);
@@ -86,12 +95,42 @@ async function main() {
     tongTamTinh += tt;
     tongDuDieuKien += dk;
     tomTat(`${m}: trạng thái ${r.profitGate.result.status} · giả định cổng ${g.status} · ${g.allocations.filter((a) => (a.provisional ?? 0) > (a.eligible ?? 0)).length} khoản bị giữ lại`);
+
+    // ─── V2: sổ mã giả định + đối soát ───
+    const t = r.marketers.totals;
+    const sumCodes = r.marketers.products.reduce((s, x) => s + x.profit, 0);
+    const gap = t.profit - (sumCodes - t.testSpend - t.sharedUnallocated - t.logisticsAdjustmentUnallocated);
+    const step = codeLedgerStep(codeState, r.marketers.products.map((x) => ({ productId: x.productId, code: x.code, profit: x.profit })));
+    const alloc = allocateCompanyToCodes(step.rows, g.eligibleProfit ?? 0);
+    codeState = step.closing;
+    console.log(`   ĐỐI SOÁT mã: Σ LN ${r.marketers.products.length} mã ${tien(sumCodes)} − QC test ${tien(t.testSpend)} − chung không chia ${tien(t.sharedUnallocated)} − vận chuyển không chia ${tien(t.logisticsAdjustmentUnallocated)} ⇒ chênh với LN công ty ${tien(gap)}${gap === 0 ? " (khớp)" : " ⚠ CHƯA GIẢI THÍCH"}`);
+    console.log(`   Mã không có mã hàng (custom_id rỗng): ${r.marketers.products.filter((x) => !x.code).length} · LN không phân bổ cho ai ${tien(r.marketers.unattributedProfit)}`);
+    const top = step.rows.filter((x) => x.eligible > 0 || x.profit !== 0).sort((a, b) => b.profit - a.profit);
+    for (const x of top.slice(0, 15)) {
+      console.log(`     mã ${(x.code || x.productId).padEnd(14)} LN ${tien(x.profit).padStart(13)}   lũy kế ${tien(x.cumulative).padStart(13)}   đủ ĐK ${tien(x.eligible).padStart(12)}   phân bổ ${tien(alloc.get(x.productId) ?? 0).padStart(12)}`);
+    }
+    if (top.length > 15) console.log(`     … và ${top.length - 15} mã khác`);
+    tomTat(`${m}: ${step.rows.filter((x) => x.eligible > 0).length}/${step.rows.length} mã có LN đủ điều kiện (giả định) · phân bổ ${tien([...alloc.values()].reduce((s, x) => s + x, 0))} · chênh đối soát ${tien(gap)}`);
+    for (const pr of r.marketers.products) {
+      if (!pr.ownerId) continue;
+      const line = r.lines.find((l) => l.employee.id === pr.ownerId);
+      const o = ownerV2.get(pr.ownerId) ?? { name: line ? line.employee.shortName || line.employee.name : pr.ownerName, legacyPersonal: 0, ownerBonus: 0 };
+      o.ownerBonus += Math.floor(((alloc.get(pr.productId) ?? 0) * Math.round(ownerPct * 100)) / 10_000);
+      ownerV2.set(pr.ownerId, o);
+    }
+    for (const l of r.lines) {
+      const o = ownerV2.get(l.employee.id);
+      if (o) o.legacyPersonal += l.bonusPersonal ?? 0;
+    }
     opening = nextOpening(opening, g, true, "") ?? opening;
   }
   console.log("\n═══ THEO NHÂN VIÊN (cộng các tháng) ═══");
   for (const [id, e] of perEmp) console.log(`   ${e.name.padEnd(20)} ${id}   tạm tính ${tien(e.provisional).padStart(13)}   đủ ĐK ${tien(e.eligible).padStart(13)}   có nguy cơ tính sai ${tien(e.provisional - e.eligible).padStart(13)}`);
   console.log(`\nTỔNG thưởng % LN tạm tính ${tien(tongTamTinh)} · đủ điều kiện ${tien(tongDuDieuKien)} · CÓ NGUY CƠ TÍNH SAI ${tien(tongTamTinh - tongDuDieuKien)}`);
   console.log(`Lũy kế cuối kỳ đo (giả định): ${tien(opening.cumulative)} · mốc cao nhất ${tien(opening.highWater)}`);
+  console.log(`\n═══ V2 · THƯỞNG OWNER GIẢ ĐỊNH theo chủ mã đang khai (X = ${ownerPct}%) ↔ % LN cá nhân cũ ═══`);
+  for (const [id, o] of ownerV2) console.log(`   ${o.name.padEnd(20)} ${id}   % LN cá nhân cũ ${tien(o.legacyPersonal).padStart(13)}   OWNER V2 ${tien(o.ownerBonus).padStart(13)}`);
+  tomTat(`V2: ${ownerV2.size} chủ mã · OWNER V2 (X=${ownerPct}%) tổng ${tien([...ownerV2.values()].reduce((s, o) => s + o.ownerBonus, 0))}`);
 
   const all = await getPayrollReport({ key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null }, "profit1");
   console.log("\n═══ BẢNG LƯƠNG “TOÀN BỘ” (?period=all) ═══");

@@ -1,6 +1,7 @@
 import { InfoHint } from "@/components/info-hint";
 import { Money } from "@/components/ui-bits";
 import { MISSING_TEXT } from "@/lib/format";
+import { isCodeClaimKey } from "@/lib/constants/payroll-code";
 
 /**
  * Dòng "thưởng % lợi nhuận chưa đủ điều kiện" trên phiếu lương — dùng CHUNG cho phiếu lương quản trị
@@ -11,8 +12,39 @@ import { MISSING_TEXT } from "@/lib/format";
  * dòng trừ kèm lý do, để các dòng cộng ra đúng số thực nhận và người nhận biết vì sao. Ảnh chụp đời cũ
  * (không có `profitShare`) không in dòng nào — không đoán.
  */
-export function ProfitGateRows({ share }: { share: { provisional: number | null; eligible: number | null; withheld: number | null; reasons: string[]; claims: unknown[] } | undefined }) {
+export function ProfitGateRows({ share }: { share: { provisional: number | null; eligible: number | null; withheld: number | null; reasons: string[]; claims: { key: string; provisional: number | null }[] } | undefined }) {
   if (!share || !share.claims.length) return null;
+  return (
+    <>
+      <CodeBonusRow claims={share.claims} />
+      <GateRow share={share} />
+    </>
+  );
+}
+
+
+/**
+ * THƯỞNG THEO MÃ (Payroll V2) không nằm trong thành phần nào của chính sách lương, nên phải có dòng
+ * RIÊNG — thiếu nó thì các dòng của phiếu cộng ra thiếu đúng khoản ấy mà "Thực nhận" lại gồm nó.
+ */
+function CodeBonusRow({ claims }: { claims: { key: string; provisional: number | null }[] }) {
+  const ma = claims.filter((c) => isCodeClaimKey(c.key));
+  if (!ma.length) return null;
+  const tong = ma.some((c) => c.provisional === null) ? null : ma.reduce((t, c) => t + (c.provisional ?? 0), 0);
+  return (
+    <tr className="border-b">
+      <td className="py-1.5 pr-3">
+        <span className="inline-flex items-center gap-1">
+          Thưởng theo mã (OWNER / SUPPORT) — tạm tính
+          <InfoHint>{ma.length} khoản theo mã sản phẩm. Phần được duyệt sau cổng lỗ lũy kế công ty nằm ở dòng bên dưới.</InfoHint>
+        </span>
+      </td>
+      <td className="py-1.5 text-right tabular-nums">{tong === null ? <span className="text-muted-foreground">{MISSING_TEXT}</span> : <Money value={tong} sign />}</td>
+    </tr>
+  );
+}
+
+function GateRow({ share }: { share: { provisional: number | null; eligible: number | null; reasons: string[] } }) {
   if (share.eligible === null) {
     return (
       <tr className="border-b">
