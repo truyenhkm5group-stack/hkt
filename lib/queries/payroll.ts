@@ -1459,7 +1459,7 @@ export async function getPayrollReport(
       lương") mà có phân công hiệu lực: khoản ấy là CHƯA BIẾT, không phải 0. Im lặng bỏ đi thì thực
       nhận in ra một con số tự tin thiếu đúng khoản thưởng (AGENTS.md mục 42).
     */
-    const book = await loadCodeBook(period.from ?? new Date(0), period.to ?? new Date(8.64e15));
+    const book = await loadCodeBook(period.from, period.to);
     codeLedger.assignmentCount = book.assignments.length;
     codeLedger.termsCount = book.terms.length;
     const ly = applicable.ok ? "Thưởng theo mã chỉ xét theo trọn THÁNG LỊCH." : applicable.reason;

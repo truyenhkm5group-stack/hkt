@@ -519,6 +519,10 @@ async function testFlow(db: Db) {
   const rTuan = await getPayrollReport(tuan, "profit1");
   assert.ok(rTuan.profitGate.codeLedger.pending.some((p) => p.employeeId === M1.id && /THÁNG LỊCH/.test(p.reason)), "kỳ tuần ⇒ khoản theo mã đứng ở chờ, có lý do");
   assert.equal(rTuan.lines.find((l) => l.employee.id === M1.id)?.salary, null, "và thực nhận của người có phân công là CHƯA BIẾT — không in số thiếu khoản thưởng");
+  // Kỳ "Toàn bộ" (`?period=all`, không mốc): đọc sổ không lọc ngày — từng chết vì mốc giả năm 275760.
+  const rAll = await getPayrollReport({ key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null }, "profit1");
+  assert.ok(rAll.profitGate.codeLedger.pending.some((p) => p.employeeId === M1.id), "period=all ⇒ khoản theo mã CHƯA XÉT, có lý do");
+  assert.equal(rAll.profitGate.codeLedger.assignmentCount, 5, "đọc đủ mọi phân công khi kỳ không có mốc");
   const chan1 = payrollFinalizeBlockers({ bounded: true, basisEligible: true, basisWhy: "", basisLabel: "", totalSalary: r1.totalSalary, costWarnings: r1.marketers.costWarnings, lines: [], profitGate: profitGateReadiness(r1) });
   assert.ok(!chan1.some((b) => b.code === "PROFIT_CODE_PENDING"), "đủ căn cứ ⇒ không chặn");
 

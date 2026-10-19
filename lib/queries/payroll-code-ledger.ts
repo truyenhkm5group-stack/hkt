@@ -19,8 +19,11 @@ import type { CodeAssignment, CodeSegment, CodeTerms, WeightMethod } from "@/lib
 import { addDays, vnDateKey, vnStartOfDay } from "@/lib/format";
 import type { Period } from "@/lib/search-params";
 
-/** Phân công / điều khoản ĐÃ DUYỆT có hiệu lực chồng lên [from, to]. */
-export async function loadCodeBook(from: Date, to: Date): Promise<{ assignments: CodeAssignment[]; terms: CodeTerms[] }> {
+/**
+ * Phân công / điều khoản ĐÃ DUYỆT có hiệu lực chồng lên [from, to]. Mốc `null` = không giới hạn phía ấy
+ * (kỳ "Toàn bộ") — KHÔNG thay bằng một ngày cực xa: Postgres từ chối timestamptz ngoài miền của nó.
+ */
+export async function loadCodeBook(from: Date | null, to: Date | null): Promise<{ assignments: CodeAssignment[]; terms: CodeTerms[] }> {
   const db = await getDb();
   const a = schema.productMarketerAssignments;
   const t = schema.productBonusTerms;
@@ -28,11 +31,11 @@ export async function loadCodeBook(from: Date, to: Date): Promise<{ assignments:
     db
       .select()
       .from(a)
-      .where(and(eq(a.status, "APPROVED"), lte(a.effectiveFrom, to), or(isNull(a.effectiveTo), gte(a.effectiveTo, from)))),
+      .where(and(eq(a.status, "APPROVED"), to ? lte(a.effectiveFrom, to) : undefined, from ? or(isNull(a.effectiveTo), gte(a.effectiveTo, from)) : undefined)),
     db
       .select()
       .from(t)
-      .where(and(eq(t.status, "APPROVED"), lte(t.effectiveFrom, to), or(isNull(t.effectiveTo), gte(t.effectiveTo, from)))),
+      .where(and(eq(t.status, "APPROVED"), to ? lte(t.effectiveFrom, to) : undefined, from ? or(isNull(t.effectiveTo), gte(t.effectiveTo, from)) : undefined)),
   ]);
   return {
     assignments: rowsA.map((r) => ({
