@@ -21,6 +21,7 @@ import {
   amountsIn,
   applyCustomerCartMessage,
   bindCommitment,
+  calledByName,
   cartCommitmentPrompt,
   cartHoldVerdict,
   classifyCartMessage,
@@ -28,6 +29,9 @@ import {
   declinesAddOnOnly,
   hasEditCue,
   holdCartText,
+  labelsMatch,
+  lineBasisViolation,
+  mentionsProduct,
   orderReadiness,
   type AskedLine,
   type CartCommitment,
@@ -813,6 +817,30 @@ function testRealHslcCatalog() {
   const TRA = ["Trà hoà tan", "Trà hoa tan"];
   assert.equal(amountsIn("1 gói trà hòa tan", TRA)[0]?.display, "Trà hoà tan", "«hòa» kiểu cũ = «hoà» kiểu mới");
   assert.equal(amountsIn("1 gói trà hoà tan", TRA)[0]?.display, "Trà hoà tan");
+  // gio-dau-con-lai (review #915): cùng gốc lỗi dấu ở bốn chỗ khác của bộ đọc giỏ.
+  // (1) số trần không đơn vị · (2) gõ hoa đầu từ — trước đây giỏ rỗng.
+  assert.deepEqual(one("1 chả cá thu"), [["Chả cá thu", 1, "pack", true]]);
+  assert.deepEqual(one("cho chị 2 chả cá thu nhé"), [["Chả cá thu", 2, "pack", true]]);
+  assert.deepEqual(one("Lấy 2 Gói Chả Cá Thu"), [["Chả cá thu", 2, "pack", true]]);
+  assert.equal(one("1 chà cá thu"), null, "số trần + gõ nhầm «chà» ⇒ không đoán");
+  // (3) hàng rào thay món: nhãn có dấu khác dấu ⇒ không cùng món; nhãn đã bỏ dấu ⇒ như cũ (không có dấu để phân xử).
+  const RCT = "Ruốc bông (chà bông) cá thu nguyên chất (Size: Hộp 250g)";
+  assert.equal(labelsMatch("Chả cá thu", RCT), false);
+  assert.equal(labelsMatch("cha ca thu", RCT), true, "ô match đã bỏ dấu ⇒ không phân xử");
+  assert.equal(labelsMatch("Chả cá thu", "Chả cá thu (Size: 1kg (2 túi 0,5kg))"), true);
+  assert.equal(calledByName(RCT, "thêm 1kg chả cá thu"), false, "«chả cá thu» không gọi tên ruốc");
+  assert.equal(calledByName(RCT, "thêm 1 hộp ruốc cá thu"), true);
+  assert.equal(mentionsProduct("Chả cá thu", "1 hộp chà bông cá thu"), false, "«chà bông cá thu» không gọi tên chả cá thu");
+  assert.equal(mentionsProduct("Chả cá thu", "cho chi 1kg cha ca thu"), true, "khách gõ không dấu ⇒ không phân xử, như cũ");
+  const cartCa = applyCustomerCartMessage(undefined, "cho chị 1kg chả cá thu", 1, at, { catalog: REAL });
+  const ask = (productId: string, name: string, quantity = 1): AskedLine => ({ variantId: `v-${productId}`, productId, name, quantity, weightGrams: null });
+  assert.match(lineBasisViolation(cartCa, [ask("p-rct", RCT)], 1, "cho chị 1kg chả cá thu") ?? "", /KHÔNG đưa «Ruốc bông \(chà bông\) cá thu nguyên chất»/, "bot đưa ruốc thay chả cá thu ⇒ bị chặn");
+  assert.equal(lineBasisViolation(cartCa, [ask("p-cct", "Chả cá thu (Size: 1kg (2 túi 0,5kg))")], 1, "cho chị 1kg chả cá thu"), null);
+  // (4) số viết bằng chữ dính liền đơn vị: «ruoc bong» không dấu KHÔNG thành 4 g; «hai kg», «bốn hộp» vẫn đọc được.
+  assert.deepEqual(amountsIn("cho chi ruoc bong 1 hop", REAL).map((x) => [x.value, x.unit]), [[1, "pack"]]);
+  assert.deepEqual(amountsIn("1 hop ruoc bong ca thu", REAL).map((x) => [x.value, x.unit]), [[1, "pack"]]);
+  assert.deepEqual(amountsIn("hai kg chả cá thu", REAL).map((x) => [x.value, x.unit, x.display]), [[2000, "g", "Chả cá thu"]]);
+  assert.deepEqual(amountsIn("bốn hộp nem hải sản", REAL).map((x) => [x.value, x.unit]), [[4, "pack"]]);
 }
 
 export async function testSalesCartCommitment() {
