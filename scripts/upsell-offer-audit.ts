@@ -191,7 +191,7 @@ async function bindReadOnlyOrgHandle(org: { code: string; isHome: boolean }, db:
 }
 
 /** Lời mời của mọi hội thoại có tin trong kỳ (trừ khung thử). */
-/** Mẫu MÃ hội thoại (≤ AUDIT_SAMPLE_MAX mỗi nhóm) để lần vết bằng `conv-money-trace --conv` — CHỈ in ở phần MÃ HOÁ, không vào [ops:tom-tat]. */
+/** Mẫu MÃ hội thoại (≤ AUDIT_SAMPLE_MAX mỗi nhóm) để lần vết bằng `conv-money-trace --conv` — CHỈ in ở phần MÃ HOÁ, không vào kênh tóm tắt công khai. */
 export const AUDIT_SAMPLE_MAX = 20;
 export type AuditSamples = { repeated: string[]; afterDecline: string[]; upsellAfterSize: string[]; reaskAfterSize: string[] };
 /** Thêm mã hội thoại vào nhóm sai lúc / lặp của nó. HÀM THUẦN. */
