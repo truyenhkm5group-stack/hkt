@@ -311,15 +311,19 @@ export type PostConfirmOfferRef = { productId?: string; variantId?: string; name
  * thêm nhé em» bỏ dấu thành «dung them» = «đúng», «không đúng đâu em», «ok ship nhanh giúp chị», «có gì chị báo sau» đều thành ĐỒNG Ý và
  * đơn đã chốt 350.000 → 750.000 ₫). (1) Có bất kỳ từ PHỦ ĐỊNH nào trên chữ CÓ DẤU ⇒ không. (2) Bỏ từ lịch sự / xưng hô; phần còn lại
  * (bỏ dấu) phải ghép TRỌN từ các cụm trong danh sách đồng ý — thừa một từ nào khác ⇒ không. HÀM THUẦN.
+ * Vòng 5: khách gõ KHÔNG DẤU thì phủ định cũng không dấu («khong», «thoi», «chua») ⇒ dò cả trên chữ đã bỏ dấu; «dung» không dấu là «đúng»
+ * HAY «đừng» ⇒ mơ hồ ⇒ không. Có «?» hoặc «à» / «á» / «hả» / «ư» (hỏi lại: «ok?», «thêm à», «ư?») ⇒ là câu HỎI, không phải đồng ý;
+ * «ơi» là GỌI người («dạ em ơi»), không phải trả lời ⇒ không còn là từ lịch sự bỏ qua được.
  */
-const YES_NEGATION = new Set(["không", "ko", "k", "kh", "hông", "hok", "chưa", "đừng", "thôi", "khỏi", "nhầm", "sai", "hủy", "huỷ", "bỏ"]);
-const YES_PARTICLES = new Set(["em", "e", "ạ", "à", "nhé", "nhe", "nha", "nhá", "chị", "c", "anh", "shop", "sop", "luôn", "đi", "với", "ơi", "oi", "nhen", "hen", "nghen"]);
-const YES_PHRASES = ["u", "uk", "um", "uhm", "vang", "da vang", "da", "dung roi", "dung vay", "dung", "co", "duoc", "ok", "oke", "okie", "dong y", "them", "them giup", "lay", "lay luon", "lay them", "cho them"]
+const YES_NEGATION = new Set(["không", "ko", "k", "kh", "hông", "hok", "hem", "chưa", "đừng", "thôi", "khỏi", "nhầm", "sai", "hủy", "huỷ", "bỏ"]);
+const YES_NEGATION_FOLDED = new Set(["khong", "hong", "hok", "hem", "chua", "thoi", "khoi", "nham", "sai", "huy", "bo"]);
+const YES_PARTICLES = new Set(["em", "e", "ạ", "nhé", "nhe", "nha", "nhá", "chị", "c", "anh", "shop", "sop", "luôn", "đi", "với", "nhen", "hen", "nghen"]);
+const YES_PHRASES = ["u", "uk", "um", "uhm", "vang", "da vang", "da", "dung roi", "dung vay", "dung", "co", "duoc", "ok", "oke", "okie", "dong y", "them", "them giup", "lay", "lay luon", "lay them", "cho them", "dc", "oki", "okela", "uki", "ua", "duoc roi", "ok roi", "co chu", "chot"]
   .map((p) => p.split(" "))
   .sort((a, b) => b.length - a.length);
 export function isShortYes(text: string): boolean {
   const raw = text.normalize("NFC").toLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, " ").trim().split(/\s+/).filter(Boolean);
-  if (!raw.length || raw.some((w) => YES_NEGATION.has(w))) return false;
+  if (!raw.length || /[?？]/.test(text) || raw.some((w) => YES_NEGATION.has(w) || YES_NEGATION_FOLDED.has(foldVi(w)) || w === "dung" || w === "ư")) return false;
   const rest = raw.filter((w) => !YES_PARTICLES.has(w)).map((w) => foldVi(w)).filter(Boolean);
   if (!rest.length) return false;
   let i = 0;
