@@ -602,6 +602,8 @@ export function guardReply(text: string, input: ReplyGuardInput): ReplyGuardResu
  * Dùng lại ĐÚNG phán xét của `guardReply` — cửa sổ lời mời coi như MỞ để chỉ hỏi luật quy cách, không hỏi lý do khác; không có luật thứ
  * hai. Món câu mẫu GỌI TÊN đều phải là món khách đã chọn khối lượng: quy cách đã chọn của món KHÁC không chặn câu mẫu của món này. HÀM THUẦN.
  */
+/** Trần số mốc «câu mẫu nhường AI vì khách đã chọn khối lượng» giữ trên một hội thoại (`state.quickSizeYields`). */
+export const QUICK_SIZE_YIELDS_MAX = 20;
 export function quickReplySizeConflict(text: string, input: { cart?: CartCommitment; lastUserText: string; facts: OfferFacts | null }): boolean {
   if (!explicitItems(input.cart).length) return false;
   const g = guardReply(text, { window: { open: true }, cart: input.cart, lastUserText: input.lastUserText, greetedBefore: false, facts: input.facts });

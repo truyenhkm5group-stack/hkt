@@ -60,7 +60,7 @@ import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { customer360Prompt, loadCustomer360, preferReturning, reuseIntentOf } from "@/lib/sales-chatbot/customer-360";
 import { CUSTOMER_PHASE_LABEL, customerComplaintSignal, loadCustomerPhase, postSalePrompt } from "@/lib/sales-chatbot/lifecycle";
-import { guardReply, needsOfferFacts, OFFER_BLOCK_LABEL, offerDeclinedBy, offerWindow, quickReplySizeConflict, withOfferDrops, type OfferBlock, type OfferFacts } from "@/lib/sales-chatbot/next-best-action";
+import { guardReply, needsOfferFacts, OFFER_BLOCK_LABEL, offerDeclinedBy, offerWindow, QUICK_SIZE_YIELDS_MAX, quickReplySizeConflict, withOfferDrops, type OfferBlock, type OfferFacts } from "@/lib/sales-chatbot/next-best-action";
 import { loadOfferFacts } from "@/lib/sales-chatbot/offer-facts";
 import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
 import { freeShipPolicyText } from "@/lib/sales-chatbot/shipping";
@@ -123,9 +123,6 @@ async function businessProfile(): Promise<string> {
 }
 
 /** Lời nhắc hệ thống — dựng từ cấu hình; KHÔNG có giá, tồn hay danh mục (bot phải hỏi công cụ). */
-/** Trần số mốc «câu mẫu nhường AI vì khách đã chọn khối lượng» giữ trên một hội thoại (`quickSizeYields`). */
-const QUICK_SIZE_YIELDS_MAX = 20;
-
 export type PromptQuickReply = { code: string; title: string; upsell: boolean };
 
 /**

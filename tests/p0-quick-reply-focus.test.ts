@@ -321,6 +321,13 @@ const CASES: GoldenCase[] = [
     channel: "WEB",
     turns: [{ say: "cho chị 1kg chả cá thu", ai: [() => [say("Dạ chị lấy 1kg chả cá thu 280.000đ ạ. Dạ, mình muốn mua 1kg hay 2kg ạ? Chị cho em xin SĐT và địa chỉ nhận hàng nhé.")]] }],
   },
+  {
+    key: "qrf-cong-cu-quy-cach",
+    title: "(#868 trên câu mẫu) «cho chị 1kg chả cá thu», model gọi send_quick_reply câu mẫu hỏi quy cách ⇒ máy chủ từ chối, model trả lời bằng chữ, không hỏi lại",
+    shop: "food",
+    channel: "WEB",
+    turns: [{ say: "cho chị 1kg chả cá thu", ai: [() => [tool("send_quick_reply", { code: "Q1" })], () => [say("Dạ chị lấy 1kg chả cá thu 280.000đ ạ. Chị cho em xin SĐT và địa chỉ nhận hàng nhé.")]] }],
+  },
   { key: "qrf-chua-chon-quy-cach", title: "(#868 trên câu mẫu) «giá chả cá thu» (chưa chọn khối lượng) ⇒ câu mẫu hỏi quy cách VẪN gửi nguyên văn", shop: "food", channel: "WEB", turns: [{ say: "giá chả cá thu", ai: [] }] },
   {
     key: "qrf-quy-cach-mon-khac",
@@ -426,7 +433,13 @@ async function testChatTurn() {
         const db = await getDb();
         const [row] = await db.select({ state: schema.salesChatConversations.state }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, ctx.conversationId));
         const yields = ((row?.state ?? {}) as { quickSizeYields?: string[] }).quickSizeYields ?? [];
-        if (c.key === "qrf-da-chon-quy-cach") {
+        if (c.key === "qrf-cong-cu-quy-cach") {
+          assert.match(results, /hỏi lại quy cách khách đã chọn/, results);
+          assert.doesNotMatch(results, /"sent":true/, "câu mẫu KHÔNG được gửi qua công cụ");
+          assert.equal(t.turns[0].rounds.length, 2, "từ chối ⇒ model đi tiếp trong cùng lượt (không vòng lặp, không chuyển người)");
+          assert.doesNotMatch(shown, /1kg hay 2kg/, shown);
+          assert.match(shown, /SĐT/, shown);
+        } else if (c.key === "qrf-da-chon-quy-cach") {
           assert.equal(t.turns[0].rounds.length, 1, "câu mẫu nhường ⇒ AI trả lời");
           assert.doesNotMatch(shown, /1kg hay 2kg/, `không hỏi lại quy cách khách đã chọn: ${shown}`);
           assert.match(shown, /SĐT/, shown);
