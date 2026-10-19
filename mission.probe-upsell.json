@@ -3,7 +3,7 @@
   "mission_id": "probe-upsell",
   "title": "Kiểm lời mời sau chốt trực tiếp (org-ai-cutover --probe-set=upsell)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-probe-upsell",
@@ -25,9 +25,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-19T05:08:20.463Z",
-  "updated_at": "2026-10-19T05:10:12.686Z",
+  "updated_at": "2026-10-19T06:19:51.568Z",
   "last_heartbeat": "2026-10-19T05:08:47.966Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#909 → ca95a38d5944509b57d402d6fcb4559fe5352e03"
+  },
   "handoff": {
     "branch": "claude/probe-upsell",
     "sha": "b31461c270bc01fe9831aa0c97cc7e675ac5781a",
