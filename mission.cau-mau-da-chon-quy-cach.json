@@ -25,18 +25,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-19T12:48:34.999Z",
-  "updated_at": "2026-10-19T12:49:02.372Z",
-  "last_heartbeat": "2026-10-19T12:49:02.372Z",
+  "updated_at": "2026-10-19T12:55:50.756Z",
+  "last_heartbeat": "2026-10-19T12:55:50.756Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/cau-mau-da-chon-quy-cach",
-    "sha": "d49f9f53d3365de72d44b23c4b015d0b5d049d98",
-    "at": "2026-10-19T12:49:02.372Z",
+    "sha": "a8c733c4d8015743d450a0fbce5bf0eb78987bb1",
+    "at": "2026-10-19T12:55:50.756Z",
     "actor": "DESKTOP-56TH98Y:wt-cau-mau-quy-cach",
     "title": "Câu mẫu thôi hỏi lại quy cách khi khách đã chọn khối lượng (#868 trên câu mẫu)",
     "summary": "",
     "tests": [
-      "P0 câu mẫu (3 ca chatTurn mới + kiểm thuần + khoá nguồn hai đường; đột biến đỏ); conv-money-trace (sizeYield); sales-agent-golden 23; order-golden 33×2 BASELINE; P0 upsell; báo giá; upsell-offer-audit; ops-log-leak; platform-isolation-static; test-hygiene; repo-integrity; tsc + eslint sạch"
+      "P0 câu mẫu (4 ca chatTurn: đã chọn · công cụ send_quick_reply bị từ chối · chưa chọn · món khác; đột biến đỏ ở cả đường khớp chữ lẫn công cụ); conv-money-trace; sales-agent-golden 23; order-golden 33×2 BASELINE; P0 upsell; tsc + eslint sạch"
     ]
   }
 }
