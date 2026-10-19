@@ -250,7 +250,48 @@ export function splitSentences(text: string): string[] {
  * đang bật (lời mời «xem menu» không gọi tên món là của chính shop); `freeShip` = shop bật miễn ship theo ngưỡng (lý do giá thật của
  * câu «thêm … là được miễn ship»).
  */
-export type OfferFacts = { catalogNames: readonly string[]; crossSell: readonly string[]; volume: readonly { name: string; saveFromGrams: number }[]; menu: boolean; freeShip: boolean };
+export type OfferFacts = {
+  catalogNames: readonly string[];
+  crossSell: readonly string[];
+  /** Mẫu mã mời được cho từng món bổ trợ (giá đã xác thực, còn hàng) — câu mời SAU CHỐT dựng từ đây (P0 19/10/2026). */
+  crossSellOffers?: readonly CrossSellOffer[];
+  volume: readonly { name: string; saveFromGrams: number }[];
+  menu: boolean;
+  freeShip: boolean;
+};
+export type CrossSellOffer = { name: string; productId: string; variantId: string; variant: string; price: number };
+
+/**
+ * CỬA SỔ LỜI MỜI SAU CHỐT (P0 19/10/2026, ca «Trung Dinh»: khách chọn 1kg, gửi SĐT + địa chỉ, đơn tự chốt — bot cảm ơn, không mời gì,
+ * vì `offerWindow` đóng ở CONTACT_INFO / ORDERING / CONFIRMED và B4 chỉ cho mời TRƯỚC khi có thông tin nhận hàng). Chốt nhanh vẫn ưu
+ * tiên: lời mời chỉ đi SAU khi đơn đã chốt thành công, một lần mỗi lượt mua, gộp vào tin xác nhận. Đóng khi: đã chuyển người · khách
+ * khiếu nại / xin huỷ / từ chối / phản đối giá · đơn chưa qua kiểm · đã từ chối lời mời · đã được mời trong lượt mua. HÀM THUẦN.
+ */
+export function postConfirmOfferWindow(input: { state: OfferStateView; complaint: boolean; orderValid: boolean }): OfferWindow {
+  const s = input.state;
+  if (s.handoff) return { open: false, reason: "HANDOFF" };
+  if (s.cancelRequest || s.declined || s.priceDispute?.open || !input.orderValid) return { open: false, reason: "ORDER_PROBLEM" };
+  if (input.complaint) return { open: false, reason: "COMPLAINT" };
+  if (s.upsellDeclinedTurn !== undefined) return { open: false, reason: "DECLINED" };
+  if (s.upsellSent) return { open: false, reason: "ALREADY_OFFERED" };
+  return { open: true };
+}
+
+/** Món mời sau chốt: món bổ trợ ĐẦU TIÊN chưa có trong đơn — so theo SẢN PHẨM (`productId`), không theo nhãn dòng (nhãn mang cả quy cách). HÀM THUẦN. */
+export function pickPostConfirmOffer(orderProductIds: readonly (string | null)[], offers: readonly CrossSellOffer[]): CrossSellOffer | null {
+  const has = new Set(orderProductIds.filter((x): x is string => Boolean(x)));
+  return offers.find((o) => !has.has(o.productId)) ?? null;
+}
+
+/**
+ * Câu mời — MÁY CHỦ dựng, giá máy chủ, một câu, nói rõ khách phải NHẮN món nếu muốn (khách chỉ «ok» với đơn chính không phải đồng ý
+ * mua thêm — `lineBasisViolation` chặn thêm món khách chưa gọi tên). HÀM THUẦN.
+ */
+export function postConfirmOfferText(o: CrossSellOffer, money: (n: number) => string): string {
+  const label = o.variant.replace(/^\s*(?:size|cỡ|kích thước|quy cách)\s*:\s*/i, "").trim();
+  const what = label && label !== o.name ? `${o.name} (${label})` : o.name;
+  return `Bên em có thêm ${what} giá ${money(o.price)} ăn kèm rất hợp — mình muốn thêm vào đơn thì nhắn em «thêm ${o.name.toLowerCase()}» nhé ạ.`;
+}
 
 export type ReplyGuardInput = {
   window: OfferWindow;

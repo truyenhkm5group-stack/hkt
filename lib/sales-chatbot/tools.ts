@@ -60,7 +60,8 @@ import { customerOrderStatus } from "@/lib/sales-chatbot/order-status-shared";
 import { classifyDeliveryQuestion, deliveryPreferenceNote, deliveryTimeAnswer, pickDeliveryOrder, staffDeliveryCommitment } from "@/lib/sales-chatbot/delivery-intent";
 import { futurePurchaseOnly, postSaleDropsIn } from "@/lib/sales-chatbot/post-sale-guard";
 import { customerComplaintSignal, LIFECYCLE_ORDER_LOOKBACK_DAYS } from "@/lib/sales-chatbot/lifecycle";
-import { OFFER_BLOCK_LABEL, offerWindow, withOfferDrops, type OfferBlock, type SentenceClass } from "@/lib/sales-chatbot/next-best-action";
+import { OFFER_BLOCK_LABEL, offerWindow, pickPostConfirmOffer, postConfirmOfferText, postConfirmOfferWindow, withOfferDrops, type OfferBlock, type SentenceClass } from "@/lib/sales-chatbot/next-best-action";
+import { loadOfferFacts } from "@/lib/sales-chatbot/offer-facts";
 import { fanpageVisitorKeyMirror } from "@/lib/pricing/ai-customer-identity";
 import type { PromptStamp } from "@/lib/sales-chatbot/prompt-stamp";
 import type { PancakeThreadProfile, ReturningCustomer } from "@/lib/sales-chatbot/returning";
@@ -142,6 +143,12 @@ export type ChatState = {
   stage?: SalesStage;
   /** Đã có MỘT lời mời mua thêm trong lượt mua này (câu mẫu UPSELL hoặc câu bot máy chủ nhận ra — #868); xoá khi sang lượt mua mới. */
   upsellSent?: boolean;
+  /**
+   * LỜI MỜI SAU CHỐT (P0 19/10/2026): quyết định của lượt chốt — `OFFERED` (máy chủ dựng câu, engine gắn vào cuối tin xác nhận rồi đặt
+   * `sent`) hoặc lý do KHÔNG mời (cửa sổ đóng · không có món bổ trợ đủ điều kiện · đọc dữ kiện lỗi). `accepted` = đơn ĐÃ CHỐT được sửa thêm
+   * đúng món được mời SAU lời mời. Chỉ để vận hành + đo (ops upsell-offer-audit); xoá khi sang lượt mua mới.
+   */
+  postConfirmOffer?: { turn: number; at: string; outcome: "OFFERED" | "NO_CANDIDATE" | "FACTS_ERROR" | "NOT_SENT" | OfferBlock; text?: string; name?: string; productId?: string; variantId?: string; price?: number; sent?: boolean; accepted?: { at: string; amount: number } };
   /** Câu upsell không gửi được (thiếu số ERP) — chỉ để đo; từ 16/10/2026 câu upsell KHÔNG còn là điều kiện lên đơn (#868). */
   upsellUnavailable?: boolean;
   /** Lượt khách TỪ CHỐI lời mời mua thêm của lượt mua này (`offerDeclinedBy`, next-best-action.ts) — không mời lại trong lượt mua. */
@@ -1215,7 +1222,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         const r = draft.orderId
           ? await updateOrderAsAgent(ctx.agent, draft.orderId, payload, { ...agentOrderOpts(ctx, state, false, quoteClaim, holdNew), ...review })
           : await createOrderAsAgent(ctx.agent, payload, { ...agentOrderOpts(ctx, state, true, quoteClaim, holdNew), adId: await chatOrderAdId(ctx.conversationId, now), ...review });
-        if (!r.ok) return err("Đơn nháp: lỗi", failureText(r), state, omsSignal(r));
+        // Sửa đơn ĐÃ CHỐT bị lõi từ chối (vận đơn đang chạy ở hãng, đơn đã đi tiếp…) ⇒ việc của NHÂN VIÊN theo quy trình (P0 19/10/2026):
+        // máy không hứa đã thêm món, không thử lại.
+        if (!r.ok) return { ...err("Đơn nháp: lỗi", failureText(r), state, omsSignal(r)), ...(editingConfirmed ? { requireHuman: `Khách muốn sửa / thêm vào đơn đã chốt nhưng lõi đơn từ chối (${failureText(r).slice(0, 120)})` } : {}) };
         // Lõi đơn trả lại một đơn ĐÃ CÓ theo khoá (`reused`) mà đơn ấy tạo TRƯỚC lượt mua này ⇒ đó là đơn của lượt mua cũ: KHÔNG báo
         // «đã lên đơn» (review #886 — đúng triệu chứng 42f28794: khách thấy 1,5 kg, CSDL vẫn là đơn 1 kg cũ). Đơn mới của lượt này không bị chặn.
         if (!draft.orderId && "reused" in r && r.reused && (await orderBeforeRound(r.id, state))) {
@@ -1233,6 +1242,12 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       markAddressAsked(state, addr, ctx.turn);
       const view = { order_code: draft.orderId ? `#${manualOrderShortCode(draft.orderId)}` : "(thử)", status: "Nháp — chưa chốt, chưa giữ hàng", simulated, ...cartView(priced), recipient: recipientView(draft.recipient, state), delivery_note: draft.note || null, address_check: addr.view };
       if (editingConfirmed && state.confirmed) {
+        // Khách NHẬN lời mời sau chốt: đơn đã chốt vừa được sửa có thêm ĐÚNG món được mời (đo attach / tiền thêm — ops upsell-offer-audit).
+        const pco = state.postConfirmOffer;
+        if (pco?.outcome === "OFFERED" && pco.sent && !pco.accepted && pco.productId && priced.asked.some((a) => a.productId === pco.productId)) {
+          const amount = priced.lines.filter((l) => priced.asked.some((a) => a.variantId === l.variantId && a.productId === pco.productId)).reduce((t, l) => t + l.lineTotal, 0);
+          state.postConfirmOffer = { ...pco, accepted: { at: now.toISOString(), amount } };
+        }
         const validity = simulated || !draft.orderId ? null : await confirmedValidity(draft.orderId);
         state.confirmed = { ...state.confirmed, total: priced.total ?? priced.subtotal, quoteId: priced.quote.quoteId, ...(validity ? { valid: validity.valid, pending: validity.pending } : {}) };
         const pendingText = validity && !validity.valid ? (validity.pending === "ADDRESS" ? CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK) : null;
@@ -1359,6 +1374,8 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // Đơn ĐÃ GHI nhưng CHƯA QUA KIỂM (địa chỉ chưa ghép · tổng lệch · cờ cần kiểm) ⇒ «khách đồng ý» ≠ «đơn đã tạo hợp lệ»: model nói
       // đúng câu ghi nhận, KHÔNG «đã lên đơn» (claim-guard chặn lần nữa nếu model vẫn viết).
       const pendingText = validity && !validity.valid ? (validity.pending === "ADDRESS" ? CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK) : null;
+      // Lời mời SAU CHỐT (P0 19/10/2026): chỉ khi đơn đã ghi hợp lệ; câu do máy chủ dựng, engine gắn vào cuối tin xác nhận.
+      await notePostConfirmOffer(state, ctx, priced.asked.map((a) => a.productId), !pendingText, now);
       return ok(`${simulated ? "(Thử) " : ""}Đã chốt đơn · ${formatVND(priced.subtotal)}${pendingText ? " · CHƯA qua kiểm" : ""}`, {
         confirmed: true,
         simulated,
@@ -1598,6 +1615,29 @@ export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "las
   // Xã / phường chưa ghép (biết tỉnh) KHÔNG chặn tự chốt — luật P0-A: đơn tự chốt kèm cờ ADDRESS_UNRESOLVED, câu ghi nhận
   // ORDER_PENDING_ADDRESS, nhân viên hỏi lại. Tỉnh chỉ suy từ viết tắt («P13 GV») là CHƯA BIẾT TỈNH ⇒ đã dừng ở dòng trên.
   return null;
+}
+
+/**
+ * QUYẾT ĐỊNH LỜI MỜI SAU CHỐT cho lượt vừa chốt thành công (P0 19/10/2026) — ghi `state.postConfirmOffer`; engine gắn câu vào cuối tin
+ * xác nhận SAU mọi hàng rào (model không viết câu mời, nên hàng rào không có gì để chặn nhầm). Đơn chưa qua kiểm / cửa sổ đóng / không
+ * có món bổ trợ còn bán · còn hàng · giá đã xác thực ⇒ ghi lý do, không mời. Đọc dữ kiện lỗi ⇒ không mời (không kiểm được thì không nói).
+ */
+async function notePostConfirmOffer(state: ChatState, ctx: ToolContext, orderProductIds: readonly (string | null)[], orderValid: boolean, now: Date): Promise<void> {
+  if (ctx.turn === undefined) return;
+  const base = { turn: ctx.turn, at: now.toISOString() };
+  const w = postConfirmOfferWindow({ state, complaint: customerComplaintSignal(ctx.lastUserText), orderValid });
+  if (!w.open) {
+    state.postConfirmOffer = { ...base, outcome: w.reason };
+    return;
+  }
+  const upsellId = ctx.quickReplies?.find((q) => q.upsell)?.id ?? null;
+  const facts = await loadOfferFacts(ctx.config, upsellId).catch(() => null);
+  if (!facts) {
+    state.postConfirmOffer = { ...base, outcome: "FACTS_ERROR" };
+    return;
+  }
+  const o = pickPostConfirmOffer(orderProductIds, facts.crossSellOffers ?? []);
+  state.postConfirmOffer = o ? { ...base, outcome: "OFFERED", text: postConfirmOfferText(o, formatVND), name: o.name, productId: o.productId, variantId: o.variantId, price: o.price } : { ...base, outcome: "NO_CANDIDATE" };
 }
 
 /** Câu chốt ngắn khi máy chủ tự chốt — «Dạ em lên đơn 2 × Chả cá thu (1kg) cho mình rồi ạ, shop giao theo thông tin mình vừa gửi nhé.» */

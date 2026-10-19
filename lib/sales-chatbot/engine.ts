@@ -206,6 +206,7 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
     upsell
       ? `  B4 UPSELL — LỜI MỜI LÀ CƠ HỘI, KHÔNG PHẢI BƯỚC BẮT BUỘC (chủ shop 16/10/2026): KHÔNG BAO GIỜ trì hoãn lên đơn để mời. Tối đa MỘT lời mời mỗi lượt mua, chỉ khi khách đã chọn món mà CHƯA gửi SĐT / địa chỉ (gộp trong tin ghi nhận món + xin thông tin nhận hàng). Khách đang gửi SĐT / địa chỉ, đã có đơn, đang phàn nàn, đã từ chối, đơn lỗi / huỷ ⇒ KHÔNG mời — lên / chốt đơn ngay. Mời bằng câu mẫu ${upsell.code} (send_quick_reply — kèm ảnh menu) — khách nhìn ảnh menu tự chọn (chủ shop 09/10/2026): KHÔNG chào lẻ từng món, KHÔNG gợi ý tên món khác trong tóm tắt đơn hay ở bất kỳ tin nào. Khách từ chối ⇒ không mời lại; khách TỰ hỏi món khác ⇒ tư vấn bình thường. Khách chọn món trong menu ⇒ search_products rồi lên / sửa đơn và đọc tổng mới. Máy chủ bỏ mọi lời mời sai lúc.`
       : "  B4 UPSELL — LỜI MỜI LÀ CƠ HỘI, KHÔNG PHẢI BƯỚC BẮT BUỘC (chủ shop 16/10/2026): KHÔNG BAO GIỜ trì hoãn lên đơn để mời. Tối đa MỘT lời mời mỗi lượt mua, chỉ khi khách đã chọn món mà CHƯA gửi SĐT / địa chỉ: Gợi ý ĐÚNG MỘT món bổ trợ còn bán (search_products) — mẫu mã bán kèm (add_on_only) của món khác để khách dùng thử — hoặc quy cách lớn hơn khi search_products cho thấy rẻ hơn tính theo đơn vị (nói khoản tiết kiệm MỘT lần). Khách đang gửi SĐT / địa chỉ, đã có đơn, đang phàn nàn, đã từ chối, đơn lỗi / huỷ ⇒ KHÔNG mời. Khách TỰ hỏi món khác ⇒ tư vấn bình thường. Máy chủ bỏ mọi lời mời sai lúc / món không đủ điều kiện.",
+    "  SAU KHI ĐƠN ĐÃ CHỐT: máy chủ có thể tự gắn MỘT câu mời món kèm vào cuối tin xác nhận (giá máy chủ) — BẠN KHÔNG tự viết lời mời sau chốt. Khách nhắn đúng món được mời («thêm …», «lấy thêm 1 hộp …») ⇒ update_draft_order thêm món đó; khách chỉ nói «ok», «dạ», «cảm ơn» ⇒ đó là ghi nhận ĐƠN CHÍNH, KHÔNG thêm món, KHÔNG nhắc lại lời mời.",
     `  ĐÃ CHỌN QUY CÁCH / SỐ LƯỢNG ⇒ KHÔNG hỏi lại quy cách ${pack.specExample}, KHÔNG báo lại bảng giá / quảng cáo món chính, KHÔNG chào lại: ghi nhận NGẮN (1–2 câu) rồi đi bước kế.`,
     upsell
       ? "  ĐƠN SÁT NGƯỠNG MIỄN SHIP (chính sách ship của shop / «Hướng dẫn thêm» có ngưỡng): lúc khách vừa chọn món (CHƯA gửi SĐT / địa chỉ) mà đơn chỉ thiếu ít là đạt ⇒ lời mời của lượt mua có thể là ĐÚNG MỘT câu «mình chọn thêm một món trong menu là được miễn ship ạ» — KHÔNG nêu tên món. Không nói khi đơn đã đạt, còn thiếu nhiều, hoặc đã mời."
@@ -868,6 +869,29 @@ export type TurnResult = { ok: true; view: ChatView; media?: { quickReplyId: str
 
 async function reply(conv: ConvRow, seq: number, text: string): Promise<void> {
   await appendMessage(conv.id, seq, "assistant", [{ type: "text", text }]);
+}
+
+/**
+ * Gắn MỘT câu vào cuối tin bot CUỐI CÙNG của lượt (sau tin khách `afterSeq`) — chỉ khi tin ấy là chữ thuần của bot (không phải tin shop /
+ * page, không kèm khối công cụ) và câu ghép vẫn qua hàng rào khẳng định. Trả `true` khi đã gắn. Lời mời sau chốt (P0 19/10/2026).
+ */
+async function appendToTurnReply(convId: string, afterSeq: number, line: string, passes: (text: string) => Promise<boolean>): Promise<boolean> {
+  const db = await getDb();
+  const m = schema.salesChatMessages;
+  const [last] = await db
+    .select({ id: m.id, seq: m.seq, content: m.content })
+    .from(m)
+    .where(and(eq(m.conversationId, convId), eq(m.role, "assistant"), sql`${m.seq} > ${afterSeq}`))
+    .orderBy(desc(m.seq))
+    .limit(1);
+  const blocks = (last?.content ?? []) as AiBlock[];
+  if (!last || !blocks.length || !blocks.every((b) => b.type === "text")) return false;
+  const t = textOf(blocks);
+  if (!t.trim() || t.startsWith(SHOP_SAID) || t.includes(line)) return false;
+  const next = `${t}\n${line}`;
+  if (!(await passes(next))) return false;
+  await db.update(m).set({ content: [{ type: "text", text: next }] }).where(eq(m.id, last.id));
+  return true;
 }
 
 /**
@@ -1764,6 +1788,16 @@ async function chatTurnCore(
       await reply(conv, seq++, draftUnsaid);
       spoke = true;
     }
+    // LỜI MỜI SAU CHỐT (P0 19/10/2026): công cụ chốt của CHÍNH lượt này đã quyết mời (`postConfirmOffer.OFFERED`, câu máy chủ dựng, giá
+    // đã xác thực, món còn hàng) ⇒ gắn ĐÚNG MỘT câu vào cuối TIN XÁC NHẬN đã gửi của lượt — SAU mọi hàng rào (model không viết câu mời,
+    // nên hàng rào lời mời / hậu mãi không có gì để chặn nhầm). Không gửi tin riêng. Lượt có chuyển người / ghi đơn hỏng / không có tin
+    // xác nhận ⇒ không mời (ghi NOT_SENT để đo). Một lần mỗi lượt mua (`upsellSent`).
+    const pco = state.postConfirmOffer;
+    if (pco?.outcome === "OFFERED" && pco.turn === turnSeq && !pco.sent && pco.text) {
+      const can = spoke && status === "OK" && !orderWriteFailed && !state.handoff;
+      const appended = can ? await appendToTurnReply(conv.id, turnSeq, pco.text, async (t) => (await guardOutgoing(t, () => claimFacts(state))).ok).catch(() => false) : false;
+      state = appended ? { ...state, upsellSent: true, upsellTurn: turnSeq, postConfirmOffer: { ...pco, sent: true } } : { ...state, postConfirmOffer: { ...pco, outcome: "NOT_SENT" } };
+    }
     if (!spoke && replayNoop) lastError = lastError ?? "Lượt lặp lại tin khách đã được trả lời — đơn nháp không đổi, không gửi lại câu nào";
     // HẬU MÃI, TIN MODEL CHỈ TOÀN LỜI MỜI (review PR #878 vòng 2): câu thay KHÔNG phải câu chung «nói rõ hơn» (sau chốt câu ấy vô nghĩa).
     // Khách hỏi trạng thái / lịch giao ⇒ câu trạng thái từ `get_order_status` của lượt; model chưa gọi ⇒ máy chủ tự tra (cùng công cụ,
@@ -1894,7 +1928,7 @@ export const COMMENT_BATCH_WINDOW_MS = 30 * 60_000;
 export const NEW_ROUND_GAP_MS = 7 * 24 * 3_600_000;
 
 /** Khoá trạng thái thuộc về MỘT lượt mua — lượt mua mới xoá hết (#855: báo giá / sổ tổng bị từ chối; #868: sổ lời mời). */
-const ROUND_STATE_KEYS = ["confirmed", "draft", "stage", "upsellSent", "upsellUnavailable", "upsellDeclinedTurn", "offerDrops", "declined", "handoff", "cart", "quote", "rejectedTotals", "proposedItems", "deliveryPref"] as const;
+const ROUND_STATE_KEYS = ["confirmed", "draft", "stage", "upsellSent", "upsellUnavailable", "upsellDeclinedTurn", "offerDrops", "postConfirmOffer", "declined", "handoff", "cart", "quote", "rejectedTotals", "proposedItems", "deliveryPref"] as const;
 
 /**
  * Trạng thái của một LƯỢT MUA MỚI: đơn đã chốt (nếu có) sang `pastOrders`, mọi khoá của lượt mua cũ bị xoá, `startAt` (nếu có) thành mốc
