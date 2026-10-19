@@ -47,9 +47,11 @@ export async function loadOfferFacts(cfg: SalesChatbotConfig, upsellReplyId: str
   const catalogNames = [...new Set(catalog.map((c) => c.name))];
   const byName = new Map<string, CatalogItem[]>();
   for (const c of catalog) byName.set(c.name, [...(byName.get(c.name) ?? []), c]);
+  // Giá mời: mẫu mã chỉ bán kèm được định giá như món đi kèm đơn chính (không phải đơn riêng) — xem `addOnAlone`.
   const verified = verifiedUnitPrices(
     catalog.map((c) => c.variantId),
     ctx,
+    { addOnAlone: true },
   );
   // Món shop khai là bổ trợ.
   const answer = await upsellAnswer(upsellReplyId);

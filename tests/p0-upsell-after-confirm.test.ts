@@ -19,6 +19,9 @@ import { getDb, schema } from "@/db";
 import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
 import { formatVND } from "@/lib/format";
 import { stockFor } from "@/lib/sales-chatbot/catalog";
+import type { CatalogItem } from "@/lib/sales-chatbot/catalog";
+import { DEFAULT_SALES_CHATBOT_CONFIG } from "@/lib/sales-chatbot/config";
+import { pricingContextOf, verifiedUnitPrices } from "@/lib/sales-chatbot/quote";
 import { confirmedAddIssue, isShortYes, pickPostConfirmOffer, postConfirmOfferText, postConfirmOfferWindow } from "@/lib/sales-chatbot/next-best-action";
 import { SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
@@ -104,11 +107,24 @@ function testThuan() {
   assert.equal(confirmedAddIssue(ruoc, undefined, "ok lấy thêm 1 hũ ruốc nữa em", { chosen: [{ productId: null, match: "ruốc" }] }), null, "nhãn khách nói khớp tên món ⇒ thêm");
   assert.equal(confirmedAddIssue(ruoc, undefined, "ok em", { chosen: [] })?.kind, "UNNAMED", "không có lựa chọn ⇒ vẫn chặn");
   assert.equal(confirmedAddIssue(ruoc, undefined, "ok lấy thêm 1 hộp nem", { chosen: [{ productId: "p3", match: "nem" }] })?.kind, "UNNAMED", "chọn món khác ⇒ không phải căn cứ cho ruốc");
+  // Production 19/10/2026 (kênh TEST HSLC): gói 0,5kg CHỈ BÁN KÈM 200.000 ₫ không bao giờ có «giá đã xác thực» vì báo giá riêng nó luôn là
+  // «giỏ chỉ có món bán kèm» ⇒ lời mời ra gói 1kg 400.000 ₫. Định giá như món đi kèm: chỉ lý do ADD_ON_ONLY được bỏ qua.
+  {
+    const muc = (variantId: string, variant: string, price: number | null, addOnOnly = false): CatalogItem => ({ variantId, productId: "p-muc", name: "Chả mực giã tay", sku: variantId.toUpperCase(), variant, price, fields: {}, ...(addOnOnly ? { addOnOnly: true } : {}) });
+    const cfg = { volumeDiscount: { ...DEFAULT_SALES_CHATBOT_CONFIG.volumeDiscount, enabled: false }, freeShipping: DEFAULT_SALES_CHATBOT_CONFIG.freeShipping, shippingFee: 30_000, wholesalePricing: false };
+    const ctx = pricingContextOf([muc("m1", "1kg (2 túi 0,5kg)", 400_000), muc("m05", "0,5kg (1 túi 0,5kg)", 200_000, true), muc("m05x", "0,5kg", null, true)], cfg, null);
+    assert.equal(verifiedUnitPrices(["m05"], ctx).get("m05")?.price, null, "mặc định: món chỉ bán kèm KHÔNG có giá riêng (đường báo giá giữ nguyên)");
+    const offer = verifiedUnitPrices(["m1", "m05", "m05x"], ctx, { addOnAlone: true });
+    assert.equal(offer.get("m05")?.price, 200_000, "lời mời: gói chỉ bán kèm có giá của nó");
+    assert.equal(offer.get("m1")?.price, 400_000);
+    assert.equal(offer.get("m05x")?.price, null, "chỉ bán kèm mà CHƯA có giá ⇒ vẫn không mời");
+  }
   // B3 + NB4 khoá mức mã nguồn: đồng hồ khách AI nhận chữ ĐÃ GHÉP; giá mời theo bảng giá của khách.
   const eng = readFileSync("lib/sales-chatbot/engine.ts", "utf8");
   assert.match(eng, /const i = aiTexts\.lastIndexOf\(appended\.before\);\s*if \(i >= 0\) aiTexts\[i\] = appended\.after;/, "aiTexts thay bằng chữ đã ghép câu mời");
   const tools = readFileSync("lib/sales-chatbot/tools.ts", "utf8");
   assert.match(tools, /booksForChat\(ctx\.config, verifiedCustomerId\(state\)\)\s*\.then\(\(books\) => loadOfferFacts\(ctx\.config, upsellId, books\)\)/, "giá mời theo bảng giá của khách");
+  assert.match(readFileSync("lib/sales-chatbot/offer-facts.ts", "utf8"), /verifiedUnitPrices\(\s*catalog\.map\(\(c\) => c\.variantId\),\s*ctx,\s*\{ addOnAlone: true \},?\s*\)/, "lời mời định giá gói chỉ bán kèm như món đi kèm");
 }
 
 // ═══ chatTurn THẬT + PGlite (`gd-food-pco`) ═══
