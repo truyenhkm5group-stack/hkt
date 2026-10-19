@@ -25,18 +25,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-19T11:32:45.301Z",
-  "updated_at": "2026-10-19T11:34:30.301Z",
-  "last_heartbeat": "2026-10-19T11:33:11.034Z",
+  "updated_at": "2026-10-19T11:45:32.905Z",
+  "last_heartbeat": "2026-10-19T11:45:32.905Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/upsell-audit-mau",
-    "sha": "eaaf5a1049ec50db297c7333e980921c48b928b5",
-    "at": "2026-10-19T11:33:11.034Z",
+    "sha": "e6017488650327f5df043d59d80b683d7f7c60fe",
+    "at": "2026-10-19T11:45:32.905Z",
     "actor": "DESKTOP-56TH98Y:wt-upsell-audit-mau",
     "title": "upsell-offer-audit in mẫu mã hội thoại sai lúc (phần mã hoá)",
     "summary": "",
     "tests": [
-      "testUpsellOfferAudit ĐẠT (addSamples + trần + chặn mẫu vào tóm tắt); tsc + eslint sạch"
+      "ops-log-leak (cả testKenhTomTat) + testUpsellOfferAudit ĐẠT; chỉ đổi chữ chú thích"
     ]
   }
 }
