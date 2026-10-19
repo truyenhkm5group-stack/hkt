@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "upsell-audit-lap",
+  "title": "upsell-offer-audit tách mời lặp: có lời mời sau chốt / hai món khác",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-upsell-audit-lap",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/upsell-audit-lap",
+  "base_sha": "a8ca4d65e34b8f35c7ce40f99eb15e4a076d4d53",
+  "domains": [],
+  "owned_paths": [
+    "scripts/upsell-offer-audit.ts",
+    "tests/upsell-offer-audit.test.ts"
+  ],
+  "dependencies": [
+    "upsell-goi-ban-kem"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-19T10:57:43.949Z",
+  "updated_at": "2026-10-19T10:57:43.949Z",
+  "last_heartbeat": "2026-10-19T10:57:43.949Z",
+  "definition_of_done": []
+}
