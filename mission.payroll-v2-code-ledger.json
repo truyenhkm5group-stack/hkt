@@ -3,7 +3,7 @@
   "mission_id": "payroll-v2-code-ledger",
   "title": "P0 Lương V2: sổ lợi nhuận theo mã (lũy kế + HWM), phân công MKTer↔mã nhiều-nhiều OWNER/SUPPORT, thưởng theo mã giới hạn bằng quỹ công ty",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -38,13 +38,14 @@
     "0249": "2026-10-19T02:44:48.729Z"
   },
   "created_at": "2026-10-19T02:43:55.309Z",
-  "updated_at": "2026-10-19T08:54:47.372Z",
-  "last_heartbeat": "2026-10-19T08:00:40.382Z",
+  "updated_at": "2026-10-19T08:58:28.380Z",
+  "last_heartbeat": "2026-10-19T08:58:28.380Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#911 → a8ca4d65e34b8f35c7ce40f99eb15e4a076d4d53",
     "verify": "PASS a8ca4d65e34b8f35c7ce40f99eb15e4a076d4d53 2026-10-19T08:54:27.615Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39224811647"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39224811647",
+    "done": "#911 deploy a8ca4d65 (run 39224811647 GREEN, verify PASS, 0249 áp 5/5 tổ chức). Production verification ops payroll-profit-gate-audit run 39226377109 (chỉ đọc đã xác minh): đối soát Σ LN mã − QC test − chung không chia − vận chuyển không chia = LN công ty CHÊNH 0 ở cả 5 tháng 06–10/2026; sổ mã giả định tính tay khớp (Q002 T9 bù −16.252.983 rồi đủ ĐK 10.280.375; Q003 T10 vượt HWM 17.488.533 ⇒ 442.293; Q001 T9 dưới HWM ⇒ 0); công ty lũy kế âm mọi tháng ⇒ phân bổ xuống mã 0 ⇒ 0 thưởng theo mã; production 0 phân công ⇒ bảng lương không đổi."
   },
   "handoff": {
     "branch": "claude/payroll-v2-code-ledger",
