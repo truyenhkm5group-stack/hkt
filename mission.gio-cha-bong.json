@@ -28,18 +28,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-19T14:39:53.454Z",
-  "updated_at": "2026-10-19T14:40:21.698Z",
-  "last_heartbeat": "2026-10-19T14:40:21.698Z",
+  "updated_at": "2026-10-19T15:05:53.527Z",
+  "last_heartbeat": "2026-10-19T15:05:53.527Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/gio-cha-bong",
-    "sha": "f3033dd89a279f6bf1d7531392d681b169d8d027",
-    "at": "2026-10-19T14:40:21.698Z",
+    "sha": "2cd33df5769dc18c2c1cb8ba155020d62ee7c2c9",
+    "at": "2026-10-19T15:05:53.527Z",
     "actor": "DESKTOP-56TH98Y:wt-gio-cha-bong",
     "title": "P0: giỏ ghi được «1kg chả cá thu» khi danh mục có «Ruốc bông (chà bông) cá thu» + câu mẫu xét món theo bộ lọc món",
     "summary": "",
     "tests": [
-      "sales-cart-commitment (+ danh mục thật HSLC); #855 cart/delta; #863; #871 (cả golden); P0 câu mẫu (ca đã chọn chạy với tên ruốc thật — đột biến gỡ «liền nhau» ⇒ đỏ); P0 upsell; báo giá; upsell-offer-audit; conv-money-trace; sales-agent-golden 23; order-golden 33×2 BASELINE; ops-log-leak; platform-isolation-static; test-hygiene; repo-integrity; tsc + eslint sạch"
+      "sales-cart-commitment (HSLC thật + áo thun nam/nữ vẫn mơ hồ; đột biến đỏ); #855 cart/delta; #863; #871; P0 câu mẫu; P0 upsell; báo giá; sales-agent-golden 23; order-golden 33×2 BASELINE; tsc + eslint sạch"
     ]
   }
 }
