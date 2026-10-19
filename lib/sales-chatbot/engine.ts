@@ -1324,7 +1324,7 @@ async function chatTurnCore(
     const quickSizeReask = async (pick: QuickReplyPick): Promise<boolean> => {
       if (!st0.cart?.selectedItems.some((x) => x.customerExplicit)) return false;
       const facts = needsOfferFacts(pick.text, st0.cart) ? await loadOfferFacts(cfg, qrSettings.upsellReplyId ?? null).catch(() => null) : null;
-      if (!quickReplySizeConflict(pick.text, { cart: st0.cart, lastUserText: text, facts })) return false;
+      if (!quickReplySizeConflict(pick.text, { cart: st0.cart, lastUserText: text, facts, ...(qrFocus ? { covers: qrFocus.coversOf(pick.entry) } : {}) })) return false;
       const st: ChatState = { ...st0, quickSizeYields: [...(st0.quickSizeYields ?? []), now.toISOString()].slice(-QUICK_SIZE_YIELDS_MAX) };
       await bump({ state: st as Record<string, unknown> });
       conv.state = st as Record<string, unknown>;
