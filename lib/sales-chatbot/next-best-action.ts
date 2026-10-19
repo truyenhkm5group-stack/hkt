@@ -23,7 +23,7 @@
  */
 import { purchaseRoundStart } from "@/lib/sales-chatbot/purchase-round";
 import { resolveRecipientPlace } from "@/lib/address/vn-address";
-import { amountsIn, declinesAddOnOnly, labelsMatch, namedProductsIn, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
+import { amountsIn, buyingText, calledByName, declinesAddOnOnly, labelsMatch, mentionsProduct, namedProductsIn, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 
@@ -290,12 +290,42 @@ export function pickPostConfirmOffer(orderProductIds: readonly (string | null)[]
   return offers.find((o) => !has.has(o.productId) && !families.has(familyOf(o.name))) ?? null;
 }
 
+/** Nhãn quy cách đọc được («Size: 0,5kg» ⇒ «0,5kg»). */
+export const offerVariantLabel = (variant: string) => variant.replace(/^\s*(?:size|cỡ|kích thước|quy cách)\s*:\s*/i, "").trim();
+
+/**
+ * THÊM MÓN VÀO ĐƠN ĐÃ CHỐT — có được không (review upsell-after-confirm vòng 1 + 2). `added` = sản phẩm MỚI (đơn chưa có). Khách phải
+ * gọi tên món trong CHỮ MUA của tin này (`buyingText` — bỏ câu hỏi giá «chả mực bao nhiêu em», câu từ chối «chả mực thì thôi em»; nhận
+ * cả tên bỏ chữ đầu «thêm mực giã tay» — `calledByName`). Món là món VỪA ĐƯỢC MỜI mà mẫu mã khác mẫu mã đã mời: khách không nói khối
+ * lượng, hoặc khối lượng khách nói không khớp mẫu mã đã chọn ⇒ không được (mời 0,5kg mà thêm 1kg là đổi giá khách đã thấy). Trả `null`
+ * khi được; còn lại trả lý do + (khi khách có ý thêm món được mời mà chưa gọi tên rõ) ĐÚNG MỘT câu hỏi xác nhận. HÀM THUẦN.
+ */
+export type ConfirmedAddLine = { productId: string | null; variantId: string; name: string; quantity: number; weightGrams: number | null };
+export type PostConfirmOfferRef = { productId?: string; variantId?: string; name?: string; variant?: string; price?: number; sent?: boolean };
+export function confirmedAddIssue(added: readonly ConfirmedAddLine[], offer: PostConfirmOfferRef | undefined, customerText: string): { kind: "UNNAMED" | "WRONG_VARIANT"; names: string[]; ask: string | null } | null {
+  const buy = buyingText([customerText]);
+  const unnamed = added.filter((a) => !(mentionsProduct(a.name, buy) || calledByName(a.name, buy)));
+  const what = offer?.name ? `${offer.name}${offer.variant && offerVariantLabel(offer.variant) ? ` (${offerVariantLabel(offer.variant)})` : ""}` : "";
+  const addCue = /(?:^| )(?:them|lay them|cho them|ok|oke|duoc|dong y|u|uk|lay|lay luon)(?: |$)/.test(foldVi(customerText));
+  if (unnamed.length) {
+    const offeredUnnamed = Boolean(offer?.sent && offer.productId && unnamed.some((a) => a.productId === offer.productId));
+    return { kind: "UNNAMED", names: unnamed.map((a) => a.name), ask: offeredUnnamed && addCue && what ? `Mình muốn thêm ${what} vào đơn đúng không ạ?` : null };
+  }
+  const off = offer?.sent && offer.productId && offer.variantId ? added.find((a) => a.productId === offer.productId && a.variantId !== offer.variantId) : undefined;
+  if (off) {
+    const grams = amountsIn(customerText).filter((x) => x.unit === "g").map((x) => x.value);
+    const fits = off.weightGrams !== null && grams.some((g) => g === off.weightGrams! * off.quantity || g === off.weightGrams);
+    if (!fits) return { kind: "WRONG_VARIANT", names: [off.name], ask: what ? `Mình muốn thêm ${what} vào đơn đúng không ạ?` : null };
+  }
+  return null;
+}
+
 /**
  * Câu mời — MÁY CHỦ dựng, giá máy chủ, một câu, nói rõ khách phải NHẮN món nếu muốn (khách chỉ «ok» với đơn chính không phải đồng ý
  * mua thêm — `lineBasisViolation` chặn thêm món khách chưa gọi tên). HÀM THUẦN.
  */
 export function postConfirmOfferText(o: CrossSellOffer, money: (n: number) => string): string {
-  const label = o.variant.replace(/^\s*(?:size|cỡ|kích thước|quy cách)\s*:\s*/i, "").trim();
+  const label = offerVariantLabel(o.variant);
   const what = label && label !== o.name ? `${o.name} (${label})` : o.name;
   // Câu gợi ý mang cả quy cách đã mời (review NB1) — khách nhắn đúng câu thì máy thêm đúng mẫu mã, đúng giá đã báo.
   const reply = label && label !== o.name ? `${o.name.toLowerCase()} ${label}` : o.name.toLowerCase();

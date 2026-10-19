@@ -18,7 +18,8 @@ import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
 import { formatVND } from "@/lib/format";
-import { pickPostConfirmOffer, postConfirmOfferText, postConfirmOfferWindow } from "@/lib/sales-chatbot/next-best-action";
+import { stockFor } from "@/lib/sales-chatbot/catalog";
+import { confirmedAddIssue, pickPostConfirmOffer, postConfirmOfferText, postConfirmOfferWindow } from "@/lib/sales-chatbot/next-best-action";
 import { QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { setSettingJson } from "@/lib/settings";
@@ -45,6 +46,21 @@ function testThuan() {
   // NB3: không mời món CÙNG HỌ với món khách vừa mua.
   const fam = [{ name: "Chả cá hấp", productId: "p3", variantId: "v3", variant: "1kg", price: 300_000 }, ...offers];
   assert.equal(pickPostConfirmOffer(["p1"], fam, ["Chả cá thu (Size: 1kg)"])?.name, "Chả mực giã tay", "mua chả cá thu ⇒ không mời chả cá hấp");
+  // Review vòng 2: thêm món vào đơn đã chốt — chữ MUA phải gọi tên món; câu hỏi giá / câu từ chối không phải; tên bỏ chữ đầu vẫn nhận;
+  // món vừa mời phải đúng mẫu mã đã mời (khối lượng khách nói phải khớp).
+  const mucNew = [{ productId: "p2", variantId: "v2", name: "Chả mực giã tay (Size: 0,5kg)", quantity: 1, weightGrams: 500 }];
+  const offerRef = { productId: "p2", variantId: "v2", name: "Chả mực giã tay", variant: "Size: 0,5kg", price: 200_000, sent: true };
+  assert.equal(confirmedAddIssue(mucNew, offerRef, "chả mực giã tay bao nhiêu em")?.kind, "UNNAMED", "câu hỏi giá không phải lời mua");
+  assert.equal(confirmedAddIssue(mucNew, offerRef, "chả mực giã tay thì thôi em")?.kind, "UNNAMED", "câu từ chối không phải lời mua");
+  assert.equal(confirmedAddIssue(mucNew, offerRef, "thêm mực giã tay nhé em"), null, "tên bỏ chữ đầu vẫn là gọi tên");
+  assert.equal(confirmedAddIssue(mucNew, offerRef, "thêm chả mực giã tay 0,5kg"), null);
+  const okAdd = confirmedAddIssue(mucNew, offerRef, "ok thêm giúp chị");
+  assert.equal(okAdd?.kind, "UNNAMED");
+  assert.equal(okAdd?.ask, "Mình muốn thêm Chả mực giã tay (0,5kg) vào đơn đúng không ạ?", "có ý thêm mà chưa gọi tên ⇒ hỏi ĐÚNG một câu, không im lặng");
+  const muc1kg = [{ productId: "p2", variantId: "v2-1kg", name: "Chả mực giã tay (Size: 1kg)", quantity: 1, weightGrams: 1000 }];
+  assert.equal(confirmedAddIssue(muc1kg, offerRef, "thêm chả mực giã tay 0,5kg")?.kind, "WRONG_VARIANT", "mời 0,5kg mà chọn mẫu mã 1kg ⇒ không");
+  assert.equal(confirmedAddIssue(muc1kg, offerRef, "thêm chả mực giã tay nhé")?.kind, "WRONG_VARIANT", "không nói khối lượng ⇒ đúng mẫu mã đã mời");
+  assert.equal(confirmedAddIssue(muc1kg, offerRef, "thêm 1kg chả mực giã tay"), null, "khách nói rõ 1kg ⇒ mẫu mã 1kg được");
   // B3 + NB4 khoá mức mã nguồn: đồng hồ khách AI nhận chữ ĐÃ GHÉP; giá mời theo bảng giá của khách.
   const eng = readFileSync("lib/sales-chatbot/engine.ts", "utf8");
   assert.match(eng, /const i = aiTexts\.lastIndexOf\(appended\.before\);\s*if \(i >= 0\) aiTexts\[i\] = appended\.after;/, "aiTexts thay bằng chữ đã ghép câu mời");
@@ -58,10 +74,15 @@ const ADDR = "9 Hai Bà Trưng, Phường Hoàn Kiếm, Thành phố Hà Nội";
 const MENU = "Dạ bên em còn chả mực giã tay {{giá:CHA-MUC}} ăn kèm rất hợp ạ.";
 const INFO = (phone: string) => `Cho chị 1 hộp ruốc bông tôm, Lan ${phone}, ${ADDR}`;
 
-async function seedMenu(): Promise<void> {
+async function seedMenu(ids: ReadonlyMap<string, string>): Promise<void> {
   const db = await getDb();
   const qr = schema.salesChatQuickReplies;
   const [row] = await db.select({ id: qr.id }).from(qr).where(eq(qr.title, "Menu món ngon")).limit(1);
+  // Mỗi ca đặt một hộp ruốc + vài ca thêm chả mực — nạp đủ tồn một lần để không ca nào trượt vì «không đủ hàng».
+  if (!row) {
+    const [rc] = await db.insert(schema.stockReceipts).values({ kind: "RECEIPT", receivedAt: new Date(), reference: "PCO-NAP", totalQuantity: 120, createdBy: "test" }).returning({ id: schema.stockReceipts.id });
+    await db.insert(schema.stockReceiptItems).values([{ receiptId: rc.id, variantId: ids.get("RUOC-TOM")!, quantity: 100, unitCost: 100_000 }, { receiptId: rc.id, variantId: ids.get("CHA-MUC")!, quantity: 20, unitCost: 200_000 }]);
+  }
   const id = row?.id ?? (await db.insert(qr).values({ title: "Menu món ngon", triggers: ["menu món ngon"], answer: MENU, active: true }).returning({ id: qr.id }))[0].id;
   await setSettingJson(QUICK_REPLY_SETTING_KEY, { enabled: true, aiMatch: false, upsellReplyId: id, autoLearn: false, autoActivate: false });
 }
@@ -90,11 +111,20 @@ const CASES: GoldenCase[] = [
     { say: INFO("0961003209"), ai: orderInfo("0961003209") },
     { say: "thêm chả mực giã tay nhé em", ai: [({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })], ({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em thêm chả mực vào đơn rồi ạ.")]] },
   ] },
-  { key: "pco-da-moi-truoc", title: "Đã được mời trước khi chốt trong lượt mua ⇒ không mời lại sau chốt", shop: "food", channel: "WEB", turns: [
+  { key: "pco-hoi-gia-mon-moi", title: "(review vòng 2) Sau lời mời, khách HỎI GIÁ món được mời ⇒ không thêm vào đơn đã chốt", shop: "food", channel: "WEB", turns: [
+    { say: "chị lấy cái này nhé", ai: [() => [say("Dạ chị lấy 1 hộp ruốc bông tôm nhé, cho em xin SĐT + địa chỉ ạ.")]] },
+    { say: `Lan 0961003210, ${ADDR}`, ai: orderInfo("0961003210") },
+    { say: "chả mực giã tay bao nhiêu em", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ chả mực giã tay 400.000 ₫/kg ạ.")]] },
+  ] },
+  { key: "pco-ship-bao-sau", title: "(review vòng 2) Shop chưa khai phí ship ⇒ «Tổng đơn mới» không in phí ship CHƯA BIẾT thành 0", shop: "food", channel: "WEB", config: { shippingFee: null }, turns: [
+    { say: INFO("0961003211"), ai: orderInfo("0961003211") },
+    { say: "thêm 1kg chả mực giã tay nữa nhé em", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em thêm chả mực vào đơn rồi ạ.")]] },
+  ] },
+  { key: "pco-da-moi-truoc", title: "Đã được mời trước khi chốt trong lượt mua ⇒ không mời lại sau chốt", shop: "food", channel: "WEB", config: {}, turns: [
     { say: "Cho chị 1 hộp ruốc bông tôm", ai: [() => [say("Dạ 1 hộp ruốc bông tôm ạ. Mình dùng thêm chả mực giã tay ăn kèm không ạ?")]] },
     { say: `Lan 0961003203, ${ADDR}`, ai: orderInfo("0961003203") },
   ] },
-  { key: "pco-van-don-chay", title: "Khách nhận lời mời nhưng đơn đã có vận đơn ở hãng ⇒ lõi không sửa, chuyển người, không hứa đã thêm", shop: "food", channel: "WEB", turns: [
+  { key: "pco-van-don-chay", title: "Khách nhận lời mời nhưng đơn đã có vận đơn ở hãng ⇒ lõi không sửa, chuyển người, không hứa đã thêm", shop: "food", channel: "WEB", config: {}, turns: [
     { say: INFO("0961003204"), ai: orderInfo("0961003204") },
     {
       say: "thêm 1kg chả mực giã tay nữa nhé em",
@@ -106,20 +136,23 @@ const CASES: GoldenCase[] = [
       ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em báo nhân viên hỗ trợ mình ạ.")]],
     },
   ] },
-  { key: "pco-khong-tu-chot", title: "Đơn chốt bằng LỜI ĐỒNG Ý của khách ⇒ vẫn mời sau chốt; thêm món vào đơn đã chốt là việc của nhân viên", shop: "food", channel: "WEB", turns: [
+  { key: "pco-khong-tu-chot", title: "Đơn chốt bằng LỜI ĐỒNG Ý của khách ⇒ vẫn mời sau chốt; thêm món vào đơn đã chốt là việc của nhân viên", shop: "food", channel: "WEB", config: {}, turns: [
     { say: INFO("0961003205"), ai: [() => [tool("create_customer", { name: "Lan", phone: "0961003205", address: ADDR })], ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }] })], () => [say("Dạ đơn 1 hộp ruốc bông tôm 350.000 ₫, mình xác nhận giúp em nhé.")]] },
     { say: "ok chốt em", ai: [() => [tool("confirm_order", { customer_confirmation: "ok chốt em" })], () => [say("Dạ em chốt đơn cho mình rồi ạ.")]] },
   ] },
-  { key: "pco-don-co-mon-kem", title: "Đơn đã có đúng món kèm ⇒ không mời lại chính món đó (so theo sản phẩm, không theo nhãn dòng)", shop: "food", channel: "WEB", turns: [
+  { key: "pco-don-co-mon-kem", title: "Đơn đã có đúng món kèm ⇒ không mời lại chính món đó (so theo sản phẩm, không theo nhãn dòng)", shop: "food", channel: "WEB", config: {}, turns: [
     { say: `Cho chị 1kg chả mực giã tay, Lan 0961003207, ${ADDR}`, ai: [() => [tool("create_customer", { name: "Lan", phone: "0961003207", address: ADDR })], ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em lên đơn cho mình rồi ạ.")]] },
   ] },
-  { key: "pco-het-hang", title: "Món kèm hết hàng ⇒ không mời (không mời sai SKU, không mời cả menu)", shop: "food", channel: "WEB", turns: [
+  { key: "pco-het-hang", title: "Món kèm hết hàng ⇒ không mời (không mời sai SKU, không mời cả menu)", shop: "food", channel: "WEB", config: {}, turns: [
     {
       say: INFO("0961003206"),
       before: async (ctx) => {
         const db = await getDb();
-        const [rc] = await db.insert(schema.stockReceipts).values({ kind: "ADJUSTMENT", receivedAt: new Date(), reference: "PCO-HET", totalQuantity: -10, createdBy: "test" }).returning({ id: schema.stockReceipts.id });
-        await db.insert(schema.stockReceiptItems).values({ receiptId: rc.id, variantId: ctx.ids.get("CHA-MUC")!, quantity: -10, unitCost: 0 });
+        // Đưa tồn KHẢ DỤNG về đúng 0 (đọc sổ kho — các ca trước đã thêm chả mực vào đơn), không âm: tồn âm là sổ sai, ca khác.
+        const vid = ctx.ids.get("CHA-MUC")!;
+        const avail = (await stockFor([vid])).get(vid)?.available ?? 0;
+        const [rc] = await db.insert(schema.stockReceipts).values({ kind: "ADJUSTMENT", receivedAt: new Date(), reference: "PCO-HET", totalQuantity: -avail, createdBy: "test" }).returning({ id: schema.stockReceipts.id });
+        await db.insert(schema.stockReceiptItems).values({ receiptId: rc.id, variantId: vid, quantity: -avail, unitCost: 0 });
       },
       ai: orderInfo("0961003206"),
     },
@@ -144,8 +177,8 @@ async function testChatTurn() {
   const seen = new Set<string>();
   await runGoldenCases(CASES, {
     orgSuffix: "-pco",
-    beforeCase: async (c) => {
-      await seedMenu();
+    beforeCase: async (c, ctx) => {
+      await seedMenu(ctx.ids);
       await setSettingJson(AUTO_CONFIRM_COMPLETE_SETTING_KEY, { enabled: c.key !== "pco-khong-tu-chot" });
     },
     afterCase: async (c, ctx: GoldenHookCtx, t) => {
@@ -168,6 +201,14 @@ async function testChatTurn() {
         assert.deepEqual(lines, ["CHA-MUC×1", "RUOC-TOM×1"], results);
         assert.equal(st.postConfirmOffer?.accepted?.amount, 400_000);
         assert.match(results, /Tổng đơn mới 750\.000 ₫/, "câu xác nhận sửa đơn báo TỔNG MỚI (NB6)");
+      }
+      if (c.key === "pco-hoi-gia-mon-moi") {
+        assert.deepEqual(lines, ["RUOC-TOM×1"], `câu hỏi giá KHÔNG thêm món: ${lines.join(", ")}`);
+        assert.equal(st.postConfirmOffer?.accepted, undefined);
+      }
+      if (c.key === "pco-ship-bao-sau") {
+        assert.deepEqual(lines, ["CHA-MUC×1", "RUOC-TOM×1"], results);
+        assert.match(results, /Tổng đơn mới 750\.000 ₫ \+ phí ship \(báo sau\)/, `phí ship chưa biết không in thành 0: ${results.slice(0, 400)}`);
       }
       if (c.key === "pco-gio-khong-ten-ok") {
         assert.match(first + t.turns[1].shown.join("\n"), OFFER, "đơn chốt có lời mời");

@@ -949,7 +949,7 @@ export function mentionsProduct(name: string, customerSaid: string): boolean {
  * Khách gọi tên món, kể cả khi bỏ danh từ đầu («mực giã tay» = «Chả mực giã tay», «cá thu» = «Chả cá thu»): `mentionsProduct`, hoặc ít nhất
  * HAI từ riêng (ngoài từ đầu) của tên có mặt. Chỉ dùng để NỚI hàng rào (món được gọi tên thì không bị coi là tự thêm). HÀM THUẦN.
  */
-function calledByName(name: string, customerSaid: string): boolean {
+export function calledByName(name: string, customerSaid: string): boolean {
   if (mentionsProduct(name, customerSaid)) return true;
   const rest = [...new Set(labelTokens(productName(name)).slice(1).filter((w) => !/^\d/.test(w) && w !== "kg" && w !== "g"))];
   const said = new Set(labelTokens(customerSaid));

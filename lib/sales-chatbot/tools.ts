@@ -45,7 +45,7 @@ import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packi
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
 import type { ObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
-import { amountsIn, bindCommitment, cartDraftDiff, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, mentionsProduct, mentionText, negatedCancel, unrequestedProducts, type CartCommitment, type CartDraftDiff } from "@/lib/sales-chatbot/cart-commitment";
+import { bindCommitment, cartDraftDiff, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, mentionText, negatedCancel, unrequestedProducts, type CartCommitment, type CartDraftDiff } from "@/lib/sales-chatbot/cart-commitment";
 import { cartQuoteLines, type CatalogLite } from "@/lib/sales-chatbot/cancel-recovery";
 import { acceptCustomerWard, addressQuestion, canAutoFill, legacyAddressUnmapped, namesOtherWard, otherWardNamed, parseCustomerAddress, sameDeliveryPlace, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
 import { addressKnowledge, addressReaskVerdict, askedBefore, askMemoryFor, askMemoryParts, askParts, deliveryAddressDecision, hasChangeCue, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
@@ -60,7 +60,7 @@ import { customerOrderStatus } from "@/lib/sales-chatbot/order-status-shared";
 import { classifyDeliveryQuestion, deliveryPreferenceNote, deliveryTimeAnswer, pickDeliveryOrder, staffDeliveryCommitment } from "@/lib/sales-chatbot/delivery-intent";
 import { futurePurchaseOnly, postSaleDropsIn } from "@/lib/sales-chatbot/post-sale-guard";
 import { customerComplaintSignal, LIFECYCLE_ORDER_LOOKBACK_DAYS } from "@/lib/sales-chatbot/lifecycle";
-import { OFFER_BLOCK_LABEL, offerWindow, pickPostConfirmOffer, postConfirmOfferText, postConfirmOfferWindow, withOfferDrops, type OfferBlock, type SentenceClass } from "@/lib/sales-chatbot/next-best-action";
+import { confirmedAddIssue, OFFER_BLOCK_LABEL, offerWindow, pickPostConfirmOffer, postConfirmOfferText, postConfirmOfferWindow, withOfferDrops, type OfferBlock, type SentenceClass } from "@/lib/sales-chatbot/next-best-action";
 import { loadOfferFacts } from "@/lib/sales-chatbot/offer-facts";
 import { fanpageVisitorKeyMirror } from "@/lib/pricing/ai-customer-identity";
 import type { PromptStamp } from "@/lib/sales-chatbot/prompt-stamp";
@@ -148,7 +148,7 @@ export type ChatState = {
    * `sent`) hoặc lý do KHÔNG mời (cửa sổ đóng · không có món bổ trợ đủ điều kiện · đọc dữ kiện lỗi). `accepted` = đơn ĐÃ CHỐT được sửa thêm
    * đúng món được mời SAU lời mời. Chỉ để vận hành + đo (ops upsell-offer-audit); xoá khi sang lượt mua mới.
    */
-  postConfirmOffer?: { turn: number; at: string; outcome: "OFFERED" | "NO_CANDIDATE" | "FACTS_ERROR" | "NOT_SENT" | OfferBlock; text?: string; name?: string; productId?: string; variantId?: string; price?: number; sent?: boolean; accepted?: { at: string; amount: number } };
+  postConfirmOffer?: { turn: number; at: string; outcome: "OFFERED" | "NO_CANDIDATE" | "FACTS_ERROR" | "NOT_SENT" | OfferBlock; text?: string; name?: string; productId?: string; variantId?: string; variant?: string; price?: number; sent?: boolean; accepted?: { at: string; amount: number } };
   /** Câu upsell không gửi được (thiếu số ERP) — chỉ để đo; từ 16/10/2026 câu upsell KHÔNG còn là điều kiện lên đơn (#868). */
   upsellUnavailable?: boolean;
   /** Lượt khách TỪ CHỐI lời mời mua thêm của lượt mua này (`offerDeclinedBy`, next-best-action.ts) — không mời lại trong lượt mua. */
@@ -1197,13 +1197,13 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (editingConfirmed && v.data.items && existing) {
         const had = new Set((await priceLines(existing.lines, ctx.config, verifiedCustomerId(state))).asked.map((a) => a.productId ?? a.variantId));
         const added = priced.asked.filter((a) => !had.has(a.productId ?? a.variantId));
-        const unnamed = added.filter((a) => !mentionsProduct(a.name, ctx.lastUserText));
-        if (unnamed.length) return err("Sửa đơn đã chốt: khách chưa gọi tên món", `Khách CHƯA gọi tên ${unnamed.map((a) => a.name).join(", ")} trong tin này — «ok», «dạ», «cảm ơn» là ghi nhận ĐƠN CHÍNH. KHÔNG thêm món, KHÔNG nhắc lại lời mời; đơn giữ nguyên.`, state);
-        // Khách nhận lời mời mà KHÔNG nói quy cách ⇒ đúng mẫu mã đã mời (giá đã báo), không phải mẫu mã khác giá khác (review NB1).
-        const pco = state.postConfirmOffer;
-        const offered = pco?.sent && pco.productId && pco.variantId ? added.find((a) => a.productId === pco.productId && a.variantId !== pco.variantId) : undefined;
-        if (offered && !amountsIn(ctx.lastUserText).some((a) => a.unit === "g")) {
-          return err("Sửa đơn đã chốt: sai mẫu mã được mời", `Khách nhận lời mời nhưng không nói quy cách — thêm ĐÚNG mẫu mã đã mời variant_id ${pco!.variantId} (${pco!.name}, ${formatVND(pco!.price ?? 0)}), không phải mẫu mã khác.`, state);
+        // Chữ MUA của tin này (bỏ câu hỏi giá / câu từ chối — review vòng 2) phải gọi tên món; món vừa được mời phải đúng mẫu mã đã mời.
+        const issue = confirmedAddIssue(added, state.postConfirmOffer, ctx.lastUserText);
+        const ask = issue?.ask ? ` Hỏi khách ĐÚNG MỘT câu: «${issue.ask}» — không im lặng, không nói đã thêm.` : " KHÔNG nhắc lại lời mời.";
+        if (issue?.kind === "UNNAMED") return err("Sửa đơn đã chốt: khách chưa gọi tên món", `Khách CHƯA gọi tên ${issue.names.join(", ")} như một lời MUA trong tin này — «ok», «dạ», câu hỏi giá, câu từ chối không phải đồng ý mua thêm. KHÔNG thêm món; đơn giữ nguyên.${ask}`, state);
+        if (issue?.kind === "WRONG_VARIANT") {
+          const pco = state.postConfirmOffer;
+          return err("Sửa đơn đã chốt: sai mẫu mã được mời", `Mẫu mã chọn không khớp mẫu mã đã mời / khối lượng khách nói — món vừa mời là variant_id ${pco?.variantId} (${pco?.name}, ${formatVND(pco?.price ?? 0)}). KHÔNG thêm mẫu mã khác.${ask}`, state);
         }
       }
       const packMistake = v.data.items ? packQuantityMistake(priced.asked, ctx.lastUserText) : null;
@@ -1270,7 +1270,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         const validity = simulated || !draft.orderId ? null : await confirmedValidity(draft.orderId);
         state.confirmed = { ...state.confirmed, total: priced.total ?? priced.subtotal, quoteId: priced.quote.quoteId, ...(validity ? { valid: validity.valid, pending: validity.pending } : {}) };
         const pendingText = validity && !validity.valid ? (validity.pending === "ADDRESS" ? CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK) : null;
-        return ok(`${simulated ? "(Thử) " : ""}Sửa đơn đã chốt · ${formatVND(priced.subtotal)}`, { ...view, status: "Đã chốt — đã cập nhật theo ý khách", auto_confirmed: true, say_to_customer: pendingText ?? `${autoConfirmText(priced.lines)} Tổng đơn mới ${formatVND(priced.total ?? priced.subtotal)} ạ.`, instruction: "Đơn ĐÃ CHỐT vừa được cập nhật theo ý khách. Gửi khách ĐÚNG MỘT câu say_to_customer — không hỏi xác nhận lại." }, state);
+        return ok(`${simulated ? "(Thử) " : ""}Sửa đơn đã chốt · ${formatVND(priced.subtotal)}`, { ...view, status: "Đã chốt — đã cập nhật theo ý khách", auto_confirmed: true, say_to_customer: pendingText ?? `${autoConfirmText(priced.lines)} Tổng đơn mới ${cartView(priced).cod_total_text} ạ.`, instruction: "Đơn ĐÃ CHỐT vừa được cập nhật theo ý khách. Gửi khách ĐÚNG MỘT câu say_to_customer — không hỏi xác nhận lại." }, state);
       }
       // TỰ CHỐT KHI ĐỦ ĐƠN (P0-A): đủ sáu điều kiện ⇒ chốt NGAY bằng chính lượt chốt của confirm_order (cùng kiểm giá · tồn · địa chỉ của lõi),
       // không hỏi khách «có chốt không / lấy thêm gì không». Thiếu ⇒ nói đúng phần thiếu cho model hỏi khách.
@@ -1660,7 +1660,7 @@ async function notePostConfirmOffer(state: ChatState, ctx: ToolContext, orderPro
     return;
   }
   const o = pickPostConfirmOffer(orderProductIds, facts.crossSellOffers ?? [], orderNames);
-  state.postConfirmOffer = o ? { ...base, outcome: "OFFERED", text: postConfirmOfferText(o, formatVND), name: o.name, productId: o.productId, variantId: o.variantId, price: o.price } : { ...base, outcome: "NO_CANDIDATE" };
+  state.postConfirmOffer = o ? { ...base, outcome: "OFFERED", text: postConfirmOfferText(o, formatVND), name: o.name, productId: o.productId, variantId: o.variantId, variant: o.variant, price: o.price } : { ...base, outcome: "NO_CANDIDATE" };
 }
 
 /** Câu chốt ngắn khi máy chủ tự chốt — «Dạ em lên đơn 2 × Chả cá thu (1kg) cho mình rồi ạ, shop giao theo thông tin mình vừa gửi nhé.» */
