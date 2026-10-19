@@ -13,7 +13,7 @@ import { confirmCodeWeights, revokeCodeWeights } from "@/lib/actions/payroll-cod
  * số đo đổi thì khoản quay lại chờ. Người thứ hai duyệt khi nhóm Lương bật cưỡng chế duyệt.
  * Action `revalidatePath` trang này.
  */
-export function ConfirmWeightsButton({ monthKey, productId, code, fingerprints }: { monthKey: string; productId: string; code: string; fingerprints: string[] }) {
+export function ConfirmWeightsButton({ monthKey, productId, code, fingerprints, details }: { monthKey: string; productId: string; code: string; fingerprints: string[]; details: string[] }) {
   const [mo, setMo] = useState(false);
   const [lyDo, setLyDo] = useState("");
   const [pending, start] = useTransition();
@@ -26,6 +26,11 @@ export function ConfirmWeightsButton({ monthKey, productId, code, fingerprints }
   }
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1">
+      <ul className="w-full list-disc pl-5 text-xs">
+        {details.map((x, i) => (
+          <li key={i}>{x}</li>
+        ))}
+      </ul>
       <p className="w-full text-xs text-muted-foreground">Xác nhận áp cho ĐÚNG số đo đang hiện; số đo đổi (ghép chiến dịch, đơn chốt kết quả) thì phải xác nhận lại — nên làm ngay trước khi chốt kỳ.</p>
       <Input className="h-8 w-[360px] max-w-full" value={lyDo} onChange={(e) => setLyDo(e.target.value)} placeholder="Vì sao số đo hiện có là đủ (vd: B nghỉ chạy QC cả tháng)" />
       <Button

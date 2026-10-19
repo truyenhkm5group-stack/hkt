@@ -10,6 +10,7 @@ import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import { payrollPeriodKey } from "@/lib/constants/payroll";
 import { formatDate, formatVND } from "@/lib/format";
 import { PROFIT_GATE_STATUS_LABEL } from "@/lib/payroll/profit-gate";
+import { describeFingerprint } from "@/lib/payroll/code-ledger";
 import { getPayrollReport } from "@/lib/queries/payroll";
 import { periodFinalized } from "@/lib/queries/payroll-engine";
 import { paramList, resolvePeriod, type SearchParams } from "@/lib/search-params";
@@ -39,6 +40,8 @@ export default async function PayrollCodesPage({ searchParams }: { searchParams:
   const names = new Map(report.lines.map((l) => [l.employee.id, l.employee.shortName || l.employee.name] as const));
   const ten = (id: string | null) => (id ? (names.get(id) ?? id) : "—");
   const alloc = new Map(gate.result.allocations.map((a) => [a.key, a] as const));
+  // Dấu vân tay lấy từ TOÀN BỘ khoản chờ (không phải danh sách đã lọc) — server đòi bằng đúng tập này.
+  const vanTayCua = (pid: string) => [...new Set(led.pending.filter((q) => q.kind === "WEIGHT_PARTIAL" && q.productId === pid && q.fingerprint).map((q) => q.fingerprint as string))].sort();
 
   const product = new Map(report.marketers.products.map((p) => [p.productId, p] as const));
   const ledgerRow = new Map((led.rows ?? []).map((r) => [r.productId, r] as const));
@@ -249,7 +252,8 @@ export default async function PayrollCodesPage({ searchParams }: { searchParams:
                     monthKey={gate.result.monthKey}
                     productId={p.productId}
                     code={p.code || p.productId}
-                    fingerprints={[...new Set(led.pending.filter((q) => q.kind === "WEIGHT_PARTIAL" && q.productId === p.productId && q.fingerprint).map((q) => q.fingerprint as string))]}
+                    fingerprints={vanTayCua(p.productId)}
+                    details={vanTayCua(p.productId).map((f) => describeFingerprint(f, (x) => ten(x)))}
                   />
                 ) : null}
               </li>

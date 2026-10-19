@@ -33,6 +33,7 @@ import { codeAssignmentSchema, codeRowId, codeTermsSchema, endChangesFromKey, pl
 import type { Period } from "@/lib/search-params";
 import { monthPeriodKey } from "@/lib/queries/payroll-profit-gate";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
+import { PAYROLL_CODE_WEIGHT_CONFIRM_KEY } from "@/lib/constants/payroll-code";
 import { PAYROLL_RECOGNITION_KEY } from "@/lib/queries/payroll-cost";
 
 const TR = 1_000_000;
@@ -588,6 +589,39 @@ async function testFlow(db: Db) {
   await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [M1, M2, M4] });
   clearMemo();
 
+  /* ══ LỐI XÁC NHẬN TRỌNG SỐ — LUỒNG THẬT qua settings + getPayrollReport (review vòng 5) ══ */
+  // 500k QC trên mã A CHƯA GÁN cho MKTer nào ⇒ hai SUPPORT theo chi phí QC đứng ở chờ loại WEIGHT_PARTIAL.
+  await db.insert(schema.adSpends).values({ id: "cl-ad-chuagan", platform: "facebook", campaign: "CL chưa gán", spend: 500_000, spendDate: d("2029-01-12"), productId: "cl-prod-a", marketerId: null, excluded: false });
+  clearMemo();
+  const rCho = await getPayrollReport(T1, "profit1");
+  const choA = rCho.profitGate.codeLedger.pending.filter((p) => p.productId === "cl-prod-a" && p.kind === "WEIGHT_PARTIAL");
+  assert.equal(choA.length, 2, "chuẩn bị: QC chưa gán trên A ⇒ cả hai SUPPORT chờ, mang dấu vân tay");
+  assert.ok(!rCho.profitGate.codeLedger.claims.some((c) => c.productId === "cl-prod-a" && c.role === "SUPPORT"));
+  const vtA = [...new Set(choA.map((p) => p.fingerprint as string))];
+  await setSettingJson(PAYROLL_CODE_WEIGHT_CONFIRM_KEY, [
+    { id: "cl-xn-1", contentId: "cl-xn", monthKey: "2029-01", productId: "cl-prod-a", fingerprints: vtA, reason: "kiểm thử: QC chưa gán là chiến dịch thử, không thuộc SUPPORT nào", requestedById: null, requestedByEmail: "kiem-thu@erp", approvedById: null, approvedByEmail: "duyet@erp", confirmedAt: "2029-02-01T00:00:00.000Z", revokedAt: null },
+  ]);
+  clearMemo();
+  const rXn = await getPayrollReport(T1, "profit1");
+  assert.equal(rXn.profitGate.codeLedger.confirmations.length, 1, "lời xác nhận ĐỌC LẠI được từ settings (mảng không bị gộp thành object)");
+  assert.ok(!rXn.profitGate.codeLedger.pending.some((p) => p.productId === "cl-prod-a" && p.kind === "WEIGHT_PARTIAL"), "đã xác nhận đúng số đo ⇒ hết chờ");
+  assert.equal(rXn.profitGate.codeLedger.claims.filter((c) => c.productId === "cl-prod-a" && c.role === "SUPPORT").length, 2, "hai khoản SUPPORT có lại");
+  // Số đo đổi SAU khi xác nhận (thêm 1 ₫ chưa gán) ⇒ quay lại chờ, nói rõ.
+  await db.insert(schema.adSpends).values({ id: "cl-ad-chuagan-2", platform: "facebook", campaign: "CL chưa gán 2", spend: 1, spendDate: d("2029-01-13"), productId: "cl-prod-a", marketerId: null, excluded: false });
+  clearMemo();
+  const rDoi = await getPayrollReport(T1, "profit1");
+  assert.ok(rDoi.profitGate.codeLedger.pending.some((p) => p.productId === "cl-prod-a" && /SỐ ĐO ĐÃ ĐỔI/.test(p.reason)), "thêm 1 ₫ chưa gán ⇒ lời xác nhận cũ không áp");
+  // Lời xác nhận đã huỷ ⇒ không áp.
+  await db.delete(schema.adSpends).where(eq(schema.adSpends.id, "cl-ad-chuagan-2"));
+  await setSettingJson(PAYROLL_CODE_WEIGHT_CONFIRM_KEY, [
+    { id: "cl-xn-1", contentId: "cl-xn", monthKey: "2029-01", productId: "cl-prod-a", fingerprints: vtA, reason: "kiểm thử", requestedById: null, requestedByEmail: "kiem-thu@erp", approvedById: null, approvedByEmail: "duyet@erp", confirmedAt: "2029-02-01T00:00:00.000Z", revokedAt: "2029-02-02T00:00:00.000Z" },
+  ]);
+  clearMemo();
+  assert.ok((await getPayrollReport(T1, "profit1")).profitGate.codeLedger.pending.some((p) => p.productId === "cl-prod-a" && p.kind === "WEIGHT_PARTIAL"), "lời xác nhận đã huỷ ⇒ chờ lại");
+  await db.delete(schema.adSpends).where(eq(schema.adSpends.id, "cl-ad-chuagan"));
+  await setSettingJson(PAYROLL_CODE_WEIGHT_CONFIRM_KEY, []);
+  clearMemo();
+
   /* ══ KHOÁ THÁNG 1 bằng đúng đường chốt kỳ ══ */
   const actor = { id: null, email: "kiem-thu@erp" };
   const tinh = await calculatePayrollPeriodAs(actor, { from: "2029-01-01", to: "2029-01-31", basis: "profit1", note: "kiểm thử sổ mã" });
@@ -629,8 +663,8 @@ async function testFlow(db: Db) {
   assert.equal(L2.allocated?.["cl-prod-a"] ?? 0, 0);
 
   /* ══ LƯỢC ĐỒ CŨ (sổ MIGRATION_SERVE_COMPAT, tag 0249_product_marketer_assignments): chưa có hai bảng ⇒ sổ rỗng, bảng lương vẫn chạy ══ */
-  const journal249 = (JSON.parse(readFileSync("drizzle/meta/_journal.json", "utf8")) as { entries: { tag: string; when: number }[] }).entries.find((x) => x.tag === "0249_product_marketer_assignments");
-  assert.equal(MIGRATION_0249_WHEN, journal249?.when, "MIGRATION_0249_WHEN phải là mốc `when` của 0249 trong sổ");
+  const journal249 = (JSON.parse(readFileSync("drizzle/meta/_journal.json", "utf8")) as { entries: { tag: string; when: number }[] }).entries.find((x) => x.tag.endsWith("_product_marketer_assignments"));
+  assert.equal(MIGRATION_0249_WHEN, journal249?.when, `MIGRATION_0249_WHEN phải là mốc \`when\` của migration product_marketer_assignments trong sổ (tìm thấy: ${journal249?.tag ?? "không có"} — đánh số lại thì sửa cả hằng số lẫn tag trong MIGRATION_SERVE_COMPAT)`);
   await db.execute(sql`alter table "product_marketer_assignments" rename to "pma_tam_cl"`);
   await db.execute(sql`alter table "product_bonus_terms" rename to "pbt_tam_cl"`);
   const dongSo = await db.execute(sql`select hash, created_at from "drizzle"."__drizzle_migrations" where created_at = ${MIGRATION_0249_WHEN}`);

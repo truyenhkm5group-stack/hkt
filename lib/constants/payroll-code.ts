@@ -32,7 +32,10 @@ export const isCodeClaimKey = (key: string) => key.includes(CODE_CLAIM_MARKER);
 export const PAYROLL_CODE_WEIGHT_CONFIRM_KEY = "payroll.code-weight-confirmations";
 
 export type CodeWeightConfirmation = {
+  /** Khoá BẢN GHI (nội dung + mốc ghi) — nhật ký xác nhận và huỷ cùng dùng khoá này. */
   id: string;
+  /** Khoá NỘI DUNG (tháng · mã · dấu vân tay) — khớp với lời duyệt người thứ hai. */
+  contentId?: string;
   monthKey: string;
   productId: string;
   /** Dấu vân tay số đo của các đoạn đã được xem lúc xác nhận. */

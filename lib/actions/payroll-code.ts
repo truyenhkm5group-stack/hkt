@@ -399,10 +399,11 @@ export async function confirmCodeWeights(input: unknown): Promise<CodeActionResu
       const khoa = await lockedMonthIn(tx, `${d.monthKey}-01`, `${d.monthKey}-01`);
       if (khoa) return { error: `Tháng ${khoa} đã khoá lương — không xác nhận lại được.` };
       const dang = new Set(cur.filter((c) => c.monthKey === d.monthKey && c.productId === d.productId && !c.revokedAt).flatMap((c) => c.fingerprints ?? []));
-      if (fingerprints.every((f) => dang.has(f))) return { ok: true as const, moi: false };
+      if (fingerprints.every((f) => dang.has(f))) return { ok: true as const, moi: false, recordId: id };
       // Khoá bản ghi gồm MỐC GHI: xác nhận lại sau khi huỷ là một bản ghi MỚI — bản đã huỷ vẫn tra được.
       const moi: CodeWeightConfirmation = {
         id: `${id}-${Date.now()}`,
+        contentId: id,
         monthKey: d.monthKey,
         productId: d.productId,
         fingerprints,
@@ -415,12 +416,13 @@ export async function confirmCodeWeights(input: unknown): Promise<CodeActionResu
         revokedAt: null,
       };
       await ghiXacNhan(tx, [...cur, moi]);
-      return { ok: true as const, moi: true };
+      return { ok: true as const, moi: true, recordId: moi.id };
     });
     if ("error" in kq) return kq;
-    if (kq.moi) await audit({ userId: guard.id, userEmail: guard.email, action: "PAYROLL_CODE_WEIGHTS_CONFIRM", entity: "PRODUCT_CODE_WEIGHTS", entityId: id, after: { ...d, fingerprints, approvedById: duyet.id }, reason: d.reason });
+    // Nhật ký mang khoá BẢN GHI — cùng khoá với lượt huỷ về sau, để nối được xác nhận ↔ huỷ.
+    if (kq.moi) await audit({ userId: guard.id, userEmail: guard.email, action: "PAYROLL_CODE_WEIGHTS_CONFIRM", entity: "PRODUCT_CODE_WEIGHTS", entityId: kq.recordId, after: { ...d, contentId: id, fingerprints, chiTiet, approvedById: duyet.id }, reason: d.reason });
     revalidate();
-    return { ok: true, id };
+    return { ok: true, id: kq.moi ? kq.recordId : id };
   });
 }
 

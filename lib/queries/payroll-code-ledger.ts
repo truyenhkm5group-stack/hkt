@@ -18,7 +18,6 @@ import { getDb, schema } from "@/db";
 import type { CodeAssignment, CodeSegment, CodeTerms, WeightMethod } from "@/lib/payroll/code-ledger";
 import { addDays, vnDateKey, vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { PAYROLL_CODE_WEIGHT_CONFIRM_KEY, type CodeWeightConfirmation } from "@/lib/constants/payroll-code";
-import { getSettingJson } from "@/lib/settings";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -47,7 +46,7 @@ async function chuaAp0249(error: unknown): Promise<boolean> {
   if (!isMissingTable(error)) return false;
   try {
     const db = await getDb();
-    const r = await db.execute(sql`select 1 as x from "drizzle"."__drizzle_migrations" where created_at = ${MIGRATION_0249_WHEN} limit 1`);
+    const r = await db.execute(sql`select 1 as x from "drizzle"."__drizzle_migrations" where created_at = ${String(MIGRATION_0249_WHEN)}::bigint limit 1`);
     const rows = (r as unknown as { rows?: unknown[] }).rows ?? (Array.isArray(r) ? r : []);
     return rows.length === 0;
   } catch {
@@ -216,10 +215,24 @@ export async function buildCodeSegmentsFor(
   return out;
 }
 
-/** Lời xác nhận trọng số CÒN HIỆU LỰC của MỘT tháng (`lib/constants/payroll-code.ts`). */
+/**
+ * Lời xác nhận trọng số CÒN HIỆU LỰC của MỘT tháng (`lib/constants/payroll-code.ts`).
+ *
+ * Đọc THÔ bằng `JSON.parse`, KHÔNG qua `getSettingJson`: hàm ấy gộp giá trị đã lưu vào giá trị mặc định
+ * như gộp object (`{ ...fallback, ...parsed }`), nên một MẢNG đọc ra thành `{ "0": …, "1": … }` và lời
+ * xác nhận đã ghi không bao giờ có hiệu lực (review vòng 5 bắt). Ô hỏng ⇒ coi như chưa có lời xác nhận
+ * nào — khoản vẫn CHỜ, không bao giờ mở ra.
+ */
 export async function loadWeightConfirmations(monthKey: string): Promise<CodeWeightConfirmation[]> {
-  const all = await getSettingJson<CodeWeightConfirmation[]>(PAYROLL_CODE_WEIGHT_CONFIRM_KEY, []);
-  return (Array.isArray(all) ? all : []).filter((c) => c.monthKey === monthKey && !c.revokedAt && Array.isArray(c.fingerprints));
+  const db = await getDb();
+  const [row] = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, PAYROLL_CODE_WEIGHT_CONFIRM_KEY)).limit(1);
+  let all: unknown = [];
+  try {
+    all = row ? (JSON.parse(row.value) as unknown) : [];
+  } catch {
+    return [];
+  }
+  return (Array.isArray(all) ? (all as CodeWeightConfirmation[]) : []).filter((c) => c && c.monthKey === monthKey && !c.revokedAt && Array.isArray(c.fingerprints));
 }
 
 export type CodeBookRow = {
