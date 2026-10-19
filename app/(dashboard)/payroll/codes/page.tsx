@@ -245,7 +245,12 @@ export default async function PayrollCodesPage({ searchParams }: { searchParams:
                 {p.provisional !== null ? <span className="text-muted-foreground"> · đang treo {v(p.provisional)}</span> : null}
                 <div className="text-muted-foreground">{p.reason}</div>
                 {p.kind === "WEIGHT_PARTIAL" && !locked && gate.result.monthKey && !pending.slice(0, i).some((q) => q.kind === "WEIGHT_PARTIAL" && q.productId === p.productId) ? (
-                  <ConfirmWeightsButton monthKey={gate.result.monthKey} productId={p.productId} code={p.code || p.productId} />
+                  <ConfirmWeightsButton
+                    monthKey={gate.result.monthKey}
+                    productId={p.productId}
+                    code={p.code || p.productId}
+                    fingerprints={[...new Set(led.pending.filter((q) => q.kind === "WEIGHT_PARTIAL" && q.productId === p.productId && q.fingerprint).map((q) => q.fingerprint as string))]}
+                  />
                 ) : null}
               </li>
             ))}

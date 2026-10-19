@@ -24,11 +24,11 @@ import { clearMemo } from "@/lib/cache";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
 import { DEFAULT_PROFIT_GATE_CONFIG, PAYROLL_PROFIT_GATE_KEY, type ProfitGatePolicy } from "@/lib/constants/payroll-profit-gate";
 import { payrollFinalizeBlockers } from "@/lib/constants/payroll-readiness";
-import { allocateCompanyToCodes, codeBonusClaims, codeLedgerStep, splitByWeights, type CodeAssignment, type CodeSegment, type CodeState, type CodeTerms } from "@/lib/payroll/code-ledger";
+import { allocateCompanyToCodes, codeBonusClaims, codeLedgerStep, describeFingerprint, splitByWeights, type CodeAssignment, type CodeSegment, type CodeState, type CodeTerms } from "@/lib/payroll/code-ledger";
 import { calculatePayrollPeriodAs } from "@/lib/payroll/run-service";
 import { getPayrollReport, monthReportPeriod, profitGateReadiness } from "@/lib/queries/payroll";
 import type { PayrollSnapshot } from "@/lib/queries/payroll-period";
-import { buildCodeSegmentsFor, listCodeBook, loadCodeBook, segmentBounds, type CodeFacts } from "@/lib/queries/payroll-code-ledger";
+import { buildCodeSegmentsFor, listCodeBook, loadCodeBook, MIGRATION_0249_WHEN, segmentBounds, type CodeFacts } from "@/lib/queries/payroll-code-ledger";
 import { codeAssignmentSchema, codeRowId, codeTermsSchema, endChangesFromKey, planOwnerHandover } from "@/lib/validation/payroll-code";
 import type { Period } from "@/lib/search-params";
 import { monthPeriodKey } from "@/lib/queries/payroll-profit-gate";
@@ -250,6 +250,12 @@ function testPure() {
   assert.ok(doi1.claims.length === 0 && doi1.pending.every((p) => /SỐ ĐO ĐÃ ĐỔI/.test(p.reason)), "lời xác nhận không áp cho số đo khác — nói rõ đã đổi");
   const doi2 = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, { x: 10 * TR })], assignments: [support("A", "x", "AD_SPEND"), support("A", "y", "AD_SPEND"), support("A", "z", "AD_SPEND")], terms: [terms(null, 10)], confirmedFingerprints: vt(motNguoi) });
   assert.equal(doi2.claims.length, 0, "thêm SUPPORT sau khi xác nhận ⇒ chờ lại, z không lặng lẽ nhận 0");
+  // Câu "số đo đã đổi" chỉ cho ĐÚNG đoạn từng được xác nhận; đoạn khác nhận câu trung tính.
+  const doanKhac = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, { x: 10 * TR }, {}, T_FROM, e("2029-03-15"))], assignments: [support("A", "x", "AD_SPEND"), support("A", "y", "AD_SPEND")], terms: [terms(null, 10)], confirmedFingerprints: vt(motNguoi) });
+  assert.ok(doanKhac.pending.every((p) => !/SỐ ĐO ĐÃ ĐỔI/.test(p.reason)), "đoạn chưa ai xác nhận không bị nói là 'đã đổi'");
+  // Người duyệt đọc được con số mình ký.
+  const moTa = describeFingerprint([...vt(chuaGan)][0], (x) => `NV-${x}`);
+  assert.ok(/NV-x 1\.000\.000/.test(moTa) && /chưa gán QC 500\.000 ₫/.test(moTa), `mô tả dấu vân tay: ${moTa}`);
   assert.equal(codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg()], assignments: [support("A", "x", "AD_SPEND")], terms: [terms(null, 10)], confirmedFingerprints: new Set(["bất kỳ"]) }).claims.length, 0, "xác nhận KHÔNG gỡ được ca không ai có số đo");
   const dtChuaGan = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, {}, { x: 1 }, T_FROM, T_TO, { ad: 0, rev: 1 })], assignments: [support("A", "x", "ATTRIBUTED_REVENUE")], terms: [terms(null, 10)] });
   assert.equal(dtChuaGan.claims.length, 0, "11. doanh thu chưa gán ⇒ chờ");
@@ -623,18 +629,27 @@ async function testFlow(db: Db) {
   assert.equal(L2.allocated?.["cl-prod-a"] ?? 0, 0);
 
   /* ══ LƯỢC ĐỒ CŨ (sổ MIGRATION_SERVE_COMPAT, tag 0249_product_marketer_assignments): chưa có hai bảng ⇒ sổ rỗng, bảng lương vẫn chạy ══ */
+  const journal249 = (JSON.parse(readFileSync("drizzle/meta/_journal.json", "utf8")) as { entries: { tag: string; when: number }[] }).entries.find((x) => x.tag === "0249_product_marketer_assignments");
+  assert.equal(MIGRATION_0249_WHEN, journal249?.when, "MIGRATION_0249_WHEN phải là mốc `when` của 0249 trong sổ");
   await db.execute(sql`alter table "product_marketer_assignments" rename to "pma_tam_cl"`);
   await db.execute(sql`alter table "product_bonus_terms" rename to "pbt_tam_cl"`);
+  const dongSo = await db.execute(sql`select hash, created_at from "drizzle"."__drizzle_migrations" where created_at = ${MIGRATION_0249_WHEN}`);
+  const so = ((dongSo as unknown as { rows?: { hash: string; created_at: string | number }[] }).rows ?? []) as { hash: string; created_at: string | number }[];
   try {
     clearMemo();
+    // Bảng thiếu mà sổ migration nói 0249 ĐÃ áp ⇒ KHÔNG đọc thành rỗng (phân công có thể đã tồn tại).
+    await assert.rejects(loadCodeBook(T1.from, T1.to), "bảng mất sau khi 0249 đã áp ⇒ ném, không in thực nhận thiếu khoản thưởng");
+    await db.execute(sql`delete from "drizzle"."__drizzle_migrations" where created_at = ${MIGRATION_0249_WHEN}`);
     assert.deepEqual(await loadCodeBook(T1.from, T1.to), { assignments: [], terms: [] }, "0249 chưa áp ⇒ chưa ai được phân công — không ném lỗi");
     assert.deepEqual(await listCodeBook(), []);
     const rCu = await getPayrollReport(T2, "profit1");
     assert.deepEqual([rCu.profitGate.codeLedger.claims.length, rCu.profitGate.codeLedger.pending.length], [0, 0], "bảng lương chạy y như trước V2");
   } finally {
+    for (const r of so) await db.execute(sql`insert into "drizzle"."__drizzle_migrations" (hash, created_at) values (${r.hash}, ${r.created_at})`);
     await db.execute(sql`alter table "pma_tam_cl" rename to "product_marketer_assignments"`);
     await db.execute(sql`alter table "pbt_tam_cl" rename to "product_bonus_terms"`);
   }
+  assert.equal(so.length, 1, "chuẩn bị: sổ migration của CSDL kiểm thử có dòng 0249");
 
   await reset(db);
   await setSettingJson(PAYROLL_RECOGNITION_KEY, ghiNhanTruoc);

@@ -38,6 +38,7 @@ import { monthPeriod } from "@/lib/constants/payroll-autopilot";
 import { isFrozen, normalizePayrollStatus } from "@/lib/constants/payroll-lifecycle";
 import { codeAssignmentSchema, codeEndSchema, codeRevokeSchema, codeRowId, codeTermsSchema, codeWeightConfirmSchema, codeWeightRevokeSchema, endChangesFromKey, planOwnerHandover } from "@/lib/validation/payroll-code";
 import { PAYROLL_CODE_WEIGHT_CONFIRM_KEY, type CodeWeightConfirmation } from "@/lib/constants/payroll-code";
+import { describeFingerprint } from "@/lib/payroll/code-ledger";
 
 export type CodeActionResult = { ok: true; id?: string } | { error: string };
 
@@ -369,15 +370,25 @@ export async function confirmCodeWeights(input: unknown): Promise<CodeActionResu
     const r = await getPayrollReport(monthReportPeriod(d.monthKey), "profit1");
     const fingerprints = [...new Set(r.profitGate.codeLedger.pending.filter((p) => p.kind === "WEIGHT_PARTIAL" && p.productId === d.productId && p.fingerprint).map((p) => p.fingerprint as string))].sort();
     if (!fingerprints.length) return { error: `Mã ${code} không có khoản chờ "thiếu một phần trọng số" nào trong tháng ${d.monthKey} — không có gì để xác nhận.` };
+    /*
+      Xác nhận ĐÚNG thứ người bấm đã thấy: số đo trên trang (lúc mở) phải bằng số đo đo lại bây giờ. Tab mở
+      lâu trong lúc người khác thêm SUPPORT / có thêm tiền chưa gán ⇒ từ chối, không ký thay họ.
+    */
+    const daThay = [...new Set(d.fingerprints)].sort();
+    if (daThay.length !== fingerprints.length || daThay.some((f, i) => f !== fingerprints[i])) {
+      return { error: `Số đo của mã ${code} đã đổi kể từ lúc mở trang — tải lại trang, xem lại rồi mới xác nhận.` };
+    }
+    const tenNv = new Map((await listEmployees()).map((e) => [e.id, e.shortName || e.name] as const));
+    const chiTiet = fingerprints.map((f) => describeFingerprint(f, (x) => tenNv.get(x) ?? x)).join(" | ");
     const id = codeRowId("TERMS", { confirm: "WEIGHTS", monthKey: d.monthKey, productId: d.productId, fingerprints });
     const cong = await guardSecondApproval({
       group: "PAYROLL_EDIT",
       action: "payroll.code.weights.confirm",
       entity: "PRODUCT_CODE_WEIGHTS",
       entityId: id,
-      summary: `Xác nhận trọng số SUPPORT của mã ${code} tháng ${d.monthKey} (${fingerprints.length} đoạn): ${d.reason}`,
+      summary: `Xác nhận trọng số SUPPORT của mã ${code} tháng ${d.monthKey}: ${chiTiet}. Lý do: ${d.reason}`,
       amount: null,
-      payload: { ...d, fingerprints },
+      payload: { ...d, fingerprints, chiTiet },
     });
     const chan = tuChoi(cong);
     if (chan) return chan;
@@ -389,8 +400,9 @@ export async function confirmCodeWeights(input: unknown): Promise<CodeActionResu
       if (khoa) return { error: `Tháng ${khoa} đã khoá lương — không xác nhận lại được.` };
       const dang = new Set(cur.filter((c) => c.monthKey === d.monthKey && c.productId === d.productId && !c.revokedAt).flatMap((c) => c.fingerprints ?? []));
       if (fingerprints.every((f) => dang.has(f))) return { ok: true as const, moi: false };
+      // Khoá bản ghi gồm MỐC GHI: xác nhận lại sau khi huỷ là một bản ghi MỚI — bản đã huỷ vẫn tra được.
       const moi: CodeWeightConfirmation = {
-        id,
+        id: `${id}-${Date.now()}`,
         monthKey: d.monthKey,
         productId: d.productId,
         fingerprints,
@@ -402,7 +414,7 @@ export async function confirmCodeWeights(input: unknown): Promise<CodeActionResu
         confirmedAt: new Date().toISOString(),
         revokedAt: null,
       };
-      await ghiXacNhan(tx, [...cur.filter((c) => c.id !== id), moi]);
+      await ghiXacNhan(tx, [...cur, moi]);
       return { ok: true as const, moi: true };
     });
     if ("error" in kq) return kq;
@@ -431,6 +443,7 @@ export async function revokeCodeWeights(input: unknown): Promise<CodeActionResul
     });
     const chan = tuChoi(cong);
     if (chan) return chan;
+    const duyet = await nguoiDuyet(cong, guard);
     const db = await getDb();
     const kq = await db.transaction(async (tx) => {
       const cur = await docXacNhan(tx);
@@ -439,7 +452,10 @@ export async function revokeCodeWeights(input: unknown): Promise<CodeActionResul
       if (!x) return { error: "Không tìm thấy lời xác nhận đang hiệu lực" };
       const khoa = await lockedMonthIn(tx, `${x.monthKey}-01`, `${x.monthKey}-01`);
       if (khoa) return { error: `Tháng ${khoa} đã khoá lương — lời xác nhận của tháng ấy đã nằm trong ảnh chụp.` };
-      await ghiXacNhan(tx, cur.map((c) => (c.id === d.id ? { ...c, revokedAt: new Date().toISOString(), revokedReason: d.reason, revokedByEmail: guard.email ?? "" } : c)));
+      await ghiXacNhan(
+        tx,
+        cur.map((c) => (c.id === d.id ? { ...c, revokedAt: new Date().toISOString(), revokedReason: d.reason, revokedById: guard.id, revokedByEmail: guard.email ?? "", revokeApprovedById: duyet.id, revokeApprovedByEmail: duyet.email } : c)),
+      );
       return { ok: true as const };
     });
     if ("error" in kq) return kq;

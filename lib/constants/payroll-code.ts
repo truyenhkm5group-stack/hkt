@@ -47,5 +47,8 @@ export type CodeWeightConfirmation = {
   /** Đã huỷ (có duyệt) — giữ lại để tra, không còn hiệu lực. */
   revokedAt?: string | null;
   revokedReason?: string | null;
+  revokedById?: string | null;
   revokedByEmail?: string | null;
+  revokeApprovedById?: string | null;
+  revokeApprovedByEmail?: string | null;
 };

@@ -13,7 +13,7 @@
  * thật của đoạn), và trọng số SUPPORT theo chi phí quảng cáo / doanh thu quy kết đo TRONG đoạn —
  * không chia theo số ngày, không chia đều.
  */
-import { and, eq, gte, isNull, lte, or } from "drizzle-orm";
+import { and, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { CodeAssignment, CodeSegment, CodeTerms, WeightMethod } from "@/lib/payroll/code-ledger";
 import { addDays, vnDateKey, vnEndOfDay, vnStartOfDay } from "@/lib/format";
@@ -30,8 +30,28 @@ export async function loadCodeBook(from: Date | null, to: Date | null): Promise<
     return await loadCodeBookRaw(from, to);
   } catch (e) {
     // CSDL tổ chức đang phục vụ ở lược đồ cũ (chưa áp 0249 — `MIGRATION_SERVE_COMPAT`): chưa có bảng ⇒ chưa có phân công nào.
-    if (isMissingTable(e)) return { assignments: [], terms: [] };
+    if (await chuaAp0249(e)) return { assignments: [], terms: [] };
     throw e;
+  }
+}
+
+/** Mốc `when` của 0249 trong drizzle/meta/_journal.json (bài kiểm khẳng định hai số bằng nhau). */
+export const MIGRATION_0249_WHEN = 1791574497000;
+
+/**
+ * Bảng thiếu VÀ sổ migration nói 0249 CHƯA áp ⇒ lược đồ cũ hợp lệ ⇒ sổ rỗng. Bảng thiếu mà 0249 ĐÃ áp
+ * (xoá tay, khôi phục hỏng) ⇒ NÉM: phân công có thể đã tồn tại, đọc thành rỗng là in thực nhận thiếu
+ * khoản thưởng mà không ai được báo (AGENTS.md mục 42).
+ */
+async function chuaAp0249(error: unknown): Promise<boolean> {
+  if (!isMissingTable(error)) return false;
+  try {
+    const db = await getDb();
+    const r = await db.execute(sql`select 1 as x from "drizzle"."__drizzle_migrations" where created_at = ${MIGRATION_0249_WHEN} limit 1`);
+    const rows = (r as unknown as { rows?: unknown[] }).rows ?? (Array.isArray(r) ? r : []);
+    return rows.length === 0;
+  } catch {
+    return false;
   }
 }
 
@@ -229,7 +249,7 @@ export async function listCodeBook(): Promise<CodeBookRow[]> {
   try {
     return await listCodeBookRaw();
   } catch (e) {
-    if (isMissingTable(e)) return [];
+    if (await chuaAp0249(e)) return [];
     throw e;
   }
 }

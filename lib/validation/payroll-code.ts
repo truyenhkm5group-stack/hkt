@@ -64,6 +64,8 @@ export const codeWeightRevokeSchema = z.object({ id: z.string().min(1), reason: 
 export const codeWeightConfirmSchema = z.object({
   monthKey: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Tháng phải dạng YYYY-MM"),
   productId: z.string().min(1),
+  /** Dấu vân tay số đo NGƯỜI BẤM ĐÃ THẤY trên trang — server chỉ nhận khi bằng đúng số đo hiện tại. */
+  fingerprints: z.array(z.string().min(1)).min(1, "Không có số đo nào để xác nhận"),
   reason: z.string().trim().min(10, "Ghi rõ vì sao số đo hiện có là đủ (ít nhất 10 ký tự)").max(500),
 });
 

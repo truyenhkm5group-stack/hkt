@@ -220,6 +220,35 @@ export function weightFingerprint(x: {
   return JSON.stringify([x.productId, x.from.toISOString(), x.to.toISOString(), x.method, w, Math.round(x.unattributedAdSpend), Math.round(x.unattributedRevenue)]);
 }
 
+type FingerprintParts = [string, string, string, WeightMethod, [string, number][], number, number];
+function parseFingerprint(f: string): FingerprintParts | null {
+  try {
+    const x = JSON.parse(f) as unknown;
+    return Array.isArray(x) && x.length === 7 && Array.isArray(x[4]) ? (x as FingerprintParts) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Dấu vân tay `f` có thuộc ĐÚNG đoạn [from, to] của mã `productId` không. */
+export function fingerprintSameSegment(f: string, productId: string, from: Date, to: Date): boolean {
+  const p = parseFingerprint(f);
+  return p !== null && p[0] === productId && p[1] === from.toISOString() && p[2] === to.toISOString();
+}
+
+/**
+ * Câu đọc được của MỘT dấu vân tay — để người DUYỆT thấy đúng con số họ đang ký (ai, trọng số bao nhiêu,
+ * bao nhiêu tiền chưa gán), không chỉ "N đoạn".
+ */
+export function describeFingerprint(f: string, nameOf: (employeeId: string) => string = (x) => x): string {
+  const p = parseFingerprint(f);
+  if (!p) return "(dấu vân tay không đọc được)";
+  const ngay = (iso: string) => iso.slice(0, 10);
+  const dv = p[3] === "AD_SPEND" ? "chi phí QC" : p[3] === "ATTRIBUTED_REVENUE" ? "doanh thu quy kết" : "trọng số tay";
+  const nguoi = p[4].map(([id, w]) => `${nameOf(id)} ${w.toLocaleString("vi-VN")}`).join(", ");
+  return `đoạn ${ngay(p[1])} → ${ngay(p[2])} · ${dv}: ${nguoi || "—"} · chưa gán QC ${p[5].toLocaleString("vi-VN")} ₫ · chưa gán doanh thu ${p[6].toLocaleString("vi-VN")} ₫`;
+}
+
 /** Khoản % theo số nguyên tiền: làm tròn XUỐNG — tổng không bao giờ vượt phần đem chia. */
 const pct = (amount: number, bp: number) => Math.floor((Math.max(0, amount) * bp) / 10_000);
 
@@ -338,7 +367,8 @@ export function codeBonusClaims(input: {
             unattributedAdSpend: seg.unattributedAdSpend,
             unattributedRevenue: seg.unattributedRevenue,
           });
-          const coXacNhan = (input.confirmedFingerprints?.size ?? 0) > 0;
+          // "Số đo đã đổi" chỉ nói cho ĐÚNG đoạn này từng được xác nhận — đoạn chưa ai xác nhận nhận câu trung tính.
+          const coXacNhan = [...(input.confirmedFingerprints ?? [])].some((f) => fingerprintSameSegment(f, input.productId, seg.from, seg.to));
           const xacNhan = input.confirmedFingerprints?.has(vanTay) === true;
           const thieuNguoi = method === "MANUAL" || xacNhan ? [] : raw.filter((r) => r.w <= 0);
           const chuaGan = xacNhan ? 0 : method === "AD_SPEND" ? seg.unattributedAdSpend : method === "ATTRIBUTED_REVENUE" ? seg.unattributedRevenue : 0;
