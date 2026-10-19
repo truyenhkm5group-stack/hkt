@@ -1,8 +1,8 @@
 {
   "pr": 908,
-  "sha": "6a103e0b4ecec586714986a02f5af4c77d082151",
+  "sha": "e6c444db7dfb02e7ce7c49cc778166d782d62546",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-19T05:00:49.829Z",
-  "note": "review độc lập 7 vòng PASS: một lời mời sau chốt mỗi lượt mua do máy chủ quyết, ghép cuối câu xác nhận; thêm món vào đơn đã chốt chỉ khi khách gọi tên trong phần mua hoặc trả lời 'có' ngắn (danh sách đóng, so chữ có dấu) ngay lượt sau câu hỏi duy nhất; fuzz 266 câu 0 dương tính giả; đồng hồ AI đúng; giá theo bảng giá khách; tổng mới kèm phí ship khi chưa biết"
+  "at": "2026-10-19T05:35:28.872Z",
+  "note": "như 6a103e0b (review độc lập 7 vòng, fuzz 266 câu 0 dương tính giả) + sửa luật quá chặt bắt ở order-golden «upsell»: món khách CHỌN tường minh ở chính tin này theo bộ đọc giỏ (cùng căn cứ lineBasisViolation) = gọi tên; «ok» vẫn chặn; golden KHÔNG đổi; order-golden 33×2 khớp baseline"
 }
