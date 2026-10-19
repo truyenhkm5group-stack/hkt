@@ -32,11 +32,11 @@ import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import { guardSecondApproval } from "@/lib/actions/approvals";
 import { withApprovalExecution } from "@/lib/approvals/execution";
 import { vnDateKey, vnEndOfDay, vnStartOfDay } from "@/lib/format";
-import { listEmployees } from "@/lib/queries/payroll";
+import { getPayrollReport, listEmployees, monthReportPeriod } from "@/lib/queries/payroll";
 import { monthsBetween } from "@/lib/queries/payroll-profit-gate";
 import { monthPeriod } from "@/lib/constants/payroll-autopilot";
 import { isFrozen, normalizePayrollStatus } from "@/lib/constants/payroll-lifecycle";
-import { codeAssignmentSchema, codeEndSchema, codeRevokeSchema, codeRowId, codeTermsSchema, codeWeightConfirmSchema, endChangesFromKey, planOwnerHandover } from "@/lib/validation/payroll-code";
+import { codeAssignmentSchema, codeEndSchema, codeRevokeSchema, codeRowId, codeTermsSchema, codeWeightConfirmSchema, codeWeightRevokeSchema, endChangesFromKey, planOwnerHandover } from "@/lib/validation/payroll-code";
 import { PAYROLL_CODE_WEIGHT_CONFIRM_KEY, type CodeWeightConfirmation } from "@/lib/constants/payroll-code";
 
 export type CodeActionResult = { ok: true; id?: string } | { error: string };
@@ -63,12 +63,19 @@ const tuChoi = (cong: { mode: string; reason?: string }): CodeActionResult | nul
       ? { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` }
       : null;
 
-/** Người QUYẾT yêu cầu duyệt vừa được tiêu thụ; không có lượt duyệt (nhóm chưa cưỡng chế) ⇒ chính người làm. */
-async function nguoiDuyet(cong: { consumed?: boolean; requestId?: string }, guard: SessionUser): Promise<string | null> {
-  if (!cong.consumed || !cong.requestId) return guard.id;
+/**
+ * Người QUYẾT yêu cầu duyệt vừa được tiêu thụ; không có lượt duyệt (nhóm chưa cưỡng chế) ⇒ chính người
+ * làm. Gọi TRƯỚC `db.transaction` — trên PGlite (một kết nối) một câu `getDb()` trong giao dịch tự khoá.
+ */
+async function nguoiDuyet(cong: { consumed?: boolean; requestId?: string }, guard: SessionUser): Promise<{ id: string | null; email: string }> {
+  if (!cong.consumed || !cong.requestId) return { id: guard.id, email: guard.email ?? "" };
   const db = await getDb();
-  const [r] = await db.select({ by: schema.approvalRequests.decidedBy }).from(schema.approvalRequests).where(eq(schema.approvalRequests.id, cong.requestId)).limit(1);
-  return r?.by ?? null;
+  const [r] = await db
+    .select({ by: schema.approvalRequests.decidedBy, email: schema.approvalRequests.decidedByEmail })
+    .from(schema.approvalRequests)
+    .where(eq(schema.approvalRequests.id, cong.requestId))
+    .limit(1);
+  return { id: r?.by ?? null, email: r?.email ?? "" };
 }
 
 /** Tháng đã khoá đầu tiên mà khoảng [fromKey, toKey] chạm tới (`toKey` rỗng = tới hôm nay). Đọc qua `tx`. */
@@ -125,7 +132,7 @@ export async function saveCodeAssignment(input: unknown): Promise<CodeActionResu
     });
     const chan = tuChoi(cong);
     if (chan) return chan;
-    const approvedBy = await nguoiDuyet(cong, guard);
+    const approvedBy = (await nguoiDuyet(cong, guard)).id;
 
     const a = schema.productMarketerAssignments;
     const chong = (role: string, employeeId?: string): SQL => {
@@ -292,7 +299,7 @@ export async function saveCodeTerms(input: unknown): Promise<CodeActionResult> {
     });
     const chan = tuChoi(cong);
     if (chan) return chan;
-    const approvedBy = await nguoiDuyet(cong, guard);
+    const approvedBy = (await nguoiDuyet(cong, guard)).id;
     const t = schema.productBonusTerms;
     const kq = await db.transaction(async (tx) => {
       await khoaMa(tx, productId);
@@ -326,10 +333,27 @@ export async function saveCodeTerms(input: unknown): Promise<CodeActionResult> {
   });
 }
 
+/** Đọc ô xác nhận trọng số trong giao dịch, dưới khoá tên. Ô hỏng ⇒ KHÔNG ghi đè. */
+async function docXacNhan(tx: Tx): Promise<CodeWeightConfirmation[] | { error: string }> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('erp:payroll-code-weights'))`);
+  const [row] = await tx.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, PAYROLL_CODE_WEIGHT_CONFIRM_KEY)).limit(1);
+  try {
+    const cur = row ? (JSON.parse(row.value) as unknown) : [];
+    return Array.isArray(cur) ? (cur as CodeWeightConfirmation[]) : { error: "Ô lưu xác nhận trọng số không đúng dạng — không ghi đè lên nó." };
+  } catch {
+    return { error: "Ô lưu xác nhận trọng số không đọc được — không ghi đè lên nó." };
+  }
+}
+const ghiXacNhan = (tx: Tx, list: CodeWeightConfirmation[]) => {
+  const text = JSON.stringify(list);
+  return tx.insert(schema.settings).values({ key: PAYROLL_CODE_WEIGHT_CONFIRM_KEY, value: text }).onConflictDoUpdate({ target: schema.settings.key, set: { value: text, updatedAt: new Date() } });
+};
+
 /**
- * XÁC NHẬN TRỌNG SỐ của một mã × một tháng (`lib/constants/payroll-code.ts`): gỡ khoản chờ loại
- * "thiếu một phần trọng số" — số 0 là 0 thật, phần chưa gán đứng ngoài phép chia. Duyệt người thứ hai,
- * không áp cho tháng đã khoá, ghi một lần (lần thứ hai cùng mã × tháng là không đổi gì).
+ * XÁC NHẬN TRỌNG SỐ của một mã × một tháng (`lib/constants/payroll-code.ts`): gỡ ĐÚNG những khoản chờ
+ * loại "thiếu một phần trọng số" đang có lúc bấm — lời xác nhận mang dấu vân tay số đo của từng đoạn
+ * ấy, nên số đo đổi sau đó thì khoản quay lại chờ. Không có khoản chờ nào ⇒ không có gì để xác nhận
+ * (không xác nhận trước được). Không cho tháng đã khoá.
  */
 export async function confirmCodeWeights(input: unknown): Promise<CodeActionResult> {
   return withApprovalExecution(async () => {
@@ -338,13 +362,70 @@ export async function confirmCodeWeights(input: unknown): Promise<CodeActionResu
     const parsed = codeWeightConfirmSchema.safeParse(input);
     if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
     const d = parsed.data;
-    const id = codeRowId("TERMS", { confirm: "WEIGHTS", monthKey: d.monthKey, productId: d.productId });
+    const db = await getDb();
+    const [sp0] = await db.select({ customId: schema.products.customId, name: schema.products.name }).from(schema.products).where(eq(schema.products.id, d.productId)).limit(1);
+    if (!sp0) return { error: "Không tìm thấy mã sản phẩm" };
+    const code = sp0.customId || sp0.name;
+    const r = await getPayrollReport(monthReportPeriod(d.monthKey), "profit1");
+    const fingerprints = [...new Set(r.profitGate.codeLedger.pending.filter((p) => p.kind === "WEIGHT_PARTIAL" && p.productId === d.productId && p.fingerprint).map((p) => p.fingerprint as string))].sort();
+    if (!fingerprints.length) return { error: `Mã ${code} không có khoản chờ "thiếu một phần trọng số" nào trong tháng ${d.monthKey} — không có gì để xác nhận.` };
+    const id = codeRowId("TERMS", { confirm: "WEIGHTS", monthKey: d.monthKey, productId: d.productId, fingerprints });
     const cong = await guardSecondApproval({
       group: "PAYROLL_EDIT",
       action: "payroll.code.weights.confirm",
       entity: "PRODUCT_CODE_WEIGHTS",
       entityId: id,
-      summary: `Xác nhận trọng số SUPPORT của mã ${d.productId} tháng ${d.monthKey}: ${d.reason}`,
+      summary: `Xác nhận trọng số SUPPORT của mã ${code} tháng ${d.monthKey} (${fingerprints.length} đoạn): ${d.reason}`,
+      amount: null,
+      payload: { ...d, fingerprints },
+    });
+    const chan = tuChoi(cong);
+    if (chan) return chan;
+    const duyet = await nguoiDuyet(cong, guard);
+    const kq = await db.transaction(async (tx) => {
+      const cur = await docXacNhan(tx);
+      if ("error" in cur) return cur;
+      const khoa = await lockedMonthIn(tx, `${d.monthKey}-01`, `${d.monthKey}-01`);
+      if (khoa) return { error: `Tháng ${khoa} đã khoá lương — không xác nhận lại được.` };
+      const dang = new Set(cur.filter((c) => c.monthKey === d.monthKey && c.productId === d.productId && !c.revokedAt).flatMap((c) => c.fingerprints ?? []));
+      if (fingerprints.every((f) => dang.has(f))) return { ok: true as const, moi: false };
+      const moi: CodeWeightConfirmation = {
+        id,
+        monthKey: d.monthKey,
+        productId: d.productId,
+        fingerprints,
+        reason: d.reason,
+        requestedById: guard.id,
+        requestedByEmail: guard.email ?? "",
+        approvedById: duyet.id,
+        approvedByEmail: duyet.email,
+        confirmedAt: new Date().toISOString(),
+        revokedAt: null,
+      };
+      await ghiXacNhan(tx, [...cur.filter((c) => c.id !== id), moi]);
+      return { ok: true as const, moi: true };
+    });
+    if ("error" in kq) return kq;
+    if (kq.moi) await audit({ userId: guard.id, userEmail: guard.email, action: "PAYROLL_CODE_WEIGHTS_CONFIRM", entity: "PRODUCT_CODE_WEIGHTS", entityId: id, after: { ...d, fingerprints, approvedById: duyet.id }, reason: d.reason });
+    revalidate();
+    return { ok: true, id };
+  });
+}
+
+/** HUỶ một lời xác nhận trọng số (đánh dấu, không xoá — vẫn tra được). Không cho tháng đã khoá. */
+export async function revokeCodeWeights(input: unknown): Promise<CodeActionResult> {
+  return withApprovalExecution(async () => {
+    const guard = await requireManage();
+    if ("error" in guard) return guard;
+    const parsed = codeWeightRevokeSchema.safeParse(input);
+    if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+    const d = parsed.data;
+    const cong = await guardSecondApproval({
+      group: "PAYROLL_EDIT",
+      action: "payroll.code.weights.revoke",
+      entity: "PRODUCT_CODE_WEIGHTS",
+      entityId: d.id,
+      summary: `Huỷ lời xác nhận trọng số: ${d.reason}`,
       amount: null,
       payload: d,
     });
@@ -352,26 +433,18 @@ export async function confirmCodeWeights(input: unknown): Promise<CodeActionResu
     if (chan) return chan;
     const db = await getDb();
     const kq = await db.transaction(async (tx) => {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext('erp:payroll-code-weights'))`);
-      const khoa = await lockedMonthIn(tx, `${d.monthKey}-01`, `${d.monthKey}-01`);
-      if (khoa) return { error: `Tháng ${khoa} đã khoá lương — không xác nhận lại được.` };
-      const [row] = await tx.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, PAYROLL_CODE_WEIGHT_CONFIRM_KEY)).limit(1);
-      let cur: CodeWeightConfirmation[] = [];
-      try {
-        cur = row ? (JSON.parse(row.value) as CodeWeightConfirmation[]) : [];
-      } catch {
-        return { error: "Ô lưu xác nhận trọng số không đọc được — không ghi đè lên nó." };
-      }
-      if (!Array.isArray(cur)) return { error: "Ô lưu xác nhận trọng số không đúng dạng — không ghi đè lên nó." };
-      if (cur.some((c) => c.monthKey === d.monthKey && c.productId === d.productId)) return { ok: true as const, moi: false };
-      const moi: CodeWeightConfirmation = { id, monthKey: d.monthKey, productId: d.productId, reason: d.reason, confirmedById: await nguoiDuyet(cong, guard), confirmedByEmail: guard.email ?? "", confirmedAt: new Date().toISOString() };
-      const text = JSON.stringify([...cur, moi]);
-      await tx.insert(schema.settings).values({ key: PAYROLL_CODE_WEIGHT_CONFIRM_KEY, value: text }).onConflictDoUpdate({ target: schema.settings.key, set: { value: text, updatedAt: new Date() } });
-      return { ok: true as const, moi: true };
+      const cur = await docXacNhan(tx);
+      if ("error" in cur) return cur;
+      const x = cur.find((c) => c.id === d.id && !c.revokedAt);
+      if (!x) return { error: "Không tìm thấy lời xác nhận đang hiệu lực" };
+      const khoa = await lockedMonthIn(tx, `${x.monthKey}-01`, `${x.monthKey}-01`);
+      if (khoa) return { error: `Tháng ${khoa} đã khoá lương — lời xác nhận của tháng ấy đã nằm trong ảnh chụp.` };
+      await ghiXacNhan(tx, cur.map((c) => (c.id === d.id ? { ...c, revokedAt: new Date().toISOString(), revokedReason: d.reason, revokedByEmail: guard.email ?? "" } : c)));
+      return { ok: true as const };
     });
     if ("error" in kq) return kq;
-    if (kq.moi) await audit({ userId: guard.id, userEmail: guard.email, action: "PAYROLL_CODE_WEIGHTS_CONFIRM", entity: "PRODUCT_CODE_WEIGHTS", entityId: id, after: d, reason: d.reason });
+    await audit({ userId: guard.id, userEmail: guard.email, action: "PAYROLL_CODE_WEIGHTS_REVOKE", entity: "PRODUCT_CODE_WEIGHTS", entityId: d.id, before: { revokedAt: null }, after: { revokedAt: "now" }, reason: d.reason });
     revalidate();
-    return { ok: true, id };
+    return { ok: true, id: d.id };
   });
 }

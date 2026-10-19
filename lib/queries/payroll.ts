@@ -1477,7 +1477,8 @@ export async function getPayrollReport(
     codeLedger.assignmentCount = book.assignments.length;
     codeLedger.termsCount = book.terms.length;
     codeLedger.confirmations = confirmations;
-    const daXacNhan = new Set(confirmations.map((c) => c.productId));
+    const daXacNhan = new Map<string, Set<string>>();
+    for (const c of confirmations) for (const f of c.fingerprints) daXacNhan.set(c.productId, (daXacNhan.get(c.productId) ?? new Set<string>()).add(f));
     const step = codeOpening ? codeLedgerStep(codeOpening, codes) : null;
     codeLedger.rows = step?.rows ?? null;
     const allocated = step && E !== null ? allocateCompanyToCodes(step.rows, E) : null;
@@ -1556,7 +1557,7 @@ export async function getPayrollReport(
         assignments: book.assignments,
         terms: book.terms,
         nameOf,
-        weightsConfirmed: daXacNhan.has(row.productId),
+        confirmedFingerprints: daXacNhan.get(row.productId),
       });
       codeLedger.pending.push(...out.pending);
       for (const c of out.claims) {

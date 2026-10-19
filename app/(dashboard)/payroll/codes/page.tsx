@@ -13,7 +13,7 @@ import { PROFIT_GATE_STATUS_LABEL } from "@/lib/payroll/profit-gate";
 import { getPayrollReport } from "@/lib/queries/payroll";
 import { periodFinalized } from "@/lib/queries/payroll-engine";
 import { paramList, resolvePeriod, type SearchParams } from "@/lib/search-params";
-import { ConfirmWeightsButton } from "@/app/(dashboard)/payroll/codes/confirm-weights-button";
+import { ConfirmWeightsButton, RevokeConfirmationButton } from "@/app/(dashboard)/payroll/codes/confirm-weights-button";
 
 export const metadata = { title: "Lợi nhuận theo mã" };
 
@@ -141,7 +141,8 @@ export default async function PayrollCodesPage({ searchParams }: { searchParams:
           <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
             {led.confirmations.map((c) => (
               <li key={c.id}>
-                Đã xác nhận trọng số mã {product.get(c.productId)?.code || c.productId} tháng {c.monthKey} — {c.reason} ({c.confirmedByEmail}, {formatDate(c.confirmedAt)})
+                Đã xác nhận trọng số mã {product.get(c.productId)?.code || c.productId} tháng {c.monthKey} ({c.fingerprints.length} đoạn) — {c.reason} · gửi: {c.requestedByEmail || "—"} · duyệt: {c.approvedByEmail || "—"} · {formatDate(c.confirmedAt)}
+                {!locked ? <RevokeConfirmationButton id={c.id} /> : null}
               </li>
             ))}
           </ul>

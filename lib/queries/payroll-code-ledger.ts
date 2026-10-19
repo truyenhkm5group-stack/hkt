@@ -26,6 +26,22 @@ import type { Period } from "@/lib/search-params";
  * (kỳ "Toàn bộ") — KHÔNG thay bằng một ngày cực xa: Postgres từ chối timestamptz ngoài miền của nó.
  */
 export async function loadCodeBook(from: Date | null, to: Date | null): Promise<{ assignments: CodeAssignment[]; terms: CodeTerms[] }> {
+  try {
+    return await loadCodeBookRaw(from, to);
+  } catch (e) {
+    // CSDL tổ chức đang phục vụ ở lược đồ cũ (chưa áp 0249 — `MIGRATION_SERVE_COMPAT`): chưa có bảng ⇒ chưa có phân công nào.
+    if (isMissingTable(e)) return { assignments: [], terms: [] };
+    throw e;
+  }
+}
+
+/** Bảng chưa tồn tại (SQLSTATE 42P01) — drizzle bọc lỗi pg trong `cause`. */
+function isMissingTable(error: unknown): boolean {
+  const e = error as { code?: string; cause?: { code?: string } } | null;
+  return (e?.code ?? e?.cause?.code) === "42P01";
+}
+
+async function loadCodeBookRaw(from: Date | null, to: Date | null): Promise<{ assignments: CodeAssignment[]; terms: CodeTerms[] }> {
   const db = await getDb();
   const a = schema.productMarketerAssignments;
   const t = schema.productBonusTerms;
@@ -180,10 +196,10 @@ export async function buildCodeSegmentsFor(
   return out;
 }
 
-/** Lời xác nhận trọng số của MỘT tháng (`lib/constants/payroll-code.ts`) — tập mã đã được xác nhận. */
+/** Lời xác nhận trọng số CÒN HIỆU LỰC của MỘT tháng (`lib/constants/payroll-code.ts`). */
 export async function loadWeightConfirmations(monthKey: string): Promise<CodeWeightConfirmation[]> {
   const all = await getSettingJson<CodeWeightConfirmation[]>(PAYROLL_CODE_WEIGHT_CONFIRM_KEY, []);
-  return (Array.isArray(all) ? all : []).filter((c) => c.monthKey === monthKey);
+  return (Array.isArray(all) ? all : []).filter((c) => c.monthKey === monthKey && !c.revokedAt && Array.isArray(c.fingerprints));
 }
 
 export type CodeBookRow = {
@@ -210,6 +226,15 @@ export type CodeBookRow = {
 
 /** Toàn bộ sổ (kể cả dòng đã kết thúc / huỷ) cho màn hình quản lý — lịch sử không bị giấu. */
 export async function listCodeBook(): Promise<CodeBookRow[]> {
+  try {
+    return await listCodeBookRaw();
+  } catch (e) {
+    if (isMissingTable(e)) return [];
+    throw e;
+  }
+}
+
+async function listCodeBookRaw(): Promise<CodeBookRow[]> {
   const db = await getDb();
   const a = schema.productMarketerAssignments;
   const t = schema.productBonusTerms;

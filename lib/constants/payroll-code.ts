@@ -20,6 +20,14 @@ export const isCodeClaimKey = (key: string) => key.includes(CODE_CLAIM_MARKER);
  *
  * Lời xác nhận KHÔNG gỡ được các khoản chờ khác (chưa có Y%, trọng số tay Σ ≠ 100%, không SUPPORT
  * nào có số đo, hai OWNER…): những thứ ấy sửa bằng phân công / điều khoản, không bằng một cú bấm.
+ *
+ * ─── XÁC NHẬN ĐÚNG THỨ ĐÃ XEM, KHÔNG PHẢI CẢ THÁNG ───
+ *
+ * Mỗi lời xác nhận mang DẤU VÂN TAY số đo của từng đoạn đang chờ lúc bấm (`weightFingerprint`: ai là
+ * SUPPORT, trọng số đo được của từng người, phần chưa gán). Nó chỉ có hiệu lực khi số đo HIỆN TẠI
+ * khớp đúng dấu ấy: thêm SUPPORT, ghép muộn một chiến dịch, hay có thêm tiền chưa gán ⇒ khoản quay
+ * lại chờ với câu "số đo đã đổi". Không xác nhận trước được: phải có khoản chờ đang tồn tại.
+ * Duyệt người thứ hai chỉ bắt buộc khi nhóm `PAYROLL_EDIT` bật cưỡng chế (như mọi đường ghi lương).
  */
 export const PAYROLL_CODE_WEIGHT_CONFIRM_KEY = "payroll.code-weight-confirmations";
 
@@ -27,8 +35,17 @@ export type CodeWeightConfirmation = {
   id: string;
   monthKey: string;
   productId: string;
+  /** Dấu vân tay số đo của các đoạn đã được xem lúc xác nhận. */
+  fingerprints: string[];
   reason: string;
-  confirmedById: string | null;
-  confirmedByEmail: string;
+  /** Người GỬI yêu cầu xác nhận và người DUYỆT — hai khoá tài khoản, hai thư (AGENTS.md mục 34). */
+  requestedById: string | null;
+  requestedByEmail: string;
+  approvedById: string | null;
+  approvedByEmail: string;
   confirmedAt: string;
+  /** Đã huỷ (có duyệt) — giữ lại để tra, không còn hiệu lực. */
+  revokedAt?: string | null;
+  revokedReason?: string | null;
+  revokedByEmail?: string | null;
 };

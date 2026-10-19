@@ -4,12 +4,14 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { confirmCodeWeights } from "@/lib/actions/payroll-code";
+import { confirmCodeWeights, revokeCodeWeights } from "@/lib/actions/payroll-code";
 
 /**
  * Lối ra CÓ NGƯỜI DUYỆT cho khoản chờ "thiếu một phần trọng số" (`lib/constants/payroll-code.ts`).
  * Bắt ghi lý do: lời xác nhận nói "số 0 là thật / phần chưa gán không thuộc ai trong nhóm" — một câu
- * khẳng định về tiền, nên phải có người đứng tên. Action `revalidatePath` trang này.
+ * khẳng định về tiền, nên phải có người đứng tên. Nó chỉ áp cho ĐÚNG số đo đang hiện (dấu vân tay);
+ * số đo đổi thì khoản quay lại chờ. Người thứ hai duyệt khi nhóm Lương bật cưỡng chế duyệt.
+ * Action `revalidatePath` trang này.
  */
 export function ConfirmWeightsButton({ monthKey, productId, code }: { monthKey: string; productId: string; code: string }) {
   const [mo, setMo] = useState(false);
@@ -42,5 +44,29 @@ export function ConfirmWeightsButton({ monthKey, productId, code }: { monthKey: 
         Thôi
       </Button>
     </div>
+  );
+}
+
+/** Huỷ một lời xác nhận trọng số — có lý do, cùng đường duyệt. */
+export function RevokeConfirmationButton({ id }: { id: string }) {
+  const [pending, start] = useTransition();
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      className="ml-1 h-6 px-2 text-xs"
+      disabled={pending}
+      onClick={() => {
+        const ly = window.prompt("Lý do huỷ lời xác nhận (ít nhất 10 ký tự):");
+        if (!ly) return;
+        start(async () => {
+          const r = await revokeCodeWeights({ id, reason: ly });
+          if ("error" in r) toast.error(r.error);
+          else toast.success("Đã huỷ lời xác nhận");
+        });
+      }}
+    >
+      Huỷ xác nhận
+    </Button>
   );
 }

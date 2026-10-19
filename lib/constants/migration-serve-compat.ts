@@ -68,6 +68,16 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/org-migrate-isolation.test.ts",
   },
+  {
+    tag: "0249_product_marketer_assignments",
+    why:
+      "Chỉ TẠO hai bảng mới (product_marketer_assignments, product_bonus_terms) — không thêm / đổi / xoá cột của bảng nào mã đang đọc. " +
+      "Hai đường đọc (`loadCodeBook`, `listCodeBook`) bắt lỗi bảng chưa có (42P01) và trả sổ RỖNG — đúng nghĩa: chưa áp 0249 thì chưa " +
+      "ai được phân công, nên bảng lương chạy y như trước Payroll V2 (không khoản thưởng theo mã, không khoản chờ). Đường GHI phân công " +
+      "báo lỗi CSDL cho tới khi 0249 áp — không ghi được thì không có gì sai để sửa sau.",
+    addedColumns: {},
+    proof: "tests/payroll-code-ledger.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */

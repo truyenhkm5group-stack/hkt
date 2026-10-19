@@ -28,7 +28,7 @@ import { allocateCompanyToCodes, codeBonusClaims, codeLedgerStep, splitByWeights
 import { calculatePayrollPeriodAs } from "@/lib/payroll/run-service";
 import { getPayrollReport, monthReportPeriod, profitGateReadiness } from "@/lib/queries/payroll";
 import type { PayrollSnapshot } from "@/lib/queries/payroll-period";
-import { buildCodeSegmentsFor, segmentBounds, type CodeFacts } from "@/lib/queries/payroll-code-ledger";
+import { buildCodeSegmentsFor, listCodeBook, loadCodeBook, segmentBounds, type CodeFacts } from "@/lib/queries/payroll-code-ledger";
 import { codeAssignmentSchema, codeRowId, codeTermsSchema, endChangesFromKey, planOwnerHandover } from "@/lib/validation/payroll-code";
 import type { Period } from "@/lib/search-params";
 import { monthPeriodKey } from "@/lib/queries/payroll-profit-gate";
@@ -231,8 +231,10 @@ function testPure() {
   assert.ok(motNguoi.pending.every((p) => p.kind === "WEIGHT_PARTIAL"));
   assert.ok(thieuQc.pending.every((p) => p.kind === undefined), "không SUPPORT nào có số đo ⇒ KHÔNG gỡ được bằng lời xác nhận");
   assert.ok(tayLech.pending.every((p) => p.kind === undefined), "trọng số tay lệch ⇒ sửa phân công, không xác nhận");
-  // Lời xác nhận có người duyệt (vòng review 2): số 0 là 0 thật, phần chưa gán đứng ngoài phép chia.
-  const xn = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, { x: 10 * TR })], assignments: [support("A", "x", "AD_SPEND"), support("A", "y", "AD_SPEND")], terms: [terms(null, 10)], weightsConfirmed: true });
+  // Lời xác nhận có người duyệt (vòng review 2 + 3): áp ĐÚNG dấu vân tay số đo đã được xem.
+  const vt = (pd: { pending: { fingerprint?: string }[] }) => new Set(pd.pending.map((p) => p.fingerprint).filter((f): f is string => Boolean(f)));
+  assert.ok(vt(motNguoi).size === 1 && vt(chuaGan).size === 1, "khoản chờ WEIGHT_PARTIAL mang dấu vân tay số đo");
+  const xn = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, { x: 10 * TR })], assignments: [support("A", "x", "AD_SPEND"), support("A", "y", "AD_SPEND")], terms: [terms(null, 10)], confirmedFingerprints: vt(motNguoi) });
   assert.deepEqual(
     xn.claims.map((c) => [c.employeeId, c.demand]),
     [
@@ -241,9 +243,14 @@ function testPure() {
     ],
     "đã xác nhận ⇒ y nhận 0 thật, x nhận đủ quỹ — có người đứng tên",
   );
-  const xn2 = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, { x: 1 * TR, y: 1 * TR }, {}, T_FROM, T_TO, { ad: 500_000, rev: 0 })], assignments: [support("A", "x", "AD_SPEND"), support("A", "y", "AD_SPEND")], terms: [terms(null, 10)], weightsConfirmed: true });
+  const xn2 = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, { x: 1 * TR, y: 1 * TR }, {}, T_FROM, T_TO, { ad: 500_000, rev: 0 })], assignments: [support("A", "x", "AD_SPEND"), support("A", "y", "AD_SPEND")], terms: [terms(null, 10)], confirmedFingerprints: vt(chuaGan) });
   assert.equal(xn2.pending.length, 0);
-  assert.equal(codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg()], assignments: [support("A", "x", "AD_SPEND")], terms: [terms(null, 10)], weightsConfirmed: true }).claims.length, 0, "xác nhận KHÔNG gỡ được ca không ai có số đo");
+  // Số đo ĐỔI sau khi xác nhận (thêm 1 ₫ chưa gán / ghép muộn chiến dịch / thêm SUPPORT) ⇒ quay lại chờ.
+  const doi1 = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, { x: 1 * TR, y: 1 * TR }, {}, T_FROM, T_TO, { ad: 500_001, rev: 0 })], assignments: [support("A", "x", "AD_SPEND"), support("A", "y", "AD_SPEND")], terms: [terms(null, 10)], confirmedFingerprints: vt(chuaGan) });
+  assert.ok(doi1.claims.length === 0 && doi1.pending.every((p) => /SỐ ĐO ĐÃ ĐỔI/.test(p.reason)), "lời xác nhận không áp cho số đo khác — nói rõ đã đổi");
+  const doi2 = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, { x: 10 * TR })], assignments: [support("A", "x", "AD_SPEND"), support("A", "y", "AD_SPEND"), support("A", "z", "AD_SPEND")], terms: [terms(null, 10)], confirmedFingerprints: vt(motNguoi) });
+  assert.equal(doi2.claims.length, 0, "thêm SUPPORT sau khi xác nhận ⇒ chờ lại, z không lặng lẽ nhận 0");
+  assert.equal(codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg()], assignments: [support("A", "x", "AD_SPEND")], terms: [terms(null, 10)], confirmedFingerprints: new Set(["bất kỳ"]) }).claims.length, 0, "xác nhận KHÔNG gỡ được ca không ai có số đo");
   const dtChuaGan = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, {}, { x: 1 }, T_FROM, T_TO, { ad: 0, rev: 1 })], assignments: [support("A", "x", "ATTRIBUTED_REVENUE")], terms: [terms(null, 10)] });
   assert.equal(dtChuaGan.claims.length, 0, "11. doanh thu chưa gán ⇒ chờ");
   // Căn cứ trọng số in ra là của RIÊNG người ấy trong đoạn.
@@ -614,6 +621,20 @@ async function testFlow(db: Db) {
   assert.equal(ownersB[1].demand, Math.floor((Math.floor(allocB2 * 0.75) * 2000) / 10_000), "8. đoạn 2 (75%) × X 20%");
   // Mã lỗ không kéo quỹ của mã lãi: phần công ty phân xuống chỉ đi vào mã có phần đủ điều kiện.
   assert.equal(L2.allocated?.["cl-prod-a"] ?? 0, 0);
+
+  /* ══ LƯỢC ĐỒ CŨ (sổ MIGRATION_SERVE_COMPAT, tag 0249_product_marketer_assignments): chưa có hai bảng ⇒ sổ rỗng, bảng lương vẫn chạy ══ */
+  await db.execute(sql`alter table "product_marketer_assignments" rename to "pma_tam_cl"`);
+  await db.execute(sql`alter table "product_bonus_terms" rename to "pbt_tam_cl"`);
+  try {
+    clearMemo();
+    assert.deepEqual(await loadCodeBook(T1.from, T1.to), { assignments: [], terms: [] }, "0249 chưa áp ⇒ chưa ai được phân công — không ném lỗi");
+    assert.deepEqual(await listCodeBook(), []);
+    const rCu = await getPayrollReport(T2, "profit1");
+    assert.deepEqual([rCu.profitGate.codeLedger.claims.length, rCu.profitGate.codeLedger.pending.length], [0, 0], "bảng lương chạy y như trước V2");
+  } finally {
+    await db.execute(sql`alter table "pma_tam_cl" rename to "product_marketer_assignments"`);
+    await db.execute(sql`alter table "pbt_tam_cl" rename to "product_bonus_terms"`);
+  }
 
   await reset(db);
   await setSettingJson(PAYROLL_RECOGNITION_KEY, ghiNhanTruoc);

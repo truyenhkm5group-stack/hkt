@@ -165,6 +165,8 @@ export type CodeBonusClaim = {
 export type CodePending = {
   /** `WEIGHT_PARTIAL` = thiếu MỘT PHẦN trọng số — gỡ được bằng lời xác nhận có người duyệt (`lib/constants/payroll-code.ts`). */
   kind?: "WEIGHT_PARTIAL";
+  /** Với `WEIGHT_PARTIAL`: dấu vân tay số đo của đoạn — lời xác nhận chỉ áp khi khớp đúng dấu này. */
+  fingerprint?: string;
   productId: string;
   code: string;
   employeeId: string | null;
@@ -201,6 +203,23 @@ export function splitByWeights(pool: number, items: readonly { key: string; weig
   return out;
 }
 
+/**
+ * DẤU VÂN TAY SỐ ĐO của một đoạn: những gì người xác nhận đã nhìn thấy. Chuỗi xác định (xếp theo
+ * người, tiền làm tròn tới đồng) — số đo đổi một đồng là dấu khác.
+ */
+export function weightFingerprint(x: {
+  productId: string;
+  from: Date;
+  to: Date;
+  method: WeightMethod;
+  weights: readonly (readonly [string, number])[];
+  unattributedAdSpend: number;
+  unattributedRevenue: number;
+}): string {
+  const w = [...x.weights].map(([k, v]) => [k, Math.round(v)] as const).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  return JSON.stringify([x.productId, x.from.toISOString(), x.to.toISOString(), x.method, w, Math.round(x.unattributedAdSpend), Math.round(x.unattributedRevenue)]);
+}
+
 /** Khoản % theo số nguyên tiền: làm tròn XUỐNG — tổng không bao giờ vượt phần đem chia. */
 const pct = (amount: number, bp: number) => Math.floor((Math.max(0, amount) * bp) / 10_000);
 
@@ -220,8 +239,11 @@ export function codeBonusClaims(input: {
   assignments: readonly CodeAssignment[];
   terms: readonly CodeTerms[];
   nameOf?: (employeeId: string) => string;
-  /** Người có quyền đã xác nhận số đo hiện có của mã × tháng là đủ: số 0 là 0 thật, phần chưa gán đứng ngoài phép chia. */
-  weightsConfirmed?: boolean;
+  /**
+   * Dấu vân tay số đo ĐÃ ĐƯỢC XÁC NHẬN (có người duyệt) cho mã × tháng: đoạn nào khớp ⇒ số 0 là 0
+   * thật, phần chưa gán đứng ngoài phép chia. Không khớp ⇒ vẫn chờ.
+   */
+  confirmedFingerprints?: ReadonlySet<string>;
 }): { claims: CodeBonusClaim[]; pending: CodePending[] } {
   const claims: CodeBonusClaim[] = [];
   const pending: CodePending[] = [];
@@ -307,7 +329,17 @@ export function codeBonusClaims(input: {
             chi phí / doanh thu CHƯA GÁN cho ai ⇒ chia trên phần đã biết là dồn cả quỹ cho người được
             ghép trước, còn người kia nhận 0 mà không ai bị báo.
           */
-          const xacNhan = input.weightsConfirmed === true;
+          const vanTay = weightFingerprint({
+            productId: input.productId,
+            from: seg.from,
+            to: seg.to,
+            method,
+            weights: raw.map((r) => [r.s.employeeId, r.w] as const),
+            unattributedAdSpend: seg.unattributedAdSpend,
+            unattributedRevenue: seg.unattributedRevenue,
+          });
+          const coXacNhan = (input.confirmedFingerprints?.size ?? 0) > 0;
+          const xacNhan = input.confirmedFingerprints?.has(vanTay) === true;
           const thieuNguoi = method === "MANUAL" || xacNhan ? [] : raw.filter((r) => r.w <= 0);
           const chuaGan = xacNhan ? 0 : method === "AD_SPEND" ? seg.unattributedAdSpend : method === "ATTRIBUTED_REVENUE" ? seg.unattributedRevenue : 0;
           if (tong <= 0 || hongTay || thieuNguoi.length || chuaGan > 0) {
@@ -322,7 +354,15 @@ export function codeBonusClaims(input: {
                     ? `${thieuNguoi.map((r) => ten(r.s.employeeId)).join(", ")} không có ${doLuong} trên mã trong đoạn — chưa biết là 0 thật hay chiến dịch chưa ghép`
                     : `mã còn ${Math.round(chuaGan).toLocaleString("vi-VN")} ₫ ${doLuong.replace(" đối soát được", "")} CHƯA GÁN cho MKTer nào trong đoạn — trọng số chưa đủ căn cứ`;
             for (const r of raw) {
-              pending.push({ ...(moTPhan ? { kind: "WEIGHT_PARTIAL" as const } : {}), productId: input.productId, code: input.code, employeeId: r.s.employeeId, segment: span, reason: `Mã ${input.code}: PENDING_RECONCILIATION — ${why}. ERP không tự chia đều.${moTPhan ? " Nếu số đo hiện có là đủ, người có quyền xác nhận trọng số của mã cho tháng này." : ""}`, provisional: poolProv });
+              pending.push({
+                ...(moTPhan ? { kind: "WEIGHT_PARTIAL" as const, fingerprint: vanTay } : {}),
+                productId: input.productId,
+                code: input.code,
+                employeeId: r.s.employeeId,
+                segment: span,
+                reason: `Mã ${input.code}: PENDING_RECONCILIATION — ${why}. ERP không tự chia đều.${moTPhan ? (coXacNhan ? " Đã có lời xác nhận cho mã này nhưng SỐ ĐO ĐÃ ĐỔI kể từ lúc xác nhận — phải xem và xác nhận lại." : " Nếu số đo hiện có là đủ, người có quyền xác nhận trọng số của mã cho tháng này.") : ""}`,
+                provisional: poolProv,
+              });
             }
           } else {
             const poolDemand = allocS === null ? null : pct(allocS, y);

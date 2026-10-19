@@ -86,7 +86,13 @@ số đo 0, và mã còn chi phí / doanh thu CHƯA GÁN — ERP không phân bi
 Chặn cả kỳ lương mà không có lối ra hợp lệ sẽ đẩy người ta đi sửa lùi lịch sử phân công cho qua. Nên
 khoản chờ ấy mang `kind: "WEIGHT_PARTIAL"` và gỡ được bằng `confirmCodeWeights` (duyệt người thứ hai,
 kèm lý do, đúng một mã × một tháng, không cho tháng đã khoá; `settings: payroll.code-weight-confirmations`).
-Khi đã xác nhận: số 0 là 0 thật, phần chưa gán đứng ngoài phép chia. Lời xác nhận KHÔNG gỡ được các
+Khi đã xác nhận: số 0 là 0 thật, phần chưa gán đứng ngoài phép chia — nhưng CHỈ cho đúng số đo đã được
+xem: lời xác nhận mang dấu vân tay từng đoạn (`weightFingerprint`: ai là SUPPORT, trọng số đo được, phần
+chưa gán). Thêm SUPPORT, ghép muộn một chiến dịch, có thêm 1 ₫ chưa gán ⇒ khoản quay lại chờ, câu "số đo
+đã đổi — phải xác nhận lại". Không xác nhận trước được (phải có khoản chờ đang tồn tại, đo lại bằng
+`getPayrollReport` lúc bấm). Huỷ được (`revokeCodeWeights`, có lý do, đánh dấu chứ không xoá). Bản ghi
+giữ RIÊNG người gửi và người duyệt. Người thứ hai chỉ bắt buộc khi nhóm `PAYROLL_EDIT` bật cưỡng chế
+duyệt — hôm nay một quản trị viên lương xác nhận được một mình, giống mọi đường ghi lương khác. Lời xác nhận KHÔNG gỡ được các
 khoản chờ khác (không SUPPORT nào có số đo, trọng số tay lệch, thiếu Y%, hai OWNER…) — những thứ ấy
 sửa bằng phân công / điều khoản. Không có ngưỡng "đáng kể" ghi cứng (AGENTS.md mục 38).
 
@@ -134,6 +140,12 @@ Mốc của mọi mã trong tháng gom thành MỘT bộ mảnh chung (`buildCod
 trong tháng ⇒ N lượt, dùng chung cho mọi mã — không phải một lượt mỗi đoạn mỗi mã. Mô phỏng tháng
 chưa khoá (tối đa 12) lặp lại phần ấy cho từng tháng; production hôm nay chưa có phân công nào nên chi
 phí thêm là 2 câu đọc sổ mỗi tháng.
+
+## 5d. Tổ chức đang phục vụ ở lược đồ cũ
+
+0249 khai trong `MIGRATION_SERVE_COMPAT`: hai đường đọc bắt lỗi bảng chưa có (42P01) và trả sổ rỗng —
+chưa áp 0249 thì chưa ai được phân công, bảng lương chạy y như trước V2. Đường ghi báo lỗi CSDL cho tới
+khi 0249 áp. Bài kiểm đổi tên tạm hai bảng rồi mở bảng lương để chứng minh.
 
 ## 6. Đối soát với lợi nhuận công ty
 
