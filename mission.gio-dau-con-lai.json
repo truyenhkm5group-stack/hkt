@@ -23,18 +23,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-19T15:07:05.805Z",
-  "updated_at": "2026-10-19T16:46:28.206Z",
-  "last_heartbeat": "2026-10-19T16:46:28.206Z",
+  "updated_at": "2026-10-19T18:21:16.742Z",
+  "last_heartbeat": "2026-10-19T18:21:16.742Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/gio-dau-con-lai",
-    "sha": "aed0bb264de78b774827edf1db97f823ee29cb05",
-    "at": "2026-10-19T16:46:28.206Z",
+    "sha": "49f351a6c740123e3e8a4c3d1190cec2a3e738ee",
+    "at": "2026-10-19T18:21:16.742Z",
     "actor": "DESKTOP-56TH98Y:wt-gio-dau-con-lai",
     "title": "Gốc lỗi dấu (chả/chà) còn ở 3 chỗ của bộ đọc giỏ + WEIGHT_RE đọc «bong» không dấu thành 4g",
     "summary": "",
     "tests": [
-      "sales-cart-commitment (HSLC thật: số trần · chữ hoa · hàng rào thay món · số viết bằng chữ; đột biến 5/5 đỏ); #855 cart/delta; #863; #871; P0 câu mẫu; P0 upsell; báo giá; upsell-offer-audit; sales-agent-golden 23; order-golden 33×2 BASELINE; tsc + eslint sạch"
+      "sales-cart-commitment (hỏi≡ngã: chã mực · chã cá thu · bê bê; đột biến đỏ); #855 cart/delta; #863; #871; sales-agent-golden 23; order-golden 33×2; P0 upsell; P0 câu mẫu; báo giá; tsc + eslint sạch"
     ]
   }
 }

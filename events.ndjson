@@ -1,4 +1,3 @@
-{"at":"2026-10-12T06:41:07.496Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"inbox-read-audit-orgctx","detail":"#813 cho fix/inbox-read-audit-org-ctx @ 1161848c209b"}
 {"at":"2026-10-12T07:15:08.049Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"inbox-read-audit-orgctx","detail":"#813 @ 1161848c209b → 8ad6f6949268 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-12T08:46:58.643Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"migration-rehearsal","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-12T08:47:20.001Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"migration-rehearsal","detail":"fix/migration-rehearsal @ cd72b7ec47b7 · 3 lệnh kiểm thử"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-19T18:06:41.759Z","actor":"DESKTOP-56TH98Y:wt-payroll-gate","kind":"HANDOFF","mission":"payroll-v2-operational","detail":"claude/payroll-v2-operational @ 5816a72d1b2b · 6 lệnh kiểm thử"}
 {"at":"2026-10-19T18:08:54.540Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"payroll-v2-operational","detail":"#916 cho claude/payroll-v2-operational @ 5816a72d1b2b"}
 {"at":"2026-10-19T18:09:20.394Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#916 @ 5816a72d1b2b · review lead: tính kỳ không bị chặn; DUYỆT/KHOÁ chỉ đòi chữ ký khi thưởng % LN đủ điều kiện > 0; chữ ký gắn dấu vân tay ảnh chụp (tính lại ⇒ ký lại), người duyệt khác người ký, KHOÁ kiểm lại chữ ký còn hiệu lực; đọc lại trạng thái kỳ + sổ chữ ký trong giao dịch dưới pg_advisory_xact_lock chung; huỷ chữ ký không được khi kỳ LOCKED/PAID; không migration, không đổi công thức cơ sở lương; script ops 18"}
+{"at":"2026-10-19T18:21:16.780Z","actor":"DESKTOP-56TH98Y:wt-gio-dau-con-lai","kind":"HANDOFF","mission":"gio-dau-con-lai","detail":"claude/gio-dau-con-lai @ 49f351a6c740 · 1 lệnh kiểm thử"}
