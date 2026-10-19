@@ -1,0 +1,8 @@
+{
+  "pr": 914,
+  "sha": "a8c733c4d8015743d450a0fbce5bf0eb78987bb1",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-19T13:04:18.471Z",
+  "note": "review độc lập PASS-WITH-NITS: câu mẫu hỏi lại quy cách/mời gói lớn món khách đã chọn khối lượng ⇒ nhường AI (qua guardReply #868) ở cả 3 đường (khớp chữ · AI chọn mã · công cụ send_quick_reply); dùng lại guardReply, không luật thứ hai; mở-an-toàn (tệ nhất = như hôm nay). Việc tiếp: bộ đọc giỏ không ra giỏ khi danh mục có «chà bông» ⇒ PR riêng"
+}
