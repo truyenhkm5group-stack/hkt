@@ -309,12 +309,22 @@ export function packingIssues(priced: Pick<Priced, "lines" | "packOptions">, rul
 }
 
 /** Giá ĐÃ XÁC THỰC của MỘT đơn vị từng mẫu mã (báo giá của giỏ [mẫu mã × 1]); chưa xác thực ⇒ `null` kèm lý do. HÀM THUẦN. */
-export function verifiedUnitPrices(variantIds: readonly string[], ctx: PricingContext): Map<string, { price: number | null; reason: string | null }> {
+export function verifiedUnitPrices(
+  variantIds: readonly string[],
+  ctx: PricingContext,
+  /**
+   * `addOnAlone` (lời mời bán kèm, production 19/10/2026): mẫu mã CHỈ BÁN KÈM không bao giờ đứng một mình trong giỏ, nên báo giá riêng nó
+   * luôn mang `ADD_ON_ONLY` — HSLC khai Chả mực 0,5kg 200.000 ₫ chỉ bán kèm mà lời mời vẫn ra gói 1kg 400.000 ₫. Món mời sẽ đi CÙNG đơn
+   * chính ⇒ chỉ lý do ấy được bỏ qua; mọi lý do khác (chưa có giá, mẫu mã không có, catalog mâu thuẫn) vẫn chặn.
+   */
+  opts: { addOnAlone?: boolean } = {},
+): Map<string, { price: number | null; reason: string | null }> {
   const out = new Map<string, { price: number | null; reason: string | null }>();
   for (const id of variantIds) {
     if (out.has(id)) continue;
     const q = buildQuote(computePriced([{ variantId: id, quantity: 1 }], ctx), ctx);
-    out.set(id, q.verified ? { price: q.subtotal, reason: null } : { price: null, reason: q.unverifiedReasons.map((r) => r.detail).join(" · ") });
+    const ok = q.verified || (opts.addOnAlone === true && q.unverifiedReasons.length > 0 && q.unverifiedReasons.every((r) => r.code === "ADD_ON_ONLY"));
+    out.set(id, ok ? { price: q.subtotal, reason: null } : { price: null, reason: q.unverifiedReasons.map((r) => r.detail).join(" · ") });
   }
   return out;
 }
