@@ -3,7 +3,7 @@
   "mission_id": "payroll-v2-operational",
   "title": "Payroll V2 vận hành: đối soát P&L theo tháng, phân công MKTer từ chiến dịch, trạng thái thưởng tới đã trả, duyệt hai cấp chốt thưởng LN",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -46,11 +46,27 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-19T13:49:10.563Z",
-  "updated_at": "2026-10-19T14:53:04.213Z",
-  "last_heartbeat": "2026-10-19T14:53:04.213Z",
+  "updated_at": "2026-10-19T18:06:41.719Z",
+  "last_heartbeat": "2026-10-19T18:06:41.719Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "IN_PROGRESS",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/payroll-v2-operational",
+    "sha": "5816a72d1b2b8fc82e5cd1b48e5d07384751c8d4",
+    "at": "2026-10-19T18:06:41.719Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "Lương có tab Đối soát: lợi nhuận tính lương đặt cạnh nguồn từng dòng, và thưởng % lợi nhuận đủ điều kiện chỉ chốt được sau chữ ký đối soát + một người khác duyệt",
+    "summary": "Payroll V2 vận hành: bảng đối soát lợi nhuận tính lương theo tháng (cơ sở ↔ máy chi phí + đo lại trên đơn bằng ORDER_OUTCOME/LINE_UNIT_COST; QC bốn ô đo thẳng; 'đã giải thích' chỉ khi đo được), nhóm chi phí theo mã/chung/chưa rõ nguồn/chưa vào cơ sở, độ phủ; ảnh chụp kỳ mang bảng; duyệt hai cấp (cấp 1 ký trên ảnh chụp, DUYỆT cần chữ ký còn hiệu lực + người khác, KHOÁ kiểm lại); năm nấc thưởng; gợi ý phân công từ dữ liệu QC; ops audit đối soát từng tháng. Không đổi công thức cơ sở lương. Review độc lập 3 vòng ⇒ vòng 3 PASS @1073c7d53; rebase lên 918663dde range-diff 4/4 '='. Không migration.",
+    "tests": [
+      "npm test (ẩn danh) @1073c7d53: TẤT CẢ KIỂM THỬ ĐẠT",
+      "npm test GITHUB_TOKEN=gia-lap-khong-that @1073c7d53: TẤT CẢ KIỂM THỬ ĐẠT (lượt đầu đỏ ở postsale-lifecycle 'quét lại trong ngày' vì chạy sát nửa đêm VN — bom hẹn giờ có sẵn trên main, chạy lại xanh)",
+      "npm run build @1073c7d53: EXIT 0",
+      "sau rebase @5816a72d1: typecheck + lint sạch, payroll-reconciliation + payroll-profit-gate + payroll-code-ledger ĐẠT",
+      "đột biến: 10 luật mới, 10/10 đỏ khi phá",
+      "production: payroll_periods = 0 dòng (ops 39274631625)"
+    ]
   }
 }
