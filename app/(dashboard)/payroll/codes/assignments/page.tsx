@@ -7,7 +7,10 @@ import { can, requireUser } from "@/lib/auth/session";
 import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import { formatVND, vnDateKey } from "@/lib/format";
 import { listEmployees } from "@/lib/queries/payroll";
-import { listCodeBook, listCodeOptions } from "@/lib/queries/payroll-code-ledger";
+import { adSpendSuggestions, listCodeBook, listCodeOptions } from "@/lib/queries/payroll-code-ledger";
+import { getProfitGateConfig } from "@/lib/queries/payroll-profit-gate";
+import { addDays, todayVN, vnStartOfDay } from "@/lib/format";
+import type { Suggestion } from "@/app/(dashboard)/payroll/codes/assignments/code-book-manager";
 
 export const metadata = { title: "Phân công MKTer ↔ mã" };
 
@@ -22,7 +25,13 @@ const METHOD: Record<string, string> = { MANUAL: "trọng số tay", AD_SPEND: "
 export default async function PayrollCodeAssignmentsPage() {
   const user = await requireUser();
   if (!canAdministerPayroll(user, can(user, "payroll:manage"))) redirect("/payroll?forbidden=1");
-  const [employees, book, codes] = await Promise.all([listEmployees(), listCodeBook(), listCodeOptions()]);
+  /*
+    LỊCH SỬ GỢI Ý: từ tháng mở sổ của quy chế cổng (lũy kế mã bắt đầu từ đó), chưa khai thì 12 tháng gần
+    nhất — đủ để khai phân công cho mọi tháng còn mở mà không quét toàn bộ lịch sử QC.
+  */
+  const gateCfg = await getProfitGateConfig();
+  const tuNgay = gateCfg.active ? vnStartOfDay(`${gateCfg.active.openingMonth}-01`) : vnStartOfDay(addDays(todayVN(), -365).slice(0, 8) + "01");
+  const [employees, book, codes, goiY] = await Promise.all([listEmployees(), listCodeBook(), listCodeOptions(), adSpendSuggestions(tuNgay)]);
   const nameOf = (id: string | null) => {
     const e = employees.find((x) => x.id === id);
     return e ? e.shortName || e.name : (id ?? "—");
@@ -40,6 +49,18 @@ export default async function PayrollCodeAssignmentsPage() {
         </Link>
       </p>
       <CodeBookManager
+        suggestions={goiY.map((s): Suggestion => {
+          const den = new Date(Date.UTC(Number(s.monthKey.slice(0, 4)), Number(s.monthKey.slice(5, 7)), 0)).getUTCDate();
+          const dau = vnStartOfDay(`${s.monthKey}-01`).getTime();
+          const cuoi = vnStartOfDay(`${s.monthKey}-${String(den).padStart(2, "0")}`).getTime() + 86_399_999;
+          const dang = book.find((r) => r.kind === "ASSIGNMENT" && r.status === "APPROVED" && r.productId === s.productId && r.employeeId === s.marketerId && r.effectiveFrom.getTime() <= cuoi && (!r.effectiveTo || r.effectiveTo.getTime() >= dau));
+          return {
+            ...s,
+            marketerName: s.marketerId ? nameOf(s.marketerId) : "",
+            existingRole: dang?.role ?? "",
+            adsHref: `/ads?period=custom&from=${s.monthKey}-01&to=${s.monthKey}-${String(den).padStart(2, "0")}&product=${encodeURIComponent(s.productId)}&marketer=${encodeURIComponent(s.marketerId ?? "__none__")}`,
+          };
+        })}
         employees={employees.filter((e) => e.active).map((e) => ({ id: e.id, name: e.shortName || e.name }))}
         codes={codes}
         rows={book.map((r) => ({

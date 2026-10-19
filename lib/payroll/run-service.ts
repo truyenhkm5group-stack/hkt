@@ -34,6 +34,8 @@ import {
 } from "@/lib/constants/payroll";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { getPayrollReport, profitGateReadiness } from "@/lib/queries/payroll";
+import { profitReconReadiness } from "@/lib/queries/payroll-reconciliation";
+import { reconFingerprintKey } from "@/lib/payroll/profit-reconciliation";
 import { LEGACY_CARRY_COMPONENT, monthKeyOf, rateToBp, wholeMonthKey } from "@/lib/constants/payroll-carryover";
 import { getProfitGateConfig } from "@/lib/queries/payroll-profit-gate";
 import { PAYROLL_PROFIT_GATE_KEY } from "@/lib/constants/payroll-profit-gate";
@@ -90,6 +92,7 @@ export async function calculatePayrollPeriodAs(actor: PayrollActor, input: Calcu
 
   const period: Period = { key: "custom", from: fromAt, to: toAt, fromKey: from, toKey: to, label: `${from} → ${to}` };
   const report = await getPayrollReport(period, basis);
+  const rc = await profitReconReadiness(report);
   /*
     ĐIỀU KIỆN CHỐT ĐỌC TỪ MỘT CHỖ DUY NHẤT.
 
@@ -122,12 +125,22 @@ export async function calculatePayrollPeriodAs(actor: PayrollActor, input: Calcu
       report.lines.map((l) => ({ id: l.employee.id, name: l.employee.shortName || l.employee.name })),
     ),
     profitGate: profitGateReadiness(report),
+    profitRecon: { required: rc.required, monthKey: rc.monthKey, signed: rc.signoff !== null, status: rc.recon?.status ?? null, issueCount: rc.recon?.issues.length ?? 0 },
   });
   if (blockers.length) {
     return { error: `Chưa đủ căn cứ để chốt kỳ này:\n· ${blockers.map((b) => b.message).join("\n· ")}` };
   }
 
   const snapshot = buildPayrollSnapshot(report, period, key);
+  // Ảnh chụp mang chữ ký cấp 1 (nếu kỳ cần) — bước DUYỆT đọc nó để bắt người duyệt khác người ký.
+  if (rc.required && rc.recon && rc.signoff) {
+    snapshot.profitRecon = {
+      status: rc.recon.status,
+      fingerprintKey: reconFingerprintKey(rc.recon.fingerprint),
+      issues: rc.recon.issues.map((i) => ({ code: i.code, label: i.label, amount: i.amount, count: i.count })),
+      signoff: { id: rc.signoff.id, signedById: rc.signoff.signedById, signedByEmail: rc.signoff.signedByEmail, signedAt: rc.signoff.signedAt, reason: rc.signoff.reason },
+    };
+  }
   const luc = new Date();
   /** Các dòng sổ lỗ sẽ ghi cùng lượt chốt — rỗng khi sổ không áp dụng cho kỳ này. */
   const soLo = report.lines
@@ -408,6 +421,23 @@ export async function transitionPayrollRunAs(actor: PayrollActor, input: Transit
       khoá giữ nguyên mốc duyệt cũ để tra lịch sử, nhưng trạng thái phải đi qua vòng soát lại —
       bảng chuyển trạng thái đã ép điều đó: `APPROVED` chỉ đi tiếp được khi có người bấm `LOCK`.
     */
+    /*
+      CẤP 2 PHẢI LÀ MỘT NGƯỜI KHÁC CẤP 1 (duyệt hai cấp cho thưởng % lợi nhuận, chủ shop 19/10/2026).
+      Kỳ có thưởng đủ điều kiện > 0 thì ảnh chụp bắt buộc mang chữ ký đối soát cấp 1 (đã chặn ở bước
+      tính), và người bấm DUYỆT không được là người đã ký — một người tự đối soát rồi tự duyệt khoản
+      thưởng là đúng thứ hai cấp sinh ra để chặn.
+    */
+    if (action === "APPROVE" && thangCong) {
+      const [anh2] = await tx.select({ snapshot: p.snapshot }).from(p).where(and(eq(p.periodKey, periodKey), eq(p.basis, basis))).limit(1);
+      const snap = anh2?.snapshot as PayrollSnapshot | null;
+      if ((snap?.profitGate?.allocatedTotal ?? 0) > 0) {
+        const ky = snap?.profitRecon?.signoff;
+        if (!ky) return { error: "Kỳ có thưởng % lợi nhuận đủ điều kiện nhưng ảnh chụp không mang chữ ký đối soát cấp 1 — ký ở Lương → Đối soát rồi bấm “Tính lại”." } as const;
+        if (ky.signedById && ky.signedById === actor.id) {
+          return { error: `Bạn đã ký đối soát cấp 1 cho tháng này (${ky.signedByEmail}). Duyệt cấp 2 phải do MỘT NGƯỜI KHÁC.` } as const;
+        }
+      }
+    }
     const set: Record<string, unknown> = { status: spec.to, updatedAt: luc, statusReason: spec.requiresReason ? reason : "" };
     if (action === "APPROVE") {
       set.approvedAt = luc;

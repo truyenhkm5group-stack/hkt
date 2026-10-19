@@ -83,6 +83,13 @@ export type PayrollSnapshot = {
    * sổ lũy kế khi ấy dựng lại từ chính những con số đã chụp (`lockedMonthFigures`), không tính lại.
    */
   profitGate?: ProfitGateSnapshot;
+  /** Chữ ký đối soát cấp 1 của thưởng % lợi nhuận (chỉ có khi kỳ có khoản đủ điều kiện > 0). */
+  profitRecon?: {
+    status: "RECONCILED" | "UNRECONCILED";
+    fingerprintKey: string;
+    issues: { code: string; label: string; amount: number | null; count: number | null }[];
+    signoff: { id: string; signedById: string | null; signedByEmail: string; signedAt: string; reason: string };
+  };
   lines: {
     employeeId: string;
     name: string;

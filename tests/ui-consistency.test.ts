@@ -235,6 +235,7 @@ export function testNavigationCoverage() {
     "/payroll/assignments": "tab 'Phân công & gán chính sách' của /payroll, chỉ hiện với quyền payroll:manage",
     "/payroll/adjustments": "tab 'Đầu vào & điều chỉnh' của /payroll, chỉ hiện với quyền payroll:manage",
     "/payroll/codes": "tab 'Lợi nhuận theo mã' của /payroll, chỉ hiện với quyền payroll:manage",
+    "/payroll/reconciliation": "tab 'Đối soát' của /payroll (đối soát lợi nhuận tháng + duyệt hai cấp thưởng LN), chỉ hiện với quyền payroll:manage",
     "/payroll/codes/assignments": "liên kết 'Quản lý phân công MKTer ↔ mã' ngay trên tab 'Lợi nhuận theo mã' của /payroll",
     "/payroll/migration": "tab 'Xem trước chuyển đổi' của /payroll, chỉ hiện với quyền payroll:manage",
     "/payroll/runs": "tab 'Lịch sử kỳ' của /payroll",

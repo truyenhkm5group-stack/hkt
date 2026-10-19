@@ -20,6 +20,11 @@
  * ĐỐI SOÁT Σ LN mã ↔ LN công ty từng tháng, và thưởng OWNER GIẢ ĐỊNH theo chủ mã đang khai
  * (`--owner-pct`, mặc định 0 = không tính) để đặt cạnh % LN cá nhân của công thức cũ.
  *
+ * PAYROLL V2 VẬN HÀNH (`docs/payroll-code-ledger.md` §9): mỗi tháng thêm BẢNG ĐỐI SOÁT (cơ sở lương ↔
+ * máy chi phí + chứng từ trên đơn): độ phủ doanh thu / chi phí, nhóm chi phí theo mã · chung · chưa rõ
+ * nguồn · chưa vào cơ sở, số mã đủ dữ liệu / đã phân công, và các khoản chưa đối soát. Đầu kỳ dữ liệu
+ * THỰC (tháng sớm nhất có đơn / QC / chi phí) in ra để không ai mặc định số dư 0 khi chưa đối soát.
+ *
  * KHÔNG ghi gì: Postgres ép chỉ đọc (`ERP_READ_ONLY=1` đặt TRƯỚC khi nạp `@/db`, rồi hỏi lại phiên).
  * Số dư mở sổ ở đây là GIẢ ĐỊNH của phép đo, KHÔNG phải số dư đã đối soát — quy chế thật do người có
  * quyền duyệt lương khai ở Lương → Cấu hình.
@@ -34,6 +39,12 @@ import { getCashProfitReport } from "@/lib/queries/profit-cash";
 import { getPayrollReport, monthReportPeriod } from "@/lib/queries/payroll";
 import { monthsBetween } from "@/lib/queries/payroll-profit-gate";
 import { assertReadOnlySession } from "@/lib/queries/payroll-reconcile-source";
+import { getMonthReconciliation, loadProfitSignoffs } from "@/lib/queries/payroll-reconciliation";
+import { getProfitGateConfig } from "@/lib/queries/payroll-profit-gate";
+import { listCodeBook } from "@/lib/queries/payroll-code-ledger";
+import { COST_CLASS_LABEL, type CostClass } from "@/lib/payroll/profit-reconciliation";
+import { sql } from "drizzle-orm";
+import { getDb } from "@/db";
 
 const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
 const tien = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${Math.round(v).toLocaleString("vi-VN")}`);
@@ -54,6 +65,22 @@ async function main() {
   if (!/^\d{4}-\d{2}$/.test(fromMonth) || !/^\d{4}-\d{2}$/.test(toMonth) || compareMonthKey(fromMonth, toMonth) > 0) throw new Error("Tháng không hợp lệ");
   if (!Number.isFinite(opening0) || !Number.isFinite(cap) || cap <= 0 || cap > 100) throw new Error("--opening / --cap không hợp lệ");
   tomTat(`Kỳ đo ${fromMonth} → ${toMonth} · số dư mở sổ GIẢ ĐỊNH ${tien(opening0)} · quỹ tối đa ${cap}%`);
+  // ─── Đầu kỳ dữ liệu thực + quy chế đã khai ───
+  const db = await getDb();
+  const dau = (await db.execute(sql`select
+      (select to_char(min(inserted_at) at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM') from orders) as don,
+      (select to_char(min(spend_date) at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM') from ad_spends) as qc,
+      (select to_char(min(occurred_at) at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM') from expenses) as chi`)) as unknown as { rows?: { don: string | null; qc: string | null; chi: string | null }[] };
+  const d0 = dau.rows?.[0] ?? { don: null, qc: null, chi: null };
+  const somNhat = [d0.don, d0.qc, d0.chi].filter((x): x is string => Boolean(x)).sort()[0] ?? null;
+  const cfg = await getProfitGateConfig();
+  console.log(`ĐẦU KỲ DỮ LIỆU THỰC: đơn ${d0.don ?? "—"} · quảng cáo ${d0.qc ?? "—"} · chi phí ${d0.chi ?? "—"} ⇒ sớm nhất ${somNhat ?? "—"}`);
+  console.log(cfg.active ? `QUY CHẾ CỔNG ĐÃ KHAI v${cfg.active.version}: mở sổ ${cfg.active.openingMonth} · lũy kế ${tien(cfg.active.openingCumulative)} · mốc ${tien(cfg.active.openingHighWater)} · quỹ ${cfg.active.poolCapPercent}%` : "QUY CHẾ CỔNG CHƯA KHAI ⇒ lũy kế công ty trên production là CHƯA BIẾT; số dưới đây dùng số dư GIẢ ĐỊNH của phép đo.");
+  tomTat(`Đầu kỳ dữ liệu ${somNhat ?? "—"} · kỳ đo bắt đầu ${fromMonth}${somNhat && compareMonthKey(somNhat, fromMonth) < 0 ? " ⚠ SAU đầu kỳ dữ liệu — lỗ các tháng trước chưa vào lũy kế" : ""} · quy chế ${cfg.active ? `v${cfg.active.version} mở sổ ${cfg.active.openingMonth}` : "CHƯA KHAI"}`);
+  const book = await listCodeBook();
+  tomTat(`Sổ phân công: ${book.filter((x) => x.kind === "ASSIGNMENT" && x.status === "APPROVED").length} phân công · ${book.filter((x) => x.kind === "TERMS" && x.status === "APPROVED").length} điều khoản đang duyệt`);
+  const tong = { dt: 0, dtTien: 0, mo: 0, cp: 0, cpKhop: 0, issues: 0, thangDu: 0, thang: 0 };
+  const lop: Record<CostClass, number> = { BY_CODE: 0, SHARED: 0, UNKNOWN_SOURCE: 0, NOT_IN_BASIS: 0 };
 
   let opening: ProfitGateOpening = { cumulative: opening0, highWater: Math.max(0, opening0), paidToDate: 0, established: true, basis: "DECLARATION", reason: "giả định của phép đo" };
   const perEmp = new Map<string, { name: string; provisional: number; eligible: number }>();
@@ -122,8 +149,38 @@ async function main() {
       const o = ownerV2.get(l.employee.id);
       if (o) o.legacyPersonal += l.bonusPersonal ?? 0;
     }
+    // ─── V2 vận hành: bảng đối soát của tháng ───
+    const rc = await getMonthReconciliation(m, { report: r });
+    const ky = (await loadProfitSignoffs(m)).find((s) => s.fingerprint === rc.fingerprint) ?? null;
+    const pt = (x: number | null) => (x === null ? "—" : `${(x * 100).toFixed(1)}%`);
+    console.log(`   ĐỐI SOÁT ${m}: ${rc.status} · doanh thu có chứng từ tiền ${pt(rc.coverage.revenueWithMoneyPct)} · đơn đã có kết quả ${pt(rc.coverage.revenueSettledPct)} · chi phí khớp nguồn ${pt(rc.coverage.costReconciledPct)} · chữ ký cấp 1 ${ky ? `có (${ky.signedByEmail})` : "chưa"}`);
+    for (const l of rc.lines) console.log(`     [${l.status.padEnd(12)}] ${l.label.padEnd(58)} cơ sở ${tien(l.basis).padStart(13)}  nguồn ${tien(l.source).padStart(13)}  chênh ${tien(l.diff).padStart(12)}`);
+    console.log(`     nhóm chi phí: ${(Object.keys(COST_CLASS_LABEL) as CostClass[]).map((c) => `${COST_CLASS_LABEL[c]} ${tien(rc.classes[c])}`).join(" · ")}`);
+    console.log(`     mã: ${rc.codes.total} có số · ${rc.codes.withCustomId} có mã hàng · ${rc.codes.profitComplete} đủ dữ liệu LN · ${rc.codes.assigned} đã phân công`);
+    for (const i of rc.issues) console.log(`     ✗ ${i.label}${i.count !== null ? ` · ${i.count} mục` : ""}${i.amount !== null ? ` · ${tien(i.amount)}` : ""}`);
+    tomTat(`${m}: đối soát ${rc.status} (${rc.issues.length} khoản chưa) · DT có chứng từ ${pt(rc.coverage.revenueWithMoneyPct)} · đơn có kết quả ${pt(rc.coverage.revenueSettledPct)} · chi phí khớp ${pt(rc.coverage.costReconciledPct)} · mã đủ dữ liệu ${rc.codes.profitComplete}/${rc.codes.total} · đã phân công ${rc.codes.assigned}/${rc.codes.total} · chưa rõ nguồn ${tien(rc.classes.UNKNOWN_SOURCE)} · chưa vào cơ sở ${tien(rc.classes.NOT_IN_BASIS)}`);
+    const rev = rc.lines.find((l) => l.key === "revenue");
+    tong.dt += rev?.source ?? 0;
+    tong.thang += 1;
+    if (rc.status === "RECONCILED") tong.thangDu += 1;
+    tong.issues += rc.issues.length;
+    for (const c of Object.keys(lop) as CostClass[]) lop[c] += rc.classes[c];
+    const tr = rc.coverage;
+    if (tr.revenueWithMoneyPct !== null && rev?.source) tong.dtTien += tr.revenueWithMoneyPct * rev.source;
+    const open = rc.lines.find((l) => l.key === "open-orders")?.source ?? 0;
+    tong.mo += open;
+    const chiPhi = rc.lines.filter((l) => l.cls !== "REVENUE" && !l.key.startsWith("ads-") && l.key !== "shared-unalloc");
+    tong.cp += chiPhi.reduce((t, l) => t + Math.abs(l.basis ?? l.source ?? 0), 0);
+    tong.cpKhop += chiPhi.filter((l) => l.status === "MATCHED" || l.status === "EXPLAINED").reduce((t, l) => t + Math.abs(l.basis ?? l.source ?? 0), 0);
     opening = nextOpening(opening, g, true, "") ?? opening;
   }
+  console.log("\n═══ ĐỐI SOÁT CẢ KỲ ═══");
+  const pt2 = (a: number, b: number) => (b > 0 ? `${((a / b) * 100).toFixed(1)}%` : "—");
+  console.log(`   tháng đối soát đủ ${tong.thangDu}/${tong.thang} · tổng khoản chưa đối soát ${tong.issues}`);
+  console.log(`   doanh thu giao thành công ${tien(tong.dt)} · có chứng từ tiền ${pt2(tong.dtTien, tong.dt)} · giá trị đơn còn chưa có kết quả ${tien(tong.mo)}`);
+  console.log(`   chi phí (cơ sở + chưa vào cơ sở) ${tien(tong.cp)} · khớp nguồn / đã giải thích ${pt2(tong.cpKhop, tong.cp)}`);
+  console.log(`   nhóm: ${(Object.keys(COST_CLASS_LABEL) as CostClass[]).map((c) => `${COST_CLASS_LABEL[c]} ${tien(lop[c])}`).join(" · ")}`);
+  tomTat(`CẢ KỲ: đủ ${tong.thangDu}/${tong.thang} tháng · DT có chứng từ ${pt2(tong.dtTien, tong.dt)} · chi phí khớp ${pt2(tong.cpKhop, tong.cp)} · chưa rõ nguồn ${tien(lop.UNKNOWN_SOURCE)} · chưa vào cơ sở ${tien(lop.NOT_IN_BASIS)}`);
   console.log("\n═══ THEO NHÂN VIÊN (cộng các tháng) ═══");
   for (const [id, e] of perEmp) console.log(`   ${e.name.padEnd(20)} ${id}   tạm tính ${tien(e.provisional).padStart(13)}   đủ ĐK ${tien(e.eligible).padStart(13)}   có nguy cơ tính sai ${tien(e.provisional - e.eligible).padStart(13)}`);
   console.log(`\nTỔNG thưởng % LN tạm tính ${tien(tongTamTinh)} · đủ điều kiện ${tien(tongDuDieuKien)} · CÓ NGUY CƠ TÍNH SAI ${tien(tongTamTinh - tongDuDieuKien)}`);

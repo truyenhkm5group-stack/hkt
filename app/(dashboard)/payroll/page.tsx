@@ -37,6 +37,7 @@ import {
 import { payrollFinalizeBlockers } from "@/lib/constants/payroll-readiness";
 import { can, requireUser } from "@/lib/auth/session";
 import { employeeMatchesUser, listEmployees } from "@/lib/queries/payroll";
+import { profitReconReadiness } from "@/lib/queries/payroll-reconciliation";
 import {
   PAYROLL_BASIS_ELIGIBILITY,
   PAYROLL_BASIS_LABEL,
@@ -121,6 +122,8 @@ export default async function PayrollPage({
     Dùng `report.lines` (chưa lọc theo quyền) chứ không phải `lines`: điều kiện chốt là điều kiện
     của CẢ KỲ, không phải của riêng người đang xem.
   */
+  // Cùng hàm điều kiện đối soát với đường chốt kỳ — chỉ đo khi tháng có thưởng % LN đủ điều kiện.
+  const rc = await profitReconReadiness(report);
   const blockers = payrollFinalizeBlockers({
     bounded: report.fixedBasis.bounded,
     basisEligible: PAYROLL_BASIS_ELIGIBILITY[basis].eligible,
@@ -137,6 +140,7 @@ export default async function PayrollPage({
     })),
     policyIssues,
     profitGate: profitGateReadiness(report),
+    profitRecon: { required: rc.required, monthKey: rc.monthKey, signed: rc.signoff !== null, status: rc.recon?.status ?? null, issueCount: rc.recon?.issues.length ?? 0 },
   });
   const qs = new URLSearchParams({
     period: period.key,

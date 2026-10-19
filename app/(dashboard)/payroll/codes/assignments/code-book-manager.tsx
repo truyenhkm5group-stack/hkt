@@ -11,6 +11,19 @@ import { SectionCard } from "@/components/ui-bits";
 import { endCodeRow, revokeCodeRow, saveCodeAssignment, saveCodeTerms } from "@/lib/actions/payroll-code";
 
 type Option = { id: string; name: string };
+export type Suggestion = {
+  productId: string;
+  code: string;
+  productName: string;
+  marketerId: string | null;
+  marketerName: string;
+  monthKey: string;
+  spend: number;
+  campaigns: number;
+  /** Vai trò ĐANG khai cho (mã, người) trong tháng ấy — rỗng = chưa phân công. */
+  existingRole: string;
+  adsHref: string;
+};
 type Row = {
   kind: "ASSIGNMENT" | "TERMS";
   id: string;
@@ -37,7 +50,7 @@ const METHOD_LABEL: Record<string, string> = {
  * Không có ô sửa tỷ lệ của một dòng: đổi là KẾT THÚC + THÊM MỚI (server action từ chối mọi đường
  * khác). Action `revalidatePath` trang này nên không cần `router.refresh()`.
  */
-export function CodeBookManager({ employees, codes, rows }: { employees: Option[]; codes: { id: string; label: string }[]; rows: Row[] }) {
+export function CodeBookManager({ employees, codes, rows, suggestions }: { employees: Option[]; codes: { id: string; label: string }[]; rows: Row[]; suggestions: Suggestion[] }) {
   const [pending, start] = useTransition();
   const [a, setA] = useState({ productId: "", employeeId: "", role: "OWNER", ownerRatePercent: "", weightMethod: "AD_SPEND", weightPercent: "", effectiveFrom: "", effectiveTo: "", policyRef: "", note: "" });
   const [t, setT] = useState({ productId: "", supportPoolPercent: "", maxBonusAmount: "", effectiveFrom: "", effectiveTo: "", policyRef: "", note: "" });
@@ -50,6 +63,50 @@ export function CodeBookManager({ employees, codes, rows }: { employees: Option[
 
   return (
     <div className="space-y-5">
+      {suggestions.length ? (
+        <SectionCard
+          title="Gợi ý từ dữ liệu quảng cáo"
+          description="Ai đã chạy QC cho mã nào, tháng nào (theo ngày chi). Chỉ là căn cứ để NGƯỜI quyết OWNER / SUPPORT — bấm «Điền» chỉ điền sẵn biểu mẫu bên dưới, không lưu gì. Người chi nhiều nhất chưa chắc là người phụ trách mã."
+        >
+          <div className="max-h-[420px] overflow-auto">
+            <table className="w-full min-w-[860px] text-[13px]">
+              <thead className="sticky top-0 bg-background text-left text-muted-foreground">
+                <tr>
+                  <th className="py-1 pr-3 font-medium">Mã</th>
+                  <th className="py-1 pr-3 font-medium">Tháng</th>
+                  <th className="py-1 pr-3 font-medium">MKTer</th>
+                  <th className="py-1 pr-3 text-right font-medium">Chi phí QC · chiến dịch</th>
+                  <th className="py-1 pr-3 font-medium">Đang khai</th>
+                  <th className="py-1 font-medium" />
+                </tr>
+              </thead>
+              <tbody>
+                {suggestions.map((s) => (
+                  <tr key={`${s.productId}:${s.marketerId ?? "-"}:${s.monthKey}`} className="border-t">
+                    <td className="py-1.5 pr-3 font-medium">{s.code}</td>
+                    <td className="py-1.5 pr-3">{s.monthKey}</td>
+                    <td className={`py-1.5 pr-3 ${s.marketerId ? "" : "text-rose-700"}`}>{s.marketerId ? s.marketerName : "Chưa gán MKTer"}</td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums">
+                      <a href={s.adsHref} className="hover:text-primary hover:underline">
+                        {Math.round(s.spend).toLocaleString("vi-VN")} ₫ · {s.campaigns}
+                      </a>
+                    </td>
+                    <td className="py-1.5 pr-3 text-xs">{s.existingRole || <span className="text-muted-foreground">chưa phân công</span>}</td>
+                    <td className="py-1.5">
+                      {s.marketerId && !s.existingRole ? (
+                        <Button size="sm" variant="outline" className="h-7" onClick={() => setA({ ...a, productId: s.productId, employeeId: s.marketerId as string, effectiveFrom: `${s.monthKey}-01` })}>
+                          Điền
+                        </Button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </SectionCard>
+      ) : null}
+
       <SectionCard title="Giao MKTer vào mã" description="OWNER: X% lợi nhuận đủ điều kiện được phân bổ của mã. SUPPORT: chia quỹ Y% theo trọng số. Mỗi mã tối đa một OWNER một lúc; OWNER mới tự đóng OWNER cũ ở ngày liền trước, sổ lũy kế của mã KHÔNG reset.">
         <div className="grid gap-3 md:grid-cols-4">
           <div className="space-y-1">

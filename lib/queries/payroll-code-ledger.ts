@@ -341,3 +341,43 @@ export async function listCodeOptions(): Promise<{ id: string; label: string }[]
     .map((r) => ({ id: r.id, label: r.customId ? `${r.customId} · ${r.name}` : r.name }))
     .sort((x, y) => x.label.localeCompare(y.label, "vi"));
 }
+
+export type AdSpendSuggestion = {
+  productId: string;
+  code: string;
+  productName: string;
+  /** `null` = chi phí của mã CHƯA gán MKTer nào (chiến dịch chưa ghép). */
+  marketerId: string | null;
+  monthKey: string;
+  spend: number;
+  campaigns: number;
+};
+
+/**
+ * GỢI Ý PHÂN CÔNG TỪ DỮ LIỆU QUẢNG CÁO THẬT: ai đã chạy QC cho mã nào, tháng nào, bao nhiêu tiền, bao
+ * nhiêu chiến dịch (theo ngày chi, giờ VN). Chỉ để NGƯỜI quyết OWNER / SUPPORT — không có đường nào tự
+ * giao: người chi nhiều nhất chưa chắc là người phụ trách mã, và đoán là đúng thứ AGENTS mục 35 cấm.
+ */
+export async function adSpendSuggestions(from: Date): Promise<AdSpendSuggestion[]> {
+  const db = await getDb();
+  const a = schema.adSpends;
+  const p = schema.products;
+  const thang = sql<string>`to_char(${a.spendDate} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM')`;
+  const rows = await db
+    .select({
+      productId: a.productId,
+      code: sql<string>`max(coalesce(${p.customId}, ''))`,
+      productName: sql<string>`max(coalesce(${p.name}, ''))`,
+      marketerId: a.marketerId,
+      monthKey: thang,
+      spend: sql<number>`coalesce(sum(${a.spend}), 0)`,
+      campaigns: sql<number>`count(distinct coalesce(${a.campaignId}, ${a.campaign}))`,
+    })
+    .from(a)
+    .leftJoin(p, eq(p.id, a.productId))
+    .where(and(eq(a.excluded, false), sql`${a.productId} is not null`, gte(a.spendDate, from)))
+    .groupBy(a.productId, a.marketerId, thang);
+  return rows
+    .map((r) => ({ productId: r.productId as string, code: r.code || (r.productId as string), productName: r.productName, marketerId: r.marketerId, monthKey: r.monthKey, spend: Number(r.spend), campaigns: Number(r.campaigns) }))
+    .sort((x, y) => (x.code === y.code ? (x.monthKey === y.monthKey ? y.spend - x.spend : x.monthKey < y.monthKey ? 1 : -1) : x.code < y.code ? -1 : 1));
+}

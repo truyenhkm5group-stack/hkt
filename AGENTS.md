@@ -686,6 +686,16 @@ deploy dừng, không phải cảnh báo.
     không ghi đè (kết thúc + thêm mới), không bắt đầu trong tháng đã khoá, OWNER có hạn KHÔNG được cắt
     OWNER không hạn; migration KHÔNG gieo dòng nào — không chính sách thưởng nào tự kích hoạt.
 
+78. **THƯỞNG % LỢI NHUẬN ĐỦ ĐIỀU KIỆN CHỈ CHỐT ĐƯỢC SAU ĐỐI SOÁT + HAI NGƯỜI** (`lib/payroll/profit-reconciliation.ts`,
+    `docs/payroll-code-ledger.md` §9): bảng đối soát đặt cơ sở lương CẠNH nguồn (máy chi phí + đo lại trên
+    đơn bằng CHÍNH `ORDER_OUTCOME` / `LINE_UNIT_COST`) — không tính lại lợi nhuận, không viết luật kết quả
+    đơn thứ hai. Thiếu căn cứ (đơn chưa có chứng từ tiền, đơn chưa kết thúc, giá vốn rơi về 0, QC không mã
+    không người, phí chiều hoàn chưa vào cơ sở, cảnh báo chi phí mức cao) ⇒ CHƯA ĐỐI SOÁT; giả định ⇒ nhãn
+    ƯỚC TÍNH, không đếm là khớp. Tháng có thưởng đủ điều kiện > 0 thì chốt kỳ đòi chữ ký cấp 1 KHỚP dấu vân
+    tay số hiện tại, và người duyệt kỳ (cấp 2) KHÁC người ký. Tháng không có khoản đủ điều kiện thì không
+    giữ lương của ai vì bảng đối soát. Đưa phí chiều hoàn hay bất kỳ khoản nào vào cơ sở lương là đổi cách
+    tính thưởng ⇒ chủ shop quyết.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng
   `npm run db:generate`**: ảnh chụp `drizzle/meta/*_snapshot.json` chỉ tới `0032`, nên nó sinh migration
