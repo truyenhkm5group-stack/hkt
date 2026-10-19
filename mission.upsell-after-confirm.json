@@ -3,7 +3,7 @@
   "mission_id": "upsell-after-confirm",
   "title": "P0 lời mời mua thêm sau chốt đơn (Trung Dinh)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-upsell-sau-chot",
@@ -26,9 +26,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-19T03:11:49.549Z",
-  "updated_at": "2026-10-19T05:34:44.292Z",
+  "updated_at": "2026-10-19T06:16:24.522Z",
   "last_heartbeat": "2026-10-19T05:34:44.292Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#908 → 089eb8f0cad6556baf7dd5c8c6a33a6412ac4c1f"
+  },
   "handoff": {
     "branch": "claude/upsell-sau-chot",
     "sha": "e6c444db7dfb02e7ce7c49cc778166d782d62546",
