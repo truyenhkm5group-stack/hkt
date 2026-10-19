@@ -24,20 +24,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-19T03:11:49.549Z",
-  "updated_at": "2026-10-19T04:28:04.807Z",
-  "last_heartbeat": "2026-10-19T04:28:04.807Z",
+  "updated_at": "2026-10-19T04:44:16.093Z",
+  "last_heartbeat": "2026-10-19T04:44:16.093Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/upsell-sau-chot",
-    "sha": "24b2691582eae767d5decfc5dca2ce190494fc0e",
-    "at": "2026-10-19T04:28:04.807Z",
+    "sha": "568205c3282568d8cad901ac26380a38609e8918",
+    "at": "2026-10-19T04:44:16.093Z",
     "actor": "DESKTOP-56TH98Y:wt-upsell-sau-chot",
     "title": "P0 lời mời mua thêm sau chốt đơn (Trung Dinh)",
-    "summary": "Vòng 3: câu hỏi xác nhận có đường cho «có» ở tin kế tiếp (đúng mẫu mã đã mời), hỏi một lần, không mời lại; không hỏi khi từ chối / gọi món khác.",
+    "summary": "Vòng 4: «có» = cả tin trong danh sách đóng, phủ định trên chữ có dấu ⇒ không, tin nhân viên xen giữa ⇒ không.",
     "tests": [
-      "p0-upsell-after-confirm (thuần + 13 ca chatTurn): ĐẠT",
+      "p0-upsell-after-confirm (thuần 37 câu có/không + 15 ca chatTurn): ĐẠT",
       "18 bộ liên quan + golden: ĐẠT",
-      "đột biến không ghi askedTurn: ĐỎ",
+      "đột biến bỏ phủ định / bỏ chặn nhân viên xen: ĐỎ",
       "eslint: sạch",
       "tsc: sạch"
     ]
