@@ -1,4 +1,3 @@
-{"at":"2026-10-11T06:12:17.544Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"avatar-accept-header","detail":"#806 cho fix/avatar-accept-header @ ee8e5fb4df2f"}
 {"at":"2026-10-11T06:12:38.296Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#806 @ ee8e5fb4df2f · Sửa đúng nguyên nhân đã đo; không nới kiểm content-type/host/token"}
 {"at":"2026-10-11T06:26:55.064Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"58ac17ac0a05 · run 38118070532 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38118070532"}
 {"at":"2026-10-11T06:27:40.276Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"inbox-search","detail":"PASS 8539ead78771dcdb7d849409a1c907bd1de92189 2026-10-11T06:27:26.833Z"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-19T08:02:11.084Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#911 @ 331a4efbd02e · review độc lập 6 vòng PASS @899afff2c (code-erp-01); lead kiểm range-diff 8/8 commit giống hệt sau rebase lên d8f8c6b6; chỉ thị chủ shop 19/10 «ERP PAYROLL V2»; migration 0249 chỉ CREATE IF NOT EXISTS 2 bảng mới + FK idempotent, không backfill; production chưa có phân công ⇒ bảng lương không đổi một đồng"}
 {"at":"2026-10-19T08:42:34.535Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"payroll-v2-code-ledger","detail":"#911 @ 331a4efbd02e → a8ca4d65e34b (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-19T08:43:58.434Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"a8ca4d65e34b · run 39224811647 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39224811647"}
+{"at":"2026-10-19T08:54:47.408Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"payroll-v2-code-ledger","detail":"PASS a8ca4d65e34b8f35c7ce40f99eb15e4a076d4d53 2026-10-19T08:54:27.615Z"}
