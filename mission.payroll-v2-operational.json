@@ -3,7 +3,7 @@
   "mission_id": "payroll-v2-operational",
   "title": "Payroll V2 vận hành: đối soát P&L theo tháng, phân công MKTer từ chiến dịch, trạng thái thưởng tới đã trả, duyệt hai cấp chốt thưởng LN",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -48,12 +48,15 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-19T13:49:10.563Z",
-  "updated_at": "2026-10-19T18:08:54.499Z",
+  "updated_at": "2026-10-19T18:52:20.889Z",
   "last_heartbeat": "2026-10-19T18:06:41.719Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "IN_PROGRESS",
     "evidence": []
+  },
+  "evidence": {
+    "merged": "#916 → cf2278d25195c9f3594b722300af995e5b32119f"
   },
   "handoff": {
     "branch": "claude/payroll-v2-operational",
