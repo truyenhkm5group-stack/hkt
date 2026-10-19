@@ -797,8 +797,13 @@ function testRealHslcCatalog() {
   assert.deepEqual(one("1 hộp ruốc cá thu"), [["Ruốc bông (chà bông) cá thu nguyên chất", 1, "pack", true]]);
   assert.deepEqual(one("2 hộp chà bông tôm"), [["Ruốc bông (chà bông) tôm biển nguyên chất", 2, "pack", true]]);
   assert.deepEqual(one("cho mình 2kg chả mực giã tay"), [["Chả mực giã tay", 2000, "g", true]]);
-  // «cá thu» liền nhau ở CẢ hai tên ⇒ vẫn mơ hồ — không đoán món.
+  // «cá thu» có ở CẢ hai tên (cùng dấu) ⇒ vẫn mơ hồ — không đoán món; khách gõ KHÔNG dấu ⇒ không phân xử được bằng dấu ⇒ vẫn mơ hồ.
   assert.equal(amountsIn("lấy 1kg cá thu", REAL)[0]?.ambiguous, true);
+  assert.equal(amountsIn("cho chi 1kg cha ca thu", REAL)[0]?.ambiguous, true);
+  // Review gio-cha-bong: phân xử bằng DẤU, không bằng thứ tự từ trong tên — tên thời trang chỉ khác vị trí «nam» / «nữ» vẫn mơ hồ.
+  const AO = ["Áo thun nam cổ tròn", "Áo thun cổ tròn nữ"];
+  assert.equal(amountsIn("1 cái áo thun cổ tròn", AO)[0]?.ambiguous, true, "áo thun cổ tròn nam / nữ ⇒ vẫn hỏi lại");
+  assert.equal(amountsIn("1 cái áo thun cổ tròn nữ", AO)[0]?.display, "Áo thun cổ tròn nữ");
 }
 
 export async function testSalesCartCommitment() {
