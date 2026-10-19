@@ -17,6 +17,7 @@
     "lib/payroll/profit-gate.ts",
     "lib/payroll/run-service.ts",
     "lib/payroll/profit-reconciliation.ts",
+    "lib/payroll/recon-signoff.ts",
     "lib/queries/payroll.ts",
     "lib/queries/payroll-code-ledger.ts",
     "lib/queries/payroll-profit-gate.ts",
@@ -45,8 +46,8 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-19T13:49:10.563Z",
-  "updated_at": "2026-10-19T14:19:38.434Z",
-  "last_heartbeat": "2026-10-19T14:19:38.434Z",
+  "updated_at": "2026-10-19T14:53:04.213Z",
+  "last_heartbeat": "2026-10-19T14:53:04.213Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "IN_PROGRESS",
