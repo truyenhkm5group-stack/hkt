@@ -37,8 +37,7 @@ export type FinalizeBlocker = {
     | "PROFIT_GATE_NOT_ESTABLISHED"
     | "PROFIT_GATE_DATA_INCOMPLETE"
     | "PROFIT_GATE_NOT_APPLICABLE"
-    | "PROFIT_CODE_PENDING"
-    | "PROFIT_RECON_NOT_SIGNED";
+    | "PROFIT_CODE_PENDING";
   /** Nói ĐÚNG cái đang thiếu, và nói được phải làm gì. Không có "dữ liệu không hợp lệ". */
   message: string;
 };
@@ -82,11 +81,6 @@ export type ReadinessInput = {
    * khoản thưởng % lợi nhuận TẠM TÍNH khác 0 — không có thì cổng không có gì để xét và không chặn.
    */
   profitGate?: { status: string; established: boolean; message: string; hasProvisional: boolean; codePending?: readonly string[] };
-  /**
-   * DUYỆT HAI CẤP CHO THƯỞNG % LỢI NHUẬN (`lib/constants/payroll-reconciliation.ts`): tháng có khoản
-   * đủ điều kiện > 0 thì phải có chữ ký đối soát cấp 1 KHỚP đúng con số hiện tại.
-   */
-  profitRecon?: { required: boolean; monthKey: string | null; signed: boolean; status: string | null; issueCount: number };
 };
 
 export function payrollFinalizeBlockers(input: ReadinessInput): FinalizeBlocker[] {
@@ -186,19 +180,6 @@ export function payrollFinalizeBlockers(input: ReadinessInput): FinalizeBlocker[
   */
   for (const reason of new Set(g?.codePending ?? [])) {
     out.push({ code: "PROFIT_CODE_PENDING", message: reason });
-  }
-
-  /*
-    THƯỞNG % LỢI NHUẬN ĐỦ ĐIỀU KIỆN > 0 ⇒ CẤP 1 PHẢI KÝ ĐỐI SOÁT TRƯỚC. Chưa ký, hoặc số đã đổi sau khi
-    ký ⇒ chặn — không có đường "tự duyệt" khoản thưởng trên một lợi nhuận chưa ai đối chiếu. Tháng
-    không có khoản nào đủ điều kiện thì không cần (lương cứng không bị giữ vì bảng đối soát).
-  */
-  const rc = input.profitRecon;
-  if (rc?.required && !rc.signed) {
-    out.push({
-      code: "PROFIT_RECON_NOT_SIGNED",
-      message: `Tháng ${rc.monthKey ?? ""} có thưởng % lợi nhuận đủ điều kiện nhưng CHƯA có chữ ký đối soát cấp 1 khớp số hiện tại${rc.status === "UNRECONCILED" ? ` (bảng đối soát còn ${rc.issueCount} khoản chưa đối soát)` : ""}. Mở Lương → Đối soát, xem từng dòng rồi ký; số đổi sau khi ký thì phải ký lại.`,
-    });
   }
 
   for (const l of input.lines) {

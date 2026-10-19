@@ -28,7 +28,7 @@ import { allocateCompanyToCodes, codeBonusClaims, codeLedgerStep, describeFinger
 import { calculatePayrollPeriodAs, transitionPayrollRunAs } from "@/lib/payroll/run-service";
 import { getMonthReconciliation } from "@/lib/queries/payroll-reconciliation";
 import { PAYROLL_PROFIT_SIGNOFF_KEY } from "@/lib/constants/payroll-reconciliation";
-import { kySoatThang } from "./payroll-reconciliation.test";
+import { revokeProfitReconAs, signProfitReconAs } from "@/lib/payroll/recon-signoff";
 import { getPayrollReport, monthReportPeriod, profitGateReadiness } from "@/lib/queries/payroll";
 import type { PayrollSnapshot } from "@/lib/queries/payroll-period";
 import { buildCodeSegmentsFor, listCodeBook, loadCodeBook, MIGRATION_0249_WHEN, segmentBounds, type CodeFacts } from "@/lib/queries/payroll-code-ledger";
@@ -633,34 +633,65 @@ async function testFlow(db: Db) {
   assert.equal(dongRc("revenue")?.basis, dongRc("revenue")?.source, "doanh thu cơ sở lương = doanh thu đo lại bằng CHÍNH ORDER_OUTCOME (40tr, đơn nhiều mã)");
   assert.equal(dongRc("revenue")?.status, "MATCHED", "mọi đơn đã giao đều có COD thực thu");
   assert.equal(dongRc("ads")?.status, "MATCHED", "tổng QC cơ sở = tổng QC máy chi phí");
-  assert.equal(dongRc("ads-code-mk")?.basis, 6 * TR, "6tr QC tháng 1 đều gắn mã A và có MKTer");
+  assert.equal(dongRc("ads-code-mk")?.source, 6 * TR, "6tr QC tháng 1 đều gắn mã A và có MKTer (đo thẳng trên bảng chi)");
+  assert.equal(dongRc("ads-parts")?.status, "MATCHED", "bốn ô QC cộng lại đúng QC của cơ sở");
+  assert.equal(dongRc("ads-outside-attribution")?.status, "MATCHED", "mọi đồng QC của mã nằm trong dòng của một MKTer");
   assert.equal(dongRc("cogs")?.status, "MATCHED", "mọi dòng hàng có giá vốn (phiếu nhập 100k)");
   assert.equal(dongRc("open-orders")?.status, "MATCHED", "mọi đơn tháng 1 đã có kết quả");
   assert.deepEqual([rcJan.codes.total, rcJan.codes.assigned], [2, 2], "2 mã có số, cả 2 đã phân công");
 
-  /* ══ DUYỆT HAI CẤP: tháng 1 có thưởng đủ điều kiện ⇒ chốt kỳ đòi chữ ký cấp 1 ══ */
+  /* ══ DUYỆT HAI CẤP: tháng 1 có thưởng đủ điều kiện ⇒ ký trên ẢNH CHỤP, duyệt bởi người khác ══ */
   const actor = { id: null, email: "kiem-thu@erp" };
-  const chuaKy = await calculatePayrollPeriodAs(actor, { from: "2029-01-01", to: "2029-01-31", basis: "profit1", note: "kiểm thử sổ mã" });
-  assert.ok("error" in chuaKy && /chữ ký đối soát cấp 1/.test(chuaKy.error), `chưa ký đối soát ⇒ không chốt được kỳ có thưởng đủ điều kiện: ${"error" in chuaKy ? chuaKy.error.slice(0, 160) : "ok"}`);
-  await kySoatThang("2029-01", "cl-ky");
-  // Số đổi SAU khi ký (1 ₫ QC không mã, không người) ⇒ chữ ký cũ không còn áp.
+  const p = schema.payrollPeriods;
+  const anhKy = async () => ((await db.select({ snapshot: p.snapshot }).from(p).where(and(eq(p.periodKey, monthPeriodKey("2029-01")), eq(p.basis, "profit1"))))[0]?.snapshot ?? null) as PayrollSnapshot | null;
+  const tinhKy = async () => calculatePayrollPeriodAs(actor, { from: "2029-01-01", to: "2029-01-31", basis: "profit1", note: "kiểm thử sổ mã" });
+  const soat = async () => assert.ok("ok" in (await transitionPayrollRunAs(actor, { periodKey: monthPeriodKey("2029-01"), basis: "profit1", action: "SUBMIT_REVIEW", reason: "" })));
+  const duyetBoi = (id: string) => transitionPayrollRunAs({ id, email: `${id}@t.local` }, { periodKey: monthPeriodKey("2029-01"), basis: "profit1", action: "APPROVE", reason: "" });
+  for (const id of ["cl-ky", "cl-duyet"]) await db.insert(schema.users).values({ id, email: `${id}@t.local`, name: id, role: "ADMIN", passwordHash: "x", active: true }).onConflictDoNothing();
+  // Tính kỳ KHÔNG bị chặn bởi đối soát (lương cứng không bị giữ): ảnh chụp mang bảng đối soát.
+  const tinh = await tinhKy();
+  assert.ok("ok" in tinh, `tính được kỳ tháng 1: ${"error" in tinh ? tinh.error : ""}`);
+  const anh0 = await anhKy();
+  assert.ok(anh0?.profitRecon?.fingerprint, "ảnh chụp mang bảng đối soát của tháng");
+  assert.ok((anh0?.profitGate?.allocatedTotal ?? 0) > 0, "chuẩn bị: tháng 1 có thưởng đủ điều kiện");
+  await soat();
+  assert.match(("error" in (await duyetBoi("cl-duyet")) ? ((await duyetBoi("cl-duyet")) as { error: string }).error : ""), /CHƯA có chữ ký/, "chưa ký cấp 1 ⇒ không duyệt được");
+  const kyActor = { id: "cl-ky", email: "cl-ky@t.local" };
+  const saiMa = await signProfitReconAs(kyActor, { monthKey: "2029-01", fingerprintKey: "rc-sai", reason: "kiểm thử: đã đối chiếu từng dòng", acknowledgeIssues: true });
+  assert.ok("error" in saiMa && /tính lại/.test(saiMa.error), "ký với mã ảnh chụp khác ⇒ từ chối (trang cũ)");
+  if (anh0?.profitRecon?.status === "UNRECONCILED") {
+    const chuaXem = await signProfitReconAs(kyActor, { monthKey: "2029-01", fingerprintKey: anh0.profitRecon.fingerprintKey, reason: "kiểm thử: đã đối chiếu từng dòng", acknowledgeIssues: false });
+    assert.ok("error" in chuaXem && /đánh dấu đã xem/.test(chuaXem.error), "còn khoản chưa đối soát mà không đánh dấu đã xem ⇒ từ chối");
+  }
+  const ky1 = await signProfitReconAs(kyActor, { monthKey: "2029-01", fingerprintKey: anh0?.profitRecon?.fingerprintKey ?? "", reason: "kiểm thử: đã đối chiếu từng dòng", acknowledgeIssues: true });
+  assert.ok("ok" in ky1 && ky1.created, `cấp 1 ký được trên ảnh chụp: ${"error" in ky1 ? ky1.error : ""}`);
+  const tuDuyet = await duyetBoi("cl-ky");
+  assert.ok("error" in tuDuyet && /MỘT NGƯỜI KHÁC/.test(tuDuyet.error), "người ký cấp 1 KHÔNG được duyệt cấp 2");
+  // Huỷ chữ ký ⇒ duyệt bị chặn (review vòng 1: huỷ từng không có tác dụng sau khi đã tính).
+  assert.ok("ok" in (await revokeProfitReconAs(kyActor, { id: "ok" in ky1 ? ky1.id : "", reason: "kiểm thử: phát hiện sai, huỷ" })));
+  const sauHuy = await duyetBoi("cl-duyet");
+  assert.ok("error" in sauHuy && /CHƯA có chữ ký/.test(sauHuy.error), "chữ ký đã huỷ ⇒ không duyệt được");
+  // Ký lại; số đổi rồi TÍNH LẠI ⇒ ảnh mới ⇒ chữ ký cũ không áp.
+  const ky2 = await signProfitReconAs(kyActor, { monthKey: "2029-01", fingerprintKey: anh0?.profitRecon?.fingerprintKey ?? "", reason: "kiểm thử: ký lại sau khi sửa", acknowledgeIssues: true });
+  assert.ok("ok" in ky2 && ky2.created);
   await db.insert(schema.adSpends).values({ id: "cl-ad-tam", platform: "facebook", campaign: "CL tạm", spend: 1, spendDate: d("2029-01-20"), productId: null, marketerId: null, excluded: false });
   clearMemo();
-  const kyCu = await calculatePayrollPeriodAs(actor, { from: "2029-01-01", to: "2029-01-31", basis: "profit1", note: "kiểm thử sổ mã" });
-  assert.ok("error" in kyCu && /chữ ký đối soát cấp 1/.test(kyCu.error), "số đổi sau khi ký ⇒ phải ký lại");
+  assert.ok("ok" in (await tinhKy()));
+  assert.notEqual((await anhKy())?.profitRecon?.fingerprint, anh0?.profitRecon?.fingerprint, "chuẩn bị: 1 ₫ QC không ai nhận đổi bảng đối soát");
+  await soat();
+  const anhMoi = await duyetBoi("cl-duyet");
+  assert.ok("error" in anhMoi && /CHƯA có chữ ký/.test(anhMoi.error), "ảnh chụp mới ⇒ chữ ký trên ảnh cũ không áp");
   await db.delete(schema.adSpends).where(eq(schema.adSpends.id, "cl-ad-tam"));
   clearMemo();
-  const tinh = await calculatePayrollPeriodAs(actor, { from: "2029-01-01", to: "2029-01-31", basis: "profit1", note: "kiểm thử sổ mã" });
-  assert.ok("ok" in tinh, `ký khớp số hiện tại ⇒ tính được kỳ tháng 1: ${"error" in tinh ? tinh.error : ""}`);
-  const p = schema.payrollPeriods;
-  const [anhKy] = await db.select({ snapshot: p.snapshot }).from(p).where(and(eq(p.periodKey, monthPeriodKey("2029-01")), eq(p.basis, "profit1")));
-  assert.equal((anhKy.snapshot as PayrollSnapshot).profitRecon?.signoff.signedById, "cl-ky", "ảnh chụp mang chữ ký cấp 1");
-  for (const id of ["cl-ky", "cl-duyet"]) await db.insert(schema.users).values({ id, email: `${id}@t.local`, name: id, role: "ADMIN", passwordHash: "x", active: true }).onConflictDoNothing();
-  assert.ok("ok" in (await transitionPayrollRunAs(actor, { periodKey: monthPeriodKey("2029-01"), basis: "profit1", action: "SUBMIT_REVIEW", reason: "" })));
-  const tuDuyet = await transitionPayrollRunAs({ id: "cl-ky", email: "cl-ky@t.local" }, { periodKey: monthPeriodKey("2029-01"), basis: "profit1", action: "APPROVE", reason: "" });
-  assert.ok("error" in tuDuyet && /MỘT NGƯỜI KHÁC/.test(tuDuyet.error), "người ký cấp 1 KHÔNG được duyệt cấp 2");
-  const duyet = await transitionPayrollRunAs({ id: "cl-duyet", email: "cl-duyet@t.local" }, { periodKey: monthPeriodKey("2029-01"), basis: "profit1", action: "APPROVE", reason: "" });
-  assert.ok("ok" in duyet, `một người KHÁC duyệt được: ${"error" in duyet ? duyet.error : ""}`);
+  assert.ok("ok" in (await tinhKy()));
+  assert.equal((await anhKy())?.profitRecon?.fingerprint, anh0?.profitRecon?.fingerprint, "số trở lại như lúc ký ⇒ cùng dấu vân tay (bảng tất định)");
+  await soat();
+  const duyet = await duyetBoi("cl-duyet");
+  assert.ok("ok" in duyet, `một người KHÁC duyệt được trên ảnh đã ký: ${"error" in duyet ? duyet.error : ""}`);
+  // Huỷ chữ ký SAU khi duyệt ⇒ không khoá được.
+  assert.ok("ok" in (await revokeProfitReconAs(kyActor, { id: "ok" in ky2 ? ky2.id : "", reason: "kiểm thử: huỷ sau khi duyệt" })));
+  const khoa = await transitionPayrollRunAs({ id: "cl-duyet", email: "cl-duyet@t.local" }, { periodKey: monthPeriodKey("2029-01"), basis: "profit1", action: "LOCK", reason: "" });
+  assert.ok("error" in khoa && /CHƯA có chữ ký/.test(khoa.error), "chữ ký bị huỷ sau khi duyệt ⇒ KHÔNG khoá / không sinh lệnh chuyển");
   const now = new Date();
   await db.update(p).set({ status: "LOCKED", approvedAt: now, lockedAt: now }).where(and(eq(p.periodKey, monthPeriodKey("2029-01")), eq(p.basis, "profit1")));
   const [kh1] = await db.select({ snapshot: p.snapshot }).from(p).where(and(eq(p.periodKey, monthPeriodKey("2029-01")), eq(p.basis, "profit1")));

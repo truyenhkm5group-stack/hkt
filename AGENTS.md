@@ -691,9 +691,10 @@ deploy dừng, không phải cảnh báo.
     đơn bằng CHÍNH `ORDER_OUTCOME` / `LINE_UNIT_COST`) — không tính lại lợi nhuận, không viết luật kết quả
     đơn thứ hai. Thiếu căn cứ (đơn chưa có chứng từ tiền, đơn chưa kết thúc, giá vốn rơi về 0, QC không mã
     không người, phí chiều hoàn chưa vào cơ sở, cảnh báo chi phí mức cao) ⇒ CHƯA ĐỐI SOÁT; giả định ⇒ nhãn
-    ƯỚC TÍNH, không đếm là khớp. Tháng có thưởng đủ điều kiện > 0 thì chốt kỳ đòi chữ ký cấp 1 KHỚP dấu vân
-    tay số hiện tại, và người duyệt kỳ (cấp 2) KHÁC người ký. Tháng không có khoản đủ điều kiện thì không
-    giữ lương của ai vì bảng đối soát. Đưa phí chiều hoàn hay bất kỳ khoản nào vào cơ sở lương là đổi cách
+    ƯỚC TÍNH, không đếm là khớp; "đã giải thích" chỉ khi ĐO được phần giải thích. Ảnh chụp kỳ mang bảng
+    đối soát; chữ ký cấp 1 ký trên ẢNH CHỤP (không trên số sống); tháng có thưởng đủ điều kiện > 0 thì DUYỆT
+    đòi chữ ký còn hiệu lực trên đúng ảnh ấy + người duyệt KHÁC người ký, KHOÁ đòi chữ ký vẫn còn hiệu lực.
+    Tính kỳ không bị chặn; tháng không có khoản đủ điều kiện thì không giữ lương của ai vì bảng đối soát. Đưa phí chiều hoàn hay bất kỳ khoản nào vào cơ sở lương là đổi cách
     tính thưởng ⇒ chủ shop quyết.
 
 ## 4. Database

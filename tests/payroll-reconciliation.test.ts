@@ -2,16 +2,12 @@
  * ═══════ ĐỐI SOÁT LỢI NHUẬN TÍNH LƯƠNG + DUYỆT HAI CẤP THƯỞNG % LỢI NHUẬN (Payroll V2 vận hành) ═══════
  *
  * Đặc tả `docs/payroll-code-ledger.md` §9. Phần THUẦN (`lib/payroll/profit-reconciliation.ts`) chạy ở
- * đây; phần NỐI (chặn chốt kỳ khi chưa ký · chữ ký cũ không áp · người ký không được duyệt) chạy trong
- * luồng thật của `tests/payroll-code-ledger.test.ts` qua `kySoatThang`.
+ * đây; phần NỐI (ảnh chụp mang bảng đối soát · ký trên ảnh · duyệt cần người khác · huỷ chữ ký thì không
+ * duyệt / khoá được) chạy trong luồng thật của `tests/payroll-code-ledger.test.ts`.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildMonthReconciliation, profitBonusStage, reconFingerprintKey, type MonthReconInput } from "@/lib/payroll/profit-reconciliation";
-import { payrollFinalizeBlockers } from "@/lib/constants/payroll-readiness";
-import { getMonthReconciliation, loadProfitSignoffs } from "@/lib/queries/payroll-reconciliation";
-import { PAYROLL_PROFIT_SIGNOFF_KEY, type ProfitReconSignoff } from "@/lib/constants/payroll-reconciliation";
-import { setSettingJson } from "@/lib/settings";
+import { buildMonthReconciliation, profitApprovalProblem, profitBonusStage, reconFingerprintKey, type MonthReconInput } from "@/lib/payroll/profit-reconciliation";
 
 const TR = 1_000_000;
 const goc = (): MonthReconInput => ({
@@ -19,15 +15,13 @@ const goc = (): MonthReconInput => ({
   basis: {
     revenue: 100 * TR,
     cogs: 30 * TR,
-    adsCodeWithMarketer: 20 * TR,
-    adsCodeNoMarketer: 0,
-    adsTestWithMarketer: 2 * TR,
-    adsTestNoMarketer: 0,
+    adsCode: 20 * TR,
+    adsTest: 2 * TR,
+    adsCodeInPersonLines: 20 * TR,
     shippingPerShipment: 5 * TR,
     logisticsAdjustment: 0,
     logisticsAdjustmentUnallocated: 0,
     operatingEntered: 10 * TR,
-    operatingAllocToCodes: 10 * TR,
     fixedCostAssumption: 0,
     perOrderOpsEstimate: 0,
     sharedUnallocated: 0,
@@ -35,9 +29,11 @@ const goc = (): MonthReconInput => ({
     basisExclusionMeasured: 0,
     basisExclusionEstimated: 0,
   },
+  adsRaw: { codeWithMarketer: 20 * TR, codeNoMarketer: 0, testWithMarketer: 2 * TR, testNoMarketer: 0 },
   engine: { cogs: 30 * TR, ads: 22 * TR, shipping: 5 * TR, returnCost: 0, operatingTotal: 10 * TR },
   orders: {
     deliveredRevenue: 100 * TR,
+    deliveredRevenueNoProduct: 0,
     deliveredRevenueWithMoney: 100 * TR,
     deliveredOrders: 200,
     deliveredOrdersWithMoney: 200,
@@ -48,6 +44,9 @@ const goc = (): MonthReconInput => ({
     cancelledOrders: 5,
     unknownCostLines: 0,
     unknownCostRevenue: 0,
+    cogsMarketerPriceEffect: 0,
+    inTransitShipping: 0,
+    sentOrders: 230,
     sentNoFeeOrders: 0,
   },
   costWarnings: [],
@@ -57,39 +56,46 @@ const goc = (): MonthReconInput => ({
   ],
 });
 const Q = "period=custom&from=2029-03-01&to=2029-03-31";
+const lech = (f: (x: MonthReconInput) => void) => {
+  const x = goc();
+  f(x);
+  return buildMonthReconciliation(x, Q);
+};
+const dong = (rc: ReturnType<typeof buildMonthReconciliation>, k: string) => rc.lines.find((l) => l.key === k);
 
 function testPure() {
   /* ── Tháng sạch: mọi dòng khớp ⇒ ĐÃ ĐỐI SOÁT, độ phủ 100% ── */
   const sach = buildMonthReconciliation(goc(), Q);
-  assert.equal(sach.status, "RECONCILED", "mọi dòng khớp nguồn ⇒ đã đối soát");
-  assert.equal(sach.issues.length, 0);
+  assert.equal(sach.status, "RECONCILED", `mọi dòng khớp nguồn ⇒ đã đối soát (${sach.issues.map((i) => i.code).join(",")})`);
   assert.equal(sach.coverage.revenueWithMoneyPct, 1);
   assert.equal(sach.coverage.revenueSettledPct, 1);
   assert.equal(sach.coverage.costReconciledPct, 1);
   assert.deepEqual(sach.codes, { total: 2, withCustomId: 2, profitComplete: 2, assigned: 1, withProfit: 2 });
-  assert.equal(sach.classes.BY_CODE, 30 * TR + 20 * TR + 5 * TR + 10 * TR, "chi phí theo mã = giá vốn + QC gắn mã + cước + vận hành chia xuống mã");
-  assert.equal(sach.classes.SHARED, 2 * TR, "QC test có người chịu là chi phí CHUNG");
+  assert.equal(sach.classes.BY_CODE, 30 * TR + 20 * TR + 5 * TR, "theo mã = giá vốn + QC gắn mã + cước");
+  assert.equal(sach.classes.SHARED, 10 * TR + 2 * TR, "chung = vận hành (kể cả phần chia xuống mã theo doanh thu) + QC test có người chịu");
   assert.equal(buildMonthReconciliation(goc(), Q).fingerprint, sach.fingerprint, "hàm thuần — cùng số ⇒ cùng dấu vân tay");
 
-  /* ── Mỗi loại thiếu căn cứ ⇒ CHƯA ĐỐI SOÁT, và nói đúng khoản ── */
-  const lech = (f: (x: MonthReconInput) => void) => {
-    const x = goc();
-    f(x);
-    return buildMonthReconciliation(x, Q);
-  };
+  /* ── Doanh thu ── */
   const thieuTien = lech((x) => {
     x.orders.deliveredRevenueWithMoney = 90 * TR;
     x.orders.deliveredOrdersWithMoney = 180;
   });
   assert.equal(thieuTien.status, "UNRECONCILED", "đơn đã giao chưa có chứng từ tiền ⇒ doanh thu chưa xác minh");
   assert.equal(thieuTien.coverage.revenueWithMoneyPct, 0.9);
-  assert.ok(thieuTien.lines.find((l) => l.key === "revenue")?.note.includes("20 đơn"));
+  assert.ok(dong(thieuTien, "revenue")?.note.includes("20 đơn"));
+  const khongMa = lech((x) => {
+    x.orders.deliveredRevenueNoProduct = 3 * TR;
+  });
+  assert.equal(dong(khongMa, "revenue-no-product")?.status, "UNRECONCILED", "dòng hàng không có mã — cơ sở bỏ qua chúng ⇒ chưa đối soát");
+  assert.equal(dong(khongMa, "revenue")?.status, "MATCHED", "dòng có mã vẫn khớp — hai thứ tách riêng");
   const dangDi = lech((x) => {
     x.orders.openOrders = 12;
     x.orders.openValue = 30 * TR;
   });
   assert.ok(dangDi.issues.some((i) => i.code === "open-orders" && i.count === 12), "đơn chưa kết thúc ⇒ tháng chưa chín");
   assert.equal(dangDi.coverage.revenueSettledPct, 0.8);
+
+  /* ── Giá vốn: chênh chỉ "đã giải thích" khi đo được phần giải thích ── */
   const giaVon0 = lech((x) => {
     x.orders.unknownCostLines = 7;
     x.orders.unknownCostRevenue = 3 * TR;
@@ -97,50 +103,92 @@ function testPure() {
   });
   assert.ok(giaVon0.issues.some((i) => i.code === "cogs" && i.count === 7), "dòng hàng không có giá vốn (đang tính 0 ₫) ⇒ chưa đối soát");
   assert.equal(giaVon0.codes.profitComplete, 1, "mã có dòng thiếu giá vốn KHÔNG tính là đủ dữ liệu lợi nhuận");
+  const giaBao = lech((x) => {
+    x.basis.cogs = 32 * TR;
+    x.orders.cogsMarketerPriceEffect = 2 * TR;
+  });
+  assert.equal(dong(giaBao, "cogs")?.status, "EXPLAINED", "chênh = đúng phần giá báo MKT đo được ⇒ đã giải thích");
+  const duKhongRo = lech((x) => {
+    x.basis.cogs = 32 * TR;
+    x.orders.cogsMarketerPriceEffect = 1 * TR;
+  });
+  assert.equal(dong(duKhongRo, "cogs")?.status, "UNRECONCILED", "còn phần dư không đo được ⇒ KHÔNG được gọi là đã giải thích");
+  assert.ok(dong(duKhongRo, "cogs")?.note.includes("phần dư"));
+
+  /* ── Quảng cáo: bốn ô đo thẳng + QC ngoài quy kết người ── */
   const qcKhongAi = lech((x) => {
-    x.basis.adsTestNoMarketer = 1 * TR;
+    x.basis.adsTest = 3 * TR;
+    x.adsRaw.testNoMarketer = 1 * TR;
     x.engine.ads = 23 * TR;
   });
   assert.equal(qcKhongAi.classes.UNKNOWN_SOURCE, 1 * TR, "QC không mã, không người ⇒ chưa xác định nguồn");
   assert.ok(qcKhongAi.issues.some((i) => i.code === "ads-test-nomk"));
+  const maChuaGan = lech((x) => {
+    x.adsRaw.codeWithMarketer = 18 * TR;
+    x.adsRaw.codeNoMarketer = 2 * TR;
+  });
+  assert.ok(maChuaGan.issues.some((i) => i.code === "ads-code-nomk"), "QC gắn mã chưa có người ⇒ chưa đối soát (đo thẳng trên bảng chi, không qua quy kết)");
+  const ngoaiQuyKet = lech((x) => {
+    x.basis.adsCodeInPersonLines = 15 * TR;
+  });
+  assert.ok(ngoaiQuyKet.issues.some((i) => i.code === "ads-outside-attribution" && i.amount === 5 * TR), "QC của mã không đi vào dòng của MKTer nào ⇒ nói rõ 5tr 'không ai nhận'");
   const qcLech = lech((x) => {
     x.engine.ads = 25 * TR;
   });
   assert.ok(qcLech.issues.some((i) => i.code === "ads"), "tổng QC cơ sở lệch máy chi phí ⇒ chưa đối soát");
+  const oLech = lech((x) => {
+    x.adsRaw.codeWithMarketer = 19 * TR;
+  });
+  assert.ok(oLech.issues.some((i) => i.code === "ads-parts"), "bốn ô đo thẳng không cộng ra QC của cơ sở ⇒ chưa đối soát");
+
+  /* ── Logistics ── */
+  const dangDiCuoc = lech((x) => {
+    x.basis.shippingPerShipment = 6 * TR;
+    x.orders.inTransitShipping = 1 * TR;
+  });
+  assert.equal(dong(dangDiCuoc, "shipping")?.status, "EXPLAINED", "chênh cước = đúng cước kiện đang đi ⇒ đã giải thích");
+  const cuocAm = lech((x) => {
+    x.basis.shippingPerShipment = 4 * TR;
+  });
+  assert.equal(dong(cuocAm, "shipping")?.status, "UNRECONCILED", "cơ sở THẤP hơn máy chi phí — không thể là do kiện đang đi ⇒ chưa đối soát");
+  const khongCuoc = lech((x) => {
+    x.orders.sentNoFeeOrders = 3;
+  });
+  assert.ok(khongCuoc.issues.some((i) => i.code === "shipping" && i.count === 3), "kiện đã gửi không có cước (tính 0 ₫)");
   const phiHoan = lech((x) => {
     x.engine.returnCost = 4 * TR;
   });
   assert.equal(phiHoan.classes.NOT_IN_BASIS, 4 * TR, "phí chiều hoàn có thật mà chưa vào cơ sở lương");
   assert.ok(phiHoan.issues.some((i) => i.code === "return-cost"));
-  const luongCung = lech((x) => {
-    x.costWarnings = [{ rule: "PAYROLL_OBLIGATION_NOT_RECOGNIZED", title: "Lương cứng chưa ghi nhận", amount: 8 * TR }];
+
+  /* ── Cảnh báo: chỉ "lương cứng chưa ghi nhận" là chưa vào cơ sở; trùng nguồn là khoản bị LOẠI ── */
+  const canhBao = lech((x) => {
+    x.costWarnings = [
+      { rule: "PAYROLL_OBLIGATION_NOT_RECOGNIZED", title: "Lương cứng chưa ghi nhận", amount: 8 * TR },
+      { rule: "DUPLICATE_LOGISTICS_COST_SOURCE", title: "Cước gõ tay trùng vận đơn", amount: 3 * TR },
+    ];
   });
-  assert.equal(luongCung.classes.NOT_IN_BASIS, 8 * TR);
-  assert.ok(luongCung.issues.some((i) => i.code === "warn:PAYROLL_OBLIGATION_NOT_RECOGNIZED"));
-  const khongCuoc = lech((x) => {
-    x.orders.sentNoFeeOrders = 3;
+  assert.equal(canhBao.classes.NOT_IN_BASIS, 8 * TR, "khoản trùng nguồn (bị loại) KHÔNG cộng vào 'chưa vào cơ sở' — cộng là mời tính hai lần");
+  assert.ok(canhBao.issues.some((i) => i.code === "warn:DUPLICATE_LOGISTICS_COST_SOURCE"), "nhưng vẫn là việc phải đối chiếu tay");
+
+  /* ── Ước tính có nhãn, không tính là khớp ── */
+  const uocTinh = lech((x) => {
+    x.basis.fixedCostAssumption = 5 * TR;
   });
-  assert.ok(khongCuoc.issues.some((i) => i.code === "shipping" && i.count === 3), "kiện đã gửi không có cước (tính 0 ₫)");
+  assert.equal(dong(uocTinh, "fixed-assumption")?.status, "ESTIMATED");
+  assert.ok((uocTinh.coverage.costReconciledPct ?? 1) < 1, "chi phí GIẢ ĐỊNH không đếm là khớp nguồn");
+  assert.equal(uocTinh.classes.SHARED, 10 * TR + 5 * TR + 2 * TR, "chi phí cố định giả định là chi phí CHUNG");
   const khongMaHang = lech((x) => {
     x.codes[1].hasCustomId = false;
   });
   assert.ok(khongMaHang.issues.some((i) => i.code === "code-no-custom-id" && i.count === 1));
-  // Ước tính KHÔNG phải số đo: không được tính vào "đã khớp", nhưng tự nó không phải lỗi.
-  const uocTinh = lech((x) => {
-    x.basis.fixedCostAssumption = 5 * TR;
-  });
-  assert.equal(uocTinh.lines.find((l) => l.key === "fixed-assumption")?.status, "ESTIMATED");
-  assert.ok((uocTinh.coverage.costReconciledPct ?? 1) < 1, "chi phí GIẢ ĐỊNH không đếm là khớp nguồn");
-  assert.equal(uocTinh.status, "RECONCILED", "ước tính có nhãn, không tự là khoản chưa đối soát");
-  // Số đổi ⇒ dấu vân tay đổi ⇒ chữ ký cũ không còn áp.
-  assert.notEqual(dangDi.fingerprint, sach.fingerprint);
+  assert.notEqual(dangDi.fingerprint, sach.fingerprint, "số đổi ⇒ dấu vân tay đổi");
   assert.notEqual(reconFingerprintKey(dangDi.fingerprint), reconFingerprintKey(sach.fingerprint));
-  // Mẫu số 0 ⇒ chưa đo được (null), không phải 0% hay 100%.
   const rong = lech((x) => {
     x.orders = { ...x.orders, deliveredRevenue: 0, deliveredRevenueWithMoney: 0, settledValue: 0, openValue: 0 };
     x.basis.revenue = 0;
   });
-  assert.equal(rong.coverage.revenueWithMoneyPct, null);
+  assert.equal(rong.coverage.revenueWithMoneyPct, null, "mẫu số 0 ⇒ chưa đo được, không phải 0% hay 100%");
   assert.equal(rong.coverage.revenueSettledPct, null);
 
   /* ── Năm nấc trạng thái khoản thưởng ── */
@@ -152,12 +200,18 @@ function testPure() {
   assert.equal(profitBonusStage({ eligible: 5 * TR, established: true, runStatus: "PAID", paid: true }), "PAID");
   assert.equal(profitBonusStage({ eligible: 0, established: true, runStatus: "PAID", paid: true }), "NOT_ELIGIBLE", "kỳ đã trả nhưng khoản không đủ điều kiện ⇒ không có gì được trả");
 
-  /* ── Điều kiện chốt: cần ký khi có khoản đủ điều kiện, không cần khi không có ── */
-  const chan = (rc: { required: boolean; signed: boolean }) =>
-    payrollFinalizeBlockers({ bounded: true, basisEligible: true, basisWhy: "", basisLabel: "", totalSalary: 1, costWarnings: [], lines: [], profitRecon: { ...rc, monthKey: "2029-03", status: "UNRECONCILED", issueCount: 2 } }).some((b) => b.code === "PROFIT_RECON_NOT_SIGNED");
-  assert.equal(chan({ required: true, signed: false }), true, "có thưởng đủ điều kiện, chưa ký ⇒ chặn chốt");
-  assert.equal(chan({ required: true, signed: true }), false);
-  assert.equal(chan({ required: false, signed: false }), false, "không có khoản đủ điều kiện ⇒ lương cứng không bị giữ vì bảng đối soát");
+  /* ── Cấp 2 ── */
+  const ky = { id: "k1", monthKey: "2029-03", fingerprint: "FP", signedById: "u1", signedByEmail: "u1@x", revokedAt: null };
+  const hoi = (o: Partial<Parameters<typeof profitApprovalProblem>[0]>) =>
+    profitApprovalProblem({ allocatedTotal: 5 * TR, monthKey: "2029-03", snapshotFingerprint: "FP", signoffs: [ky], actorId: "u2", requireDifferentPerson: true, ...o });
+  assert.equal(hoi({}), null, "chữ ký còn hiệu lực trên đúng ảnh + người khác duyệt ⇒ được");
+  assert.equal(hoi({ allocatedTotal: 0, signoffs: [] }), null, "không có thưởng đủ điều kiện ⇒ không cần ký (lương cứng không bị giữ)");
+  assert.match(hoi({ signoffs: [] }) ?? "", /CHƯA có chữ ký/);
+  assert.match(hoi({ snapshotFingerprint: "FP2" }) ?? "", /CHƯA có chữ ký/, "chữ ký trên ảnh chụp CŨ không áp cho ảnh mới");
+  assert.match(hoi({ signoffs: [{ ...ky, revokedAt: "2029-04-01" }] }) ?? "", /CHƯA có chữ ký/, "chữ ký đã huỷ không áp");
+  assert.match(hoi({ actorId: "u1" }) ?? "", /MỘT NGƯỜI KHÁC/, "người ký cấp 1 không duyệt cấp 2");
+  assert.equal(hoi({ actorId: "u1", requireDifferentPerson: false }), null, "bước KHOÁ chỉ cần chữ ký còn hiệu lực");
+  assert.match(hoi({ snapshotFingerprint: null }) ?? "", /không mang bảng đối soát/);
 }
 
 function testSourceFences() {
@@ -168,34 +222,14 @@ function testSourceFences() {
   assert.ok(/getRecognizedCosts/.test(q) && /getPayrollReport/.test(q), "hai vế đối chiếu là hai nguồn đã có, không tính lại lợi nhuận");
   assert.ok(!/getSettingJson\s*[<(]/.test(q), "ô settings kiểu mảng đọc THÔ (getSettingJson gộp mảng thành object)");
   const rs = readFileSync("lib/payroll/run-service.ts", "utf8");
-  assert.ok(/profitReconReadiness\(report\)/.test(rs) && /signedById === actor\.id/.test(rs), "chốt kỳ đòi chữ ký cấp 1; duyệt đòi người khác người ký");
-  const page = readFileSync("app/(dashboard)/payroll/page.tsx", "utf8");
-  assert.ok(/profitReconReadiness\(report\)/.test(page), "màn hình gọi CÙNG hàm điều kiện với server");
-}
-
-/** Ghi chữ ký cấp 1 KHỚP số hiện tại của tháng — dùng trong luồng thật của các bộ khác. */
-export async function kySoatThang(monthKey: string, signedById: string): Promise<ProfitReconSignoff> {
-  const rc = await getMonthReconciliation(monthKey);
-  const cu = await loadProfitSignoffs();
-  const ky: ProfitReconSignoff = {
-    id: `kt-${monthKey}-${signedById}-${cu.length}`,
-    monthKey,
-    fingerprint: rc.fingerprint,
-    fingerprintKey: reconFingerprintKey(rc.fingerprint),
-    status: rc.status,
-    issues: rc.issues.map((i) => ({ code: i.code, label: i.label, amount: i.amount, count: i.count })),
-    reason: "kiểm thử: đã đối chiếu từng dòng",
-    signedById,
-    signedByEmail: `${signedById}@kiem-thu`,
-    signedAt: new Date("2029-12-01T00:00:00Z").toISOString(),
-    revokedAt: null,
-  };
-  await setSettingJson(PAYROLL_PROFIT_SIGNOFF_KEY, [...cu, ky]);
-  return ky;
+  assert.ok(/snapshot\.profitRecon = /.test(rs), "ảnh chụp kỳ mang bảng đối soát");
+  assert.ok(/profitApprovalProblem\(/.test(rs) && /action === "APPROVE" \|\| action === "LOCK"/.test(rs), "duyệt VÀ khoá đều kiểm chữ ký còn hiệu lực");
+  const svc = readFileSync("lib/payroll/recon-signoff.ts", "utf8");
+  assert.ok(/snapshot\?\.profitRecon/.test(svc) && !/getMonthReconciliation/.test(svc), "chữ ký ký trên ẢNH CHỤP, không đo lại số sống");
 }
 
 export function testPayrollReconciliationPure() {
   testPure();
   testSourceFences();
-  console.log("✓ đối soát lợi nhuận tính lương: từng dòng cơ sở ↔ nguồn · chi phí theo mã / chung / chưa rõ nguồn / chưa vào cơ sở · độ phủ (chưa đo được ≠ 0%) · năm nấc thưởng · chốt kỳ cần ký khi có khoản đủ điều kiện");
+  console.log("✓ đối soát lợi nhuận tính lương: từng dòng cơ sở ↔ nguồn · 'đã giải thích' chỉ khi đo được phần giải thích · QC bốn ô đo thẳng + QC ngoài quy kết · chi phí theo mã / chung / chưa rõ nguồn / chưa vào cơ sở · độ phủ (chưa đo được ≠ 0%) · năm nấc thưởng · cấp 2 cần chữ ký còn hiệu lực trên đúng ảnh + người khác");
 }

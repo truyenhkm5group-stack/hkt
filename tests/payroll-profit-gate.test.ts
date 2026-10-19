@@ -43,7 +43,6 @@ import { lockedMonthFigures, monthPeriodKey, monthsBetween } from "@/lib/queries
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { PAYROLL_RECOGNITION_KEY } from "@/lib/queries/payroll-cost";
 import { PAYROLL_PROFIT_SIGNOFF_KEY } from "@/lib/constants/payroll-reconciliation";
-import { kySoatThang } from "./payroll-reconciliation.test";
 
 const TR = 1_000_000;
 const mo = (cumulative: number, highWater: number, paidToDate = 0, established = true): ProfitGateOpening => ({
@@ -434,8 +433,6 @@ async function testFlow(db: Db) {
   assert.equal(dong(tuan, A.id).salary, null, "kỳ 7 ngày có thưởng % LN ⇒ thực nhận chưa kết luận");
 
   /* ══ 5 + 8 (nối, tiếp) · KHOÁ THÁNG 2: ĐIỀU CHỈNH ĐƯỢC CHỤP, ĐẾM ĐÚNG MỘT LẦN, KHÔNG MỞ KHOÁ NGƯỢC CHUỖI ══ */
-  // Payroll V2 vận hành: tháng 2 có thưởng % LN ĐỦ ĐIỀU KIỆN ⇒ chốt kỳ đòi chữ ký đối soát cấp 1 khớp số hiện tại.
-  await kySoatThang("2028-02", "pg-ky");
   const tinh2 = await calculatePayrollPeriodAs(actor, { from: "2028-02-01", to: "2028-02-29", basis: "profit1", note: "kiểm thử cổng" });
   assert.ok("ok" in tinh2, `tính được kỳ tháng 2: ${"error" in tinh2 ? tinh2.error : ""}`);
   // Review vòng 5: điều chỉnh ghi SAU lần tính (lúc soát) mà không tính lại thì duyệt / khoá bị CHẶN — nếu

@@ -206,17 +206,21 @@ Mã: `lib/payroll/profit-reconciliation.ts` (thuần) · `lib/queries/payroll-re
 |---|---|---|
 | Doanh thu giao thành công | Σ `products[].revenue` | đo lại trên đơn bằng CHÍNH `ORDER_OUTCOME_FAST` + `REVENUE_RECOGNIZED_ON_DELIVERY`; phần có chứng từ tiền (COD thực thu / chuyển khoản) |
 | Đơn chưa kết thúc | — | giá trị đơn nhóm OPEN của tháng (đang đi · chưa rời kho · chưa biết) |
-| Giá vốn | Σ `products[].cogs` (`LINE_UNIT_COST`) | máy chi phí `COGS`; dòng hàng mà `LINE_UNIT_COST` rơi về **0** được đếm riêng |
-| Quảng cáo | QC gắn mã (có / chưa có MKTer) + QC test (có / không ai) | máy chi phí `ADS` |
-| Cước chiều đi | cước vận đơn của MỌI kiện đã gửi | máy chi phí `SHIPPING` (chỉ đơn đã kết thúc, không gồm điều chỉnh) — chênh = cước kiện đang đi |
+| Giá vốn | Σ `products[].cogs` (`LINE_UNIT_COST`) | máy chi phí `COGS`; "đã giải thích" CHỈ khi chênh = ảnh hưởng giá báo MKT ĐO ĐƯỢC (dư ≤ 1 ₫/đơn); dòng hàng mà `LINE_UNIT_COST` rơi về **0** được đếm riêng |
+| Doanh thu dòng không mã | — | dòng hàng không ghép được mẫu mã — cơ sở bỏ qua |
+| Quảng cáo | QC của mã + QC test | máy chi phí `ADS`; bốn ô (mã × có/không MKTer) đo THẲNG trên `ad_spends`; dòng riêng cho QC của mã KHÔNG đi vào quy kết của MKTer nào |
+| Cước chiều đi | cước vận đơn của MỌI kiện đã gửi | máy chi phí `SHIPPING` (chỉ đơn đã kết thúc, không gồm điều chỉnh); "đã giải thích" CHỈ khi chênh = cước kiện đang đi ĐO ĐƯỢC (dư ≤ 1 ₫/kiện) |
 | Phí chiều hoàn | **không có** | máy chi phí `RETURN_COST` (vận đơn chiều về, không gồm điều chỉnh) |
 | Vận hành | `operatingEntered` | máy chi phí `operatingTotal` − khoản loại khỏi cơ sở (thù lao biến đổi) |
 | Giả định | chi phí cố định khai ở Cấu hình, định mức theo đơn | — (ƯỚC TÍNH) |
 | Cảnh báo `high` | — | vd lương cứng chưa ghi nhận |
 
-Trạng thái mỗi dòng: **Khớp nguồn** · **Chênh đã giải thích** · **Ước tính** (có nhãn, không đếm là khớp) ·
-**Chưa đối soát**. Nhóm chi phí: **theo mã** · **chung** · **chưa xác định nguồn** (QC không mã không người)
-· **có thật nhưng chưa vào cơ sở lương** (phí chiều hoàn, lương cứng chưa ghi nhận).
+Trạng thái mỗi dòng: **Khớp nguồn** · **Chênh đã giải thích** (chỉ khi đo được phần giải thích) · **Ước tính**
+(có nhãn, không đếm là khớp) · **Chưa đối soát**. Nhóm chi phí: **theo mã** (giá vốn, QC của mã, cước, định
+mức theo đơn) · **chung** (vận hành, chi phí cố định giả định — kể cả phần chia xuống mã theo doanh thu, QC
+test có người chịu) · **chưa xác định nguồn** (QC không mã không người) · **có thật nhưng chưa vào cơ sở
+lương** (phí chiều hoàn, lương cứng chưa ghi nhận — KHÔNG gồm khoản bị loại vì trùng nguồn). Dòng "Vận hành"
+là kiểm nhất quán CÙNG nguồn, không phải đối chiếu độc lập với sao kê.
 
 Độ phủ (mẫu số 0 ⇒ `null`, in "—", không phải 0%): doanh thu có chứng từ tiền ÷ doanh thu đã giao (theo
 giá trị); giá trị đơn đã có kết quả ÷ (đã kết thúc + chưa kết thúc); chi phí ở dòng khớp / đã giải thích ÷
@@ -232,18 +236,29 @@ giá vốn, QC của mã đều có người.
 3. **Kiện đang đi** đã chịu cước + chi phí theo đơn mà chưa có doanh thu: số của tháng còn đổi cho tới khi
    mọi đơn có kết quả.
 
-### 9.3 Duyệt hai cấp (`lib/constants/payroll-reconciliation.ts`)
+### 9.3 Duyệt hai cấp (`lib/constants/payroll-reconciliation.ts` · `lib/payroll/recon-signoff.ts`)
 
-Chỉ bắt buộc khi tháng có thưởng % lợi nhuận **đủ điều kiện > 0** — tháng còn lỗ lũy kế thì lương cứng và
-hoa hồng thông thường chốt như cũ.
+**Ký trên ẢNH CHỤP kỳ, không trên số sống** (review vòng 1): số sống đổi theo từng webhook / khoản COD về,
+nên "ký số sống rồi tính rồi duyệt" có thể không bao giờ khớp — và kỳ kẹt kéo theo cả lương cứng.
 
-- **Cấp 1 — ký đối soát** (`signProfitReconciliation`): xem từng dòng rồi ký, kèm lý do. Chữ ký mang dấu
-  vân tay MỌI con số đã thấy; trang gửi dấu đang hiện, server đo lại và chỉ nhận khi bằng nhau. Số đổi sau
-  khi ký ⇒ chữ ký cũ không còn áp ⇒ chốt kỳ bị chặn (`PROFIT_RECON_NOT_SIGNED`). Huỷ được, có lý do.
-- **Cấp 2 — duyệt kỳ lương** (`APPROVE`): ảnh chụp kỳ mang chữ ký cấp 1; người bấm duyệt **không được** là
-  người đã ký. Thanh toán (lệnh chuyển) chỉ sinh khi KHOÁ, mà khoá chỉ sau duyệt — không có đường trả thưởng
-  tự động khi dữ liệu chưa đạt.
-- Người thứ hai duyệt chính chữ ký cấp 1 khi nhóm `PAYROLL_EDIT` bật cưỡng chế.
+1. **Tính kỳ** (`CALCULATE`) — KHÔNG bị chặn bởi đối soát. Ảnh chụp mang bảng đối soát của tháng
+   (`snapshot.profitRecon`: từng dòng, nhóm chi phí, độ phủ, khoản chưa đối soát, dấu vân tay).
+2. **Cấp 1 — ký** (`signProfitReconciliation`) khi kỳ `CALCULATED` / `UNDER_REVIEW`: ký ĐÚNG dấu vân tay
+   của ảnh chụp đang hiện (trang gửi mã ảnh; ảnh đã tính lại ⇒ từ chối). Bảng còn khoản chưa đối soát ⇒ phải
+   đánh dấu đã xem từng khoản và ghi lý do chấp nhận. Huỷ được, có lý do (đánh dấu, không xoá).
+3. **Cấp 2 — duyệt** (`APPROVE`): kỳ có thưởng % lợi nhuận **đủ điều kiện > 0** thì phải có chữ ký CÒN
+   HIỆU LỰC trên đúng ảnh chụp này, và người duyệt **khác** người ký. **Khoá** (`LOCK`) kiểm lại chữ ký vẫn
+   còn hiệu lực — huỷ chữ ký sau khi duyệt thì không khoá được, không sinh lệnh chuyển. Đọc chữ ký trong
+   giao dịch, dưới khoá tên của sổ chữ ký.
+4. Tính lại kỳ ⇒ ảnh mới; số không đổi ⇒ cùng dấu vân tay (bảng tất định) ⇒ chữ ký cũ vẫn áp; số đổi ⇒
+   phải ký lại.
+
+Kỳ KHÔNG có khoản thưởng đủ điều kiện (công ty còn lỗ lũy kế) duyệt / khoá như cũ — không giữ lương của ai
+vì bảng đối soát. Người thứ hai duyệt chính chữ ký cấp 1 khi nhóm `PAYROLL_EDIT` bật cưỡng chế; hôm nay chưa
+bật nên MỘT quản trị viên ký được, nhưng người DUYỆT kỳ vẫn phải là người khác.
+
+Lưu ý thực tế: tháng còn đơn chưa kết thúc hay còn phí chiều hoàn thì bảng gần như luôn "chưa đối soát" — cổng
+khi ấy là "một người đã xem từng khoản và ghi lý do", rồi một người khác duyệt.
 
 ### 9.4 Năm nấc của một khoản thưởng % lợi nhuận
 

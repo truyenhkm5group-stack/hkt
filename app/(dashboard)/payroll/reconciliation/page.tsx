@@ -53,18 +53,26 @@ export default async function PayrollReconciliationPage({ searchParams }: { sear
     );
   }
 
-  const [report, state, signoffs] = await Promise.all([getPayrollReport(period, "profit1"), getPayrollPeriodState(period, "profit1"), loadProfitSignoffs(monthKey)]);
-  const recon = await getMonthReconciliation(monthKey, { report });
-  const key = reconFingerprintKey(recon.fingerprint);
+  const [report, state, signoffs] = await Promise.all([getPayrollReport(period, "profit1"), getPayrollPeriodState(period, "profit1"), loadProfitSignoffs(monthKey, { includeRevoked: true })]);
+  const live = await getMonthReconciliation(monthKey, { report });
   const gate = report.profitGate.result;
-  const required = (gate.allocatedTotal ?? 0) > 0;
   const runStatus = state.status === "NONE" ? null : state.status;
-  const snap = state.frozen ? (state.snapshot as PayrollSnapshot | null) : null;
-  // Kỳ đã khoá: trạng thái thưởng đọc từ ẢNH CHỤP (số đã duyệt), không từ bản tính sống.
+  /*
+    KỲ ĐÃ TÍNH ⇒ ĐỌC ẢNH CHỤP. Thứ được ký là bảng trong ảnh chụp (số sống đổi theo từng webhook);
+    trạng thái thưởng cũng đọc từ ảnh vì đó là con số được duyệt. Số sống vẫn hiện bên dưới để so.
+  */
+  const snap = state.snapshot ? (state.snapshot as PayrollSnapshot) : null;
+  const anh = snap?.profitRecon ?? null;
+  const recon = anh
+    ? { ...live, lines: anh.lines as typeof live.lines, issues: anh.issues.map((i) => ({ ...i, href: live.issues.find((x) => x.code === i.code)?.href ?? null })), status: anh.status, coverage: anh.coverage, classes: anh.classes as typeof live.classes, codes: anh.codes, fingerprint: anh.fingerprint }
+    : live;
+  const key = anh ? anh.fingerprintKey : reconFingerprintKey(live.fingerprint);
+  const required = ((snap ? snap.profitGate?.allocatedTotal : gate.allocatedTotal) ?? 0) > 0;
   const claims = snap
     ? snap.lines.flatMap((l) => (l.profitShare?.claims ?? []).map((c) => ({ key: c.key, label: c.label, provisional: c.provisional, eligible: c.eligible, withheld: c.withheld })))
     : gate.allocations.map((a) => ({ key: a.key, label: a.label, provisional: a.provisional, eligible: a.eligible, withheld: a.withheld }));
   const established = snap ? snap.profitGate?.established === true : gate.established;
+  const lechSong = anh !== null && anh.fingerprint !== live.fingerprint;
   const stageOf = (eligible: number | null) => profitBonusStage({ eligible, established, runStatus, paid: runStatus === "PAID" });
   const theoNac = new Map<string, { n: number; provisional: number; eligible: number }>();
   for (const c of claims) {
@@ -98,7 +106,11 @@ export default async function PayrollReconciliationPage({ searchParams }: { sear
 
       <SectionCard
         title={`Tháng ${monthKey} · ${recon.status === "RECONCILED" ? "ĐÃ ĐỐI SOÁT ĐỦ" : `CHƯA ĐỐI SOÁT — ${recon.issues.length} khoản`}`}
-        description={`Lợi nhuận tính lương ${v(report.totalProfit)} · cổng công ty: ${gate.message}`}
+        description={
+          anh
+            ? `Bảng trong ẢNH CHỤP kỳ (${runStatus}) — đây là thứ được ký và duyệt.${lechSong ? " Số hiện tại ĐÃ KHÁC ảnh chụp (đơn chốt kết quả / chi phí nhập thêm): tính lại kỳ để chụp số mới, rồi ký lại." : " Số hiện tại vẫn khớp ảnh chụp."}`
+            : `Chưa tính kỳ lương tháng này — bảng dưới là SỐ SỐNG (để xem, không ký được). Lợi nhuận tính lương ${v(report.totalProfit)} · ${gate.message}`
+        }
       >
         <dl className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
           <div>
@@ -233,8 +245,11 @@ export default async function PayrollReconciliationPage({ searchParams }: { sear
         <SignoffPanel
           monthKey={monthKey}
           fingerprintKey={key}
+          canSign={anh !== null && (runStatus === "CALCULATED" || runStatus === "UNDER_REVIEW")}
+          cannotSignWhy={!anh ? "Chưa có ảnh chụp kỳ — bấm “Tính & chụp ảnh kỳ” ở tab Bảng lương trước. Chữ ký ký trên ảnh chụp, không trên số sống." : runStatus === "CALCULATED" || runStatus === "UNDER_REVIEW" ? null : `Kỳ đang ở trạng thái “${runStatus}” — chỉ ký khi kỳ Đã tính / Đang soát.`}
           locked={state.frozen}
-          signoffs={signoffs.map((s) => ({ id: s.id, current: s.fingerprint === recon.fingerprint, signedByEmail: s.signedByEmail, signedAt: s.signedAt, reason: s.reason, status: s.status }))}
+          issues={recon.issues.map((i) => i.label)}
+          signoffs={signoffs.map((s) => ({ id: s.id, current: !s.revokedAt && s.fingerprint === recon.fingerprint, revoked: Boolean(s.revokedAt), signedByEmail: s.signedByEmail, signedAt: s.signedAt, reason: s.reason, status: s.status }))}
         />
       </SectionCard>
     </div>

@@ -34,8 +34,9 @@ import {
 } from "@/lib/constants/payroll";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { getPayrollReport, profitGateReadiness } from "@/lib/queries/payroll";
-import { profitReconReadiness } from "@/lib/queries/payroll-reconciliation";
-import { reconFingerprintKey } from "@/lib/payroll/profit-reconciliation";
+import { getMonthReconciliation, parseSignoffs } from "@/lib/queries/payroll-reconciliation";
+import { profitApprovalProblem, reconFingerprintKey } from "@/lib/payroll/profit-reconciliation";
+import { PAYROLL_PROFIT_SIGNOFF_KEY } from "@/lib/constants/payroll-reconciliation";
 import { LEGACY_CARRY_COMPONENT, monthKeyOf, rateToBp, wholeMonthKey } from "@/lib/constants/payroll-carryover";
 import { getProfitGateConfig } from "@/lib/queries/payroll-profit-gate";
 import { PAYROLL_PROFIT_GATE_KEY } from "@/lib/constants/payroll-profit-gate";
@@ -92,7 +93,6 @@ export async function calculatePayrollPeriodAs(actor: PayrollActor, input: Calcu
 
   const period: Period = { key: "custom", from: fromAt, to: toAt, fromKey: from, toKey: to, label: `${from} → ${to}` };
   const report = await getPayrollReport(period, basis);
-  const rc = await profitReconReadiness(report);
   /*
     ĐIỀU KIỆN CHỐT ĐỌC TỪ MỘT CHỖ DUY NHẤT.
 
@@ -125,21 +125,35 @@ export async function calculatePayrollPeriodAs(actor: PayrollActor, input: Calcu
       report.lines.map((l) => ({ id: l.employee.id, name: l.employee.shortName || l.employee.name })),
     ),
     profitGate: profitGateReadiness(report),
-    profitRecon: { required: rc.required, monthKey: rc.monthKey, signed: rc.signoff !== null, status: rc.recon?.status ?? null, issueCount: rc.recon?.issues.length ?? 0 },
   });
   if (blockers.length) {
     return { error: `Chưa đủ căn cứ để chốt kỳ này:\n· ${blockers.map((b) => b.message).join("\n· ")}` };
   }
 
   const snapshot = buildPayrollSnapshot(report, period, key);
-  // Ảnh chụp mang chữ ký cấp 1 (nếu kỳ cần) — bước DUYỆT đọc nó để bắt người duyệt khác người ký.
-  if (rc.required && rc.recon && rc.signoff) {
-    snapshot.profitRecon = {
-      status: rc.recon.status,
-      fingerprintKey: reconFingerprintKey(rc.recon.fingerprint),
-      issues: rc.recon.issues.map((i) => ({ code: i.code, label: i.label, amount: i.amount, count: i.count })),
-      signoff: { id: rc.signoff.id, signedById: rc.signoff.signedById, signedByEmail: rc.signoff.signedByEmail, signedAt: rc.signoff.signedAt, reason: rc.signoff.reason },
-    };
+  /*
+    ẢNH CHỤP MANG BẢNG ĐỐI SOÁT CỦA THÁNG (Payroll V2 vận hành, `docs/payroll-code-ledger.md` §9.3).
+    Chữ ký cấp 1 ký ĐÚNG bảng này — không ký số sống, vì số sống đổi theo từng webhook và ký → tính →
+    duyệt sẽ không bao giờ khớp. Tính kỳ KHÔNG bị chặn ở đây: chặn nằm ở bước DUYỆT / KHOÁ, và chỉ khi
+    kỳ có thưởng % lợi nhuận đủ điều kiện > 0.
+  */
+  const thangKy = basis === "profit1" ? wholeMonthKey(fromAt, toAt) : null;
+  if (thangKy) {
+    try {
+      const rc = await getMonthReconciliation(thangKy, { report });
+      snapshot.profitRecon = {
+        status: rc.status,
+        fingerprint: rc.fingerprint,
+        fingerprintKey: reconFingerprintKey(rc.fingerprint),
+        issues: rc.issues.map((i) => ({ code: i.code, label: i.label, amount: i.amount, count: i.count })),
+        lines: rc.lines.map((l) => ({ key: l.key, label: l.label, basis: l.basis, source: l.source, diff: l.diff, status: l.status, cls: l.cls, note: l.note })),
+        coverage: rc.coverage,
+        classes: rc.classes,
+        codes: rc.codes,
+      };
+    } catch (e) {
+      return { error: `Không dựng được bảng đối soát lợi nhuận tháng ${thangKy}: ${e instanceof Error ? e.message : String(e)}` };
+    }
   }
   const luc = new Date();
   /** Các dòng sổ lỗ sẽ ghi cùng lượt chốt — rỗng khi sổ không áp dụng cho kỳ này. */
@@ -422,21 +436,25 @@ export async function transitionPayrollRunAs(actor: PayrollActor, input: Transit
       bảng chuyển trạng thái đã ép điều đó: `APPROVED` chỉ đi tiếp được khi có người bấm `LOCK`.
     */
     /*
-      CẤP 2 PHẢI LÀ MỘT NGƯỜI KHÁC CẤP 1 (duyệt hai cấp cho thưởng % lợi nhuận, chủ shop 19/10/2026).
-      Kỳ có thưởng đủ điều kiện > 0 thì ảnh chụp bắt buộc mang chữ ký đối soát cấp 1 (đã chặn ở bước
-      tính), và người bấm DUYỆT không được là người đã ký — một người tự đối soát rồi tự duyệt khoản
-      thưởng là đúng thứ hai cấp sinh ra để chặn.
+      DUYỆT HAI CẤP CHO THƯỞNG % LỢI NHUẬN (chủ shop 19/10/2026). Kỳ có thưởng đủ điều kiện > 0 thì:
+        · DUYỆT đòi chữ ký cấp 1 CÒN HIỆU LỰC ký đúng ảnh chụp này, và người duyệt KHÁC người ký;
+        · KHOÁ đòi chữ ký ấy VẪN còn hiệu lực — huỷ chữ ký sau khi duyệt thì không khoá được.
+      Đọc chữ ký TRONG giao dịch (không qua `getDb()` — PGlite một kết nối tự khoá), dưới khoá tên của sổ.
     */
-    if (action === "APPROVE" && thangCong) {
+    if ((action === "APPROVE" || action === "LOCK") && thangCong) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext('erp:payroll-profit-signoff'))`);
       const [anh2] = await tx.select({ snapshot: p.snapshot }).from(p).where(and(eq(p.periodKey, periodKey), eq(p.basis, basis))).limit(1);
       const snap = anh2?.snapshot as PayrollSnapshot | null;
-      if ((snap?.profitGate?.allocatedTotal ?? 0) > 0) {
-        const ky = snap?.profitRecon?.signoff;
-        if (!ky) return { error: "Kỳ có thưởng % lợi nhuận đủ điều kiện nhưng ảnh chụp không mang chữ ký đối soát cấp 1 — ký ở Lương → Đối soát rồi bấm “Tính lại”." } as const;
-        if (ky.signedById && ky.signedById === actor.id) {
-          return { error: `Bạn đã ký đối soát cấp 1 cho tháng này (${ky.signedByEmail}). Duyệt cấp 2 phải do MỘT NGƯỜI KHÁC.` } as const;
-        }
-      }
+      const [soKy] = await tx.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, PAYROLL_PROFIT_SIGNOFF_KEY)).limit(1);
+      const loi = profitApprovalProblem({
+        allocatedTotal: snap?.profitGate?.allocatedTotal,
+        monthKey: thangCong,
+        snapshotFingerprint: snap?.profitRecon?.fingerprint,
+        signoffs: parseSignoffs(soKy?.value ?? null),
+        actorId: actor.id,
+        requireDifferentPerson: action === "APPROVE",
+      });
+      if (loi) return { error: loi } as const;
     }
     const set: Record<string, unknown> = { status: spec.to, updatedAt: luc, statusReason: spec.requiresReason ? reason : "" };
     if (action === "APPROVE") {

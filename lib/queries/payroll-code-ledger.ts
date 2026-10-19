@@ -371,7 +371,7 @@ export async function adSpendSuggestions(from: Date): Promise<AdSpendSuggestion[
       marketerId: a.marketerId,
       monthKey: thang,
       spend: sql<number>`coalesce(sum(${a.spend}), 0)`,
-      campaigns: sql<number>`count(distinct coalesce(${a.campaignId}, ${a.campaign}))`,
+      campaigns: sql<number>`count(distinct nullif(coalesce(${a.campaignId}, ${a.campaign}), ''))`,
     })
     .from(a)
     .leftJoin(p, eq(p.id, a.productId))
