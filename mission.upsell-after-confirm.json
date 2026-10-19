@@ -24,20 +24,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-19T03:11:49.549Z",
-  "updated_at": "2026-10-19T03:47:10.371Z",
-  "last_heartbeat": "2026-10-19T03:47:10.371Z",
+  "updated_at": "2026-10-19T04:07:29.106Z",
+  "last_heartbeat": "2026-10-19T04:07:29.106Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/upsell-sau-chot",
-    "sha": "8f54be2db3a975954ab8498ec4c6b9ae484a75da",
-    "at": "2026-10-19T03:47:10.371Z",
+    "sha": "8a36cec03db8587622bce9683c5e7e9ac1abe29d",
+    "at": "2026-10-19T04:07:29.106Z",
     "actor": "DESKTOP-56TH98Y:wt-upsell-sau-chot",
     "title": "P0 lời mời mua thêm sau chốt đơn (Trung Dinh)",
-    "summary": "Sửa 3 lỗi chặn review: «ok» không thêm món vào đơn đã chốt; create_draft_order trên đơn tự chốt chỉ sang update; aiTexts tính tin đã ghép; + NB1/3/4/6.",
+    "summary": "Vòng 2: chỉ chữ mua mới là gọi tên (câu hỏi giá / từ chối không thêm); tổng mới dùng cod_total_text; câu hỏi xác nhận khi chưa rõ ý; khối lượng khớp mẫu mã.",
     "tests": [
-      "p0-upsell-after-confirm (thuần + 9 ca chatTurn): ĐẠT",
+      "p0-upsell-after-confirm (thuần + 11 ca chatTurn): ĐẠT",
       "18 bộ liên quan + golden: ĐẠT",
-      "đột biến bỏ chặn B1: ĐỎ (tái hiện 750.000 ₫)",
+      "đột biến đọc chữ thô: ĐỎ",
       "eslint: sạch",
       "tsc: sạch"
     ]
