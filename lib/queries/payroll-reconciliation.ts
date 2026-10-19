@@ -15,7 +15,7 @@ import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { ELIGIBLE_SENT_SQL } from "@/lib/constants/returns";
-import { FINISHED_OUTCOMES_SQL, OUTCOME_GROUP } from "@/lib/constants/truth";
+import { FINISHED_OUTCOMES_SQL, OUTCOME_GROUP, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import type { OrderOutcome } from "@/lib/constants/returns";
 import { getRecognizedCosts } from "@/lib/queries/cost-engine";
 import { getPayrollReport, monthReportPeriod, type PayrollReport } from "@/lib/queries/payroll";
@@ -74,7 +74,7 @@ async function orderFacts(from: Date, to: Date): Promise<{ total: OrderFacts; un
         deliveredOrders: sql<number>`count(*) filter (where ${giao})`,
         deliveredOrdersWithMoney: sql<number>`count(*) filter (where ${giao} and ${coTien})`,
         openOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(OPEN_OUTCOMES_SQL)}) and ${o.stage} not in ('CANCELLED','DELETED'))`,
-        returnedOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE'))`,
+        returnedOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
         cancelledOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'CANCELLED')`,
         sentNoFeeOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(ELIGIBLE_SENT_SQL)}) and coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0) = 0)`,
       })
