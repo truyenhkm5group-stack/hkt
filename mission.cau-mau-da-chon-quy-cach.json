@@ -3,7 +3,7 @@
   "mission_id": "cau-mau-da-chon-quy-cach",
   "title": "Câu mẫu thôi hỏi lại quy cách khi khách đã chọn khối lượng (#868 trên câu mẫu)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-cau-mau-quy-cach",
@@ -27,9 +27,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-19T12:48:34.999Z",
-  "updated_at": "2026-10-19T13:04:14.640Z",
+  "updated_at": "2026-10-19T15:18:52.265Z",
   "last_heartbeat": "2026-10-19T12:55:50.756Z",
   "definition_of_done": [],
+  "evidence": {
+    "verify": "PASS 10ed1216c4aabab29e6c3198a57b76fc032ca1fa 2026-10-19T15:18:28.048Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39269656993"
+  },
   "handoff": {
     "branch": "claude/cau-mau-da-chon-quy-cach",
     "sha": "a8c733c4d8015743d450a0fbce5bf0eb78987bb1",
