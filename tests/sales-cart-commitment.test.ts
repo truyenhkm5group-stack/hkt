@@ -787,7 +787,8 @@ async function testReviewGolden() {
 
 /**
  * Danh mục THẬT của HSLC (org-catalog 19/10/2026): «Ruốc bông (chà bông) cá thu nguyên chất» — bỏ dấu «chà» = «cha» nên «chả cá thu» đếm
- * theo tập từ khớp CẢ ruốc ⇒ mơ hồ ⇒ giỏ rỗng (câu mẫu A01 hỏi lại «1kg hay 2kg» lọt qua luật quy cách). Tên chứa cụm LIỀN NHAU thắng.
+ * theo tập từ khớp CẢ ruốc ⇒ mơ hồ ⇒ giỏ rỗng (câu mẫu A01 hỏi lại «1kg hay 2kg» lọt qua luật quy cách). Phân xử bằng DẤU khách gõ: tên
+ * DUY NHẤT chứa cụm có dấu ấy liền nhau, đúng thứ tự thắng; không có ⇒ vẫn mơ hồ.
  */
 function testRealHslcCatalog() {
   const REAL = ["Chả cá thu", "Chả mực giã tay", "Nem hải sản tôm bề bề", "Nước mắm cốt cá cơm truyền thống", "Ruốc bông (chà bông) cá thu nguyên chất", "Ruốc bông (chà bông) tôm biển nguyên chất"];
@@ -804,6 +805,14 @@ function testRealHslcCatalog() {
   const AO = ["Áo thun nam cổ tròn", "Áo thun cổ tròn nữ"];
   assert.equal(amountsIn("1 cái áo thun cổ tròn", AO)[0]?.ambiguous, true, "áo thun cổ tròn nam / nữ ⇒ vẫn hỏi lại");
   assert.equal(amountsIn("1 cái áo thun cổ tròn nữ", AO)[0]?.display, "Áo thun cổ tròn nữ");
+  // Review NB1: gõ nhầm một phím («chà» thay «chả») KHÔNG thành ruốc — cụm «chà cá thu» không liền nhau trong tên ruốc ⇒ vẫn mơ hồ.
+  assert.equal(amountsIn("1kg chà cá thu", REAL)[0]?.ambiguous, true, "«chà cá thu» ⇒ mơ hồ, không phải 1kg ruốc");
+  assert.equal(amountsIn("1kg chà cá", REAL)[0]?.ambiguous, true);
+  assert.equal(amountsIn("1 hộp chà bông cá thu", REAL)[0]?.display, "Ruốc bông (chà bông) cá thu nguyên chất");
+  // Review NB2: vị trí dấu thanh kiểu cũ / mới không quyết định món («hòa» = «hoà»).
+  const TRA = ["Trà hoà tan", "Trà hoa tan"];
+  assert.equal(amountsIn("1 gói trà hòa tan", TRA)[0]?.display, "Trà hoà tan", "«hòa» kiểu cũ = «hoà» kiểu mới");
+  assert.equal(amountsIn("1 gói trà hoà tan", TRA)[0]?.display, "Trà hoà tan");
 }
 
 export async function testSalesCartCommitment() {

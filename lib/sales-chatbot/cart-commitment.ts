@@ -123,8 +123,22 @@ function labelTokens(s: string): string[] {
   return foldVi(s).split(" ").filter(Boolean);
 }
 
-/** Từ GIỮ DẤU (chữ thường, NFC, bỏ dấu câu) — để phân xử hai tên chỉ trùng nhau khi bỏ dấu («chả» ≠ «chà»). HÀM THUẦN. */
-const accentTokens = (s: string) => s.normalize("NFC").toLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, " ").split(/\s+/).filter(Boolean);
+/**
+ * Từ GIỮ DẤU (chữ thường, NFC, bỏ dấu câu) — để phân xử hai tên chỉ trùng nhau khi bỏ dấu («chả» ≠ «chà»). Vị trí dấu thanh quy về MỘT kiểu
+ * (òa → oà, òe → oè, úy → uý — review gio-cha-bong NB2): kiểu gõ dấu cũ / mới không được quyết định ra món nào. HÀM THUẦN.
+ */
+const accentTokens = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/o([\u0300\u0301\u0303\u0309\u0323])([ae])/g, "o$2$1")
+    .replace(/u([\u0300\u0301\u0303\u0309\u0323])y/g, "uy$1")
+    .normalize("NFC")
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+/** `run` nằm LIỀN NHAU, đúng thứ tự trong `tokens`. HÀM THUẦN. */
+const hasRun = (tokens: readonly string[], run: readonly string[]) => tokens.some((_, i) => run.every((w, k) => tokens[i + k] === w));
 
 /** Tên sản phẩm bỏ phần quy cách trong ngoặc («Chả mực giã tay (Size: 1kg)» ⇒ «Chả mực giã tay»). */
 const productName = (name: string) => name.replace(/\s*\([^)]*\)\s*$/, "").trim() || name;
@@ -150,9 +164,12 @@ function resolveLabel(raw: { match: string; display: string }, catalog?: readonl
       // Nhiều tên chứa ĐỦ các từ khi BỎ DẤU nhưng chỉ MỘT tên chứa đúng các từ CÓ DẤU khách gõ ⇒ tên ấy (HSLC 19/10/2026: «1kg chả cá thu»
       // với «Chả cá thu» và «Ruốc bông (chà bông) cá thu nguyên chất» — bỏ dấu «chà» = «chả» ⇒ cả hai khớp ⇒ mơ hồ ⇒ giỏ RỖNG, mọi hàng rào
       // theo giỏ mù với chả cá thu). Chỉ dấu phân xử, KHÔNG phải thứ tự từ trong tên (review: «áo thun cổ tròn» với «Áo thun nam cổ tròn» /
-      // «Áo thun cổ tròn nữ» phải vẫn mơ hồ); khách gõ không dấu, hay «cá thu» có ở cả hai ⇒ vẫn mơ hồ.
+      // «Áo thun cổ tròn nữ» phải vẫn mơ hồ); khách gõ không dấu, hay «cá thu» có ở cả hai ⇒ vẫn mơ hồ. Tên thắng còn phải chứa cụm có dấu
+      // của khách LIỀN NHAU, đúng thứ tự (review NB1): «1kg chà cá thu» — gõ nhầm một phím của «chả» — không được thành 1kg ruốc «chà bông) cá
+      // thu» mà phải vẫn mơ hồ.
       const subSaid = saidAligned ? said.slice(s, s + len) : null;
-      const exact = hits.length > 1 && subSaid ? hits.filter((n) => subSaid.every((w) => accentTokens(n).includes(w))) : [];
+      const accented = hits.length > 1 && subSaid ? hits.filter((n) => subSaid.every((w) => accentTokens(n).includes(w))) : [];
+      const exact = accented.length === 1 && subSaid && hasRun(accentTokens(accented[0]), subSaid) ? accented : [];
       const hit = hits.length === 1 ? hits[0] : exact.length === 1 ? exact[0] : null;
       if (hit) {
         // Từ ngay sau DANH TỪ MÓN mà tên danh mục không có (và không phải cỡ / màu) ⇒ khách gọi một món KHÁC cùng danh từ («nem chua» khi shop
