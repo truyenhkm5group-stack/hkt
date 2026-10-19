@@ -78,7 +78,8 @@ function testThuan() {
   // Vòng 4: «có» = CẢ tin thuộc danh sách đóng; phủ định trên chữ có dấu ⇒ không; câu nói chuyện khác chứa «ok» / «có» / «đúng» ⇒ không.
   for (const yes of ["ừ", "ừ đúng rồi", "vâng thêm giúp chị", "được em", "đúng rồi em", "có", "ok em", "dạ vâng ạ", "lấy luôn nhé", "thêm giúp chị nhé", "Đúng rồi!", "oke",
     // Vòng 5: đồng ý ngắn kiểu gõ nhanh — trước đây rơi mất đơn bán thêm.
-    "dc", "đc", "đc em", "oki", "okela", "uki", "ừa", "được rồi", "ok rồi", "có chứ", "chốt", "chốt luôn", "ok 👌", "uk e", "vâng ạ", "dạ", "ok luôn"]) assert.ok(isShortYes(yes), `«${yes}» là đồng ý`);
+    "dc", "đc", "đc em", "oki", "okela", "uki", "ừa", "được rồi", "ok rồi", "có chứ", "chốt", "chốt luôn", "ok 👌", "uk e", "vâng ạ", "dạ", "ok luôn",
+    "ờ", "ừm", "okee", "chốt đơn", "chốt đơn luôn", "đúng r", "ok r", "đc rồi nhé"]) assert.ok(isShortYes(yes), `«${yes}» là đồng ý`);
   const NOT_YES = [
     "đừng thêm nhé em", "không đúng đâu em", "đừng em", "không có nhu cầu", "không em, ok em gửi địa chỉ khác nhé", "chị chỉ lấy ruốc thôi, ok em", "ok em gửi địa chỉ khác nhé",
     "ok ship nhanh giúp chị", "ok cảm ơn em", "có gì chị báo sau", "có ai ở nhà đâu em", "có chồng chị ăn", "được rồi, giao sáng mai nhé", "đúng 3h chiều giao nha",
@@ -87,6 +88,9 @@ function testThuan() {
     "có à?", "dung them nhe", "dung nha", "dung them", "dạ?", "dạ em ơi", "ư?", "ok à?", "thêm à?", "ok à", "thêm à", "có à", "lấy à?", "ok?", "có?", "được?",
     "dung roi em", "ư", "ok hả", "thêm á", "khong em", "ko lay dau", "thoi khoi", "huy di em", "hông em", "hem", "k cần đâu", "ok nhưng để chị hỏi chồng",
     "👍", "để chị xem", "lấy 2 hộp nhé", "ừ thêm 1 hộp đó đi", "lấy 1 hộp nhé", "được không em", "chua em", "nham roi",
+    // Vòng 6: so khớp sau khi bỏ dấu ⇒ «ủa» = «ừa». Cụm đồng ý chỉ nhận chữ CÓ DẤU; dạng không dấu hai nghĩa ⇒ không.
+    "ủa", "ủa em", "ủa ok", "ủa thêm", "ủa có", "ua", "cô", "cô em", "cỏ", "đông y", "da", "da em", "co", "co em", "them", "them nhe", "lay", "vang", "u", "r",
+    "đã", "đã thêm", "dạ đã", "lây", "thèm", "chột",
   ];
   for (const no of NOT_YES) {
     assert.ok(!isShortYes(no), `«${no}» KHÔNG phải đồng ý`);
