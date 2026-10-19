@@ -166,12 +166,17 @@ function testWrongProduct() {
     { id: "ca", title: "Chả cá", triggers: ["Cha ca"], answer: "Dạ chả cá thu bên em giá {{giá:CHA-CA-THU}} ạ" },
   ];
   const d1 = quickDecisionAt(c("xin giá chả cá"), entries, products);
-  assert.deepEqual(d1, { eligible: true, raw: "MATCH «Nem»", after: "MATCH «Chả cá»", changed: true, wrongBefore: true, wrongAfter: false, defaultBefore: false, quickAfter: true });
-  assert.deepEqual(quickDecisionAt(c("nem bao nhiêu"), entries, products), { eligible: true, raw: "MATCH «Nem»", after: "MATCH «Nem»", changed: false, wrongBefore: false, wrongAfter: false, defaultBefore: false, quickAfter: true });
+  assert.deepEqual(d1, { eligible: true, raw: "MATCH «Nem»", after: "MATCH «Chả cá»", changed: true, wrongBefore: true, wrongAfter: false, defaultBefore: false, quickAfter: true, sizeYield: false });
+  assert.deepEqual(quickDecisionAt(c("nem bao nhiêu"), entries, products), { eligible: true, raw: "MATCH «Nem»", after: "MATCH «Nem»", changed: false, wrongBefore: false, wrongAfter: false, defaultBefore: false, quickAfter: true, sizeYield: false });
   // «báo giá» không ai nói món ⇒ khớp trần MẶC ĐỊNH nem (không phải «sai món»), sau luật nhường AI.
-  assert.deepEqual(quickDecisionAt(c("báo giá"), entries, products), { eligible: true, raw: "MATCH «Nem»", after: "NONE", changed: true, wrongBefore: false, wrongAfter: false, defaultBefore: true, quickAfter: false });
+  assert.deepEqual(quickDecisionAt(c("báo giá"), entries, products), { eligible: true, raw: "MATCH «Nem»", after: "NONE", changed: true, wrongBefore: false, wrongAfter: false, defaultBefore: true, quickAfter: false, sizeYield: false });
   assert.equal(quickDecisionAt(c("Chị 0961003107, 9 Hai Bà Trưng"), entries, products).eligible, false, "tin chốt đơn ⇒ câu mẫu không được xét (như lượt sống)");
   assert.equal(quickDecisionAt(c("thời tiết đẹp"), entries, products).eligible, false);
+  // #868 trên câu mẫu (19/10/2026): câu mẫu thắng mà luật quy cách chặn ⇒ cột «sau luật» ghi NHƯỜNG AI, không tính là câu mẫu tự trả lời.
+  const dy = quickDecisionAt(c("Cha ca"), entries, products, [], (e) => e.id === "ca");
+  assert.deepEqual([dy.sizeYield, dy.quickAfter, dy.changed, dy.wrongAfter], [true, false, true, false], JSON.stringify(dy));
+  assert.match(dy.after, /^MATCH «Chả cá» ⇒ NHƯỜNG AI/);
+  assert.equal(quickDecisionAt(c("Cha ca"), entries, products, [], () => false).sizeYield, false);
   for (const v of QUICK_REPLAY_VARIANTS) assert.equal(quickDecisionAt(v.lines, entries, products).wrongAfter, false, `biến thể «${v.key}» không bao giờ sai món sau luật`);
   assert.deepEqual(parseTraceArgs(["hslc", "--replay-quick=419a66d8-3079-4cdd-bb7a-802c386493f9,d1a2fd9d-eeac-466a-bcc3-e50823cdd586"]), { code: "hslc", conv: null, order: null, scan: false, days: 3, replayQuick: ["419a66d8-3079-4cdd-bb7a-802c386493f9", "d1a2fd9d-eeac-466a-bcc3-e50823cdd586"] });
   assert.ok("error" in parseTraceArgs(["hslc", "--replay-quick=khong-phai-uuid"]));

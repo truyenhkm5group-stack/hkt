@@ -79,6 +79,8 @@ export { SALES_STAGE_LABEL, SALES_STAGES, type SalesStage } from "@/lib/sales-ch
 export type ChatState = {
   /** Lượt gần nhất câu mẫu bị tạm dừng vì không đọc được danh mục (bộ lọc món ĐÓNG — quick-reply-focus.ts). */
   quickGuardClosed?: { at: string; turn: number };
+  /** Mốc mỗi lần câu mẫu NHƯỜNG AI vì khách đã chọn khối lượng (`quickReplySizeConflict`, có trần) — ops conv-money-trace đếm giá token. */
+  quickSizeYields?: string[];
   /** `at` = lần ĐẦU khách để lại SĐT này (02/10/2026 — báo cáo chi phí AI / SĐT theo ngày); dòng cũ không có mốc. */
   /** `savedAddress` = địa chỉ do MÁY CHỦ điền từ đơn cũ khớp qua SĐT (`use_saved_address`) — bot chỉ thấy bản đã che. */
   /**

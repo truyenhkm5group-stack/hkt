@@ -595,6 +595,21 @@ export function guardReply(text: string, input: ReplyGuardInput): ReplyGuardResu
   return { text: out, offered, dropped: final.flatMap((x) => x.drops) };
 }
 
+/**
+ * CÂU MẪU GỬI NGUYÊN VĂN (khớp chữ / AI chọn mã) mà hỏi lại quy cách hay mời gói lớn hơn cho MÓN khách đã chọn khối lượng (luật #868
+ * SIZE_CHOSEN — production 19/10/2026, HSLC: «1kg chả cá thu» ⇒ câu mẫu «… Dạ, mình muốn mua 1kg hay 2kg ạ?» đi thẳng vì câu mẫu không
+ * qua `guardReply`). Câu mẫu là lời của shop, KHÔNG được cắt ⇒ `true` = nơi gọi không gửi câu mẫu, để AI trả lời (chữ AI qua guardReply).
+ * Dùng lại ĐÚNG phán xét của `guardReply` — cửa sổ lời mời coi như MỞ để chỉ hỏi luật quy cách, không hỏi lý do khác; không có luật thứ
+ * hai. Món câu mẫu GỌI TÊN đều phải là món khách đã chọn khối lượng: quy cách đã chọn của món KHÁC không chặn câu mẫu của món này. HÀM THUẦN.
+ */
+export function quickReplySizeConflict(text: string, input: { cart?: CartCommitment; lastUserText: string; facts: OfferFacts | null }): boolean {
+  if (!explicitItems(input.cart).length) return false;
+  const g = guardReply(text, { window: { open: true }, cart: input.cart, lastUserText: input.lastUserText, greetedBefore: false, facts: input.facts });
+  if (!g.dropped.some((d) => d.reason === "SIZE_CHOSEN")) return false;
+  const named = input.facts?.catalogNames.length ? namedIn(text, input.facts.catalogNames) : [];
+  return named.every((n) => chosenGrams(input.cart, n) !== undefined);
+}
+
 /** Ghi một lần bỏ lời mời vào state (đo đạc, có trần). Trả mảng MỚI. HÀM THUẦN. */
 export function withOfferDrops(prev: ChatState["offerDrops"], turn: number | undefined, drops: readonly ReplyDrop[], via: "TEXT" | "QUICK_REPLY"): NonNullable<ChatState["offerDrops"]> {
   const add = drops.filter((d) => d.reason !== "STYLE").map((d) => ({ turn: turn ?? null, cls: d.cls, reason: d.reason as OfferBlock, via }));
