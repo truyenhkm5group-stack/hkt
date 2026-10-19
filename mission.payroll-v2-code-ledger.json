@@ -3,7 +3,7 @@
   "mission_id": "payroll-v2-code-ledger",
   "title": "P0 Lương V2: sổ lợi nhuận theo mã (lũy kế + HWM), phân công MKTer↔mã nhiều-nhiều OWNER/SUPPORT, thưởng theo mã giới hạn bằng quỹ công ty",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -36,7 +36,22 @@
     "0249": "2026-10-19T02:44:48.729Z"
   },
   "created_at": "2026-10-19T02:43:55.309Z",
-  "updated_at": "2026-10-19T02:44:48.729Z",
-  "last_heartbeat": "2026-10-19T02:43:55.309Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-19T08:00:40.382Z",
+  "last_heartbeat": "2026-10-19T08:00:40.382Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/payroll-v2-code-ledger",
+    "sha": "331a4efbd02e9f3cf00c0612c7534ac0b30ac19b",
+    "at": "2026-10-19T08:00:40.382Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "Thưởng theo mã nay đi qua sổ lũy kế RIÊNG từng mã rồi mới qua cổng lỗ công ty; nhiều MKTer một mã, chờ đối soát thay vì chia đều",
+    "summary": "Payroll V2: sổ lũy kế + HWM từng mã (products[].profit, một nguồn), phân bổ LN đủ điều kiện công ty xuống mã, OWNER X% / SUPPORT Y% × trọng số theo đoạn hiệu lực; thiếu căn cứ ⇒ PENDING_RECONCILIATION chặn duyệt kỳ; xác nhận trọng số có dấu vân tay; migration 0249 (2 bảng mới, không gieo dòng, khai MIGRATION_SERVE_COMPAT). Review độc lập 6 vòng, vòng 6 PASS @899afff2c; rebase lên d8f8c6b65 range-diff 8/8 '='.",
+    "tests": [
+      "npm test (ẩn danh) @899afff2c: TẤT CẢ KIỂM THỬ ĐẠT",
+      "npm test GITHUB_TOKEN=gia-lap-khong-that @899afff2c: TẤT CẢ KIỂM THỬ ĐẠT",
+      "npm run build @899afff2c: EXIT 0",
+      "sau rebase @331a4efbd: typecheck sạch · lint sạch · payroll-profit-gate + payroll-code-ledger + migration-serve-compat ĐẠT",
+      "kiểm đột biến 16 luật: 16/16 đỏ khi phá"
+    ]
+  }
 }
