@@ -41,8 +41,8 @@ export function volumeSaveFrom(variants: readonly { grams: number | null; price:
   return out.length ? Math.min(...out) : null;
 }
 
-export async function loadOfferFacts(cfg: SalesChatbotConfig, upsellReplyId: string | null): Promise<OfferFacts> {
-  const ctx = await loadPricingContext(cfg, null);
+export async function loadOfferFacts(cfg: SalesChatbotConfig, upsellReplyId: string | null, books: Parameters<typeof loadPricingContext>[1] = null): Promise<OfferFacts> {
+  const ctx = await loadPricingContext(cfg, books);
   const catalog = [...ctx.byId.values()];
   const catalogNames = [...new Set(catalog.map((c) => c.name))];
   const byName = new Map<string, CatalogItem[]>();
@@ -60,6 +60,14 @@ export async function loadOfferFacts(cfg: SalesChatbotConfig, upsellReplyId: str
   const stock = cfg.sellWithoutStockCheck ? null : await stockFor(candidates.map((c) => c.variantId));
   const inStock = (id: string) => stock === null || ((stock.get(id)?.stockKnown ?? false) && (stock.get(id)?.available ?? 0) > 0);
   const crossSell = complementary.filter((n) => candidates.some((c) => c.name === n && inStock(c.variantId)));
+  // Lời mời CỤ THỂ cho câu mời sau chốt (P0 19/10/2026): mỗi món bổ trợ MỘT mẫu mã — ưu tiên mẫu mã CHỈ BÁN KÈM (gói dùng thử), không có
+  // thì mẫu mã rẻ nhất — giá ĐÃ XÁC THỰC, còn hàng. Không có mẫu mã đủ điều kiện ⇒ món đó không được mời.
+  const crossSellOffers = crossSell.flatMap((n) => {
+    const ok = candidates.filter((c) => c.name === n && inStock(c.variantId));
+    const pick = [...ok].sort((a, b) => Number(Boolean(b.addOnOnly)) - Number(Boolean(a.addOnOnly)) || (verified.get(a.variantId)?.price ?? 0) - (verified.get(b.variantId)?.price ?? 0))[0];
+    const price = pick ? verified.get(pick.variantId)?.price : null;
+    return pick && typeof price === "number" && price > 0 ? [{ name: n, productId: pick.productId, variantId: pick.variantId, variant: pick.variant, price }] : [];
+  });
   const volume = catalogNames.flatMap((n) => {
     const from = volumeSaveFrom(
       (byName.get(n) ?? []).map((c) => ({ grams: ctx.weight.get(c.variantId) ?? null, price: verified.get(c.variantId)?.price ?? null, addOnOnly: c.addOnOnly })),
@@ -67,5 +75,5 @@ export async function loadOfferFacts(cfg: SalesChatbotConfig, upsellReplyId: str
     );
     return from === null ? [] : [{ name: n, saveFromGrams: from }];
   });
-  return { catalogNames, crossSell, volume, menu: Boolean(answer), freeShip: cfg.freeShipping.enabled };
+  return { catalogNames, crossSell, crossSellOffers, volume, menu: Boolean(answer), freeShip: cfg.freeShipping.enabled };
 }

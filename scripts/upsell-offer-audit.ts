@@ -141,6 +141,34 @@ export function addConversation(t: OfferTotals, c: ConvOffers, drops: readonly {
   return t;
 }
 
+/**
+ * 4. LỜI MỜI SAU CHỐT (P0 19/10/2026 — `state.postConfirmOffer`, chỉ có từ bản sửa): lượt chốt có quyết định · mời đã gửi · không mời theo
+ * lý do · nhận (đơn đã chốt được sửa thêm đúng món được mời) · tiền thêm · khách xin huỷ / huỷ đơn SAU lời mời. HÀM THUẦN.
+ */
+export type PostConfirmTotals = { decided: number; offered: number; notOffered: Record<string, number>; accepted: number; acceptedAmount: number; cancelAfterOffer: number };
+export function emptyPostConfirm(): PostConfirmTotals {
+  return { decided: 0, offered: 0, notOffered: {}, accepted: 0, acceptedAmount: 0, cancelAfterOffer: 0 };
+}
+export function addPostConfirm(t: PostConfirmTotals, st: Pick<ChatState, "postConfirmOffer" | "cancelRequest" | "cancelledOrders">, from: Date): PostConfirmTotals {
+  const p = st.postConfirmOffer;
+  if (!p || !(Date.parse(p.at) >= from.getTime())) return t;
+  t.decided += 1;
+  if (p.outcome === "OFFERED" && p.sent) {
+    t.offered += 1;
+    if (p.accepted) {
+      t.accepted += 1;
+      t.acceptedAmount += p.accepted.amount;
+    }
+    const after = (at: string | undefined) => Boolean(at && Date.parse(at) > Date.parse(p.at));
+    const cr = st.cancelRequest as { at?: string } | undefined;
+    if (after(cr?.at) || (st.cancelledOrders ?? []).some((c) => after(c.at))) t.cancelAfterOffer += 1;
+  } else {
+    const k = p.outcome === "OFFERED" ? "NOT_SENT" : p.outcome;
+    t.notOffered[k] = (t.notOffered[k] ?? 0) + 1;
+  }
+  return t;
+}
+
 // ─────────────────────────── ĐỌC ───────────────────────────
 
 type DbHolder = { __erpDb?: { orgs?: Map<string, { db?: Db }> } };
@@ -155,11 +183,13 @@ async function bindReadOnlyOrgHandle(org: { code: string; isHome: boolean }, db:
 }
 
 /** Lời mời của mọi hội thoại có tin trong kỳ (trừ khung thử). */
-export async function auditOffers(db: Db, from: Date): Promise<OfferTotals> {
+export async function auditOffers(db: Db, from: Date): Promise<OfferTotals & { post: PostConfirmTotals }> {
   const c = schema.salesChatConversations;
   const m = schema.salesChatMessages;
   const convs = await db.select({ id: c.id, state: c.state }).from(c).where(and(ne(c.channel, "TEST"), gte(c.updatedAt, from))).limit(AUDIT_MAX_CONVERSATIONS);
   const totals = emptyTotals();
+  const post = emptyPostConfirm();
+  for (const conv of convs) addPostConfirm(post, (conv.state ?? {}) as ChatState, from);
   for (let i = 0; i < convs.length; i += 200) {
     const batch = convs.slice(i, i + 200);
     const rows = await db.select({ conv: m.conversationId, role: m.role, content: m.content }).from(m).where(and(inArray(m.conversationId, batch.map((x) => x.id)), gte(m.createdAt, from))).orderBy(asc(m.conversationId), asc(m.seq));
@@ -173,7 +203,7 @@ export async function auditOffers(db: Db, from: Date): Promise<OfferTotals> {
       addConversation(totals, offersOfConversation(msgs, st), st.offerDrops ?? []);
     }
   }
-  return totals;
+  return { ...totals, post };
 }
 
 async function main() {
@@ -213,6 +243,12 @@ async function main() {
     const drops = OFFER_BLOCKS.filter((k) => t.drops[k] > 0).map((k) => `${k} ${t.drops[k]}`);
     tomTat(`MÁY CHỦ ĐÃ BỎ (state.offerDrops, từ bản #868): ${drops.join(" · ") || "0"}`);
     for (const k of OFFER_BLOCKS) if (t.drops[k] > 0) console.log(`  ${k}: ${OFFER_BLOCK_LABEL[k]} — ${t.drops[k]}`);
+    // 4. Lời mời SAU CHỐT (P0 19/10/2026). AOV tăng thêm = tiền thêm / lượt chốt có quyết định. Lãi gộp thêm: CHƯA ĐO — sổ không giữ giá
+    // vốn theo dòng của món thêm sau chốt (giá vốn sống đọc ở báo cáo lợi nhuận); in «—», không đoán.
+    const p = t.post;
+    const lyDo = Object.entries(p.notOffered).map(([k, n]) => `${k} ${n}`).join(" · ") || "0";
+    tomTat(`SAU CHỐT: lượt chốt có quyết định ${p.decided} · mời đã gửi ${p.offered} (${pct(p.decided ? p.offered / p.decided : null)}) · không mời: ${lyDo}`);
+    tomTat(`SAU CHỐT kết quả: nhận ${p.accepted} · attach ${pct(p.offered ? p.accepted / p.offered : null)} · tiền thêm ${vnd(p.acceptedAmount)} · AOV tăng thêm ${vnd(p.decided ? p.acceptedAmount / p.decided : null)} · xin huỷ / huỷ sau lời mời ${p.cancelAfterOffer} · lãi gộp thêm —`);
   });
   process.stdout.write("", () => process.exit(0));
 }

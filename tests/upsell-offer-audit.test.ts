@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { addConversation, auditOffers, emptyTotals, offersOfConversation, parseAuditArgs } from "../scripts/upsell-offer-audit";
+import { addConversation, addPostConfirm, auditOffers, emptyPostConfirm, emptyTotals, offersOfConversation, parseAuditArgs } from "../scripts/upsell-offer-audit";
 
 const PHONE = "0900008681";
 const txt = (text: string) => [{ type: "text", text }];
@@ -42,6 +42,22 @@ function testPure() {
   assert.deepEqual(clean, { offers: 1, afterDecline: 0, upsellAfterSize: 0, reaskAfterSize: 0, endedCancelled: false });
   const t = addConversation(addConversation(emptyTotals(), c, [{ reason: "CONTACT_INFO" }, { reason: "DECLINED" }]), clean, []);
   assert.deepEqual([t.conversations, t.withOffer, t.offers, t.repeated, t.afterDecline, t.cancelledAfterOffer, t.drops.CONTACT_INFO, t.drops.DECLINED], [2, 2, 3, 1, 1, 1, 1, 1]);
+}
+
+/** 4. Lời mời SAU CHỐT (P0 19/10/2026): mời đã gửi · không mời theo lý do · nhận + tiền thêm · huỷ sau lời mời; ngoài kỳ không tính. */
+function testPostConfirm() {
+  const from = new Date("2026-10-19T00:00:00Z");
+  const at = "2026-10-19T02:40:20Z";
+  const later = "2026-10-19T03:00:00Z";
+  let t = emptyPostConfirm();
+  t = addPostConfirm(t, { postConfirmOffer: { turn: 20, at, outcome: "OFFERED", sent: true, accepted: { at: later, amount: 200_000 } } }, from);
+  t = addPostConfirm(t, { postConfirmOffer: { turn: 5, at, outcome: "OFFERED", sent: true }, cancelRequest: { at: later } as never }, from);
+  t = addPostConfirm(t, { postConfirmOffer: { turn: 5, at, outcome: "OFFERED" } }, from);
+  t = addPostConfirm(t, { postConfirmOffer: { turn: 5, at, outcome: "ALREADY_OFFERED" } }, from);
+  t = addPostConfirm(t, { postConfirmOffer: { turn: 5, at, outcome: "NO_CANDIDATE" } }, from);
+  t = addPostConfirm(t, { postConfirmOffer: { turn: 5, at: "2026-10-18T10:00:00Z", outcome: "OFFERED", sent: true } }, from);
+  t = addPostConfirm(t, {}, from);
+  assert.deepEqual(t, { decided: 5, offered: 2, notOffered: { NOT_SENT: 1, ALREADY_OFFERED: 1, NO_CANDIDATE: 1 }, accepted: 1, acceptedAmount: 200_000, cancelAfterOffer: 1 });
 }
 
 function testSource() {
@@ -87,6 +103,7 @@ async function testDb() {
 }
 
 export async function testUpsellOfferAudit() {
+  testPostConfirm();
   testPure();
   testSource();
   await testDb();

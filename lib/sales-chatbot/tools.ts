@@ -16,9 +16,10 @@
  * dòng nào vượt tồn KHẢ DỤNG đã biết, và `customer_confirmation` là nguyên văn một đoạn trong câu CUỐI của khách — model
  * không tự chốt thay khách được.
  */
-import { and, desc, eq, inArray, ne, or } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
+import { SHOP_SAID_PREFIX } from "@/lib/sales-chatbot/replay-shared";
 import { purchaseRoundStart } from "@/lib/sales-chatbot/purchase-round";
 import type { AiToolDef } from "@/lib/ai/provider";
 import { freeSlots, slotBookable, vnDayOffset, vnInstant, WEEKDAY_LABEL } from "@/lib/constants/booking";
@@ -60,7 +61,8 @@ import { customerOrderStatus } from "@/lib/sales-chatbot/order-status-shared";
 import { classifyDeliveryQuestion, deliveryPreferenceNote, deliveryTimeAnswer, pickDeliveryOrder, staffDeliveryCommitment } from "@/lib/sales-chatbot/delivery-intent";
 import { futurePurchaseOnly, postSaleDropsIn } from "@/lib/sales-chatbot/post-sale-guard";
 import { customerComplaintSignal, LIFECYCLE_ORDER_LOOKBACK_DAYS } from "@/lib/sales-chatbot/lifecycle";
-import { OFFER_BLOCK_LABEL, offerWindow, withOfferDrops, type OfferBlock, type SentenceClass } from "@/lib/sales-chatbot/next-best-action";
+import { confirmedAddIssue, OFFER_BLOCK_LABEL, offerWindow, pickPostConfirmOffer, postConfirmOfferText, postConfirmOfferWindow, withOfferDrops, type OfferBlock, type SentenceClass } from "@/lib/sales-chatbot/next-best-action";
+import { loadOfferFacts } from "@/lib/sales-chatbot/offer-facts";
 import { fanpageVisitorKeyMirror } from "@/lib/pricing/ai-customer-identity";
 import type { PromptStamp } from "@/lib/sales-chatbot/prompt-stamp";
 import type { PancakeThreadProfile, ReturningCustomer } from "@/lib/sales-chatbot/returning";
@@ -142,6 +144,12 @@ export type ChatState = {
   stage?: SalesStage;
   /** Đã có MỘT lời mời mua thêm trong lượt mua này (câu mẫu UPSELL hoặc câu bot máy chủ nhận ra — #868); xoá khi sang lượt mua mới. */
   upsellSent?: boolean;
+  /**
+   * LỜI MỜI SAU CHỐT (P0 19/10/2026): quyết định của lượt chốt — `OFFERED` (máy chủ dựng câu, engine gắn vào cuối tin xác nhận rồi đặt
+   * `sent`) hoặc lý do KHÔNG mời (cửa sổ đóng · không có món bổ trợ đủ điều kiện · đọc dữ kiện lỗi). `accepted` = đơn ĐÃ CHỐT được sửa thêm
+   * đúng món được mời SAU lời mời. Chỉ để vận hành + đo (ops upsell-offer-audit); xoá khi sang lượt mua mới.
+   */
+  postConfirmOffer?: { turn: number; at: string; outcome: "OFFERED" | "NO_CANDIDATE" | "FACTS_ERROR" | "NOT_SENT" | OfferBlock; text?: string; name?: string; productId?: string; variantId?: string; variant?: string; price?: number; sent?: boolean; askedTurn?: number; accepted?: { at: string; amount: number } };
   /** Câu upsell không gửi được (thiếu số ERP) — chỉ để đo; từ 16/10/2026 câu upsell KHÔNG còn là điều kiện lên đơn (#868). */
   upsellUnavailable?: boolean;
   /** Lượt khách TỪ CHỐI lời mời mua thêm của lượt mua này (`offerDeclinedBy`, next-best-action.ts) — không mời lại trong lượt mua. */
@@ -1108,6 +1116,11 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const editingConfirmed = Boolean(state.confirmed?.auto) && name === "update_draft_order" && Boolean(state.draft?.orderId || state.confirmed?.simulated);
       // Đơn chốt qua LỜI ĐỒNG Ý (không phải máy tự chốt) ⇒ sửa / thêm vào đơn là việc của NHÂN VIÊN — máy chủ ép chuyển người, không để tuỳ
       // model (HOTFIX 12/10/2026: engine bỏ chuyển người mặc định sau chốt nên đây là lớp chặn ca «Đỗ Là» — bot hứa đổi địa chỉ / lịch giao).
+      // Đơn máy TỰ CHỐT mà model gọi create_draft_order (review upsell-after-confirm B2: câu mời sau chốt «nhắn em "thêm …"» làm model tạo
+      // đơn MỚI) ⇒ chỉ đường đúng: update_draft_order với đủ dòng — KHÔNG nói «đã chuyển nhân viên» khi không có ai được chuyển.
+      if (state.confirmed?.auto && name === "create_draft_order" && Boolean(state.draft?.orderId || state.confirmed.simulated)) {
+        return err("Đơn đã tự chốt", "Đơn của hội thoại này đã TỰ CHỐT — thêm / sửa món thì gọi update_draft_order với ĐỦ dòng hàng (dòng cũ + món khách vừa gọi tên). KHÔNG tạo đơn mới, KHÔNG nói đã thêm trước khi công cụ báo xong, KHÔNG nói đã chuyển nhân viên.", state);
+      }
       if (state.confirmed && !editingConfirmed) return { ...err("Đơn đã chốt", "Đơn của hội thoại này đã chốt — KHÔNG nói đã sửa / đã thêm; máy chủ đã chuyển nhân viên.", state), ...(state.confirmed.auto ? {} : { requireHuman: `Sửa đơn đã chốt — khách muốn ${name === "create_draft_order" ? "thêm đơn / thêm món" : "đổi đơn"}: «${ctx.lastUserText.trim().slice(0, 120)}»` }) };
       const base: Recipient = existing?.recipient ?? { name: state.customer.name, phone: state.customer.phone, address: state.customer.address, province: state.customer.province };
       const lines = v.data.items ? mergeLines(v.data.items.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))) : existing!.lines;
@@ -1180,6 +1193,42 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (priced.unpriced.length) return { ...err("Đơn nháp: mã chưa có giá", `Chưa có giá: ${priced.unpriced.join(", ")}.`, state, { reason: "UNPRICED_SKU" }), requireHuman: `Giá bất thường: ${priced.unpriced.join(", ")} chưa có giá` };
       if (priced.addOnOnly) return err("Đơn nháp: chỉ có món bán kèm", ADD_ON_ONLY_ERROR, state);
       // Số lượng chỉ xét khi lượt này GỬI items (sửa người nhận / ghi chú không kiểm lại số lượng đã lên).
+      // SỬA ĐƠN ĐÃ CHỐT mà THÊM SẢN PHẨM MỚI (review upsell-after-confirm B1, tái hiện thật: giỏ không gọi tên món nào ⇒ «ok em» sau lời
+      // mời làm đơn đã chốt 350.000 → 750.000 ₫): khách phải GỌI TÊN món đó trong CHÍNH tin này. «ok», «dạ», «cảm ơn» là ghi nhận đơn chính.
+      // Khách trả lời «có» đúng câu hỏi xác nhận lời mời ⇒ món được mời là CĂN CỨ của khách (hàng rào dòng hàng bên dưới).
+      let offerYesProduct: string | null = null;
+      if (editingConfirmed && v.data.items && existing) {
+        const had = new Set((await priceLines(existing.lines, ctx.config, verifiedCustomerId(state))).asked.map((a) => a.productId ?? a.variantId));
+        const added = priced.asked.filter((a) => !had.has(a.productId ?? a.variantId));
+        // Chữ MUA của tin này (bỏ câu hỏi giá / câu từ chối — review vòng 2) phải gọi tên món; món vừa được mời phải đúng mẫu mã đã mời.
+        const catalogNames = added.length ? [...new Set([...(await pricingContextFor(ctx.config, verifiedCustomerId(state))).byId.values()].map((c) => c.name))] : [];
+        // Tin nhân viên / page xen giữa câu hỏi xác nhận và tin này (review vòng 4) — chỉ đọc khi khách đang trả lời đúng câu hỏi ấy.
+        const askedAt = state.postConfirmOffer?.askedTurn;
+        const staffBetween =
+          askedAt !== undefined && ctx.prevTurn === askedAt && ctx.turn !== undefined && ctx.conversationId
+            ? (await (await getDb())
+                .select({ seq: schema.salesChatMessages.seq })
+                .from(schema.salesChatMessages)
+                .where(and(eq(schema.salesChatMessages.conversationId, ctx.conversationId), eq(schema.salesChatMessages.role, "assistant"), sql`${schema.salesChatMessages.seq} > ${askedAt}`, sql`${schema.salesChatMessages.seq} < ${ctx.turn}`, sql`${schema.salesChatMessages.content}::text like ${`%${SHOP_SAID_PREFIX}%`}`))
+                .limit(1)).length > 0
+            : false;
+        // Món khách nói TƯỜNG MINH trong CHÍNH tin này theo bộ đọc giỏ (sản phẩm đã gắn hoặc nhãn khách nói).
+        const chosen = (state.cart?.selectedItems ?? []).filter((x) => x.customerExplicit && ctx.turn !== undefined && x.sourceMessageId === ctx.turn && (x.productId || x.match)).map((x) => ({ productId: x.productId, match: x.match }));
+        const issue = confirmedAddIssue(added, state.postConfirmOffer, ctx.lastUserText, { prevTurn: ctx.prevTurn, catalogNames, staffBetween, chosen });
+        // Câu hỏi xác nhận chỉ MỘT lần (review vòng 3) — ghi lượt đã hỏi; lượt khách KẾ TIẾP trả lời đồng ý = chọn đúng mẫu mã đã mời.
+        if (issue?.ask && state.postConfirmOffer && ctx.turn !== undefined) state.postConfirmOffer = { ...state.postConfirmOffer, askedTurn: ctx.turn };
+        const pcoNow = state.postConfirmOffer;
+        const ask = issue?.ask
+          ? ` Hỏi khách ĐÚNG MỘT câu: «${issue.ask}» — không im lặng, không nói đã thêm. Khách đồng ý ở tin kế tiếp ⇒ update_draft_order thêm variant_id ${pcoNow?.variantId} (đúng mẫu mã đã mời).`
+          : " KHÔNG nhắc lại lời mời, KHÔNG hỏi lại.";
+        if (issue?.kind === "UNNAMED") return err("Sửa đơn đã chốt: khách chưa gọi tên món", `Khách CHƯA gọi tên ${issue.names.join(", ")} như một lời MUA trong tin này — «ok», «dạ», câu hỏi giá, câu từ chối không phải đồng ý mua thêm. KHÔNG thêm món; đơn giữ nguyên.${ask}`, state);
+        const pcoYes = state.postConfirmOffer;
+        if (!issue && pcoYes?.askedTurn !== undefined && ctx.prevTurn === pcoYes.askedTurn && pcoYes.productId && added.some((a) => a.productId === pcoYes.productId)) offerYesProduct = pcoYes.productId;
+        if (issue?.kind === "WRONG_VARIANT") {
+          const pco = state.postConfirmOffer;
+          return err("Sửa đơn đã chốt: sai mẫu mã được mời", `Mẫu mã chọn không khớp mẫu mã đã mời / khối lượng khách nói — món vừa mời là variant_id ${pco?.variantId} (${pco?.name}, ${formatVND(pco?.price ?? 0)}). KHÔNG thêm mẫu mã khác.${ask}`, state);
+        }
+      }
       const packMistake = v.data.items ? packQuantityMistake(priced.asked, ctx.lastUserText) : null;
       if (packMistake) return err("Đơn nháp: nhầm quy cách thành số lượng", packMistake, state, { reason: "BAD_INPUT", fields: ["items.quantity"] });
       const choice = v.data.items ? packChoiceMistake(priced, ctx.config, ctx.lastUserText) : null;
@@ -1191,6 +1240,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // DÒNG HÀNG PHẢI CÓ CĂN CỨ TỪ KHÁCH (P0 14/10/2026, ca «Châu Dương»: món upsell × 3 khách chưa đồng ý vào đơn, đơn tự chốt 640.000 ₫).
       // Sản phẩm ĐÃ nằm trong đơn nháp hiện có đã qua kiểm này lúc được ghi ⇒ chỉ kiểm sản phẩm MỚI (review 14/10: không bắt bỏ món chính).
       const grounded = v.data.items && existing ? new Set((await priceLines(existing.lines, ctx.config, verifiedCustomerId(state))).asked.map((l) => l.productId ?? l.variantId)) : new Set<string>();
+      if (offerYesProduct) grounded.add(offerYesProduct);
       const noBasis = v.data.items ? lineBasisViolation(state.cart, priced.asked, ctx.turn ?? null, ctx.customerSaid ?? "", grounded) : null;
       if (noBasis) return err("Đơn nháp: dòng hàng không có căn cứ từ khách", noBasis, state);
       // Giá chưa xác thực ⇒ KHÔNG tạo / sửa đơn tự động, người xác minh (yêu cầu 5 của chủ shop).
@@ -1215,7 +1265,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         const r = draft.orderId
           ? await updateOrderAsAgent(ctx.agent, draft.orderId, payload, { ...agentOrderOpts(ctx, state, false, quoteClaim, holdNew), ...review })
           : await createOrderAsAgent(ctx.agent, payload, { ...agentOrderOpts(ctx, state, true, quoteClaim, holdNew), adId: await chatOrderAdId(ctx.conversationId, now), ...review });
-        if (!r.ok) return err("Đơn nháp: lỗi", failureText(r), state, omsSignal(r));
+        // Sửa đơn ĐÃ CHỐT bị lõi từ chối (vận đơn đang chạy ở hãng, đơn đã đi tiếp…) ⇒ việc của NHÂN VIÊN theo quy trình (P0 19/10/2026):
+        // máy không hứa đã thêm món, không thử lại.
+        if (!r.ok) return { ...err("Đơn nháp: lỗi", failureText(r), state, omsSignal(r)), ...(editingConfirmed ? { requireHuman: `Khách muốn sửa / thêm vào đơn đã chốt nhưng lõi đơn từ chối (${failureText(r).slice(0, 120)})` } : {}) };
         // Lõi đơn trả lại một đơn ĐÃ CÓ theo khoá (`reused`) mà đơn ấy tạo TRƯỚC lượt mua này ⇒ đó là đơn của lượt mua cũ: KHÔNG báo
         // «đã lên đơn» (review #886 — đúng triệu chứng 42f28794: khách thấy 1,5 kg, CSDL vẫn là đơn 1 kg cũ). Đơn mới của lượt này không bị chặn.
         if (!draft.orderId && "reused" in r && r.reused && (await orderBeforeRound(r.id, state))) {
@@ -1233,10 +1285,16 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       markAddressAsked(state, addr, ctx.turn);
       const view = { order_code: draft.orderId ? `#${manualOrderShortCode(draft.orderId)}` : "(thử)", status: "Nháp — chưa chốt, chưa giữ hàng", simulated, ...cartView(priced), recipient: recipientView(draft.recipient, state), delivery_note: draft.note || null, address_check: addr.view };
       if (editingConfirmed && state.confirmed) {
+        // Khách NHẬN lời mời sau chốt: đơn đã chốt vừa được sửa có thêm ĐÚNG món được mời (đo attach / tiền thêm — ops upsell-offer-audit).
+        const pco = state.postConfirmOffer;
+        if (pco?.outcome === "OFFERED" && pco.sent && !pco.accepted && pco.productId && priced.asked.some((a) => a.productId === pco.productId)) {
+          const amount = priced.lines.filter((l) => priced.asked.some((a) => a.variantId === l.variantId && a.productId === pco.productId)).reduce((t, l) => t + l.lineTotal, 0);
+          state.postConfirmOffer = { ...pco, accepted: { at: now.toISOString(), amount } };
+        }
         const validity = simulated || !draft.orderId ? null : await confirmedValidity(draft.orderId);
         state.confirmed = { ...state.confirmed, total: priced.total ?? priced.subtotal, quoteId: priced.quote.quoteId, ...(validity ? { valid: validity.valid, pending: validity.pending } : {}) };
         const pendingText = validity && !validity.valid ? (validity.pending === "ADDRESS" ? CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK) : null;
-        return ok(`${simulated ? "(Thử) " : ""}Sửa đơn đã chốt · ${formatVND(priced.subtotal)}`, { ...view, status: "Đã chốt — đã cập nhật theo ý khách", auto_confirmed: true, say_to_customer: pendingText ?? autoConfirmText(priced.lines), instruction: "Đơn ĐÃ CHỐT vừa được cập nhật theo ý khách. Gửi khách ĐÚNG MỘT câu say_to_customer — không hỏi xác nhận lại." }, state);
+        return ok(`${simulated ? "(Thử) " : ""}Sửa đơn đã chốt · ${formatVND(priced.subtotal)}`, { ...view, status: "Đã chốt — đã cập nhật theo ý khách", auto_confirmed: true, say_to_customer: pendingText ?? `${autoConfirmText(priced.lines)} Tổng đơn mới ${cartView(priced).cod_total_text} ạ.`, instruction: "Đơn ĐÃ CHỐT vừa được cập nhật theo ý khách. Gửi khách ĐÚNG MỘT câu say_to_customer — không hỏi xác nhận lại." }, state);
       }
       // TỰ CHỐT KHI ĐỦ ĐƠN (P0-A): đủ sáu điều kiện ⇒ chốt NGAY bằng chính lượt chốt của confirm_order (cùng kiểm giá · tồn · địa chỉ của lõi),
       // không hỏi khách «có chốt không / lấy thêm gì không». Thiếu ⇒ nói đúng phần thiếu cho model hỏi khách.
@@ -1359,6 +1417,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // Đơn ĐÃ GHI nhưng CHƯA QUA KIỂM (địa chỉ chưa ghép · tổng lệch · cờ cần kiểm) ⇒ «khách đồng ý» ≠ «đơn đã tạo hợp lệ»: model nói
       // đúng câu ghi nhận, KHÔNG «đã lên đơn» (claim-guard chặn lần nữa nếu model vẫn viết).
       const pendingText = validity && !validity.valid ? (validity.pending === "ADDRESS" ? CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK) : null;
+      // Lời mời SAU CHỐT (P0 19/10/2026): chỉ khi đơn đã ghi hợp lệ; câu do máy chủ dựng, engine gắn vào cuối tin xác nhận.
+      // (`cancelRequest` đã được xoá ngay trên khi chốt — cửa sổ vẫn xét nó cho lượt chốt có lỗi ghi đơn quay lại.)
+      await notePostConfirmOffer(state, ctx, priced.asked.map((a) => a.productId), priced.asked.map((a) => a.name), !pendingText, now);
       return ok(`${simulated ? "(Thử) " : ""}Đã chốt đơn · ${formatVND(priced.subtotal)}${pendingText ? " · CHƯA qua kiểm" : ""}`, {
         confirmed: true,
         simulated,
@@ -1598,6 +1659,32 @@ export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "las
   // Xã / phường chưa ghép (biết tỉnh) KHÔNG chặn tự chốt — luật P0-A: đơn tự chốt kèm cờ ADDRESS_UNRESOLVED, câu ghi nhận
   // ORDER_PENDING_ADDRESS, nhân viên hỏi lại. Tỉnh chỉ suy từ viết tắt («P13 GV») là CHƯA BIẾT TỈNH ⇒ đã dừng ở dòng trên.
   return null;
+}
+
+/**
+ * QUYẾT ĐỊNH LỜI MỜI SAU CHỐT cho lượt vừa chốt thành công (P0 19/10/2026) — ghi `state.postConfirmOffer`; engine gắn câu vào cuối tin
+ * xác nhận SAU mọi hàng rào (model không viết câu mời, nên hàng rào không có gì để chặn nhầm). Đơn chưa qua kiểm / cửa sổ đóng / không
+ * có món bổ trợ còn bán · còn hàng · giá đã xác thực ⇒ ghi lý do, không mời. Đọc dữ kiện lỗi ⇒ không mời (không kiểm được thì không nói).
+ */
+async function notePostConfirmOffer(state: ChatState, ctx: ToolContext, orderProductIds: readonly (string | null)[], orderNames: readonly string[], orderValid: boolean, now: Date): Promise<void> {
+  if (ctx.turn === undefined) return;
+  const base = { turn: ctx.turn, at: now.toISOString() };
+  const w = postConfirmOfferWindow({ state, complaint: customerComplaintSignal(ctx.lastUserText), orderValid });
+  if (!w.open) {
+    state.postConfirmOffer = { ...base, outcome: w.reason };
+    return;
+  }
+  const upsellId = ctx.quickReplies?.find((q) => q.upsell)?.id ?? null;
+  // Giá mời theo ĐÚNG bảng giá của khách (sỉ / riêng — review NB4), không phải giá lẻ; đọc bảng giá lỗi ⇒ không mời.
+  const facts = await booksForChat(ctx.config, verifiedCustomerId(state))
+    .then((books) => loadOfferFacts(ctx.config, upsellId, books))
+    .catch(() => null);
+  if (!facts) {
+    state.postConfirmOffer = { ...base, outcome: "FACTS_ERROR" };
+    return;
+  }
+  const o = pickPostConfirmOffer(orderProductIds, facts.crossSellOffers ?? [], orderNames);
+  state.postConfirmOffer = o ? { ...base, outcome: "OFFERED", text: postConfirmOfferText(o, formatVND), name: o.name, productId: o.productId, variantId: o.variantId, variant: o.variant, price: o.price } : { ...base, outcome: "NO_CANDIDATE" };
 }
 
 /** Câu chốt ngắn khi máy chủ tự chốt — «Dạ em lên đơn 2 × Chả cá thu (1kg) cho mình rồi ạ, shop giao theo thông tin mình vừa gửi nhé.» */

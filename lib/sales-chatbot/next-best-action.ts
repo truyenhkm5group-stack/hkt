@@ -23,7 +23,7 @@
  */
 import { purchaseRoundStart } from "@/lib/sales-chatbot/purchase-round";
 import { resolveRecipientPlace } from "@/lib/address/vn-address";
-import { amountsIn, declinesAddOnOnly, labelsMatch, namedProductsIn, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
+import { amountsIn, buyingText, calledByName, declinesAddOnOnly, labelsMatch, mentionsProduct, namedProductsIn, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 
@@ -250,7 +250,145 @@ export function splitSentences(text: string): string[] {
  * đang bật (lời mời «xem menu» không gọi tên món là của chính shop); `freeShip` = shop bật miễn ship theo ngưỡng (lý do giá thật của
  * câu «thêm … là được miễn ship»).
  */
-export type OfferFacts = { catalogNames: readonly string[]; crossSell: readonly string[]; volume: readonly { name: string; saveFromGrams: number }[]; menu: boolean; freeShip: boolean };
+export type OfferFacts = {
+  catalogNames: readonly string[];
+  crossSell: readonly string[];
+  /** Mẫu mã mời được cho từng món bổ trợ (giá đã xác thực, còn hàng) — câu mời SAU CHỐT dựng từ đây (P0 19/10/2026). */
+  crossSellOffers?: readonly CrossSellOffer[];
+  volume: readonly { name: string; saveFromGrams: number }[];
+  menu: boolean;
+  freeShip: boolean;
+};
+export type CrossSellOffer = { name: string; productId: string; variantId: string; variant: string; price: number };
+
+/**
+ * CỬA SỔ LỜI MỜI SAU CHỐT (P0 19/10/2026, ca «Trung Dinh»: khách chọn 1kg, gửi SĐT + địa chỉ, đơn tự chốt — bot cảm ơn, không mời gì,
+ * vì `offerWindow` đóng ở CONTACT_INFO / ORDERING / CONFIRMED và B4 chỉ cho mời TRƯỚC khi có thông tin nhận hàng). Chốt nhanh vẫn ưu
+ * tiên: lời mời chỉ đi SAU khi đơn đã chốt thành công, một lần mỗi lượt mua, gộp vào tin xác nhận. Đóng khi: đã chuyển người · khách
+ * khiếu nại / xin huỷ / từ chối / phản đối giá · đơn chưa qua kiểm · đã từ chối lời mời · đã được mời trong lượt mua. HÀM THUẦN.
+ */
+export function postConfirmOfferWindow(input: { state: OfferStateView; complaint: boolean; orderValid: boolean }): OfferWindow {
+  const s = input.state;
+  if (s.handoff) return { open: false, reason: "HANDOFF" };
+  if (s.cancelRequest || s.declined || s.priceDispute?.open || !input.orderValid) return { open: false, reason: "ORDER_PROBLEM" };
+  if (input.complaint) return { open: false, reason: "COMPLAINT" };
+  if (s.upsellDeclinedTurn !== undefined) return { open: false, reason: "DECLINED" };
+  if (s.upsellSent) return { open: false, reason: "ALREADY_OFFERED" };
+  return { open: true };
+}
+
+/** Họ món: hai từ đầu của tên (bỏ dấu, bỏ quy cách trong ngoặc) — «Chả cá thu» và «Chả cá hấp» cùng họ «cha ca». */
+const familyOf = (name: string) => foldVi(name.replace(/\([^)]*\)/g, " ")).split(" ").filter(Boolean).slice(0, 2).join(" ");
+
+/**
+ * Món mời sau chốt: món bổ trợ ĐẦU TIÊN chưa có trong đơn — so theo SẢN PHẨM (`productId`; nhãn dòng mang cả quy cách) VÀ không cùng HỌ món
+ * với món khách vừa mua (review NB3: mua chả cá thu thì không mời «chả cá hấp»). HÀM THUẦN.
+ */
+export function pickPostConfirmOffer(orderProductIds: readonly (string | null)[], offers: readonly CrossSellOffer[], orderNames: readonly string[] = []): CrossSellOffer | null {
+  const has = new Set(orderProductIds.filter((x): x is string => Boolean(x)));
+  const families = new Set(orderNames.map(familyOf).filter(Boolean));
+  return offers.find((o) => !has.has(o.productId) && !families.has(familyOf(o.name))) ?? null;
+}
+
+/** Nhãn quy cách đọc được («Size: 0,5kg» ⇒ «0,5kg»). */
+export const offerVariantLabel = (variant: string) => variant.replace(/^\s*(?:size|cỡ|kích thước|quy cách)\s*:\s*/i, "").trim();
+
+/**
+ * THÊM MÓN VÀO ĐƠN ĐÃ CHỐT — có được không (review upsell-after-confirm vòng 1 → 3). `added` = sản phẩm MỚI (đơn chưa có). Khách phải
+ * gọi tên món trong CHỮ MUA của tin này (`buyingText` — bỏ câu hỏi giá «chả mực bao nhiêu em», câu từ chối «chả mực thì thôi em»; nhận
+ * cả tên bỏ chữ đầu «thêm mực giã tay» — `calledByName`). Món là món VỪA ĐƯỢC MỜI mà mẫu mã khác mẫu mã đã mời: khách không nói khối
+ * lượng, hoặc khối lượng khách nói không khớp mẫu mã đã chọn ⇒ không được (mời 0,5kg mà thêm 1kg là đổi giá khách đã thấy).
+ *
+ * CÂU HỎI XÁC NHẬN (vòng 3): khách có ý thêm món được mời mà chưa gọi tên rõ («ok thêm giúp chị») ⇒ hỏi ĐÚNG MỘT LẦN («Mình muốn thêm
+ * … đúng không ạ?» — nơi gọi ghi `askedTurn`). Ở ĐÚNG lượt khách KẾ TIẾP, câu ĐỒNG Ý (ừ · vâng · đúng rồi · có · được · ok — đọc trên chữ
+ * mua, không gọi tên món KHÁC của danh mục) = chọn ĐÚNG mẫu mã đã mời. Đã hỏi một lần thì không bao giờ hỏi lại; khách trả lời khác ⇒
+ * lời mời thôi, không mời lại. Không hỏi khi khách đang từ chối hoặc gọi tên món khác. Trả `null` khi được. HÀM THUẦN.
+ */
+export type ConfirmedAddLine = { productId: string | null; variantId: string; name: string; quantity: number; weightGrams: number | null };
+export type PostConfirmOfferRef = { productId?: string; variantId?: string; name?: string; variant?: string; price?: number; sent?: boolean; askedTurn?: number };
+/**
+ * «CÓ» CHO CÂU HỎI XÁC NHẬN — kiểm CẢ TIN, danh sách ĐÓNG, không heuristics (review vòng 4: dò «đúng» / «có» / «ok» ở bất kỳ đâu ⇒ «đừng
+ * thêm nhé em» bỏ dấu thành «dung them» = «đúng», «không đúng đâu em», «ok ship nhanh giúp chị», «có gì chị báo sau» đều thành ĐỒNG Ý và
+ * đơn đã chốt 350.000 → 750.000 ₫). (1) Có bất kỳ từ PHỦ ĐỊNH nào ⇒ không. (2) Bỏ từ lịch sự / xưng hô; phần còn lại
+ * phải ghép TRỌN từ các cụm trong danh sách đồng ý — thừa một từ nào khác ⇒ không. HÀM THUẦN.
+ * Vòng 5: khách gõ KHÔNG DẤU thì phủ định cũng không dấu («khong», «thoi», «chua») ⇒ dò cả trên chữ đã bỏ dấu. Có «?» hoặc «à» / «á» /
+ * «hả» / «ư» (hỏi lại: «ok?», «thêm à», «ư?») ⇒ là câu HỎI, không phải đồng ý; «ơi» là GỌI người («dạ em ơi») ⇒ không bỏ qua được.
+ * Vòng 6: cụm đồng ý so ĐÚNG CHỮ CÓ DẤU, không bỏ dấu — bỏ dấu thì «ủa» (ngạc nhiên) thành «ừa», «cô» thành «có», «đông y» thành «đồng ý».
+ * Dạng không dấu chỉ có mặt khi KHÔNG trùng một từ thông dụng nào (ok, oki, uk, dc…); «dung» / «da» / «co» / «them» / «lay» / «vang» /
+ * «ua» không dấu đều hai nghĩa ⇒ không phải đồng ý.
+ */
+const YES_NEGATION = new Set(["không", "ko", "k", "kh", "hông", "hok", "hem", "chưa", "đừng", "thôi", "khỏi", "nhầm", "sai", "hủy", "huỷ", "bỏ"]);
+const YES_NEGATION_FOLDED = new Set(["khong", "hong", "hok", "hem", "chua", "thoi", "khoi", "nham", "sai", "huy", "bo"]);
+const YES_PARTICLES = new Set(["em", "e", "ạ", "nhé", "nhe", "nha", "nhá", "chị", "c", "anh", "shop", "sop", "luôn", "đi", "với", "nhen", "hen", "nghen"]);
+const YES_PHRASES = [
+  "ừ", "ừa", "ờ", "ừm", "uk", "um", "uhm", "uki", "ok", "oke", "okee", "okie", "oki", "okela",
+  "vâng", "dạ", "dạ vâng", "đúng", "đúng rồi", "đúng r", "đúng vậy", "có", "có chứ", "được", "được rồi", "đc", "dc", "đc rồi", "dc rồi", "đc r", "dc r",
+  "ok rồi", "ok r", "đồng ý", "thêm", "thêm giúp", "cho thêm", "lấy", "lấy luôn", "lấy thêm", "chốt", "chốt đơn",
+]
+  .map((p) => p.split(" "))
+  .sort((a, b) => b.length - a.length);
+export function isShortYes(text: string): boolean {
+  const raw = text.normalize("NFC").toLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, " ").trim().split(/\s+/).filter(Boolean);
+  if (!raw.length || /[?？]/.test(text) || raw.some((w) => YES_NEGATION.has(w) || YES_NEGATION_FOLDED.has(foldVi(w)))) return false;
+  const rest = raw.filter((w) => !YES_PARTICLES.has(w));
+  if (!rest.length) return false;
+  let i = 0;
+  while (i < rest.length) {
+    const hit = YES_PHRASES.find((ph) => ph.every((w, k) => rest[i + k] === w));
+    if (!hit) return false;
+    i += hit.length;
+  }
+  return true;
+}
+const ADD_CUE_RE = /(?:^| )(?:them|lay them|cho them|ok|oke|duoc|dong y|u|uk|lay|lay luon)(?: |$)/;
+export function confirmedAddIssue(
+  added: readonly ConfirmedAddLine[],
+  offer: PostConfirmOfferRef | undefined,
+  customerText: string,
+  /** `prevTurn` = seq tin khách NGAY TRƯỚC tin này (engine) — bằng `askedTurn` nghĩa là khách đang trả lời câu hỏi xác nhận. */
+  opts: { prevTurn?: number; catalogNames?: readonly string[]; staffBetween?: boolean; chosen?: readonly { productId: string | null; match: string }[] } = {},
+): { kind: "UNNAMED" | "WRONG_VARIANT"; names: string[]; ask: string | null } | null {
+  const buy = buyingText([customerText]);
+  const fb = foldVi(buy);
+  const otherNamed = (opts.catalogNames ?? []).some((n) => n !== offer?.name && (mentionsProduct(n, buy) || calledByName(n, buy)));
+  const what = offer?.name ? `${offer.name}${offer.variant && offerVariantLabel(offer.variant) ? ` (${offerVariantLabel(offer.variant)})` : ""}` : "";
+  const askedBefore = offer?.askedTurn !== undefined;
+  // Trả lời «có» cho câu hỏi xác nhận ⇒ đúng mẫu mã đã mời, không món nào khác.
+  // Nhân viên / page nhắn xen giữa câu hỏi và câu trả lời ⇒ «có» có thể là trả lời NGƯỜI, không phải câu hỏi của bot.
+  const answersYes = Boolean(offer?.sent && askedBefore && opts.prevTurn !== undefined && opts.prevTurn === offer!.askedTurn && !opts.staffBetween && isShortYes(customerText) && !otherNamed);
+  if (answersYes && added.length > 0 && added.every((a) => a.productId === offer!.productId)) {
+    const wrong = added.filter((a) => a.variantId !== offer!.variantId);
+    return wrong.length ? { kind: "WRONG_VARIANT", names: wrong.map((a) => a.name), ask: null } : null;
+  }
+  const canAsk = Boolean(offer?.sent && !askedBefore && what && fb && ADD_CUE_RE.test(fb) && !otherNamed);
+  // Khách CHỌN món trong tin này theo bộ đọc giỏ («1 hũ ruốc» ⇒ món «ruốc» khách nói tường minh, gắn được sản phẩm / nhãn) = gọi tên — cùng
+  // căn cứ `lineBasisViolation` đang dùng. Chỉ so chữ thì tên tắt một từ («ruốc» của «Ruốc bông tôm 100%») bị chặn (order-golden «upsell»).
+  const chosenHere = (a: ConfirmedAddLine) => (opts.chosen ?? []).some((c) => (c.productId !== null && c.productId === a.productId) || (Boolean(c.match) && labelsMatch(c.match, a.name)));
+  const unnamed = added.filter((a) => !(mentionsProduct(a.name, buy) || calledByName(a.name, buy) || chosenHere(a)));
+  if (unnamed.length) {
+    const offeredUnnamed = Boolean(offer?.productId && unnamed.some((a) => a.productId === offer.productId));
+    return { kind: "UNNAMED", names: unnamed.map((a) => a.name), ask: offeredUnnamed && canAsk ? `Mình muốn thêm ${what} vào đơn đúng không ạ?` : null };
+  }
+  const off = offer?.sent && offer.productId && offer.variantId ? added.find((a) => a.productId === offer.productId && a.variantId !== offer.variantId) : undefined;
+  if (off) {
+    const grams = amountsIn(customerText).filter((x) => x.unit === "g").map((x) => x.value);
+    const fits = off.weightGrams !== null && grams.some((g) => g === off.weightGrams! * off.quantity || g === off.weightGrams);
+    if (!fits) return { kind: "WRONG_VARIANT", names: [off.name], ask: canAsk ? `Mình muốn thêm ${what} vào đơn đúng không ạ?` : null };
+  }
+  return null;
+}
+
+/**
+ * Câu mời — MÁY CHỦ dựng, giá máy chủ, một câu, nói rõ khách phải NHẮN món nếu muốn (khách chỉ «ok» với đơn chính không phải đồng ý
+ * mua thêm — `lineBasisViolation` chặn thêm món khách chưa gọi tên). HÀM THUẦN.
+ */
+export function postConfirmOfferText(o: CrossSellOffer, money: (n: number) => string): string {
+  const label = offerVariantLabel(o.variant);
+  const what = label && label !== o.name ? `${o.name} (${label})` : o.name;
+  // Câu gợi ý mang cả quy cách đã mời (review NB1) — khách nhắn đúng câu thì máy thêm đúng mẫu mã, đúng giá đã báo.
+  const reply = label && label !== o.name ? `${o.name.toLowerCase()} ${label}` : o.name.toLowerCase();
+  return `Bên em có thêm ${what} giá ${money(o.price)} ăn kèm rất hợp — mình muốn thêm vào đơn thì nhắn em «thêm ${reply}» nhé ạ.`;
+}
 
 export type ReplyGuardInput = {
   window: OfferWindow;
