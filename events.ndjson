@@ -1,4 +1,3 @@
-{"at":"2026-10-11T05:59:47.964Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"sender-provenance-probe","detail":"#805 cho fix/sender-provenance-probe @ 049146b4cc0b"}
 {"at":"2026-10-11T06:00:06.694Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#805 @ 049146b4cc0b · Chỉ đọc + chỉ GET, nghỉ giữa lượt + dừng ở 429, tóm tắt không chữ tin/token; chỉ lib đã có"}
 {"at":"2026-10-11T06:11:23.659Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"avatar-accept-header","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-11T06:11:23.659Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"avatar-accept-header","detail":"OVERLAP_ACCEPTED với avatar-pancake-endpoint: phạm vi lib/sales-chatbot/avatar-proxy.ts, tests/avatar-proxy.test.ts — cách tích hợp: tiếp avatar-pancake-endpoint"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-19T06:49:19.719Z","actor":"DESKTOP-56TH98Y:wt-upsell-goi-ban-kem","kind":"HANDOFF","mission":"upsell-goi-ban-kem","detail":"claude/upsell-goi-ban-kem @ 80f37dcfb5df · 1 lệnh kiểm thử"}
 {"at":"2026-10-19T06:51:35.320Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"upsell-goi-ban-kem","detail":"#910 cho claude/upsell-goi-ban-kem @ 80f37dcfb5df"}
 {"at":"2026-10-19T06:52:01.712Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#910 @ 80f37dcfb5df · lead: verifiedUnitPrices thêm cờ addOnAlone chỉ cho giá LỜI MỜI — bỏ qua đúng lý do ADD_ON_ONLY (món đi cùng đơn chính), mọi lý do khác vẫn chặn; mặc định giữ nguyên nên đường báo giá không đổi; bắt từ probe production (mời gói 1kg 400k thay vì 0,5kg 200k)"}
+{"at":"2026-10-19T07:32:04.379Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"upsell-goi-ban-kem","detail":"#910 @ 80f37dcfb5df → d8f8c6b6593c (MERGE_NOW · MEDIUM · gates success)"}
