@@ -123,6 +123,9 @@ function labelTokens(s: string): string[] {
   return foldVi(s).split(" ").filter(Boolean);
 }
 
+/** `run` nằm LIỀN NHAU, đúng thứ tự trong `tokens`. HÀM THUẦN. */
+const hasRun = (tokens: readonly string[], run: readonly string[]) => tokens.some((_, i) => run.every((w, k) => tokens[i + k] === w));
+
 /** Tên sản phẩm bỏ phần quy cách trong ngoặc («Chả mực giã tay (Size: 1kg)» ⇒ «Chả mực giã tay»). */
 const productName = (name: string) => name.replace(/\s*\([^)]*\)\s*$/, "").trim() || name;
 
@@ -141,13 +144,18 @@ function resolveLabel(raw: { match: string; display: string }, catalog?: readonl
         const nt = labelTokens(n);
         return sub.every((w) => nt.includes(w));
       });
-      if (hits.length === 1) {
+      // Nhiều tên chứa ĐỦ các từ nhưng chỉ MỘT tên chứa chúng LIỀN NHAU, đúng thứ tự ⇒ tên ấy (HSLC 19/10/2026: «1kg chả cá thu» với «Chả cá
+      // thu» và «Ruốc bông (chà bông) cá thu nguyên chất» — bỏ dấu «chà» thành «cha», đếm theo tập từ thì cả hai khớp ⇒ mơ hồ ⇒ giỏ RỖNG, mọi
+      // hàng rào theo giỏ mù với chả cá thu). «cá thu» liền nhau ở cả hai ⇒ vẫn mơ hồ (đúng: khách chưa nói món nào).
+      const runs = hits.length > 1 ? hits.filter((n) => hasRun(labelTokens(n), sub)) : [];
+      const hit = hits.length === 1 ? hits[0] : runs.length === 1 ? runs[0] : null;
+      if (hit) {
         // Từ ngay sau DANH TỪ MÓN mà tên danh mục không có (và không phải cỡ / màu) ⇒ khách gọi một món KHÁC cùng danh từ («nem chua» khi shop
         // chỉ có «Nem hải sản tôm bề bề», «nem rán») — không phải món này (review c0b7eb96). Trả «không khớp» ⇒ tên ngoài danh mục ⇒ hỏi lại.
-        const nt = labelTokens(hits[0]);
+        const nt = labelTokens(hit);
         const second = tokens[1];
         if (s === 0 && second && !nt.includes(second) && !/\d/.test(second) && !ATTR_WORDS.has(second)) return { match: "", display: "" };
-        return { match: foldVi(hits[0]), display: hits[0] };
+        return { match: foldVi(hit), display: hit };
       }
       if (hits.length > 1 && len === tokens.length) return { match: "", display: "", ambiguous: true, hint: raw.match };
     }

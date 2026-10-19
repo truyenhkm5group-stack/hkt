@@ -785,7 +785,24 @@ async function testReviewGolden() {
   assert.deepEqual([...seen].sort(), REVIEW.map((c) => c.key).sort());
 }
 
+/**
+ * Danh mục THẬT của HSLC (org-catalog 19/10/2026): «Ruốc bông (chà bông) cá thu nguyên chất» — bỏ dấu «chà» = «cha» nên «chả cá thu» đếm
+ * theo tập từ khớp CẢ ruốc ⇒ mơ hồ ⇒ giỏ rỗng (câu mẫu A01 hỏi lại «1kg hay 2kg» lọt qua luật quy cách). Tên chứa cụm LIỀN NHAU thắng.
+ */
+function testRealHslcCatalog() {
+  const REAL = ["Chả cá thu", "Chả mực giã tay", "Nem hải sản tôm bề bề", "Nước mắm cốt cá cơm truyền thống", "Ruốc bông (chà bông) cá thu nguyên chất", "Ruốc bông (chà bông) tôm biển nguyên chất"];
+  const at = new Date("2026-10-19T08:46:58Z");
+  const one = (t: string) => applyCustomerCartMessage(undefined, t, 1, at, { catalog: REAL })?.selectedItems.map((x) => [x.label, x.quantity, x.unit, x.customerExplicit]) ?? null;
+  for (const t of ["cho chị 1kg chả cá thu", "chả cá thu 1kg ạ", "lấy 1kg chả cá"]) assert.deepEqual(one(t), [["Chả cá thu", 1000, "g", true]], t);
+  assert.deepEqual(one("1 hộp ruốc cá thu"), [["Ruốc bông (chà bông) cá thu nguyên chất", 1, "pack", true]]);
+  assert.deepEqual(one("2 hộp chà bông tôm"), [["Ruốc bông (chà bông) tôm biển nguyên chất", 2, "pack", true]]);
+  assert.deepEqual(one("cho mình 2kg chả mực giã tay"), [["Chả mực giã tay", 2000, "g", true]]);
+  // «cá thu» liền nhau ở CẢ hai tên ⇒ vẫn mơ hồ — không đoán món.
+  assert.equal(amountsIn("lấy 1kg cá thu", REAL)[0]?.ambiguous, true);
+}
+
 export async function testSalesCartCommitment() {
+  testRealHslcCatalog();
   testClassify();
   testApply();
   testViolation();
