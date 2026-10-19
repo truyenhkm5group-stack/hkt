@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "mission_id": "payroll-v2-operational",
+  "title": "Payroll V2 vận hành: đối soát P&L theo tháng, phân công MKTer từ chiến dịch, trạng thái thưởng tới đã trả, duyệt hai cấp chốt thưởng LN",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/payroll-v2-operational",
+  "base_sha": "d50ffe2c51c8a837b7e24a201c740649c428ab85",
+  "domains": [],
+  "owned_paths": [
+    "lib/payroll/code-ledger.ts",
+    "lib/payroll/profit-gate.ts",
+    "lib/payroll/run-service.ts",
+    "lib/queries/payroll.ts",
+    "lib/queries/payroll-code-ledger.ts",
+    "lib/queries/payroll-profit-gate.ts",
+    "lib/queries/payroll-reconciliation.ts",
+    "lib/actions/payroll-code.ts",
+    "lib/validation/payroll-code.ts",
+    "lib/constants/payroll-code.ts",
+    "lib/constants/payroll-readiness.ts",
+    "app/(dashboard)/payroll/codes",
+    "docs/payroll-code-ledger.md",
+    "scripts/payroll-profit-gate-audit.ts",
+    "tests/payroll-code-ledger.test.ts"
+  ],
+  "dependencies": [
+    "payroll-v2-code-ledger"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-19T13:49:10.563Z",
+  "updated_at": "2026-10-19T13:49:10.563Z",
+  "last_heartbeat": "2026-10-19T13:49:10.563Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "IN_PROGRESS",
+    "evidence": []
+  }
+}
