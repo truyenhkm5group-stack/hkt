@@ -37,11 +37,32 @@ function testPure() {
   const c = offersOfConversation(HSLC, { cancelRequest: { orderIds: [], at: "", turn: 1, quote: null, reason: "x" } });
   // Lời mời 1 = tin bot đầu (mời 2kg SAU khi khách đã chọn 2kg + hỏi lại quy cách); lời mời 2 = câu mẫu menu SAU khi khách «không em».
   // Tin «[Shop đã nhắn]» là của page / nhân viên — không đếm.
-  assert.deepEqual(c, { offers: 2, afterDecline: 1, upsellAfterSize: 1, reaskAfterSize: 1, endedCancelled: true });
+  // Lời mời 1 chỉ mời gói 2kg (cùng món); lời mời 2 mời món KHÁC (chả mực) ⇒ crossSells 1.
+  assert.deepEqual(c, { offers: 2, crossSells: 1, afterDecline: 1, upsellAfterSize: 1, reaskAfterSize: 1, endedCancelled: true });
   const clean = offersOfConversation([{ role: "user", content: txt("Cho chị 1kg chả cá thu") }, { role: "assistant", content: txt("Dạ mình dùng thêm chả mực giã tay ăn kèm không ạ? Cho em xin SĐT nhé.") }, { role: "user", content: txt("ok lấy thêm 1kg chả mực") }], {});
-  assert.deepEqual(clean, { offers: 1, afterDecline: 0, upsellAfterSize: 0, reaskAfterSize: 0, endedCancelled: false });
+  assert.deepEqual(clean, { offers: 1, crossSells: 1, afterDecline: 0, upsellAfterSize: 0, reaskAfterSize: 0, endedCancelled: false });
   const t = addConversation(addConversation(emptyTotals(), c, [{ reason: "CONTACT_INFO" }, { reason: "DECLINED" }]), clean, []);
   assert.deepEqual([t.conversations, t.withOffer, t.offers, t.repeated, t.afterDecline, t.cancelledAfterOffer, t.drops.CONTACT_INFO, t.drops.DECLINED], [2, 2, 3, 1, 1, 1, 1, 1]);
+  assert.deepEqual([t.repeatedWithPost, t.repeatedCrossSell], [0, 0], "lặp ở ca HSLC: một lần gói lớn + một lần món khác, không có lời mời sau chốt");
+  // Tách «mời ≥ 2 lần» (production 19/10/2026): mời gói 2kg (cùng món) rồi lời mời sau chốt ⇒ lặp CÓ lời mời sau chốt, KHÔNG phải ≥ 2 món
+  // khác. Bảng giá thuần («1kg 280k, 2kg giảm còn 540k») là PRICE_LIST — KHÔNG phải lời mời.
+  assert.equal(offersOfConversation([{ role: "user", content: txt("chả cá thu giá sao shop") }, { role: "assistant", content: txt("Dạ chả cá thu 1kg giá 280.000 ₫, lấy 2kg giảm còn 540.000 ₫ ạ.") }], {}).offers, 0, "bảng giá không phải lời mời");
+  const priceThenPost = offersOfConversation([
+    { role: "user", content: txt("chả cá thu giá sao shop") },
+    { role: "assistant", content: txt("Dạ chả cá thu 1kg giá 280.000 ₫ ạ. Chị lấy 2kg được giảm còn 540.000đ, tiết kiệm hơn ạ.") },
+    { role: "user", content: txt(`Lan ${PHONE}, 9 Hai Bà Trưng, Hoàn Kiếm, Hà Nội`) },
+    { role: "assistant", content: txt("Dạ em lên đơn cho mình rồi ạ. Bên em có thêm Chả mực giã tay (0,5kg) giá 200.000 ₫ ăn kèm rất hợp — mình muốn thêm vào đơn thì nhắn em «thêm chả mực giã tay 0,5kg» nhé ạ.") },
+  ], {});
+  const twoCross = offersOfConversation([
+    { role: "user", content: txt("cho chị 1kg chả cá thu") },
+    { role: "assistant", content: txt("Dạ mình dùng thêm chả mực giã tay ăn kèm không ạ?") },
+    { role: "user", content: txt("để chị xem") },
+    { role: "assistant", content: txt("Dạ bên em còn nem hải sản ăn kèm rất hợp ạ.") },
+  ], {});
+  assert.equal(twoCross.crossSells, 2, twoCross.offers.toString());
+  const t2 = addConversation(addConversation(emptyTotals(), priceThenPost, [], true), twoCross, [], false);
+  assert.equal(priceThenPost.offers, 2, JSON.stringify(priceThenPost));
+  assert.deepEqual([t2.repeated, t2.repeatedWithPost, t2.repeatedCrossSell], [2, 1, 1], JSON.stringify(t2));
 }
 
 /** 4. Lời mời SAU CHỐT (P0 19/10/2026): mời đã gửi · không mời theo lý do · nhận + tiền thêm · huỷ sau lời mời; ngoài kỳ không tính. */
