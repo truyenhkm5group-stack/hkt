@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "probe-upsell",
+  "title": "Kiểm lời mời sau chốt trực tiếp (org-ai-cutover --probe-set=upsell)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-probe-upsell",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/probe-upsell",
+  "base_sha": "ae8a153ec3cc085eb4293b39b19823dafe895c42",
+  "domains": [],
+  "owned_paths": [
+    "scripts/org-ai-cutover.ts",
+    "tests/org-ai-cutover.test.ts"
+  ],
+  "dependencies": [
+    "upsell-after-confirm"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-19T05:08:20.463Z",
+  "updated_at": "2026-10-19T05:08:20.463Z",
+  "last_heartbeat": "2026-10-19T05:08:20.463Z",
+  "definition_of_done": []
+}
