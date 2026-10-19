@@ -1,4 +1,3 @@
-{"at":"2026-10-11T06:11:23.659Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"avatar-accept-header","detail":"OVERLAP_ACCEPTED với avatar-proxy: phạm vi tests/avatar-proxy.test.ts — cách tích hợp: tiếp avatar-pancake-endpoint"}
 {"at":"2026-10-11T06:11:23.659Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"avatar-accept-header","detail":"OVERLAP_ACCEPTED với master-mission: phạm vi lib/sales-chatbot/avatar-proxy.ts ↔ lib/sales-chatbot/ — cách tích hợp: tiếp avatar-pancake-endpoint"}
 {"at":"2026-10-11T06:11:23.659Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"avatar-accept-header","detail":"OVERLAP_ACCEPTED với pancake-replacement: phạm vi lib/sales-chatbot/avatar-proxy.ts ↔ lib/sales-chatbot/ — cách tích hợp: tiếp avatar-pancake-endpoint"}
 {"at":"2026-10-11T06:11:41.348Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"avatar-accept-header","detail":"fix/avatar-accept-header @ ee8e5fb4df2f · 1 lệnh kiểm thử"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-19T07:33:36.484Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"d8f8c6b6593c · run 39216715848 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39216715848"}
 {"at":"2026-10-19T07:48:54.613Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"upsell-goi-ban-kem","detail":"PASS d8f8c6b6593cbaa847f5f0496d4b04762abc90ac 2026-10-19T07:48:32.621Z"}
 {"at":"2026-10-19T08:00:40.418Z","actor":"DESKTOP-56TH98Y:wt-payroll-gate","kind":"HANDOFF","mission":"payroll-v2-code-ledger","detail":"claude/payroll-v2-code-ledger @ 331a4efbd02e · 5 lệnh kiểm thử"}
+{"at":"2026-10-19T08:01:47.701Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"payroll-v2-code-ledger","detail":"#911 cho claude/payroll-v2-code-ledger @ 331a4efbd02e"}
