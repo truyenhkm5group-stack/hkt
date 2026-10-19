@@ -60,7 +60,7 @@ import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { customer360Prompt, loadCustomer360, preferReturning, reuseIntentOf } from "@/lib/sales-chatbot/customer-360";
 import { CUSTOMER_PHASE_LABEL, customerComplaintSignal, loadCustomerPhase, postSalePrompt } from "@/lib/sales-chatbot/lifecycle";
-import { guardReply, needsOfferFacts, OFFER_BLOCK_LABEL, offerDeclinedBy, offerWindow, withOfferDrops, type OfferBlock, type OfferFacts } from "@/lib/sales-chatbot/next-best-action";
+import { guardReply, needsOfferFacts, OFFER_BLOCK_LABEL, offerDeclinedBy, offerWindow, QUICK_SIZE_YIELDS_MAX, quickReplySizeConflict, withOfferDrops, type OfferBlock, type OfferFacts } from "@/lib/sales-chatbot/next-best-action";
 import { loadOfferFacts } from "@/lib/sales-chatbot/offer-facts";
 import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
 import { freeShipPolicyText } from "@/lib/sales-chatbot/shipping";
@@ -1318,7 +1318,20 @@ async function chatTurnCore(
     // cho («…xin SĐT + địa chỉ chính xác để em check tuyến giao» khớp chữ «giao» của «Giao sáng mai khoảng 9h») ⇒ không gửi, AI trả lời.
     // Cùng cửa sổ với `customerTexts` của đường AI — hai đường phán cùng một tin như nhau.
     const quickReasks = (pick: QuickReplyPick) => addressReaskVerdict(pick.text, addressKnowledge(st0, customerTexts), turnSeq, { botTexts: recentSaid }) !== null;
-    if (quick.kind === "ANSWER" && !quickReasks(quick.pick)) return sendQuick(quick.pick, null);
+    // #868 TRÊN ĐƯỜNG CÂU MẪU (production 19/10/2026, HSLC): «1kg chả cá thu» ⇒ câu mẫu «… mình muốn mua 1kg hay 2kg ạ?» đi nguyên văn
+    // vì câu mẫu không qua guardReply. Câu mẫu không được cắt (lời của shop) ⇒ câu mẫu hỏi lại quy cách / mời gói lớn cho món khách đã
+    // chọn khối lượng thì KHÔNG gửi, AI trả lời (qua guardReply). Mỗi lần nhường ghi một mốc (có trần) — ops đếm số lời gọi AI thêm.
+    const quickSizeReask = async (pick: QuickReplyPick): Promise<boolean> => {
+      if (!st0.cart?.selectedItems.some((x) => x.customerExplicit)) return false;
+      const facts = needsOfferFacts(pick.text, st0.cart) ? await loadOfferFacts(cfg, qrSettings.upsellReplyId ?? null).catch(() => null) : null;
+      if (!quickReplySizeConflict(pick.text, { cart: st0.cart, lastUserText: text, facts })) return false;
+      const st: ChatState = { ...st0, quickSizeYields: [...(st0.quickSizeYields ?? []), now.toISOString()].slice(-QUICK_SIZE_YIELDS_MAX) };
+      await bump({ state: st as Record<string, unknown> });
+      conv.state = st as Record<string, unknown>;
+      st0 = st;
+      return true;
+    };
+    if (quick.kind === "ANSWER" && !quickReasks(quick.pick) && !(await quickSizeReask(quick.pick))) return sendQuick(quick.pick, null);
     const org = await currentOrganization();
     // Trang công khai: khách KHÔNG BAO GIỜ đọc lý do nội bộ (công tắc, hạn mức gói, khoá) — chuyển người, báo chủ shop.
     // Khung THỬ của chủ shop giữ nguyên câu lỗi để họ sửa được.
@@ -1357,7 +1370,7 @@ async function chatTurnCore(
         const inT = res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens;
         await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: quickProv.source, provider: quickProv.provider.name, model: res.model || quickProv.provider.model, requests: 1, inputTokens: inT, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || quickProv.provider.model, res.usage), status: "OK", actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id, workload: "quick_extract", ...usageDetail(res) }).catch(() => undefined);
         Object.assign(pre, { calls: 1, inTok: inT, outTok: res.usage.outputTokens });
-        if (pick && !repeatsRecent(pick.text, recentSaid) && !quickReasks(pick) && (!qrFocus || qrFocus.answers(pick.entry))) return sendQuick(pick, pre);
+        if (pick && !repeatsRecent(pick.text, recentSaid) && !quickReasks(pick) && (!qrFocus || qrFocus.answers(pick.entry)) && !(await quickSizeReask(pick))) return sendQuick(pick, pre);
       } catch (error) {
         if (error instanceof SeqConflict) throw error;
       }

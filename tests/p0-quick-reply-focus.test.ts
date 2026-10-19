@@ -18,7 +18,9 @@ import { readFileSync } from "node:fs";
 import { eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { createProductCore } from "@/lib/records/product-create";
+import { applyCustomerCartMessage } from "@/lib/sales-chatbot/cart-commitment";
 import { SHOP_SAID } from "@/lib/sales-chatbot/engine";
+import { quickReplySizeConflict } from "@/lib/sales-chatbot/next-best-action";
 import { matchQuickReplyByKeyword, QUICK_REPLY_SETTING_KEY, type QuickReplyEntry } from "@/lib/sales-chatbot/quick-replies-shared";
 import { bulkQuickReplies, insertLearned, quickReplyByKeyword, removeWrongProductTriggers, saveQuickReply, setQuickReplyActive } from "@/lib/sales-chatbot/quick-replies";
 import { consistentTriggers, productConsistencyError, productFocusOf, productsNamedIn, quickReplyCovers, quickReplyFocusGuard, triggerProductConflicts, unavailableQuickReplyGuard, type FocusLine, type FocusProduct } from "@/lib/sales-chatbot/quick-reply-focus";
@@ -215,6 +217,26 @@ function testThuan() {
   assert.deepEqual(triggerProductConflicts(A07, PRODUCTS).map((x) => x.trigger), ["xin giá chả cá", "Xin giá chả cá nhé shop", "Báo giá chả cá thu?"]);
   assert.deepEqual(triggerProductConflicts(A01, PRODUCTS), []);
   assert.deepEqual(triggerProductConflicts(UPSELL, PRODUCTS), [], "câu menu chung mang «có chả mực không» là hợp lệ");
+
+  // #868 TRÊN CÂU MẪU (production 19/10/2026, HSLC): câu mẫu gửi nguyên văn mà hỏi lại «1kg hay 2kg» cho món khách đã chọn khối lượng ⇒
+  // nhường AI. Dùng lại phán xét của guardReply; quy cách đã chọn của món KHÁC không chặn câu mẫu món này.
+  const NAMES = ["Chả cá thu", "Nem hải sản tôm bề bề"];
+  const factsQ = { catalogNames: NAMES, crossSell: [], volume: [], menu: false, freeShip: false };
+  const ASK = "Dạ chả cá thu bên em 1kg giá 280.000 ₫ ạ. Dạ, mình muốn mua 1kg hay 2kg ạ?";
+  const cartOf = (t: string) => applyCustomerCartMessage(undefined, t, 1, new Date(), { catalog: NAMES });
+  const caKg = cartOf("cho chị 1kg chả cá thu");
+  assert.ok(caKg?.selectedItems.some((x) => x.customerExplicit), JSON.stringify(caKg));
+  assert.ok(quickReplySizeConflict(ASK, { cart: caKg, lastUserText: "cho chị 1kg chả cá thu", facts: factsQ }), "đã chọn 1kg ⇒ câu mẫu hỏi lại quy cách nhường AI");
+  assert.ok(!quickReplySizeConflict(ASK, { cart: undefined, lastUserText: "giá chả cá thu", facts: factsQ }), "chưa chọn ⇒ câu mẫu vẫn gửi");
+  assert.ok(!quickReplySizeConflict("Dạ chả cá thu bên em 1kg giá 280.000 ₫ ạ.", { cart: caKg, lastUserText: "cho chị 1kg chả cá thu", facts: factsQ }), "câu mẫu không hỏi lại quy cách ⇒ gửi");
+  const nem2 = cartOf("cho chị 2 hộp nem hải sản tôm bề bề");
+  assert.ok(nem2?.selectedItems.some((x) => x.customerExplicit), JSON.stringify(nem2));
+  assert.ok(!quickReplySizeConflict(ASK, { cart: nem2, lastUserText: "giá chả cá thu", facts: factsQ }), "(1) chọn quy cách NEM không chặn câu mẫu CHẢ CÁ");
+  assert.ok(!quickReplySizeConflict(ASK, { cart: nem2, lastUserText: "ok em", facts: factsQ }), "(1) khách không gọi tên món, giỏ chỉ có nem ⇒ câu mẫu gọi tên chả cá vẫn đi");
+  assert.ok(!quickReplySizeConflict(ASK, { cart: caKg, lastUserText: "cho chị 1kg chả cá thu, có mấy loại size em", facts: factsQ }), "khách HỎI các quy cách ⇒ câu hỏi quy cách là câu trả lời (luật guardReply)");
+  const engQ = readFileSync("lib/sales-chatbot/engine.ts", "utf8");
+  assert.match(engQ, /quick\.kind === "ANSWER" && !quickReasks\(quick\.pick\) && !\(await quickSizeReask\(quick\.pick\)\)\) return sendQuick/, "đường khớp chữ qua luật quy cách");
+  assert.match(engQ, /qrFocus\.answers\(pick\.entry\)\) && !\(await quickSizeReask\(pick\)\)\) return sendQuick\(pick, pre\)/, "đường AI chọn mã qua luật quy cách");
 }
 
 // ═══ chatTurn THẬT + PGlite: đường khớp chữ, AI chọn mã và công cụ send_quick_reply ═══
@@ -239,6 +261,8 @@ async function seed(ctx: Omit<GoldenHookCtx, "conversationId">): Promise<void> {
   await db.insert(qr).values([
     { title: "A01 Báo giá chả cá thu", triggers: ["giá chả cá thu", "Cha ca", "Xin giá chả cá thu?", "giá bao nhiêu 1kg"], answer: CHA_CA, active: true },
     { title: "A07 Nem hải sản tôm bề bề giá bao nhiêu", triggers: ["nem bao nhiêu", "giá nem", "xin giá chả cá", "Báo giá chả cá thu?", "báo giá"], answer: NEM, active: true },
+    // Dáng câu A01 thật của HSLC: báo giá rồi HỎI quy cách (#868 trên câu mẫu, 19/10/2026).
+    { title: "B90 Chả cá thu hỏi quy cách", triggers: ["chả cá thu", "giá chả cá thu"], answer: `${CHA_CA} Dạ, mình muốn mua 1kg hay 2kg ạ?`, active: false },
   ]);
 }
 
@@ -288,6 +312,31 @@ const CASES: GoldenCase[] = [
     turns: [
       { say: "giá bao nhiêu 1kg", ai: [() => [say("Dạ anh/chị hỏi giá món nào ạ? Bên em có chả cá thu, nem hải sản…")]] },
       { say: "giá bao nhiêu 1kg", before: (ctx) => shopSays(ctx.conversationId, "Chả cá thu Hạ Long nhà làm ạ"), ai: [] },
+    ],
+  },
+  {
+    key: "qrf-da-chon-quy-cach",
+    title: "(#868 trên câu mẫu, 19/10) «cho chị 1kg chả cá thu» ⇒ câu mẫu hỏi lại «1kg hay 2kg» KHÔNG gửi, AI trả lời và không hỏi lại",
+    shop: "food",
+    channel: "WEB",
+    turns: [{ say: "cho chị 1kg chả cá thu", ai: [() => [say("Dạ chị lấy 1kg chả cá thu 280.000đ ạ. Dạ, mình muốn mua 1kg hay 2kg ạ? Chị cho em xin SĐT và địa chỉ nhận hàng nhé.")]] }],
+  },
+  {
+    key: "qrf-cong-cu-quy-cach",
+    title: "(#868 trên câu mẫu) «cho chị 1kg chả cá thu», model gọi send_quick_reply câu mẫu hỏi quy cách ⇒ máy chủ từ chối, model trả lời bằng chữ, không hỏi lại",
+    shop: "food",
+    channel: "WEB",
+    turns: [{ say: "cho chị 1kg chả cá thu", ai: [() => [tool("send_quick_reply", { code: "Q1" })], () => [say("Dạ chị lấy 1kg chả cá thu 280.000đ ạ. Chị cho em xin SĐT và địa chỉ nhận hàng nhé.")]] }],
+  },
+  { key: "qrf-chua-chon-quy-cach", title: "(#868 trên câu mẫu) «giá chả cá thu» (chưa chọn khối lượng) ⇒ câu mẫu hỏi quy cách VẪN gửi nguyên văn", shop: "food", channel: "WEB", turns: [{ say: "giá chả cá thu", ai: [] }] },
+  {
+    key: "qrf-quy-cach-mon-khac",
+    title: "(#868 trên câu mẫu) khách chọn 2 hộp nem rồi hỏi giá chả cá thu ⇒ câu mẫu chả cá vẫn gửi (quy cách của món KHÁC không chặn)",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      { say: "cho chị 2 hộp nem hải sản tôm bề bề", ai: [() => [say("Dạ chị lấy 2 hộp nem hải sản tôm bề bề ạ.")]] },
+      { say: "giá chả cá thu", ai: [] },
     ],
   },
   {
@@ -344,7 +393,7 @@ async function testChatTurn() {
     orgSuffix: "-qrf",
     beforeCase: async (c, ctx) => {
       await seed(ctx);
-      await onlyActive(c.key === "qrf-cong-cu-sai-mon" || c.key === "qrf-shop-moi-nem" ? ["A07"] : ["A01", "A07"]);
+      await onlyActive(c.key === "qrf-cong-cu-sai-mon" || c.key === "qrf-shop-moi-nem" ? ["A07"] : c.key.includes("quy-cach") ? ["B90"] : ["A01", "A07"]);
     },
     afterCase: async (c, ctx, t) => {
       seen.add(c.key);
@@ -379,6 +428,28 @@ async function testChatTurn() {
         const r2 = JSON.stringify(t.turns[1].rounds.map((r) => r.results));
         assert.doesNotMatch(r2, /không khớp món đang bàn/, r2);
         assert.match(t.turns[1].shown.join("\n"), /Nem hải sản giá 120\.000/, t.turns[1].shown.join("\n"));
+      }
+      if (c.key.includes("quy-cach")) {
+        const db = await getDb();
+        const [row] = await db.select({ state: schema.salesChatConversations.state }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, ctx.conversationId));
+        const yields = ((row?.state ?? {}) as { quickSizeYields?: string[] }).quickSizeYields ?? [];
+        if (c.key === "qrf-cong-cu-quy-cach") {
+          assert.match(results, /hỏi lại quy cách khách đã chọn/, results);
+          assert.doesNotMatch(results, /"sent":true/, "câu mẫu KHÔNG được gửi qua công cụ");
+          assert.equal(t.turns[0].rounds.length, 2, "từ chối ⇒ model đi tiếp trong cùng lượt (không vòng lặp, không chuyển người)");
+          assert.doesNotMatch(shown, /1kg hay 2kg/, shown);
+          assert.match(shown, /SĐT/, shown);
+        } else if (c.key === "qrf-da-chon-quy-cach") {
+          assert.equal(t.turns[0].rounds.length, 1, "câu mẫu nhường ⇒ AI trả lời");
+          assert.doesNotMatch(shown, /1kg hay 2kg/, `không hỏi lại quy cách khách đã chọn: ${shown}`);
+          assert.match(shown, /SĐT/, shown);
+          assert.equal(yields.length, 1, "ghi một mốc nhường AI (ops đếm giá token)");
+        } else {
+          const last = t.turns[t.turns.length - 1];
+          assert.equal(last.rounds.length, 0, "câu mẫu trả lời, 0 lời gọi AI");
+          assert.match(last.shown.join("\n"), /chả cá thu bên em 1kg giá 280\.000.*1kg hay 2kg/, last.shown.join("\n"));
+          assert.equal(yields.length, 0);
+        }
       }
       if (c.key === "qrf-cong-cu-sai-mon") {
         assert.match(results, /không khớp món đang bàn/, results);

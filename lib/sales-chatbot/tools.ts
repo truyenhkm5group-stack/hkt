@@ -61,7 +61,7 @@ import { customerOrderStatus } from "@/lib/sales-chatbot/order-status-shared";
 import { classifyDeliveryQuestion, deliveryPreferenceNote, deliveryTimeAnswer, pickDeliveryOrder, staffDeliveryCommitment } from "@/lib/sales-chatbot/delivery-intent";
 import { futurePurchaseOnly, postSaleDropsIn } from "@/lib/sales-chatbot/post-sale-guard";
 import { customerComplaintSignal, LIFECYCLE_ORDER_LOOKBACK_DAYS } from "@/lib/sales-chatbot/lifecycle";
-import { confirmedAddIssue, OFFER_BLOCK_LABEL, offerWindow, pickPostConfirmOffer, postConfirmOfferText, postConfirmOfferWindow, withOfferDrops, type OfferBlock, type SentenceClass } from "@/lib/sales-chatbot/next-best-action";
+import { confirmedAddIssue, needsOfferFacts, OFFER_BLOCK_LABEL, type OfferBlock, offerWindow, pickPostConfirmOffer, postConfirmOfferText, postConfirmOfferWindow, quickReplySizeConflict, type SentenceClass, withOfferDrops } from "@/lib/sales-chatbot/next-best-action";
 import { loadOfferFacts } from "@/lib/sales-chatbot/offer-facts";
 import { fanpageVisitorKeyMirror } from "@/lib/pricing/ai-customer-identity";
 import type { PromptStamp } from "@/lib/sales-chatbot/prompt-stamp";
@@ -79,6 +79,8 @@ export { SALES_STAGE_LABEL, SALES_STAGES, type SalesStage } from "@/lib/sales-ch
 export type ChatState = {
   /** Lượt gần nhất câu mẫu bị tạm dừng vì không đọc được danh mục (bộ lọc món ĐÓNG — quick-reply-focus.ts). */
   quickGuardClosed?: { at: string; turn: number };
+  /** Mốc mỗi lần câu mẫu NHƯỜNG AI vì khách đã chọn khối lượng (`quickReplySizeConflict`, có trần) — ops conv-money-trace đếm giá token. */
+  quickSizeYields?: string[];
   /** `at` = lần ĐẦU khách để lại SĐT này (02/10/2026 — báo cáo chi phí AI / SĐT theo ngày); dòng cũ không có mốc. */
   /** `savedAddress` = địa chỉ do MÁY CHỦ điền từ đơn cũ khớp qua SĐT (`use_saved_address`) — bot chỉ thấy bản đã che. */
   /**
@@ -1472,6 +1474,19 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // khách đã cho («mình cho em xin SĐT + địa chỉ chính xác để em check tuyến giao») thì không gửi.
       if (ctx.customerTexts && addressReaskVerdict(pick.text, addressKnowledge(state, ctx.customerTexts), ctx.turn ?? 0, { botTexts: ctx.recentSaid ?? [] })) {
         return err(`Câu mẫu ${entry.code}: xin lại thông tin đã có`, "Câu mẫu này xin SĐT / địa chỉ mà khách ĐÃ cho — không gửi. Dùng thông tin đã có và đi tiếp (khách hẹn giờ giao ⇒ ghi nhận, không hứa giờ).", state);
+      }
+      // #868 TRÊN CÂU MẪU (production 19/10/2026): model gọi câu mẫu hỏi lại quy cách / mời gói lớn cho món khách ĐÃ chọn khối lượng ⇒ không
+      // gửi; model trả lời bằng chữ trong CÙNG lượt (chữ ấy qua guardReply). Cùng phán quyết với đường khớp chữ / AI chọn mã của engine.
+      if (state.cart?.selectedItems.some((x) => x.customerExplicit)) {
+        const upsellId = ctx.quickReplies?.find((q) => q.upsell)?.id ?? null;
+        const facts = needsOfferFacts(pick.text, state.cart) ? await loadOfferFacts(ctx.config, upsellId).catch(() => null) : null;
+        if (quickReplySizeConflict(pick.text, { cart: state.cart, lastUserText: ctx.lastUserText, facts })) {
+          return err(
+            `Câu mẫu ${entry.code}: hỏi lại quy cách khách đã chọn`,
+            "Câu mẫu này hỏi lại quy cách / mời gói lớn cho món khách ĐÃ chọn khối lượng — KHÔNG gửi. Trả lời bằng chữ: theo đúng khối lượng khách đã chọn và đi tiếp bước bán; KHÔNG hỏi lại «1kg hay 2kg».",
+            state,
+          );
+        }
       }
       if (state.confirmed && postSaleDropsIn(pick.text, ctx.lastUserText).length) return err(`Câu mẫu ${entry.code}: sai lúc sau chốt`, "Đơn ĐÃ CHỐT — câu mẫu này mời mua / xin chốt lại. KHÔNG gửi; trả lời đúng câu khách hỏi.", state);
       if (entry.upsell) {
