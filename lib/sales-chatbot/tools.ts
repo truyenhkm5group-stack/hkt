@@ -148,7 +148,7 @@ export type ChatState = {
    * `sent`) hoặc lý do KHÔNG mời (cửa sổ đóng · không có món bổ trợ đủ điều kiện · đọc dữ kiện lỗi). `accepted` = đơn ĐÃ CHỐT được sửa thêm
    * đúng món được mời SAU lời mời. Chỉ để vận hành + đo (ops upsell-offer-audit); xoá khi sang lượt mua mới.
    */
-  postConfirmOffer?: { turn: number; at: string; outcome: "OFFERED" | "NO_CANDIDATE" | "FACTS_ERROR" | "NOT_SENT" | OfferBlock; text?: string; name?: string; productId?: string; variantId?: string; variant?: string; price?: number; sent?: boolean; accepted?: { at: string; amount: number } };
+  postConfirmOffer?: { turn: number; at: string; outcome: "OFFERED" | "NO_CANDIDATE" | "FACTS_ERROR" | "NOT_SENT" | OfferBlock; text?: string; name?: string; productId?: string; variantId?: string; variant?: string; price?: number; sent?: boolean; askedTurn?: number; accepted?: { at: string; amount: number } };
   /** Câu upsell không gửi được (thiếu số ERP) — chỉ để đo; từ 16/10/2026 câu upsell KHÔNG còn là điều kiện lên đơn (#868). */
   upsellUnavailable?: boolean;
   /** Lượt khách TỪ CHỐI lời mời mua thêm của lượt mua này (`offerDeclinedBy`, next-best-action.ts) — không mời lại trong lượt mua. */
@@ -1194,13 +1194,23 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // Số lượng chỉ xét khi lượt này GỬI items (sửa người nhận / ghi chú không kiểm lại số lượng đã lên).
       // SỬA ĐƠN ĐÃ CHỐT mà THÊM SẢN PHẨM MỚI (review upsell-after-confirm B1, tái hiện thật: giỏ không gọi tên món nào ⇒ «ok em» sau lời
       // mời làm đơn đã chốt 350.000 → 750.000 ₫): khách phải GỌI TÊN món đó trong CHÍNH tin này. «ok», «dạ», «cảm ơn» là ghi nhận đơn chính.
+      // Khách trả lời «có» đúng câu hỏi xác nhận lời mời ⇒ món được mời là CĂN CỨ của khách (hàng rào dòng hàng bên dưới).
+      let offerYesProduct: string | null = null;
       if (editingConfirmed && v.data.items && existing) {
         const had = new Set((await priceLines(existing.lines, ctx.config, verifiedCustomerId(state))).asked.map((a) => a.productId ?? a.variantId));
         const added = priced.asked.filter((a) => !had.has(a.productId ?? a.variantId));
         // Chữ MUA của tin này (bỏ câu hỏi giá / câu từ chối — review vòng 2) phải gọi tên món; món vừa được mời phải đúng mẫu mã đã mời.
-        const issue = confirmedAddIssue(added, state.postConfirmOffer, ctx.lastUserText);
-        const ask = issue?.ask ? ` Hỏi khách ĐÚNG MỘT câu: «${issue.ask}» — không im lặng, không nói đã thêm.` : " KHÔNG nhắc lại lời mời.";
+        const catalogNames = added.length ? [...new Set([...(await pricingContextFor(ctx.config, verifiedCustomerId(state))).byId.values()].map((c) => c.name))] : [];
+        const issue = confirmedAddIssue(added, state.postConfirmOffer, ctx.lastUserText, { prevTurn: ctx.prevTurn, catalogNames });
+        // Câu hỏi xác nhận chỉ MỘT lần (review vòng 3) — ghi lượt đã hỏi; lượt khách KẾ TIẾP trả lời đồng ý = chọn đúng mẫu mã đã mời.
+        if (issue?.ask && state.postConfirmOffer && ctx.turn !== undefined) state.postConfirmOffer = { ...state.postConfirmOffer, askedTurn: ctx.turn };
+        const pcoNow = state.postConfirmOffer;
+        const ask = issue?.ask
+          ? ` Hỏi khách ĐÚNG MỘT câu: «${issue.ask}» — không im lặng, không nói đã thêm. Khách đồng ý ở tin kế tiếp ⇒ update_draft_order thêm variant_id ${pcoNow?.variantId} (đúng mẫu mã đã mời).`
+          : " KHÔNG nhắc lại lời mời, KHÔNG hỏi lại.";
         if (issue?.kind === "UNNAMED") return err("Sửa đơn đã chốt: khách chưa gọi tên món", `Khách CHƯA gọi tên ${issue.names.join(", ")} như một lời MUA trong tin này — «ok», «dạ», câu hỏi giá, câu từ chối không phải đồng ý mua thêm. KHÔNG thêm món; đơn giữ nguyên.${ask}`, state);
+        const pcoYes = state.postConfirmOffer;
+        if (!issue && pcoYes?.askedTurn !== undefined && ctx.prevTurn === pcoYes.askedTurn && pcoYes.productId && added.some((a) => a.productId === pcoYes.productId)) offerYesProduct = pcoYes.productId;
         if (issue?.kind === "WRONG_VARIANT") {
           const pco = state.postConfirmOffer;
           return err("Sửa đơn đã chốt: sai mẫu mã được mời", `Mẫu mã chọn không khớp mẫu mã đã mời / khối lượng khách nói — món vừa mời là variant_id ${pco?.variantId} (${pco?.name}, ${formatVND(pco?.price ?? 0)}). KHÔNG thêm mẫu mã khác.${ask}`, state);
@@ -1217,6 +1227,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // DÒNG HÀNG PHẢI CÓ CĂN CỨ TỪ KHÁCH (P0 14/10/2026, ca «Châu Dương»: món upsell × 3 khách chưa đồng ý vào đơn, đơn tự chốt 640.000 ₫).
       // Sản phẩm ĐÃ nằm trong đơn nháp hiện có đã qua kiểm này lúc được ghi ⇒ chỉ kiểm sản phẩm MỚI (review 14/10: không bắt bỏ món chính).
       const grounded = v.data.items && existing ? new Set((await priceLines(existing.lines, ctx.config, verifiedCustomerId(state))).asked.map((l) => l.productId ?? l.variantId)) : new Set<string>();
+      if (offerYesProduct) grounded.add(offerYesProduct);
       const noBasis = v.data.items ? lineBasisViolation(state.cart, priced.asked, ctx.turn ?? null, ctx.customerSaid ?? "", grounded) : null;
       if (noBasis) return err("Đơn nháp: dòng hàng không có căn cứ từ khách", noBasis, state);
       // Giá chưa xác thực ⇒ KHÔNG tạo / sửa đơn tự động, người xác minh (yêu cầu 5 của chủ shop).

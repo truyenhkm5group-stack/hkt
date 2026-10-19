@@ -294,28 +294,49 @@ export function pickPostConfirmOffer(orderProductIds: readonly (string | null)[]
 export const offerVariantLabel = (variant: string) => variant.replace(/^\s*(?:size|cỡ|kích thước|quy cách)\s*:\s*/i, "").trim();
 
 /**
- * THÊM MÓN VÀO ĐƠN ĐÃ CHỐT — có được không (review upsell-after-confirm vòng 1 + 2). `added` = sản phẩm MỚI (đơn chưa có). Khách phải
+ * THÊM MÓN VÀO ĐƠN ĐÃ CHỐT — có được không (review upsell-after-confirm vòng 1 → 3). `added` = sản phẩm MỚI (đơn chưa có). Khách phải
  * gọi tên món trong CHỮ MUA của tin này (`buyingText` — bỏ câu hỏi giá «chả mực bao nhiêu em», câu từ chối «chả mực thì thôi em»; nhận
  * cả tên bỏ chữ đầu «thêm mực giã tay» — `calledByName`). Món là món VỪA ĐƯỢC MỜI mà mẫu mã khác mẫu mã đã mời: khách không nói khối
- * lượng, hoặc khối lượng khách nói không khớp mẫu mã đã chọn ⇒ không được (mời 0,5kg mà thêm 1kg là đổi giá khách đã thấy). Trả `null`
- * khi được; còn lại trả lý do + (khi khách có ý thêm món được mời mà chưa gọi tên rõ) ĐÚNG MỘT câu hỏi xác nhận. HÀM THUẦN.
+ * lượng, hoặc khối lượng khách nói không khớp mẫu mã đã chọn ⇒ không được (mời 0,5kg mà thêm 1kg là đổi giá khách đã thấy).
+ *
+ * CÂU HỎI XÁC NHẬN (vòng 3): khách có ý thêm món được mời mà chưa gọi tên rõ («ok thêm giúp chị») ⇒ hỏi ĐÚNG MỘT LẦN («Mình muốn thêm
+ * … đúng không ạ?» — nơi gọi ghi `askedTurn`). Ở ĐÚNG lượt khách KẾ TIẾP, câu ĐỒNG Ý (ừ · vâng · đúng rồi · có · được · ok — đọc trên chữ
+ * mua, không gọi tên món KHÁC của danh mục) = chọn ĐÚNG mẫu mã đã mời. Đã hỏi một lần thì không bao giờ hỏi lại; khách trả lời khác ⇒
+ * lời mời thôi, không mời lại. Không hỏi khi khách đang từ chối hoặc gọi tên món khác. Trả `null` khi được. HÀM THUẦN.
  */
 export type ConfirmedAddLine = { productId: string | null; variantId: string; name: string; quantity: number; weightGrams: number | null };
-export type PostConfirmOfferRef = { productId?: string; variantId?: string; name?: string; variant?: string; price?: number; sent?: boolean };
-export function confirmedAddIssue(added: readonly ConfirmedAddLine[], offer: PostConfirmOfferRef | undefined, customerText: string): { kind: "UNNAMED" | "WRONG_VARIANT"; names: string[]; ask: string | null } | null {
+export type PostConfirmOfferRef = { productId?: string; variantId?: string; name?: string; variant?: string; price?: number; sent?: boolean; askedTurn?: number };
+const AFFIRM_RE = /(?:^| )(?:u|uk|um|uhm|vang|da vang|dung roi|dung vay|dung|co|duoc|ok|oke|okie|dong y|chot|them giup|lay giup|lay luon|them luon)(?: |$)/;
+const ADD_CUE_RE = /(?:^| )(?:them|lay them|cho them|ok|oke|duoc|dong y|u|uk|lay|lay luon)(?: |$)/;
+export function confirmedAddIssue(
+  added: readonly ConfirmedAddLine[],
+  offer: PostConfirmOfferRef | undefined,
+  customerText: string,
+  /** `prevTurn` = seq tin khách NGAY TRƯỚC tin này (engine) — bằng `askedTurn` nghĩa là khách đang trả lời câu hỏi xác nhận. */
+  opts: { prevTurn?: number; catalogNames?: readonly string[] } = {},
+): { kind: "UNNAMED" | "WRONG_VARIANT"; names: string[]; ask: string | null } | null {
   const buy = buyingText([customerText]);
-  const unnamed = added.filter((a) => !(mentionsProduct(a.name, buy) || calledByName(a.name, buy)));
+  const fb = foldVi(buy);
+  const otherNamed = (opts.catalogNames ?? []).some((n) => n !== offer?.name && (mentionsProduct(n, buy) || calledByName(n, buy)));
   const what = offer?.name ? `${offer.name}${offer.variant && offerVariantLabel(offer.variant) ? ` (${offerVariantLabel(offer.variant)})` : ""}` : "";
-  const addCue = /(?:^| )(?:them|lay them|cho them|ok|oke|duoc|dong y|u|uk|lay|lay luon)(?: |$)/.test(foldVi(customerText));
+  const askedBefore = offer?.askedTurn !== undefined;
+  // Trả lời «có» cho câu hỏi xác nhận ⇒ đúng mẫu mã đã mời, không món nào khác.
+  const answersYes = Boolean(offer?.sent && askedBefore && opts.prevTurn !== undefined && opts.prevTurn === offer!.askedTurn && fb && AFFIRM_RE.test(fb) && !otherNamed);
+  if (answersYes && added.length > 0 && added.every((a) => a.productId === offer!.productId)) {
+    const wrong = added.filter((a) => a.variantId !== offer!.variantId);
+    return wrong.length ? { kind: "WRONG_VARIANT", names: wrong.map((a) => a.name), ask: null } : null;
+  }
+  const canAsk = Boolean(offer?.sent && !askedBefore && what && fb && ADD_CUE_RE.test(fb) && !otherNamed);
+  const unnamed = added.filter((a) => !(mentionsProduct(a.name, buy) || calledByName(a.name, buy)));
   if (unnamed.length) {
-    const offeredUnnamed = Boolean(offer?.sent && offer.productId && unnamed.some((a) => a.productId === offer.productId));
-    return { kind: "UNNAMED", names: unnamed.map((a) => a.name), ask: offeredUnnamed && addCue && what ? `Mình muốn thêm ${what} vào đơn đúng không ạ?` : null };
+    const offeredUnnamed = Boolean(offer?.productId && unnamed.some((a) => a.productId === offer.productId));
+    return { kind: "UNNAMED", names: unnamed.map((a) => a.name), ask: offeredUnnamed && canAsk ? `Mình muốn thêm ${what} vào đơn đúng không ạ?` : null };
   }
   const off = offer?.sent && offer.productId && offer.variantId ? added.find((a) => a.productId === offer.productId && a.variantId !== offer.variantId) : undefined;
   if (off) {
     const grams = amountsIn(customerText).filter((x) => x.unit === "g").map((x) => x.value);
     const fits = off.weightGrams !== null && grams.some((g) => g === off.weightGrams! * off.quantity || g === off.weightGrams);
-    if (!fits) return { kind: "WRONG_VARIANT", names: [off.name], ask: what ? `Mình muốn thêm ${what} vào đơn đúng không ạ?` : null };
+    if (!fits) return { kind: "WRONG_VARIANT", names: [off.name], ask: canAsk ? `Mình muốn thêm ${what} vào đơn đúng không ạ?` : null };
   }
   return null;
 }

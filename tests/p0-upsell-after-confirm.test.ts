@@ -61,6 +61,19 @@ function testThuan() {
   assert.equal(confirmedAddIssue(muc1kg, offerRef, "thêm chả mực giã tay 0,5kg")?.kind, "WRONG_VARIANT", "mời 0,5kg mà chọn mẫu mã 1kg ⇒ không");
   assert.equal(confirmedAddIssue(muc1kg, offerRef, "thêm chả mực giã tay nhé")?.kind, "WRONG_VARIANT", "không nói khối lượng ⇒ đúng mẫu mã đã mời");
   assert.equal(confirmedAddIssue(muc1kg, offerRef, "thêm 1kg chả mực giã tay"), null, "khách nói rõ 1kg ⇒ mẫu mã 1kg được");
+  // Vòng 3: câu hỏi xác nhận có ĐƯỜNG cho «có». Đã hỏi ở tin khách seq 10 ⇒ tin khách kế tiếp (prevTurn 10) đồng ý = đúng mẫu mã đã mời.
+  const asked = { ...offerRef, askedTurn: 10 };
+  const CAT = ["Chả cá thu", "Chả mực giã tay", "Nem hải sản tôm bề bề", "Ruốc bông tôm 100%"];
+  for (const yes of ["ừ", "ừ đúng rồi", "vâng thêm giúp chị", "được em", "đúng rồi em", "có"]) {
+    assert.equal(confirmedAddIssue(mucNew, asked, yes, { prevTurn: 10, catalogNames: CAT }), null, `«${yes}» trả lời câu hỏi xác nhận ⇒ thêm đúng món đã mời`);
+  }
+  const later = confirmedAddIssue(mucNew, asked, "ừ", { prevTurn: 14, catalogNames: CAT });
+  assert.equal(later?.kind, "UNNAMED", "đồng ý KHÔNG ở tin kế tiếp ⇒ không tính");
+  assert.equal(later?.ask, null, "đã hỏi một lần ⇒ không bao giờ hỏi lại");
+  assert.equal(confirmedAddIssue(muc1kg, asked, "đúng rồi em", { prevTurn: 10, catalogNames: CAT })?.kind, "WRONG_VARIANT", "đồng ý = ĐÚNG mẫu mã đã mời, không mẫu mã khác");
+  assert.equal(confirmedAddIssue(mucNew, offerRef, "không lấy chả mực đâu", { catalogNames: CAT })?.ask, null, "đang từ chối ⇒ không hỏi (mời lại sau từ chối)");
+  assert.equal(confirmedAddIssue(mucNew, offerRef, "thêm chả cá thu nhé", { catalogNames: CAT })?.ask, null, "gọi tên món KHÁC ⇒ không hỏi về món được mời");
+  assert.equal(confirmedAddIssue(mucNew, { ...asked }, "thêm chả cá thu nhé", { prevTurn: 10, catalogNames: CAT })?.kind, "UNNAMED", "trả lời bằng tên món khác ⇒ không phải đồng ý món được mời");
   // B3 + NB4 khoá mức mã nguồn: đồng hồ khách AI nhận chữ ĐÃ GHÉP; giá mời theo bảng giá của khách.
   const eng = readFileSync("lib/sales-chatbot/engine.ts", "utf8");
   assert.match(eng, /const i = aiTexts\.lastIndexOf\(appended\.before\);\s*if \(i >= 0\) aiTexts\[i\] = appended\.after;/, "aiTexts thay bằng chữ đã ghép câu mời");
@@ -74,6 +87,10 @@ const ADDR = "9 Hai Bà Trưng, Phường Hoàn Kiếm, Thành phố Hà Nội";
 const MENU = "Dạ bên em còn chả mực giã tay {{giá:CHA-MUC}} ăn kèm rất hợp ạ.";
 const INFO = (phone: string) => `Cho chị 1 hộp ruốc bông tôm, Lan ${phone}, ${ADDR}`;
 
+/**
+ * Đồ dùng chung của các ca (một tổ chức thử `gd-food-pco`): câu mẫu UPSELL + tồn nạp MỘT lần ở ca đầu; cấu hình bot riêng của ca (`config`)
+ * được harness trả về mặc định sau mỗi ca; công tắc tự chốt đặt lại ở mọi `beforeCase`. Ca «hết hàng» đưa tồn chả mực về 0 — nên đứng cuối.
+ */
 async function seedMenu(ids: ReadonlyMap<string, string>): Promise<void> {
   const db = await getDb();
   const qr = schema.salesChatQuickReplies;
@@ -115,6 +132,17 @@ const CASES: GoldenCase[] = [
     { say: "chị lấy cái này nhé", ai: [() => [say("Dạ chị lấy 1 hộp ruốc bông tôm nhé, cho em xin SĐT + địa chỉ ạ.")]] },
     { say: `Lan 0961003210, ${ADDR}`, ai: orderInfo("0961003210") },
     { say: "chả mực giã tay bao nhiêu em", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ chả mực giã tay 400.000 ₫/kg ạ.")]] },
+  ] },
+  { key: "pco-hoi-xac-nhan-dong-y", title: "(review vòng 3) «ok thêm giúp chị» ⇒ hỏi MỘT câu xác nhận ⇒ «đúng rồi em» ⇒ thêm đúng mẫu mã đã mời + tổng mới", shop: "food", channel: "WEB", turns: [
+    { say: INFO("0961003212"), ai: orderInfo("0961003212") },
+    { say: "ok thêm giúp chị", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Mình muốn thêm Chả mực giã tay (1kg) vào đơn đúng không ạ?")]] },
+    { say: "đúng rồi em", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em thêm vào đơn rồi ạ.")]] },
+  ] },
+  { key: "pco-hoi-xac-nhan-tu-choi", title: "(review vòng 3) Đã hỏi xác nhận, khách «thôi em» ⇒ không thêm; «ok» sau đó ⇒ không thêm, KHÔNG hỏi lại", shop: "food", channel: "WEB", turns: [
+    { say: INFO("0961003213"), ai: orderInfo("0961003213") },
+    { say: "ok thêm giúp chị", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Mình muốn thêm Chả mực giã tay (1kg) vào đơn đúng không ạ?")]] },
+    { say: "thôi em", ai: [() => [say("Dạ vâng ạ.")]] },
+    { say: "ok", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ vâng ạ.")]] },
   ] },
   { key: "pco-ship-bao-sau", title: "(review vòng 2) Shop chưa khai phí ship ⇒ «Tổng đơn mới» không in phí ship CHƯA BIẾT thành 0", shop: "food", channel: "WEB", config: { shippingFee: null }, turns: [
     { say: INFO("0961003211"), ai: orderInfo("0961003211") },
@@ -204,6 +232,20 @@ async function testChatTurn() {
       }
       if (c.key === "pco-hoi-gia-mon-moi") {
         assert.deepEqual(lines, ["RUOC-TOM×1"], `câu hỏi giá KHÔNG thêm món: ${lines.join(", ")}`);
+        assert.equal(st.postConfirmOffer?.accepted, undefined);
+      }
+      if (c.key === "pco-hoi-xac-nhan-dong-y") {
+        const r1 = JSON.stringify(t.turns[1].rounds.map((r) => r.results));
+        assert.match(r1, /Hỏi khách ĐÚNG MỘT câu: «Mình muốn thêm Chả mực giã tay \(1kg\) vào đơn đúng không ạ\?»/, r1);
+        assert.deepEqual(lines, ["CHA-MUC×1", "RUOC-TOM×1"], `«đúng rồi em» sau câu hỏi xác nhận ⇒ thêm: ${results}`);
+        assert.equal(st.postConfirmOffer?.accepted?.amount, 400_000);
+        assert.match(JSON.stringify(t.turns[2].rounds.map((r) => r.results)), /Tổng đơn mới/);
+      }
+      if (c.key === "pco-hoi-xac-nhan-tu-choi") {
+        assert.deepEqual(lines, ["RUOC-TOM×1"], results);
+        const r3 = JSON.stringify(t.turns[3].rounds.map((r) => r.results));
+        assert.match(r3, /khách chưa gọi tên món/, r3);
+        assert.doesNotMatch(r3, /Hỏi khách ĐÚNG MỘT câu/, "đã hỏi một lần ⇒ không hỏi lại");
         assert.equal(st.postConfirmOffer?.accepted, undefined);
       }
       if (c.key === "pco-ship-bao-sau") {
