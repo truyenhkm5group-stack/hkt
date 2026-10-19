@@ -873,9 +873,10 @@ async function reply(conv: ConvRow, seq: number, text: string): Promise<void> {
 
 /**
  * Gắn MỘT câu vào cuối tin bot CUỐI CÙNG của lượt (sau tin khách `afterSeq`) — chỉ khi tin ấy là chữ thuần của bot (không phải tin shop /
- * page, không kèm khối công cụ) và câu ghép vẫn qua hàng rào khẳng định. Trả `true` khi đã gắn. Lời mời sau chốt (P0 19/10/2026).
+ * page, không kèm khối công cụ) và câu ghép vẫn qua hàng rào khẳng định. Trả chữ TRƯỚC / SAU khi đã gắn, `null` khi không. Lời mời sau
+ * chốt (P0 19/10/2026).
  */
-async function appendToTurnReply(convId: string, afterSeq: number, line: string, passes: (text: string) => Promise<boolean>): Promise<boolean> {
+async function appendToTurnReply(convId: string, afterSeq: number, line: string, passes: (text: string) => Promise<boolean>): Promise<{ before: string; after: string } | null> {
   const db = await getDb();
   const m = schema.salesChatMessages;
   const [last] = await db
@@ -885,13 +886,13 @@ async function appendToTurnReply(convId: string, afterSeq: number, line: string,
     .orderBy(desc(m.seq))
     .limit(1);
   const blocks = (last?.content ?? []) as AiBlock[];
-  if (!last || !blocks.length || !blocks.every((b) => b.type === "text")) return false;
+  if (!last || !blocks.length || !blocks.every((b) => b.type === "text")) return null;
   const t = textOf(blocks);
-  if (!t.trim() || t.startsWith(SHOP_SAID) || t.includes(line)) return false;
+  if (!t.trim() || t.startsWith(SHOP_SAID) || t.includes(line)) return null;
   const next = `${t}\n${line}`;
-  if (!(await passes(next))) return false;
+  if (!(await passes(next))) return null;
   await db.update(m).set({ content: [{ type: "text", text: next }] }).where(eq(m.id, last.id));
-  return true;
+  return { before: t, after: next };
 }
 
 /**
@@ -1795,7 +1796,12 @@ async function chatTurnCore(
     const pco = state.postConfirmOffer;
     if (pco?.outcome === "OFFERED" && pco.turn === turnSeq && !pco.sent && pco.text) {
       const can = spoke && status === "OK" && !orderWriteFailed && !state.handoff;
-      const appended = can ? await appendToTurnReply(conv.id, turnSeq, pco.text, async (t) => (await guardOutgoing(t, () => claimFacts(state))).ok).catch(() => false) : false;
+      const appended = can ? await appendToTurnReply(conv.id, turnSeq, pco.text, async (t) => (await guardOutgoing(t, () => claimFacts(state))).ok).catch(() => null) : null;
+      // Đồng hồ khách AI (0228) so khớp NGUYÊN VĂN chữ model với tin đã gửi (review B3): tin đã ghép câu mời phải thay chữ cũ trong `aiTexts`.
+      if (appended) {
+        const i = aiTexts.lastIndexOf(appended.before);
+        if (i >= 0) aiTexts[i] = appended.after;
+      }
       state = appended ? { ...state, upsellSent: true, upsellTurn: turnSeq, postConfirmOffer: { ...pco, sent: true } } : { ...state, postConfirmOffer: { ...pco, outcome: "NOT_SENT" } };
     }
     if (!spoke && replayNoop) lastError = lastError ?? "Lượt lặp lại tin khách đã được trả lời — đơn nháp không đổi, không gửi lại câu nào";

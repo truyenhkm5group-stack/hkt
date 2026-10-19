@@ -41,8 +41,8 @@ export function volumeSaveFrom(variants: readonly { grams: number | null; price:
   return out.length ? Math.min(...out) : null;
 }
 
-export async function loadOfferFacts(cfg: SalesChatbotConfig, upsellReplyId: string | null): Promise<OfferFacts> {
-  const ctx = await loadPricingContext(cfg, null);
+export async function loadOfferFacts(cfg: SalesChatbotConfig, upsellReplyId: string | null, books: Parameters<typeof loadPricingContext>[1] = null): Promise<OfferFacts> {
+  const ctx = await loadPricingContext(cfg, books);
   const catalog = [...ctx.byId.values()];
   const catalogNames = [...new Set(catalog.map((c) => c.name))];
   const byName = new Map<string, CatalogItem[]>();

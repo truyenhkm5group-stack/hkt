@@ -13,6 +13,7 @@
  * người · món kèm hết hàng ⇒ không mời · khiếu nại / đơn chưa qua kiểm ⇒ không mời (thuần).
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
@@ -40,7 +41,15 @@ function testThuan() {
   assert.equal(pickPostConfirmOffer(["p1", "p2"], offers), null, "hết món bổ trợ ⇒ không mời");
   assert.equal(pickPostConfirmOffer(["p9"], []), null, "không có món kèm đủ điều kiện (hết hàng / giá chưa xác thực đã bị lọc ở offer-facts) ⇒ không mời");
   const line = postConfirmOfferText(offers[1], formatVND);
-  assert.match(line, /^Bên em có thêm Chả mực giã tay \(0,5kg\) giá 200\.000 ₫ .*nhắn em «thêm chả mực giã tay»/);
+  assert.match(line, /^Bên em có thêm Chả mực giã tay \(0,5kg\) giá 200\.000 ₫ .*nhắn em «thêm chả mực giã tay 0,5kg»/, "câu gợi ý mang quy cách đã mời (NB1)");
+  // NB3: không mời món CÙNG HỌ với món khách vừa mua.
+  const fam = [{ name: "Chả cá hấp", productId: "p3", variantId: "v3", variant: "1kg", price: 300_000 }, ...offers];
+  assert.equal(pickPostConfirmOffer(["p1"], fam, ["Chả cá thu (Size: 1kg)"])?.name, "Chả mực giã tay", "mua chả cá thu ⇒ không mời chả cá hấp");
+  // B3 + NB4 khoá mức mã nguồn: đồng hồ khách AI nhận chữ ĐÃ GHÉP; giá mời theo bảng giá của khách.
+  const eng = readFileSync("lib/sales-chatbot/engine.ts", "utf8");
+  assert.match(eng, /const i = aiTexts\.lastIndexOf\(appended\.before\);\s*if \(i >= 0\) aiTexts\[i\] = appended\.after;/, "aiTexts thay bằng chữ đã ghép câu mời");
+  const tools = readFileSync("lib/sales-chatbot/tools.ts", "utf8");
+  assert.match(tools, /booksForChat\(ctx\.config, verifiedCustomerId\(state\)\)\s*\.then\(\(books\) => loadOfferFacts\(ctx\.config, upsellId, books\)\)/, "giá mời theo bảng giá của khách");
 }
 
 // ═══ chatTurn THẬT + PGlite (`gd-food-pco`) ═══
@@ -71,6 +80,15 @@ const CASES: GoldenCase[] = [
   { key: "pco-nhan-loi-moi", title: "Khách gọi tên đúng món được mời ⇒ đơn đã tự chốt được sửa thêm món, đo được tiền thêm", shop: "food", channel: "WEB", turns: [
     { say: INFO("0961003202"), ai: orderInfo("0961003202") },
     { say: "thêm 1kg chả mực giã tay nữa nhé em", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em thêm chả mực vào đơn rồi ạ.")]] },
+  ] },
+  { key: "pco-gio-khong-ten-ok", title: "(review B1) Giỏ KHÔNG gọi tên món nào, khách «ok em» sau lời mời ⇒ KHÔNG thêm món vào đơn đã chốt", shop: "food", channel: "WEB", turns: [
+    { say: "chị lấy cái này nhé", ai: [() => [say("Dạ chị lấy 1 hộp ruốc bông tôm nhé, cho em xin SĐT + địa chỉ ạ.")]] },
+    { say: `Lan 0961003208, ${ADDR}`, ai: orderInfo("0961003208") },
+    { say: "ok em", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ vâng ạ.")]] },
+  ] },
+  { key: "pco-tao-don-moi", title: "(review B2) Khách nhận lời mời, model gọi create_draft_order ⇒ được chỉ sang update_draft_order (không nói đã chuyển người) ⇒ thêm đúng món, báo tổng mới", shop: "food", channel: "WEB", turns: [
+    { say: INFO("0961003209"), ai: orderInfo("0961003209") },
+    { say: "thêm chả mực giã tay nhé em", ai: [({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })], ({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em thêm chả mực vào đơn rồi ạ.")]] },
   ] },
   { key: "pco-da-moi-truoc", title: "Đã được mời trước khi chốt trong lượt mua ⇒ không mời lại sau chốt", shop: "food", channel: "WEB", turns: [
     { say: "Cho chị 1 hộp ruốc bông tôm", ai: [() => [say("Dạ 1 hộp ruốc bông tôm ạ. Mình dùng thêm chả mực giã tay ăn kèm không ạ?")]] },
@@ -148,6 +166,20 @@ async function testChatTurn() {
       }
       if (c.key === "pco-nhan-loi-moi") {
         assert.deepEqual(lines, ["CHA-MUC×1", "RUOC-TOM×1"], results);
+        assert.equal(st.postConfirmOffer?.accepted?.amount, 400_000);
+        assert.match(results, /Tổng đơn mới 750\.000 ₫/, "câu xác nhận sửa đơn báo TỔNG MỚI (NB6)");
+      }
+      if (c.key === "pco-gio-khong-ten-ok") {
+        assert.match(first + t.turns[1].shown.join("\n"), OFFER, "đơn chốt có lời mời");
+        assert.deepEqual(lines, ["RUOC-TOM×1"], `«ok» với giỏ không tên món KHÔNG thêm món: ${lines.join(", ")} · ${results}`);
+        assert.equal(st.postConfirmOffer?.accepted, undefined);
+        assert.match(results, /khách chưa gọi tên món/);
+      }
+      if (c.key === "pco-tao-don-moi") {
+        assert.match(results, /Đơn đã tự chốt/, results);
+        assert.doesNotMatch(results, /máy chủ đã chuyển nhân viên/, "không nói đã chuyển người khi không chuyển");
+        assert.deepEqual(lines, ["CHA-MUC×1", "RUOC-TOM×1"], results);
+        assert.ok(!st.handoff, "không chuyển người");
         assert.equal(st.postConfirmOffer?.accepted?.amount, 400_000);
       }
       if (c.key === "pco-da-moi-truoc") {

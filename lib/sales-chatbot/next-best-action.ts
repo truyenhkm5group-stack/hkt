@@ -277,10 +277,17 @@ export function postConfirmOfferWindow(input: { state: OfferStateView; complaint
   return { open: true };
 }
 
-/** Món mời sau chốt: món bổ trợ ĐẦU TIÊN chưa có trong đơn — so theo SẢN PHẨM (`productId`), không theo nhãn dòng (nhãn mang cả quy cách). HÀM THUẦN. */
-export function pickPostConfirmOffer(orderProductIds: readonly (string | null)[], offers: readonly CrossSellOffer[]): CrossSellOffer | null {
+/** Họ món: hai từ đầu của tên (bỏ dấu, bỏ quy cách trong ngoặc) — «Chả cá thu» và «Chả cá hấp» cùng họ «cha ca». */
+const familyOf = (name: string) => foldVi(name.replace(/\([^)]*\)/g, " ")).split(" ").filter(Boolean).slice(0, 2).join(" ");
+
+/**
+ * Món mời sau chốt: món bổ trợ ĐẦU TIÊN chưa có trong đơn — so theo SẢN PHẨM (`productId`; nhãn dòng mang cả quy cách) VÀ không cùng HỌ món
+ * với món khách vừa mua (review NB3: mua chả cá thu thì không mời «chả cá hấp»). HÀM THUẦN.
+ */
+export function pickPostConfirmOffer(orderProductIds: readonly (string | null)[], offers: readonly CrossSellOffer[], orderNames: readonly string[] = []): CrossSellOffer | null {
   const has = new Set(orderProductIds.filter((x): x is string => Boolean(x)));
-  return offers.find((o) => !has.has(o.productId)) ?? null;
+  const families = new Set(orderNames.map(familyOf).filter(Boolean));
+  return offers.find((o) => !has.has(o.productId) && !families.has(familyOf(o.name))) ?? null;
 }
 
 /**
@@ -290,7 +297,9 @@ export function pickPostConfirmOffer(orderProductIds: readonly (string | null)[]
 export function postConfirmOfferText(o: CrossSellOffer, money: (n: number) => string): string {
   const label = o.variant.replace(/^\s*(?:size|cỡ|kích thước|quy cách)\s*:\s*/i, "").trim();
   const what = label && label !== o.name ? `${o.name} (${label})` : o.name;
-  return `Bên em có thêm ${what} giá ${money(o.price)} ăn kèm rất hợp — mình muốn thêm vào đơn thì nhắn em «thêm ${o.name.toLowerCase()}» nhé ạ.`;
+  // Câu gợi ý mang cả quy cách đã mời (review NB1) — khách nhắn đúng câu thì máy thêm đúng mẫu mã, đúng giá đã báo.
+  const reply = label && label !== o.name ? `${o.name.toLowerCase()} ${label}` : o.name.toLowerCase();
+  return `Bên em có thêm ${what} giá ${money(o.price)} ăn kèm rất hợp — mình muốn thêm vào đơn thì nhắn em «thêm ${reply}» nhé ạ.`;
 }
 
 export type ReplyGuardInput = {
