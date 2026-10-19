@@ -814,9 +814,13 @@ function testRealHslcCatalog() {
   assert.equal(amountsIn("1kg chà cá", REAL)[0]?.ambiguous, true);
   assert.equal(amountsIn("1 hộp chà bông cá thu", REAL)[0]?.display, "Ruốc bông (chà bông) cá thu nguyên chất");
   // Review NB2: vị trí dấu thanh kiểu cũ / mới không quyết định món («hòa» = «hoà»).
-  const TRA = ["Trà hoà tan", "Trà hoa tan"];
+  // Hai tên CÙNG mang dấu thanh (huyền / sắc) ⇒ vị trí dấu kiểu cũ «hòa» hay mới «hoà» không đổi kết quả.
+  const TRA = ["Trà hoà tan", "Trà hóa tan"];
   assert.equal(amountsIn("1 gói trà hòa tan", TRA)[0]?.display, "Trà hoà tan", "«hòa» kiểu cũ = «hoà» kiểu mới");
   assert.equal(amountsIn("1 gói trà hoà tan", TRA)[0]?.display, "Trà hoà tan");
+  assert.equal(amountsIn("1 gói trà hóa tan", TRA)[0]?.display, "Trà hóa tan");
+  // Review gio-dau-con-lai: một tên KHÔNG dấu thanh («hoa») ⇒ không phân xử được bằng dấu ⇒ mơ hồ (không đoán).
+  assert.equal(amountsIn("1 gói trà hòa tan", ["Trà hoà tan", "Trà hoa tan"])[0]?.ambiguous, true);
   // gio-dau-con-lai (review #915): cùng gốc lỗi dấu ở bốn chỗ khác của bộ đọc giỏ.
   // (1) số trần không đơn vị · (2) gõ hoa đầu từ — trước đây giỏ rỗng.
   assert.deepEqual(one("1 chả cá thu"), [["Chả cá thu", 1, "pack", true]]);
@@ -841,6 +845,17 @@ function testRealHslcCatalog() {
   assert.deepEqual(amountsIn("1 hop ruoc bong ca thu", REAL).map((x) => [x.value, x.unit]), [[1, "pack"]]);
   assert.deepEqual(amountsIn("hai kg chả cá thu", REAL).map((x) => [x.value, x.unit, x.display]), [[2000, "g", "Chả cá thu"]]);
   assert.deepEqual(amountsIn("bốn hộp nem hải sản", REAL).map((x) => [x.value, x.unit]), [[4, "pack"]]);
+  // Review gio-dau-con-lai: chỉ dấu THANH phân xử, chỉ khi cả hai cùng mang thanh, hỏi ≡ ngã — gõ nhầm «chã» vẫn là «chả».
+  assert.deepEqual(one("chã mực 2kg"), [["Chả mực giã tay", 2000, "g", true]]);
+  assert.deepEqual(one("cho chị 1kg chã cá thu"), [["Chả cá thu", 1000, "g", true]], "«chã cá thu» ⇒ Chả cá thu, không mơ hồ");
+  assert.equal(mentionsProduct("Chả mực giã tay", "chã mực 2kg"), true);
+  assert.equal(mentionsProduct("Chả cá thu", "cho chị 1kg chã cá thu"), true);
+  assert.equal(calledByName("Chả cá thu", "cho chị 1kg chã cá thu"), true);
+  assert.equal(labelsMatch("chã cá thu", "Chả cá thu"), true);
+  assert.equal(calledByName(RCT, "cho chị 1kg chã cá thu"), false, "«chã» (≡ hỏi) khác «chà» (huyền) ⇒ không gọi tên ruốc");
+  // Một bên KHÔNG dấu thanh («bê» / «bề») ⇒ không phân xử.
+  assert.equal(mentionsProduct("Nem hải sản tôm bề bề", "2 hộp nem hải sản tôm bê bê"), true);
+  assert.deepEqual(one("2 hộp nem hải sản tôm bê bê"), [["Nem hải sản tôm bề bề", 2, "pack", true]]);
 }
 
 export async function testSalesCartCommitment() {

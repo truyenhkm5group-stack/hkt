@@ -137,8 +137,26 @@ const accentTokens = (s: string) =>
     .replace(/[^\p{L}\p{N}\s]+/gu, " ")
     .split(/\s+/)
     .filter(Boolean);
-/** `run` nằm LIỀN NHAU, đúng thứ tự trong `tokens`. HÀM THUẦN. */
-const hasRun = (tokens: readonly string[], run: readonly string[]) => tokens.some((_, i) => run.every((w, k) => tokens[i + k] === w));
+/** Dấu THANH của một từ (hỏi ≡ ngã — khách gõ nhầm hai dấu này rất thường); không thanh ⇒ `null`. HÀM THUẦN. */
+const toneOf = (w: string): string | null => {
+  const m = w.normalize("NFD").match(/[\u0300\u0301\u0303\u0309\u0323]/);
+  return m ? (m[0] === "\u0303" ? "\u0309" : m[0]) : null;
+};
+/**
+ * Hai từ là CÙNG một từ của tên món? Cùng dạng bỏ dấu, và chỉ dấu THANH phân xử — chỉ khi CẢ HAI cùng mang thanh, hỏi ≡ ngã (review
+ * gio-dau-con-lai: «chã mực» là gõ nhầm «chả mực», không phải món khác; «chả» / «chà» — hỏi với huyền — mới là hai món; «bê» / «bề» một
+ * bên không thanh ⇒ không phân xử). MỘT luật cho mọi phép so dấu của bộ đọc giỏ. HÀM THUẦN.
+ */
+const sameWord = (a: string, b: string): boolean => {
+  if (a === b) return true;
+  if (foldVi(a) !== foldVi(b)) return false;
+  const ta = toneOf(a);
+  const tb = toneOf(b);
+  return !ta || !tb || ta === tb;
+};
+/** `run` nằm LIỀN NHAU, đúng thứ tự trong `tokens` (so từng từ bằng `same`). HÀM THUẦN. */
+const hasRun = (tokens: readonly string[], run: readonly string[], same: (a: string, b: string) => boolean = (a, b) => a === b) =>
+  tokens.some((_, i) => run.every((w, k) => i + k < tokens.length && same(tokens[i + k], w)));
 /**
  * Nhiều tên khớp khi BỎ DẤU ⇒ tên DUY NHẤT chứa mọi từ CÓ DẤU khách gõ VÀ chứa cụm ấy liền nhau, đúng thứ tự (#915: «chả cá thu» ⇒ Chả cá
  * thu, không phải «Ruốc bông (chà bông) cá thu»; «chà cá thu» gõ nhầm ⇒ mơ hồ; áo thun nam / nữ ⇒ mơ hồ). `said` = `null` (chữ khách không
@@ -146,8 +164,8 @@ const hasRun = (tokens: readonly string[], run: readonly string[]) => tokens.som
  */
 function accentPick(hits: readonly string[], said: readonly string[] | null): string | null {
   if (hits.length < 2 || !said?.length) return null;
-  const accented = hits.filter((n) => said.every((w) => accentTokens(n).includes(w)));
-  return accented.length === 1 && hasRun(accentTokens(accented[0]), said) ? accented[0] : null;
+  const accented = hits.filter((n) => said.every((w) => accentTokens(n).some((x) => sameWord(x, w))));
+  return accented.length === 1 && hasRun(accentTokens(accented[0]), said, sameWord) ? accented[0] : null;
 }
 /** Từ có dấu của chữ khách thẳng hàng với dạng bỏ dấu `folded` (cùng số từ) ⇒ dãy ấy; không ⇒ `null`. HÀM THUẦN. */
 const saidAligned = (raw: string, folded: readonly string[]) => {
@@ -158,7 +176,7 @@ const saidAligned = (raw: string, folded: readonly string[]) => {
  * Từ của TÊN (bỏ dấu `f`, có dấu `a`) có mặt trong chữ khách `said` (từ có dấu): cùng dạng bỏ dấu và KHÔNG khác dấu khi cả hai cùng có
  * dấu («chả» ≠ «chà»); một bên không dấu ⇒ không phân xử được ⇒ tính là có. HÀM THUẦN.
  */
-const saidHas = (said: readonly string[], f: string, a: string) => said.some((s) => foldVi(s) === f && (s === a || foldVi(s) === s || f === a));
+const saidHas = (said: readonly string[], f: string, a: string) => said.some((s) => foldVi(s) === f && sameWord(s, a));
 /** Cặp (bỏ dấu, có dấu) cho từng từ của một tên — bỏ số / «kg» / «g». HÀM THUẦN. */
 const namePairs = (name: string) =>
   accentTokens(name)
@@ -1018,7 +1036,7 @@ export function calledByName(name: string, customerSaid: string): boolean {
   const said = accentTokens(customerSaid);
   // Khách gõ một từ CÙNG dạng bỏ dấu với một từ của tên mà KHÁC dấu («chả» với «chà» của «Ruốc bông (chà bông) cá thu») ⇒ khách đang gọi món
   // KHÁC, không phải tên này — «cá thu» trùng hai từ còn lại không đủ (hàng rào thay món từng mù: bot đưa ruốc thay chả cá thu vẫn lọt).
-  const clash = pairs.some(([f, a]) => said.some((s) => foldVi(s) === f && s !== a && foldVi(s) !== s && f !== a));
+  const clash = pairs.some(([f, a]) => said.some((s) => foldVi(s) === f && !sameWord(s, a)));
   return !clash && rest.length >= 2 && rest.filter(([f, a]) => saidHas(said, f, a)).length >= 2;
 }
 
