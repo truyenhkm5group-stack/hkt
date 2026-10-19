@@ -191,12 +191,28 @@ async function bindReadOnlyOrgHandle(org: { code: string; isHome: boolean }, db:
 }
 
 /** Lời mời của mọi hội thoại có tin trong kỳ (trừ khung thử). */
-export async function auditOffers(db: Db, from: Date): Promise<OfferTotals & { post: PostConfirmTotals }> {
+/** Mẫu MÃ hội thoại (≤ AUDIT_SAMPLE_MAX mỗi nhóm) để lần vết bằng `conv-money-trace --conv` — CHỈ in ở phần MÃ HOÁ, không vào kênh tóm tắt công khai. */
+export const AUDIT_SAMPLE_MAX = 20;
+export type AuditSamples = { repeated: string[]; afterDecline: string[]; upsellAfterSize: string[]; reaskAfterSize: string[] };
+/** Thêm mã hội thoại vào nhóm sai lúc / lặp của nó. HÀM THUẦN. */
+export function addSamples(s: AuditSamples, id: string, c: ConvOffers): AuditSamples {
+  const put = (k: keyof AuditSamples, yes: boolean) => {
+    if (yes && s[k].length < AUDIT_SAMPLE_MAX) s[k].push(id);
+  };
+  put("repeated", c.offers >= 2);
+  put("afterDecline", c.afterDecline > 0);
+  put("upsellAfterSize", c.upsellAfterSize > 0);
+  put("reaskAfterSize", c.reaskAfterSize > 0);
+  return s;
+}
+
+export async function auditOffers(db: Db, from: Date): Promise<OfferTotals & { post: PostConfirmTotals; samples: AuditSamples }> {
   const c = schema.salesChatConversations;
   const m = schema.salesChatMessages;
   const convs = await db.select({ id: c.id, state: c.state }).from(c).where(and(ne(c.channel, "TEST"), gte(c.updatedAt, from))).limit(AUDIT_MAX_CONVERSATIONS);
   const totals = emptyTotals();
   const post = emptyPostConfirm();
+  const samples: AuditSamples = { repeated: [], afterDecline: [], upsellAfterSize: [], reaskAfterSize: [] };
   for (const conv of convs) addPostConfirm(post, (conv.state ?? {}) as ChatState, from);
   for (let i = 0; i < convs.length; i += 200) {
     const batch = convs.slice(i, i + 200);
@@ -210,10 +226,12 @@ export async function auditOffers(db: Db, from: Date): Promise<OfferTotals & { p
       // `offerDrops` mang lượt, không mang mốc giờ — hội thoại có hoạt động trong kỳ thì tính cả lượt mua hiện tại của nó.
       const pco = st.postConfirmOffer;
       const postSent = Boolean(pco?.sent && pco.outcome === "OFFERED" && Date.parse(pco.at) >= from.getTime());
-      addConversation(totals, offersOfConversation(msgs, st), st.offerDrops ?? [], postSent);
+      const offers = offersOfConversation(msgs, st);
+      addConversation(totals, offers, st.offerDrops ?? [], postSent);
+      addSamples(samples, conv.id, offers);
     }
   }
-  return { ...totals, post };
+  return { ...totals, post, samples };
 }
 
 async function main() {
@@ -254,6 +272,12 @@ async function main() {
     const drops = OFFER_BLOCKS.filter((k) => t.drops[k] > 0).map((k) => `${k} ${t.drops[k]}`);
     tomTat(`MÁY CHỦ ĐÃ BỎ (state.offerDrops, từ bản #868): ${drops.join(" · ") || "0"}`);
     for (const k of OFFER_BLOCKS) if (t.drops[k] > 0) console.log(`  ${k}: ${OFFER_BLOCK_LABEL[k]} — ${t.drops[k]}`);
+    // Mẫu mã hội thoại để lần vết (`conv-money-trace --conv=<mã>`) — phần MÃ HOÁ, không phải tóm tắt công khai.
+    const mau = (k: keyof AuditSamples) => t.samples[k].join(" ") || "—";
+    console.log(`  mẫu mời ≥ 2 lần (≤ ${AUDIT_SAMPLE_MAX}): ${mau("repeated")}`);
+    console.log(`  mẫu mời sau khi khách từ chối: ${mau("afterDecline")}`);
+    console.log(`  mẫu mời gói lớn sau khi đã chọn khối lượng: ${mau("upsellAfterSize")}`);
+    console.log(`  mẫu hỏi lại «1kg hay 2kg» sau khi đã chọn: ${mau("reaskAfterSize")}`);
     // 4. Lời mời SAU CHỐT (P0 19/10/2026). AOV tăng thêm = tiền thêm / lượt chốt có quyết định. Lãi gộp thêm: CHƯA ĐO — sổ không giữ giá
     // vốn theo dòng của món thêm sau chốt (giá vốn sống đọc ở báo cáo lợi nhuận); in «—», không đoán.
     const p = t.post;
