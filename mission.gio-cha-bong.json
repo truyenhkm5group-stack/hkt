@@ -3,7 +3,7 @@
   "mission_id": "gio-cha-bong",
   "title": "P0: giỏ ghi được «1kg chả cá thu» khi danh mục có «Ruốc bông (chà bông) cá thu» + câu mẫu xét món theo bộ lọc món",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-gio-cha-bong",
@@ -30,9 +30,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-19T14:39:53.454Z",
-  "updated_at": "2026-10-19T15:35:12.084Z",
+  "updated_at": "2026-10-19T16:30:55.253Z",
   "last_heartbeat": "2026-10-19T15:32:51.466Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#915 → 918663dde83260256a2c3fe4d96eba3d8c5e77a5"
+  },
   "handoff": {
     "branch": "claude/gio-cha-bong",
     "sha": "4be6a4d6f9f163cfe3c10104ad2ecf9da17cb16f",
