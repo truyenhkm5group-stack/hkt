@@ -1,6 +1,7 @@
 import { InfoHint } from "@/components/info-hint";
 import { Money } from "@/components/ui-bits";
 import { MISSING_TEXT } from "@/lib/format";
+import { isCodeClaimKey } from "@/lib/constants/payroll-code";
 
 /**
  * Dòng "thưởng % lợi nhuận chưa đủ điều kiện" trên phiếu lương — dùng CHUNG cho phiếu lương quản trị
@@ -21,15 +22,13 @@ export function ProfitGateRows({ share }: { share: { provisional: number | null;
   );
 }
 
-/** Khoá khoản thưởng theo mã: `${nhân sự}:CODE:${mã}:${vai trò}:${đoạn}` (`lib/payroll/code-ledger.ts`). */
-const laKhoanTheoMa = (key: string) => key.includes(":CODE:");
 
 /**
  * THƯỞNG THEO MÃ (Payroll V2) không nằm trong thành phần nào của chính sách lương, nên phải có dòng
  * RIÊNG — thiếu nó thì các dòng của phiếu cộng ra thiếu đúng khoản ấy mà "Thực nhận" lại gồm nó.
  */
 function CodeBonusRow({ claims }: { claims: { key: string; provisional: number | null }[] }) {
-  const ma = claims.filter((c) => laKhoanTheoMa(c.key));
+  const ma = claims.filter((c) => isCodeClaimKey(c.key));
   if (!ma.length) return null;
   const tong = ma.some((c) => c.provisional === null) ? null : ma.reduce((t, c) => t + (c.provisional ?? 0), 0);
   return (

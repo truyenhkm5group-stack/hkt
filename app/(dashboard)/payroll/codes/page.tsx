@@ -13,6 +13,7 @@ import { PROFIT_GATE_STATUS_LABEL } from "@/lib/payroll/profit-gate";
 import { getPayrollReport } from "@/lib/queries/payroll";
 import { periodFinalized } from "@/lib/queries/payroll-engine";
 import { paramList, resolvePeriod, type SearchParams } from "@/lib/search-params";
+import { ConfirmWeightsButton } from "@/app/(dashboard)/payroll/codes/confirm-weights-button";
 
 export const metadata = { title: "Lợi nhuận theo mã" };
 
@@ -136,6 +137,15 @@ export default async function PayrollCodesPage({ searchParams }: { searchParams:
           </dl>
         )}
         {led.problem ? <p className="mt-2 text-sm text-amber-800">{led.problem}</p> : null}
+        {led.confirmations.length ? (
+          <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
+            {led.confirmations.map((c) => (
+              <li key={c.id}>
+                Đã xác nhận trọng số mã {product.get(c.productId)?.code || c.productId} tháng {c.monthKey} — {c.reason} ({c.confirmedByEmail}, {formatDate(c.confirmedAt)})
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <p className="mt-3">
           <Link href="/payroll/codes/assignments" className="text-sm text-primary hover:underline">
             Quản lý phân công MKTer ↔ mã và điều khoản thưởng →
@@ -233,6 +243,9 @@ export default async function PayrollCodesPage({ searchParams }: { searchParams:
                 <b>{p.code || p.productId}</b> · {ten(p.employeeId)} · {formatDate(p.segment.from)} → {formatDate(p.segment.to)}
                 {p.provisional !== null ? <span className="text-muted-foreground"> · đang treo {v(p.provisional)}</span> : null}
                 <div className="text-muted-foreground">{p.reason}</div>
+                {p.kind === "WEIGHT_PARTIAL" && !locked && gate.result.monthKey && !pending.slice(0, i).some((q) => q.kind === "WEIGHT_PARTIAL" && q.productId === p.productId) ? (
+                  <ConfirmWeightsButton monthKey={gate.result.monthKey} productId={p.productId} code={p.code || p.productId} />
+                ) : null}
               </li>
             ))}
           </ul>

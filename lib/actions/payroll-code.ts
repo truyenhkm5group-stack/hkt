@@ -36,7 +36,8 @@ import { listEmployees } from "@/lib/queries/payroll";
 import { monthsBetween } from "@/lib/queries/payroll-profit-gate";
 import { monthPeriod } from "@/lib/constants/payroll-autopilot";
 import { isFrozen, normalizePayrollStatus } from "@/lib/constants/payroll-lifecycle";
-import { codeAssignmentSchema, codeEndSchema, codeRevokeSchema, codeRowId, codeTermsSchema, planOwnerHandover } from "@/lib/validation/payroll-code";
+import { codeAssignmentSchema, codeEndSchema, codeRevokeSchema, codeRowId, codeTermsSchema, codeWeightConfirmSchema, endChangesFromKey, planOwnerHandover } from "@/lib/validation/payroll-code";
+import { PAYROLL_CODE_WEIGHT_CONFIRM_KEY, type CodeWeightConfirmation } from "@/lib/constants/payroll-code";
 
 export type CodeActionResult = { ok: true; id?: string } | { error: string };
 
@@ -137,19 +138,16 @@ export async function saveCodeAssignment(input: unknown): Promise<CodeActionResu
       await khoaMa(tx, d.productId);
       const khoa = await lockedMonthIn(tx, d.effectiveFrom, null);
       if (khoa) return { error: `Tháng ${khoa} đã khoá lương — phân công mới chỉ được bắt đầu sau tháng đã khoá cuối cùng. Kỳ đã khoá không tính lại.` };
-      const [daCo] = await tx.select({ id: a.id }).from(a).where(eq(a.id, id)).limit(1);
-      if (daCo) return { error: "Đúng phân công này đã được ghi rồi." };
+      const [daCo] = await tx.select({ status: a.status }).from(a).where(eq(a.id, id)).limit(1);
+      if (daCo) return { error: daCo.status === "REVOKED" ? "Một dòng GIỐNG HỆT đã bị huỷ trước đó. Ghi lại thì đổi ghi chú (vd «ghi lại sau khi huỷ nhầm») để thành một dòng mới có dấu vết." : "Đúng phân công này đã được ghi rồi." };
       const trung = await tx.select({ id: a.id }).from(a).where(chong(d.role, d.employeeId)).limit(1);
       if (trung.length) return { error: `${nv.shortName || nv.name} đã là ${d.role} của mã ${code} trong khoảng này — kết thúc dòng cũ trước khi đổi tỷ lệ.` };
       let dong: { id: string; before: Date | null; after: Date }[] = [];
       if (d.role === "OWNER") {
         const cu = await tx.select({ id: a.id, from: a.effectiveFrom, to: a.effectiveTo }).from(a).where(chong("OWNER"));
+        // Đóng OWNER cũ ở `from − 1 ms` chỉ đổi hiệu lực TỪ `from` — đã kiểm ở trên, không kiểm lại ngày liền trước.
         const plan = planOwnerHandover(cu, from, to);
         if ("error" in plan) return { error: `Mã ${code}: ${plan.error}` };
-        if (plan.close.length) {
-          const khoaCu = await lockedMonthIn(tx, vnDateKey(plan.close[0].after), null);
-          if (khoaCu) return { error: `Đóng OWNER cũ ở ${vnDateKey(plan.close[0].after)} chạm tháng đã khoá ${khoaCu}.` };
-        }
         for (const c of plan.close) await tx.update(a).set({ effectiveTo: c.after, updatedAt: new Date() }).where(eq(a.id, c.id));
         dong = plan.close;
       }
@@ -201,7 +199,7 @@ export async function endCodeRow(input: unknown): Promise<CodeActionResult> {
     if (chan) return chan;
     const kq = await db.transaction(async (tx) => {
       await khoaMa(tx, row.productId);
-      const khoa = await lockedMonthIn(tx, effectiveTo, row.to ? vnDateKey(row.to) : null);
+      const khoa = await lockedMonthIn(tx, endChangesFromKey(effectiveTo), row.to ? vnDateKey(row.to) : null);
       if (khoa) return { error: `Tháng ${khoa} đã khoá lương — không đổi được hiệu lực trong tháng ấy.` };
       await tx.update(t).set({ effectiveTo: to, updatedAt: new Date() }).where(and(eq(t.id, id), eq(t.status, "APPROVED")));
       return { ok: true as const };
@@ -300,14 +298,14 @@ export async function saveCodeTerms(input: unknown): Promise<CodeActionResult> {
       await khoaMa(tx, productId);
       const khoa = await lockedMonthIn(tx, d.effectiveFrom, null);
       if (khoa) return { error: `Tháng ${khoa} đã khoá lương — điều khoản mới chỉ được bắt đầu sau tháng đã khoá cuối cùng.` };
-      const [daCo] = await tx.select({ id: t.id }).from(t).where(eq(t.id, id)).limit(1);
-      if (daCo) return { error: "Đúng điều khoản này đã được ghi rồi." };
+      const [daCo] = await tx.select({ status: t.status }).from(t).where(eq(t.id, id)).limit(1);
+      if (daCo) return { error: daCo.status === "REVOKED" ? "Một điều khoản GIỐNG HỆT đã bị huỷ trước đó. Ghi lại thì đổi ghi chú để thành một dòng mới có dấu vết." : "Đúng điều khoản này đã được ghi rồi." };
       const conds: SQL[] = [productId ? eq(t.productId, productId) : isNull(t.productId), eq(t.status, "APPROVED"), or(isNull(t.effectiveTo), sql`${t.effectiveTo} >= ${from}`) as SQL];
       if (to) conds.push(lte(t.effectiveFrom, to));
       const cu = await tx.select({ id: t.id, from: t.effectiveFrom, to: t.effectiveTo }).from(t).where(and(...conds));
       // Cùng luật bàn giao như OWNER: điều khoản có hạn không được cắt điều khoản không hạn đang chạy.
-      const plan = planOwnerHandover(cu, from, to);
-      if ("error" in plan) return { error: `Điều khoản ${code}: ${plan.error.replace("OWNER", "điều khoản").replace("OWNER", "điều khoản")}` };
+      const plan = planOwnerHandover(cu, from, to, `điều khoản (${code})`);
+      if ("error" in plan) return { error: plan.error };
       for (const c of plan.close) await tx.update(t).set({ effectiveTo: c.after, updatedAt: new Date() }).where(eq(t.id, c.id));
       await tx.insert(t).values({ id, ...values, status: "APPROVED", createdBy: guard.id, approvedBy, approvedAt: new Date() });
       return { ok: true as const, dong: plan.close };
@@ -323,6 +321,56 @@ export async function saveCodeTerms(input: unknown): Promise<CodeActionResult> {
       after: { ...values, approvedBy },
       reason: kq.dong.length ? `Đóng ${kq.dong.length} điều khoản cũ ở ngày liền trước.` : undefined,
     });
+    revalidate();
+    return { ok: true, id };
+  });
+}
+
+/**
+ * XÁC NHẬN TRỌNG SỐ của một mã × một tháng (`lib/constants/payroll-code.ts`): gỡ khoản chờ loại
+ * "thiếu một phần trọng số" — số 0 là 0 thật, phần chưa gán đứng ngoài phép chia. Duyệt người thứ hai,
+ * không áp cho tháng đã khoá, ghi một lần (lần thứ hai cùng mã × tháng là không đổi gì).
+ */
+export async function confirmCodeWeights(input: unknown): Promise<CodeActionResult> {
+  return withApprovalExecution(async () => {
+    const guard = await requireManage();
+    if ("error" in guard) return guard;
+    const parsed = codeWeightConfirmSchema.safeParse(input);
+    if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+    const d = parsed.data;
+    const id = codeRowId("TERMS", { confirm: "WEIGHTS", monthKey: d.monthKey, productId: d.productId });
+    const cong = await guardSecondApproval({
+      group: "PAYROLL_EDIT",
+      action: "payroll.code.weights.confirm",
+      entity: "PRODUCT_CODE_WEIGHTS",
+      entityId: id,
+      summary: `Xác nhận trọng số SUPPORT của mã ${d.productId} tháng ${d.monthKey}: ${d.reason}`,
+      amount: null,
+      payload: d,
+    });
+    const chan = tuChoi(cong);
+    if (chan) return chan;
+    const db = await getDb();
+    const kq = await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext('erp:payroll-code-weights'))`);
+      const khoa = await lockedMonthIn(tx, `${d.monthKey}-01`, `${d.monthKey}-01`);
+      if (khoa) return { error: `Tháng ${khoa} đã khoá lương — không xác nhận lại được.` };
+      const [row] = await tx.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, PAYROLL_CODE_WEIGHT_CONFIRM_KEY)).limit(1);
+      let cur: CodeWeightConfirmation[] = [];
+      try {
+        cur = row ? (JSON.parse(row.value) as CodeWeightConfirmation[]) : [];
+      } catch {
+        return { error: "Ô lưu xác nhận trọng số không đọc được — không ghi đè lên nó." };
+      }
+      if (!Array.isArray(cur)) return { error: "Ô lưu xác nhận trọng số không đúng dạng — không ghi đè lên nó." };
+      if (cur.some((c) => c.monthKey === d.monthKey && c.productId === d.productId)) return { ok: true as const, moi: false };
+      const moi: CodeWeightConfirmation = { id, monthKey: d.monthKey, productId: d.productId, reason: d.reason, confirmedById: await nguoiDuyet(cong, guard), confirmedByEmail: guard.email ?? "", confirmedAt: new Date().toISOString() };
+      const text = JSON.stringify([...cur, moi]);
+      await tx.insert(schema.settings).values({ key: PAYROLL_CODE_WEIGHT_CONFIRM_KEY, value: text }).onConflictDoUpdate({ target: schema.settings.key, set: { value: text, updatedAt: new Date() } });
+      return { ok: true as const, moi: true };
+    });
+    if ("error" in kq) return kq;
+    if (kq.moi) await audit({ userId: guard.id, userEmail: guard.email, action: "PAYROLL_CODE_WEIGHTS_CONFIRM", entity: "PRODUCT_CODE_WEIGHTS", entityId: id, after: d, reason: d.reason });
     revalidate();
     return { ok: true, id };
   });

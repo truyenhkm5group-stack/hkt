@@ -37,7 +37,8 @@ import { isProfitLinked, isRegularVariable, type ProfitGatePolicy } from "@/lib/
 import { eligibleProfitOf, evaluateProfitGate, type LateAdjustment, type ProfitGateAllocation, type ProfitGateClaim, type ProfitGateOpening, type ProfitGateResult } from "@/lib/payroll/profit-gate";
 import { getProfitGateConfig, resolveGateOpening } from "@/lib/queries/payroll-profit-gate";
 import { allocateCompanyToCodes, codeBonusClaims, codeLedgerStep, type CodeBonusClaim, type CodeLedgerRow, type CodeMonthProfit, type CodePending, type CodeState } from "@/lib/payroll/code-ledger";
-import { buildCodeSegmentsFor, loadCodeBook, type CodeFacts } from "@/lib/queries/payroll-code-ledger";
+import { buildCodeSegmentsFor, loadCodeBook, loadWeightConfirmations, type CodeFacts } from "@/lib/queries/payroll-code-ledger";
+import type { CodeWeightConfirmation } from "@/lib/constants/payroll-code";
 import { monthPeriod } from "@/lib/constants/payroll-autopilot";
 
 export async function listEmployees(): Promise<Employee[]> {
@@ -944,6 +945,8 @@ export type PayrollCodeLedger = {
   /** Số phân công / điều khoản ĐÃ DUYỆT có hiệu lực trong kỳ — 0 thì sổ mã chỉ để xem. */
   assignmentCount: number;
   termsCount: number;
+  /** Lời xác nhận trọng số (mã × tháng) đang áp cho kỳ này. */
+  confirmations: CodeWeightConfirmation[];
 };
 
 /**
@@ -1451,7 +1454,7 @@ export async function getPayrollReport(
   */
   const codeApplicable = applicable.ok && Boolean(carryMonth) && gateMode.mode !== "off" && period.from !== null && period.to !== null;
   const codes: CodeMonthProfit[] | null = codeApplicable ? marketers.products.map((p) => ({ productId: p.productId, code: p.code, profit: p.profit })) : null;
-  const codeLedger: PayrollCodeLedger = { applicable: codeApplicable, rows: null, allocated: null, claims: [], pending: [], problem: codeProblem, assignmentCount: 0, termsCount: 0 };
+  const codeLedger: PayrollCodeLedger = { applicable: codeApplicable, rows: null, allocated: null, claims: [], pending: [], problem: codeProblem, assignmentCount: 0, termsCount: 0, confirmations: [] };
   const maCua = (pid: string) => marketers.products.find((p) => p.productId === pid)?.code || pid;
   if (!codeApplicable && gateMode.mode !== "off") {
     /*
@@ -1464,13 +1467,17 @@ export async function getPayrollReport(
     codeLedger.termsCount = book.terms.length;
     const ly = applicable.ok ? "Thưởng theo mã chỉ xét theo trọn THÁNG LỊCH." : applicable.reason;
     for (const a of book.assignments) {
-      codeLedger.pending.push({ productId: a.productId, code: maCua(a.productId), employeeId: a.employeeId, segment: { from: a.from, to: a.to ?? a.from }, reason: `Thưởng theo mã của kỳ đang xem CHƯA XÉT ĐƯỢC — ${ly}`, provisional: null });
+      const tu = period.from && period.from.getTime() > a.from.getTime() ? period.from : a.from;
+      const den = a.to ?? period.to ?? new Date();
+      codeLedger.pending.push({ productId: a.productId, code: maCua(a.productId), employeeId: a.employeeId, segment: { from: tu, to: period.to && den.getTime() > period.to.getTime() ? period.to : den }, reason: `Thưởng theo mã của kỳ đang xem CHƯA XÉT ĐƯỢC — ${ly}`, provisional: null });
     }
   }
   if (codeApplicable && codes && period.from && period.to) {
-    const book = await loadCodeBook(period.from, period.to);
+    const [book, confirmations] = await Promise.all([loadCodeBook(period.from, period.to), carryMonth ? loadWeightConfirmations(carryMonth) : Promise.resolve([])]);
     codeLedger.assignmentCount = book.assignments.length;
     codeLedger.termsCount = book.terms.length;
+    codeLedger.confirmations = confirmations;
+    const daXacNhan = new Set(confirmations.map((c) => c.productId));
     const step = codeOpening ? codeLedgerStep(codeOpening, codes) : null;
     codeLedger.rows = step?.rows ?? null;
     const allocated = step && E !== null ? allocateCompanyToCodes(step.rows, E) : null;
@@ -1549,6 +1556,7 @@ export async function getPayrollReport(
         assignments: book.assignments,
         terms: book.terms,
         nameOf,
+        weightsConfirmed: daXacNhan.has(row.productId),
       });
       codeLedger.pending.push(...out.pending);
       for (const c of out.claims) {

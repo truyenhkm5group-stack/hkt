@@ -16,7 +16,9 @@
 import { and, eq, gte, isNull, lte, or } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { CodeAssignment, CodeSegment, CodeTerms, WeightMethod } from "@/lib/payroll/code-ledger";
-import { addDays, vnDateKey, vnStartOfDay } from "@/lib/format";
+import { addDays, vnDateKey, vnEndOfDay, vnStartOfDay } from "@/lib/format";
+import { PAYROLL_CODE_WEIGHT_CONFIRM_KEY, type CodeWeightConfirmation } from "@/lib/constants/payroll-code";
+import { getSettingJson } from "@/lib/settings";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -37,6 +39,12 @@ export async function loadCodeBook(from: Date | null, to: Date | null): Promise<
       .from(t)
       .where(and(eq(t.status, "APPROVED"), to ? lte(t.effectiveFrom, to) : undefined, from ? or(isNull(t.effectiveTo), gte(t.effectiveTo, from)) : undefined)),
   ]);
+  /*
+    Hiệu lực khai theo NGÀY: chuẩn hoá về đầu ngày / cuối ngày giờ VN. Một dòng sửa tay kết thúc giữa
+    ngày cuối tháng sẽ không phủ đoạn cuối (`covers`) và phần ấy rơi mất mà không có khoản chờ nào.
+  */
+  const dau = (x: Date) => vnStartOfDay(vnDateKey(x));
+  const cuoi = (x: Date | null) => (x ? vnEndOfDay(vnDateKey(x)) : null);
   return {
     assignments: rowsA.map((r) => ({
       id: r.id,
@@ -46,8 +54,8 @@ export async function loadCodeBook(from: Date | null, to: Date | null): Promise<
       ownerRateBp: r.ownerRateBp,
       weightMethod: (r.weightMethod as WeightMethod | null) ?? null,
       weightBp: r.weightBp,
-      from: r.effectiveFrom,
-      to: r.effectiveTo,
+      from: dau(r.effectiveFrom),
+      to: cuoi(r.effectiveTo),
       policyRef: r.policyRef,
     })),
     terms: rowsT.map((r) => ({
@@ -55,8 +63,8 @@ export async function loadCodeBook(from: Date | null, to: Date | null): Promise<
       productId: r.productId,
       supportPoolBp: r.supportPoolBp,
       maxBonusAmount: r.maxBonusAmount,
-      from: r.effectiveFrom,
-      to: r.effectiveTo,
+      from: dau(r.effectiveFrom),
+      to: cuoi(r.effectiveTo),
       policyRef: r.policyRef,
     })),
   };
@@ -132,10 +140,15 @@ export async function buildCodeSegmentsFor(
   const out = new Map<string, CodeSegment[] | null>();
   if (!productIds.length) return out;
   const manh = segmentBounds(productIds, period.from, period.to, book.assignments, book.terms);
-  const doManh: Map<string, CodeFacts>[] =
-    manh.length === 1
-      ? [monthFacts]
-      : await Promise.all(manh.map((b) => factsFor({ key: "custom", from: b.from, to: b.to, fromKey: vnDateKey(b.from), toKey: vnDateKey(b.to), label: `${vnDateKey(b.from)} → ${vnDateKey(b.to)}` })));
+  // Mỗi mảnh là một `getMarketerReport` đầy đủ; VPS 2 nhân ⇒ tối đa 3 lượt chạy cùng lúc.
+  const doManh: Map<string, CodeFacts>[] = [];
+  if (manh.length === 1) doManh.push(monthFacts);
+  else {
+    for (let i = 0; i < manh.length; i += 3) {
+      const lo = manh.slice(i, i + 3);
+      doManh.push(...(await Promise.all(lo.map((b) => factsFor({ key: "custom", from: b.from, to: b.to, fromKey: vnDateKey(b.from), toKey: vnDateKey(b.to), label: `${vnDateKey(b.from)} → ${vnDateKey(b.to)}` })))));
+    }
+  }
   for (const pid of productIds) {
     const own = segmentBounds(pid, period.from, period.to, book.assignments, book.terms);
     const facts = own.map((s) =>
@@ -165,6 +178,12 @@ export async function buildCodeSegmentsFor(
     );
   }
   return out;
+}
+
+/** Lời xác nhận trọng số của MỘT tháng (`lib/constants/payroll-code.ts`) — tập mã đã được xác nhận. */
+export async function loadWeightConfirmations(monthKey: string): Promise<CodeWeightConfirmation[]> {
+  const all = await getSettingJson<CodeWeightConfirmation[]>(PAYROLL_CODE_WEIGHT_CONFIRM_KEY, []);
+  return (Array.isArray(all) ? all : []).filter((c) => c.monthKey === monthKey);
 }
 
 export type CodeBookRow = {

@@ -81,6 +81,15 @@ người liên quan là CHƯA KẾT LUẬN (`null`, in "—"). Lỗi của CẢ 
 100%) gắn vào MỌI người có phân công trong đoạn — một khoản chờ không mang tên ai không chặn được
 thực nhận của ai.
 
+**Lối ra có người duyệt: xác nhận trọng số (mã × tháng).** Hai loại khoản chờ ở trên — một SUPPORT có
+số đo 0, và mã còn chi phí / doanh thu CHƯA GÁN — ERP không phân biệt được "0 thật" với "chưa ghép".
+Chặn cả kỳ lương mà không có lối ra hợp lệ sẽ đẩy người ta đi sửa lùi lịch sử phân công cho qua. Nên
+khoản chờ ấy mang `kind: "WEIGHT_PARTIAL"` và gỡ được bằng `confirmCodeWeights` (duyệt người thứ hai,
+kèm lý do, đúng một mã × một tháng, không cho tháng đã khoá; `settings: payroll.code-weight-confirmations`).
+Khi đã xác nhận: số 0 là 0 thật, phần chưa gán đứng ngoài phép chia. Lời xác nhận KHÔNG gỡ được các
+khoản chờ khác (không SUPPORT nào có số đo, trọng số tay lệch, thiếu Y%, hai OWNER…) — những thứ ấy
+sửa bằng phân công / điều khoản. Không có ngưỡng "đáng kể" ghi cứng (AGENTS.md mục 38).
+
 **Ô trống ≠ 0.** `z.coerce.number()` biến `""` thành `0` và thành công; ô "trần (bỏ trống = không)"
 từng lưu thành trần 0 ₫ và lặng lẽ đưa mọi khoản về 0 (review 19/10). Mọi ô số đi qua
 `lib/validation/payroll-code.ts`: trống ⇒ ô bắt buộc báo lỗi, ô tuỳ chọn là "không khai".
@@ -111,6 +120,9 @@ riêng; dòng chênh "chưa đủ điều kiện" bên dưới đưa tổng về
 - Bàn giao OWNER (`planOwnerHandover`): OWNER mới KHÔNG hạn đóng OWNER cũ ở ngày liền trước; OWNER mới
   CÓ hạn chồng lên OWNER khác ⇒ từ chối (đóng người cũ là cắt luôn quyền sau ngày kết thúc của người
   mới). Huỷ một dòng KHÔNG tự mở lại dòng đã bị bàn giao. Cùng luật cho điều khoản.
+- Kết thúc một dòng ở ngày D chỉ đổi hiệu lực TỪ D + 1 (`endChangesFromKey`): bàn giao ngày 01 của tháng
+  sau một tháng đã khoá làm được (review vòng 2 bắt lỗi kiểm thừa ngày 30).
+- Dòng GIỐNG HỆT một dòng đã huỷ trùng khoá nội dung ⇒ báo rõ "đổi ghi chú để ghi lại thành dòng mới".
 - Kiểm tháng khoá đọc TRONG giao dịch, sau khoá tên của mã. Còn một khe: đường chốt kỳ không lấy khoá
   ấy, nên một tháng có thể bị khoá giữa lúc kiểm và lúc ghi — dòng khi đó chỉ ảnh hưởng tháng SAU (tháng
   đã khoá đọc ảnh chụp), không đổi số đã khoá.

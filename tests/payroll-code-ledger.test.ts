@@ -29,7 +29,7 @@ import { calculatePayrollPeriodAs } from "@/lib/payroll/run-service";
 import { getPayrollReport, monthReportPeriod, profitGateReadiness } from "@/lib/queries/payroll";
 import type { PayrollSnapshot } from "@/lib/queries/payroll-period";
 import { buildCodeSegmentsFor, segmentBounds, type CodeFacts } from "@/lib/queries/payroll-code-ledger";
-import { codeAssignmentSchema, codeRowId, codeTermsSchema, planOwnerHandover } from "@/lib/validation/payroll-code";
+import { codeAssignmentSchema, codeRowId, codeTermsSchema, endChangesFromKey, planOwnerHandover } from "@/lib/validation/payroll-code";
 import type { Period } from "@/lib/search-params";
 import { monthPeriodKey } from "@/lib/queries/payroll-profit-gate";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
@@ -227,7 +227,23 @@ function testPure() {
   assert.ok(motNguoi.pending.some((p) => /y không có chi phí quảng cáo/.test(p.reason)));
   const chuaGan = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, { x: 1 * TR, y: 1 * TR }, {}, T_FROM, T_TO, { ad: 500_000, rev: 0 })], assignments: [support("A", "x", "AD_SPEND"), support("A", "y", "AD_SPEND")], terms: [terms(null, 10)] });
   assert.equal(chuaGan.claims.length, 0, "11. mã còn chi phí QC chưa gán cho MKTer nào ⇒ trọng số chưa đủ căn cứ");
-  assert.ok(chuaGan.pending.every((p) => /CHƯA GÁN/.test(p.reason)));
+  assert.ok(chuaGan.pending.every((p) => /CHƯA GÁN/.test(p.reason) && p.kind === "WEIGHT_PARTIAL"), "loại khoản chờ gỡ được bằng lời xác nhận");
+  assert.ok(motNguoi.pending.every((p) => p.kind === "WEIGHT_PARTIAL"));
+  assert.ok(thieuQc.pending.every((p) => p.kind === undefined), "không SUPPORT nào có số đo ⇒ KHÔNG gỡ được bằng lời xác nhận");
+  assert.ok(tayLech.pending.every((p) => p.kind === undefined), "trọng số tay lệch ⇒ sửa phân công, không xác nhận");
+  // Lời xác nhận có người duyệt (vòng review 2): số 0 là 0 thật, phần chưa gán đứng ngoài phép chia.
+  const xn = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, { x: 10 * TR })], assignments: [support("A", "x", "AD_SPEND"), support("A", "y", "AD_SPEND")], terms: [terms(null, 10)], weightsConfirmed: true });
+  assert.deepEqual(
+    xn.claims.map((c) => [c.employeeId, c.demand]),
+    [
+      ["x", 1 * TR],
+      ["y", 0],
+    ],
+    "đã xác nhận ⇒ y nhận 0 thật, x nhận đủ quỹ — có người đứng tên",
+  );
+  const xn2 = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, { x: 1 * TR, y: 1 * TR }, {}, T_FROM, T_TO, { ad: 500_000, rev: 0 })], assignments: [support("A", "x", "AD_SPEND"), support("A", "y", "AD_SPEND")], terms: [terms(null, 10)], weightsConfirmed: true });
+  assert.equal(xn2.pending.length, 0);
+  assert.equal(codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg()], assignments: [support("A", "x", "AD_SPEND")], terms: [terms(null, 10)], weightsConfirmed: true }).claims.length, 0, "xác nhận KHÔNG gỡ được ca không ai có số đo");
   const dtChuaGan = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, {}, { x: 1 }, T_FROM, T_TO, { ad: 0, rev: 1 })], assignments: [support("A", "x", "ATTRIBUTED_REVENUE")], terms: [terms(null, 10)] });
   assert.equal(dtChuaGan.claims.length, 0, "11. doanh thu chưa gán ⇒ chờ");
   // Căn cứ trọng số in ra là của RIÊNG người ấy trong đoạn.
@@ -244,6 +260,7 @@ function testPure() {
   const okDk = codeTermsSchema.safeParse(dk);
   assert.ok(okDk.success && okDk.data.maxBonusAmount === undefined && okDk.data.productId === undefined, "trần bỏ trống = KHÔNG có trần (không phải trần 0 ₫); mã bỏ trống = mặc định công ty");
   assert.equal(codeTermsSchema.safeParse({ ...dk, maxBonusAmount: "0" }).data?.maxBonusAmount, 0, "gõ 0 thật thì là 0");
+  assert.equal(codeTermsSchema.safeParse({ ...dk, maxBonusAmount: "1.000.000" }).data?.maxBonusAmount, 1_000_000, "gõ tiền kiểu Việt Nam có dấu chấm");
   assert.equal(codeTermsSchema.safeParse({ ...dk, supportPoolPercent: "" }).success, false, "Y% bỏ trống ⇒ báo lỗi, không lưu thành 0%");
   assert.equal(codeTermsSchema.safeParse({ ...dk, supportPoolPercent: "  " }).success, false);
   assert.equal(codeAssignmentSchema.safeParse({ productId: "p", employeeId: "e", role: "OWNER", ownerRatePercent: "", effectiveFrom: "2029-01-01", policyRef: "QC" }).success, false, "X% bỏ trống ⇒ báo lỗi");
@@ -263,6 +280,14 @@ function testPure() {
   assert.ok("close" in bg && bg.close[0].id === "alice" && bg.close[0].after.getTime() === d("2029-11-01").getTime() - 1, "OWNER mới không hạn ⇒ Alice đóng ở ngày liền trước");
   assert.ok("error" in planOwnerHandover(alice, d("2029-10-01"), null), "cùng ngày bắt đầu ⇒ từ chối");
   assert.deepEqual(planOwnerHandover([], d("2029-11-01"), e("2029-11-15")), { close: [] });
+  // Vòng review 2: dòng cũ KẾT THÚC TRƯỚC ngày kết thúc của dòng mới ⇒ không cắt quyền nào sau hạn của nó ⇒ cho bàn giao.
+  const coHan = planOwnerHandover([{ id: "c", from: d("2029-10-01"), to: e("2029-11-10") }], d("2029-11-01"), e("2029-11-30"));
+  assert.ok("close" in coHan && coHan.close.length === 1, "dòng cũ hết hạn trước dòng mới ⇒ bàn giao được");
+  const tenDk = planOwnerHandover(alice, d("2029-11-01"), e("2029-11-15"), "điều khoản (mặc định công ty)");
+  assert.ok("error" in tenDk && !/OWNER/.test(tenDk.error) && /điều khoản \(mặc định công ty\)/.test(tenDk.error), "câu báo của điều khoản không nói OWNER");
+  // Vòng review 2 (MAJOR): tháng 9 đã khoá, Alice kết thúc 30/09 để Bob nhận từ 01/10 — đổi hiệu lực TỪ 01/10.
+  assert.equal(endChangesFromKey("2026-09-30"), "2026-10-01", "kết thúc ở ngày cuối tháng khoá chỉ đổi hiệu lực từ ngày đầu tháng sau");
+  assert.equal(endChangesFromKey("2026-12-31"), "2027-01-01");
 
   /* ══ 13 · TÍNH LẠI CHO CÙNG KẾT QUẢ ══ */
   const lan2 = codeBonusClaims({ productId: "B", code: "B", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, { m1: 1 * TR, m3: 3 * TR })], assignments: asg, terms: [terms(null, 6)] });

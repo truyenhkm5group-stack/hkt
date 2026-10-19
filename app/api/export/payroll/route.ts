@@ -5,13 +5,14 @@ import { PAYROLL_BASIS_LABEL, PAYROLL_BASIS_SHORT, parsePayrollBasis } from "@/l
 import { employeeMatchesUser, getPayrollReport, type PayrollLine } from "@/lib/queries/payroll";
 import { getPayrollPeriodState, type PayrollSnapshot } from "@/lib/queries/payroll-period";
 import { PAYROLL_RUN_STATUS_LABEL } from "@/lib/constants/payroll-lifecycle";
+import { isCodeClaimKey } from "@/lib/constants/payroll-code";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
 
 export const dynamic = "force-dynamic";
 
 /** Σ tạm tính các khoản THƯỞNG THEO MÃ (khoá `…:CODE:…`); không có khoản nào ⇒ ô trống. */
 function codeBonusOf(claims: readonly { key: string; provisional: number | null }[] | undefined): number | "" {
-  const ma = (claims ?? []).filter((c) => c.key.includes(":CODE:"));
+  const ma = (claims ?? []).filter((c) => isCodeClaimKey(c.key));
   if (!ma.length || ma.some((c) => c.provisional === null)) return "";
   return ma.reduce((t, c) => t + (c.provisional ?? 0), 0);
 }

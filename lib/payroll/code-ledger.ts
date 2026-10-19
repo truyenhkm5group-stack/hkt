@@ -32,6 +32,7 @@
  * khoản nợ thưởng phải trả").
  */
 import { allocatePool } from "@/lib/payroll/profit-gate";
+import { CODE_CLAIM_MARKER } from "@/lib/constants/payroll-code";
 
 export type CodeState = { cumulative: number; highWater: number };
 export type CodeMonthProfit = { productId: string; code: string; profit: number };
@@ -162,6 +163,8 @@ export type CodeBonusClaim = {
 };
 
 export type CodePending = {
+  /** `WEIGHT_PARTIAL` = thiếu MỘT PHẦN trọng số — gỡ được bằng lời xác nhận có người duyệt (`lib/constants/payroll-code.ts`). */
+  kind?: "WEIGHT_PARTIAL";
   productId: string;
   code: string;
   employeeId: string | null;
@@ -217,6 +220,8 @@ export function codeBonusClaims(input: {
   assignments: readonly CodeAssignment[];
   terms: readonly CodeTerms[];
   nameOf?: (employeeId: string) => string;
+  /** Người có quyền đã xác nhận số đo hiện có của mã × tháng là đủ: số 0 là 0 thật, phần chưa gán đứng ngoài phép chia. */
+  weightsConfirmed?: boolean;
 }): { claims: CodeBonusClaim[]; pending: CodePending[] } {
   const claims: CodeBonusClaim[] = [];
   const pending: CodePending[] = [];
@@ -266,7 +271,7 @@ export function codeBonusClaims(input: {
 
     if (owner) {
       segClaims.push({
-        key: `${owner.employeeId}:CODE:${input.productId}:OWNER:${si}`,
+        key: `${owner.employeeId}${CODE_CLAIM_MARKER}${input.productId}:OWNER:${si}`,
         employeeId: owner.employeeId,
         productId: input.productId,
         code: input.code,
@@ -302,9 +307,11 @@ export function codeBonusClaims(input: {
             chi phí / doanh thu CHƯA GÁN cho ai ⇒ chia trên phần đã biết là dồn cả quỹ cho người được
             ghép trước, còn người kia nhận 0 mà không ai bị báo.
           */
-          const thieuNguoi = method === "MANUAL" ? [] : raw.filter((r) => r.w <= 0);
-          const chuaGan = method === "AD_SPEND" ? seg.unattributedAdSpend : method === "ATTRIBUTED_REVENUE" ? seg.unattributedRevenue : 0;
+          const xacNhan = input.weightsConfirmed === true;
+          const thieuNguoi = method === "MANUAL" || xacNhan ? [] : raw.filter((r) => r.w <= 0);
+          const chuaGan = xacNhan ? 0 : method === "AD_SPEND" ? seg.unattributedAdSpend : method === "ATTRIBUTED_REVENUE" ? seg.unattributedRevenue : 0;
           if (tong <= 0 || hongTay || thieuNguoi.length || chuaGan > 0) {
+            const moTPhan = tong > 0 && !hongTay;
             const doLuong = method === "AD_SPEND" ? "chi phí quảng cáo đối soát được" : "doanh thu quy kết";
             const why =
               method === "MANUAL"
@@ -314,7 +321,9 @@ export function codeBonusClaims(input: {
                   : thieuNguoi.length
                     ? `${thieuNguoi.map((r) => ten(r.s.employeeId)).join(", ")} không có ${doLuong} trên mã trong đoạn — chưa biết là 0 thật hay chiến dịch chưa ghép`
                     : `mã còn ${Math.round(chuaGan).toLocaleString("vi-VN")} ₫ ${doLuong.replace(" đối soát được", "")} CHƯA GÁN cho MKTer nào trong đoạn — trọng số chưa đủ căn cứ`;
-            for (const r of raw) nghi(r.s.employeeId, `Mã ${input.code}: PENDING_RECONCILIATION — ${why}. ERP không tự chia đều.`, poolProv);
+            for (const r of raw) {
+              pending.push({ ...(moTPhan ? { kind: "WEIGHT_PARTIAL" as const } : {}), productId: input.productId, code: input.code, employeeId: r.s.employeeId, segment: span, reason: `Mã ${input.code}: PENDING_RECONCILIATION — ${why}. ERP không tự chia đều.${moTPhan ? " Nếu số đo hiện có là đủ, người có quyền xác nhận trọng số của mã cho tháng này." : ""}`, provisional: poolProv });
+            }
           } else {
             const poolDemand = allocS === null ? null : pct(allocS, y);
             const items = raw.map((r) => ({ key: r.s.id, weight: r.w }));
@@ -322,7 +331,7 @@ export function codeBonusClaims(input: {
             const dem = poolDemand === null ? null : splitByWeights(poolDemand, items);
             for (const r of raw) {
               segClaims.push({
-                key: `${r.s.employeeId}:CODE:${input.productId}:SUPPORT:${si}`,
+                key: `${r.s.employeeId}${CODE_CLAIM_MARKER}${input.productId}:SUPPORT:${si}`,
                 employeeId: r.s.employeeId,
                 productId: input.productId,
                 code: input.code,

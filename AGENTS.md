@@ -678,7 +678,9 @@ deploy dừng, không phải cảnh báo.
     khoản, X + Y > 100%, sổ mã chưa dựng được, MỘT SUPPORT thiếu số đo, mã còn chi phí / doanh thu
     CHƯA GÁN cho ai, kỳ không phải trọn tháng lịch) ⇒ `PENDING_RECONCILIATION` gắn vào MỌI người có
     phân công trong đoạn, CHẶN duyệt kỳ, thực nhận của họ là CHƯA KẾT LUẬN — **không bao giờ chia
-    đều**. Ô số để trống là "không khai", KHÔNG BAO GIỜ là 0 (`lib/validation/payroll-code.ts`). Người đang hưởng % LN CÁ NHÂN mà được
+    đều**. Lối ra DUY NHẤT cho loại "thiếu một phần trọng số" là lời XÁC NHẬN trọng số mã × tháng có
+    người duyệt (`confirmCodeWeights`) — không ngưỡng ghi cứng. Ô số để trống là "không khai", KHÔNG
+    BAO GIỜ là 0 (`lib/validation/payroll-code.ts`). Người đang hưởng % LN CÁ NHÂN mà được
     giao thêm mã ⇒ chờ chủ shop chọn (cộng cả hai là trả hai lần cho cùng một đồng lợi nhuận). Phân
     công / điều khoản chỉ ghi qua `lib/actions/payroll-code.ts`: duyệt người thứ hai, khoá theo mã,
     không ghi đè (kết thúc + thêm mới), không bắt đầu trong tháng đã khoá, OWNER có hạn KHÔNG được cắt

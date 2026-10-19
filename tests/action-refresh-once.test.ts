@@ -102,6 +102,7 @@ const SACH: string[] = [
   "outreach/outreach-table.tsx",
   "payroll/adjustments/adjustment-manager.tsx",
   "payroll/codes/assignments/code-book-manager.tsx",
+  "payroll/codes/confirm-weights-button.tsx",
   "payroll/assignments/assignment-manager.tsx",
   "payroll/employee-dialog.tsx",
   "payroll/finalize-button.tsx",
