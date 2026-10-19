@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "cau-mau-da-chon-quy-cach",
+  "title": "Câu mẫu thôi hỏi lại quy cách khi khách đã chọn khối lượng (#868 trên câu mẫu)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-cau-mau-quy-cach",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/cau-mau-da-chon-quy-cach",
+  "base_sha": "d50ffe2c51c8a837b7e24a201c740649c428ab85",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/engine.ts",
+    "lib/sales-chatbot/next-best-action.ts",
+    "lib/sales-chatbot/tools.ts",
+    "scripts/conv-money-trace.ts",
+    "tests/conv-money-trace.test.ts",
+    "tests/p0-quick-reply-focus.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-19T12:48:34.999Z",
+  "updated_at": "2026-10-19T12:48:34.999Z",
+  "last_heartbeat": "2026-10-19T12:48:34.999Z",
+  "definition_of_done": []
+}
