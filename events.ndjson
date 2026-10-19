@@ -1,4 +1,3 @@
-{"at":"2026-10-11T06:41:59.471Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"avatar-accept-header","detail":"#806 @ ee8e5fb4df2f → 90f56278201b (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-11T06:43:03.449Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"90f56278201b · run 38118946171 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38118946171"}
 {"at":"2026-10-11T06:48:51.876Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"handoff-ownership","detail":"fix/handoff-ownership @ 099823bced8a · 1 lệnh kiểm thử"}
 {"at":"2026-10-11T06:49:09.023Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#800 @ 099823bced8a · Bài chuông giữ ý định luật 03/10, kiểm chặt hơn theo khoá đợt; gộp main không xung đột"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-19T10:57:44.051Z","actor":"DESKTOP-56TH98Y:wt-upsell-audit-lap","kind":"CLAIM","mission":"upsell-audit-lap","detail":"PLANNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-19T10:57:44.051Z","actor":"DESKTOP-56TH98Y:wt-upsell-audit-lap","kind":"OVERLAP_ACCEPTED","mission":"upsell-audit-lap","detail":"OVERLAP_ACCEPTED với upsell-after-confirm: phạm vi scripts/upsell-offer-audit.ts — cách tích hợp: upsell-after-confirm (#908) đã vào main; nhánh tách từ origin/main d8f8c6b6 chứa nó; chỉ THÊM số đếm vào script đo"}
 {"at":"2026-10-19T10:58:08.976Z","actor":"DESKTOP-56TH98Y:wt-upsell-audit-lap","kind":"HANDOFF","mission":"upsell-audit-lap","detail":"claude/upsell-audit-lap @ 8675f490cec1 · 1 lệnh kiểm thử"}
+{"at":"2026-10-19T11:00:00.227Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"upsell-audit-lap","detail":"#912 cho claude/upsell-audit-lap @ 8675f490cec1"}
