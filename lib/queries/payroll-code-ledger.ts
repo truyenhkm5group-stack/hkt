@@ -16,7 +16,7 @@
 import { and, eq, gte, isNull, lte, or } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { CodeAssignment, CodeSegment, CodeTerms, WeightMethod } from "@/lib/payroll/code-ledger";
-import { vnDateKey, vnEndOfDay, vnStartOfDay } from "@/lib/format";
+import { addDays, vnDateKey, vnStartOfDay } from "@/lib/format";
 import type { Period } from "@/lib/search-params";
 
 /** Phân công / điều khoản ĐÃ DUYỆT có hiệu lực chồng lên [from, to]. */
@@ -60,64 +60,108 @@ export async function loadCodeBook(from: Date, to: Date): Promise<{ assignments:
 }
 
 /**
- * Các mốc cắt đoạn của MỘT mã trong [from, to]: đầu kỳ, mọi ngày bắt đầu và (ngày sau) ngày kết thúc
- * của phân công / điều khoản rơi vào giữa kỳ. Theo NGÀY lịch Việt Nam — mốc hiệu lực khai theo ngày.
+ * Các mốc cắt đoạn của các mã `productIds` trong [from, to]: đầu kỳ, mọi ngày bắt đầu và (ngày sau)
+ * ngày kết thúc của phân công / điều khoản rơi vào giữa kỳ. Theo NGÀY lịch Việt Nam — mốc hiệu lực
+ * khai theo ngày. Mốc ngoài [from, to] bị bỏ (một dòng sửa tay kết thúc giữa ngày cuối tháng không
+ * được đẻ ra một đoạn ngược chiều).
  */
-export function segmentBounds(productId: string, from: Date, to: Date, assignments: readonly CodeAssignment[], terms: readonly CodeTerms[]): { from: Date; to: Date }[] {
-  const startKeys = new Set<string>([vnDateKey(from)]);
-  const inside = (d: Date) => d.getTime() > from.getTime() && d.getTime() <= to.getTime();
-  const nextDayKey = (d: Date) => vnDateKey(new Date(vnEndOfDay(vnDateKey(d)).getTime() + 1));
-  for (const x of [...assignments.filter((a) => a.productId === productId), ...terms.filter((t) => t.productId === productId || t.productId === null)]) {
-    if (inside(x.from)) startKeys.add(vnDateKey(x.from));
-    if (x.to && x.to.getTime() < to.getTime() && x.to.getTime() >= from.getTime()) startKeys.add(nextDayKey(x.to));
+export function segmentBounds(productIds: string | readonly string[], from: Date, to: Date, assignments: readonly CodeAssignment[], terms: readonly CodeTerms[]): { from: Date; to: Date }[] {
+  const ids = new Set(typeof productIds === "string" ? [productIds] : productIds);
+  const fromKey = vnDateKey(from);
+  const toKey = vnDateKey(to);
+  const startKeys = new Set<string>([fromKey]);
+  const them = (k: string) => {
+    if (k > fromKey && k <= toKey) startKeys.add(k);
+  };
+  for (const x of [...assignments.filter((a) => ids.has(a.productId)), ...terms.filter((t) => t.productId === null || ids.has(t.productId))]) {
+    them(vnDateKey(x.from));
+    if (x.to) them(addDays(vnDateKey(x.to), 1));
   }
   const starts = [...startKeys].sort();
   return starts.map((k, i) => ({
-    from: vnStartOfDay(k),
+    from: i === 0 ? from : vnStartOfDay(k),
     to: i + 1 < starts.length ? new Date(vnStartOfDay(starts[i + 1]).getTime() - 1) : to,
   }));
 }
 
-/** Phần một mã trong một báo cáo: doanh thu, chi phí QC và doanh thu quy kết của từng MKTer. */
+/** Phần một mã trong một báo cáo: doanh thu, chi phí QC và doanh thu quy kết của từng MKTer, và phần chưa gán cho ai. */
 export type CodeFacts = {
   revenue: number;
   adSpendByEmployee: Map<string, number>;
   revenueByEmployee: Map<string, number>;
+  unattributedAdSpend: number;
+  unattributedRevenue: number;
 };
 
 export type ReportFacts = (period: Period) => Promise<Map<string, CodeFacts>>;
 
+const rong = (): CodeFacts => ({ revenue: 0, adSpendByEmployee: new Map(), revenueByEmployee: new Map(), unattributedAdSpend: 0, unattributedRevenue: 0 });
+const cong = (a: CodeFacts, b: CodeFacts): CodeFacts => {
+  const gop = (x: Map<string, number>, y: Map<string, number>) => {
+    const out = new Map(x);
+    for (const [k, v] of y) out.set(k, (out.get(k) ?? 0) + v);
+    return out;
+  };
+  return {
+    revenue: a.revenue + b.revenue,
+    adSpendByEmployee: gop(a.adSpendByEmployee, b.adSpendByEmployee),
+    revenueByEmployee: gop(a.revenueByEmployee, b.revenueByEmployee),
+    unattributedAdSpend: a.unattributedAdSpend + b.unattributedAdSpend,
+    unattributedRevenue: a.unattributedRevenue + b.unattributedRevenue,
+  };
+};
+
 /**
- * Dựng các đoạn của một mã. Một đoạn ⇒ dùng ngay số của tháng (`monthFacts`), không tính thêm báo cáo
- * nào. Nhiều đoạn ⇒ một báo cáo cho mỗi đoạn (memo theo kỳ ở `getMarketerReport`).
+ * ĐOẠN CỦA NHIỀU MÃ, MỘT LƯỢT ĐO. Mốc của mọi mã gom thành MỘT bộ mảnh chung; mỗi mảnh đo đúng một
+ * báo cáo (song song, memo theo kỳ ở `getMarketerReport`), rồi mỗi mã cộng các mảnh nằm trong đoạn
+ * của RIÊNG nó. Không đổi giữa tháng ⇒ dùng ngay số của tháng, không đo thêm gì.
+ *
+ * `null` cho một mã = có nhiều đoạn nhưng KHÔNG đoạn nào có doanh thu giao thành công để biết phần của
+ * từng đoạn ⇒ người gọi đưa vào CHỜ ĐỐI SOÁT. Chia đều theo số đoạn là đúng thứ đặc tả cấm.
  */
-export async function buildCodeSegments(
-  productId: string,
+export async function buildCodeSegmentsFor(
+  productIds: readonly string[],
   period: { from: Date; to: Date },
   book: { assignments: readonly CodeAssignment[]; terms: readonly CodeTerms[] },
   monthFacts: Map<string, CodeFacts>,
   factsFor: ReportFacts,
-): Promise<CodeSegment[]> {
-  const bounds = segmentBounds(productId, period.from, period.to, book.assignments, book.terms);
-  const empty: CodeFacts = { revenue: 0, adSpendByEmployee: new Map(), revenueByEmployee: new Map() };
-  if (bounds.length === 1) {
-    const f = monthFacts.get(productId) ?? empty;
-    return [{ from: bounds[0].from, to: bounds[0].to, weight: 1, adSpendByEmployee: f.adSpendByEmployee, revenueByEmployee: f.revenueByEmployee }];
+): Promise<Map<string, CodeSegment[] | null>> {
+  const out = new Map<string, CodeSegment[] | null>();
+  if (!productIds.length) return out;
+  const manh = segmentBounds(productIds, period.from, period.to, book.assignments, book.terms);
+  const doManh: Map<string, CodeFacts>[] =
+    manh.length === 1
+      ? [monthFacts]
+      : await Promise.all(manh.map((b) => factsFor({ key: "custom", from: b.from, to: b.to, fromKey: vnDateKey(b.from), toKey: vnDateKey(b.to), label: `${vnDateKey(b.from)} → ${vnDateKey(b.to)}` })));
+  for (const pid of productIds) {
+    const own = segmentBounds(pid, period.from, period.to, book.assignments, book.terms);
+    const facts = own.map((s) =>
+      manh.reduce((acc, m, i) => (m.from.getTime() >= s.from.getTime() && m.to.getTime() <= s.to.getTime() ? cong(acc, doManh[i].get(pid) ?? rong()) : acc), rong()),
+    );
+    if (own.length === 1) {
+      const f = monthFacts.get(pid) ?? rong();
+      out.set(pid, [{ from: own[0].from, to: own[0].to, weight: 1, adSpendByEmployee: f.adSpendByEmployee, revenueByEmployee: f.revenueByEmployee, unattributedAdSpend: f.unattributedAdSpend, unattributedRevenue: f.unattributedRevenue }]);
+      continue;
+    }
+    const tong = facts.reduce((t, f) => t + Math.max(0, f.revenue), 0);
+    if (tong <= 0) {
+      out.set(pid, null);
+      continue;
+    }
+    out.set(
+      pid,
+      own.map((s, i) => ({
+        from: s.from,
+        to: s.to,
+        weight: Math.max(0, facts[i].revenue) / tong,
+        adSpendByEmployee: facts[i].adSpendByEmployee,
+        revenueByEmployee: facts[i].revenueByEmployee,
+        unattributedAdSpend: facts[i].unattributedAdSpend,
+        unattributedRevenue: facts[i].unattributedRevenue,
+      })),
+    );
   }
-  const facts = await Promise.all(
-    bounds.map((b) =>
-      factsFor({ key: "custom", from: b.from, to: b.to, fromKey: vnDateKey(b.from), toKey: vnDateKey(b.to), label: `${vnDateKey(b.from)} → ${vnDateKey(b.to)}` }).then((m) => m.get(productId) ?? empty),
-    ),
-  );
-  const tong = facts.reduce((t, f) => t + Math.max(0, f.revenue), 0);
-  return bounds.map((b, i) => ({
-    from: b.from,
-    to: b.to,
-    // Không có doanh thu ở đoạn nào thì mã cũng không có phần đủ điều kiện để chia — trọng số ấy không được dùng.
-    weight: tong > 0 ? Math.max(0, facts[i].revenue) / tong : 1 / bounds.length,
-    adSpendByEmployee: facts[i].adSpendByEmployee,
-    revenueByEmployee: facts[i].revenueByEmployee,
-  }));
+  return out;
 }
 
 export type CodeBookRow = {

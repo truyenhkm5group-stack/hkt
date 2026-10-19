@@ -28,7 +28,9 @@ import { allocateCompanyToCodes, codeBonusClaims, codeLedgerStep, splitByWeights
 import { calculatePayrollPeriodAs } from "@/lib/payroll/run-service";
 import { getPayrollReport, monthReportPeriod, profitGateReadiness } from "@/lib/queries/payroll";
 import type { PayrollSnapshot } from "@/lib/queries/payroll-period";
-import { segmentBounds } from "@/lib/queries/payroll-code-ledger";
+import { buildCodeSegmentsFor, segmentBounds, type CodeFacts } from "@/lib/queries/payroll-code-ledger";
+import { codeAssignmentSchema, codeRowId, codeTermsSchema, planOwnerHandover } from "@/lib/validation/payroll-code";
+import type { Period } from "@/lib/search-params";
 import { monthPeriodKey } from "@/lib/queries/payroll-profit-gate";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { PAYROLL_RECOGNITION_KEY } from "@/lib/queries/payroll-cost";
@@ -38,12 +40,14 @@ const d = (iso: string) => new Date(`${iso}T00:00:00+07:00`);
 const e = (iso: string) => new Date(`${iso}T23:59:59.999+07:00`);
 const T_FROM = d("2029-03-01");
 const T_TO = e("2029-03-31");
-const seg = (weight = 1, ad: Record<string, number> = {}, rev: Record<string, number> = {}, from = T_FROM, to = T_TO): CodeSegment => ({
+const seg = (weight = 1, ad: Record<string, number> = {}, rev: Record<string, number> = {}, from = T_FROM, to = T_TO, unattributed = { ad: 0, rev: 0 }): CodeSegment => ({
   from,
   to,
   weight,
   adSpendByEmployee: new Map(Object.entries(ad)),
   revenueByEmployee: new Map(Object.entries(rev)),
+  unattributedAdSpend: unattributed.ad,
+  unattributedRevenue: unattributed.rev,
 });
 let n = 0;
 const owner = (productId: string, employeeId: string, pct: number, from = T_FROM, to: Date | null = null): CodeAssignment => ({ id: `as${++n}`, productId, employeeId, role: "OWNER", ownerRateBp: pct * 100, weightMethod: null, weightBp: null, from, to, policyRef: "QC-1" });
@@ -208,9 +212,57 @@ function testPure() {
   const vuot = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg()], assignments: [owner("A", "o", 95), support("A", "x", "MANUAL", 100)], terms: [terms(null, 10)] });
   assert.equal(vuot.claims.length, 0, "12. X% + Y% > 100% ⇒ chờ, không trả quá lợi nhuận mã");
   const haiChu = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg()], assignments: [owner("A", "o", 10), owner("A", "p", 10)], terms: [] });
-  assert.deepEqual([haiChu.claims.length, haiChu.pending.length], [0, 1], "12. hai OWNER cùng lúc ⇒ chờ, không trả cả hai");
+  assert.deepEqual([haiChu.claims.length, haiChu.pending.map((p) => p.employeeId)], [0, ["o", "p"]], "12. hai OWNER cùng lúc ⇒ chờ, gắn vào CẢ HAI người (khoản chờ không tên không chặn được thực nhận của ai)");
+  assert.deepEqual(
+    vuot.pending.map((p) => p.employeeId),
+    ["o", "x"],
+    "12. X + Y > 100% ⇒ chờ cho mọi người có phân công trong đoạn",
+  );
   const haiDk = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg()], assignments: [owner("A", "o", 10)], terms: [terms("A", 5), terms("A", 6)] });
   assert.equal(haiDk.pending.length, 1, "12. hai điều khoản cùng hiệu lực ⇒ ERP không chọn hộ");
+
+  /* ══ 11 (review) · THIẾU MỘT PHẦN TRỌNG SỐ cũng là thiếu ══ */
+  const motNguoi = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, { x: 10 * TR })], assignments: [support("A", "x", "AD_SPEND"), support("A", "y", "AD_SPEND")], terms: [terms(null, 10)] });
+  assert.equal(motNguoi.claims.length, 0, "11. y chưa có chi phí QC (chiến dịch chưa ghép?) ⇒ KHÔNG dồn cả quỹ cho x");
+  assert.ok(motNguoi.pending.some((p) => /y không có chi phí quảng cáo/.test(p.reason)));
+  const chuaGan = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, { x: 1 * TR, y: 1 * TR }, {}, T_FROM, T_TO, { ad: 500_000, rev: 0 })], assignments: [support("A", "x", "AD_SPEND"), support("A", "y", "AD_SPEND")], terms: [terms(null, 10)] });
+  assert.equal(chuaGan.claims.length, 0, "11. mã còn chi phí QC chưa gán cho MKTer nào ⇒ trọng số chưa đủ căn cứ");
+  assert.ok(chuaGan.pending.every((p) => /CHƯA GÁN/.test(p.reason)));
+  const dtChuaGan = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, {}, { x: 1 }, T_FROM, T_TO, { ad: 0, rev: 1 })], assignments: [support("A", "x", "ATTRIBUTED_REVENUE")], terms: [terms(null, 10)] });
+  assert.equal(dtChuaGan.claims.length, 0, "11. doanh thu chưa gán ⇒ chờ");
+  // Căn cứ trọng số in ra là của RIÊNG người ấy trong đoạn.
+  assert.deepEqual(
+    cB.claims.filter((c) => c.role === "SUPPORT").map((c) => [c.employeeId, c.basisAdSpend]),
+    [
+      ["m1", 1 * TR],
+      ["m3", 3 * TR],
+    ],
+  );
+
+  /* ══ ĐẦU VÀO (review): ô trống KHÔNG phải số 0 ══ */
+  const dk = { supportPoolPercent: "5", maxBonusAmount: "", effectiveFrom: "2029-01-01", effectiveTo: "", policyRef: "QC", productId: "" };
+  const okDk = codeTermsSchema.safeParse(dk);
+  assert.ok(okDk.success && okDk.data.maxBonusAmount === undefined && okDk.data.productId === undefined, "trần bỏ trống = KHÔNG có trần (không phải trần 0 ₫); mã bỏ trống = mặc định công ty");
+  assert.equal(codeTermsSchema.safeParse({ ...dk, maxBonusAmount: "0" }).data?.maxBonusAmount, 0, "gõ 0 thật thì là 0");
+  assert.equal(codeTermsSchema.safeParse({ ...dk, supportPoolPercent: "" }).success, false, "Y% bỏ trống ⇒ báo lỗi, không lưu thành 0%");
+  assert.equal(codeTermsSchema.safeParse({ ...dk, supportPoolPercent: "  " }).success, false);
+  assert.equal(codeAssignmentSchema.safeParse({ productId: "p", employeeId: "e", role: "OWNER", ownerRatePercent: "", effectiveFrom: "2029-01-01", policyRef: "QC" }).success, false, "X% bỏ trống ⇒ báo lỗi");
+  assert.equal(codeAssignmentSchema.safeParse({ productId: "p", employeeId: "e", role: "SUPPORT", weightMethod: "MANUAL", weightPercent: "", effectiveFrom: "2029-01-01", policyRef: "QC" }).success, false, "trọng số tay bỏ trống ⇒ báo lỗi");
+
+  /* ══ KHOÁ DÒNG THEO NỘI DUNG (review): lần gửi lại sau khi duyệt mang ĐÚNG khoá đã duyệt ══ */
+  const v1 = { productId: "p", employeeId: "e", role: "OWNER", ownerRateBp: 1000, effectiveFrom: d("2029-01-01"), effectiveTo: null };
+  assert.equal(codeRowId("ASSIGNMENT", v1), codeRowId("ASSIGNMENT", { ...v1 }), "cùng nội dung ⇒ cùng khoá");
+  const { productId: p1, ...conLai } = v1;
+  assert.equal(codeRowId("ASSIGNMENT", { ...conLai, productId: p1 }), codeRowId("ASSIGNMENT", v1), "không phụ thuộc thứ tự trường");
+  assert.notEqual(codeRowId("ASSIGNMENT", { ...v1, ownerRateBp: 1100 }), codeRowId("ASSIGNMENT", v1), "đổi tỷ lệ ⇒ khoá khác ⇒ phải duyệt lại");
+
+  /* ══ BÀN GIAO OWNER (review): OWNER có hạn không được cắt quyền của OWNER không hạn ══ */
+  const alice = [{ id: "alice", from: d("2029-10-01"), to: null }];
+  assert.ok("error" in planOwnerHandover(alice, d("2029-11-01"), e("2029-11-15")), "Bob 01–15/11 chồng lên Alice không hạn ⇒ TỪ CHỐI, không đóng Alice");
+  const bg = planOwnerHandover(alice, d("2029-11-01"), null);
+  assert.ok("close" in bg && bg.close[0].id === "alice" && bg.close[0].after.getTime() === d("2029-11-01").getTime() - 1, "OWNER mới không hạn ⇒ Alice đóng ở ngày liền trước");
+  assert.ok("error" in planOwnerHandover(alice, d("2029-10-01"), null), "cùng ngày bắt đầu ⇒ từ chối");
+  assert.deepEqual(planOwnerHandover([], d("2029-11-01"), e("2029-11-15")), { close: [] });
 
   /* ══ 13 · TÍNH LẠI CHO CÙNG KẾT QUẢ ══ */
   const lan2 = codeBonusClaims({ productId: "B", code: "B", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, { m1: 1 * TR, m3: 3 * TR })], assignments: asg, terms: [terms(null, 6)] });
@@ -219,6 +271,55 @@ function testPure() {
     cB.claims.map((c) => [c.key, c.demand]),
     "13. hàm thuần — hai lần ra cùng kết quả",
   );
+}
+
+/* ═══════════════════════ ĐOẠN CỦA NHIỀU MÃ, MỘT LƯỢT ĐO (review) ═══════════════════════ */
+async function testSegments() {
+  const f = (revenue: number, ad: Record<string, number> = {}): CodeFacts => ({ revenue, adSpendByEmployee: new Map(Object.entries(ad)), revenueByEmployee: new Map(), unattributedAdSpend: 0, unattributedRevenue: 0 });
+  const giua = d("2029-03-11");
+  const sau = d("2029-03-21");
+  const book = {
+    assignments: [owner("A", "m1", 10, T_FROM, new Date(giua.getTime() - 1)), owner("A", "m2", 10, giua), owner("B", "m1", 10, T_FROM, new Date(sau.getTime() - 1)), owner("B", "m3", 10, sau)],
+    terms: [] as CodeTerms[],
+  };
+  const goi: string[] = [];
+  // Mảnh chung: 01–10 · 11–20 · 21–31. A: 01–10 | 11–31. B: 01–20 | 21–31.
+  const doanhThu: Record<string, Record<string, number>> = {
+    "2029-03-01": { A: 10, B: 30 },
+    "2029-03-11": { A: 20, B: 30 },
+    "2029-03-21": { A: 10, B: 40 },
+  };
+  const factsFor = async (p: Period) => {
+    goi.push(p.fromKey ?? "");
+    const r = doanhThu[p.fromKey ?? ""] ?? {};
+    return new Map(Object.entries(r).map(([k, v]) => [k, f(v, { [k === "A" ? "m1" : "m3"]: v })]));
+  };
+  const out = await buildCodeSegmentsFor(["A", "B"], { from: T_FROM, to: T_TO }, book, new Map(), factsFor);
+  assert.deepEqual(goi.sort(), ["2029-03-01", "2029-03-11", "2029-03-21"], "7. hai mã, bốn mốc ⇒ ĐÚNG ba lượt đo (mảnh chung), không phải một lượt mỗi đoạn mỗi mã");
+  assert.deepEqual(
+    out.get("A")?.map((s) => s.weight),
+    [0.25, 0.75],
+    "đoạn của A cộng các mảnh nằm trong nó (10 | 20 + 10)",
+  );
+  assert.deepEqual(
+    out.get("B")?.map((s) => s.weight),
+    [0.6, 0.4],
+  );
+  assert.equal(out.get("A")?.[1].adSpendByEmployee.get("m1"), 30, "căn cứ trọng số cũng được cộng theo mảnh");
+  // Không mảnh nào có doanh thu ⇒ không biết phần của từng đoạn ⇒ null (người gọi đưa vào chờ), KHÔNG chia đều.
+  const rongDt = await buildCodeSegmentsFor(["A"], { from: T_FROM, to: T_TO }, book, new Map(), async () => new Map());
+  assert.equal(rongDt.get("A"), null, "10. không có doanh thu để chia đoạn ⇒ chờ, không 1/n");
+  // Không đổi giữa tháng ⇒ dùng số của tháng, không đo thêm lượt nào.
+  let them = 0;
+  const motDoan = await buildCodeSegmentsFor(["Z"], { from: T_FROM, to: T_TO }, book, new Map([["Z", f(5)]]), async () => {
+    them += 1;
+    return new Map();
+  });
+  assert.deepEqual([them, motDoan.get("Z")?.length, motDoan.get("Z")?.[0].weight], [0, 1, 1]);
+  // Dòng sửa tay kết thúc GIỮA ngày cuối tháng không đẻ ra đoạn ngược chiều.
+  const lech = segmentBounds("A", T_FROM, T_TO, [owner("A", "m1", 10, T_FROM, new Date("2029-03-31T10:00:00+07:00"))], []);
+  assert.deepEqual(lech.length, 1, "11. mốc ngoài kỳ bị bỏ");
+  assert.ok(lech.every((b) => b.from.getTime() <= b.to.getTime()));
 }
 
 /* ═══════════════════════ HÀNG RÀO MÃ NGUỒN ═══════════════════════ */
@@ -406,6 +507,18 @@ async function testFlow(db: Db) {
   const l1 = r1.lines.find((l) => l.employee.id === M1.id)!;
   assert.equal(l1.salary, l1.profitShare.eligible, "M1 không lương cứng ⇒ thực nhận được duyệt = phần đủ điều kiện");
   assert.equal(l1.provisionalSalary, l1.profitShare.provisional, "tạm tính gồm khoản theo mã (thành phần mới), không đếm hai lần");
+  assert.equal(
+    l1.codeBonusProvisional,
+    L1.claims.filter((c) => c.employeeId === M1.id).reduce((s, c) => s + c.provisional, 0),
+    "phần theo mã đứng RIÊNG để phiếu lương in thành một dòng (các dòng cộng ra đúng thực nhận)",
+  );
+  assert.equal((l1.provisionalSalary ?? 0) - l1.codeBonusProvisional, 0, "trừ phần theo mã ra là đúng công thức cũ (M1 không có khoản nào khác)");
+
+  /* ══ 5 (review) · KỲ KHÔNG PHẢI THÁNG LỊCH: thưởng theo mã CHƯA BIẾT, không phải 0 ══ */
+  const tuan = { key: "custom" as const, from: d("2029-01-05"), to: e("2029-01-11"), fromKey: "2029-01-05", toKey: "2029-01-11", label: "tuần" };
+  const rTuan = await getPayrollReport(tuan, "profit1");
+  assert.ok(rTuan.profitGate.codeLedger.pending.some((p) => p.employeeId === M1.id && /THÁNG LỊCH/.test(p.reason)), "kỳ tuần ⇒ khoản theo mã đứng ở chờ, có lý do");
+  assert.equal(rTuan.lines.find((l) => l.employee.id === M1.id)?.salary, null, "và thực nhận của người có phân công là CHƯA BIẾT — không in số thiếu khoản thưởng");
   const chan1 = payrollFinalizeBlockers({ bounded: true, basisEligible: true, basisWhy: "", basisLabel: "", totalSalary: r1.totalSalary, costWarnings: r1.marketers.costWarnings, lines: [], profitGate: profitGateReadiness(r1) });
   assert.ok(!chan1.some((b) => b.code === "PROFIT_CODE_PENDING"), "đủ căn cứ ⇒ không chặn");
 
@@ -480,6 +593,7 @@ async function testFlow(db: Db) {
 
 export async function testPayrollCodeLedger(db: Db) {
   testPure();
+  await testSegments();
   testSourceFences();
   await testFlow(db);
   console.log("✓ sổ lợi nhuận theo mã + thưởng OWNER / SUPPORT (13 ca)");

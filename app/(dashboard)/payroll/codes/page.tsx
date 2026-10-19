@@ -39,18 +39,6 @@ export default async function PayrollCodesPage({ searchParams }: { searchParams:
   const ten = (id: string | null) => (id ? (names.get(id) ?? id) : "—");
   const alloc = new Map(gate.result.allocations.map((a) => [a.key, a] as const));
 
-  // Chi phí QC + doanh thu quy kết của từng MKTer trên từng mã — cùng nguồn trọng số dùng.
-  const perMk = new Map<string, { adSpend: number; revenue: number }>();
-  for (const m of report.marketers.marketers) {
-    if (!m.marketerId) continue;
-    for (const p of m.products) {
-      const k = `${m.marketerId}:${p.productId}`;
-      const o = perMk.get(k) ?? { adSpend: 0, revenue: 0 };
-      o.adSpend += p.adSpend;
-      o.revenue += p.attributedRevenue;
-      perMk.set(k, o);
-    }
-  }
   const product = new Map(report.marketers.products.map((p) => [p.productId, p] as const));
   const ledgerRow = new Map((led.rows ?? []).map((r) => [r.productId, r] as const));
 
@@ -74,11 +62,9 @@ export default async function PayrollCodesPage({ searchParams }: { searchParams:
   const byMk = new Map<string, { codes: Set<string>; owner: number; support: number; adSpend: number; revenue: number; provisional: number; approved: number | null; pending: number }>();
   for (const c of led.claims) {
     const o = byMk.get(c.employeeId) ?? { codes: new Set<string>(), owner: 0, support: 0, adSpend: 0, revenue: 0, provisional: 0, approved: 0, pending: 0 };
-    if (!o.codes.has(c.productId)) {
-      const f = perMk.get(`${c.employeeId}:${c.productId}`);
-      o.adSpend += f?.adSpend ?? 0;
-      o.revenue += f?.revenue ?? 0;
-    }
+    // Căn cứ trọng số đo TRONG ĐOẠN của khoản — các đoạn rời nhau nên cộng lại không đếm trùng.
+    o.adSpend += c.basisAdSpend;
+    o.revenue += c.basisRevenue;
     o.codes.add(c.productId);
     if (c.role === "OWNER") o.owner += 1;
     else o.support += 1;
@@ -174,7 +160,7 @@ export default async function PayrollCodesPage({ searchParams }: { searchParams:
                       <th className="py-1 pr-3 font-medium">Mã</th>
                       <th className="py-1 pr-3 font-medium">MKTer · Vai trò</th>
                       <th className="py-1 pr-3 font-medium">Thời gian</th>
-                      <th className="py-1 pr-3 text-right font-medium">Chi phí Ads · Doanh thu</th>
+                      <th className="py-1 pr-3 text-right font-medium">Chi phí Ads · Doanh thu (trong đoạn)</th>
                       <th className="py-1 pr-3 text-right font-medium">LN mã · LN lũy kế</th>
                       <th className="py-1 pr-3 text-right font-medium">LN đủ điều kiện · phân bổ</th>
                       <th className="py-1 pr-3 text-right font-medium">% thưởng</th>
@@ -184,7 +170,6 @@ export default async function PayrollCodesPage({ searchParams }: { searchParams:
                   <tbody>
                     {claims.map((c) => {
                       const r = ledgerRow.get(c.productId);
-                      const f = perMk.get(`${c.employeeId}:${c.productId}`);
                       const a = alloc.get(c.key);
                       const phanBo = led.allocated ? (led.allocated[c.productId] ?? 0) : null;
                       const duyet = gate.result.established ? (a?.eligible ?? null) : null;
@@ -206,8 +191,8 @@ export default async function PayrollCodesPage({ searchParams }: { searchParams:
                             {formatDate(c.segment.from)} → {formatDate(c.segment.to)}
                           </td>
                           <td className="py-1.5 pr-3 text-right tabular-nums">
-                            {v(f?.adSpend ?? 0)}
-                            <div className="text-xs text-muted-foreground">{v(f?.revenue ?? 0)}</div>
+                            {v(c.basisAdSpend)}
+                            <div className="text-xs text-muted-foreground">{v(c.basisRevenue)}</div>
                           </td>
                           <td className="py-1.5 pr-3 text-right tabular-nums">
                             {v(r?.profit)}

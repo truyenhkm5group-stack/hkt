@@ -133,6 +133,12 @@ export type CodeSegment = {
   adSpendByEmployee: ReadonlyMap<string, number>;
   /** Doanh thu quy kết cho từng MKTer trên mã trong đoạn. */
   revenueByEmployee: ReadonlyMap<string, number>;
+  /**
+   * Chi phí QC / doanh thu của mã trong đoạn CHƯA GÁN được cho MKTer nào (chiến dịch chưa khai ánh
+   * xạ — AGENTS.md mục 67). Khác 0 ⇒ trọng số theo cách đó THIẾU một phần chưa biết của ai.
+   */
+  unattributedAdSpend: number;
+  unattributedRevenue: number;
 };
 
 export type CodeBonusClaim = {
@@ -144,6 +150,9 @@ export type CodeBonusClaim = {
   segment: { from: Date; to: Date };
   /** % thực áp lên LN của mã cho khoản này (X, hoặc Y × trọng số). */
   ratePercent: number;
+  /** Chi phí QC và doanh thu quy kết của RIÊNG người này trên mã, TRONG đoạn — căn cứ trọng số in ra màn hình. */
+  basisAdSpend: number;
+  basisRevenue: number;
   /** Tạm tính trên phần đủ điều kiện CỦA MÃ (chưa qua cổng công ty). */
   provisional: number;
   /** Đề nghị trên phần đã PHÂN BỔ từ quỹ công ty, sau trần theo mã. `null` = công ty chưa kết luận. */
@@ -228,21 +237,30 @@ export function codeBonusClaims(input: {
     const segClaims: CodeBonusClaim[] = [];
     const nghi = (employeeId: string | null, reason: string, provisional: number | null) =>
       pending.push({ productId: input.productId, code: input.code, employeeId, segment: span, reason, provisional });
+    /*
+      Lỗi của CẢ ĐOẠN (hai OWNER, hai điều khoản, X + Y > 100%) gắn vào MỌI người có phân công trong
+      đoạn: một khoản chờ không mang tên ai thì không chặn được thực nhận của ai, và người liên quan
+      trông như đã được duyệt — thiếu đúng khoản đang chờ.
+    */
+    const nghiCaDoan = (reason: string) => {
+      for (const id of new Set(here.map((a) => a.employeeId))) nghi(id, reason, null);
+    };
+    const coSo = (employeeId: string) => ({ basisAdSpend: Math.max(0, seg.adSpendByEmployee.get(employeeId) ?? 0), basisRevenue: Math.max(0, seg.revenueByEmployee.get(employeeId) ?? 0) });
 
     if (termsHere.length > 1) {
-      nghi(null, `Mã ${input.code}: ${termsHere.length} điều khoản thưởng cùng hiệu lực trong đoạn — ERP không chọn hộ.`, null);
+      nghiCaDoan(`Mã ${input.code}: ${termsHere.length} điều khoản thưởng cùng hiệu lực trong đoạn — ERP không chọn hộ.`);
       return;
     }
     const term = termsHere[0] ?? null;
     if (owners.length > 1) {
-      nghi(null, `Mã ${input.code}: ${owners.length} OWNER cùng hiệu lực trong đoạn — mỗi mã tối đa một OWNER một lúc.`, null);
+      nghiCaDoan(`Mã ${input.code}: ${owners.length} OWNER cùng hiệu lực trong đoạn — mỗi mã tối đa một OWNER một lúc.`);
       return;
     }
     const owner = owners[0] ?? null;
     const x = owner?.ownerRateBp ?? 0;
     const y = supports.length ? (term?.supportPoolBp ?? null) : 0;
     if (y !== null && x + y > 10_000) {
-      nghi(null, `Mã ${input.code}: X% (${x / 100}%) + Y% (${y / 100}%) vượt 100% lợi nhuận đủ điều kiện của mã.`, null);
+      nghiCaDoan(`Mã ${input.code}: X% (${x / 100}%) + Y% (${y / 100}%) vượt 100% lợi nhuận đủ điều kiện của mã.`);
       return;
     }
 
@@ -255,6 +273,7 @@ export function codeBonusClaims(input: {
         role: "OWNER",
         segment: span,
         ratePercent: x / 100,
+        ...coSo(owner.employeeId),
         provisional: pct(eligS, x),
         demand: allocS === null ? null : pct(allocS, x),
         policyRef: owner.policyRef,
@@ -278,13 +297,23 @@ export function codeBonusClaims(input: {
           }));
           const tong = raw.reduce((t, r) => t + r.w, 0);
           const hongTay = method === "MANUAL" && tong !== 10_000;
-          if (tong <= 0 || hongTay) {
+          /*
+            THIẾU MỘT PHẦN cũng là thiếu: một SUPPORT không có số đo (chiến dịch chưa ghép) hoặc mã còn
+            chi phí / doanh thu CHƯA GÁN cho ai ⇒ chia trên phần đã biết là dồn cả quỹ cho người được
+            ghép trước, còn người kia nhận 0 mà không ai bị báo.
+          */
+          const thieuNguoi = method === "MANUAL" ? [] : raw.filter((r) => r.w <= 0);
+          const chuaGan = method === "AD_SPEND" ? seg.unattributedAdSpend : method === "ATTRIBUTED_REVENUE" ? seg.unattributedRevenue : 0;
+          if (tong <= 0 || hongTay || thieuNguoi.length || chuaGan > 0) {
+            const doLuong = method === "AD_SPEND" ? "chi phí quảng cáo đối soát được" : "doanh thu quy kết";
             const why =
               method === "MANUAL"
                 ? `tổng trọng số tay của SUPPORT là ${tong / 100}% — phải đúng 100%`
-                : method === "AD_SPEND"
-                  ? "không SUPPORT nào có chi phí quảng cáo đối soát được trên mã trong đoạn"
-                  : "không SUPPORT nào có doanh thu quy kết trên mã trong đoạn";
+                : tong <= 0
+                  ? `không SUPPORT nào có ${doLuong} trên mã trong đoạn`
+                  : thieuNguoi.length
+                    ? `${thieuNguoi.map((r) => ten(r.s.employeeId)).join(", ")} không có ${doLuong} trên mã trong đoạn — chưa biết là 0 thật hay chiến dịch chưa ghép`
+                    : `mã còn ${Math.round(chuaGan).toLocaleString("vi-VN")} ₫ ${doLuong.replace(" đối soát được", "")} CHƯA GÁN cho MKTer nào trong đoạn — trọng số chưa đủ căn cứ`;
             for (const r of raw) nghi(r.s.employeeId, `Mã ${input.code}: PENDING_RECONCILIATION — ${why}. ERP không tự chia đều.`, poolProv);
           } else {
             const poolDemand = allocS === null ? null : pct(allocS, y);
@@ -300,6 +329,7 @@ export function codeBonusClaims(input: {
                 role: "SUPPORT",
                 segment: span,
                 ratePercent: (y / 100) * (r.w / tong),
+                ...coSo(r.s.employeeId),
                 provisional: prov.get(r.s.id) ?? 0,
                 demand: dem === null ? null : (dem.get(r.s.id) ?? 0),
                 policyRef: r.s.policyRef,

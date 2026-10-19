@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SectionCard } from "@/components/ui-bits";
-import { endCodeAssignment, endCodeTerms, revokeCodeRow, saveCodeAssignment, saveCodeTerms } from "@/lib/actions/payroll-code";
+import { endCodeRow, revokeCodeRow, saveCodeAssignment, saveCodeTerms } from "@/lib/actions/payroll-code";
 
 type Option = { id: string; name: string };
 type Row = {
@@ -150,7 +150,7 @@ export function CodeBookManager({ employees, codes, rows }: { employees: Option[
             <Input inputMode="decimal" value={t.supportPoolPercent} onChange={(e) => setT({ ...t, supportPoolPercent: e.target.value })} placeholder="vd 5" />
           </div>
           <div className="space-y-1">
-            <Label>Trần thưởng của mã / tháng (₫, bỏ trống = không)</Label>
+            <Label>Trần thưởng của mã / tháng (₫, bỏ trống = không có trần)</Label>
             <Input inputMode="numeric" value={t.maxBonusAmount} onChange={(e) => setT({ ...t, maxBonusAmount: e.target.value })} />
           </div>
           <div className="space-y-1">
@@ -219,7 +219,7 @@ function RowView({ r, pending, run }: { r: Row; pending: boolean; run: (fn: () =
         {active ? (
           <div className="flex flex-wrap items-center gap-1">
             <Input type="date" className="h-7 w-[140px]" value={den} onChange={(e) => setDen(e.target.value)} />
-            <Button size="sm" variant="outline" disabled={pending || !den} onClick={() => run(() => (r.kind === "ASSIGNMENT" ? endCodeAssignment(r.id, den) : endCodeTerms(r.id, den)), "Đã kết thúc hiệu lực")}>
+            <Button size="sm" variant="outline" disabled={pending || !den} onClick={() => run(() => endCodeRow({ kind: r.kind, id: r.id, effectiveTo: den }), "Đã kết thúc hiệu lực")}>
               Kết thúc
             </Button>
             <Button
@@ -228,7 +228,7 @@ function RowView({ r, pending, run }: { r: Row; pending: boolean; run: (fn: () =
               disabled={pending}
               onClick={() => {
                 const ly = window.prompt("Lý do huỷ (dòng nhập nhầm):");
-                if (ly) run(() => revokeCodeRow(r.kind, r.id, ly), "Đã huỷ dòng");
+                if (ly) run(() => revokeCodeRow({ kind: r.kind, id: r.id, reason: ly }), "Đã huỷ dòng");
               }}
             >
               Huỷ

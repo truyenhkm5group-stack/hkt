@@ -141,7 +141,7 @@ export async function previewLegacyMigration(period: Period, basis: PayrollBasis
             employeeName: proposal.employeeName,
             // So TẠM TÍNH với TẠM TÍNH: cổng lợi nhuận áp như nhau cho hai đường, nên đem số sau cổng của
             // một bên so với số trước cổng của bên kia là đẻ ra một khoản lệch không có thật.
-            old: { fixed: line.fixed, bonusTotal: line.bonusTotal, bonusPersonal: line.bonusPersonal, bonusRevenue: line.bonusRevenue, salary: line.provisionalSalary },
+            old: { fixed: line.fixed, bonusTotal: line.bonusTotal, bonusPersonal: line.bonusPersonal, bonusRevenue: line.bonusRevenue, salary: line.provisionalSalary === null ? null : line.provisionalSalary - line.codeBonusProvisional },
             next: { components: ketQua.components, grossEarnings: ketQua.grossEarnings, totalDeductions: ketQua.totalDeductions, netPay: ketQua.netPay },
             adjustmentTotal,
           })

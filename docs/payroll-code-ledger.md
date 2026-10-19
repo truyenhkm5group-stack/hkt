@@ -65,6 +65,10 @@ TRONG đoạn. Sổ mã không đổi: nó không có tham số người.
 | SUPPORT mà chưa có điều khoản Y% hiệu lực | chờ (OWNER vẫn tính) |
 | Trọng số tay Σ ≠ 100% | chờ — không tự chuẩn hoá |
 | `AD_SPEND` / `ATTRIBUTED_REVENUE` mà không SUPPORT nào có số | chờ — không chia đều |
+| MỘT SUPPORT không có số đo trong đoạn (chiến dịch chưa ghép?) | chờ — không dồn cả quỹ cho người đã ghép |
+| Mã còn chi phí QC / doanh thu CHƯA GÁN cho MKTer nào trong đoạn | chờ — trọng số thiếu một phần chưa biết của ai |
+| Đổi phân công giữa tháng mà không đoạn nào có doanh thu giao thành công | chờ — không chia 1/n |
+| Kỳ không phải trọn tháng lịch / cơ sở khác "Lợi nhuận tính lương" | chờ — thưởng theo mã CHƯA BIẾT, không phải 0 |
 | Các SUPPORT dùng hai cách tính trọng số trong cùng đoạn | chờ |
 | Hai OWNER / hai điều khoản cùng hiệu lực | chờ — ERP không chọn hộ |
 | X% + Y% > 100% | chờ |
@@ -73,7 +77,18 @@ TRONG đoạn. Sổ mã không đổi: nó không có tham số người.
 | Sổ mã chưa dựng được (chưa khai quy chế / ảnh chụp trước V2) | chờ |
 
 Còn bất kỳ dòng chờ nào ⇒ blocker `PROFIT_CODE_PENDING` chặn duyệt kỳ, và thực nhận được duyệt của
-người liên quan là CHƯA KẾT LUẬN (`null`, in "—").
+người liên quan là CHƯA KẾT LUẬN (`null`, in "—"). Lỗi của CẢ ĐOẠN (hai OWNER, hai điều khoản, X + Y >
+100%) gắn vào MỌI người có phân công trong đoạn — một khoản chờ không mang tên ai không chặn được
+thực nhận của ai.
+
+**Ô trống ≠ 0.** `z.coerce.number()` biến `""` thành `0` và thành công; ô "trần (bỏ trống = không)"
+từng lưu thành trần 0 ₫ và lặng lẽ đưa mọi khoản về 0 (review 19/10). Mọi ô số đi qua
+`lib/validation/payroll-code.ts`: trống ⇒ ô bắt buộc báo lỗi, ô tuỳ chọn là "không khai".
+
+**Phiếu lương / CSV.** Thưởng theo mã không nằm trong thành phần nào của chính sách nên in thành MỘT
+dòng riêng ("Thưởng theo mã — tạm tính", `components/payroll/profit-gate-rows.tsx`) và một cột CSV
+riêng; dòng chênh "chưa đủ điều kiện" bên dưới đưa tổng về đúng thực nhận được duyệt.
+`PayrollLine.codeBonusProvisional` giữ phần ấy; bảng chuyển đổi trừ nó ra để so đúng công thức cũ.
 
 ## 5. Chính sách có phiên bản
 
@@ -87,6 +102,26 @@ người liên quan là CHƯA KẾT LUẬN (`null`, in "—").
 | Đổi giữa tháng theo thời điểm nghiệp vụ | Có | cắt đoạn (§3); chính sách lương chung chia theo ngày hiệu lực |
 | Kỳ khoá chụp phiên bản chính sách | Có | ảnh chụp kỳ: `policyVersion` cổng, `codes`, và mọi khoản đã tính |
 | Không ghi đè lịch sử | Có | đổi = kết thúc + thêm mới; huỷ chỉ cho dòng nhập nhầm chưa chạm tháng khoá |
+
+## 5b. Đường ghi
+
+- Khoá dòng = băm NỘI DUNG (`codeRowId`): duyệt người thứ hai so dấu vân tay gồm khoá dòng, nên lần
+  gửi lại sau khi được duyệt tiêu thụ ĐÚNG lời duyệt ấy. Người duyệt ghi vào dòng là người QUYẾT yêu
+  cầu (`approval_requests.decided_by`).
+- Bàn giao OWNER (`planOwnerHandover`): OWNER mới KHÔNG hạn đóng OWNER cũ ở ngày liền trước; OWNER mới
+  CÓ hạn chồng lên OWNER khác ⇒ từ chối (đóng người cũ là cắt luôn quyền sau ngày kết thúc của người
+  mới). Huỷ một dòng KHÔNG tự mở lại dòng đã bị bàn giao. Cùng luật cho điều khoản.
+- Kiểm tháng khoá đọc TRONG giao dịch, sau khoá tên của mã. Còn một khe: đường chốt kỳ không lấy khoá
+  ấy, nên một tháng có thể bị khoá giữa lúc kiểm và lúc ghi — dòng khi đó chỉ ảnh hưởng tháng SAU (tháng
+  đã khoá đọc ảnh chụp), không đổi số đã khoá.
+
+## 5c. Hiệu năng
+
+Mốc của mọi mã trong tháng gom thành MỘT bộ mảnh chung (`buildCodeSegmentsFor`); mỗi mảnh là một lượt
+`getMarketerReport` (song song, memo 120 s). Không ai đổi giữa tháng ⇒ 0 lượt đo thêm. N mốc khác nhau
+trong tháng ⇒ N lượt, dùng chung cho mọi mã — không phải một lượt mỗi đoạn mỗi mã. Mô phỏng tháng
+chưa khoá (tối đa 12) lặp lại phần ấy cho từng tháng; production hôm nay chưa có phân công nào nên chi
+phí thêm là 2 câu đọc sổ mỗi tháng.
 
 ## 6. Đối soát với lợi nhuận công ty
 
@@ -118,10 +153,19 @@ Lợi nhuận đem xét ở cổng công ty là `totalProfit − hoa hồng thô
    `product_marketer_assignments` là HAI sổ. V2 không ghi đè sổ cũ và không đọc nó để chia thưởng —
    sổ cũ vẫn quyết cách QUY KẾT đơn / LN cá nhân. Hợp nhất hai sổ là một việc riêng.
 
+6. **Tháng khoá TRƯỚC khi V2 lên production** sẽ không có `profitGate.codes` trong ảnh chụp ⇒ sổ mã
+   của mọi tháng sau chưa dựng được ⇒ mọi phân công đứng ở "chờ". Production 19/10 chưa khoá tháng
+   nào, nên chỉ cần V2 deploy trước lần khoá đầu tiên. Nếu đã lỡ: khai lại mốc mở sổ quy chế sau tháng ấy.
+7. **Thuế / bảo hiểm trên thưởng theo mã**: khoản theo mã cộng SAU `netPay` của máy tính lương chung,
+   nên công thức khấu trừ (nếu chính sách có) không nhìn thấy nó — giống phần chênh của cổng V1. Nếu
+   chính sách cần khấu trừ trên khoản thưởng này, phải thêm thành phần tương ứng vào chính sách.
+
 ## 8. Kiểm thử
 
 `tests/payroll-code-ledger.test.ts` — 13 ca chủ shop liệt kê (phần thuần + luồng thật trên CSDL qua
 `getPayrollReport`, khoá tháng 1 bằng đường chốt kỳ, đổi OWNER + đổi X% giữa tháng 2), cộng hàng rào
 mã nguồn. Kiểm đột biến 19/10/2026: bỏ HWM · chia đều khi thiếu QC · đề nghị trên phần đủ điều kiện
 của mã thay vì phần phân bổ · bỏ chặn lương khi chờ · bỏ phát hiện % LN cá nhân · không cộng khoản
-theo mã vào tạm tính — cả 6 đều làm bài kiểm đỏ.
+theo mã vào tạm tính — cả 6 đều làm bài kiểm đỏ. Sau review độc lập: thêm 5 đột biến (bỏ kiểm thiếu
+một phần trọng số · ô trống không qua `blank` · cho OWNER có hạn cắt OWNER cũ · khoản chờ cả đoạn không
+tên · kỳ không phải tháng im lặng) — cả 5 đỏ.

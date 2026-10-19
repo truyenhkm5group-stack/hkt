@@ -9,6 +9,13 @@ import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
 
 export const dynamic = "force-dynamic";
 
+/** Σ tạm tính các khoản THƯỞNG THEO MÃ (khoá `…:CODE:…`); không có khoản nào ⇒ ô trống. */
+function codeBonusOf(claims: readonly { key: string; provisional: number | null }[] | undefined): number | "" {
+  const ma = (claims ?? []).filter((c) => c.key.includes(":CODE:"));
+  if (!ma.length || ma.some((c) => c.provisional === null)) return "";
+  return ma.reduce((t, c) => t + (c.provisional ?? 0), 0);
+}
+
 function csvCell(value: unknown) {
   const text = value === null || value === undefined ? "" : String(value);
   return /[",\n;]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
@@ -90,7 +97,7 @@ function snapshotRows(snapshot: PayrollSnapshot, live: readonly PayrollLine[]) {
       bonusRevenue: s.bonusRevenue,
       salary: s.salary,
       // Ảnh chụp đời cũ (chốt trước cổng lợi nhuận) không có khối này ⇒ ba cột thưởng LN để TRỐNG.
-      gateShare: s.profitShare ? { provisional: s.profitShare.provisional, eligible: s.profitShare.eligible, withheld: s.profitShare.withheld, reasons: s.profitShare.reasons } : null,
+      gateShare: s.profitShare ? { provisional: s.profitShare.provisional, eligible: s.profitShare.eligible, withheld: s.profitShare.withheld, reasons: s.profitShare.reasons, codeBonus: codeBonusOf(s.profitShare.claims) } : null,
       // Ảnh chụp đời cũ (`undefined`) chưa gồm điều chỉnh trong `salary` — ô để TRỐNG, không tự tính lại.
       legacyAdjustments: s.legacyAdjustments ?? null,
       /*
@@ -183,6 +190,8 @@ export async function GET(request: NextRequest) {
     "Thưởng % LN tạm tính (đ)",
     "Thưởng % LN đủ điều kiện (đ)",
     "Thưởng % LN chưa đủ điều kiện (đ)",
+    // Payroll V2: phần THƯỞNG THEO MÃ đã nằm trong cột "tạm tính" bên trái — tách ra để đối chiếu phiếu lương.
+    "Trong đó thưởng theo mã tạm tính (đ)",
     /*
       BẢY CỘT BÙ TRỪ LỖ LŨY KẾ.
 
@@ -215,7 +224,7 @@ export async function GET(request: NextRequest) {
   const out = [header.join(",")];
   for (const l of lines) {
     const ghiChu: string[] = [];
-    const gs = "gateShare" in l ? l.gateShare : { provisional: l.profitShare.provisional, eligible: l.profitShare.eligible, withheld: l.profitShare.withheld, reasons: l.profitShare.reasons };
+    const gs = "gateShare" in l ? l.gateShare : { provisional: l.profitShare.provisional, eligible: l.profitShare.eligible, withheld: l.profitShare.withheld, reasons: l.profitShare.reasons, codeBonus: codeBonusOf(l.profitShare.claims) };
     for (const r of gs?.reasons ?? []) ghiChu.push(`Thưởng % LN: ${r}`);
     if (l.fixed === null) ghiChu.push("Lương cứng CHƯA BIẾT: kỳ không có mốc đầu/cuối nên không chia theo ngày được.");
     if (l.bonusPersonal === null) ghiChu.push(report.cashRatioReason ?? "Thưởng theo LN cá nhân CHƯA BIẾT.");
@@ -253,6 +262,7 @@ export async function GET(request: NextRequest) {
         gs?.provisional ?? "",
         gs?.eligible ?? "",
         gs?.withheld ?? "",
+        gs?.codeBonus ?? "",
         l.carry?.monthKey ?? "không áp dụng",
         l.carry?.openingBalance ?? "",
         l.carry?.realProfit ?? "",
