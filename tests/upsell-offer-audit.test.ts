@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { addConversation, addPostConfirm, auditOffers, emptyPostConfirm, emptyTotals, offersOfConversation, parseAuditArgs } from "../scripts/upsell-offer-audit";
+import { addConversation, addPostConfirm, addSamples, AUDIT_SAMPLE_MAX, auditOffers, emptyPostConfirm, emptyTotals, offersOfConversation, parseAuditArgs } from "../scripts/upsell-offer-audit";
 
 const PHONE = "0900008681";
 const txt = (text: string) => [{ type: "text", text }];
@@ -42,6 +42,12 @@ function testPure() {
   const clean = offersOfConversation([{ role: "user", content: txt("Cho chị 1kg chả cá thu") }, { role: "assistant", content: txt("Dạ mình dùng thêm chả mực giã tay ăn kèm không ạ? Cho em xin SĐT nhé.") }, { role: "user", content: txt("ok lấy thêm 1kg chả mực") }], {});
   assert.deepEqual(clean, { offers: 1, crossSells: 1, afterDecline: 0, upsellAfterSize: 0, reaskAfterSize: 0, endedCancelled: false });
   const t = addConversation(addConversation(emptyTotals(), c, [{ reason: "CONTACT_INFO" }, { reason: "DECLINED" }]), clean, []);
+  // Mẫu mã hội thoại cho từng nhóm sai lúc / lặp (để lần vết), có trần.
+  const sm = addSamples(addSamples({ repeated: [], afterDecline: [], upsellAfterSize: [], reaskAfterSize: [] }, "conv-hslc", c), "conv-sach", clean);
+  assert.deepEqual(sm, { repeated: ["conv-hslc"], afterDecline: ["conv-hslc"], upsellAfterSize: ["conv-hslc"], reaskAfterSize: ["conv-hslc"] });
+  const full = { repeated: [] as string[], afterDecline: [] as string[], upsellAfterSize: [] as string[], reaskAfterSize: [] as string[] };
+  for (let i = 0; i < AUDIT_SAMPLE_MAX + 5; i++) addSamples(full, `c${i}`, c);
+  assert.equal(full.repeated.length, AUDIT_SAMPLE_MAX, "mẫu có trần");
   assert.deepEqual([t.conversations, t.withOffer, t.offers, t.repeated, t.afterDecline, t.cancelledAfterOffer, t.drops.CONTACT_INFO, t.drops.DECLINED], [2, 2, 3, 1, 1, 1, 1, 1]);
   assert.deepEqual([t.repeatedWithPost, t.repeatedCrossSell], [0, 0], "lặp ở ca HSLC: một lần gói lớn + một lần món khác, không có lời mời sau chốt");
   // Tách «mời ≥ 2 lần» (production 19/10/2026): mời gói 2kg (cùng món) rồi lời mời sau chốt ⇒ lặp CÓ lời mời sau chốt, KHÔNG phải ≥ 2 món
@@ -91,6 +97,7 @@ function testSource() {
   assert.doesNotMatch(src, /\.(insert|update|delete)\(|\binsert into\b|\bupdate \w+ set\b/i, "script không câu ghi");
   assert.ok(!/\(\?<[=!]/.test(src), "không nhìn-ngược");
   assert.match(src, /loadAiSalesPerformance\(/, "phễu + upsell dùng lại performance.ts, không tự tính");
+  assert.ok(!src.split("\n").some((l) => /tomTat\(`/.test(l) && /samples|mau\(/.test(l)), "mẫu mã hội thoại KHÔNG vào dòng tóm tắt công khai");
   for (const line of src.split("\n").filter((l) => /tomTat\(`/.test(l))) assert.doesNotMatch(line, /\$\{(?:t|text|conv\.id|r\.content|msgs)\}/, `dòng tóm tắt không in dữ liệu người: ${line.trim().slice(0, 120)}`);
   const ops = readFileSync(".github/workflows/ops-vps.yml", "utf8").replace(/\r\n/g, "\n");
   assert.match(ops, /- upsell-offer-audit\s+#/, "ops-vps khai lựa chọn");
