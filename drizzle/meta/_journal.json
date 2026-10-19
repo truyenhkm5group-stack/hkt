@@ -1737,6 +1737,13 @@
       "when": 1791574437000,
       "tag": "0248_org_migration_status",
       "breakpoints": true
+    },
+    {
+      "idx": 249,
+      "version": "7",
+      "when": 1791574497000,
+      "tag": "0249_product_marketer_assignments",
+      "breakpoints": true
     }
   ]
 }

@@ -320,6 +320,11 @@ export type ProfitGateSnapshot = {
   periodBase: number | null;
   /** Điều chỉnh lũy kế tường minh đã ghi vào tháng này, chụp lại nguyên văn lúc khoá. */
   lateAdjustments: LateAdjustment[];
+  /**
+   * LỢI NHUẬN TỪNG MÃ của riêng tháng này (`docs/payroll-code-ledger.md`). Sổ mã các tháng sau dựng lại
+   * từ chuỗi số này bằng hàm thuần — không tính lại tháng đã khoá. `undefined` = ảnh chụp trước Payroll V2.
+   */
+  codes?: { productId: string; code: string; profit: number }[];
   openingCumulative: number | null;
   openingHighWater: number | null;
   eligibleProfit: number | null;

@@ -35,6 +35,7 @@ import {
   type ProfitGatePolicy,
 } from "@/lib/constants/payroll-profit-gate";
 import { lockedMonthStep, nextOpening, type LateAdjustment, type ProfitGateOpening, type ProfitGateResult } from "@/lib/payroll/profit-gate";
+import { codeLedgerStep, type CodeMonthProfit, type CodeState } from "@/lib/payroll/code-ledger";
 import type { PayrollSnapshot } from "@/lib/queries/payroll-period";
 import { getSettingJson } from "@/lib/settings";
 import { monthPeriod } from "@/lib/constants/payroll-autopilot";
@@ -126,7 +127,7 @@ async function lockedSnapshots(monthKeys: readonly string[]): Promise<Map<string
  * Mô phỏng MỘT tháng chưa khoá trên số dư đầu đã cho. Bảng lương truyền hàm này vào — nó chạy
  * đúng phép tính của màn hình cho tháng ấy, với cổng ở chế độ "đã cho số dư".
  */
-export type SimulateMonth = (monthKey: string, opening: ProfitGateOpening) => Promise<ProfitGateResult>;
+export type SimulateMonth = (monthKey: string, opening: ProfitGateOpening, codeOpening: Map<string, CodeState> | null) => Promise<{ result: ProfitGateResult; codes: CodeMonthProfit[] | null }>;
 
 export type GateOpeningResolution = {
   policy: ProfitGatePolicy | null;
@@ -134,12 +135,18 @@ export type GateOpeningResolution = {
   problem: string | null;
   /** Những tháng đã dùng số MÔ PHỎNG — để màn hình nói thẳng tháng nào cần khoá. */
   simulatedMonths: string[];
+  /**
+   * SỔ MÃ đầu tháng (lũy kế + HWM từng mã), dựng từ mốc mở sổ: mọi mã bắt đầu ở 0 tại tháng mở sổ
+   * của quy chế. `null` = chưa dựng được (xem `codeProblem`).
+   */
+  codeOpening: Map<string, CodeState> | null;
+  codeProblem: string | null;
 };
 
 export async function resolveGateOpening(monthKey: string, deps: { simulate: SimulateMonth }): Promise<GateOpeningResolution> {
   const config = await getProfitGateConfig();
   const policy = config.active;
-  const none = (problem: string): GateOpeningResolution => ({ policy, opening: null, problem, simulatedMonths: [] });
+  const none = (problem: string): GateOpeningResolution => ({ policy, opening: null, problem, simulatedMonths: [], codeOpening: null, codeProblem: problem });
   if (!policy) return none("Chưa khai quy chế chia thưởng lợi nhuận.");
   if (compareMonthKey(monthKey, policy.openingMonth) < 0) {
     return none(
@@ -157,11 +164,23 @@ export async function resolveGateOpening(monthKey: string, deps: { simulate: Sim
   const before = monthsBetween(policy.openingMonth, prevMonthKey(monthKey));
   const locked = await lockedSnapshots(before);
   const simulatedMonths: string[] = [];
+  let codeOpening: Map<string, CodeState> | null = new Map();
+  let codeProblem: string | null = null;
+  const buocMa = (m: string, codes: readonly CodeMonthProfit[] | null | undefined) => {
+    if (!codeOpening) return;
+    if (!codes) {
+      codeOpening = null;
+      codeProblem = `Tháng ${m} không có số lợi nhuận theo mã (ảnh chụp trước Payroll V2) — sổ mã chưa dựng được; khai lại mốc mở sổ sau tháng ấy.`;
+      return;
+    }
+    codeOpening = codeLedgerStep(codeOpening, codes).closing;
+  };
   for (const m of before) {
     const snap = locked.get(m);
     const fig = snap ? lockedMonthFigures(snap) : null;
     if (fig) {
       opening = lockedMonthStep(opening, fig.base, fig.allocated);
+      buocMa(m, snap?.profitGate?.codes);
       continue;
     }
     if (snap) {
@@ -171,11 +190,12 @@ export async function resolveGateOpening(monthKey: string, deps: { simulate: Sim
       return { ...none(`Quá ${PROFIT_GATE_MAX_SIMULATED_MONTHS} tháng chưa khoá kể từ mốc mở sổ — khoá các tháng cũ hoặc khai lại mốc mở sổ.`), simulatedMonths };
     }
     simulatedMonths.push(m);
-    const r = await deps.simulate(m, opening);
-    const next = nextOpening(opening, r, false, `MÔ PHỎNG: tháng ${simulatedMonths.join(", ")} chưa khoá — số dư sẽ đổi khi các tháng ấy được chốt.`);
-    if (!next) return { ...none(`Tháng ${m} chưa khoá và không mô phỏng được: ${r.message}`), simulatedMonths };
+    const sim = await deps.simulate(m, opening, codeOpening);
+    const next = nextOpening(opening, sim.result, false, `MÔ PHỎNG: tháng ${simulatedMonths.join(", ")} chưa khoá — số dư sẽ đổi khi các tháng ấy được chốt.`);
+    if (!next) return { ...none(`Tháng ${m} chưa khoá và không mô phỏng được: ${sim.result.message}`), simulatedMonths };
     opening = next;
+    buocMa(m, sim.codes);
   }
 
-  return { policy, opening, problem: null, simulatedMonths };
+  return { policy, opening, problem: null, simulatedMonths, codeOpening, codeProblem };
 }

@@ -142,6 +142,8 @@ const ROUTES = [
   "/payroll/policies",
   "/payroll/assignments",
   "/payroll/adjustments",
+  "/payroll/codes",
+  "/payroll/codes/assignments",
   "/payroll/migration",
   "/payroll/runs",
   "/payroll/settings",

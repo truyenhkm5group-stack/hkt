@@ -668,6 +668,20 @@ deploy dừng, không phải cảnh báo.
     vào tháng còn mở, đúng một lần; mở khoá đi từ tháng khoá mới nhất trở về.
     Khoản KHẤU TRỪ / TẠM ỨNG trên đại lượng lợi nhuận không phải thưởng và không đi qua cổng.
 
+71. **THƯỞNG THEO MÃ: SỔ ĐI THEO MÃ, CỔNG ĐI THEO CÔNG TY, NGƯỜI CHỈ CHIA** (`lib/payroll/code-ledger.ts`,
+    `docs/payroll-code-ledger.md`): lợi nhuận mã là `getMarketerReport().products[].profit` — tính MỘT
+    lần, không viết công thức thứ hai. Mỗi mã có lũy kế + HWM RIÊNG, bắt đầu ở 0 tại tháng mở sổ của
+    quy chế cổng; đổi OWNER không reset sổ. Σ phần đủ điều kiện của các mã bị chặn bởi lợi nhuận đủ
+    điều kiện của CÔNG TY (phân bổ theo tỷ trọng), rồi OWNER = phân bổ × X%, SUPPORT = phân bổ × Y% ×
+    trọng số; mọi khoản theo mã đi vào CÙNG cổng (trần quỹ chung). Thiếu căn cứ chia (chưa có Y%,
+    trọng số tay Σ ≠ 100%, không SUPPORT nào có chi phí QC / doanh thu quy kết, hai OWNER, hai điều
+    khoản, X + Y > 100%, sổ mã chưa dựng được) ⇒ `PENDING_RECONCILIATION`, CHẶN duyệt kỳ, thực nhận
+    của người ấy là CHƯA KẾT LUẬN — **không bao giờ chia đều**. Người đang hưởng % LN CÁ NHÂN mà được
+    giao thêm mã ⇒ chờ chủ shop chọn (cộng cả hai là trả hai lần cho cùng một đồng lợi nhuận). Phân
+    công / điều khoản chỉ ghi qua `lib/actions/payroll-code.ts`: duyệt người thứ hai, khoá theo mã,
+    không ghi đè (kết thúc + thêm mới), không bắt đầu trong tháng đã khoá; migration KHÔNG gieo dòng
+    nào — không chính sách thưởng nào tự kích hoạt.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng
   `npm run db:generate`**: ảnh chụp `drizzle/meta/*_snapshot.json` chỉ tới `0032`, nên nó sinh migration
