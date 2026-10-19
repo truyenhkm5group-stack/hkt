@@ -1,0 +1,8 @@
+{
+  "pr": 917,
+  "sha": "49f351a6c740123e3e8a4c3d1190cec2a3e738ee",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-19T18:22:59.059Z",
+  "note": "review lead 2 vòng: vòng 1 FAIL (gõ nhầm hỏi/ngã «chã mực», «chã cá thu» mất mentionsProduct/labelsMatch so với main — đo bằng chạy thử nhánh vs 918663dd). Delta 49f351a6: một luật sameWord cho saidHas · clash calledByName · accentPick; chỉ dấu THANH phân xử, chỉ khi cả hai có thanh, hỏi ≡ ngã; «chà»/«chả» vẫn khác món. Đổi một kỳ vọng cũ (Trà hoa tan không thanh ⇒ mơ hồ) là hệ quả trực tiếp của l"
+}
