@@ -346,7 +346,7 @@ export function confirmedAddIssue(
   offer: PostConfirmOfferRef | undefined,
   customerText: string,
   /** `prevTurn` = seq tin khách NGAY TRƯỚC tin này (engine) — bằng `askedTurn` nghĩa là khách đang trả lời câu hỏi xác nhận. */
-  opts: { prevTurn?: number; catalogNames?: readonly string[]; staffBetween?: boolean } = {},
+  opts: { prevTurn?: number; catalogNames?: readonly string[]; staffBetween?: boolean; chosen?: readonly { productId: string | null; match: string }[] } = {},
 ): { kind: "UNNAMED" | "WRONG_VARIANT"; names: string[]; ask: string | null } | null {
   const buy = buyingText([customerText]);
   const fb = foldVi(buy);
@@ -361,7 +361,10 @@ export function confirmedAddIssue(
     return wrong.length ? { kind: "WRONG_VARIANT", names: wrong.map((a) => a.name), ask: null } : null;
   }
   const canAsk = Boolean(offer?.sent && !askedBefore && what && fb && ADD_CUE_RE.test(fb) && !otherNamed);
-  const unnamed = added.filter((a) => !(mentionsProduct(a.name, buy) || calledByName(a.name, buy)));
+  // Khách CHỌN món trong tin này theo bộ đọc giỏ («1 hũ ruốc» ⇒ món «ruốc» khách nói tường minh, gắn được sản phẩm / nhãn) = gọi tên — cùng
+  // căn cứ `lineBasisViolation` đang dùng. Chỉ so chữ thì tên tắt một từ («ruốc» của «Ruốc bông tôm 100%») bị chặn (order-golden «upsell»).
+  const chosenHere = (a: ConfirmedAddLine) => (opts.chosen ?? []).some((c) => (c.productId !== null && c.productId === a.productId) || (Boolean(c.match) && labelsMatch(c.match, a.name)));
+  const unnamed = added.filter((a) => !(mentionsProduct(a.name, buy) || calledByName(a.name, buy) || chosenHere(a)));
   if (unnamed.length) {
     const offeredUnnamed = Boolean(offer?.productId && unnamed.some((a) => a.productId === offer.productId));
     return { kind: "UNNAMED", names: unnamed.map((a) => a.name), ask: offeredUnnamed && canAsk ? `Mình muốn thêm ${what} vào đơn đúng không ạ?` : null };

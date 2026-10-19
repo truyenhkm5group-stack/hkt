@@ -97,6 +97,13 @@ function testThuan() {
     assert.notEqual(confirmedAddIssue(mucNew, asked, no, { prevTurn: 10, catalogNames: CAT }), null, `«${no}» không được thêm món vào đơn đã chốt`);
   }
   assert.equal(confirmedAddIssue(mucNew, asked, "đúng rồi em", { prevTurn: 10, catalogNames: CAT, staffBetween: true })?.kind, "UNNAMED", "nhân viên nhắn xen giữa ⇒ «có» không phải trả lời câu hỏi của bot");
+  // Cổng #908 (order-golden «upsell»): «ok lấy thêm 1 hũ ruốc nữa em» — tên tắt MỘT từ, bộ đọc giỏ đã ghi khách CHỌN món ruốc ở tin này ⇒
+  // là gọi tên, không chặn. Không có lựa chọn của tin này ⇒ «ok em» vẫn bị chặn như cũ; lựa chọn món KHÁC không làm căn cứ cho món này.
+  const ruoc = [{ productId: "p4", variantId: "v4", name: "Ruốc bông tôm 100% (Size: 250g)", quantity: 1, weightGrams: 250 }];
+  assert.equal(confirmedAddIssue(ruoc, undefined, "ok lấy thêm 1 hũ ruốc nữa em", { chosen: [{ productId: "p4", match: "ruốc" }] }), null, "khách chọn ruốc ở tin này ⇒ thêm");
+  assert.equal(confirmedAddIssue(ruoc, undefined, "ok lấy thêm 1 hũ ruốc nữa em", { chosen: [{ productId: null, match: "ruốc" }] }), null, "nhãn khách nói khớp tên món ⇒ thêm");
+  assert.equal(confirmedAddIssue(ruoc, undefined, "ok em", { chosen: [] })?.kind, "UNNAMED", "không có lựa chọn ⇒ vẫn chặn");
+  assert.equal(confirmedAddIssue(ruoc, undefined, "ok lấy thêm 1 hộp nem", { chosen: [{ productId: "p3", match: "nem" }] })?.kind, "UNNAMED", "chọn món khác ⇒ không phải căn cứ cho ruốc");
   // B3 + NB4 khoá mức mã nguồn: đồng hồ khách AI nhận chữ ĐÃ GHÉP; giá mời theo bảng giá của khách.
   const eng = readFileSync("lib/sales-chatbot/engine.ts", "utf8");
   assert.match(eng, /const i = aiTexts\.lastIndexOf\(appended\.before\);\s*if \(i >= 0\) aiTexts\[i\] = appended\.after;/, "aiTexts thay bằng chữ đã ghép câu mời");

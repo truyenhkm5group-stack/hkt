@@ -1212,7 +1212,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
                 .where(and(eq(schema.salesChatMessages.conversationId, ctx.conversationId), eq(schema.salesChatMessages.role, "assistant"), sql`${schema.salesChatMessages.seq} > ${askedAt}`, sql`${schema.salesChatMessages.seq} < ${ctx.turn}`, sql`${schema.salesChatMessages.content}::text like ${`%${SHOP_SAID_PREFIX}%`}`))
                 .limit(1)).length > 0
             : false;
-        const issue = confirmedAddIssue(added, state.postConfirmOffer, ctx.lastUserText, { prevTurn: ctx.prevTurn, catalogNames, staffBetween });
+        // Món khách nói TƯỜNG MINH trong CHÍNH tin này theo bộ đọc giỏ (sản phẩm đã gắn hoặc nhãn khách nói).
+        const chosen = (state.cart?.selectedItems ?? []).filter((x) => x.customerExplicit && ctx.turn !== undefined && x.sourceMessageId === ctx.turn && (x.productId || x.match)).map((x) => ({ productId: x.productId, match: x.match }));
+        const issue = confirmedAddIssue(added, state.postConfirmOffer, ctx.lastUserText, { prevTurn: ctx.prevTurn, catalogNames, staffBetween, chosen });
         // Câu hỏi xác nhận chỉ MỘT lần (review vòng 3) — ghi lượt đã hỏi; lượt khách KẾ TIẾP trả lời đồng ý = chọn đúng mẫu mã đã mời.
         if (issue?.ask && state.postConfirmOffer && ctx.turn !== undefined) state.postConfirmOffer = { ...state.postConfirmOffer, askedTurn: ctx.turn };
         const pcoNow = state.postConfirmOffer;
