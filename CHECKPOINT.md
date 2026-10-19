@@ -38,6 +38,14 @@
 
 
 
+
+### 19/10/2026 — Integration Lead (DESKTOP-56TH98Y:wt-tech-lead-v2): việc tiếp theo CHƯA có chủ (mở sứ mệnh khi nhận)
+
+- **claim-guard-added-claim** (P1, lib/sales-chatbot): sau khi lượt sửa đơn ĐÃ CHỐT bị từ chối, câu model «Dạ em thêm rồi ạ» lọt qua claim guard — guard không bắt khẳng định «đã thêm / đã sửa đơn». Có từ trước #upsell-after-confirm; luồng đó chỉ làm nó hay gặp hơn. Phát hiện ở review vòng 3 của upsell-after-confirm.
+- **ops-script-root-fix** (P2, .github/workflows/ops-vps.yml): kịch bản ops đi qua MỘT biến môi trường (trần 131.072 B) — #907 chỉ rút chú thích + test chặn 125.000 B; gốc là chuyển sang script_path / tách thân từng nhánh ra scripts/.
+- **shared-node-modules-qrcode** (P2, máy DESKTOP-56TH98Y): node_modules dùng chung (hkt-tech-control-plane / Code ERP) thiếu `qrcode` 1.5.4 ⇒ không phiên nào chạy được npm test đầy đủ tại máy; cần MỘT lượt `npm ci` có kiểm soát khi không phiên nào đang dùng.
+- **hslc-vtp-webhook** (CHỜ CHỦ SHOP): HSLC tạo vận đơn ngoài ERP (shipping-source-probe 39165959552: ERP không tạo, không nối POS, VTP chưa từng báo về); đề xuất dán URL webhook ERP vào tài khoản VTP của HSLC (chỉ nhận) — cần chủ shop xác nhận công cụ tạo vận đơn + duyệt.
+
 ## 17/10/2026 ~03:30Z — Tech Lead Web: #872 + #874 đã lên production (d11467d0)
 
 - **Production**: health 02:58Z `commit d11467d0ae66` (gồm #870 · #872 · #869 · #873 · #874 · #878) · migrations 248 · `degradedMigration: true` (tổ chức thử «qa» thiếu 0245–0247 — deploy thứ 5 liên tiếp đỏ CHỈ vì «qa»; app đã dựng lại, smoke 135/135, 0 lỗi thật). #877 đang đo tài nguyên cho «qa» 0245.
