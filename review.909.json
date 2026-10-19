@@ -1,0 +1,8 @@
+{
+  "pr": 909,
+  "sha": "b31461c270bc01fe9831aa0c97cc7e675ac5781a",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-19T05:10:16.499Z",
+  "note": "lead: như #901 (org-ai-cutover --apply-probe), thêm --probe-set=upsell: 2 hội thoại kênh TEST qua lõi openConversation/chatTurn (công cụ mô phỏng, không đơn thật, không nhắn khách), không ghi thẳng bảng; chấm bằng hàm thuần; tóm tắt chỉ số đếm; kịch bản ops 115.460 B"
+}
