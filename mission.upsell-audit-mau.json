@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "upsell-audit-mau",
+  "title": "upsell-offer-audit in mẫu mã hội thoại sai lúc (phần mã hoá)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-upsell-audit-mau",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/upsell-audit-mau",
+  "base_sha": "d0beefc6a4eca45ef2b7e130b94a7eb5bc863c7a",
+  "domains": [],
+  "owned_paths": [
+    "scripts/upsell-offer-audit.ts",
+    "tests/upsell-offer-audit.test.ts"
+  ],
+  "dependencies": [
+    "upsell-audit-lap"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-19T11:32:45.301Z",
+  "updated_at": "2026-10-19T11:32:45.301Z",
+  "last_heartbeat": "2026-10-19T11:32:45.301Z",
+  "definition_of_done": []
+}
