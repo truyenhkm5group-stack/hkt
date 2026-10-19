@@ -1,0 +1,8 @@
+{
+  "pr": 916,
+  "sha": "5816a72d1b2b8fc82e5cd1b48e5d07384751c8d4",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-19T18:08:58.454Z",
+  "note": "review lead: tính kỳ không bị chặn; DUYỆT/KHOÁ chỉ đòi chữ ký khi thưởng % LN đủ điều kiện > 0; chữ ký gắn dấu vân tay ảnh chụp (tính lại ⇒ ký lại), người duyệt khác người ký, KHOÁ kiểm lại chữ ký còn hiệu lực; đọc lại trạng thái kỳ + sổ chữ ký trong giao dịch dưới pg_advisory_xact_lock chung; huỷ chữ ký không được khi kỳ LOCKED/PAID; không migration, không đổi công thức cơ sở lương; script ops 18"
+}
