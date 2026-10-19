@@ -1,4 +1,3 @@
-{"at":"2026-10-11T07:04:32.223Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#805 @ 3b8232e8d16d · Chỉ commit gộp main; danh sách ops giải hợp (giữ avatar-proxy-check + sender-provenance-probe)"}
 {"at":"2026-10-11T07:19:01.692Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"handoff-ownership","detail":"#800 @ 099823bced8a → f9657f4fa1b0 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-11T07:44:50.279Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"f9657f4fa1b0 · run 38122386879 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38122386879"}
 {"at":"2026-10-11T07:47:42.404Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"avatar-accept-header","detail":"PASS 90f56278201bcd2aa810d23f66af1ca927a8c611 2026-10-11T07:47:27.544Z"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-19T11:26:06.578Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"upsell-audit-lap","detail":"#912 @ 8675f490cec1 → d0beefc6a4ec (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-19T11:32:45.406Z","actor":"DESKTOP-56TH98Y:wt-upsell-audit-mau","kind":"CLAIM","mission":"upsell-audit-mau","detail":"PLANNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-19T11:32:45.406Z","actor":"DESKTOP-56TH98Y:wt-upsell-audit-mau","kind":"OVERLAP_ACCEPTED","mission":"upsell-audit-mau","detail":"OVERLAP_ACCEPTED với upsell-after-confirm: phạm vi scripts/upsell-offer-audit.ts — cách tích hợp: upsell-after-confirm (#908) và upsell-audit-lap (#912) đã vào main; nhánh tách từ origin/main d0beefc6; chỉ THÊM mẫu mã ở phần mã hoá"}
+{"at":"2026-10-19T11:33:11.072Z","actor":"DESKTOP-56TH98Y:wt-upsell-audit-mau","kind":"HANDOFF","mission":"upsell-audit-mau","detail":"claude/upsell-audit-mau @ eaaf5a1049ec · 1 lệnh kiểm thử"}
