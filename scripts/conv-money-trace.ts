@@ -608,7 +608,7 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   const yieldsOf = sql`case when jsonb_typeof(${cvq.state}->'quickSizeYields') = 'array' then ${cvq.state}->'quickSizeYields' else '[]'::jsonb end`;
   const inWindow = sql`(select count(*) from jsonb_array_elements_text(${yieldsOf}) as y(at) where y.at >= ${from.toISOString()} and y.at <= ${now.toISOString()})`;
   const [sy] = await db.select({ n: sql<number>`coalesce(sum(${inWindow}), 0)::int`, convs: sql<number>`(count(*) filter (where ${inWindow} > 0))::int` }).from(cvq).where(sql`${cvq.channel} <> 'TEST'`);
-  tomTat(`D nhường AI vì khách đã chọn khối lượng (#868 trên câu mẫu): ${sy?.n ?? 0} lượt / ${sy?.convs ?? 0} hội thoại — mỗi lượt là một lời gọi AI thay cho câu mẫu 0 token`);
+  tomTat(`D nhường AI vì khách đã chọn khối lượng (#868 trên câu mẫu · khớp chữ + AI chọn mã; KHÔNG đếm công cụ send_quick_reply — ở đó model đã được gọi): ${sy?.n ?? 0} lượt / ${sy?.convs ?? 0} hội thoại — mỗi lượt là một lời gọi AI thay cho câu mẫu 0 token`);
   // C — P0 khách cũ mua lại (#886): lượt bình luận ĐÃ CHÉP sang hộp thư (`carryCommentTurn` gắn nhãn cố định ở đầu tin khách) và đơn được
   // gắn cờ ROUND_ABANDONED trong kỳ. Chỉ số đếm. Nhãn gõ lại ở đây (không import) vì ops lấy script từ main nhưng lib từ ảnh đang chạy;
   // tests/conv-money-trace.test.ts đối chiếu đúng chuỗi này với engine.ts.
@@ -714,10 +714,10 @@ async function replayQuick(db: Db, convIds: readonly string[]): Promise<void> {
   // chưa có luật ⇒ in «CHƯA ĐO ĐƯỢC», không giả vờ là đã xét. Giỏ dựng lại từ chữ khách (cùng `applyCustomerCartMessage` của lượt sống;
   // không có món vừa được mời / danh mục đầy đủ như lượt sống ⇒ có thể bỏ sót, không bịa thêm), câu mẫu xét theo chữ GỐC (ô giá chưa điền).
   const nba = (await import("@/lib/sales-chatbot/next-best-action")) as Record<string, unknown>;
-  const sizeRule = typeof nba.quickReplySizeConflict === "function" ? (nba.quickReplySizeConflict as (text: string, input: { cart?: CartCommitment; lastUserText: string; facts: OfferFacts | null }) => boolean) : null;
+  const sizeRule = typeof nba.quickReplySizeConflict === "function" ? (nba.quickReplySizeConflict as (text: string, input: { cart?: CartCommitment; lastUserText: string; facts: OfferFacts | null; covers?: readonly string[] }) => boolean) : null;
   const facts = sizeRule ? await loadOfferFacts(await loadSalesChatbotConfig(), upsellId).catch(() => null) : null;
   const names = products.map((p) => p.name);
-  const sizeBlockedFor = (cart: CartCommitment | undefined, lastUserText: string) => (sizeRule ? (e: QuickReplyEntry) => sizeRule(e.answer, { cart, lastUserText, facts }) : undefined);
+  const sizeBlockedFor = (cart: CartCommitment | undefined, lastUserText: string) => (sizeRule ? (e: QuickReplyEntry) => sizeRule(e.answer, { cart, lastUserText, facts, covers: quickReplyCovers(e, products) }) : undefined);
   const now = new Date();
   const m = schema.salesChatMessages;
   const T = { turns: 0, eligible: 0, changed: 0, wrongBefore: 0, wrongAfter: 0, found: 0, defaultBefore: 0, sizeYield: 0 };

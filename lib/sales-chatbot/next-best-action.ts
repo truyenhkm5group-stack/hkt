@@ -600,15 +600,18 @@ export function guardReply(text: string, input: ReplyGuardInput): ReplyGuardResu
  * SIZE_CHOSEN — production 19/10/2026, HSLC: «1kg chả cá thu» ⇒ câu mẫu «… Dạ, mình muốn mua 1kg hay 2kg ạ?» đi thẳng vì câu mẫu không
  * qua `guardReply`). Câu mẫu là lời của shop, KHÔNG được cắt ⇒ `true` = nơi gọi không gửi câu mẫu, để AI trả lời (chữ AI qua guardReply).
  * Dùng lại ĐÚNG phán xét của `guardReply` — cửa sổ lời mời coi như MỞ để chỉ hỏi luật quy cách, không hỏi lý do khác; không có luật thứ
- * hai. Món câu mẫu GỌI TÊN đều phải là món khách đã chọn khối lượng: quy cách đã chọn của món KHÁC không chặn câu mẫu của món này. HÀM THUẦN.
+ * hai. Món câu mẫu NÓI TỚI đều phải là món khách đã chọn khối lượng: quy cách đã chọn của món KHÁC không chặn câu mẫu của món này.
+ * `covers` = món câu mẫu nói tới theo bộ lọc món #898 (`quickReplyCovers` — ô SKU trước, rồi tên) — review #914 NB2: dò tên trên CẢ câu mẫu
+ * thì một dòng «Bên em còn có Nem…» cuối A01 làm câu mẫu lọt, và tên danh mục dài («Chả cá thu Hạ Long (1kg)») trôi sang món khác. Không
+ * truyền ⇒ lùi về dò tên trong chữ. HÀM THUẦN.
  */
 /** Trần số mốc «câu mẫu nhường AI vì khách đã chọn khối lượng» giữ trên một hội thoại (`state.quickSizeYields`). */
 export const QUICK_SIZE_YIELDS_MAX = 20;
-export function quickReplySizeConflict(text: string, input: { cart?: CartCommitment; lastUserText: string; facts: OfferFacts | null }): boolean {
+export function quickReplySizeConflict(text: string, input: { cart?: CartCommitment; lastUserText: string; facts: OfferFacts | null; covers?: readonly string[] }): boolean {
   if (!explicitItems(input.cart).length) return false;
   const g = guardReply(text, { window: { open: true }, cart: input.cart, lastUserText: input.lastUserText, greetedBefore: false, facts: input.facts });
   if (!g.dropped.some((d) => d.reason === "SIZE_CHOSEN")) return false;
-  const named = input.facts?.catalogNames.length ? namedIn(text, input.facts.catalogNames) : [];
+  const named = input.covers ?? (input.facts?.catalogNames.length ? namedIn(text, input.facts.catalogNames) : []);
   return named.every((n) => chosenGrams(input.cart, n) !== undefined);
 }
 

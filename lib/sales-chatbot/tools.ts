@@ -1480,7 +1480,8 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (state.cart?.selectedItems.some((x) => x.customerExplicit)) {
         const upsellId = ctx.quickReplies?.find((q) => q.upsell)?.id ?? null;
         const facts = needsOfferFacts(pick.text, state.cart) ? await loadOfferFacts(ctx.config, upsellId).catch(() => null) : null;
-        if (quickReplySizeConflict(pick.text, { cart: state.cart, lastUserText: ctx.lastUserText, facts })) {
+        const covers = ctx.quickReplyFocus ? { covers: ctx.quickReplyFocus.coversOf(pick.entry) } : {};
+        if (quickReplySizeConflict(pick.text, { cart: state.cart, lastUserText: ctx.lastUserText, facts, ...covers })) {
           return err(
             `Câu mẫu ${entry.code}: hỏi lại quy cách khách đã chọn`,
             "Câu mẫu này hỏi lại quy cách / mời gói lớn cho món khách ĐÃ chọn khối lượng — KHÔNG gửi. Trả lời bằng chữ: theo đúng khối lượng khách đã chọn và đi tiếp bước bán; KHÔNG hỏi lại «1kg hay 2kg».",

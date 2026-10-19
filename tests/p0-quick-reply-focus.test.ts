@@ -234,7 +234,14 @@ function testThuan() {
   assert.ok(!quickReplySizeConflict(ASK, { cart: nem2, lastUserText: "giá chả cá thu", facts: factsQ }), "(1) chọn quy cách NEM không chặn câu mẫu CHẢ CÁ");
   assert.ok(!quickReplySizeConflict(ASK, { cart: nem2, lastUserText: "ok em", facts: factsQ }), "(1) khách không gọi tên món, giỏ chỉ có nem ⇒ câu mẫu gọi tên chả cá vẫn đi");
   assert.ok(!quickReplySizeConflict(ASK, { cart: caKg, lastUserText: "cho chị 1kg chả cá thu, có mấy loại size em", facts: factsQ }), "khách HỎI các quy cách ⇒ câu hỏi quy cách là câu trả lời (luật guardReply)");
+  // Review #914 NB2: món câu mẫu nói tới lấy từ bộ lọc món (`covers`), không dò tên trên cả câu — dòng «Bên em còn có Nem…» cuối câu mẫu
+  // chả cá không làm nó lọt; tên danh mục dài không trôi sang món khác.
+  const ASK_NEM = `${ASK} Bên em còn có Nem hải sản tôm bề bề ăn kèm rất hợp ạ.`;
+  assert.ok(quickReplySizeConflict(ASK_NEM, { cart: caKg, lastUserText: "cho chị 1kg chả cá thu", facts: factsQ, covers: ["Chả cá thu"] }), "câu mẫu chả cá có dòng nhắc nem vẫn nhường AI");
+  assert.ok(!quickReplySizeConflict(ASK, { cart: caKg, lastUserText: "ok em", facts: factsQ, covers: ["Nem hải sản tôm bề bề"] }), "câu mẫu của NEM, khách đã chọn khối lượng CHẢ CÁ ⇒ không chặn");
   const engQ = readFileSync("lib/sales-chatbot/engine.ts", "utf8");
+  assert.match(engQ, /quickReplySizeConflict\(pick\.text, \{[^}]*covers: qrFocus\.coversOf\(pick\.entry\)/, "engine truyền món câu mẫu nói tới từ bộ lọc món");
+  assert.match(readFileSync("lib/sales-chatbot/tools.ts", "utf8"), /covers: ctx\.quickReplyFocus\.coversOf\(pick\.entry\)/, "công cụ truyền món câu mẫu nói tới từ bộ lọc món");
   assert.match(engQ, /quick\.kind === "ANSWER" && !quickReasks\(quick\.pick\) && !\(await quickSizeReask\(quick\.pick\)\)\) return sendQuick/, "đường khớp chữ qua luật quy cách");
   assert.match(engQ, /qrFocus\.answers\(pick\.entry\)\) && !\(await quickSizeReask\(pick\)\)\) return sendQuick\(pick, pre\)/, "đường AI chọn mã qua luật quy cách");
 }
@@ -252,6 +259,8 @@ async function seed(ctx: Omit<GoldenHookCtx, "conversationId">): Promise<void> {
   for (const p of [
     { name: "Chả cá thu", code: "CCT", sku: "CCT-1KG", size: "1kg", price: 280_000 },
     { name: "Nem hải sản tôm bề bề", code: "NEM", sku: "NEM-HOP", size: "Hộp 10 cái", price: 120_000 },
+    // Tên THẬT của HSLC (org-catalog 19/10/2026): bỏ dấu «chà» = «cha» — từng làm giỏ đọc «1kg chả cá thu» thành mơ hồ (giỏ rỗng).
+    { name: "Ruốc bông (chà bông) cá thu nguyên chất", code: "RCT", sku: "RUOC-CT", size: "Hộp 250g", price: 250_000 },
   ]) {
     const r = await createProductCore(admin, { name: p.name, code: p.code, unit: "gói", retailPrice: p.price, cost: null, variants: [{ sku: p.sku, size: p.size, color: "", retailPrice: p.price, cost: null, selling: true }] });
     assert.ok(r.ok, JSON.stringify(r));
