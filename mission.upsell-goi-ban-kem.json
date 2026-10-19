@@ -21,10 +21,12 @@
     "upsell-after-confirm"
   ],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    910
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-19T06:48:52.051Z",
-  "updated_at": "2026-10-19T06:49:19.678Z",
+  "updated_at": "2026-10-19T06:51:35.279Z",
   "last_heartbeat": "2026-10-19T06:49:19.678Z",
   "definition_of_done": [],
   "handoff": {
