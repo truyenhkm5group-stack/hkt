@@ -1,0 +1,8 @@
+{
+  "pr": 910,
+  "sha": "80f37dcfb5dff2d0f6e1d0085a40bcdc2924644b",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-19T06:51:40.996Z",
+  "note": "lead: verifiedUnitPrices thêm cờ addOnAlone chỉ cho giá LỜI MỜI — bỏ qua đúng lý do ADD_ON_ONLY (món đi cùng đơn chính), mọi lý do khác vẫn chặn; mặc định giữ nguyên nên đường báo giá không đổi; bắt từ probe production (mời gói 1kg 400k thay vì 0,5kg 200k)"
+}
