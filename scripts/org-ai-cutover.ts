@@ -624,15 +624,16 @@ export function cutoverVerdict(rows: readonly UsageGroup[]): { salesPlatform: nu
   return out;
 }
 
-export type CutoverArgs = { ok: true; code: string; mode: "AUDIT" | "APPLY" | "PROBE"; credit: number | null; since: Date | null; probeSet?: "quick-reply" } | { ok: false; error: string };
+export type CutoverArgs = { ok: true; code: string; mode: "AUDIT" | "APPLY" | "PROBE"; credit: number | null; since: Date | null; probeSet?: ProbeSet } | { ok: false; error: string };
+export type ProbeSet = "quick-reply" | "upsell";
 
 /** Ô arg ⇒ chế độ. Cờ lạ / lặp / sai cặp ⇒ lỗi cách dùng — không đoán ý (gõ nhầm `--credits` mà vẫn chạy `--apply` là chuyển mù). Thông điệp không lặp lại giá trị đã gõ. */
 export function parseCutoverArgs(args: readonly string[]): CutoverArgs {
   const positional = args.filter((a) => !a.startsWith("--"));
   const flags = args.filter((a) => a.startsWith("--"));
   if (positional.length !== 1) return { ok: false, error: positional.length ? "chỉ nhận MỘT mã tổ chức" : "thiếu mã tổ chức" };
-  const known = (f: string) => f === "--apply" || f === "--apply-probe" || f.startsWith("--credit=") || f.startsWith("--since=") || f === "--probe-set=quick-reply";
-  if (flags.some((f) => !known(f))) return { ok: false, error: "cờ lạ — chỉ nhận --apply, --credit=<USD>, --apply-probe, --since=<ISO>, --probe-set=quick-reply" };
+  const known = (f: string) => f === "--apply" || f === "--apply-probe" || f.startsWith("--credit=") || f.startsWith("--since=") || f === "--probe-set=quick-reply" || f === "--probe-set=upsell";
+  if (flags.some((f) => !known(f))) return { ok: false, error: "cờ lạ — chỉ nhận --apply, --credit=<USD>, --apply-probe, --since=<ISO>, --probe-set=quick-reply|upsell" };
   if (new Set(flags.map((f) => f.split("=")[0])).size !== flags.length) return { ok: false, error: "mỗi cờ chỉ một lần" };
   const apply = flags.includes("--apply");
   const probe = flags.includes("--apply-probe");
@@ -641,7 +642,7 @@ export function parseCutoverArgs(args: readonly string[]): CutoverArgs {
   const sinceRaw = flags.find((f) => f.startsWith("--since="))?.slice("--since=".length);
   if (creditRaw !== undefined && !apply) return { ok: false, error: "--credit chỉ đi cùng --apply (đặt credit rồi chuyển trong CÙNG một lượt)" };
   if (sinceRaw !== undefined && !probe) return { ok: false, error: "--since chỉ đi cùng --apply-probe" };
-  const probeSet = flags.includes("--probe-set=quick-reply");
+  const probeSet = flags.find((f) => f.startsWith("--probe-set="))?.slice("--probe-set=".length) as ProbeSet | undefined;
   if (probeSet && !probe) return { ok: false, error: "--probe-set chỉ đi cùng --apply-probe" };
   let credit: number | null = null;
   if (creditRaw !== undefined) {
@@ -654,7 +655,7 @@ export function parseCutoverArgs(args: readonly string[]): CutoverArgs {
     since = new Date(sinceRaw);
     if (!sinceRaw || Number.isNaN(since.getTime())) return { ok: false, error: "--since phải là mốc ISO, ví dụ 2026-10-08T04:00:00Z" };
   }
-  return { ok: true, code: positional[0], mode: apply ? "APPLY" : probe ? "PROBE" : "AUDIT", credit, since, ...(probeSet ? { probeSet: "quick-reply" as const } : {}) };
+  return { ok: true, code: positional[0], mode: apply ? "APPLY" : probe ? "PROBE" : "AUDIT", credit, since, ...(probeSet ? { probeSet } : {}) };
 }
 
 /**
@@ -689,6 +690,48 @@ export function judgeProbe(c: QuickReplyProbeCase, reply: string, names: readonl
   if (c.noDefault && named.length === 1 && extractVndAmounts(reply).length > 0) return { verdict: "FAIL", why: `khách chưa nói món mà bot báo giá MỘT món: ${named[0]}` };
   if (c.onlyItems && items.some((n) => !c.onlyItems!.test(n))) return { verdict: "FAIL", why: `giỏ / đơn có món khách không chọn: ${items.filter((n) => !c.onlyItems!.test(n)).join(", ")}` };
   return { verdict: needed.length || c.noDefault ? "PASS" : "N/A", why: "đúng" };
+}
+
+/**
+ * `--apply-probe --probe-set=upsell` (Tech Lead 19/10/2026, P0 lời mời sau chốt — «xác minh trên production»): mỗi ca một hội thoại THỬ
+ * (kênh TEST — không nhắn khách thật, công cụ ghi chỉ mô phỏng, KHÔNG đơn / khách thật) đi trọn đường chốt nhanh: chọn món → gửi thông
+ * tin ⇒ đơn tự chốt và tin xác nhận mang MỘT lời mời. Ca «đồng ý»: «ok thêm giúp chị» (chưa gọi tên món) ⇒ bot hỏi đúng một câu ⇒
+ * «đúng rồi» ⇒ món được mời vào đơn + «Tổng đơn mới». Ca «ok»: «ok» trả lời tin xác nhận ⇒ đơn KHÔNG đổi. Chữ khách, tên, số điện thoại
+ * là chữ TỰ DỰNG. upsell-offer-audit bỏ kênh TEST khỏi phép đo nên ca thử không làm lệch số «SAU CHỐT».
+ */
+export const UPSELL_PROBE_INFO = "Nguyễn Thị Thử, 0912000111, số 12 ngõ 34 Láng Hạ, Đống Đa, Hà Nội";
+export type UpsellProbeCase = { key: string; say: string[]; expectAdded: boolean };
+export const UPSELL_PROBE_CASES: UpsellProbeCase[] = [
+  { key: "moi-sau-chot-dong-y", say: ["cho chị 1kg chả cá thu", UPSELL_PROBE_INFO, "ok thêm giúp chị", "đúng rồi"], expectAdded: true },
+  { key: "moi-sau-chot-ok-khong-them", say: ["cho chị 1kg chả cá thu", UPSELL_PROBE_INFO, "ok"], expectAdded: false },
+];
+/** Những gì máy đọc được sau từng lượt của một ca upsell — `afterInfo` = ngay sau lượt gửi thông tin (lượt thứ 2), `end` = lượt cuối. */
+export type UpsellProbeObs = {
+  confirmedAfterInfo: boolean;
+  offer: { outcome: string; sent: boolean; productId: string | null; text: string | null } | null;
+  infoReply: string;
+  productsAfterInfo: string[];
+  productsEnd: string[];
+  accepted: boolean;
+  lastReply: string;
+};
+/** Chấm một ca upsell — HÀM THUẦN. Không tự chốt / không có món kèm hợp lệ ⇒ KHÔNG ÁP DỤNG (không phải ĐẠT); lời mời hỏng ⇒ TRƯỢT. */
+export function judgeUpsellProbe(c: UpsellProbeCase, o: UpsellProbeObs): { verdict: ProbeVerdict; why: string } {
+  if (!o.confirmedAfterInfo) return { verdict: "N/A", why: "đơn KHÔNG tự chốt sau lượt gửi thông tin (công tắc tự chốt / thiếu thông tin) — không có lời mời sau chốt để kiểm" };
+  if (!o.offer) return { verdict: "FAIL", why: "đơn đã chốt mà máy chủ không ghi quyết định mời nào" };
+  if (o.offer.outcome === "NO_CANDIDATE") return { verdict: "N/A", why: "không có món kèm đang bán · còn hàng · giá xác minh" };
+  if (o.offer.outcome !== "OFFERED" || !o.offer.sent) return { verdict: "FAIL", why: `lời mời không tới khách (quyết định: ${o.offer.outcome}${o.offer.sent ? "" : " · chưa gắn vào tin"})` };
+  if (o.offer.text && !o.infoReply.includes(o.offer.text)) return { verdict: "FAIL", why: "tin xác nhận không mang câu mời đã ghi" };
+  const before = [...o.productsAfterInfo].sort().join(",");
+  if (c.expectAdded) {
+    if (!o.offer.productId || !o.productsEnd.includes(o.offer.productId)) return { verdict: "FAIL", why: "khách đồng ý mà món được mời KHÔNG vào đơn" };
+    if (!o.accepted) return { verdict: "FAIL", why: "món đã vào đơn mà lời mời không ghi «khách nhận»" };
+    if (!/Tổng đơn mới/.test(o.lastReply)) return { verdict: "FAIL", why: "thêm món mà không báo khách tổng đơn mới" };
+    return { verdict: "PASS", why: "mời ⇒ hỏi một câu ⇒ đồng ý ⇒ thêm đúng món + tổng mới" };
+  }
+  if ([...o.productsEnd].sort().join(",") !== before) return { verdict: "FAIL", why: "«ok» trả lời tin xác nhận mà đơn bị đổi món" };
+  if (o.accepted) return { verdict: "FAIL", why: "«ok» bị ghi là khách nhận lời mời" };
+  return { verdict: "PASS", why: "«ok» không thêm món, đơn giữ nguyên" };
 }
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300);
@@ -1337,6 +1380,58 @@ async function probeQuickReplies(org: Org): Promise<number> {
   return dem("FAIL") ? 1 : 0;
 }
 
+async function probeUpsell(org: Org): Promise<number> {
+  const out = await withOrganization(org.code, async () => {
+    const db = await getDb();
+    const c = schema.salesChatConversations;
+    const pv = schema.productVariants;
+    type St = { confirmed?: { auto?: boolean } | null; draft?: { lines?: { variantId: string }[] }; postConfirmOffer?: { outcome?: string; sent?: boolean; productId?: string; text?: string; accepted?: unknown } };
+    const readState = async (id: string): Promise<St> => ((await db.select({ state: c.state }).from(c).where(eq(c.id, id)))[0]?.state ?? {}) as St;
+    const productsOf = async (st: St): Promise<string[]> => {
+      const vids = (st.draft?.lines ?? []).map((l) => l.variantId).filter(Boolean);
+      return vids.length ? (await db.select({ productId: pv.productId }).from(pv).where(inArray(pv.id, vids))).map((x) => x.productId) : [];
+    };
+    const res: { key: string; verdict: ProbeVerdict; why: string; replies: string[]; outcome: string }[] = [];
+    for (const k of UPSELL_PROBE_CASES) {
+      const conv = await openConversation("TEST", { createdBy: null });
+      const replies: string[] = [];
+      try {
+        let afterInfo: St = {};
+        for (const [i, text] of k.say.entries()) {
+          const turn = await chatTurn(conv.id, text, { channel: "TEST", actorId: null });
+          if (!turn.ok) throw new Error(turn.error);
+          const msgs = turn.view.messages;
+          const lastUser = msgs.map((x) => x.role).lastIndexOf("user");
+          replies.push(msgs.slice(lastUser + 1).filter((x) => x.role === "assistant").map((x) => x.text).join("\n"));
+          if (i === 1) afterInfo = await readState(conv.id);
+        }
+        const end = await readState(conv.id);
+        const pco = end.postConfirmOffer ?? afterInfo.postConfirmOffer;
+        const obs: UpsellProbeObs = {
+          confirmedAfterInfo: Boolean(afterInfo.confirmed),
+          offer: pco ? { outcome: String(pco.outcome ?? "—"), sent: Boolean(pco.sent), productId: pco.productId ?? null, text: pco.text ?? null } : null,
+          infoReply: replies[1] ?? "",
+          productsAfterInfo: await productsOf(afterInfo),
+          productsEnd: await productsOf(end),
+          accepted: Boolean(end.postConfirmOffer?.accepted),
+          lastReply: replies[replies.length - 1] ?? "",
+        };
+        res.push({ key: k.key, ...judgeUpsellProbe(k, obs), replies, outcome: obs.offer?.outcome ?? "—" });
+      } catch (e) {
+        res.push({ key: k.key, verdict: "FAIL", why: `lỗi lượt: ${errorText(e)}`, replies, outcome: "—" });
+      }
+    }
+    return res;
+  });
+  for (const r of out) {
+    console.log(`Ca ${r.key}: ${r.verdict} — ${r.why} · quyết định mời: ${r.outcome}`);
+    r.replies.forEach((t, i) => console.log(`  lượt ${i + 1} bot: «${t.replace(/\s+/g, " ").slice(0, 400)}»`));
+  }
+  const dem = (v: ProbeVerdict) => out.filter((r) => r.verdict === v).length;
+  tomTat(`Kiểm lời mời sau chốt trực tiếp (kênh TEST, không nhắn khách thật, không đơn thật): ${out.length} ca · ĐẠT ${dem("PASS")} · TRƯỢT ${dem("FAIL")} · KHÔNG ÁP DỤNG ${dem("N/A")}${out.length ? ` · ${out.map((r) => `${r.key} ${r.verdict} (${r.outcome})`).join(" · ")}` : ""}`);
+  return dem("FAIL") ? 1 : 0;
+}
+
 async function probe(org: Org, since: Date | null): Promise<number> {
   const t = await withOrganization(org.code, async () => {
     // Máy làm ⇒ không mang tên người (luật 34 / 36); dấu vết nằm ở nhật ký nền tảng của lượt chuyển.
@@ -1383,6 +1478,7 @@ async function main(): Promise<number> {
   }
   if (a.mode === "APPLY") return applyCutover(org, a.credit, realDeps());
   if (a.mode === "PROBE" && a.probeSet === "quick-reply") return probeQuickReplies(org);
+  if (a.mode === "PROBE" && a.probeSet === "upsell") return probeUpsell(org);
   if (a.mode === "PROBE") return probe(org, a.since);
   return audit(org);
 }

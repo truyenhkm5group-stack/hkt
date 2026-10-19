@@ -43,6 +43,8 @@ import {
   judgeProbe,
   parseCutoverArgs,
   QUICK_REPLY_PROBE_CASES,
+  UPSELL_PROBE_CASES,
+  judgeUpsellProbe,
   platformCandidateModels,
   platformPriceRatio,
   PLATFORM_ENGINE_PATCH,
@@ -562,6 +564,29 @@ export function testOrgAiCutoverPure() {
   assert.equal(ok([ORG, "--apply-probe", "--probe-set=quick-reply"]).probeSet, "quick-reply");
   assert.match(sai2([ORG, "--probe-set=quick-reply"]), /chỉ đi cùng --apply-probe/);
   sai2([ORG, "--apply-probe", "--probe-set=khac"]);
+  // Kiểm lời mời sau chốt trực tiếp (Tech Lead 19/10/2026): cùng đường --apply-probe; máy chấm bằng trạng thái hội thoại thử.
+  assert.equal(ok([ORG, "--apply-probe", "--probe-set=upsell"]).probeSet, "upsell");
+  assert.match(sai2([ORG, "--probe-set=upsell"]), /chỉ đi cùng --apply-probe/);
+  sai2([ORG, "--apply-probe", "--probe-set=upsell", "--probe-set=quick-reply"]);
+  {
+    const dy = UPSELL_PROBE_CASES.find((x) => x.key === "moi-sau-chot-dong-y")!;
+    const okc = UPSELL_PROBE_CASES.find((x) => x.key === "moi-sau-chot-ok-khong-them")!;
+    const MOI = "Bên em có thêm Chả mực giã tay (0,5kg) giá 200.000 ₫ ăn kèm rất hợp";
+    const o = { confirmedAfterInfo: true, offer: { outcome: "OFFERED", sent: true, productId: "p-muc", text: MOI }, infoReply: `Dạ em đã lên đơn ạ. ${MOI}`, productsAfterInfo: ["p-ca"], productsEnd: ["p-ca", "p-muc"], accepted: true, lastReply: "Dạ em lên đơn Chả cá thu và Chả mực. Tổng đơn mới 480.000 ₫ ạ." };
+    assert.equal(judgeUpsellProbe(dy, o).verdict, "PASS");
+    assert.equal(judgeUpsellProbe(dy, { ...o, productsEnd: ["p-ca"], accepted: false }).verdict, "FAIL", "đồng ý mà không thêm ⇒ TRƯỢT");
+    assert.equal(judgeUpsellProbe(dy, { ...o, lastReply: "Dạ em thêm rồi ạ." }).verdict, "FAIL", "thêm mà không báo tổng mới ⇒ TRƯỢT");
+    assert.equal(judgeUpsellProbe(dy, { ...o, infoReply: "Dạ em đã lên đơn ạ." }).verdict, "FAIL", "câu mời không nằm trong tin xác nhận ⇒ TRƯỢT");
+    const k = { ...o, productsEnd: ["p-ca"], accepted: false, lastReply: "Dạ vâng ạ." };
+    assert.equal(judgeUpsellProbe(okc, k).verdict, "PASS");
+    assert.equal(judgeUpsellProbe(okc, { ...k, productsEnd: ["p-ca", "p-muc"] }).verdict, "FAIL", "«ok» làm đổi đơn ⇒ TRƯỢT");
+    assert.equal(judgeUpsellProbe(okc, { ...k, accepted: true }).verdict, "FAIL");
+    assert.equal(judgeUpsellProbe(okc, { ...k, offer: { ...k.offer, sent: false } }).verdict, "FAIL", "lời mời không gắn vào tin ⇒ TRƯỢT");
+    assert.equal(judgeUpsellProbe(okc, { ...k, offer: { ...k.offer, outcome: "FACTS_ERROR" } }).verdict, "FAIL");
+    assert.equal(judgeUpsellProbe(okc, { ...k, offer: null }).verdict, "FAIL", "đã chốt mà không có quyết định mời ⇒ TRƯỢT");
+    assert.equal(judgeUpsellProbe(okc, { ...k, offer: { ...k.offer, outcome: "NO_CANDIDATE" } }).verdict, "N/A", "không có món kèm ⇒ KHÔNG ÁP DỤNG, không phải ĐẠT");
+    assert.equal(judgeUpsellProbe(okc, { ...k, confirmedAfterInfo: false }).verdict, "N/A");
+  }
   const DM = ["Chả cá thu", "Chả mực giã tay", "Nem hải sản tôm bề bề"];
   const ca = (k: string) => QUICK_REPLY_PROBE_CASES.find((x) => x.key === k)!;
   assert.equal(judgeProbe(ca("hoi-cha-ca"), "Dạ chả cá thu bên em 1kg giá 280.000 ₫ ạ", DM, []).verdict, "PASS");
