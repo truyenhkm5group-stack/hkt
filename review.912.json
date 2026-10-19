@@ -1,0 +1,8 @@
+{
+  "pr": 912,
+  "sha": "8675f490cec18e058b9ad2a0c587f872cc16eab7",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-19T11:00:04.098Z",
+  "note": "lead: chỉ script đo upsell-offer-audit thêm dòng LẶP (ESTIMATED): mời ≥2 lần · có lời mời sau chốt · ≥2 lời mời món khác — chỉ đọc, chỉ số đếm, không hàm lib mới"
+}
