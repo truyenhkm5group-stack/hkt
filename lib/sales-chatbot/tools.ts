@@ -16,9 +16,10 @@
  * dòng nào vượt tồn KHẢ DỤNG đã biết, và `customer_confirmation` là nguyên văn một đoạn trong câu CUỐI của khách — model
  * không tự chốt thay khách được.
  */
-import { and, desc, eq, inArray, ne, or } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
+import { SHOP_SAID_PREFIX } from "@/lib/sales-chatbot/replay-shared";
 import { purchaseRoundStart } from "@/lib/sales-chatbot/purchase-round";
 import type { AiToolDef } from "@/lib/ai/provider";
 import { freeSlots, slotBookable, vnDayOffset, vnInstant, WEEKDAY_LABEL } from "@/lib/constants/booking";
@@ -1201,7 +1202,17 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         const added = priced.asked.filter((a) => !had.has(a.productId ?? a.variantId));
         // Chữ MUA của tin này (bỏ câu hỏi giá / câu từ chối — review vòng 2) phải gọi tên món; món vừa được mời phải đúng mẫu mã đã mời.
         const catalogNames = added.length ? [...new Set([...(await pricingContextFor(ctx.config, verifiedCustomerId(state))).byId.values()].map((c) => c.name))] : [];
-        const issue = confirmedAddIssue(added, state.postConfirmOffer, ctx.lastUserText, { prevTurn: ctx.prevTurn, catalogNames });
+        // Tin nhân viên / page xen giữa câu hỏi xác nhận và tin này (review vòng 4) — chỉ đọc khi khách đang trả lời đúng câu hỏi ấy.
+        const askedAt = state.postConfirmOffer?.askedTurn;
+        const staffBetween =
+          askedAt !== undefined && ctx.prevTurn === askedAt && ctx.turn !== undefined && ctx.conversationId
+            ? (await (await getDb())
+                .select({ seq: schema.salesChatMessages.seq })
+                .from(schema.salesChatMessages)
+                .where(and(eq(schema.salesChatMessages.conversationId, ctx.conversationId), eq(schema.salesChatMessages.role, "assistant"), sql`${schema.salesChatMessages.seq} > ${askedAt}`, sql`${schema.salesChatMessages.seq} < ${ctx.turn}`, sql`${schema.salesChatMessages.content}::text like ${`%${SHOP_SAID_PREFIX}%`}`))
+                .limit(1)).length > 0
+            : false;
+        const issue = confirmedAddIssue(added, state.postConfirmOffer, ctx.lastUserText, { prevTurn: ctx.prevTurn, catalogNames, staffBetween });
         // Câu hỏi xác nhận chỉ MỘT lần (review vòng 3) — ghi lượt đã hỏi; lượt khách KẾ TIẾP trả lời đồng ý = chọn đúng mẫu mã đã mời.
         if (issue?.ask && state.postConfirmOffer && ctx.turn !== undefined) state.postConfirmOffer = { ...state.postConfirmOffer, askedTurn: ctx.turn };
         const pcoNow = state.postConfirmOffer;

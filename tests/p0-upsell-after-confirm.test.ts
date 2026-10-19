@@ -19,7 +19,8 @@ import { getDb, schema } from "@/db";
 import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
 import { formatVND } from "@/lib/format";
 import { stockFor } from "@/lib/sales-chatbot/catalog";
-import { confirmedAddIssue, pickPostConfirmOffer, postConfirmOfferText, postConfirmOfferWindow } from "@/lib/sales-chatbot/next-best-action";
+import { confirmedAddIssue, isShortYes, pickPostConfirmOffer, postConfirmOfferText, postConfirmOfferWindow } from "@/lib/sales-chatbot/next-best-action";
+import { SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { setSettingJson } from "@/lib/settings";
@@ -74,6 +75,18 @@ function testThuan() {
   assert.equal(confirmedAddIssue(mucNew, offerRef, "không lấy chả mực đâu", { catalogNames: CAT })?.ask, null, "đang từ chối ⇒ không hỏi (mời lại sau từ chối)");
   assert.equal(confirmedAddIssue(mucNew, offerRef, "thêm chả cá thu nhé", { catalogNames: CAT })?.ask, null, "gọi tên món KHÁC ⇒ không hỏi về món được mời");
   assert.equal(confirmedAddIssue(mucNew, { ...asked }, "thêm chả cá thu nhé", { prevTurn: 10, catalogNames: CAT })?.kind, "UNNAMED", "trả lời bằng tên món khác ⇒ không phải đồng ý món được mời");
+  // Vòng 4: «có» = CẢ tin thuộc danh sách đóng; phủ định trên chữ có dấu ⇒ không; câu nói chuyện khác chứa «ok» / «có» / «đúng» ⇒ không.
+  for (const yes of ["ừ", "ừ đúng rồi", "vâng thêm giúp chị", "được em", "đúng rồi em", "có", "ok em", "dạ vâng ạ", "lấy luôn nhé", "thêm giúp chị nhé", "Đúng rồi!", "oke"]) assert.ok(isShortYes(yes), `«${yes}» là đồng ý`);
+  const NOT_YES = [
+    "đừng thêm nhé em", "không đúng đâu em", "đừng em", "không có nhu cầu", "không em, ok em gửi địa chỉ khác nhé", "chị chỉ lấy ruốc thôi, ok em", "ok em gửi địa chỉ khác nhé",
+    "ok ship nhanh giúp chị", "ok cảm ơn em", "có gì chị báo sau", "có ai ở nhà đâu em", "có chồng chị ăn", "được rồi, giao sáng mai nhé", "đúng 3h chiều giao nha",
+    "thôi em", "khỏi em", "chưa em", "nhầm rồi", "sai rồi em", "hủy nhé", "bỏ đi em", "ko", "k em", "", "em ơi",
+  ];
+  for (const no of NOT_YES) {
+    assert.ok(!isShortYes(no), `«${no}» KHÔNG phải đồng ý`);
+    assert.notEqual(confirmedAddIssue(mucNew, asked, no, { prevTurn: 10, catalogNames: CAT }), null, `«${no}» không được thêm món vào đơn đã chốt`);
+  }
+  assert.equal(confirmedAddIssue(mucNew, asked, "đúng rồi em", { prevTurn: 10, catalogNames: CAT, staffBetween: true })?.kind, "UNNAMED", "nhân viên nhắn xen giữa ⇒ «có» không phải trả lời câu hỏi của bot");
   // B3 + NB4 khoá mức mã nguồn: đồng hồ khách AI nhận chữ ĐÃ GHÉP; giá mời theo bảng giá của khách.
   const eng = readFileSync("lib/sales-chatbot/engine.ts", "utf8");
   assert.match(eng, /const i = aiTexts\.lastIndexOf\(appended\.before\);\s*if \(i >= 0\) aiTexts\[i\] = appended\.after;/, "aiTexts thay bằng chữ đã ghép câu mời");
@@ -143,6 +156,25 @@ const CASES: GoldenCase[] = [
     { say: "ok thêm giúp chị", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Mình muốn thêm Chả mực giã tay (1kg) vào đơn đúng không ạ?")]] },
     { say: "thôi em", ai: [() => [say("Dạ vâng ạ.")]] },
     { say: "ok", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ vâng ạ.")]] },
+  ] },
+  { key: "pco-hoi-xac-nhan-dung-them", title: "(review vòng 4) Hỏi xác nhận ⇒ «đừng thêm nhé em» (bỏ dấu = «dung them») ⇒ KHÔNG thêm", shop: "food", channel: "WEB", turns: [
+    { say: INFO("0961003214"), ai: orderInfo("0961003214") },
+    { say: "ok thêm giúp chị", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Mình muốn thêm Chả mực giã tay (1kg) vào đơn đúng không ạ?")]] },
+    { say: "đừng thêm nhé em", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ vâng ạ.")]] },
+  ] },
+  { key: "pco-hoi-xac-nhan-nv-xen", title: "(review vòng 4) Hỏi xác nhận ⇒ nhân viên nhắn xen giữa ⇒ «đúng rồi em» KHÔNG tính là trả lời câu hỏi của bot", shop: "food", channel: "WEB", turns: [
+    { say: INFO("0961003215"), ai: orderInfo("0961003215") },
+    { say: "ok thêm giúp chị", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Mình muốn thêm Chả mực giã tay (1kg) vào đơn đúng không ạ?")]] },
+    {
+      say: "đúng rồi em",
+      before: async (ctx) => {
+        const db = await getDb();
+        const m = schema.salesChatMessages;
+        const rows = await db.select({ seq: m.seq }).from(m).where(eq(m.conversationId, ctx.conversationId));
+        await db.insert(m).values({ conversationId: ctx.conversationId, seq: Math.max(...rows.map((r) => r.seq)) + 1, role: "assistant", content: [{ type: "text", text: `${SHOP_SAID} Chị ơi đơn mình giao sáng mai được không ạ?` }] });
+      },
+      ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ vâng ạ.")]],
+    },
   ] },
   { key: "pco-ship-bao-sau", title: "(review vòng 2) Shop chưa khai phí ship ⇒ «Tổng đơn mới» không in phí ship CHƯA BIẾT thành 0", shop: "food", channel: "WEB", config: { shippingFee: null }, turns: [
     { say: INFO("0961003211"), ai: orderInfo("0961003211") },
@@ -246,6 +278,10 @@ async function testChatTurn() {
         const r3 = JSON.stringify(t.turns[3].rounds.map((r) => r.results));
         assert.match(r3, /khách chưa gọi tên món/, r3);
         assert.doesNotMatch(r3, /Hỏi khách ĐÚNG MỘT câu/, "đã hỏi một lần ⇒ không hỏi lại");
+        assert.equal(st.postConfirmOffer?.accepted, undefined);
+      }
+      if (c.key === "pco-hoi-xac-nhan-dung-them" || c.key === "pco-hoi-xac-nhan-nv-xen") {
+        assert.deepEqual(lines, ["RUOC-TOM×1"], `[${c.key}] KHÔNG thêm món: ${lines.join(", ")} · ${results.slice(0, 600)}`);
         assert.equal(st.postConfirmOffer?.accepted, undefined);
       }
       if (c.key === "pco-ship-bao-sau") {

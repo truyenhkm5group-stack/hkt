@@ -306,14 +306,37 @@ export const offerVariantLabel = (variant: string) => variant.replace(/^\s*(?:si
  */
 export type ConfirmedAddLine = { productId: string | null; variantId: string; name: string; quantity: number; weightGrams: number | null };
 export type PostConfirmOfferRef = { productId?: string; variantId?: string; name?: string; variant?: string; price?: number; sent?: boolean; askedTurn?: number };
-const AFFIRM_RE = /(?:^| )(?:u|uk|um|uhm|vang|da vang|dung roi|dung vay|dung|co|duoc|ok|oke|okie|dong y|chot|them giup|lay giup|lay luon|them luon)(?: |$)/;
+/**
+ * «CÓ» CHO CÂU HỎI XÁC NHẬN — kiểm CẢ TIN, danh sách ĐÓNG, không heuristics (review vòng 4: dò «đúng» / «có» / «ok» ở bất kỳ đâu ⇒ «đừng
+ * thêm nhé em» bỏ dấu thành «dung them» = «đúng», «không đúng đâu em», «ok ship nhanh giúp chị», «có gì chị báo sau» đều thành ĐỒNG Ý và
+ * đơn đã chốt 350.000 → 750.000 ₫). (1) Có bất kỳ từ PHỦ ĐỊNH nào trên chữ CÓ DẤU ⇒ không. (2) Bỏ từ lịch sự / xưng hô; phần còn lại
+ * (bỏ dấu) phải ghép TRỌN từ các cụm trong danh sách đồng ý — thừa một từ nào khác ⇒ không. HÀM THUẦN.
+ */
+const YES_NEGATION = new Set(["không", "ko", "k", "kh", "hông", "hok", "chưa", "đừng", "thôi", "khỏi", "nhầm", "sai", "hủy", "huỷ", "bỏ"]);
+const YES_PARTICLES = new Set(["em", "e", "ạ", "à", "nhé", "nhe", "nha", "nhá", "chị", "c", "anh", "shop", "sop", "luôn", "đi", "với", "ơi", "oi", "nhen", "hen", "nghen"]);
+const YES_PHRASES = ["u", "uk", "um", "uhm", "vang", "da vang", "da", "dung roi", "dung vay", "dung", "co", "duoc", "ok", "oke", "okie", "dong y", "them", "them giup", "lay", "lay luon", "lay them", "cho them"]
+  .map((p) => p.split(" "))
+  .sort((a, b) => b.length - a.length);
+export function isShortYes(text: string): boolean {
+  const raw = text.normalize("NFC").toLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, " ").trim().split(/\s+/).filter(Boolean);
+  if (!raw.length || raw.some((w) => YES_NEGATION.has(w))) return false;
+  const rest = raw.filter((w) => !YES_PARTICLES.has(w)).map((w) => foldVi(w)).filter(Boolean);
+  if (!rest.length) return false;
+  let i = 0;
+  while (i < rest.length) {
+    const hit = YES_PHRASES.find((ph) => ph.every((w, k) => rest[i + k] === w));
+    if (!hit) return false;
+    i += hit.length;
+  }
+  return true;
+}
 const ADD_CUE_RE = /(?:^| )(?:them|lay them|cho them|ok|oke|duoc|dong y|u|uk|lay|lay luon)(?: |$)/;
 export function confirmedAddIssue(
   added: readonly ConfirmedAddLine[],
   offer: PostConfirmOfferRef | undefined,
   customerText: string,
   /** `prevTurn` = seq tin khách NGAY TRƯỚC tin này (engine) — bằng `askedTurn` nghĩa là khách đang trả lời câu hỏi xác nhận. */
-  opts: { prevTurn?: number; catalogNames?: readonly string[] } = {},
+  opts: { prevTurn?: number; catalogNames?: readonly string[]; staffBetween?: boolean } = {},
 ): { kind: "UNNAMED" | "WRONG_VARIANT"; names: string[]; ask: string | null } | null {
   const buy = buyingText([customerText]);
   const fb = foldVi(buy);
@@ -321,7 +344,8 @@ export function confirmedAddIssue(
   const what = offer?.name ? `${offer.name}${offer.variant && offerVariantLabel(offer.variant) ? ` (${offerVariantLabel(offer.variant)})` : ""}` : "";
   const askedBefore = offer?.askedTurn !== undefined;
   // Trả lời «có» cho câu hỏi xác nhận ⇒ đúng mẫu mã đã mời, không món nào khác.
-  const answersYes = Boolean(offer?.sent && askedBefore && opts.prevTurn !== undefined && opts.prevTurn === offer!.askedTurn && fb && AFFIRM_RE.test(fb) && !otherNamed);
+  // Nhân viên / page nhắn xen giữa câu hỏi và câu trả lời ⇒ «có» có thể là trả lời NGƯỜI, không phải câu hỏi của bot.
+  const answersYes = Boolean(offer?.sent && askedBefore && opts.prevTurn !== undefined && opts.prevTurn === offer!.askedTurn && !opts.staffBetween && isShortYes(customerText) && !otherNamed);
   if (answersYes && added.length > 0 && added.every((a) => a.productId === offer!.productId)) {
     const wrong = added.filter((a) => a.variantId !== offer!.variantId);
     return wrong.length ? { kind: "WRONG_VARIANT", names: wrong.map((a) => a.name), ask: null } : null;
