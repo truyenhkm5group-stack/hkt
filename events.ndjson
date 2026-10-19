@@ -1,4 +1,3 @@
-{"at":"2026-10-11T06:48:51.876Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"handoff-ownership","detail":"fix/handoff-ownership @ 099823bced8a · 1 lệnh kiểm thử"}
 {"at":"2026-10-11T06:49:09.023Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#800 @ 099823bced8a · Bài chuông giữ ý định luật 03/10, kiểm chặt hơn theo khoá đợt; gộp main không xung đột"}
 {"at":"2026-10-11T07:03:50.939Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#805 @ 049146b4cc0b · Chỉ commit gộp main; danh sách ops giải hợp (giữ avatar-proxy-check + sender-provenance-probe)"}
 {"at":"2026-10-11T07:04:32.223Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#805 @ 3b8232e8d16d · Chỉ commit gộp main; danh sách ops giải hợp (giữ avatar-proxy-check + sender-provenance-probe)"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-19T10:58:08.976Z","actor":"DESKTOP-56TH98Y:wt-upsell-audit-lap","kind":"HANDOFF","mission":"upsell-audit-lap","detail":"claude/upsell-audit-lap @ 8675f490cec1 · 1 lệnh kiểm thử"}
 {"at":"2026-10-19T11:00:00.227Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"upsell-audit-lap","detail":"#912 cho claude/upsell-audit-lap @ 8675f490cec1"}
 {"at":"2026-10-19T11:00:23.695Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#912 @ 8675f490cec1 · lead: chỉ script đo upsell-offer-audit thêm dòng LẶP (ESTIMATED): mời ≥2 lần · có lời mời sau chốt · ≥2 lời mời món khác — chỉ đọc, chỉ số đếm, không hàm lib mới"}
+{"at":"2026-10-19T11:26:06.578Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"upsell-audit-lap","detail":"#912 @ 8675f490cec1 → d0beefc6a4ec (MERGE_NOW · MEDIUM · gates success)"}

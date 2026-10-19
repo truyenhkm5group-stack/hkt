@@ -3,7 +3,7 @@
   "mission_id": "upsell-audit-lap",
   "title": "upsell-offer-audit tách mời lặp: có lời mời sau chốt / hai món khác",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-upsell-audit-lap",
@@ -25,9 +25,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-19T10:57:43.949Z",
-  "updated_at": "2026-10-19T11:00:00.191Z",
+  "updated_at": "2026-10-19T11:26:06.543Z",
   "last_heartbeat": "2026-10-19T10:58:08.939Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#912 → d0beefc6a4eca45ef2b7e130b94a7eb5bc863c7a"
+  },
   "handoff": {
     "branch": "claude/upsell-audit-lap",
     "sha": "8675f490cec18e058b9ad2a0c587f872cc16eab7",
