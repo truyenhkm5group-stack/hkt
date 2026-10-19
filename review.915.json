@@ -1,0 +1,8 @@
+{
+  "pr": 915,
+  "sha": "4be6a4d6f9f163cfe3c10104ad2ecf9da17cb16f",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-19T15:35:17.003Z",
+  "note": "review độc lập 2 vòng PASS-WITH-NITS + delta cuối (lead): nhiều tên khớp khi bỏ dấu ⇒ đúng MỘT tên chứa mọi từ CÓ DẤU khách gõ VÀ chứa cụm đó liền nhau, đúng thứ tự mới thắng; còn lại mơ hồ (chà cá thu, cá thu, gõ không dấu, áo thun cổ tròn nam/nữ); chuẩn hoá vị trí dấu thanh; luật từ thứ hai giữ nguyên. Ghi chú NB3: khi AI không dùng được, lượt câu mẫu nhường AI sẽ chuyển người thay vì gửi câu mẫ"
+}
