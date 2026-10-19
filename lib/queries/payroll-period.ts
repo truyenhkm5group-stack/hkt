@@ -83,6 +83,20 @@ export type PayrollSnapshot = {
    * sổ lũy kế khi ấy dựng lại từ chính những con số đã chụp (`lockedMonthFigures`), không tính lại.
    */
   profitGate?: ProfitGateSnapshot;
+  /**
+   * BẢNG ĐỐI SOÁT LỢI NHUẬN của tháng lúc tính kỳ (`docs/payroll-code-ledger.md` §9). Chữ ký cấp 1 ký
+   * ĐÚNG dấu vân tay này; `undefined` = ảnh chụp trước Payroll V2 vận hành hoặc kỳ không phải tháng lịch.
+   */
+  profitRecon?: {
+    status: "RECONCILED" | "UNRECONCILED";
+    fingerprint: string;
+    fingerprintKey: string;
+    issues: { code: string; label: string; amount: number | null; count: number | null }[];
+    lines: { key: string; label: string; basis: number | null; source: number | null; diff: number | null; status: string; cls: string; note: string }[];
+    coverage: { revenueWithMoneyPct: number | null; revenueSettledPct: number | null; costReconciledPct: number | null };
+    classes: Record<string, number>;
+    codes: { total: number; withCustomId: number; profitComplete: number; assigned: number; withProfit: number };
+  };
   lines: {
     employeeId: string;
     name: string;

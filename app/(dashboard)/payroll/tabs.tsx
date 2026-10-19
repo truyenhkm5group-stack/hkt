@@ -20,6 +20,7 @@ export function PayrollTabs({ canManage }: { canManage: boolean }) {
     ...(canManage
       ? [
           { href: "/payroll/codes", label: "Lợi nhuận theo mã" },
+          { href: "/payroll/reconciliation", label: "Đối soát" },
           { href: "/payroll/autopilot", label: "Trả lương tự động" },
           { href: "/payroll/policies", label: "Chính sách lương" },
           { href: "/payroll/assignments", label: "Phân công & gán chính sách" },

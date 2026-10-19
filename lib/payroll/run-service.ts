@@ -34,6 +34,9 @@ import {
 } from "@/lib/constants/payroll";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { getPayrollReport, profitGateReadiness } from "@/lib/queries/payroll";
+import { getMonthReconciliation, parseSignoffs } from "@/lib/queries/payroll-reconciliation";
+import { profitApprovalProblem, reconFingerprintKey, signableFingerprint } from "@/lib/payroll/profit-reconciliation";
+import { PAYROLL_PROFIT_SIGNOFF_KEY } from "@/lib/constants/payroll-reconciliation";
 import { LEGACY_CARRY_COMPONENT, monthKeyOf, rateToBp, wholeMonthKey } from "@/lib/constants/payroll-carryover";
 import { getProfitGateConfig } from "@/lib/queries/payroll-profit-gate";
 import { PAYROLL_PROFIT_GATE_KEY } from "@/lib/constants/payroll-profit-gate";
@@ -128,6 +131,38 @@ export async function calculatePayrollPeriodAs(actor: PayrollActor, input: Calcu
   }
 
   const snapshot = buildPayrollSnapshot(report, period, key);
+  /*
+    ẢNH CHỤP MANG BẢNG ĐỐI SOÁT CỦA THÁNG (Payroll V2 vận hành, `docs/payroll-code-ledger.md` §9.3).
+    Chữ ký cấp 1 ký ĐÚNG bảng này — không ký số sống, vì số sống đổi theo từng webhook và ký → tính →
+    duyệt sẽ không bao giờ khớp. Tính kỳ KHÔNG bị chặn ở đây: chặn nằm ở bước DUYỆT / KHOÁ, và chỉ khi
+    kỳ có thưởng % lợi nhuận đủ điều kiện > 0.
+  */
+  const thangKy = basis === "profit1" ? wholeMonthKey(fromAt, toAt) : null;
+  if (thangKy) {
+    try {
+      const rc = await getMonthReconciliation(thangKy, { report });
+      const fp = signableFingerprint(rc.fingerprint, report.profitGate.result);
+      snapshot.profitRecon = {
+        status: rc.status,
+        fingerprint: fp,
+        fingerprintKey: reconFingerprintKey(fp),
+        issues: rc.issues.map((i) => ({ code: i.code, label: i.label, amount: i.amount, count: i.count })),
+        lines: rc.lines.map((l) => ({ key: l.key, label: l.label, basis: l.basis, source: l.source, diff: l.diff, status: l.status, cls: l.cls, note: l.note })),
+        coverage: rc.coverage,
+        classes: rc.classes,
+        codes: rc.codes,
+      };
+    } catch (e) {
+      /*
+        Chỉ CHẶN khi tháng có thưởng % lợi nhuận đủ điều kiện (review vòng 2): tháng không có khoản nào thì
+        bước duyệt không cần bảng này, và giữ lương cứng của cả công ty vì một truy vấn đối soát hết giờ là
+        đúng thứ luật 78 cấm. Ảnh chụp khi ấy không mang bảng — duyệt vẫn qua vì không có gì phải ký.
+      */
+      if ((report.profitGate.result.allocatedTotal ?? 0) > 0) {
+        return { error: `Không dựng được bảng đối soát lợi nhuận tháng ${thangKy} — tháng có thưởng % lợi nhuận đủ điều kiện nên phải có bảng: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+  }
   const luc = new Date();
   /** Các dòng sổ lỗ sẽ ghi cùng lượt chốt — rỗng khi sổ không áp dụng cho kỳ này. */
   const soLo = report.lines
@@ -408,6 +443,27 @@ export async function transitionPayrollRunAs(actor: PayrollActor, input: Transit
       khoá giữ nguyên mốc duyệt cũ để tra lịch sử, nhưng trạng thái phải đi qua vòng soát lại —
       bảng chuyển trạng thái đã ép điều đó: `APPROVED` chỉ đi tiếp được khi có người bấm `LOCK`.
     */
+    /*
+      DUYỆT HAI CẤP CHO THƯỞNG % LỢI NHUẬN (chủ shop 19/10/2026). Kỳ có thưởng đủ điều kiện > 0 thì:
+        · DUYỆT đòi chữ ký cấp 1 CÒN HIỆU LỰC ký đúng ảnh chụp này, và người duyệt KHÁC người ký;
+        · KHOÁ đòi chữ ký ấy VẪN còn hiệu lực — huỷ chữ ký sau khi duyệt thì không khoá được.
+      Đọc chữ ký TRONG giao dịch (không qua `getDb()` — PGlite một kết nối tự khoá), dưới khoá tên của sổ.
+    */
+    if ((action === "APPROVE" || action === "LOCK") && thangCong) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext('erp:payroll-profit-signoff'))`);
+      const [anh2] = await tx.select({ snapshot: p.snapshot }).from(p).where(and(eq(p.periodKey, periodKey), eq(p.basis, basis))).limit(1);
+      const snap = anh2?.snapshot as PayrollSnapshot | null;
+      const [soKy] = await tx.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, PAYROLL_PROFIT_SIGNOFF_KEY)).limit(1);
+      const loi = profitApprovalProblem({
+        allocatedTotal: snap?.profitGate?.allocatedTotal,
+        monthKey: thangCong,
+        snapshotFingerprint: snap?.profitRecon?.fingerprint,
+        signoffs: parseSignoffs(soKy?.value ?? null),
+        actorId: actor.id,
+        requireDifferentPerson: action === "APPROVE",
+      });
+      if (loi) return { error: loi } as const;
+    }
     const set: Record<string, unknown> = { status: spec.to, updatedAt: luc, statusReason: spec.requiresReason ? reason : "" };
     if (action === "APPROVE") {
       set.approvedAt = luc;

@@ -193,3 +193,87 @@ của mã thay vì phần phân bổ · bỏ chặn lương khi chờ · bỏ ph
 theo mã vào tạm tính — cả 6 đều làm bài kiểm đỏ. Sau review độc lập: thêm 5 đột biến (bỏ kiểm thiếu
 một phần trọng số · ô trống không qua `blank` · cho OWNER có hạn cắt OWNER cũ · khoản chờ cả đoạn không
 tên · kỳ không phải tháng im lặng) — cả 5 đỏ.
+
+## 9. Payroll V2 vận hành — đối soát lợi nhuận tháng + duyệt hai cấp (chủ shop 19/10/2026, sau #911)
+
+Mã: `lib/payroll/profit-reconciliation.ts` (thuần) · `lib/queries/payroll-reconciliation.ts` (đọc) ·
+`lib/actions/payroll-reconciliation.ts` (ký / huỷ cấp 1) · `app/(dashboard)/payroll/reconciliation` (tab
+**Đối soát**). Kiểm thử `tests/payroll-reconciliation.test.ts` + luồng thật trong `tests/payroll-code-ledger.test.ts`.
+
+### 9.1 Hai vế, không tính lại lợi nhuận
+
+| Dòng | Cơ sở lương (`getMarketerReport`) | Nguồn đối chiếu |
+|---|---|---|
+| Doanh thu giao thành công | Σ `products[].revenue` | đo lại trên đơn bằng CHÍNH `ORDER_OUTCOME_FAST` + `REVENUE_RECOGNIZED_ON_DELIVERY`; phần có chứng từ tiền (COD thực thu / chuyển khoản) |
+| Đơn chưa kết thúc | — | giá trị đơn nhóm OPEN của tháng (đang đi · chưa rời kho · chưa biết) |
+| Giá vốn | Σ `products[].cogs` (`LINE_UNIT_COST`) | máy chi phí `COGS`; "đã giải thích" CHỈ khi chênh = ảnh hưởng giá báo MKT ĐO ĐƯỢC (dư ≤ 1 ₫/đơn); dòng hàng mà `LINE_UNIT_COST` rơi về **0** được đếm riêng |
+| Doanh thu dòng không mã | — | dòng hàng không ghép được mẫu mã — cơ sở bỏ qua |
+| Quảng cáo | QC của mã + QC test | máy chi phí `ADS`; bốn ô (mã × có/không MKTer) đo THẲNG trên `ad_spends`; dòng riêng cho QC của mã KHÔNG đi vào quy kết của MKTer nào |
+| Cước chiều đi | cước vận đơn của MỌI kiện đã gửi | máy chi phí `SHIPPING` (chỉ đơn đã kết thúc, không gồm điều chỉnh); "đã giải thích" CHỈ khi chênh = cước kiện đang đi ĐO ĐƯỢC (dư ≤ 1 ₫/kiện) |
+| Phí chiều hoàn | **không có** | máy chi phí `RETURN_COST` (vận đơn chiều về, không gồm điều chỉnh) |
+| Vận hành | `operatingEntered` | máy chi phí `operatingTotal` − khoản loại khỏi cơ sở (thù lao biến đổi) |
+| Giả định | chi phí cố định khai ở Cấu hình, định mức theo đơn | — (ƯỚC TÍNH) |
+| Cảnh báo `high` | — | vd lương cứng chưa ghi nhận |
+
+Trạng thái mỗi dòng: **Khớp nguồn** · **Chênh đã giải thích** (chỉ khi đo được phần giải thích) · **Ước tính**
+(có nhãn, không đếm là khớp) · **Chưa đối soát**. Nhóm chi phí: **theo mã** (giá vốn, QC của mã, cước, định
+mức theo đơn) · **chung** (vận hành, chi phí cố định giả định — kể cả phần chia xuống mã theo doanh thu, QC
+test có người chịu) · **chưa xác định nguồn** (QC không mã không người) · **có thật nhưng chưa vào cơ sở
+lương** (phí chiều hoàn, lương cứng chưa ghi nhận — KHÔNG gồm khoản bị loại vì trùng nguồn). Dòng "Vận hành"
+là kiểm nhất quán CÙNG nguồn, không phải đối chiếu độc lập với sao kê.
+
+Độ phủ (mẫu số 0 ⇒ `null`, in "—", không phải 0%): doanh thu có chứng từ tiền ÷ doanh thu đã giao (theo
+giá trị); giá trị đơn đã có kết quả ÷ (đã kết thúc + chưa kết thúc); chi phí ở dòng khớp / đã giải thích ÷
+toàn bộ chi phí (gồm phần chưa vào cơ sở). Mã "đủ dữ liệu lợi nhuận" = có mã hàng, không dòng nào thiếu
+giá vốn, QC của mã đều có người.
+
+### 9.2 Ba lỗ hổng của cơ sở lương mà đối soát này làm lộ ra (CHƯA sửa công thức — chủ shop quyết)
+
+1. **Giá vốn không biết = 0 ₫** (`LINE_UNIT_COST` rơi về 0): lợi nhuận cao hơn thật. Sửa ở dữ liệu
+   (phiếu nhập / giá nhập mẫu mã), đối soát chặn tới khi hết.
+2. **Phí chiều hoàn không vào cơ sở lương** dù máy chi phí đã ghi nhận: lợi nhuận tính lương cao hơn Báo
+   cáo lợi nhuận đúng bằng khoản ấy. Đưa vào cơ sở là ĐỔI CÁCH TÍNH THƯỞNG ⇒ việc của chủ shop (AGENTS §7).
+3. **Kiện đang đi** đã chịu cước + chi phí theo đơn mà chưa có doanh thu: số của tháng còn đổi cho tới khi
+   mọi đơn có kết quả.
+
+### 9.3 Duyệt hai cấp (`lib/constants/payroll-reconciliation.ts` · `lib/payroll/recon-signoff.ts`)
+
+**Ký trên ẢNH CHỤP kỳ, không trên số sống** (review vòng 1): số sống đổi theo từng webhook / khoản COD về,
+nên "ký số sống rồi tính rồi duyệt" có thể không bao giờ khớp — và kỳ kẹt kéo theo cả lương cứng.
+
+1. **Tính kỳ** (`CALCULATE`) — KHÔNG bị chặn bởi đối soát. Ảnh chụp mang bảng đối soát của tháng
+   (`snapshot.profitRecon`: từng dòng, nhóm chi phí, độ phủ, khoản chưa đối soát, dấu vân tay).
+2. **Cấp 1 — ký** (`signProfitReconciliation`) khi kỳ `CALCULATED` / `UNDER_REVIEW`: ký ĐÚNG dấu vân tay
+   của ảnh chụp đang hiện (trang gửi mã ảnh; ảnh đã tính lại ⇒ từ chối). Bảng còn khoản chưa đối soát ⇒ phải
+   đánh dấu đã xem từng khoản và ghi lý do chấp nhận. Huỷ được, có lý do (đánh dấu, không xoá).
+3. **Cấp 2 — duyệt** (`APPROVE`): kỳ có thưởng % lợi nhuận **đủ điều kiện > 0** thì phải có chữ ký CÒN
+   HIỆU LỰC trên đúng ảnh chụp này, và người duyệt **khác** người ký. **Khoá** (`LOCK`) kiểm lại chữ ký vẫn
+   còn hiệu lực — huỷ chữ ký sau khi duyệt thì không khoá được, không sinh lệnh chuyển. Đọc chữ ký trong
+   giao dịch, dưới khoá tên của sổ chữ ký.
+4. Tính lại kỳ ⇒ ảnh mới; số không đổi ⇒ cùng dấu vân tay (bảng tất định) ⇒ chữ ký cũ vẫn áp; số đổi ⇒
+   phải ký lại.
+
+Kỳ KHÔNG có khoản thưởng đủ điều kiện (công ty còn lỗ lũy kế) duyệt / khoá như cũ — không giữ lương của ai
+vì bảng đối soát. Người thứ hai duyệt chính chữ ký cấp 1 khi nhóm `PAYROLL_EDIT` bật cưỡng chế; hôm nay chưa
+bật nên MỘT quản trị viên ký được, nhưng người DUYỆT kỳ vẫn phải là người khác.
+
+Lưu ý thực tế: tháng còn đơn chưa kết thúc hay còn phí chiều hoàn thì bảng gần như luôn "chưa đối soát" — cổng
+khi ấy là "một người đã xem từng khoản và ghi lý do", rồi một người khác duyệt.
+
+### 9.4 Năm nấc của một khoản thưởng % lợi nhuận
+
+Tạm tính (chưa xét được) → Chưa đủ điều kiện / Đủ điều kiện chờ duyệt → Đã duyệt (kỳ `APPROVED` /
+`LOCKED`) → Đã thanh toán (kỳ `PAID`). Kỳ đã khoá đọc từ ảnh chụp.
+
+### 9.5 Phân công từ dữ liệu quảng cáo
+
+Trang phân công liệt kê (mã × MKTer × tháng) chi phí QC và số chiến dịch thật, từ tháng mở sổ của quy chế
+(chưa khai thì 12 tháng gần nhất), kèm liên kết mở đúng danh sách chiến dịch. Nút «Điền» chỉ điền sẵn biểu
+mẫu — máy không tự giao: người chi nhiều nhất chưa chắc là người phụ trách mã. Phân công lịch sử khai được
+cho mọi tháng chưa khoá.
+
+### 9.6 X% / Y% theo chính sách · nhân viên · mã · thời gian
+
+X% khai trên TỪNG phân công (nhân viên × mã × khoảng hiệu lực); Y% và trần trên điều khoản (theo mã, hoặc
+mặc định công ty), có hiệu lực theo thời gian; mỗi dòng mang số hiệu quy chế (`policyRef`). Không có tỷ lệ
+mặc định nào ghi cứng.

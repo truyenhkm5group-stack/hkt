@@ -154,6 +154,9 @@ export default async function PayrollCodesPage({ searchParams }: { searchParams:
           <Link href="/payroll/codes/assignments" className="text-sm text-primary hover:underline">
             Quản lý phân công MKTer ↔ mã và điều khoản thưởng →
           </Link>
+          <Link href={`/payroll/reconciliation${period.key === "custom" ? `?period=custom&from=${period.fromKey}&to=${period.toKey}` : `?period=${period.key}`}`} className="ml-4 text-sm text-primary hover:underline">
+            Đối soát lợi nhuận tháng & duyệt hai cấp →
+          </Link>
         </p>
       </SectionCard>
 
@@ -273,6 +276,7 @@ export default async function PayrollCodesPage({ searchParams }: { searchParams:
                   <th className="py-1 pr-3 text-right font-medium">Số mã · OWNER / SUPPORT</th>
                   <th className="py-1 pr-3 text-right font-medium">Chi phí Ads</th>
                   <th className="py-1 pr-3 text-right font-medium">Doanh thu quy kết</th>
+                  <th className="py-1 pr-3 text-right font-medium">LN cá nhân (trang Marketer)</th>
                   <th className="py-1 pr-3 text-right font-medium">Thưởng tạm tính</th>
                   <th className="py-1 text-right font-medium">Thưởng được duyệt</th>
                 </tr>
@@ -291,6 +295,7 @@ export default async function PayrollCodesPage({ searchParams }: { searchParams:
                     </td>
                     <td className="py-1.5 pr-3 text-right tabular-nums">{v(o.adSpend)}</td>
                     <td className="py-1.5 pr-3 text-right tabular-nums">{v(o.revenue)}</td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums">{v(report.marketers.marketers.find((m) => m.marketerId === id)?.personalProfit ?? null)}</td>
                     <td className="py-1.5 pr-3 text-right tabular-nums">{v(o.provisional)}</td>
                     <td className="py-1.5 text-right font-semibold tabular-nums">{v(o.approved)}</td>
                   </tr>

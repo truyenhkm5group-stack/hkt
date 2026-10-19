@@ -42,6 +42,7 @@ import { buildPayrollSnapshot, type PayrollSnapshot } from "@/lib/queries/payrol
 import { lockedMonthFigures, monthPeriodKey, monthsBetween } from "@/lib/queries/payroll-profit-gate";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { PAYROLL_RECOGNITION_KEY } from "@/lib/queries/payroll-cost";
+import { PAYROLL_PROFIT_SIGNOFF_KEY } from "@/lib/constants/payroll-reconciliation";
 
 const TR = 1_000_000;
 const mo = (cumulative: number, highWater: number, paidToDate = 0, established = true): ProfitGateOpening => ({
@@ -261,6 +262,7 @@ async function reset(db: Db) {
   await db.delete(schema.products).where(sql`${schema.products.id} like 'pg-%'`);
   await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [] });
   await setSettingJson(PAYROLL_PROFIT_GATE_KEY, DEFAULT_PROFIT_GATE_CONFIG);
+  await setSettingJson(PAYROLL_PROFIT_SIGNOFF_KEY, []);
   await db.delete(schema.users).where(sql`${schema.users.id} = 'pg-nguoi'`);
   clearMemo();
 }
