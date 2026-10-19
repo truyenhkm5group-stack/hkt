@@ -88,6 +88,12 @@ export async function revokeProfitReconAs(actor: ReconActor, input: { id: string
   if (ky && (ky.status === "LOCKED" || ky.status === "PAID")) return { error: `Kỳ tháng ${truoc.monthKey} đã khoá lương — chữ ký đã nằm trong lượt khoá, không huỷ.` };
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext('erp:payroll-profit-signoff'))`);
+    // Đọc LẠI trạng thái kỳ TRONG giao dịch, dưới khoá tên mà bước KHOÁ cũng lấy: một lượt khoá lọt vào giữa
+    // lượt kiểm ở trên và lượt ghi này sẽ để lại kỳ đã khoá mang chữ ký "đã huỷ" (review vòng 2).
+    const p = schema.payrollPeriods;
+    const [kyNay] = await tx.select({ status: p.status }).from(p).where(and(eq(p.periodKey, monthPeriod(truoc.monthKey).periodKey), eq(p.basis, "profit1"))).limit(1);
+    const st = kyNay ? normalizePayrollStatus(kyNay.status) : null;
+    if (st === "LOCKED" || st === "PAID") return { error: `Kỳ tháng ${truoc.monthKey} vừa được khoá — chữ ký đã nằm trong lượt khoá, không huỷ.` };
     const [row] = await tx.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, PAYROLL_PROFIT_SIGNOFF_KEY)).limit(1);
     const cur = parseSignoffs(row?.value ?? null);
     if (!cur.some((c) => c.id === input.id && !c.revokedAt)) return { error: "Chữ ký vừa bị huỷ bởi người khác." };

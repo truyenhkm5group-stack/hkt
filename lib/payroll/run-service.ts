@@ -35,7 +35,7 @@ import {
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { getPayrollReport, profitGateReadiness } from "@/lib/queries/payroll";
 import { getMonthReconciliation, parseSignoffs } from "@/lib/queries/payroll-reconciliation";
-import { profitApprovalProblem, reconFingerprintKey } from "@/lib/payroll/profit-reconciliation";
+import { profitApprovalProblem, reconFingerprintKey, signableFingerprint } from "@/lib/payroll/profit-reconciliation";
 import { PAYROLL_PROFIT_SIGNOFF_KEY } from "@/lib/constants/payroll-reconciliation";
 import { LEGACY_CARRY_COMPONENT, monthKeyOf, rateToBp, wholeMonthKey } from "@/lib/constants/payroll-carryover";
 import { getProfitGateConfig } from "@/lib/queries/payroll-profit-gate";
@@ -141,10 +141,11 @@ export async function calculatePayrollPeriodAs(actor: PayrollActor, input: Calcu
   if (thangKy) {
     try {
       const rc = await getMonthReconciliation(thangKy, { report });
+      const fp = signableFingerprint(rc.fingerprint, report.profitGate.result);
       snapshot.profitRecon = {
         status: rc.status,
-        fingerprint: rc.fingerprint,
-        fingerprintKey: reconFingerprintKey(rc.fingerprint),
+        fingerprint: fp,
+        fingerprintKey: reconFingerprintKey(fp),
         issues: rc.issues.map((i) => ({ code: i.code, label: i.label, amount: i.amount, count: i.count })),
         lines: rc.lines.map((l) => ({ key: l.key, label: l.label, basis: l.basis, source: l.source, diff: l.diff, status: l.status, cls: l.cls, note: l.note })),
         coverage: rc.coverage,
@@ -152,7 +153,14 @@ export async function calculatePayrollPeriodAs(actor: PayrollActor, input: Calcu
         codes: rc.codes,
       };
     } catch (e) {
-      return { error: `Không dựng được bảng đối soát lợi nhuận tháng ${thangKy}: ${e instanceof Error ? e.message : String(e)}` };
+      /*
+        Chỉ CHẶN khi tháng có thưởng % lợi nhuận đủ điều kiện (review vòng 2): tháng không có khoản nào thì
+        bước duyệt không cần bảng này, và giữ lương cứng của cả công ty vì một truy vấn đối soát hết giờ là
+        đúng thứ luật 78 cấm. Ảnh chụp khi ấy không mang bảng — duyệt vẫn qua vì không có gì phải ký.
+      */
+      if ((report.profitGate.result.allocatedTotal ?? 0) > 0) {
+        return { error: `Không dựng được bảng đối soát lợi nhuận tháng ${thangKy} — tháng có thưởng % lợi nhuận đủ điều kiện nên phải có bảng: ${e instanceof Error ? e.message : String(e)}` };
+      }
     }
   }
   const luc = new Date();

@@ -35,7 +35,7 @@ export function SignoffPanel({
       {signoffs.length ? (
         <ul className="space-y-1">
           {signoffs.map((s) => (
-            <li key={s.id} className={s.current ? "font-medium" : "text-muted-foreground line-through"}>
+            <li key={s.id} className={s.current ? "font-medium" : s.revoked ? "text-muted-foreground line-through" : "text-muted-foreground"}>
               {s.revoked ? "✗ ĐÃ HUỶ" : s.current ? "✓ Ký đúng ảnh chụp hiện tại" : "✗ Ký trên ảnh chụp CŨ (không còn áp)"} · {s.signedByEmail} · {s.signedAt.slice(0, 16).replace("T", " ")} · {s.status === "RECONCILED" ? "đã khớp nguồn" : "còn khoản chưa đối soát"} — {s.reason}
               {!locked && !s.revoked ? (
                 <Button

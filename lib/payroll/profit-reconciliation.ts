@@ -87,8 +87,12 @@ export type MonthReconInput = {
     /** Dòng hàng đã giao mà giá vốn rơi về 0 (không phiếu nhập, không giá Pancake, không giá nhập mẫu mã). */
     unknownCostLines: number;
     unknownCostRevenue: number;
-    /** Σ số lượng × (giá vốn cơ sở − giá vốn khi bỏ giá báo MKT) trên hàng đã giao — phần chênh do giá báo. */
-    cogsMarketerPriceEffect: number;
+    /**
+     * Giá vốn (cùng `LINE_UNIT_COST`) của dòng hàng đã giao KHÔNG có mã — máy chi phí tính (theo đơn), cơ sở
+     * lương bỏ. Đây là phần chênh giá vốn DUY NHẤT đo được tách riêng; phần còn lại (giá vốn tính lại theo
+     * phiếu nhập hôm nay ↔ giá đã chốt lúc giao, dòng chốt cũ) là PHẦN DƯ chưa đối chiếu, không được gán nguyên nhân.
+     */
+    cogsNoProduct: number;
     /** Cước theo vận đơn (nguyên đơn) của kiện ĐANG ĐI — cơ sở trừ, máy chi phí chưa trừ. */
     inTransitShipping: number;
     sentOrders: number;
@@ -190,9 +194,11 @@ export function buildMonthReconciliation(x: MonthReconInput, periodQuery: string
     href: `/shipments?${periodQuery}`,
   });
 
-  // ── GIÁ VỐN ── chênh chỉ "đã giải thích" khi phần dư sau khi trừ ảnh hưởng giá báo MKT về 0 (sai số làm tròn ≤ 1 ₫ / đơn).
+  // ── GIÁ VỐN ── chênh chỉ "đã giải thích" khi phần dư sau khi cộng giá vốn dòng không mã về 0 (≤ 1 ₫ / đơn).
+  // KHÔNG tách "phần giá báo MKT": máy chi phí cũng đặt giá báo đang hiệu lực lên đầu, hai vế triệt tiêu
+  // nhau (review vòng 2) — gán phần chênh cho giá báo là một lời giải thích sai.
   const tolCogs = Math.max(1, o.deliveredOrders);
-  const duCogs = b.cogs - e.cogs - o.cogsMarketerPriceEffect;
+  const duCogs = b.cogs + o.cogsNoProduct - e.cogs;
   add({
     key: "cogs",
     label: "Giá vốn hàng giao thành công",
@@ -204,7 +210,7 @@ export function buildMonthReconciliation(x: MonthReconInput, periodQuery: string
       (o.unknownCostLines > 0 ? `${o.unknownCostLines.toLocaleString("vi-VN")} dòng hàng đã giao (doanh thu ${vnd(o.unknownCostRevenue)}) KHÔNG có giá vốn nào — cơ sở đang tính 0 ₫ cho chúng, lợi nhuận cao hơn thật. ` : "") +
       (r(b.cogs) === r(e.cogs)
         ? "Khớp máy chi phí."
-        : `Chênh ${vnd(b.cogs - e.cogs)} = giá báo MKT ${vnd(o.cogsMarketerPriceEffect)} + phần dư ${vnd(duCogs)}${Math.abs(duCogs) <= tolCogs ? " (làm tròn)" : " — cơ sở dùng giá vốn HÔM NAY (phiếu nhập mới nhất), máy chi phí dùng giá vốn đã chốt lúc giao: phần dư này chưa được đối chiếu"}.`),
+        : `Chênh ${vnd(b.cogs - e.cogs)}: dòng hàng không có mã ${vnd(-o.cogsNoProduct)} (máy chi phí tính, cơ sở bỏ) · phần dư ${vnd(duCogs)}${Math.abs(duCogs) <= tolCogs ? " (làm tròn)" : " CHƯA đối chiếu — có thể do giá vốn tính lại theo phiếu nhập hôm nay khác giá đã chốt lúc giao, ERP chưa đo tách được"}.`),
     href: "/data-quality?issue=missing-cogs",
   });
 
@@ -347,14 +353,30 @@ export function buildMonthReconciliation(x: MonthReconInput, periodQuery: string
   };
 
   const COUNT: Record<string, number> = { "open-orders": o.openOrders, cogs: o.unknownCostLines, shipping: o.sentNoFeeOrders };
+  // Số tiền của khoản: đúng thứ đang treo — không phải "chênh 0 ₫" khi lý do là chứng từ / giá vốn thiếu.
+  const SOTIEN: Record<string, number> = {
+    revenue: r(b.revenue) !== r(o.deliveredRevenue) ? r(b.revenue - o.deliveredRevenue) : r(thieuTien),
+    cogs: o.unknownCostLines > 0 ? r(o.unknownCostRevenue) : r(duCogs),
+    shipping: r(duShip),
+  };
   const issues: ReconIssue[] = lines
     .filter((l) => l.status === "UNRECONCILED")
-    .map((l) => ({ code: l.key, label: l.label, amount: l.diff ?? l.source ?? l.basis, count: COUNT[l.key] ?? null, href: l.href }));
+    .map((l) => ({ code: l.key, label: l.label, amount: SOTIEN[l.key] ?? l.diff ?? l.source ?? l.basis, count: COUNT[l.key] ?? null, href: l.href }));
   const noMaHang = x.codes.filter((c) => !c.hasCustomId && (c.revenue > 0 || c.profit !== 0));
   if (noMaHang.length) issues.push({ code: "code-no-custom-id", label: "Mã có doanh thu / lợi nhuận nhưng CHƯA có mã hàng", amount: r(noMaHang.reduce((t, c) => t + c.profit, 0)), count: noMaHang.length, href: "/products" });
 
   const fingerprint = JSON.stringify([x.monthKey, lines.map((l) => [l.key, l.basis, l.source, l.status]), issues.map((i) => [i.code, i.amount, i.count])]);
   return { monthKey: x.monthKey, lines, classes, coverage, codes, issues, status: issues.length ? "UNRECONCILED" : "RECONCILED", fingerprint };
+}
+
+/**
+ * DẤU VÂN TAY ĐƯỢC KÝ = bảng đối soát + CÁC KHOẢN THƯỞNG % LỢI NHUẬN ĐỦ ĐIỀU KIỆN (review vòng 2): đổi X% /
+ * phân công / số dư mở sổ rồi tính lại mà lợi nhuận không đổi thì số tiền thưởng vẫn đổi — chữ ký cấp 1 phải
+ * ký lại. Dùng CHUNG cho ảnh chụp (`run-service`) và trang (so số sống với ảnh).
+ */
+export function signableFingerprint(reconFingerprint: string, gate: { allocatedTotal: number | null; allocations: readonly { key: string; eligible: number | null }[] }): string {
+  const khoan = [...gate.allocations].map((a) => [a.key, a.eligible] as const).sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
+  return JSON.stringify([reconFingerprint, gate.allocatedTotal, khoan]);
 }
 
 /** Khoá ổn định ngắn của dấu vân tay (để so và để in). */

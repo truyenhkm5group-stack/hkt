@@ -15,7 +15,6 @@
 import { and, eq, gte, isNotNull, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
-import { LAST_RECEIPT_COST } from "@/lib/queries/stock";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { ELIGIBLE_SENT_SQL } from "@/lib/constants/returns";
@@ -46,8 +45,6 @@ async function orderFacts(from: Date, to: Date): Promise<{ total: MonthReconInpu
   const giao = sql`${ORDER_OUTCOME_FAST} = 'DELIVERED' and ${REVENUE_RECOGNIZED_ON_DELIVERY}`;
   const productKey = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
   const coMa = sql`${productKey} <> ''`;
-  // Giá vốn KHI BỎ giá báo MKT — cùng bậc thang LINE_UNIT_COST từ nấc thứ hai trở đi.
-  const giaVonThat = sql<number>`coalesce(${LAST_RECEIPT_COST}, nullif(${i.unitCost}, 0), ${pv.lastImportedPrice}, 0)`;
   const cuoc = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)::bigint`;
   return chayKhongJit(db, async (tx) => {
     const [dong] = await tx
@@ -59,7 +56,7 @@ async function orderFacts(from: Date, to: Date): Promise<{ total: MonthReconInpu
         settledValue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(FINISHED_OUTCOMES_SQL)}) and ${i.isBonus} = false), 0)`,
         unknownCostLines: sql<number>`count(*) filter (where ${giao} and ${coMa} and ${LINE_UNIT_COST} = 0)`,
         unknownCostRevenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${giao} and ${coMa} and ${LINE_UNIT_COST} = 0), 0)`,
-        cogsMarketerPriceEffect: sql<number>`coalesce(sum(${i.quantity} * (${LINE_UNIT_COST} - ${giaVonThat})) filter (where ${giao} and ${coMa}), 0)`,
+        cogsNoProduct: sql<number>`coalesce(sum(${i.quantity} * ${LINE_UNIT_COST}) filter (where ${giao} and not (${coMa})), 0)`,
       })
       .from(i)
       .innerJoin(o, eq(o.id, i.orderId))
@@ -103,7 +100,7 @@ async function orderFacts(from: Date, to: Date): Promise<{ total: MonthReconInpu
         cancelledOrders: n(don?.cancelledOrders),
         unknownCostLines: n(dong?.unknownCostLines),
         unknownCostRevenue: n(dong?.unknownCostRevenue),
-        cogsMarketerPriceEffect: n(dong?.cogsMarketerPriceEffect),
+        cogsNoProduct: n(dong?.cogsNoProduct),
         inTransitShipping: n(don?.inTransitShipping),
         sentOrders: n(don?.sentOrders),
         sentNoFeeOrders: n(don?.sentNoFeeOrders),

@@ -9,7 +9,7 @@ import { can, requireUser } from "@/lib/auth/session";
 import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import { wholeMonthKey } from "@/lib/constants/payroll-carryover";
 import { formatVND } from "@/lib/format";
-import { COST_CLASS_LABEL, PROFIT_BONUS_STAGE_LABEL, RECON_STATUS_LABEL, profitBonusStage, reconFingerprintKey, type CostClass, type ReconStatus } from "@/lib/payroll/profit-reconciliation";
+import { COST_CLASS_LABEL, PROFIT_BONUS_STAGE_LABEL, RECON_STATUS_LABEL, profitBonusStage, reconFingerprintKey, signableFingerprint, type CostClass, type ReconStatus } from "@/lib/payroll/profit-reconciliation";
 import { getPayrollReport } from "@/lib/queries/payroll";
 import { getPayrollPeriodState, type PayrollSnapshot } from "@/lib/queries/payroll-period";
 import { getMonthReconciliation, loadProfitSignoffs } from "@/lib/queries/payroll-reconciliation";
@@ -66,13 +66,13 @@ export default async function PayrollReconciliationPage({ searchParams }: { sear
   const recon = anh
     ? { ...live, lines: anh.lines as typeof live.lines, issues: anh.issues.map((i) => ({ ...i, href: live.issues.find((x) => x.code === i.code)?.href ?? null })), status: anh.status, coverage: anh.coverage, classes: anh.classes as typeof live.classes, codes: anh.codes, fingerprint: anh.fingerprint }
     : live;
-  const key = anh ? anh.fingerprintKey : reconFingerprintKey(live.fingerprint);
+  const key = anh ? anh.fingerprintKey : reconFingerprintKey(signableFingerprint(live.fingerprint, gate));
   const required = ((snap ? snap.profitGate?.allocatedTotal : gate.allocatedTotal) ?? 0) > 0;
   const claims = snap
     ? snap.lines.flatMap((l) => (l.profitShare?.claims ?? []).map((c) => ({ key: c.key, label: c.label, provisional: c.provisional, eligible: c.eligible, withheld: c.withheld })))
     : gate.allocations.map((a) => ({ key: a.key, label: a.label, provisional: a.provisional, eligible: a.eligible, withheld: a.withheld }));
   const established = snap ? snap.profitGate?.established === true : gate.established;
-  const lechSong = anh !== null && anh.fingerprint !== live.fingerprint;
+  const lechSong = anh !== null && anh.fingerprint !== signableFingerprint(live.fingerprint, gate);
   const stageOf = (eligible: number | null) => profitBonusStage({ eligible, established, runStatus, paid: runStatus === "PAID" });
   const theoNac = new Map<string, { n: number; provisional: number; eligible: number }>();
   for (const c of claims) {

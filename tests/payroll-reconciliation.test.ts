@@ -7,7 +7,7 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { buildMonthReconciliation, profitApprovalProblem, profitBonusStage, reconFingerprintKey, type MonthReconInput } from "@/lib/payroll/profit-reconciliation";
+import { buildMonthReconciliation, profitApprovalProblem, profitBonusStage, reconFingerprintKey, signableFingerprint, type MonthReconInput } from "@/lib/payroll/profit-reconciliation";
 
 const TR = 1_000_000;
 const goc = (): MonthReconInput => ({
@@ -44,7 +44,7 @@ const goc = (): MonthReconInput => ({
     cancelledOrders: 5,
     unknownCostLines: 0,
     unknownCostRevenue: 0,
-    cogsMarketerPriceEffect: 0,
+    cogsNoProduct: 0,
     inTransitShipping: 0,
     sentOrders: 230,
     sentNoFeeOrders: 0,
@@ -83,6 +83,7 @@ function testPure() {
   assert.equal(thieuTien.status, "UNRECONCILED", "đơn đã giao chưa có chứng từ tiền ⇒ doanh thu chưa xác minh");
   assert.equal(thieuTien.coverage.revenueWithMoneyPct, 0.9);
   assert.ok(dong(thieuTien, "revenue")?.note.includes("20 đơn"));
+  assert.equal(thieuTien.issues.find((i) => i.code === "revenue")?.amount, 10 * TR, "số tiền của khoản = doanh thu CHƯA có chứng từ, không phải 'chênh 0 ₫'");
   const khongMa = lech((x) => {
     x.orders.deliveredRevenueNoProduct = 3 * TR;
   });
@@ -101,19 +102,19 @@ function testPure() {
     x.orders.unknownCostRevenue = 3 * TR;
     x.codes[1].unknownCostLines = 7;
   });
-  assert.ok(giaVon0.issues.some((i) => i.code === "cogs" && i.count === 7), "dòng hàng không có giá vốn (đang tính 0 ₫) ⇒ chưa đối soát");
+  assert.ok(giaVon0.issues.some((i) => i.code === "cogs" && i.count === 7 && i.amount === 3 * TR), "dòng hàng không có giá vốn (đang tính 0 ₫) ⇒ chưa đối soát, số tiền = doanh thu của chúng");
   assert.equal(giaVon0.codes.profitComplete, 1, "mã có dòng thiếu giá vốn KHÔNG tính là đủ dữ liệu lợi nhuận");
-  const giaBao = lech((x) => {
-    x.basis.cogs = 32 * TR;
-    x.orders.cogsMarketerPriceEffect = 2 * TR;
+  const dongKhongMa = lech((x) => {
+    x.basis.cogs = 28 * TR;
+    x.orders.cogsNoProduct = 2 * TR;
   });
-  assert.equal(dong(giaBao, "cogs")?.status, "EXPLAINED", "chênh = đúng phần giá báo MKT đo được ⇒ đã giải thích");
+  assert.equal(dong(dongKhongMa, "cogs")?.status, "EXPLAINED", "chênh = đúng giá vốn dòng không mã (máy chi phí tính, cơ sở bỏ) ⇒ đã giải thích");
   const duKhongRo = lech((x) => {
     x.basis.cogs = 32 * TR;
-    x.orders.cogsMarketerPriceEffect = 1 * TR;
   });
   assert.equal(dong(duKhongRo, "cogs")?.status, "UNRECONCILED", "còn phần dư không đo được ⇒ KHÔNG được gọi là đã giải thích");
-  assert.ok(dong(duKhongRo, "cogs")?.note.includes("phần dư"));
+  assert.ok(dong(duKhongRo, "cogs")?.note.includes("CHƯA đối chiếu") && !dong(duKhongRo, "cogs")?.note.includes("giá báo MKT"), "không gán phần dư cho giá báo MKT (hai vế cùng dùng giá báo)");
+  assert.equal(duKhongRo.issues.find((i) => i.code === "cogs")?.amount, 2 * TR, "số tiền của khoản = đúng phần dư");
 
   /* ── Quảng cáo: bốn ô đo thẳng + QC ngoài quy kết người ── */
   const qcKhongAi = lech((x) => {
@@ -212,6 +213,11 @@ function testPure() {
   assert.match(hoi({ actorId: "u1" }) ?? "", /MỘT NGƯỜI KHÁC/, "người ký cấp 1 không duyệt cấp 2");
   assert.equal(hoi({ actorId: "u1", requireDifferentPerson: false }), null, "bước KHOÁ chỉ cần chữ ký còn hiệu lực");
   assert.match(hoi({ snapshotFingerprint: null }) ?? "", /không mang bảng đối soát/);
+
+  /* ── Dấu vân tay được ký gồm cả khoản thưởng đủ điều kiện ── */
+  const g1 = { allocatedTotal: 5 * TR, allocations: [{ key: "a:SHOP", eligible: 3 * TR }, { key: "b:CODE:x:OWNER:0", eligible: 2 * TR }] };
+  assert.equal(signableFingerprint("RC", g1), signableFingerprint("RC", { ...g1, allocations: [...g1.allocations].reverse() }), "không phụ thuộc thứ tự khoản");
+  assert.notEqual(signableFingerprint("RC", g1), signableFingerprint("RC", { ...g1, allocations: [{ key: "a:SHOP", eligible: 4 * TR }, { key: "b:CODE:x:OWNER:0", eligible: 1 * TR }] }), "lợi nhuận không đổi nhưng chia thưởng khác (đổi X%) ⇒ phải ký lại");
 }
 
 function testSourceFences() {
@@ -222,7 +228,8 @@ function testSourceFences() {
   assert.ok(/getRecognizedCosts/.test(q) && /getPayrollReport/.test(q), "hai vế đối chiếu là hai nguồn đã có, không tính lại lợi nhuận");
   assert.ok(!/getSettingJson\s*[<(]/.test(q), "ô settings kiểu mảng đọc THÔ (getSettingJson gộp mảng thành object)");
   const rs = readFileSync("lib/payroll/run-service.ts", "utf8");
-  assert.ok(/snapshot\.profitRecon = /.test(rs), "ảnh chụp kỳ mang bảng đối soát");
+  assert.ok(/snapshot\.profitRecon = /.test(rs) && /signableFingerprint\(rc\.fingerprint, report\.profitGate\.result\)/.test(rs), "ảnh chụp kỳ mang bảng đối soát, dấu vân tay gồm cả khoản thưởng");
+  assert.ok(/allocatedTotal \?\? 0\) > 0\) \{\n\s+return \{ error: `Không dựng được bảng đối soát/.test(rs), "lỗi dựng bảng chỉ chặn khi tháng có thưởng đủ điều kiện — không giữ lương cứng");
   assert.ok(/profitApprovalProblem\(/.test(rs) && /action === "APPROVE" \|\| action === "LOCK"/.test(rs), "duyệt VÀ khoá đều kiểm chữ ký còn hiệu lực");
   const svc = readFileSync("lib/payroll/recon-signoff.ts", "utf8");
   assert.ok(/snapshot\?\.profitRecon/.test(svc) && !/getMonthReconciliation/.test(svc), "chữ ký ký trên ẢNH CHỤP, không đo lại số sống");
