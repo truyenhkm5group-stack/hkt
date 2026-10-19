@@ -1,8 +1,8 @@
 {
   "pr": 913,
-  "sha": "eaaf5a1049ec50db297c7333e980921c48b928b5",
+  "sha": "e6017488650327f5df043d59d80b683d7f7c60fe",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-19T11:34:34.306Z",
-  "note": "lead: chỉ script đo — giữ mã hội thoại mẫu (≤20/nhóm) cho 4 nhóm sai lúc, in ở phần MÃ HOÁ (console.log), không vào [ops:tom-tat] (bài kiểm nguồn chặn)"
+  "at": "2026-10-19T11:45:56.115Z",
+  "note": "như eaaf5a10 + đổi một dòng chú thích (tiền tố kênh tóm tắt liền dấu chấm) — không đụng bài kiểm"
 }
