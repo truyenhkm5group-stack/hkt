@@ -119,6 +119,15 @@ export function testEvidenceResolution() {
   assert.equal(d.tier, "CARRIER_OBSERVED");
   assert.equal(d.primary?.reason, "CUSTOMER_REFUSED", "lời muộn hơn của cùng nguồn thắng");
   assert.equal(d.secondary.length, 0);
+  /*
+    VTP THẮNG PANCAKE CHUYỂN TIẾP THEO HẠNG, KHÔNG THEO MỐC (AGENTS.md mục 3.6). Cùng HỌ nguồn nên
+    không thành mâu thuẫn giả; Pancake chỉ lên tiếng khi không có lời VTP nào.
+  */
+  const vp = resolveEvidence([it("CARRIER_TEXT", "CUSTOMER_UNREACHABLE", 1), it("CARRIER_TEXT_VIA_PANCAKE", "CUSTOMER_REFUSED", 9)]);
+  assert.equal(vp.primary?.reason, "CUSTOMER_UNREACHABLE", "lời Pancake MỚI HƠN không được đè lời VTP");
+  assert.equal(vp.tier, "CARRIER_OBSERVED", "VTP và Pancake chuyển tiếp là cùng một lời ĐVVC — không phải mâu thuẫn");
+  assert.equal(vp.secondary.length, 0);
+  assert.equal(resolveEvidence([it("CARRIER_TEXT_VIA_PANCAKE", "CUSTOMER_REFUSED", 9)]).primary?.reason, "CUSTOMER_REFUSED", "chỉ có Pancake ⇒ dùng Pancake");
   /* Mã có cấu trúc thắng chữ của chính ĐVVC, kể cả chữ muộn hơn. */
   assert.equal(resolveEvidence([it("CARRIER_CODE", "WRONG_PHONE", 1), it("CARRIER_TEXT", "CUSTOMER_REFUSED", 5)]).primary?.reason, "WRONG_PHONE");
 
@@ -333,6 +342,63 @@ export async function testEvidenceOnDb(db: Db) {
     await db.delete(schema.orders).where(inArray(schema.orders.id, DON));
   }
   console.log("✓ Lý do theo chứng cứ trên CSDL: bảy lỗi đã vá · tổng hoàn trước = sau · cờ tắt = số cũ · không liên lạc ≠ giao chậm · từ chối ≠ boom · mâu thuẫn đếm được · drilldown = bảng");
+}
+
+/* ───── 6 · Trên CSDL: sự kiện Pancake chuyển tiếp không đè lời VTP (đo production 20/10: −266 ca) ───── */
+export async function testVtpBeatsPancakeRelayOnDb(db: Db) {
+  const Q = "rrv-";
+  const KIEN = [1, 2, 3].map((i) => `${Q}s${i}`);
+  const DON = [1, 2, 3].map((i) => `${Q}o${i}`);
+  const t = (ngay: number) => new Date(Date.UTC(2026, 7, ngay, 3, 0, 0));
+  await db.insert(schema.products).values({ id: `${Q}p1`, name: "Đầm RRV", customId: "RRV1", isRemoved: false }).onConflictDoNothing();
+  await db.insert(schema.productVariants).values({ id: `${Q}v1`, productId: `${Q}p1`, sku: "RRV1-S", detail: "S" }).onConflictDoNothing();
+  for (const so of [1, 2, 3]) {
+    await db.insert(schema.orders).values({ id: `${Q}o${so}`, stage: "CONFIRMED", status: 2, insertedAt: t(10), totalPriceAfterDiscount: 500_000, billFullName: `RRV ${so}`, billPhone: "0900000000" }).onConflictDoNothing();
+    await db.insert(schema.orderItems).values({ id: `${Q}i${so}`, orderId: `${Q}o${so}`, variantId: `${Q}v1`, sku: "RRV1-S", productName: "Đầm RRV", quantity: 1, lineTotal: 500_000, isBonus: false }).onConflictDoNothing();
+    await db
+      .insert(schema.shipments)
+      .values({ id: `${Q}s${so}`, orderId: `${Q}o${so}`, vtpOrderNumber: `${Q}T${so}`, trackingCode: `${Q}T${so}`, stage: "RETURNED", vtpStatusName: "Đã trả", vtpStatusDate: t(24), codCollected: 0, pickedUpAt: t(20), returnedAt: t(24), createdAt: t(10), isFinal: true })
+      .onConflictDoNothing();
+  }
+  const ev = (id: string, shipmentId: string, source: string, statusName: string, ngay: number) => ({ id, shipmentId, source, status: "506", statusName, normalizedStage: "RETURNED" as const, occurredAt: t(ngay) });
+  await db.insert(schema.shipmentEvents).values([
+    // s1: quan sát VTP "không liên lạc" + sự kiện PANCAKE MỚI HƠN "từ chối".
+    ev(`${Q}e1`, `${Q}s1`, "PANCAKE", "Tồn - Khách từ chối nhận", 22),
+    // s2: sự kiện VTP "không có nhà" + sự kiện PANCAKE MỚI HƠN "không có nhu cầu" (không có quan sát).
+    ev(`${Q}e2a`, `${Q}s2`, "VTP_WEBHOOK", "Tồn - Khách hàng nghỉ, không có nhà", 20),
+    ev(`${Q}e2b`, `${Q}s2`, "PANCAKE", "Tồn - Khách không có nhu cầu", 23),
+    // s3: CHỈ có Pancake ⇒ dùng Pancake.
+    ev(`${Q}e3`, `${Q}s3`, "PANCAKE", "Tồn - Khách từ chối nhận", 22),
+  ]);
+  await db.insert(schema.returnReasonObservations).values({ shipmentId: `${Q}s1`, orderId: `${Q}o1`, source: "CARRIER_TEXT", rawText: "Tồn - Khách hàng nghỉ, không có nhà", reasonAtWrite: "UNKNOWN", occurredAt: t(20), dedupeKey: `${Q}s1|CARRIER_TEXT|20` });
+  try {
+    const ra = await reasonsForShipments(KIEN);
+    assert.equal(ra.get(`${Q}s1`)?.reason, "CUSTOMER_UNREACHABLE", "quan sát VTP thắng sự kiện Pancake mới hơn");
+    assert.equal(ra.get(`${Q}s2`)?.reason, "CUSTOMER_UNREACHABLE", "sự kiện VTP thắng sự kiện Pancake mới hơn — kể cả khi không có quan sát nào");
+    assert.ok(ra.get(`${Q}s2`)?.rawReason.includes("không có nhà"), "chữ đi kèm là chữ VTP, không phải chữ Pancake");
+    assert.equal(ra.get(`${Q}s3`)?.reason, "CUSTOMER_REFUSED", "chỉ có Pancake ⇒ dùng Pancake");
+    assert.equal(ra.get(`${Q}s3`)?.source, "CARRIER_TEXT_VIA_PANCAKE", "nguồn phải nói rõ là qua Pancake");
+
+    const loc = { period: KY("2026-08-18T00:00:00Z", "2026-08-28T23:59:59Z"), basis: "SHIPPED" as const, codes: ["RRV1"] };
+    clearMemo();
+    for (const taxonomy of ["LEGACY", "EVIDENCE"] as const) {
+      const bc = await getReturnReasonReport({ ...loc, taxonomy });
+      const dem = new Map<string, number>();
+      for (const g of bc.groups) for (const d of g.details) if (d.count) dem.set(d.reason, (dem.get(d.reason) ?? 0) + d.count);
+      assert.equal(dem.get("CUSTOMER_UNREACHABLE"), 2, `${taxonomy}: hai ca VTP nói "không liên lạc" phải ở lại đó`);
+      assert.equal(dem.get("CUSTOMER_REFUSED"), 1, `${taxonomy}: chỉ ca không có lời VTP mới theo Pancake`);
+      assert.equal(dem.get("CUSTOMER_CHANGED_MIND") ?? 0, 0, `${taxonomy}: lời Pancake mới hơn không kéo ca sang "đổi ý"`);
+      assert.equal(bc.evidenceTiers.CONFLICTED, 0, `${taxonomy}: VTP và Pancake chuyển tiếp không phải mâu thuẫn`);
+    }
+  } finally {
+    clearMemo();
+    await db.delete(schema.returnReasonObservations).where(inArray(schema.returnReasonObservations.orderId, DON));
+    await db.delete(schema.shipmentEvents).where(inArray(schema.shipmentEvents.shipmentId, KIEN));
+    await db.delete(schema.shipments).where(inArray(schema.shipments.id, KIEN));
+    await db.delete(schema.orderItems).where(inArray(schema.orderItems.orderId, DON));
+    await db.delete(schema.orders).where(inArray(schema.orders.id, DON));
+  }
+  console.log("✓ VTP trước Pancake: quan sát / sự kiện VTP thắng sự kiện Pancake mới hơn · chỉ Pancake thì dùng Pancake · cả hai cách xếp · không mâu thuẫn giả");
 }
 
 /** Chủ thể của mục 0 trong đặc tả: nguồn có thẩm quyền khai ở MỘT chỗ — bảng mới không khai lại. */

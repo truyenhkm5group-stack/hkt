@@ -50,6 +50,11 @@ export const REASON_SOURCES = [
   "CARRIER_CODE",
   /** Chữ trạng thái / ghi chú do ĐVVC gửi. */
   "CARRIER_TEXT",
+  /**
+   * Chữ trạng thái ĐVVC mà PANCAKE chuyển tiếp (`shipment_events.source = 'PANCAKE'`). Cùng lời của
+   * ĐVVC nhưng qua tay thứ hai — AGENTS.md mục 3.6: dữ liệu Viettel Post ưu tiên hơn Pancake.
+   */
+  "CARRIER_TEXT_VIA_PANCAKE",
   /** Bản ghi đổi trả đồng bộ từ Pancake. */
   "PANCAKE_RETURN",
   /** Ghi chú trên đơn Pancake. */
@@ -64,6 +69,7 @@ export const REASON_SOURCE_LABEL: Record<ReasonSource, string> = {
   CS_NOTE: "Ghi chú ca CSKH",
   CARRIER_CODE: "Mã lý do ĐVVC",
   CARRIER_TEXT: "Chữ trạng thái ĐVVC",
+  CARRIER_TEXT_VIA_PANCAKE: "Chữ trạng thái ĐVVC qua Pancake",
   PANCAKE_RETURN: "Phiếu đổi trả Pancake",
   PANCAKE_ORDER_NOTE: "Ghi chú đơn Pancake",
 };
@@ -86,6 +92,7 @@ export const SOURCE_CAN_CONCLUDE_SHOP_FAULT: Record<ReasonSource, boolean> = {
   CS_NOTE: true,
   CARRIER_CODE: false,
   CARRIER_TEXT: false,
+  CARRIER_TEXT_VIA_PANCAKE: false,
   PANCAKE_RETURN: false,
   PANCAKE_ORDER_NOTE: false,
 };
@@ -106,6 +113,13 @@ export const SOURCE_RANK: Record<ReasonSource, number> = {
   CS_NOTE: 55,
   CARRIER_CODE: 40,
   CARRIER_TEXT: 30,
+  /*
+    DƯỚI chữ ĐVVC đến thẳng, kể cả khi MUỘN HƠN. Đo production 20/10/2026 (db-query run
+    39426937465): bản gộp lời khai đầu tiên (#922) để lời muộn nhất thắng, và sự kiện Pancake chuyển
+    tiếp mới hơn quan sát VTP đã kéo 266 ca "Không liên lạc" sang "Từ chối"/"Hẹn lại"/"Đổi ý" trong
+    khi cờ cách xếp còn TẮT. Pancake chỉ lên tiếng khi kiện không có lời VTP nào mang lý do.
+  */
+  CARRIER_TEXT_VIA_PANCAKE: 28,
   PANCAKE_RETURN: 25,
   PANCAKE_ORDER_NOTE: 10,
 };
@@ -118,6 +132,7 @@ export const SOURCE_IS_HUMAN: Record<ReasonSource, boolean> = {
   CS_NOTE: true,
   CARRIER_CODE: false,
   CARRIER_TEXT: false,
+  CARRIER_TEXT_VIA_PANCAKE: false,
   PANCAKE_RETURN: false,
   PANCAKE_ORDER_NOTE: false,
 };
