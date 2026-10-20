@@ -3,7 +3,7 @@
   "mission_id": "upsell-audit-hoi-gia",
   "title": "upsell-offer-audit tách câu trả lời câu hỏi giá khỏi lặp / gói lớn",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-audit-hoi-gia",
@@ -24,7 +24,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-20T07:08:05.042Z",
-  "updated_at": "2026-10-20T07:08:05.042Z",
-  "last_heartbeat": "2026-10-20T07:08:05.042Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-20T07:08:30.175Z",
+  "last_heartbeat": "2026-10-20T07:08:30.175Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/upsell-audit-hoi-gia",
+    "sha": "0460a182a2d8b220eb01560bcd88ad695e8734a0",
+    "at": "2026-10-20T07:08:30.175Z",
+    "actor": "DESKTOP-56TH98Y:wt-audit-hoi-gia",
+    "title": "upsell-offer-audit tách câu trả lời câu hỏi giá khỏi lặp / gói lớn",
+    "summary": "",
+    "tests": [
+      "testUpsellOfferAudit (+ ca hỏi giá sau chốt / không hỏi / không có phép đọc; đột biến đỏ); ops-log-leak; tsc + eslint sạch"
+    ]
+  }
 }
