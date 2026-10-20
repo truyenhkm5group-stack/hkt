@@ -406,6 +406,8 @@ export type ReplyGuardResult = { text: string; offered: OfferKind | null; droppe
 const FREE_SHIP_RE = /(?:^| )(?:mien (?:phi )?ship|free ?ship|mien phi van chuyen|mien phi giao(?: hang)?)(?: |$)/;
 const MENU_RE = /(?:^| )(?:menu|thuc don)(?: |$)/;
 const PRICE_ASK_RE = /(?:^| )(?:gia|bao nhieu|bn|bnhieu|nhieu tien|may tien|tinh sao|het bao)(?: |$)/;
+/** Khách HỎI GIÁ — ĐÚNG phép đọc của `guardReply` (cùng `PRICE_ASK_RE`), dùng chung cho đo đạc (scripts/upsell-offer-audit.ts). HÀM THUẦN. */
+export const customerAskedPrice = (text: string): boolean => PRICE_ASK_RE.test(foldVi(text));
 const MENU_ASK_RE = /(?:^| )(?:menu|thuc don|mon khac|mon gi|con gi|co gi|co ban|ban gi|xem them|them mon|lay them|mua them|kem)(?: |$)/;
 /** Khách hỏi QUY CÁCH / LOẠI («chả mực có mấy loại em», «size nào») — câu trả lời kể quy cách, giá từng loại. Bản gập dấu. */
 const OPTIONS_ASK_RE = /(?:^| )(?:may loai|loai nao|loai gi|nhung loai|bao nhieu loai|co loai|may size|size nao|co size|quy cach|may kg|may ky|may goi|goi nao|may hop)(?: |$)/;

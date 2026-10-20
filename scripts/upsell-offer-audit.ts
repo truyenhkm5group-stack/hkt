@@ -83,16 +83,27 @@ const deliveredOf = (content: unknown): string[] =>
   });
 
 /** `crossSells` = số lời mời có câu mời MÓN KHÁC (CROSS_SELL) — phần còn lại chỉ là mời gói lớn hơn của cùng món (UPSELL). */
-export type ConvOffers = { offers: number; crossSells: number; afterDecline: number; upsellAfterSize: number; reaskAfterSize: number; endedCancelled: boolean };
+/**
+ * `priceAnswers` = lời mời nằm trong tin bot trả lời NGAY sau một tin khách HỎI GIÁ (`askedPrice` = `customerAskedPrice` — cùng phép đọc của
+ * guardReply, vốn GIỮ câu giá khi khách hỏi giá): không tính là «lặp» / «gói lớn sau khi đã chọn», nhưng đếm RIÊNG (`upsellAfterSizePrice`),
+ * không biến mất (production 20/10/2026: khách hỏi lại «xin giá chả cá thu» 40′ sau khi chốt, câu mẫu bảng giá bị đếm thành lời mời thứ hai).
+ */
+export type ConvOffers = { offers: number; crossSells: number; afterDecline: number; upsellAfterSize: number; reaskAfterSize: number; endedCancelled: boolean; priceAnswers: number; upsellAfterSizePrice: number };
 
 /**
  * Lời mời của MỘT hội thoại đọc từ chữ ĐÃ GỬI (theo seq). Một tin bot có nhiều câu mời vẫn là MỘT lời mời (khách nhận một lần). Từ chối =
  * tin khách NGAY SAU một lời mời mà `offerDeclinedBy`. «Đã chọn khối lượng» = tin khách đặt / sửa số lượng tường minh (`classifyCartMessage`
  * ORDER · SET · ADD có lượng). HÀM THUẦN.
  */
-export function offersOfConversation(msgs: readonly { role: string; content: unknown }[], state: Pick<ChatState, "declined" | "cancelRequest" | "cancelledOrders">): ConvOffers {
-  const out: ConvOffers = { offers: 0, crossSells: 0, afterDecline: 0, upsellAfterSize: 0, reaskAfterSize: 0, endedCancelled: false };
+export function offersOfConversation(
+  msgs: readonly { role: string; content: unknown }[],
+  state: Pick<ChatState, "declined" | "cancelRequest" | "cancelledOrders">,
+  opts: { askedPrice?: (text: string) => boolean } = {},
+): ConvOffers {
+  const out: ConvOffers = { offers: 0, crossSells: 0, afterDecline: 0, upsellAfterSize: 0, reaskAfterSize: 0, endedCancelled: false, priceAnswers: 0, upsellAfterSizePrice: 0 };
   let declined = false;
+  // Tin khách gần nhất HỎI GIÁ ⇒ mọi tin bot tới tin khách kế tiếp là câu TRẢ LỜI giá.
+  let priceAsk = false;
   let sizeChosen = false;
   let awaiting = false;
   const botSaid = (t: string) => {
@@ -101,9 +112,13 @@ export function offersOfConversation(msgs: readonly { role: string; content: unk
     if (sizeChosen && kinds.includes("SIZE_REASK")) out.reaskAfterSize += 1;
     if (!kinds.some((k) => k === "UPSELL" || k === "CROSS_SELL")) return;
     out.offers += 1;
+    if (priceAsk) out.priceAnswers += 1;
     if (kinds.includes("CROSS_SELL")) out.crossSells += 1;
     if (declined) out.afterDecline += 1;
-    if (sizeChosen && kinds.includes("UPSELL")) out.upsellAfterSize += 1;
+    if (sizeChosen && kinds.includes("UPSELL")) {
+      if (priceAsk) out.upsellAfterSizePrice += 1;
+      else out.upsellAfterSize += 1;
+    }
     awaiting = true;
   };
   for (const m of msgs) {
@@ -114,6 +129,7 @@ export function offersOfConversation(msgs: readonly { role: string; content: unk
     for (const d of deliveredOf(m.content)) botSaid(d);
     const t = blocksOf(m.content).some((b) => b.type === "tool_result") ? "" : textOf(m.content);
     if (!t) continue;
+    priceAsk = opts.askedPrice ? opts.askedPrice(t) : false;
     if (awaiting && offerDeclinedBy(t)) declined = true;
     awaiting = false;
     const intent = classifyCartMessage(t);
@@ -123,10 +139,10 @@ export function offersOfConversation(msgs: readonly { role: string; content: unk
   return out;
 }
 
-export type OfferTotals = { conversations: number; withOffer: number; offers: number; repeated: number; repeatedWithPost: number; repeatedCrossSell: number; afterDecline: number; upsellAfterSize: number; reaskAfterSize: number; cancelledAfterOffer: number; drops: Record<OfferBlock, number> };
+export type OfferTotals = { conversations: number; withOffer: number; offers: number; repeated: number; repeatedPriceOnly: number; upsellAfterSizePrice: number; repeatedWithPost: number; repeatedCrossSell: number; afterDecline: number; upsellAfterSize: number; reaskAfterSize: number; cancelledAfterOffer: number; drops: Record<OfferBlock, number> };
 
 export function emptyTotals(): OfferTotals {
-  return { conversations: 0, withOffer: 0, offers: 0, repeated: 0, repeatedWithPost: 0, repeatedCrossSell: 0, afterDecline: 0, upsellAfterSize: 0, reaskAfterSize: 0, cancelledAfterOffer: 0, drops: Object.fromEntries(OFFER_BLOCKS.map((k) => [k, 0])) as Record<OfferBlock, number> };
+  return { conversations: 0, withOffer: 0, offers: 0, repeated: 0, repeatedPriceOnly: 0, upsellAfterSizePrice: 0, repeatedWithPost: 0, repeatedCrossSell: 0, afterDecline: 0, upsellAfterSize: 0, reaskAfterSize: 0, cancelledAfterOffer: 0, drops: Object.fromEntries(OFFER_BLOCKS.map((k) => [k, 0])) as Record<OfferBlock, number> };
 }
 
 /**
@@ -137,8 +153,12 @@ export function emptyTotals(): OfferTotals {
 export function addConversation(t: OfferTotals, c: ConvOffers, drops: readonly { reason: string }[], postSent = false): OfferTotals {
   t.conversations += 1;
   if (c.offers > 0) t.withOffer += 1;
-  if (c.offers >= 2) t.repeated += 1;
-  if (c.offers >= 2 && postSent) t.repeatedWithPost += 1;
+  // Lời mời của CHÍNH bot (không tính câu trả lời câu hỏi giá); hội thoại chỉ «lặp» nhờ câu trả lời giá ⇒ đếm riêng.
+  const own = c.offers - c.priceAnswers;
+  if (own >= 2) t.repeated += 1;
+  if (c.offers >= 2 && own < 2) t.repeatedPriceOnly += 1;
+  if (own >= 2 && postSent) t.repeatedWithPost += 1;
+  t.upsellAfterSizePrice += c.upsellAfterSizePrice;
   if (c.crossSells >= 2) t.repeatedCrossSell += 1;
   t.offers += c.offers;
   t.afterDecline += c.afterDecline;
@@ -199,14 +219,18 @@ export function addSamples(s: AuditSamples, id: string, c: ConvOffers): AuditSam
   const put = (k: keyof AuditSamples, yes: boolean) => {
     if (yes && s[k].length < AUDIT_SAMPLE_MAX) s[k].push(id);
   };
-  put("repeated", c.offers >= 2);
+  put("repeated", c.offers - c.priceAnswers >= 2);
   put("afterDecline", c.afterDecline > 0);
   put("upsellAfterSize", c.upsellAfterSize > 0);
   put("reaskAfterSize", c.reaskAfterSize > 0);
   return s;
 }
 
-export async function auditOffers(db: Db, from: Date): Promise<OfferTotals & { post: PostConfirmTotals; samples: AuditSamples }> {
+export async function auditOffers(db: Db, from: Date): Promise<OfferTotals & { post: PostConfirmTotals; samples: AuditSamples; priceRule: boolean }> {
+  // Phép đọc «khách hỏi giá» của guardReply — ops lấy script từ MAIN nhưng lib từ ẢNH ĐANG CHẠY ⇒ import động; ảnh chưa có ⇒ không loại gì
+  // và in «CHƯA ĐO ĐƯỢC» (không giả vờ đã tách).
+  const nba = (await import("@/lib/sales-chatbot/next-best-action")) as Record<string, unknown>;
+  const askedPrice = typeof nba.customerAskedPrice === "function" ? (nba.customerAskedPrice as (text: string) => boolean) : undefined;
   const c = schema.salesChatConversations;
   const m = schema.salesChatMessages;
   const convs = await db.select({ id: c.id, state: c.state }).from(c).where(and(ne(c.channel, "TEST"), gte(c.updatedAt, from))).limit(AUDIT_MAX_CONVERSATIONS);
@@ -226,12 +250,12 @@ export async function auditOffers(db: Db, from: Date): Promise<OfferTotals & { p
       // `offerDrops` mang lượt, không mang mốc giờ — hội thoại có hoạt động trong kỳ thì tính cả lượt mua hiện tại của nó.
       const pco = st.postConfirmOffer;
       const postSent = Boolean(pco?.sent && pco.outcome === "OFFERED" && Date.parse(pco.at) >= from.getTime());
-      const offers = offersOfConversation(msgs, st);
+      const offers = offersOfConversation(msgs, st, { askedPrice });
       addConversation(totals, offers, st.offerDrops ?? [], postSent);
       addSamples(samples, conv.id, offers);
     }
   }
-  return { ...totals, post, samples };
+  return { ...totals, post, samples, priceRule: Boolean(askedPrice) };
 }
 
 async function main() {
@@ -268,6 +292,7 @@ async function main() {
     const t = await auditOffers(db, from);
     tomTat(`LỜI MỜI ĐÃ GỬI (ESTIMATED, đọc chữ): ${t.conversations} hội thoại · có mời ${t.withOffer} · tổng lời mời ${t.offers} · hội thoại bị mời ≥ 2 lần ${t.repeated}`);
     tomTat(`LẶP (ESTIMATED): mời ≥ 2 lần ${t.repeated} hội thoại · trong đó có lời mời sau chốt ${t.repeatedWithPost} · ≥ 2 lời mời MÓN KHÁC ${t.repeatedCrossSell} (phần còn lại chỉ là mời gói lớn hơn cùng món)`);
+    tomTat(t.priceRule ? `TRẢ LỜI CÂU HỎI GIÁ (KHÔNG tính vào hai dòng trên / dưới): hội thoại chỉ «lặp» nhờ câu trả lời giá ${t.repeatedPriceOnly} · «gói lớn sau khi đã chọn» là trả lời câu hỏi giá ${t.upsellAfterSizePrice}` : "TRẢ LỜI CÂU HỎI GIÁ: CHƯA ĐO ĐƯỢC — ảnh đang chạy chưa có customerAskedPrice; «lặp» / «gói lớn» vẫn đếm cả câu trả lời giá");
     tomTat(`SAI LÚC: mời sau khi khách từ chối ${t.afterDecline} · mời gói lớn sau khi đã chọn khối lượng ${t.upsellAfterSize} · hỏi lại «1kg hay 2kg» sau khi đã chọn ${t.reaskAfterSize} · có mời rồi huỷ / từ chối ${t.cancelledAfterOffer} hội thoại`);
     const drops = OFFER_BLOCKS.filter((k) => t.drops[k] > 0).map((k) => `${k} ${t.drops[k]}`);
     tomTat(`MÁY CHỦ ĐÃ BỎ (state.offerDrops, từ bản #868): ${drops.join(" · ") || "0"}`);
