@@ -93,3 +93,25 @@ shop cần làm"` — `board` in nó ở mục CẦN CHỦ SHOP. Trong lúc ch�
 
 Tiếng Việt, ngắn: kết quả · số thật · việc đang chạy · CẦN CHỦ SHOP (nếu có, đúng MỘT hành động). Không
 kể lệnh shell, không dán log.
+
+## 7. Ngân sách token (`docs/ai-tech-room/token-budget.md`, chủ shop duyệt 16/10/2026)
+
+Baseline 10–16/10: **33,6M CU / việc DONE**, 8,0M CU / PR gộp. Mục tiêu ≤ −50% CU / việc DONE. Chi phí =
+số lượt × cỡ context, nên:
+
+| Việc | Ai làm |
+|---|---|
+| tra tệp / nơi gọi, tóm tắt, đọc PR · CI · deploy · health, chờ một mốc | `ai-tech-scout` (Haiku) |
+| viết mã một việc rõ phạm vi | `ai-tech-worker` |
+| sửa P0 khó, chẩn đoán, review rủi ro ≥ HIGH | Opus — không hạ model ở đây |
+
+- **Không vòng `sleep`.** Chờ PR / CI / deploy / health: `npm run ai -- wait pr|run|health …` bằng
+  `run_in_background` — harness báo đúng một lần khi xong.
+- **Một worker = một PR**, xong là kết thúc; hậu kiểm deploy giao `ai-tech-scout`. Không giữ worker chờ CI.
+- **Chỉ dựng subagent khi đầu ra độc lập**; không cho hai agent cùng phân tích một nguyên nhân, không mở PR
+  thứ hai cho cùng nguyên nhân gốc — tiếp tục từ CHECKPOINT, không phân tích lại từ đầu.
+- **Ngân sách mỗi việc**: ≤ 10M CU · ≤ 2 lượt CI đỏ cùng nguyên nhân · ≤ 4 giờ. Vượt ⇒ dừng, báo nguyên nhân
+  + phương án khác, không thử tiếp.
+- **Phiên Lead sống ≤ 1 ngày**: cuối ngày cập nhật CHECKPOINT rồi mở phiên mới, không kéo một phiên 7 ngày.
+- **Thứ Sáu**: `node scripts/claude-usage.mjs --days=7 --baseline=docs/ai-tech-room/token-baseline-2026-10-16.json`
+  rồi ghi một dòng kết quả vào CHECKPOINT. Không API trả phí khi chưa có ngân sách được duyệt.

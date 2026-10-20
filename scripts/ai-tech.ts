@@ -1353,6 +1353,7 @@ ${t.integrationNotes ?? "(không)"}
 5. \`git push -u ${"origin"} ${m.branch}\` khi xong. KHÔNG mở PR, KHÔNG merge, KHÔNG deploy, KHÔNG đụng \`main\` — Lead làm.
 6. Báo cáo cuối: XONG / CHẶN, SHA đã đẩy, lệnh kiểm thử đã chạy + kết quả, tệp đã đổi, rủi ro còn lại.
 7. Kiểm lại phạm vi trước khi báo xong: \`npm run ai -- ready ${m.mission.id} ${t.id}\` (chạy từ cây của Lead) hoặc \`git diff --name-only ${m.baseSha.slice(0, 12)}..HEAD\`.
+8. Ngân sách token (docs/ai-tech-room/token-budget.md): KHÔNG vòng \`sleep\` — chờ bằng \`npm run ai -- wait …\` chạy nền. Đọc đúng tệp liên quan, tìm có mục tiêu, không đọc lại cả kho / log / lịch sử. Xong việc (đã đẩy + báo cáo) là KẾT THÚC — không ở lại chờ CI hay deploy. Hai lần CI đỏ cùng nguyên nhân, hoặc context chạm ~200k token ⇒ dừng, báo Lead "VƯỢT NGÂN SÁCH: <vì sao> — <đề xuất>".
 `;
 }
 
@@ -4241,6 +4242,96 @@ async function cmdMetrics(ctx: RepoCtx, flags: Set<string>, values: Map<string, 
   return 0;
 }
 
+/**
+ * ═══════════ CHỜ KHÔNG ĐỐT LƯỢT GỌI MODEL ═══════════
+ *
+ * Đo 10–16/10/2026: 1.110 lượt `sleep` của agent = 27% tổng chi phí token, vì mỗi lượt thức dậy đọc lại cả
+ * context (TB ~370k token) và lượt ngay sau một lần ngủ quá hạn cache GHI LẠI TB 203k token. `wait` gói cả vòng
+ * hỏi vào MỘT tiến trình: agent chạy nó bằng `run_in_background`, harness báo đúng một lần khi nó thoát.
+ * Không in gì giữa chừng (mọi dòng in ra sẽ thành token khi agent đọc lại kết quả).
+ */
+export type WaitObservation =
+  | { kind: "pr"; merged: boolean; state: string; mergeableState: string | null; gates: "success" | "failure" | "pending" | "missing"; untilMerged: boolean }
+  | { kind: "run"; status: string; conclusion: string | null }
+  | { kind: "health"; commit: string | null; target: string };
+export type WaitVerdict = { done: false } | { done: true; ok: boolean; line: string };
+
+/** Quyết định đã đến lúc thoát chưa. HÀM THUẦN. */
+export function waitVerdict(o: WaitObservation): WaitVerdict {
+  if (o.kind === "pr") {
+    if (o.merged) return { done: true, ok: true, line: "đã gộp" };
+    if (o.state === "closed") return { done: true, ok: false, line: "đã đóng, KHÔNG gộp" };
+    if (o.mergeableState === "dirty") return { done: true, ok: false, line: "xung đột với nhánh gốc (dirty)" };
+    if (o.untilMerged) return { done: false };
+    if (o.gates === "success") return { done: true, ok: true, line: "gates / gates XANH" };
+    if (o.gates === "failure") return { done: true, ok: false, line: "gates / gates ĐỎ" };
+    return { done: false };
+  }
+  if (o.kind === "run") {
+    if (o.status !== "completed") return { done: false };
+    return { done: true, ok: o.conclusion === "success", line: `xong: ${o.conclusion ?? "không rõ kết luận"}` };
+  }
+  const want = o.target.toLowerCase().slice(0, 12);
+  const have = (o.commit ?? "").toLowerCase().slice(0, 12);
+  if (want.length >= 7 && have.length >= 7 && (want.startsWith(have) || have.startsWith(want))) return { done: true, ok: true, line: `production chạy ${have}` };
+  return { done: false };
+}
+
+async function cmdWait(ctx: RepoCtx, rest: string[], flags: Set<string>, values: Map<string, string>): Promise<number> {
+  const [kind, id] = rest;
+  if (!["pr", "run", "health"].includes(kind ?? "") || !id) throw new UsageError("wait pr <số> [--merged] | wait run <id> | wait health <sha>");
+  const gh = githubClient(ctx);
+  if (!gh && kind !== "health") throw new Error("remote không phải GitHub");
+  const authed = Boolean((process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "").trim());
+  // Ẩn danh: 60 lượt/giờ cho CẢ máy — `wait pr` hỏi 2 lượt mỗi vòng nên 180 s là trần an toàn.
+  const everyS = Number(values.get("every") ?? (authed || kind === "health" ? 60 : 180));
+  const timeoutM = Number(values.get("timeout") ?? 45);
+  if (!Number.isFinite(everyS) || everyS < 15 || !Number.isFinite(timeoutM) || timeoutM <= 0 || timeoutM > 600) throw new UsageError("--every=≥15 (giây) · --timeout=1..600 (phút)");
+  const deadline = Date.now() + timeoutM * 60_000;
+  let errors = 0;
+  let lastError = "";
+  for (;;) {
+    let obs: WaitObservation | null = null;
+    try {
+      if (kind === "pr" && gh) {
+        const p = (await gh.get(`/pulls/${Number(id)}`)) as Record<string, unknown>;
+        const sha = isObj(p.head) ? String(p.head.sha ?? "") : "";
+        const merged = Boolean(p.merged);
+        const closed = String(p.state) === "closed";
+        const untilMerged = flags.has("merged");
+        obs = { kind: "pr", merged, state: String(p.state), mergeableState: typeof p.mergeable_state === "string" ? p.mergeable_state : null, gates: merged || closed || untilMerged || !sha ? "missing" : await gatesOf(gh.get, sha), untilMerged };
+      } else if (kind === "run" && gh) {
+        const r = (await gh.get(`/actions/runs/${Number(id)}`)) as Record<string, unknown>;
+        obs = { kind: "run", status: String(r.status), conclusion: typeof r.conclusion === "string" ? r.conclusion : null };
+      } else {
+        const h = await productionHealth(ctx);
+        if (h.error) throw new Error(h.error);
+        const c = h.health && typeof (h.health as { commit?: unknown }).commit === "string" ? String((h.health as { commit?: unknown }).commit) : null;
+        obs = { kind: "health", commit: c, target: id };
+      }
+      errors = 0;
+    } catch (e) {
+      errors += 1;
+      lastError = (e as Error).message;
+      // Năm lần hỏng liền nhau = đang MÙ (vd hết hạn mức 403), không phải "chưa xong" — thoát và nói thật.
+      if (errors >= 5) {
+        out(`✗ wait ${kind} ${id}: ${errors} lần hỏi hỏng liền — ${lastError}`);
+        return 1;
+      }
+    }
+    const v = obs ? waitVerdict(obs) : ({ done: false } as WaitVerdict);
+    if (v.done) {
+      out(`${v.ok ? "✓" : "✗"} wait ${kind} ${id}: ${v.line}`);
+      return v.ok ? 0 : 1;
+    }
+    if (Date.now() + everyS * 1000 > deadline) {
+      out(`… wait ${kind} ${id}: hết ${timeoutM} phút, CHƯA xong${lastError ? ` (lỗi gần nhất: ${lastError})` : ""}`);
+      return 3;
+    }
+    await new Promise((r) => setTimeout(r, everyS * 1000));
+  }
+}
+
 const HELP = `AI Tech Room — docs/ai-tech-room/README.md
 
   npm run ai -- status [sứ-mệnh…] [--github] [--json]   trạng thái SUY RA từ git + việc chủ shop cần làm
@@ -4288,6 +4379,9 @@ BÀN GIAO — worker KHÔNG cần quyền GitHub API; chỉ Delivery Controller 
   npm run ai -- merge <PR> --sha=<SHA queue in> --token=…
                                                          gộp (squash) CHỈ khi hàng đợi xếp MERGE_NOW / MERGE_ISOLATED ở đúng SHA đó
   npm run ai -- deploy --token=…                         MỘT lượt deploy, CHỈ khi deploy-plan nói DEPLOY; trả đúng run của SHA
+CHỜ — chạy bằng run_in_background, KHÔNG vòng sleep trong lượt của model (một lần thức thay cho N lần hỏi)
+  npm run ai -- wait pr <số> [--merged] | wait run <id> | wait health <sha>  [--every=giây --timeout=phút]
+                                                         thoát 0 = xong tốt · 1 = xong xấu / mù · 3 = hết giờ
 `;
 
 export async function main(argv: readonly string[], cwd: string, opts: { actor?: string } = {}): Promise<number> {
@@ -4356,6 +4450,8 @@ export async function main(argv: readonly string[], cwd: string, opts: { actor?:
       return cmdVerify(ctx, a.flags, a.values);
     case "metrics":
       return cmdMetrics(ctx, a.flags, a.values);
+    case "wait":
+      return cmdWait(ctx, rest, a.flags, a.values);
     default:
       throw new UsageError(`lệnh lạ: ${cmd}`);
   }
