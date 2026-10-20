@@ -3,7 +3,7 @@
   "mission_id": "payroll-v2-recon-center",
   "title": "Payroll V2 — Trung tâm đối soát: phí chiều hoàn vào P&L theo vận đơn/mã, lương cứng chỉ tính khi có căn cứ, phân công chờ duyệt, truy vết giá vốn/COD, đề xuất số dư mở sổ",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -44,11 +44,27 @@
     "0250": "2026-10-20T08:22:07.390Z"
   },
   "created_at": "2026-10-20T08:21:38.802Z",
-  "updated_at": "2026-10-20T08:22:07.390Z",
-  "last_heartbeat": "2026-10-20T08:21:38.802Z",
+  "updated_at": "2026-10-20T13:02:18.942Z",
+  "last_heartbeat": "2026-10-20T13:02:18.942Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "IN_PROGRESS",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/payroll-v2-recon-center",
+    "sha": "c005c8f3d34d935e046d0f619fc7bb8a7b29d73d",
+    "at": "2026-10-20T13:02:18.942Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "Payroll V2 — Trung tâm đối soát: phí chiều hoàn vào P&L theo vận đơn/mã, lương cứng chỉ tính khi có căn cứ, phân công chờ duyệt, truy vết giá vốn/COD, đề xuất số dư mở sổ",
+    "summary": "Payroll V2 Trung tâm đối soát (chủ shop 20/10). (1) Phí chiều hoàn vào cơ sở lương: tổng = máy chi phí (RETURN_COST − điều chỉnh tay), chia mã qua đơn gốc ở cost-engine returnCostByProduct, phần dư vào chi phí chung; toCodes+shared=amount. (2) Lương cứng: CHỈ tách lời khai evidenced/undated (không đọc đồng hồ) — máy chi phí, cảnh báo nghĩa vụ lương, coverage GIỮ NGUYÊN như main (rà soát độc lập bắt được bản nháp làm tắt lá chắn chốt lương ở kỳ đang trả); 'chưa biết' chỉ áp ở đề xuất số dư mở sổ (historicalSalary, không làm rơi chứng từ lương). (3) Migration 0250: PENDING cho phân công/điều khoản mã + CHECK APPROVED có mốc duyệt, 0 dòng đổi; approveCodeRow là đường duy nhất sang APPROVED; đã khai MIGRATION_SERVE_COMPAT. (4) /payroll/reconciliation/center CHỈ ĐỌC: theo tháng (độ phủ, doanh thu kế toán / phải thu / tiền thực nhận / COD ĐVVC giữ), khoản chưa đối soát + PHÒNG + lối sửa, đề xuất mở sổ, truy giá vốn, MỘT danh sách phê duyệt. (5) payroll-profit-gate-audit in thêm các phần trên (tóm tắt công khai không tên/mã đơn). AGENTS 78 sửa + 79 mới; docs §10. Không chạm kỳ đã khoá (production 0 kỳ lương). Sau deploy: chạy MỘT lượt ops payroll-profit-gate-audit --from-month 2026-06.",
+    "tests": [
+      "npm run typecheck",
+      "npm run lint",
+      "npm test (ẩn danh) — TẤT CẢ KIỂM THỬ ĐẠT",
+      "GITHUB_TOKEN=gia-lap-khong-that npm test — TẤT CẢ KIỂM THỬ ĐẠT",
+      "npm run build",
+      "đột biến 14/14 đỏ (gồm 2 đột biến tái tạo lỗi rà soát độc lập tìm ra)"
+    ]
   }
 }
