@@ -232,7 +232,21 @@ export type EvidenceVerdict = {
   tier: EvidenceTier;
 };
 
-const hon = (a: ReasonEvidenceItem, b: ReasonEvidenceItem | undefined) => !b || SOURCE_RANK[a.source] > SOURCE_RANK[b.source] || (SOURCE_RANK[a.source] === SOURCE_RANK[b.source] && a.at >= b.at);
+/**
+ * Thứ tự ƯU TIÊN giữa hai lời khai — TOÀN PHẦN, không phụ thuộc thứ tự đọc. Hạng cao thắng; bằng hạng thì muộn hơn thắng; CÙNG hạng
+ * CÙNG mốc thì phá hoà bằng khoá `nguồn|lý do` (chỉ để ổn định, không mang nghĩa).
+ *
+ * Đo production 20/10/2026 (ops reason-taxonomy-dryrun run 39460159981): ma trận chuyển và bảng SAU của CÙNG một lượt đếm «không liên lạc»
+ * 705 và 702 — 3 kiện có hai lời khai cùng hạng, cùng mốc, khác lý do; bản cũ để «cái đứng sau thắng», mà thứ tự ấy là thứ tự dòng
+ * Postgres trả về (câu đọc chỉ `ORDER BY occurred_at`), nên hai lượt đọc ra hai kết quả. Cờ cách xếp chỉ bật trên số chạy hai lần ra một.
+ */
+export function evidenceBeats(a: ReasonEvidenceItem, b: ReasonEvidenceItem | undefined): boolean {
+  if (!b) return true;
+  if (SOURCE_RANK[a.source] !== SOURCE_RANK[b.source]) return SOURCE_RANK[a.source] > SOURCE_RANK[b.source];
+  if (a.at !== b.at) return a.at > b.at;
+  return `${a.source}|${a.reason}` >= `${b.source}|${b.reason}`;
+}
+const hon = evidenceBeats;
 
 /**
  * ═══ MỘT ĐƠN, MỘT NGUYÊN NHÂN CHÍNH — HÀM THUẦN ═══
