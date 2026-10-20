@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "giu-gio-ngoac-quy-cach",
+  "title": "Câu hỏi xác nhận lời mời sau chốt không bị thay bằng câu giữ đơn (quy cách trong ngoặc)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-giu-gio-ngoac",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/giu-gio-ngoac-quy-cach",
+  "base_sha": "83bfbb89ef9f21867fa7749a09eccd92bd99d619",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/cart-commitment.ts",
+    "tests/sales-cart-commitment.test.ts"
+  ],
+  "dependencies": [
+    "gio-dau-con-lai"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-20T02:43:28.696Z",
+  "updated_at": "2026-10-20T02:43:28.696Z",
+  "last_heartbeat": "2026-10-20T02:43:28.696Z",
+  "definition_of_done": []
+}
