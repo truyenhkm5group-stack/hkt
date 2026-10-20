@@ -3,7 +3,7 @@
   "mission_id": "return-reason-tie-break",
   "title": "Lý do hoàn: phá hoà xác định — đọc hai lần ra một kết quả",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-return-reason",
@@ -20,9 +20,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-20T16:57:50.150Z",
-  "updated_at": "2026-10-20T20:18:06.227Z",
+  "updated_at": "2026-10-20T20:32:36.437Z",
   "last_heartbeat": "2026-10-20T20:16:19.695Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#928 → c23f41cd0e30783d52047ced268ce71614839136"
+  },
   "handoff": {
     "branch": "claude/return-reason-tie-break",
     "sha": "ec576caab5bbeec1f7d8e74f0015390659af2889",
