@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "payroll-audit-returnleg",
+  "title": "Kiểm toán lương in tác động phí chiều hoàn từng tháng (chỉ-script)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-audit-rl",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/payroll-audit-returnleg",
+  "base_sha": "45014719b64897cf1e316163cbfb060bc9d8216d",
+  "domains": [],
+  "owned_paths": [
+    "scripts/payroll-profit-gate-audit.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-20T15:00:00.738Z",
+  "updated_at": "2026-10-20T15:00:00.738Z",
+  "last_heartbeat": "2026-10-20T15:00:00.738Z",
+  "definition_of_done": []
+}
