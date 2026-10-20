@@ -3,7 +3,7 @@
   "mission_id": "ci-test-shard",
   "title": "Chia npm test thành shard cân theo thời gian, ma trận CI ẩn danh + token giả, job tổng hợp gates/gates",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-audit-rl",
@@ -20,9 +20,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-20T14:13:12.483Z",
-  "updated_at": "2026-10-20T18:49:05.741Z",
+  "updated_at": "2026-10-20T19:32:20.302Z",
   "last_heartbeat": "2026-10-20T18:47:43.644Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#926 → 7122e41b79babd6c10a42557c562c558c7136f49"
+  },
   "handoff": {
     "branch": "claude/ci-test-shard",
     "sha": "365ba43cc82c24a5bcef72187a980dac646cac75",
