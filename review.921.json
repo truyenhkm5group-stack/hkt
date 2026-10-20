@@ -1,0 +1,8 @@
+{
+  "pr": 921,
+  "sha": "c67e0ecce0d2c53ab45f946f6c69f7041c5735ad",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-20T08:54:27.703Z",
+  "note": "review lead: sửa lỗi của #920 — chỉ tin TOÀN UPSELL sau câu khách hỏi giá mới là «trả lời giá»; tin có CROSS_SELL (mời món khác) luôn là lời mời thật, đúng như guardReply chỉ miễn UPSELL khi khách hỏi giá. Không có bản sửa này lượt đo sau deploy sẽ che lời mời món khác khỏi «lặp». Script + bài kiểm, đột biến đỏ; không cần deploy (ops lấy script từ main). Baseline run 39392981848 không bị ảnh hưởng"
+}
