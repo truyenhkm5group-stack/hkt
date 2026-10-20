@@ -30,5 +30,13 @@ export function testOpsScriptSize() {
     bytes <= OPS_SCRIPT_MAX_BYTES,
     `Kịch bản SSH của ops-vps.yml dài ${bytes.toLocaleString("vi-VN")} byte > trần ${OPS_SCRIPT_MAX_BYTES.toLocaleString("vi-VN")} — gần giới hạn 131.072 byte của một biến môi trường, vượt là MỌI thao tác ops chết ("Argument list too long"). Chuyển chú thích dài sang docs/ops-vps-script-notes.md.`,
   );
-  console.log(`✓ Kịch bản SSH ops-vps.yml: ${bytes.toLocaleString("vi-VN")} / ${OPS_SCRIPT_MAX_BYTES.toLocaleString("vi-VN")} byte (giới hạn Linux 131.072)`);
+  // Mỗi dòng trỏ "Chú thích đầy đủ: … — mục `X`" phải có mục `X` trong tài liệu — chú thích chuyển đi KHÔNG được
+  // mất (21/10/2026: 60 cụm chuyển sang docs/ops-vps-script-notes.md, khối 124.750 ⇒ 85.412 byte).
+  const yml = readFileSync(".github/workflows/ops-vps.yml", "utf8");
+  const notes = readFileSync("docs/ops-vps-script-notes.md", "utf8");
+  const tro = [...yml.matchAll(/Chú thích đầy đủ: docs\/ops-vps-script-notes\.md — mục `([^`]+)`/g)].map((m) => m[1]);
+  const moCoi = tro.filter((ten) => !notes.includes(`\`${ten}\``));
+  assert.deepEqual(moCoi, [], "dòng trỏ tới mục KHÔNG có trong docs/ops-vps-script-notes.md — chú thích đã chuyển đi đang bị mất");
+  assert.equal(new Set(tro).size, tro.length, "hai dòng trỏ cùng một mục — mục phải có tên riêng");
+  console.log(`✓ Kịch bản SSH ops-vps.yml: ${bytes.toLocaleString("vi-VN")} / ${OPS_SCRIPT_MAX_BYTES.toLocaleString("vi-VN")} byte (giới hạn Linux 131.072) · ${tro.length} mục chú thích đã chuyển đều có trong tài liệu`);
 }
