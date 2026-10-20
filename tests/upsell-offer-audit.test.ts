@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { addConversation, addPostConfirm, addSamples, AUDIT_SAMPLE_MAX, auditOffers, emptyPostConfirm, emptyTotals, offersOfConversation, parseAuditArgs } from "../scripts/upsell-offer-audit";
+import { customerAskedPrice } from "@/lib/sales-chatbot/next-best-action";
 
 const PHONE = "0900008681";
 const txt = (text: string) => [{ type: "text", text }];
@@ -38,9 +39,9 @@ function testPure() {
   // Lời mời 1 = tin bot đầu (mời 2kg SAU khi khách đã chọn 2kg + hỏi lại quy cách); lời mời 2 = câu mẫu menu SAU khi khách «không em».
   // Tin «[Shop đã nhắn]» là của page / nhân viên — không đếm.
   // Lời mời 1 chỉ mời gói 2kg (cùng món); lời mời 2 mời món KHÁC (chả mực) ⇒ crossSells 1.
-  assert.deepEqual(c, { offers: 2, crossSells: 1, afterDecline: 1, upsellAfterSize: 1, reaskAfterSize: 1, endedCancelled: true });
+  assert.deepEqual(c, { offers: 2, crossSells: 1, afterDecline: 1, upsellAfterSize: 1, reaskAfterSize: 1, endedCancelled: true, priceAnswers: 0, upsellAfterSizePrice: 0 });
   const clean = offersOfConversation([{ role: "user", content: txt("Cho chị 1kg chả cá thu") }, { role: "assistant", content: txt("Dạ mình dùng thêm chả mực giã tay ăn kèm không ạ? Cho em xin SĐT nhé.") }, { role: "user", content: txt("ok lấy thêm 1kg chả mực") }], {});
-  assert.deepEqual(clean, { offers: 1, crossSells: 1, afterDecline: 0, upsellAfterSize: 0, reaskAfterSize: 0, endedCancelled: false });
+  assert.deepEqual(clean, { offers: 1, crossSells: 1, afterDecline: 0, upsellAfterSize: 0, reaskAfterSize: 0, endedCancelled: false, priceAnswers: 0, upsellAfterSizePrice: 0 });
   const t = addConversation(addConversation(emptyTotals(), c, [{ reason: "CONTACT_INFO" }, { reason: "DECLINED" }]), clean, []);
   // Mẫu mã hội thoại cho từng nhóm sai lúc / lặp (để lần vết), có trần.
   const sm = addSamples(addSamples({ repeated: [], afterDecline: [], upsellAfterSize: [], reaskAfterSize: [] }, "conv-hslc", c), "conv-sach", clean);
@@ -69,6 +70,22 @@ function testPure() {
   const t2 = addConversation(addConversation(emptyTotals(), priceThenPost, [], true), twoCross, [], false);
   assert.equal(priceThenPost.offers, 2, JSON.stringify(priceThenPost));
   assert.deepEqual([t2.repeated, t2.repeatedWithPost, t2.repeatedCrossSell], [2, 1, 1], JSON.stringify(t2));
+  // Production 20/10/2026: khách hỏi lại giá SAU khi chốt ⇒ câu bảng giá có «2kg giảm…» là TRẢ LỜI, không phải lời mời lặp / gói lớn sai lúc —
+  // nhưng đếm RIÊNG. Không hỏi giá ⇒ vẫn đếm như cũ. Phép đọc «hỏi giá» là CHÍNH của guardReply (customerAskedPrice).
+  const sauChot = (khach: string) => [
+    { role: "user", content: txt("Cho chị 1kg chả cá thu") },
+    { role: "assistant", content: txt("Dạ em lên đơn rồi ạ. Bên em có thêm chả mực giã tay ăn kèm rất hợp ạ.") },
+    { role: "user", content: txt(khach) },
+    { role: "assistant", content: txt("Dạ chả cá thu 1kg 280.000 ₫ ạ. Chị lấy 2kg được giảm còn 540.000đ, tiết kiệm hơn ạ.") },
+  ];
+  const hoiGia = offersOfConversation(sauChot("xin giá chả cá thu?"), {}, { askedPrice: customerAskedPrice });
+  assert.deepEqual([hoiGia.offers, hoiGia.priceAnswers, hoiGia.upsellAfterSize, hoiGia.upsellAfterSizePrice], [2, 1, 0, 1], JSON.stringify(hoiGia));
+  const khongHoi = offersOfConversation(sauChot("ok em"), {}, { askedPrice: customerAskedPrice });
+  assert.deepEqual([khongHoi.offers, khongHoi.priceAnswers, khongHoi.upsellAfterSize, khongHoi.upsellAfterSizePrice], [2, 0, 1, 0], JSON.stringify(khongHoi));
+  const t3 = addConversation(addConversation(emptyTotals(), hoiGia, [], true), khongHoi, [], true);
+  assert.deepEqual([t3.repeated, t3.repeatedPriceOnly, t3.repeatedWithPost, t3.upsellAfterSize, t3.upsellAfterSizePrice], [1, 1, 1, 1, 1], JSON.stringify(t3));
+  // Không có phép đọc «hỏi giá» (ảnh cũ) ⇒ đếm như trước, không loại gì.
+  assert.equal(offersOfConversation(sauChot("xin giá chả cá thu?"), {}).priceAnswers, 0);
 }
 
 /** 4. Lời mời SAU CHỐT (P0 19/10/2026): mời đã gửi · không mời theo lý do · nhận + tiền thêm · huỷ sau lời mời; ngoài kỳ không tính. */
