@@ -1,0 +1,8 @@
+{
+  "pr": 927,
+  "sha": "19477c5e0a9eee13f99f997472de23fdaa59fe5f",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-20T19:03:59.501Z",
+  "note": "review lead: P0 chủ shop «ưu tiên câu upsell shop đã cài, không tự sáng tác». choosePostConfirmSource thuần: câu shop dùng được ⇒ luôn thắng; không có ⇒ chỉ tự soạn khi autoUpsellOffer === true (mặc định TẮT) ⇒ NO_TEMPLATE. Câu shop nguyên văn (chỉ điền {{giá}}/{{tồn}}) là tin riêng SAU tin xác nhận qua guardOutgoing, ảnh qua TurnResult.media như send_quick_reply; khe ảnh bận ⇒ MEDIA_SLOT_BUSY, kh"
+}
