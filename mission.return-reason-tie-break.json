@@ -3,7 +3,7 @@
   "mission_id": "return-reason-tie-break",
   "title": "Lý do hoàn: phá hoà xác định — đọc hai lần ra một kết quả",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-return-reason",
@@ -18,7 +18,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-20T16:57:50.150Z",
-  "updated_at": "2026-10-20T16:57:50.150Z",
-  "last_heartbeat": "2026-10-20T16:57:50.150Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-20T20:16:19.695Z",
+  "last_heartbeat": "2026-10-20T20:16:19.695Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/return-reason-tie-break",
+    "sha": "ec576caab5bbeec1f7d8e74f0015390659af2889",
+    "at": "2026-10-20T20:16:19.695Z",
+    "actor": "DESKTOP-56TH98Y:wt-return-reason",
+    "title": "Lý do hoàn: phá hoà xác định — đọc hai lần ra một kết quả",
+    "summary": "evidenceBeats thứ tự toàn phần (hạng → mốc → nguồn|lý do), chữ gốc phá hoà; ORDER BY occurred_at, id. Phải gộp trước khi bật cờ cách xếp",
+    "tests": [
+      "typecheck: sạch",
+      "lint: sạch",
+      "npm test (cây sạch ec576caa): TẤT CẢ KIỂM THỬ ĐẠT",
+      "build: OK",
+      "đột biến bỏ phá hoà: đỏ"
+    ]
+  }
 }
