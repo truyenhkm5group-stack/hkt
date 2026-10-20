@@ -3,7 +3,7 @@
   "mission_id": "return-reason-vtp-first",
   "title": "Lý do hoàn: sự kiện VTP thắng sự kiện Pancake chuyển tiếp",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-return-reason",
@@ -18,7 +18,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-20T13:03:31.330Z",
-  "updated_at": "2026-10-20T13:03:31.330Z",
-  "last_heartbeat": "2026-10-20T13:03:31.330Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-20T14:27:33.334Z",
+  "last_heartbeat": "2026-10-20T14:27:33.334Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/return-reason-vtp-first",
+    "sha": "5fdffe07e0fcc9f1c12ce5d97f297da1e4350eff",
+    "at": "2026-10-20T14:27:33.334Z",
+    "actor": "DESKTOP-56TH98Y:wt-return-reason",
+    "title": "Lý do hoàn: lời Viettel Post thắng sự kiện Pancake chuyển tiếp",
+    "summary": "Sửa lệch sau #922 (cờ TẮT): sự kiện Pancake mới hơn đè lời VTP (KLL 702⇒436). Nguồn CARRIER_TEXT_VIA_PANCAKE hạng 28 cùng họ ĐVVC; bậc sự kiện tách VTP/Pancake",
+    "tests": [
+      "typecheck: sạch",
+      "lint: sạch",
+      "npm test (cây sạch 5fdffe07): TẤT CẢ KIỂM THỬ ĐẠT",
+      "build: OK",
+      "đột biến: 3/3 đỏ"
+    ]
+  }
 }
