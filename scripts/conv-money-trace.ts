@@ -263,6 +263,8 @@ export const QUICK_REPLAY_VARIANTS: { key: string; lines: FocusLine[] }[] = [
   { key: "khách cũ: đơn trước chả cá → lấy như lần trước", lines: [{ who: "SHOP", text: "Dạ chị đặt lại chả cá thu 1kg như đơn trước ạ?" }, { who: "CUSTOMER", text: "lấy như lần trước nhé" }] },
   // #868 trên câu mẫu (19/10/2026, HSLC): khách nói khối lượng ngay trong tin ⇒ câu mẫu hỏi lại «1kg hay 2kg» phải nhường AI.
   { key: "đã chọn: cho chị 1kg chả cá thu", lines: [{ who: "CUSTOMER", text: "cho chị 1kg chả cá thu" }] },
+  // #917 (20/10/2026): gõ nhầm hỏi / ngã, số trần không đơn vị, gõ hoa đầu từ — giỏ phải đọc ra Chả cá thu / Chả mực.
+  ...["cho chị 1kg chã cá thu", "chã mực 2kg", "1 chả cá thu", "Lấy 2 Gói Chả Cá Thu"].map((t) => ({ key: `đã chọn: ${t}`, lines: [{ who: "CUSTOMER" as const, text: t }] })),
   { key: "shop mời nem → giá sao em", lines: [{ who: "CUSTOMER", text: "chả cá thu giá sao em" }, { who: "SHOP", text: "Dạ chả cá thu 1kg 280.000đ ạ. Chị lấy thêm nem hải sản không ạ?" }, { who: "CUSTOMER", text: "giá sao em" }] },
 ];
 
