@@ -1,0 +1,8 @@
+{
+  "pr": 923,
+  "sha": "c005c8f3d34d935e046d0f619fc7bb8a7b29d73d",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-20T13:05:40.692Z",
+  "note": "review lead: (1) phí chiều hoàn vào cơ sở lương — tổng từ máy chi phí (RETURN_COST), chia theo mã qua returnCostByProduct (vận đơn chiều về nối đơn gốc qua order_reference + orders.return_fee của đơn hoàn), largest remainder có trần min(total, Σ) ⇒ toCodes + shared = amount, không ghi trùng phí gõ tay (logisticsAdjustment). Kỳ khoá đọc ảnh chụp; production 0 kỳ lương. (2) lương cứng người chưa kha"
+}
