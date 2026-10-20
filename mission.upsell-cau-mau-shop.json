@@ -3,7 +3,7 @@
   "mission_id": "upsell-cau-mau-shop",
   "title": "Upsell sau chốt dùng đúng câu mẫu + ảnh shop đã cài, không tự sáng tác",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-upsell-tpl",
@@ -20,9 +20,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-20T16:17:46.627Z",
-  "updated_at": "2026-10-20T19:03:54.692Z",
+  "updated_at": "2026-10-20T19:48:13.502Z",
   "last_heartbeat": "2026-10-20T19:01:38.257Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#927 → c359b80018224437df8dcf6d3f74adcd2efe9f33"
+  },
   "handoff": {
     "branch": "claude/upsell-cau-mau-shop",
     "sha": "19477c5e0a9eee13f99f997472de23fdaa59fe5f",
