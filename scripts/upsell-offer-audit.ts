@@ -177,9 +177,14 @@ export function addConversation(t: OfferTotals, c: ConvOffers, drops: readonly {
  * 4. LỜI MỜI SAU CHỐT (P0 19/10/2026 — `state.postConfirmOffer`, chỉ có từ bản sửa): lượt chốt có quyết định · mời đã gửi · không mời theo
  * lý do · nhận (đơn đã chốt được sửa thêm đúng món được mời) · tiền thêm · khách xin huỷ / huỷ đơn SAU lời mời. HÀM THUẦN.
  */
-export type PostConfirmTotals = { decided: number; offered: number; notOffered: Record<string, number>; accepted: number; acceptedAmount: number; cancelAfterOffer: number };
+/**
+ * `bySource` (P0 20/10/2026): lời mời ĐÃ GỬI theo nguồn — `SHOP_TEMPLATE` (câu upsell shop cài) · `AUTO_GENERATED` (bot tự soạn, shop bật)
+ * · `LEGACY` (ghi trước bản điều phối, chưa có trường nguồn). `withImages` = lời mời câu mẫu có ảnh giao cho kênh gửi.
+ * Lời mời đã quyết mà không gửi được ⇒ khoá `NOT_SENT:<lý do>` trong `notOffered`.
+ */
+export type PostConfirmTotals = { decided: number; offered: number; notOffered: Record<string, number>; accepted: number; acceptedAmount: number; cancelAfterOffer: number; bySource: Record<"SHOP_TEMPLATE" | "AUTO_GENERATED" | "LEGACY", number>; withImages: number };
 export function emptyPostConfirm(): PostConfirmTotals {
-  return { decided: 0, offered: 0, notOffered: {}, accepted: 0, acceptedAmount: 0, cancelAfterOffer: 0 };
+  return { decided: 0, offered: 0, notOffered: {}, accepted: 0, acceptedAmount: 0, cancelAfterOffer: 0, bySource: { SHOP_TEMPLATE: 0, AUTO_GENERATED: 0, LEGACY: 0 }, withImages: 0 };
 }
 export function addPostConfirm(t: PostConfirmTotals, st: Pick<ChatState, "postConfirmOffer" | "cancelRequest" | "cancelledOrders">, from: Date): PostConfirmTotals {
   const p = st.postConfirmOffer;
@@ -187,6 +192,8 @@ export function addPostConfirm(t: PostConfirmTotals, st: Pick<ChatState, "postCo
   t.decided += 1;
   if (p.outcome === "OFFERED" && p.sent) {
     t.offered += 1;
+    t.bySource[p.source ?? "LEGACY"] += 1;
+    if (p.imageStatus === "QUEUED") t.withImages += 1;
     if (p.accepted) {
       t.accepted += 1;
       t.acceptedAmount += p.accepted.amount;
@@ -195,7 +202,7 @@ export function addPostConfirm(t: PostConfirmTotals, st: Pick<ChatState, "postCo
     const cr = st.cancelRequest as { at?: string } | undefined;
     if (after(cr?.at) || (st.cancelledOrders ?? []).some((c) => after(c.at))) t.cancelAfterOffer += 1;
   } else {
-    const k = p.outcome === "OFFERED" ? "NOT_SENT" : p.outcome;
+    const k = p.outcome === "OFFERED" || p.outcome === "NOT_SENT" ? `NOT_SENT${p.notSentReason ? `:${p.notSentReason}` : ""}` : p.outcome;
     t.notOffered[k] = (t.notOffered[k] ?? 0) + 1;
   }
   return t;
@@ -312,6 +319,7 @@ async function main() {
     const p = t.post;
     const lyDo = Object.entries(p.notOffered).map(([k, n]) => `${k} ${n}`).join(" · ") || "0";
     tomTat(`SAU CHỐT: lượt chốt có quyết định ${p.decided} · mời đã gửi ${p.offered} (${pct(p.decided ? p.offered / p.decided : null)}) · không mời: ${lyDo}`);
+    tomTat(`SAU CHỐT nguồn lời mời đã gửi: câu upsell shop ${p.bySource.SHOP_TEMPLATE} (kèm ảnh ${p.withImages}) · bot tự soạn ${p.bySource.AUTO_GENERATED} · trước bản điều phối ${p.bySource.LEGACY}`);
     tomTat(`SAU CHỐT kết quả: nhận ${p.accepted} · attach ${pct(p.offered ? p.accepted / p.offered : null)} · tiền thêm ${vnd(p.acceptedAmount)} · AOV tăng thêm ${vnd(p.decided ? p.acceptedAmount / p.decided : null)} · xin huỷ / huỷ sau lời mời ${p.cancelAfterOffer} · lãi gộp thêm —`);
   });
   process.stdout.write("", () => process.exit(0));

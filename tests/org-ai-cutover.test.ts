@@ -589,6 +589,20 @@ export function testOrgAiCutoverPure() {
     assert.equal(judgeUpsellProbe(okc, { ...k, offer: null }).verdict, "FAIL", "đã chốt mà không có quyết định mời ⇒ TRƯỢT");
     assert.equal(judgeUpsellProbe(okc, { ...k, offer: { ...k.offer, outcome: "NO_CANDIDATE" } }).verdict, "N/A", "không có món kèm ⇒ KHÔNG ÁP DỤNG, không phải ĐẠT");
     assert.equal(judgeUpsellProbe(okc, { ...k, confirmedAfterInfo: false }).verdict, "N/A");
+    // P0 20/10/2026 — shop CÓ câu upsell đang bật ⇒ lời mời phải là ĐÚNG câu đó (mã) + ảnh, không phải câu bot tự soạn.
+    const TPL = "Dạ các món bán chạy của shop ạ 👇";
+    const tpl = { ...k, template: { id: "q-ban-chay", imageCount: 1 }, autoEnabled: false, infoReply: `Dạ em đã lên đơn ạ.\n${TPL}`, offer: { outcome: "OFFERED", sent: true, productId: null, text: TPL, source: "SHOP_TEMPLATE", quickReplyId: "q-ban-chay", imageStatus: "QUEUED" } };
+    assert.equal(judgeUpsellProbe(okc, tpl).verdict, "PASS", "đúng câu + ảnh shop, «ok» không thêm món");
+    assert.equal(judgeUpsellProbe(okc, { ...tpl, offer: { ...tpl.offer, source: "AUTO_GENERATED" } }).verdict, "FAIL", "shop có câu upsell mà bot tự soạn ⇒ TRƯỢT");
+    assert.equal(judgeUpsellProbe(okc, { ...tpl, offer: { ...tpl.offer, quickReplyId: "q-khac" } }).verdict, "FAIL", "câu mẫu khác câu upsell đã chọn ⇒ TRƯỢT");
+    assert.equal(judgeUpsellProbe(okc, { ...tpl, offer: { ...tpl.offer, imageStatus: "NONE" } }).verdict, "FAIL", "câu upsell có ảnh mà ảnh không đi ⇒ TRƯỢT");
+    assert.equal(judgeUpsellProbe(okc, { ...tpl, offer: { ...tpl.offer, outcome: "TEMPLATE_SIZE_CONFLICT", sent: false } }).verdict, "FAIL", "câu upsell bị bỏ ⇒ TRƯỢT (lý do in ra), không phải ĐẠT");
+    assert.equal(judgeUpsellProbe(dy, { ...tpl, productsEnd: ["p-ca"] }).verdict, "N/A", "câu nhiều món ⇒ đồng ý phải gọi tên món: KHÔNG ÁP DỤNG cho ca «đúng rồi»");
+    assert.equal(judgeUpsellProbe(dy, { ...tpl, productsEnd: ["p-ca", "p-muc"] }).verdict, "FAIL", "câu nhiều món mà «đúng rồi» làm đổi đơn ⇒ TRƯỢT");
+    // Shop KHÔNG có câu upsell, KHÔNG bật tự soạn ⇒ không mời là ĐÚNG; tự soạn là SAI.
+    const none = { ...k, template: null, autoEnabled: false, offer: { outcome: "NO_TEMPLATE", sent: false, productId: null, text: null } };
+    assert.equal(judgeUpsellProbe(okc, none).verdict, "PASS");
+    assert.equal(judgeUpsellProbe(okc, { ...none, offer: { ...k.offer, source: "AUTO_GENERATED" } }).verdict, "FAIL", "không bật tự soạn mà bot tự soạn ⇒ TRƯỢT");
   }
   const DM = ["Chả cá thu", "Chả mực giã tay", "Nem hải sản tôm bề bề"];
   const ca = (k: string) => QUICK_REPLY_PROBE_CASES.find((x) => x.key === k)!;

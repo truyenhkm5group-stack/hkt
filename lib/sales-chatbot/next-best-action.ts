@@ -390,6 +390,65 @@ export function postConfirmOfferText(o: CrossSellOffer, money: (n: number) => st
   return `Bên em có thêm ${what} giá ${money(o.price)} ăn kèm rất hợp — mình muốn thêm vào đơn thì nhắn em «thêm ${reply}» nhé ạ.`;
 }
 
+/* ═══════════ BỘ ĐIỀU PHỐI LỜI MỜI SAU CHỐT — CÂU CỦA SHOP CÓ THẨM QUYỀN (P0 20/10/2026) ═══════════
+ *
+ * Production 20/10/2026 (HSLC): shop đã cài và bật câu upsell «Các món bán chạy» (chữ + ảnh menu), nhưng sau chốt bot gửi một câu TỰ
+ * DỰNG («Bên em có thêm chả mực…» — `postConfirmOfferText`) ghép vào tin xác nhận, bỏ qua chữ lẫn ảnh shop đã cài: hai luồng mời
+ * (`send_quick_reply` trước chốt · lời mời máy chủ sau chốt) chạy độc lập. Luật thay thế — MỘT bộ điều phối:
+ *
+ *   1. Câu upsell shop cài (đang bật, dùng được) ⇒ gửi ĐÚNG câu đó + ảnh, nguyên văn (chỉ điền ô giá / tồn của chính câu mẫu).
+ *   2. Không có / không dùng được ⇒ bot chỉ tự soạn khi shop CHỦ ĐỘNG bật (`autoUpsellOffer`, mặc định TẮT). Không thì không mời.
+ *   3. Một lời mời mỗi lượt mua: đã mời trước chốt (câu mẫu hay chữ) ⇒ cửa sổ sau chốt đóng (`postConfirmOfferWindow`).
+ */
+export const TEMPLATE_SKIP_REASONS = ["TEMPLATE_UNAVAILABLE", "TEMPLATE_DUPLICATE", "TEMPLATE_ASKS_KNOWN_INFO", "TEMPLATE_SIZE_CONFLICT", "TEMPLATE_NOTHING_TO_OFFER"] as const;
+export type TemplateSkip = (typeof TEMPLATE_SKIP_REASONS)[number];
+export const TEMPLATE_SKIP_LABEL: Record<TemplateSkip, string> = {
+  TEMPLATE_UNAVAILABLE: "câu upsell đang thiếu số ERP (giá / tồn) hoặc vừa bị tắt",
+  TEMPLATE_DUPLICATE: "shop / page vừa gửi đúng câu này trong hội thoại",
+  TEMPLATE_ASKS_KNOWN_INFO: "câu upsell xin lại SĐT / địa chỉ khách đã cho",
+  TEMPLATE_SIZE_CONFLICT: "câu upsell chỉ mời gói khác của món khách vừa chọn khối lượng",
+  TEMPLATE_NOTHING_TO_OFFER: "mọi món câu upsell nhắc tới đều đã có trong đơn hoặc đang hết hàng / chưa có giá",
+};
+export type PostConfirmOfferSource = "SHOP_TEMPLATE" | "AUTO_GENERATED";
+
+/**
+ * Chọn NGUỒN của lời mời sau chốt. `template` = `null` khi shop không có câu upsell đang bật; có thì kèm phán quyết dùng được hay không.
+ * Câu shop dùng được ⇒ luôn thắng (công tắc tự soạn không có tác dụng). HÀM THUẦN.
+ */
+export function choosePostConfirmSource(input: { template: { usable: true } | { usable: false; reason: TemplateSkip } | null; autoEnabled: boolean }):
+  | { source: "SHOP_TEMPLATE" }
+  | { source: "AUTO_GENERATED"; templateSkip: TemplateSkip | null }
+  | { source: null; reason: TemplateSkip | "NO_TEMPLATE" } {
+  const t = input.template;
+  if (t?.usable) return { source: "SHOP_TEMPLATE" };
+  const skip = t && !t.usable ? t.reason : null;
+  if (input.autoEnabled) return { source: "AUTO_GENERATED", templateSkip: skip };
+  return { source: null, reason: skip ?? "NO_TEMPLATE" };
+}
+
+/**
+ * Câu mẫu upsell mời được GÌ cho đơn này. `named` = món câu mẫu gọi tên (theo danh mục). Câu không gọi tên món nào (menu chung, chỉ có
+ * ảnh) ⇒ mời được, không có món đích. Có gọi tên mà món nào cũng đã nằm trong đơn / hết hàng / chưa có giá ⇒ `null` (không gửi một
+ * menu toàn món khách không mua thêm được). `target` = MỘT món đích khi câu chỉ nói đúng một món còn mời được VÀ câu ghi đúng giá của
+ * mẫu mã đó — để «Mình muốn thêm … đúng không ạ?» và «khách nhận lời mời» đo đúng mẫu mã khách đã thấy giá. HÀM THUẦN.
+ */
+export function templateOfferTarget(
+  renderedText: string,
+  facts: Pick<OfferFacts, "catalogNames" | "crossSellOffers">,
+  orderProductIds: readonly (string | null)[],
+  orderNames: readonly string[],
+  money: (n: number) => string,
+): { named: string[]; target: CrossSellOffer | null } | null {
+  const named = namedIn(renderedText, facts.catalogNames);
+  if (!named.length) return { named, target: null };
+  const has = new Set(orderProductIds.filter((x): x is string => Boolean(x)));
+  const families = new Set(orderNames.map(familyOf).filter(Boolean));
+  const offerable = (facts.crossSellOffers ?? []).filter((o) => named.includes(o.name) && !has.has(o.productId) && !families.has(familyOf(o.name)));
+  if (!offerable.length) return null;
+  const one = named.length === 1 && offerable.length === 1 ? offerable[0] : null;
+  return { named, target: one && renderedText.includes(money(one.price)) ? one : null };
+}
+
 export type ReplyGuardInput = {
   window: OfferWindow;
   cart?: CartCommitment;

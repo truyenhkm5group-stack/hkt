@@ -1808,14 +1808,37 @@ async function chatTurnCore(
     // xác nhận ⇒ không mời (ghi NOT_SENT để đo). Một lần mỗi lượt mua (`upsellSent`).
     const pco = state.postConfirmOffer;
     if (pco?.outcome === "OFFERED" && pco.turn === turnSeq && !pco.sent && pco.text) {
-      const can = spoke && status === "OK" && !orderWriteFailed && !state.handoff;
-      const appended = can ? await appendToTurnReply(conv.id, turnSeq, pco.text, async (t) => (await guardOutgoing(t, () => claimFacts(state))).ok).catch(() => null) : null;
-      // Đồng hồ khách AI (0228) so khớp NGUYÊN VĂN chữ model với tin đã gửi (review B3): tin đã ghép câu mời phải thay chữ cũ trong `aiTexts`.
-      if (appended) {
-        const i = aiTexts.lastIndexOf(appended.before);
-        if (i >= 0) aiTexts[i] = appended.after;
+      const notSent: NonNullable<typeof pco.notSentReason> | null = !spoke ? "NO_CONFIRM_MESSAGE" : state.handoff ? "HANDOFF" : orderWriteFailed ? "WRITE_FAILED" : status !== "OK" ? "TURN_FAILED" : null;
+      if (pco.source === "SHOP_TEMPLATE") {
+        /*
+          CÂU UPSELL CỦA SHOP (P0 20/10/2026): gửi ĐÚNG câu + ảnh shop cài, thành MỘT tin riêng ngay SAU tin xác nhận — chữ của shop không
+          ghép vào chữ của bot, và ảnh đi bằng đúng đường của `send_quick_reply` (`TurnResult.media`, kênh gửi ảnh ngay sau tin này).
+          Lượt chỉ có một khe ảnh: câu mẫu khác đã chiếm ⇒ không gửi (ghi lý do), không gửi chữ thiếu ảnh. Qua hàng rào khẳng định như
+          mọi câu mẫu. Tin xác nhận đi trước ⇒ lời mời không làm chậm chốt đơn.
+        */
+        const busy = deliveredReplyId !== null;
+        const ok = !notSent && !busy && (await guardOutgoing(pco.text, () => claimFacts(state))).ok;
+        if (ok) {
+          await reply(conv, seq++, pco.text);
+          const imageIds = pco.imageIds ?? [];
+          if (imageIds.length && pco.quickReplyId) {
+            deliveredImages.push(...imageIds);
+            deliveredReplyId = pco.quickReplyId;
+            deliveredText = pco.text;
+          }
+          if (pco.quickReplyId) await markQuickReplyUsed(pco.quickReplyId, now).catch(() => undefined);
+          state = { ...state, upsellSent: true, upsellTurn: turnSeq, postConfirmOffer: { ...pco, sent: true, imageStatus: imageIds.length ? "QUEUED" : "NONE" } };
+        } else state = { ...state, postConfirmOffer: { ...pco, outcome: "NOT_SENT", notSentReason: notSent ?? (busy ? "MEDIA_SLOT_BUSY" : "GUARD_BLOCKED") } };
+      } else {
+        // Câu bot TỰ SOẠN (shop bật `autoUpsellOffer`, không có câu upsell dùng được): ghép vào cuối tin xác nhận như trước.
+        const appended = notSent ? null : await appendToTurnReply(conv.id, turnSeq, pco.text, async (t) => (await guardOutgoing(t, () => claimFacts(state))).ok).catch(() => null);
+        // Đồng hồ khách AI (0228) so khớp NGUYÊN VĂN chữ model với tin đã gửi (review B3): tin đã ghép câu mời phải thay chữ cũ trong `aiTexts`.
+        if (appended) {
+          const i = aiTexts.lastIndexOf(appended.before);
+          if (i >= 0) aiTexts[i] = appended.after;
+        }
+        state = appended ? { ...state, upsellSent: true, upsellTurn: turnSeq, postConfirmOffer: { ...pco, sent: true } } : { ...state, postConfirmOffer: { ...pco, outcome: "NOT_SENT", notSentReason: notSent ?? "APPEND_FAILED" } };
       }
-      state = appended ? { ...state, upsellSent: true, upsellTurn: turnSeq, postConfirmOffer: { ...pco, sent: true } } : { ...state, postConfirmOffer: { ...pco, outcome: "NOT_SENT" } };
     }
     if (!spoke && replayNoop) lastError = lastError ?? "Lượt lặp lại tin khách đã được trả lời — đơn nháp không đổi, không gửi lại câu nào";
     // HẬU MÃI, TIN MODEL CHỈ TOÀN LỜI MỜI (review PR #878 vòng 2): câu thay KHÔNG phải câu chung «nói rõ hơn» (sau chốt câu ấy vô nghĩa).
