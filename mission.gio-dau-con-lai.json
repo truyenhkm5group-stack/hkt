@@ -3,7 +3,7 @@
   "mission_id": "gio-dau-con-lai",
   "title": "Gốc lỗi dấu (chả/chà) còn ở 3 chỗ của bộ đọc giỏ + WEIGHT_RE đọc «bong» không dấu thành 4g",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-gio-cha-bong",
@@ -25,11 +25,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-19T15:07:05.805Z",
-  "updated_at": "2026-10-20T01:27:29.692Z",
+  "updated_at": "2026-10-20T02:25:06.683Z",
   "last_heartbeat": "2026-10-19T18:21:16.742Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#917 → 83bfbb89ef9f21867fa7749a09eccd92bd99d619"
+    "merged": "#917 → 83bfbb89ef9f21867fa7749a09eccd92bd99d619",
+    "verify": "PASS 83bfbb89ef9f21867fa7749a09eccd92bd99d619 2026-10-20T02:24:46.925Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39357454369"
   },
   "handoff": {
     "branch": "claude/gio-dau-con-lai",
