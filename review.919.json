@@ -1,0 +1,8 @@
+{
+  "pr": 919,
+  "sha": "e81f0bbf3ae23d4ac33f66c7f6ae5ef1515979e2",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-20T04:42:27.503Z",
+  "note": "review lead: judgeUpsellProbe ca «đồng ý» đòi tin cuối chứa ĐÚNG tổng máy chủ (state.confirmed.total) thay vì chữ «Tổng đơn mới» — hết trượt khi model diễn đạt lại đúng (run 39370132272) và hết đạt khi có chữ mà sai số; không đọc được tổng ⇒ lùi về câu chữ. Chỉ script + bài kiểm; ops lấy script từ main ⇒ không cần deploy. Ghi chú: org-ai-cutover.ts 116.217 B, sát trần 125.000 B — lần thêm sau phải"
+}
