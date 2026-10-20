@@ -3,7 +3,7 @@
   "mission_id": "ops-script-root-fix",
   "title": "Khối script của ops-vps.yml ≤ 100.000 B: chuyển chú thích sang docs/ops-vps-script-notes.md, không đổi hành vi",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-ci-shard",
@@ -20,9 +20,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-20T18:44:08.895Z",
-  "updated_at": "2026-10-20T21:19:44.798Z",
+  "updated_at": "2026-10-20T21:33:17.540Z",
   "last_heartbeat": "2026-10-20T21:17:32.766Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#929 → ebe025b42b43cb2f911e2b577553e4b7b5b476a6"
+  },
   "handoff": {
     "branch": "claude/ops-script-root-fix",
     "sha": "bff5ad5bc2774d9fdffd71778687bcac728db704",
