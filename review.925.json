@@ -1,0 +1,8 @@
+{
+  "pr": 925,
+  "sha": "bc371bd776f6c8aff86d4cc5ffaa551ec1a98a45",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-20T15:02:43.357Z",
+  "note": "review lead: chỉ script (payroll-profit-gate-audit.ts +5 dòng in): mỗi tháng phí chiều hoàn = gắn mã + chi phí chung và LN tính lương trước → sau (trước = sau + phí, đẳng thức khoá ở payroll-recon-center.test). Không chạm ops-vps.yml. Gộp không deploy; lib đã có trong image của #923."
+}
