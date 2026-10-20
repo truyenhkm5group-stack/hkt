@@ -3,7 +3,7 @@
   "mission_id": "test-time-bomb-postsale",
   "title": "postsale-lifecycle.test.ts:256 đỏ trong 5 phút cuối ngày VN — mốc phải đi theo đồng hồ hoặc dữ liệu (luật 50)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -18,7 +18,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-20T21:19:02.252Z",
-  "updated_at": "2026-10-20T21:19:02.252Z",
-  "last_heartbeat": "2026-10-20T21:19:02.252Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-20T21:45:25.297Z",
+  "last_heartbeat": "2026-10-20T21:45:25.297Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/test-time-bomb-postsale",
+    "sha": "2c10ab27c8c5d8d1ade7dcf545e724a2cd761221",
+    "at": "2026-10-20T21:45:25.297Z",
+    "actor": "DESKTOP-56TH98Y:wt-bomb",
+    "title": "postsale-lifecycle.test.ts:256 đỏ trong 5 phút cuối ngày VN — mốc phải đi theo đồng hồ hoặc dữ liệu (luật 50)",
+    "summary": "postsale-lifecycle.test.ts:256 quét lại ở now+5′ rồi đòi «trong ngày ⇒ không báo thêm» (luật 26 đếm theo NGÀY VN) ⇒ đỏ 23:55–23:59 VN. Hàm sauMaCungNgayVn(now, ms): bình thường now+ms; sát nửa đêm lấy giữa now và cuối ngày VN ⇒ không vượt nửa đêm. now vẫn theo đồng hồ thật. Hai khẳng định thuần (mốc cố định chỉ vào hàm): 23:58 VN vẫn trong ngày · giữa ngày đúng +5′. 1 tệp.",
+    "tests": [
+      "npm run typecheck",
+      "eslint tests/postsale-lifecycle.test.ts",
+      "testPostSaleLifecycle chạy riêng ĐẠT",
+      "TEST_SHARD=4/4 (khối K20 chứa bài) ĐẠT",
+      "đột biến đưa sauMaCungNgayVn về now+ms ⇒ ĐỎ ở «23:58 VN vẫn trong ngày»"
+    ]
+  }
 }
