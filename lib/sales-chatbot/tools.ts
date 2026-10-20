@@ -53,7 +53,7 @@ import { addressKnowledge, addressReaskVerdict, askedBefore, askMemoryFor, askMe
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
 import { isMessagingChannel, type ChatChannel, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
-import { renderQuickReplyForSend } from "@/lib/sales-chatbot/quick-replies";
+import { loadQuickReplySettings, renderQuickReplyForSend } from "@/lib/sales-chatbot/quick-replies";
 import type { QuickReplyFocusGuard } from "@/lib/sales-chatbot/quick-reply-focus";
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import type { OrderSyncThreadState } from "@/lib/sales-chatbot/order-sync-shared";
@@ -61,7 +61,7 @@ import { customerOrderStatus } from "@/lib/sales-chatbot/order-status-shared";
 import { classifyDeliveryQuestion, deliveryPreferenceNote, deliveryTimeAnswer, pickDeliveryOrder, staffDeliveryCommitment } from "@/lib/sales-chatbot/delivery-intent";
 import { futurePurchaseOnly, postSaleDropsIn } from "@/lib/sales-chatbot/post-sale-guard";
 import { customerComplaintSignal, LIFECYCLE_ORDER_LOOKBACK_DAYS } from "@/lib/sales-chatbot/lifecycle";
-import { confirmedAddIssue, needsOfferFacts, OFFER_BLOCK_LABEL, type OfferBlock, offerWindow, pickPostConfirmOffer, postConfirmOfferText, postConfirmOfferWindow, quickReplySizeConflict, type SentenceClass, withOfferDrops } from "@/lib/sales-chatbot/next-best-action";
+import { choosePostConfirmSource, confirmedAddIssue, needsOfferFacts, OFFER_BLOCK_LABEL, type CrossSellOffer, type OfferBlock, type OfferFacts, offerWindow, pickPostConfirmOffer, type PostConfirmOfferSource, postConfirmOfferText, postConfirmOfferWindow, quickReplySizeConflict, type SentenceClass, templateOfferTarget, type TemplateSkip, withOfferDrops } from "@/lib/sales-chatbot/next-best-action";
 import { loadOfferFacts } from "@/lib/sales-chatbot/offer-facts";
 import { fanpageVisitorKeyMirror } from "@/lib/pricing/ai-customer-identity";
 import type { PromptStamp } from "@/lib/sales-chatbot/prompt-stamp";
@@ -151,7 +151,33 @@ export type ChatState = {
    * `sent`) hoặc lý do KHÔNG mời (cửa sổ đóng · không có món bổ trợ đủ điều kiện · đọc dữ kiện lỗi). `accepted` = đơn ĐÃ CHỐT được sửa thêm
    * đúng món được mời SAU lời mời. Chỉ để vận hành + đo (ops upsell-offer-audit); xoá khi sang lượt mua mới.
    */
-  postConfirmOffer?: { turn: number; at: string; outcome: "OFFERED" | "NO_CANDIDATE" | "FACTS_ERROR" | "NOT_SENT" | OfferBlock; text?: string; name?: string; productId?: string; variantId?: string; variant?: string; price?: number; sent?: boolean; askedTurn?: number; accepted?: { at: string; amount: number } };
+  postConfirmOffer?: {
+    turn: number;
+    at: string;
+    /** `NO_TEMPLATE` = shop chưa có câu upsell dùng được và KHÔNG bật tự soạn (P0 20/10/2026) — mặc định không tự sáng tác. */
+    outcome: "OFFERED" | "NO_CANDIDATE" | "FACTS_ERROR" | "NOT_SENT" | "NO_TEMPLATE" | TemplateSkip | OfferBlock;
+    /** NGUỒN lời mời (kiểm toán): câu upsell shop cài, hay câu bot tự soạn vì shop bật `autoUpsellOffer`. */
+    source?: PostConfirmOfferSource;
+    /** Câu mẫu upsell đã xét (gửi hoặc bỏ). */
+    quickReplyId?: string;
+    /** Ảnh của câu mẫu gửi cùng lời mời — kênh gửi ngay sau tin chữ (`TurnResult.media`). */
+    imageIds?: string[];
+    /** Câu mẫu không dùng được nhưng shop bật tự soạn ⇒ lý do câu mẫu bị bỏ, để thấy vì sao bot tự soạn. */
+    templateSkip?: TemplateSkip;
+    /** Lý do một lời mời ĐÃ QUYẾT mà không gửi được (engine) — `NOT_SENT` không còn là một hộp đen. */
+    notSentReason?: "NO_CONFIRM_MESSAGE" | "HANDOFF" | "WRITE_FAILED" | "TURN_FAILED" | "MEDIA_SLOT_BUSY" | "GUARD_BLOCKED" | "APPEND_FAILED";
+    /** Ảnh đã giao cho kênh gửi (`QUEUED`) / không có ảnh (`NONE`). Kết quả gửi ảnh thật nằm ở nhật ký kênh. */
+    imageStatus?: "QUEUED" | "NONE";
+    text?: string;
+    name?: string;
+    productId?: string;
+    variantId?: string;
+    variant?: string;
+    price?: number;
+    sent?: boolean;
+    askedTurn?: number;
+    accepted?: { at: string; amount: number };
+  };
   /** Câu upsell không gửi được (thiếu số ERP) — chỉ để đo; từ 16/10/2026 câu upsell KHÔNG còn là điều kiện lên đơn (#868). */
   upsellUnavailable?: boolean;
   /** Lượt khách TỪ CHỐI lời mời mua thêm của lượt mua này (`offerDeclinedBy`, next-best-action.ts) — không mời lại trong lượt mua. */
@@ -1199,9 +1225,12 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // mời làm đơn đã chốt 350.000 → 750.000 ₫): khách phải GỌI TÊN món đó trong CHÍNH tin này. «ok», «dạ», «cảm ơn» là ghi nhận đơn chính.
       // Khách trả lời «có» đúng câu hỏi xác nhận lời mời ⇒ món được mời là CĂN CỨ của khách (hàng rào dòng hàng bên dưới).
       let offerYesProduct: string | null = null;
+      // Sản phẩm MỚI của lượt sửa đơn đã chốt — để đo «khách nhận lời mời» của câu upsell nhiều món (không có món đích).
+      let addedKeys: ReadonlySet<string> = new Set();
       if (editingConfirmed && v.data.items && existing) {
         const had = new Set((await priceLines(existing.lines, ctx.config, verifiedCustomerId(state))).asked.map((a) => a.productId ?? a.variantId));
         const added = priced.asked.filter((a) => !had.has(a.productId ?? a.variantId));
+        addedKeys = new Set(added.map((a) => a.productId ?? a.variantId));
         // Chữ MUA của tin này (bỏ câu hỏi giá / câu từ chối — review vòng 2) phải gọi tên món; món vừa được mời phải đúng mẫu mã đã mời.
         const catalogNames = added.length ? [...new Set([...(await pricingContextFor(ctx.config, verifiedCustomerId(state))).byId.values()].map((c) => c.name))] : [];
         // Tin nhân viên / page xen giữa câu hỏi xác nhận và tin này (review vòng 4) — chỉ đọc khi khách đang trả lời đúng câu hỏi ấy.
@@ -1291,6 +1320,10 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         const pco = state.postConfirmOffer;
         if (pco?.outcome === "OFFERED" && pco.sent && !pco.accepted && pco.productId && priced.asked.some((a) => a.productId === pco.productId)) {
           const amount = priced.lines.filter((l) => priced.asked.some((a) => a.variantId === l.variantId && a.productId === pco.productId)).reduce((t, l) => t + l.lineTotal, 0);
+          state.postConfirmOffer = { ...pco, accepted: { at: now.toISOString(), amount } };
+        } else if (pco?.outcome === "OFFERED" && pco.sent && !pco.accepted && !pco.productId && pco.source === "SHOP_TEMPLATE" && addedKeys.size) {
+          // Câu upsell NHIỀU món (menu): khách đã gọi tên món (hàng rào bên trên) ⇒ mọi món mới thêm sau lời mời là phần mua thêm.
+          const amount = priced.lines.filter((l) => priced.asked.some((a) => a.variantId === l.variantId && addedKeys.has(a.productId ?? a.variantId))).reduce((t, l) => t + l.lineTotal, 0);
           state.postConfirmOffer = { ...pco, accepted: { at: now.toISOString(), amount } };
         }
         const validity = simulated || !draft.orderId ? null : await confirmedValidity(draft.orderId);
@@ -1441,7 +1474,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (!entry) return err("Câu mẫu: không có mã", "Không có câu mẫu với mã này — chỉ dùng mã trong danh sách CÂU MẪU.", state);
       if (entry.upsell && state.upsellSent) return err("Câu upsell đã gửi", "Câu upsell đã gửi trong hội thoại này — không gửi lại.", state);
       // Hậu mãi (#871): đơn đã chốt ⇒ không mời mua thêm (khách đang chờ hàng / hỏi trạng thái / phàn nàn).
-      if (entry.upsell && state.confirmed) return err("Câu upsell: đơn đã chốt", "Đơn của khách ĐÃ CHỐT — không mời mua thêm. Trả lời đúng câu khách hỏi.", state);
+      // MỘT bộ điều phối (P0 20/10/2026): lời mời sau chốt do máy chủ gửi ngay lượt chốt (đúng câu upsell + ảnh shop cài) — công cụ không
+      // gửi lần thứ hai, kể cả khi lượt đó chưa mời (cửa sổ đóng / đã mời / shop không có câu) thì quyết định ấy đã có lý do.
+      if (entry.upsell && state.confirmed) return err("Câu upsell: đơn đã chốt", "Đơn của khách ĐÃ CHỐT — lời mời sau chốt do máy chủ gửi, không gửi câu upsell. Trả lời đúng câu khách hỏi.", state);
       // CỬA SỔ LỜI MỜI (#868): câu mẫu UPSELL chỉ đi khi máy chủ cho phép — không lúc khách gửi SĐT / địa chỉ, đơn đang lên, đã chốt,
       // khách phàn nàn / từ chối / xin huỷ, đã chuyển người. Bị chặn ⇒ đi tiếp bước bán, không chặn đơn.
       if (entry.upsell) {
@@ -1678,9 +1713,18 @@ export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "las
 }
 
 /**
- * QUYẾT ĐỊNH LỜI MỜI SAU CHỐT cho lượt vừa chốt thành công (P0 19/10/2026) — ghi `state.postConfirmOffer`; engine gắn câu vào cuối tin
- * xác nhận SAU mọi hàng rào (model không viết câu mời, nên hàng rào không có gì để chặn nhầm). Đơn chưa qua kiểm / cửa sổ đóng / không
- * có món bổ trợ còn bán · còn hàng · giá đã xác thực ⇒ ghi lý do, không mời. Đọc dữ kiện lỗi ⇒ không mời (không kiểm được thì không nói).
+ * QUYẾT ĐỊNH LỜI MỜI SAU CHỐT cho lượt vừa chốt thành công — MỘT bộ điều phối (P0 20/10/2026, `choosePostConfirmSource`):
+ *
+ *   cửa sổ đóng (đã mời trong lượt mua · khiếu nại · đơn chưa qua kiểm · chuyển người…) ⇒ không mời, ghi lý do;
+ *   câu upsell shop cài, đang bật, dùng được ⇒ ĐÚNG câu đó + ảnh (`source: SHOP_TEMPLATE`) — engine gửi thành tin riêng ngay sau tin
+ *     xác nhận, cùng đường ảnh với `send_quick_reply`;
+ *   không có / không dùng được ⇒ câu bot tự soạn CHỈ khi shop bật `autoUpsellOffer` (`AUTO_GENERATED`, ghép vào tin xác nhận như cũ);
+ *     không bật ⇒ không mời (`NO_TEMPLATE` hoặc lý do câu mẫu bị bỏ).
+ *
+ * Câu mẫu đi qua đúng các hàng rào của `send_quick_reply` còn có nghĩa sau chốt: vừa gửi rồi (kể cả do page / nhân viên gửi) · xin lại
+ * SĐT / địa chỉ đã có · chỉ mời gói khác của món khách vừa chọn khối lượng — cộng một luật riêng: mọi món câu nhắc tới đều đã có trong
+ * đơn / hết hàng ⇒ không gửi. Chữ của shop KHÔNG bị sửa: chỉ ô `{{giá}}` / `{{tồn}}` của chính câu mẫu được điền số ERP.
+ * Đọc dữ kiện lỗi ⇒ không mời (không kiểm được thì không nói).
  */
 async function notePostConfirmOffer(state: ChatState, ctx: ToolContext, orderProductIds: readonly (string | null)[], orderNames: readonly string[], orderValid: boolean, now: Date): Promise<void> {
   if (ctx.turn === undefined) return;
@@ -1690,17 +1734,65 @@ async function notePostConfirmOffer(state: ChatState, ctx: ToolContext, orderPro
     state.postConfirmOffer = { ...base, outcome: w.reason };
     return;
   }
-  const upsellId = ctx.quickReplies?.find((q) => q.upsell)?.id ?? null;
+  const entry = ctx.quickReplies?.find((q) => q.upsell);
+  const upsellId = entry?.id ?? null;
   // Giá mời theo ĐÚNG bảng giá của khách (sỉ / riêng — review NB4), không phải giá lẻ; đọc bảng giá lỗi ⇒ không mời.
   const facts = await booksForChat(ctx.config, verifiedCustomerId(state))
     .then((books) => loadOfferFacts(ctx.config, upsellId, books))
     .catch(() => null);
   if (!facts) {
-    state.postConfirmOffer = { ...base, outcome: "FACTS_ERROR" };
+    state.postConfirmOffer = { ...base, outcome: "FACTS_ERROR", ...(upsellId ? { quickReplyId: upsellId } : {}) };
     return;
   }
+  const settings = await loadQuickReplySettings().catch(() => null);
+  const tpl = entry ? await templateVerdict(entry.id, state, ctx, facts, orderProductIds, orderNames) : null;
+  const pick = choosePostConfirmSource({ template: tpl ? (tpl.ok ? { usable: true } : { usable: false, reason: tpl.reason }) : null, autoEnabled: settings?.autoUpsellOffer === true });
+  if (pick.source === "SHOP_TEMPLATE" && tpl?.ok) {
+    const t = tpl.target;
+    state.postConfirmOffer = {
+      ...base,
+      outcome: "OFFERED",
+      source: "SHOP_TEMPLATE",
+      quickReplyId: tpl.quickReplyId,
+      text: tpl.text,
+      imageIds: tpl.imageIds,
+      ...(t ? { name: t.name, productId: t.productId, variantId: t.variantId, variant: t.variant, price: t.price } : {}),
+    };
+    return;
+  }
+  if (pick.source === null) {
+    state.postConfirmOffer = { ...base, outcome: pick.reason, ...(upsellId ? { quickReplyId: upsellId, source: "SHOP_TEMPLATE" as const } : {}) };
+    return;
+  }
+  const skip = pick.source === "AUTO_GENERATED" && pick.templateSkip ? { templateSkip: pick.templateSkip, ...(upsellId ? { quickReplyId: upsellId } : {}) } : {};
   const o = pickPostConfirmOffer(orderProductIds, facts.crossSellOffers ?? [], orderNames);
-  state.postConfirmOffer = o ? { ...base, outcome: "OFFERED", text: postConfirmOfferText(o, formatVND), name: o.name, productId: o.productId, variantId: o.variantId, variant: o.variant, price: o.price } : { ...base, outcome: "NO_CANDIDATE" };
+  state.postConfirmOffer = o
+    ? { ...base, outcome: "OFFERED", source: "AUTO_GENERATED", ...skip, text: postConfirmOfferText(o, formatVND), name: o.name, productId: o.productId, variantId: o.variantId, variant: o.variant, price: o.price }
+    : { ...base, outcome: "NO_CANDIDATE", source: "AUTO_GENERATED", ...skip };
+}
+
+/**
+ * Câu upsell shop cài có dùng được cho lượt chốt này không — CÙNG các hàng rào của `send_quick_reply` còn có nghĩa sau chốt.
+ * `ok` ⇒ chữ đã điền số ERP + ảnh, và món đích nếu câu chỉ nói đúng một món còn mời được (`templateOfferTarget`).
+ */
+async function templateVerdict(
+  id: string,
+  state: ChatState,
+  ctx: ToolContext,
+  facts: OfferFacts,
+  orderProductIds: readonly (string | null)[],
+  orderNames: readonly string[],
+): Promise<{ ok: true; quickReplyId: string; text: string; imageIds: string[]; target: CrossSellOffer | null } | { ok: false; reason: TemplateSkip }> {
+  const rendered = await renderQuickReplyForSend(id, ctx.config).catch(() => null);
+  if (!rendered) return { ok: false, reason: "TEMPLATE_UNAVAILABLE" };
+  // Page / nhân viên / bot vừa gửi đúng câu này (chữ shop trong hội thoại) ⇒ không gửi trùng. Menu page gửi CHỈ bằng ảnh thì không có chữ
+  // để so — không đoán.
+  if (repeatsRecent(rendered.text, ctx.recentSaid ?? [])) return { ok: false, reason: "TEMPLATE_DUPLICATE" };
+  if (ctx.customerTexts && addressReaskVerdict(rendered.text, addressKnowledge(state, ctx.customerTexts), ctx.turn ?? 0, { botTexts: ctx.recentSaid ?? [] })) return { ok: false, reason: "TEMPLATE_ASKS_KNOWN_INFO" };
+  if (quickReplySizeConflict(rendered.text, { cart: state.cart, lastUserText: ctx.lastUserText, facts })) return { ok: false, reason: "TEMPLATE_SIZE_CONFLICT" };
+  const target = templateOfferTarget(rendered.text, facts, orderProductIds, orderNames, formatVND);
+  if (!target) return { ok: false, reason: "TEMPLATE_NOTHING_TO_OFFER" };
+  return { ok: true, quickReplyId: id, text: rendered.text, imageIds: rendered.imageIds, target: target.target };
 }
 
 /** Câu chốt ngắn khi máy chủ tự chốt — «Dạ em lên đơn 2 × Chả cá thu (1kg) cho mình rồi ạ, shop giao theo thông tin mình vừa gửi nhé.» */

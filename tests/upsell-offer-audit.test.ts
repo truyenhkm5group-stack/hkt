@@ -115,7 +115,17 @@ function testPostConfirm() {
   t = addPostConfirm(t, { postConfirmOffer: { turn: 5, at, outcome: "NO_CANDIDATE" } }, from);
   t = addPostConfirm(t, { postConfirmOffer: { turn: 5, at: "2026-10-18T10:00:00Z", outcome: "OFFERED", sent: true } }, from);
   t = addPostConfirm(t, {}, from);
-  assert.deepEqual(t, { decided: 5, offered: 2, notOffered: { NOT_SENT: 1, ALREADY_OFFERED: 1, NO_CANDIDATE: 1 }, accepted: 1, acceptedAmount: 200_000, cancelAfterOffer: 1 });
+  assert.deepEqual(t, { decided: 5, offered: 2, notOffered: { NOT_SENT: 1, ALREADY_OFFERED: 1, NO_CANDIDATE: 1 }, accepted: 1, acceptedAmount: 200_000, cancelAfterOffer: 1, bySource: { SHOP_TEMPLATE: 0, AUTO_GENERATED: 0, LEGACY: 2 }, withImages: 0 });
+  // P0 20/10/2026: nguồn lời mời + ảnh + lý do không gửi được kiểm toán riêng — «câu shop» và «bot tự soạn» không gộp.
+  let n = emptyPostConfirm();
+  n = addPostConfirm(n, { postConfirmOffer: { turn: 7, at, outcome: "OFFERED", sent: true, source: "SHOP_TEMPLATE", quickReplyId: "q1", imageStatus: "QUEUED" } }, from);
+  n = addPostConfirm(n, { postConfirmOffer: { turn: 7, at, outcome: "OFFERED", sent: true, source: "AUTO_GENERATED" } }, from);
+  n = addPostConfirm(n, { postConfirmOffer: { turn: 7, at, outcome: "NOT_SENT", source: "SHOP_TEMPLATE", notSentReason: "MEDIA_SLOT_BUSY" } }, from);
+  n = addPostConfirm(n, { postConfirmOffer: { turn: 7, at, outcome: "NO_TEMPLATE" } }, from);
+  n = addPostConfirm(n, { postConfirmOffer: { turn: 7, at, outcome: "TEMPLATE_DUPLICATE", source: "SHOP_TEMPLATE", quickReplyId: "q1" } }, from);
+  assert.deepEqual(n.bySource, { SHOP_TEMPLATE: 1, AUTO_GENERATED: 1, LEGACY: 0 });
+  assert.equal(n.withImages, 1);
+  assert.deepEqual(n.notOffered, { "NOT_SENT:MEDIA_SLOT_BUSY": 1, NO_TEMPLATE: 1, TEMPLATE_DUPLICATE: 1 }, "lý do không gửi phải đọc được, không gộp thành NOT_SENT");
 }
 
 function testSource() {

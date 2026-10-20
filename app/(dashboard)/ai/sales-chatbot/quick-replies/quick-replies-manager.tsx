@@ -128,8 +128,21 @@ export function QuickRepliesManager({ manage, settings, rows, autoLearnRun, shel
             <Switch checked={cfg.aiMatch} disabled={!manage || pending || !cfg.enabled} onCheckedChange={(v) => setCfg({ ...cfg, aiMatch: v })} aria-label="AI đọc hiểu để chọn câu mẫu" />
             AI đọc hiểu câu khó để chọn câu mẫu
           </label>
+          {/*
+            LỜI MỜI LÀ LỜI CỦA SHOP (P0 20/10/2026): câu upsell shop cài luôn thắng; công tắc này chỉ có tác dụng khi shop CHƯA có câu
+            upsell dùng được — và mặc định TẮT, bot không tự sáng tác lời mời thay shop.
+          */}
+          <label className="flex items-center gap-2" title="Chỉ áp dụng khi shop chưa có câu upsell đang bật. Có câu upsell thì bot luôn gửi đúng câu và ảnh shop đã cài.">
+            <Switch checked={cfg.autoUpsellOffer} disabled={!manage || pending} onCheckedChange={(v) => setCfg({ ...cfg, autoUpsellOffer: v })} aria-label="Bot tự soạn lời mời sau chốt khi chưa có câu upsell" />
+            Bot tự soạn lời mời sau chốt khi chưa có câu upsell
+          </label>
           {manage ? (
-            <Button size="sm" variant="outline" disabled={pending || (cfg.enabled === settings.enabled && cfg.aiMatch === settings.aiMatch)} onClick={() => act(() => saveQuickReplySettingsAction(cfg))}>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending || (cfg.enabled === settings.enabled && cfg.aiMatch === settings.aiMatch && cfg.autoUpsellOffer === settings.autoUpsellOffer)}
+              onClick={() => act(() => saveQuickReplySettingsAction({ enabled: cfg.enabled, aiMatch: cfg.aiMatch, autoUpsellOffer: cfg.autoUpsellOffer }))}
+            >
               Lưu
             </Button>
           ) : null}

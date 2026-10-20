@@ -75,9 +75,9 @@ export async function removeQuickReplyImageAction(imageId: string): Promise<Resu
   return { ok: true, message: "Đã gỡ ảnh" };
 }
 
-export async function saveQuickReplySettingsAction(input: { enabled: boolean; aiMatch: boolean }): Promise<Result> {
+export async function saveQuickReplySettingsAction(input: { enabled: boolean; aiMatch: boolean; autoUpsellOffer: boolean }): Promise<Result> {
   const user = await requireUser();
-  const r = await saveQuickReplySettings(user, { enabled: Boolean(input?.enabled), aiMatch: Boolean(input?.aiMatch) });
+  const r = await saveQuickReplySettings(user, { enabled: Boolean(input?.enabled), aiMatch: Boolean(input?.aiMatch), autoUpsellOffer: input?.autoUpsellOffer === true });
   if ("error" in r) return r;
   revalidatePath(PATH);
   return { ok: true, message: "Đã lưu cách trả lời" };

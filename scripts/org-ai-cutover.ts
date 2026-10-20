@@ -78,8 +78,9 @@ import { withOrganization } from "@/lib/platform/context";
 import { findOrganization, listOrganizations } from "@/lib/platform/organizations";
 import { DEFAULT_SALES_CHATBOT_CONFIG, effectiveFallback, parseSalesChatbotConfig, SALES_CHATBOT_SETTING_KEY, salesChatbotConfigZ, type SalesBotConnector } from "@/lib/sales-chatbot/config";
 import { extractVndAmounts } from "@/lib/sales-chatbot/claim-guard";
+import { judgeUpsellProbe, UPSELL_PROBE_CASES, type UpsellProbeObs } from "@/lib/sales-chatbot/upsell-probe";
 import { chatTurn, loadSalesChatbotConfig, openConversation } from "@/lib/sales-chatbot/engine";
-import { loadFocusProducts } from "@/lib/sales-chatbot/quick-replies";
+import { loadFocusProducts, loadQuickReplySettings, renderQuickReplyForSend } from "@/lib/sales-chatbot/quick-replies";
 import { productsNamedIn } from "@/lib/sales-chatbot/quick-reply-focus";
 import { saveChatbotEngineAsOperator } from "@/lib/sales-chatbot/settings";
 import { rowsOf } from "@/lib/sql-rows";
@@ -678,7 +679,8 @@ export const QUICK_REPLY_PROBE_CASES: QuickReplyProbeCase[] = [
   { key: "chon-cha-ca-khong-tu-them", say: ["cho mình 1kg chả cá thu"], mustName: /^Chả cá/i, onlyItems: /^Chả cá/i },
 ];
 
-export type ProbeVerdict = "PASS" | "FAIL" | "N/A";
+export type { ProbeVerdict } from "@/lib/sales-chatbot/upsell-probe";
+import type { ProbeVerdict } from "@/lib/sales-chatbot/upsell-probe";
 /** Chấm một câu bot — HÀM THUẦN. `items` = tên món trong giỏ / đơn nháp sau lượt. */
 export function judgeProbe(c: QuickReplyProbeCase, reply: string, names: readonly string[], items: readonly string[]): { verdict: ProbeVerdict; why: string } {
   const needed = [c.mustName, c.mustNotName, c.onlyItems].filter((r): r is RegExp => Boolean(r));
@@ -692,53 +694,9 @@ export function judgeProbe(c: QuickReplyProbeCase, reply: string, names: readonl
   return { verdict: needed.length || c.noDefault ? "PASS" : "N/A", why: "đúng" };
 }
 
-/**
- * `--apply-probe --probe-set=upsell` (Tech Lead 19/10/2026, P0 lời mời sau chốt — «xác minh trên production»): mỗi ca một hội thoại THỬ
- * (kênh TEST — không nhắn khách thật, công cụ ghi chỉ mô phỏng, KHÔNG đơn / khách thật) đi trọn đường chốt nhanh: chọn món → gửi thông
- * tin ⇒ đơn tự chốt và tin xác nhận mang MỘT lời mời. Ca «đồng ý»: «ok thêm giúp chị» (chưa gọi tên món) ⇒ bot hỏi đúng một câu ⇒
- * «đúng rồi» ⇒ món được mời vào đơn + «Tổng đơn mới». Ca «ok»: «ok» trả lời tin xác nhận ⇒ đơn KHÔNG đổi. Chữ khách, tên, số điện thoại
- * là chữ TỰ DỰNG. upsell-offer-audit bỏ kênh TEST khỏi phép đo nên ca thử không làm lệch số «SAU CHỐT».
- */
-export const UPSELL_PROBE_INFO = "Nguyễn Thị Thử, 0912000111, số 12 ngõ 34 Láng Hạ, Đống Đa, Hà Nội";
-export type UpsellProbeCase = { key: string; say: string[]; expectAdded: boolean };
-export const UPSELL_PROBE_CASES: UpsellProbeCase[] = [
-  { key: "moi-sau-chot-dong-y", say: ["cho chị 1kg chả cá thu", UPSELL_PROBE_INFO, "ok thêm giúp chị", "đúng rồi"], expectAdded: true },
-  { key: "moi-sau-chot-ok-khong-them", say: ["cho chị 1kg chả cá thu", UPSELL_PROBE_INFO, "ok"], expectAdded: false },
-];
-/** Những gì máy đọc được sau từng lượt của một ca upsell — `afterInfo` = ngay sau lượt gửi thông tin (lượt thứ 2), `end` = lượt cuối. */
-export type UpsellProbeObs = {
-  confirmedAfterInfo: boolean;
-  offer: { outcome: string; sent: boolean; productId: string | null; text: string | null } | null;
-  infoReply: string;
-  productsAfterInfo: string[];
-  productsEnd: string[];
-  accepted: boolean;
-  lastReply: string;
-  /** Tổng tiền của đơn đã chốt sau lượt cuối (giá MÁY CHỦ — `state.confirmed.total`); `null` = không đọc được. */
-  endTotal: number | null;
-};
-/** Chấm một ca upsell — HÀM THUẦN. Không tự chốt / không có món kèm hợp lệ ⇒ KHÔNG ÁP DỤNG (không phải ĐẠT); lời mời hỏng ⇒ TRƯỢT. */
-export function judgeUpsellProbe(c: UpsellProbeCase, o: UpsellProbeObs): { verdict: ProbeVerdict; why: string } {
-  if (!o.confirmedAfterInfo) return { verdict: "N/A", why: "đơn KHÔNG tự chốt sau lượt gửi thông tin (công tắc tự chốt / thiếu thông tin) — không có lời mời sau chốt để kiểm" };
-  if (!o.offer) return { verdict: "FAIL", why: "đơn đã chốt mà máy chủ không ghi quyết định mời nào" };
-  if (o.offer.outcome === "NO_CANDIDATE") return { verdict: "N/A", why: "không có món kèm đang bán · còn hàng · giá xác minh" };
-  if (o.offer.outcome !== "OFFERED" || !o.offer.sent) return { verdict: "FAIL", why: `lời mời không tới khách (quyết định: ${o.offer.outcome}${o.offer.sent ? "" : " · chưa gắn vào tin"})` };
-  if (o.offer.text && !o.infoReply.includes(o.offer.text)) return { verdict: "FAIL", why: "tin xác nhận không mang câu mời đã ghi" };
-  const before = [...o.productsAfterInfo].sort().join(",");
-  if (c.expectAdded) {
-    if (!o.offer.productId || !o.productsEnd.includes(o.offer.productId)) return { verdict: "FAIL", why: "khách đồng ý mà món được mời KHÔNG vào đơn" };
-    if (!o.accepted) return { verdict: "FAIL", why: "món đã vào đơn mà lời mời không ghi «khách nhận»" };
-    // Khách phải được báo ĐÚNG tổng mới (số của máy chủ), không phải một câu chữ cố định — model diễn đạt lại «tổng 480.000 ₫» là đúng
-    // (production 20/10/2026, run 39370132272); báo sai số thì TRƯỢT dù có chữ «Tổng đơn mới».
-    if (o.endTotal !== null ? !extractVndAmounts(o.lastReply).includes(o.endTotal) : !/Tổng đơn mới/.test(o.lastReply)) {
-      return { verdict: "FAIL", why: `thêm món mà không báo khách đúng tổng đơn mới${o.endTotal !== null ? ` (${o.endTotal.toLocaleString("vi-VN")} ₫)` : ""}` };
-    }
-    return { verdict: "PASS", why: "mời ⇒ hỏi một câu ⇒ đồng ý ⇒ thêm đúng món + tổng mới" };
-  }
-  if ([...o.productsEnd].sort().join(",") !== before) return { verdict: "FAIL", why: "«ok» trả lời tin xác nhận mà đơn bị đổi món" };
-  if (o.accepted) return { verdict: "FAIL", why: "«ok» bị ghi là khách nhận lời mời" };
-  return { verdict: "PASS", why: "«ok» không thêm món, đơn giữ nguyên" };
-}
+// Ca kiểm lời mời sau chốt + bộ chấm (hàm THUẦN) sống ở `lib/sales-chatbot/upsell-probe.ts` — tách ra để kịch bản ops này không chạm trần
+// kích thước (ops gửi kịch bản qua tham số dòng lệnh). Xuất lại để nơi gọi cũ không đổi.
+export { judgeUpsellProbe, UPSELL_PROBE_CASES, UPSELL_PROBE_INFO, type UpsellProbeCase, type UpsellProbeObs } from "@/lib/sales-chatbot/upsell-probe";
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300);
 
@@ -1391,13 +1349,17 @@ async function probeUpsell(org: Org): Promise<number> {
     const db = await getDb();
     const c = schema.salesChatConversations;
     const pv = schema.productVariants;
-    type St = { confirmed?: { auto?: boolean; total?: number } | null; draft?: { lines?: { variantId: string }[] }; postConfirmOffer?: { outcome?: string; sent?: boolean; productId?: string; text?: string; accepted?: unknown } };
+    type St = { confirmed?: { auto?: boolean; total?: number } | null; draft?: { lines?: { variantId: string }[] }; postConfirmOffer?: { outcome?: string; sent?: boolean; productId?: string; text?: string; accepted?: unknown; source?: string; quickReplyId?: string; imageStatus?: string } };
+    // Câu upsell shop đang cài (mã + số ảnh) và công tắc tự soạn — để chấm «đúng câu + ảnh shop», không phải câu bot tự dựng.
+    const qrs = await loadQuickReplySettings();
+    const tplPick = qrs.enabled && qrs.upsellReplyId ? await renderQuickReplyForSend(qrs.upsellReplyId, await loadSalesChatbotConfig()).catch(() => null) : null;
+    const template = qrs.enabled && qrs.upsellReplyId && tplPick ? { id: qrs.upsellReplyId, imageCount: tplPick.imageIds.length } : null;
     const readState = async (id: string): Promise<St> => ((await db.select({ state: c.state }).from(c).where(eq(c.id, id)))[0]?.state ?? {}) as St;
     const productsOf = async (st: St): Promise<string[]> => {
       const vids = (st.draft?.lines ?? []).map((l) => l.variantId).filter(Boolean);
       return vids.length ? (await db.select({ productId: pv.productId }).from(pv).where(inArray(pv.id, vids))).map((x) => x.productId) : [];
     };
-    const res: { key: string; verdict: ProbeVerdict; why: string; replies: string[]; outcome: string }[] = [];
+    const res: { key: string; verdict: ProbeVerdict; why: string; replies: string[]; outcome: string; source: string | null }[] = [];
     for (const k of UPSELL_PROBE_CASES) {
       const conv = await openConversation("TEST", { createdBy: null });
       const replies: string[] = [];
@@ -1415,7 +1377,9 @@ async function probeUpsell(org: Org): Promise<number> {
         const pco = end.postConfirmOffer ?? afterInfo.postConfirmOffer;
         const obs: UpsellProbeObs = {
           confirmedAfterInfo: Boolean(afterInfo.confirmed),
-          offer: pco ? { outcome: String(pco.outcome ?? "—"), sent: Boolean(pco.sent), productId: pco.productId ?? null, text: pco.text ?? null } : null,
+          offer: pco ? { outcome: String(pco.outcome ?? "—"), sent: Boolean(pco.sent), productId: pco.productId ?? null, text: pco.text ?? null, source: pco.source ?? null, quickReplyId: pco.quickReplyId ?? null, imageStatus: pco.imageStatus ?? null } : null,
+          template,
+          autoEnabled: qrs.autoUpsellOffer,
           infoReply: replies[1] ?? "",
           productsAfterInfo: await productsOf(afterInfo),
           productsEnd: await productsOf(end),
@@ -1423,19 +1387,19 @@ async function probeUpsell(org: Org): Promise<number> {
           lastReply: replies[replies.length - 1] ?? "",
           endTotal: typeof end.confirmed?.total === "number" ? end.confirmed.total : null,
         };
-        res.push({ key: k.key, ...judgeUpsellProbe(k, obs), replies, outcome: obs.offer?.outcome ?? "—" });
+        res.push({ key: k.key, ...judgeUpsellProbe(k, obs), replies, outcome: obs.offer?.outcome ?? "—", source: obs.offer?.source ?? null });
       } catch (e) {
-        res.push({ key: k.key, verdict: "FAIL", why: `lỗi lượt: ${errorText(e)}`, replies, outcome: "—" });
+        res.push({ key: k.key, verdict: "FAIL", why: `lỗi lượt: ${errorText(e)}`, replies, outcome: "—", source: null });
       }
     }
     return res;
   });
   for (const r of out) {
-    console.log(`Ca ${r.key}: ${r.verdict} — ${r.why} · quyết định mời: ${r.outcome}`);
+    console.log(`Ca ${r.key}: ${r.verdict} — ${r.why} · quyết định mời: ${r.outcome}${r.source ? ` · nguồn ${r.source}` : ""}`);
     r.replies.forEach((t, i) => console.log(`  lượt ${i + 1} bot: «${t.replace(/\s+/g, " ").slice(0, 400)}»`));
   }
   const dem = (v: ProbeVerdict) => out.filter((r) => r.verdict === v).length;
-  tomTat(`Kiểm lời mời sau chốt trực tiếp (kênh TEST, không nhắn khách thật, không đơn thật): ${out.length} ca · ĐẠT ${dem("PASS")} · TRƯỢT ${dem("FAIL")} · KHÔNG ÁP DỤNG ${dem("N/A")}${out.length ? ` · ${out.map((r) => `${r.key} ${r.verdict} (${r.outcome})`).join(" · ")}` : ""}`);
+  tomTat(`Kiểm lời mời sau chốt trực tiếp (kênh TEST, không nhắn khách thật, không đơn thật): ${out.length} ca · ĐẠT ${dem("PASS")} · TRƯỢT ${dem("FAIL")} · KHÔNG ÁP DỤNG ${dem("N/A")}${out.length ? ` · ${out.map((r) => `${r.key} ${r.verdict} (${r.outcome}${r.source ? ` · ${r.source}` : ""})`).join(" · ")}` : ""}`);
   return dem("FAIL") ? 1 : 0;
 }
 

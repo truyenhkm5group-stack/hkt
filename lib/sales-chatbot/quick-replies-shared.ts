@@ -63,9 +63,13 @@ export const QUICK_REPLY_AUTO_LEARN_RUN_KEY = "ai.salesChatbot.quickReplies.auto
  * `upsellReplyId` = câu mẫu (kèm ảnh menu) bot gửi ở bước UPSELL / CROSS-SELL của quy trình bán — `null` khi chưa chọn.
  * `autoLearn` = tự nạp câu mẫu mỗi ngày (dùng AI, MẶC ĐỊNH TẮT). `autoActivate` = câu mẫu tự nạp được BẬT NGAY (mặc định
  * tắt: nằm chờ người duyệt); câu còn «[giá lấy từ ERP]» không bao giờ tự bật.
+ *
+ * `autoUpsellOffer` = khi shop CHƯA có câu upsell dùng được, bot được TỰ SOẠN một câu mời sau chốt (món bổ trợ, giá ERP). MẶC ĐỊNH
+ * TẮT (P0 20/10/2026): lời mời là lời của shop — câu upsell shop cài là nguồn có thẩm quyền, và không có câu nào thì bot không tự
+ * sáng tác trừ khi shop chủ động bật. Có câu upsell dùng được thì công tắc này KHÔNG có tác dụng: câu của shop luôn thắng.
  */
-export type QuickReplySettings = { enabled: boolean; aiMatch: boolean; upsellReplyId: string | null; autoLearn: boolean; autoActivate: boolean };
-export const DEFAULT_QUICK_REPLY_SETTINGS: QuickReplySettings = { enabled: true, aiMatch: true, upsellReplyId: null, autoLearn: false, autoActivate: false };
+export type QuickReplySettings = { enabled: boolean; aiMatch: boolean; upsellReplyId: string | null; autoLearn: boolean; autoActivate: boolean; autoUpsellOffer: boolean };
+export const DEFAULT_QUICK_REPLY_SETTINGS: QuickReplySettings = { enabled: true, aiMatch: true, upsellReplyId: null, autoLearn: false, autoActivate: false, autoUpsellOffer: false };
 
 export function parseQuickReplySettings(v: unknown): QuickReplySettings {
   const o = (v && typeof v === "object" ? v : {}) as Partial<Record<keyof QuickReplySettings, unknown>>;
@@ -75,6 +79,8 @@ export function parseQuickReplySettings(v: unknown): QuickReplySettings {
     upsellReplyId: typeof o.upsellReplyId === "string" && o.upsellReplyId.trim() ? o.upsellReplyId.trim() : null,
     autoLearn: typeof o.autoLearn === "boolean" ? o.autoLearn : DEFAULT_QUICK_REPLY_SETTINGS.autoLearn,
     autoActivate: typeof o.autoActivate === "boolean" ? o.autoActivate : DEFAULT_QUICK_REPLY_SETTINGS.autoActivate,
+    // Chỉ `true` tường minh mới bật — mọi giá trị khác (thiếu, chuỗi, số) là TẮT: nhánh lỗi rơi về phía không tự sáng tác.
+    autoUpsellOffer: o.autoUpsellOffer === true,
   };
 }
 

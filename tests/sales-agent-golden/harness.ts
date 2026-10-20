@@ -46,7 +46,11 @@ export type Step = (ctx: StepCtx) => AiBlock[];
  */
 export type GoldenHookCtx = { conversationId: string; ids: ReadonlyMap<string, string>; admin: () => Promise<SessionUser> };
 /** `before` = việc xảy ra NGOÀI lượt của khách, ngay trước lượt này (nhân viên tiếp quản / trả lại AI). Bộ hội thoại vàng không dùng. */
-export type GoldenTurn = { say: string; ai: Step[]; before?: (ctx: GoldenHookCtx) => Promise<void> };
+/**
+ * `after` (P0 20/10/2026): đọc ẢNH của lượt (`TurnResult.media` — câu mẫu kèm ảnh kênh sẽ gửi). KHÔNG vào ảnh chụp golden: ảnh chụp chỉ giữ
+ * chữ khách thấy, nên thêm móc này không đổi một ảnh chụp nào.
+ */
+export type GoldenTurn = { say: string; ai: Step[]; before?: (ctx: GoldenHookCtx) => Promise<void>; after?: (ctx: GoldenHookCtx & { media: { quickReplyId: string; imageIds: string[]; afterText?: string } | null }) => Promise<void> | void };
 /** `order-food` thuộc bộ đo đơn vàng v2 (`tests/order-golden`) — hội thoại vàng (M1) chỉ dùng `food` / `fashion`. */
 export type GoldenShop = "food" | "fashion" | "order-food";
 export type GoldenChannel = "WEB" | "TEST" | "FANPAGE" | "ZALO";
@@ -293,6 +297,7 @@ async function runCase(c: GoldenCase, ids: Map<string, string>, code: string, ho
         runDates.add(vnDate(now));
         const res = await chatTurn(conv.id, t.say, { channel: c.channel, visitorKey, now });
         if (!res.ok) throw new Error(`[${c.key}] lượt «${t.say}» lỗi: ${res.error}`);
+        if (t.after) await t.after({ conversationId: conv.id, ids, admin, media: res.media ?? null });
         const msgs = res.view.messages;
         const lastUser = msgs.map((m) => m.role).lastIndexOf("user");
         const shown = msgs.slice(Math.max(lastUser + 1, seen)).filter((m) => m.role === "assistant" && m.text.trim()).map((m) => m.text);
