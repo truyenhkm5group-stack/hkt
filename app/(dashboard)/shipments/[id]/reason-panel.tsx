@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { setReturnReason } from "@/lib/actions/return-reason";
-import { RETURN_REASON_GROUPS, RETURN_REASON_GROUP_LABEL, RETURN_REASON_GROUP_OF, RETURN_REASON_LABEL, type ReturnReason, type ReturnReasonGroup } from "@/lib/constants/return-reason";
+import { RETURN_REASON_LABEL, type ReturnReason } from "@/lib/constants/return-reason";
 import { REASON_COVERAGE_ACTION, REASON_COVERAGE_LABEL, REASON_SOURCE_LABEL, type ReasonCoverageState, type ReasonSource } from "@/lib/constants/return-reason-source";
 import { cn } from "@/lib/utils";
 
@@ -34,16 +34,6 @@ import { cn } from "@/lib/utils";
  * đếm nào gom chúng lại. Ghi chú tự do VẪN CÓ ngay cạnh, nhưng nó là bối cảnh cho người đọc, không
  * phải đầu vào của phép đếm.
  */
-const REASONS_BY_GROUP = (Object.keys(RETURN_REASON_GROUP_OF) as ReturnReason[]).reduce(
-  (acc, r) => {
-    const g = RETURN_REASON_GROUP_OF[r];
-    /* UNKNOWN và OTHER là chỗ TRỐNG, không phải lựa chọn — chọn chúng là ghi lại một cái không biết. */
-    if (r !== "UNKNOWN" && r !== "OTHER") (acc[g] ??= []).push(r);
-    return acc;
-  },
-  {} as Record<ReturnReasonGroup, ReturnReason[]>,
-);
-
 const MAU: Record<ReasonCoverageState, string> = {
   CLASSIFIED: "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200",
   RAW_ONLY: "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/40 dark:text-sky-200",
@@ -60,6 +50,9 @@ export function ReturnReasonPanel({
   evidence,
   actorEmail,
   canEdit,
+  pickerGroups,
+  groupLabel,
+  tierLabel,
 }: {
   shipmentId: string;
   tracking: string;
@@ -70,6 +63,15 @@ export function ReturnReasonPanel({
   evidence: string;
   actorEmail: string;
   canEdit: boolean;
+  /**
+   * Ô chọn xếp theo CÁCH XẾP ĐANG BẬT — máy chủ dựng (`reasonPickerGroups`). Bản trước tự dựng từ
+   * bảng nhóm tĩnh trong mã, nên chủ shop đổi nhóm thì báo cáo đổi mà ô chọn vẫn xếp kiểu cũ.
+   */
+  pickerGroups: { key: string; label: string; reasons: ReturnReason[] }[];
+  /** Nhóm của ca theo cách xếp đang bật — `null` = chưa xác định. */
+  groupLabel: string | null;
+  /** Bậc chứng cứ: người xác nhận · nhân viên ghi nhận · chỉ lời ĐVVC · các nguồn nói khác nhau. */
+  tierLabel: string;
 }) {
   const [pending, start] = useTransition();
   const [chon, setChon] = useState<ReturnReason | "">(reason === "UNKNOWN" ? "" : reason);
@@ -98,6 +100,12 @@ export function ReturnReasonPanel({
       <div className={cn("rounded-md border px-3 py-2", MAU[mucDo])}>
         <div className="text-[11px] font-medium uppercase tracking-wide opacity-80">{REASON_COVERAGE_LABEL[mucDo]}</div>
         <div className="mt-0.5 text-sm font-semibold">{hienTai ? RETURN_REASON_LABEL[hienTai] : "Chưa xác định"}</div>
+        {!vuaGhi && hienTai ? (
+          <div className="mt-0.5 text-[11px] opacity-90">
+            {groupLabel ? `Nhóm: ${groupLabel} · ` : ""}
+            {tierLabel}
+          </div>
+        ) : null}
         <div className="mt-1 text-[11px] leading-snug opacity-90">{REASON_COVERAGE_ACTION[mucDo]}</div>
       </div>
 
@@ -125,10 +133,10 @@ export function ReturnReasonPanel({
               <SelectValue placeholder="Chọn lý do hoàn…" />
             </SelectTrigger>
             <SelectContent className="max-h-[320px]">
-              {RETURN_REASON_GROUPS.filter((g) => g !== "UNKNOWN" && REASONS_BY_GROUP[g]?.length).map((g) => (
-                <SelectGroup key={g}>
-                  <SelectLabel>{RETURN_REASON_GROUP_LABEL[g]}</SelectLabel>
-                  {REASONS_BY_GROUP[g].map((r) => (
+              {pickerGroups.map((g) => (
+                <SelectGroup key={g.key}>
+                  <SelectLabel>{g.label}</SelectLabel>
+                  {g.reasons.map((r) => (
                     <SelectItem key={r} value={r}>
                       {RETURN_REASON_LABEL[r]}
                     </SelectItem>

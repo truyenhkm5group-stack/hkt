@@ -93,6 +93,10 @@ export const RETURN_REASONS = [
 ] as const;
 export type ReturnReason = (typeof RETURN_REASONS)[number];
 
+export function isReturnReason(s: string): s is ReturnReason {
+  return (RETURN_REASONS as readonly string[]).includes(s);
+}
+
 export const RETURN_REASON_LABEL: Record<ReturnReason, string> = {
   QUALITY_POOR: "Chất lượng kém",
   QUALITY_COLOR_BAD: "Màu xấu",
@@ -415,11 +419,21 @@ export function boDau(s: string): string {
 }
 
 /** Độ tin cậy của một lần phân loại — đi kèm từng dòng, không phải một ghi chú ở cuối trang. */
-export type ReasonConfidence = "CONFIRMED" | "CARRIER_CODE" | "CARRIER_TEXT" | "NONE";
+/**
+ * `CONFIRMED` CHỈ dành cho người của shop bấm xác nhận lý do. Ghi chú chăm sóc / phiếu kho là
+ * `STAFF_REPORTED`: nhân viên NÓI ra một điều, chưa ai chốt nó là lý do — bản trước in cả hai là
+ * "Người xác nhận", nên một câu "khách chê vải mỏng" trong ô ghi chú trông y hệt một kết luận.
+ * `EXTERNAL_TEXT` là chữ của Pancake — không phải của ĐVVC, nên không được mang nhãn ĐVVC.
+ */
+export type ReasonConfidence = "CONFIRMED" | "STAFF_REPORTED" | "CARRIER_CODE" | "CARRIER_TEXT" | "EXTERNAL_TEXT" | "NONE";
+
+export const EMPTY_CONFIDENCE_COUNTS = (): Record<ReasonConfidence, number> => ({ CONFIRMED: 0, STAFF_REPORTED: 0, CARRIER_CODE: 0, CARRIER_TEXT: 0, EXTERNAL_TEXT: 0, NONE: 0 });
 
 export const REASON_CONFIDENCE_LABEL: Record<ReasonConfidence, string> = {
   CONFIRMED: "Người xác nhận",
+  STAFF_REPORTED: "Nhân viên ghi nhận",
   CARRIER_CODE: "Mã lý do ĐVVC",
   CARRIER_TEXT: "Suy từ trạng thái ĐVVC",
+  EXTERNAL_TEXT: "Chữ Pancake",
   NONE: "Không có chứng từ",
 };

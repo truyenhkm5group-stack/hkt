@@ -127,6 +127,22 @@ export function isReasonSource(s: string): s is ReasonSource {
 }
 
 /**
+ * ═══ CHỮ GỐC CỦA MỘT QUAN SÁT `CARRIER_CODE` — MỘT CÁCH VIẾT, MỘT CÁCH ĐỌC ═══
+ *
+ * Bảng quan sát không có cột mã: mã lý do ĐVVC nằm trong chữ gốc. Lượt rút (backfill) và webhook
+ * phải viết CÙNG một câu (nếu không khoá chống trùng lệch nhau), và lượt đọc phải bóc lại được mã
+ * từ câu ấy — bản trước gọi `classifyRaw` không truyền mã, nên câu "Mã lý do ĐVVC 36" không bao giờ
+ * xếp được, dù mã 36 đã có trong bảng tra.
+ */
+export const carrierCodeText = (code: number): string => `Mã lý do ĐVVC ${code}`;
+
+export function vtpCodeOfObservation(source: string, rawText: string): number | null {
+  if (source !== "CARRIER_CODE") return null;
+  const m = /^Mã lý do ĐVVC (\d{1,4})$/.exec(rawText.trim());
+  return m ? Number(m[1]) : null;
+}
+
+/**
  * ═══ TRẠNG THÁI ĐỘ PHỦ CỦA MỘT KIỆN HOÀN ═══
  *
  * Ba trạng thái, và chúng KHÔNG được gộp:

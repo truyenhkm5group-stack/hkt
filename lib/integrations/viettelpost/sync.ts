@@ -16,7 +16,7 @@ import { carrierSubstate } from "@/lib/constants/carrier-substate";
 import { nextSyncAt } from "@/lib/constants/vtp-reconcile";
 import { afterShipmentStateChange } from "@/lib/care/lifecycle";
 import { resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
-import { ghiQuanSat, type QuanSatMoi } from "@/lib/returns/reason-observe";
+import { carrierCodeObservation, carrierEventObservations, ghiQuanSat, type QuanSatMoi } from "@/lib/returns/reason-observe";
 
 /**
  * `changed: false` KHÔNG có nghĩa là xử lý thành công. Có hai lý do rất khác nhau:
@@ -239,16 +239,21 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
     đa 5 lần; một quan sát không ghi được là mất một dòng ghi chú, không phải mất một vận đơn — nên
     lỗi ở đây bị nuốt có chủ đích, đúng như mọi nhánh phụ khác của đường webhook.
   */
-  if (eventRows.length) {
-    const quanSat: QuanSatMoi[] = eventRows.map((r) => ({
-      shipmentId: shipment.id,
-      orderId: shipment.orderId,
-      source: "CARRIER_TEXT" as const,
-      rawText: [r.statusName ?? "", r.note ?? ""].filter(Boolean).join(" — "),
-      occurredAt: r.occurredAt,
-      sourceRef: `vtp:${source}`,
-      vtpCode: record.reasonCode ?? null,
-    }));
+  /*
+    CÙNG HÌNH DẠNG VỚI LƯỢT RÚT (`scripts/return-reason-backfill.ts`): trạng thái và ghi chú là HAI
+    quan sát, mã lý do là quan sát THỨ BA của riêng nó. Bản trước nối "trạng thái — ghi chú" thành
+    một dòng và dán mã lên mọi bước hành trình — khoá chống trùng (chứa vân tay chữ) vì thế không
+    bao giờ khớp với dòng lượt rút đã ghi, và mỗi bước đi ("Đang giao hàng") của kiện có mã lý do
+    đều lọt bộ lọc như thể nó là một lý do.
+  */
+  // Mã chỉ ghi khi gói tin CÓ mốc: lùi về "giờ nhận" thì mỗi lần VTP gửi lại là một khoá mới.
+  const maLyDo = record.reasonCode ?? null;
+  const coMa = maLyDo !== null && record.statusDate !== null && record.statusDate !== undefined;
+  if (eventRows.length || coMa) {
+    const quanSat: QuanSatMoi[] = eventRows.flatMap((r) =>
+      carrierEventObservations({ shipmentId: shipment.id, orderId: shipment.orderId, statusName: r.statusName, note: r.note, at: r.occurredAt, sourceRef: `vtp:${source}` }),
+    );
+    if (coMa) quanSat.push(carrierCodeObservation({ shipmentId: shipment.id, orderId: shipment.orderId, code: maLyDo, at: statusDate, sourceRef: `vtp:${source}:reason_code` }));
     await ghiQuanSat(db, quanSat).catch(() => 0);
   }
 

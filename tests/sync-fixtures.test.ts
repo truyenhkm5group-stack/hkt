@@ -435,6 +435,14 @@ import {
   testQuickPickHasNoFreeText,
   testReasonSourceRegistry,
 } from "./return-reason-observation.test";
+import {
+  testEvidenceOnDb,
+  testEvidenceObservationShapes,
+  testEvidenceOverrideTransition,
+  testEvidenceResolution,
+  testEvidenceTaxonomyContract,
+  testEvidenceUsesOneAuthorityTable,
+} from "./return-reason-evidence.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -2256,6 +2264,14 @@ async function main() {
   testQuickPickHasNoFreeText();
   testObservationDedupeKeyIsShared();
   await testObservationResolution(db);
+
+  // ═══ NHÓM LÝ DO THEO CHỨNG CỨ (20/10/2026) ═══
+  testEvidenceTaxonomyContract();
+  testEvidenceResolution();
+  testEvidenceOverrideTransition();
+  testEvidenceObservationShapes();
+  testEvidenceUsesOneAuthorityTable();
+  await testEvidenceOnDb(db);
   await testReasonTextLatestParity(db);
   testUseServerExports();
   testClientBoundaryExports();

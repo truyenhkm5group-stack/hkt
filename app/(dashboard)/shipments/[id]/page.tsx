@@ -20,6 +20,9 @@ import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { getShipmentDetail, outcomeOfShipment, shipmentHasCashEvidence } from "@/lib/queries/shipments";
 import { collectedCodShown, COD_UNVERIFIED_TEXT, vtpEditDefaults } from "@/lib/constants/shipment-edit";
 import { reasonsForShipments } from "@/lib/queries/return-reason";
+import { getReasonGrouping } from "@/lib/queries/return-reason-config";
+import { EVIDENCE_TIER_LABEL, reasonPickerGroups } from "@/lib/constants/return-reason-evidence";
+import { RETURN_REASONS } from "@/lib/constants/return-reason";
 import { getShipmentDwell } from "@/lib/queries/shipment-status-age";
 import { getShipmentTimeline } from "@/lib/queries/shipment-timeline";
 import { timelineSourceLabel } from "@/lib/constants/shipment-timeline";
@@ -63,7 +66,8 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
   // «Đã thu» chỉ in số khi có bằng chứng tiền — `cod_collected` mặc định 0 nên 0 trần là CHƯA BIẾT.
   const codCollectedShown = collectedCodShown(s.codCollected, hasCashEvidence);
   const daHoan = outcome === "RETURNED" || outcome === "RETURNED_BY_RULE";
-  const lyDo = daHoan ? (await reasonsForShipments([s.id])).get(s.id) : undefined;
+  const [lyDo, nhomLyDo] = daHoan ? await Promise.all([reasonsForShipments([s.id]).then((m) => m.get(s.id)), getReasonGrouping()]) : [undefined, null];
+  const nhomCuaCa = lyDo && nhomLyDo ? nhomLyDo.groupOf(lyDo) : null;
   const number = s.vtpOrderNumber ?? s.trackingCode;
   const isVtp = Boolean(s.vtpOrderNumber) || /viettel/i.test(s.carrier);
   const vtpUrl = getViettelPostTrackingUrl(s.vtpOrderNumber);
@@ -330,6 +334,9 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
                 evidence={lyDo.evidence}
                 actorEmail={lyDo.actorEmail}
                 canEdit={can(user, "shipments:view")}
+                pickerGroups={nhomLyDo ? reasonPickerGroups(nhomLyDo, RETURN_REASONS) : []}
+                groupLabel={nhomCuaCa ? (nhomLyDo?.groups.find((g) => g.key === nhomCuaCa)?.label ?? null) : null}
+                tierLabel={EVIDENCE_TIER_LABEL[nhomLyDo ? nhomLyDo.tierOf(lyDo) : "UNKNOWN"]}
               />
             </SectionCard>
           ) : null}

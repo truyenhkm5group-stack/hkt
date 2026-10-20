@@ -4,7 +4,8 @@ import { Fragment, useState } from "react";
 import Link from "next/link";
 import { ChevronRight, List } from "lucide-react";
 import { formatNumber, formatPercent } from "@/lib/format";
-import { RETURN_REASON_GROUP_ACTION, RETURN_REASON_OWNER } from "@/lib/constants/return-reason";
+import { RETURN_REASON_OWNER } from "@/lib/constants/return-reason";
+import { EVIDENCE_TIER_LABEL, EVIDENCE_TIERS } from "@/lib/constants/return-reason-evidence";
 import { RESCUE_STATE_LABEL } from "@/lib/constants/return-rescue";
 import type { ReasonGroupRow, ReasonDetailRow } from "@/lib/queries/return-reason-report";
 import { TableToolsFor } from "@/components/data-table/table-tools";
@@ -179,12 +180,22 @@ export function ReasonGroupTable({
               <Fragment key={g.group}>
                 <tr className="cursor-pointer bg-muted/10 font-medium hover:bg-muted/30" onClick={() => setMo({ ...mo, [g.group]: !xo })}>
                   <td className="px-3 py-1.5">
-                    <span className="inline-flex items-center gap-1" title={RETURN_REASON_GROUP_ACTION[g.group]}>
+                    <span className="inline-flex items-center gap-1" title={g.action}>
                       <ChevronRight className={cn("size-3.5 transition-transform", xo && "rotate-90")} />
                       {g.label}
                     </span>
                   </td>
-                  <td className="px-3 py-1.5 text-[11px] text-muted-foreground">{g.details.length} lý do</td>
+                  {/*
+                    BẬC CHỨNG CỨ nằm ở ô chú thích, không thêm cột: con số đầu dòng không nói ca ấy
+                    có người xác nhận hay chỉ là lời ĐVVC. Mâu thuẫn hiện thẳng ra — nó là việc phải hỏi.
+                  */}
+                  <td
+                    className="px-3 py-1.5 text-[11px] text-muted-foreground"
+                    title={g.count ? EVIDENCE_TIERS.filter((t) => g.tiers[t]).map((t) => `${EVIDENCE_TIER_LABEL[t]}: ${g.tiers[t]}`).join(" · ") : undefined}
+                  >
+                    {g.details.length} lý do
+                    {g.tiers.CONFLICTED ? <span className="ml-1 text-amber-600 dark:text-amber-400">· {formatNumber(g.tiers.CONFLICTED)} mâu thuẫn</span> : null}
+                  </td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{formatNumber(g.count)}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">{formatNumber(g.rescued)}</td>
                   <td className="px-3 py-1.5 text-right">
