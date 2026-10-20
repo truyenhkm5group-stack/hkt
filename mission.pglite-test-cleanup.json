@@ -3,7 +3,7 @@
   "mission_id": "pglite-test-cleanup",
   "title": "data/pglite-test-<pid> tự xoá khi tiến trình kiểm thử thoát + dọn thư mục của tiến trình đã chết",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -18,7 +18,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-20T21:35:41.574Z",
-  "updated_at": "2026-10-20T21:35:41.574Z",
-  "last_heartbeat": "2026-10-20T21:35:41.574Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-20T22:28:57.533Z",
+  "last_heartbeat": "2026-10-20T22:28:57.533Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/pglite-test-cleanup",
+    "sha": "e8391f40b3241a92efe8c3186519fc685ba01100",
+    "at": "2026-10-20T22:28:57.533Z",
+    "actor": "DESKTOP-56TH98Y:wt-pglite",
+    "title": "data/pglite-test-<pid> tự xoá khi tiến trình kiểm thử thoát + dọn thư mục của tiến trình đã chết",
+    "summary": "setup-env.ts: KHỞI ĐỘNG dọn data/pglite-test-<pid>[-org-*] của PID ĐÃ CHẾT (process.kill(pid,0), EPERM coi là sống); THOÁT (kể cả đỏ) dọn của chính tiến trình; TEST_GIU_CSDL=1 giữ lại. Logic thuần ở tests/pglite-test-dirs.ts (chỉ nhận đúng mẫu tên, lỗi xoá ⇒ bỏ qua cho lượt sau). Trước: 441 thư mục · 34,8 GB đầy ổ C (20/10); 1.027 thư mục sót trên máy dev (21/10).",
+    "tests": [
+      "npm run typecheck",
+      "eslint tests/setup-env.ts tests/pglite-test-dirs*.ts",
+      "TEST_SHARD=1/4..4/4 ĐẠT — sau 4 shard còn 0 thư mục pglite-test-*",
+      "đo Windows: thoát 0 ⇒ xoá · thoát 1 ⇒ xoá · PID chết (cả -org-) ⇒ dọn · PID sống ⇒ không đụng",
+      "testPgliteTestDirs (khối K24) ĐẠT"
+    ]
+  }
 }
