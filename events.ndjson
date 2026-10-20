@@ -1,4 +1,3 @@
-{"at":"2026-10-13T10:52:54.657Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#830 @ b5296e6d9f23 · Chỉ nâng timeout-minutes hai job kiểm thử 35→45"}
 {"at":"2026-10-13T10:53:29.623Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#830 @ 16fb61f0f060 · Chỉ nâng timeout-minutes hai job kiểm thử 35→45"}
 {"at":"2026-10-13T10:53:47.261Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"inbox-perf-probe-hotnodes","detail":"RUNNING · 1 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-13T10:53:47.261Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"inbox-perf-probe-hotnodes","detail":"OVERLAP_ACCEPTED với hslc-bot-tin-sot-429: phạm vi scripts/inbox-perf-probe.ts — cách tích hợp: chỉ script đo"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-20T22:44:36.420Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"test-time-bomb-postsale","detail":"#931 @ 2c10ab27c8c5 → 25ffdb822fb9 (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-20T22:45:35.136Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"pglite-test-cleanup","detail":"#932 cho claude/pglite-test-cleanup @ e8391f40b324"}
 {"at":"2026-10-20T22:46:05.811Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#932 @ e8391f40b324 · review lead: dọn data/pglite-test-<pid>(-org-*) — mẫu chặt ^pglite-test-(\\d+)(?:-org-.+)?$, chỉ dưới data/ của cây; khởi động xoá thư mục của PID đã chết (EPERM ⇒ coi còn sống, không đụng), thoát xoá của chính mình kể cả khi đỏ; TEST_GIU_CSDL=1 giữ lại. Hàm thuần có bài kiểm với PID giả; đo thật Windows; 4 shard đạt, 0 thư mục sót. Gốc của sự cố ổ C đầy 34,8 GB / PGlite PANIC."}
+{"at":"2026-10-20T22:59:31.691Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"pglite-test-cleanup","detail":"#932 @ e8391f40b324 → 355f142ca50d (MERGE_NOW · LOW · gates success)"}
