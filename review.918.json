@@ -1,0 +1,8 @@
+{
+  "pr": 918,
+  "sha": "5619658f4175bab8db58f0c2cc46454e60864f0b",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-20T03:01:11.309Z",
+  "note": "review lead 2 vòng. (1) holdReason: số lượng không tên trong ngoặc quy cách thuộc tên đứng TRƯỚC ngoặc (parenLabel, ngoặc mở ngoài cùng chưa đóng) — câu hỏi xác nhận lời mời sau chốt «thêm Chả mực giã tay (0,5kg …)» không còn bị đọc thành hạ 1kg chả cá thu; «Chả cá thu (0,5kg) ăn thử» vẫn giữ đơn. (2) Vòng 1 lead tìm thêm gốc «480. 000»: cartHoldVerdict tách câu theo MỌI dấu chấm rồi ghép lại ⇒ de"
+}
