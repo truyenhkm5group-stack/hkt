@@ -55,12 +55,12 @@ import { parsePlaybookState, PLAYBOOK_LIMITS, PLAYBOOK_SETTING_KEY } from "@/lib
 import { LESSONS_SETTING_KEY, lessonsPrompt, parseLessonsState } from "@/lib/sales-chatbot/lessons-shared";
 import { levelPromptFor } from "@/lib/sales-chatbot/levels";
 import { unavailableQuickReplyGuard, type FocusLine } from "@/lib/sales-chatbot/quick-reply-focus";
-import { loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, quickReplyCatalog, quickReplyFocus, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
+import { loadFocusProducts, loadQuickReplySettings, markQuickReplyUsed, quickReplyByAi, quickReplyByKeyword, quickReplyCatalog, quickReplyFocus, type QuickReplyPick, type QuickReplyStep } from "@/lib/sales-chatbot/quick-replies";
 import { repeatsRecent } from "@/lib/sales-chatbot/quick-replies-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { customer360Prompt, loadCustomer360, preferReturning, reuseIntentOf } from "@/lib/sales-chatbot/customer-360";
 import { CUSTOMER_PHASE_LABEL, customerComplaintSignal, loadCustomerPhase, postSalePrompt } from "@/lib/sales-chatbot/lifecycle";
-import { guardReply, needsOfferFacts, OFFER_BLOCK_LABEL, offerDeclinedBy, offerWindow, QUICK_SIZE_YIELDS_MAX, quickReplySizeConflict, withOfferDrops, type OfferBlock, type OfferFacts } from "@/lib/sales-chatbot/next-best-action";
+import { guardReply, menuOfferStep, needsOfferFacts, OFFER_BLOCK_LABEL, offerDeclinedBy, offerWindow, QUICK_SIZE_YIELDS_MAX, quickReplySizeConflict, withOfferDrops, type OfferBlock, type OfferFacts } from "@/lib/sales-chatbot/next-best-action";
 import { loadOfferFacts } from "@/lib/sales-chatbot/offer-facts";
 import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
 import { freeShipPolicyText } from "@/lib/sales-chatbot/shipping";
@@ -1288,6 +1288,28 @@ async function chatTurnCore(
       await bump({ state: st as Record<string, unknown> });
       conv.state = st as Record<string, unknown>;
       st0 = st;
+    }
+    /*
+      CÂU UPSELL NHIỀU MÓN CỦA SHOP — KHÁCH CÓ Ý THÊM MÀ CHƯA GỌI TÊN (P0 21/10/2026, `menuOfferStep`): máy chủ hỏi ĐÚNG MỘT câu «món nào»
+      (một lần mỗi lời mời); khách gọi đúng một món của câu ⇒ món đó thành món đích + hỏi xác nhận, rồi luồng có món đích chạy tiếp ở
+      `update_draft_order` («đúng rồi» ⇒ thêm đúng mẫu mã đã hỏi). Không tự chọn món, không ghi đơn. Đọc danh mục CHỈ khi đơn đã có lời
+      mời câu shop không món đích — lượt thường 0 truy vấn. Câu máy chủ qua hàng rào khẳng định như mọi câu gửi khách.
+    */
+    const pcoNow = st0.postConfirmOffer;
+    if (pcoNow?.outcome === "OFFERED" && pcoNow.sent && pcoNow.source === "SHOP_TEMPLATE" && !pcoNow.productId && !st0.handoff) {
+      const catalogNames = [...new Set((await loadFocusProducts().catch(() => [])).map((p) => p.name))];
+      const menuStep = menuOfferStep({ offer: pcoNow, text, prevTurn, catalogNames, declinedTurn: st0.upsellDeclinedTurn, money: formatVND });
+      const menuOk = menuStep ? (await guardOutgoing(menuStep.text, () => claimFacts(st0))).ok : false;
+      if (menuStep && menuOk) {
+        const t = menuStep.kind === "CONFIRM" ? menuStep.target : null;
+        const next = t
+          ? { ...pcoNow, name: t.name, productId: t.productId, variantId: t.variantId, variant: t.variant, price: t.price, askedTurn: turnSeq, ...(pcoNow.menuAskTurn === undefined ? { menuAskTurn: turnSeq } : {}) }
+          : { ...pcoNow, menuAskTurn: turnSeq };
+        const st: ChatState = { ...st0, postConfirmOffer: next };
+        await reply(conv, seq, menuStep.text);
+        await bump({ state: st as Record<string, unknown>, turns: conv.turns + 1 });
+        return { ok: true, view: (await conversationView(conv.id))! };
+      }
     }
     const quick0: QuickReplyStep = st0.priceDispute?.open
       ? { kind: "SKIP", reason: "Khách đang phản đối giá — AI báo lại theo báo giá máy chủ" }

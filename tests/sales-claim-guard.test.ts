@@ -277,11 +277,13 @@ function testSourceScan() {
   assert.ok(heldLoop.indexOf("guardOutgoing(out") > 0 && heldLoop.indexOf("guardOutgoing(out") < heldLoop.indexOf('text: out }]'), "chữ có số tiền giữ lại qua guardOutgoing TRƯỚC khi ghi");
   // (f) Mọi chữ hằng gửi qua `reply()` không mang khẳng định; đối số không phải hằng thì nằm trong danh sách đã biết.
   // `draftUnsaid` (tóm tắt đơn theo kết quả công cụ) và `fallback` (câu hỏi đúng phần còn thiếu) đều qua guardOutgoing ngay trước reply.
-  const knownExpr = new Set(["cfg.handoff.message", "cfg.businessHours.outsideMessage", "EMPTY_REPLY_TEXT", "aiDownReply(cfg)", "pick.text", "safeText", "b.safe", "CLAIM_SAFE_TEXT.PRICE_DISPUTE", "CLAIM_SAFE_TEXT.REFUND", "draftUnsaid", "fallback", "step.text", "pco.text"]);
+  const knownExpr = new Set(["cfg.handoff.message", "cfg.businessHours.outsideMessage", "EMPTY_REPLY_TEXT", "aiDownReply(cfg)", "pick.text", "safeText", "b.safe", "CLAIM_SAFE_TEXT.PRICE_DISPUTE", "CLAIM_SAFE_TEXT.REFUND", "draftUnsaid", "fallback", "step.text", "pco.text", "menuStep.text"]);
   // P0 #863: câu máy chủ dựng khi khách huỷ (xin lỗi + đơn đã sửa · «đã huỷ» sau khi lõi ghi) qua guardOutgoing ngay trước reply.
   assert.match(core, /guardOutgoing\(step\.text, [^\n]*\n(?:[^\n]*\n){0,2}\s*await reply\(conv, seq, step\.text\)/, "câu huỷ của máy chủ qua guardOutgoing trước reply");
   // P0 20/10/2026: câu upsell của SHOP gửi sau chốt (`pco.text` — chữ câu mẫu đã điền số ERP) qua guardOutgoing ngay trước reply.
   assert.match(core, /guardOutgoing\(pco\.text, [^\n]*\n\s*if \(ok\) \{\n\s*await reply\(conv, seq\+\+, pco\.text\)/, "câu upsell của shop qua guardOutgoing trước reply");
+  // P0 21/10/2026: câu hỏi «món nào» / hỏi xác nhận của máy chủ sau câu upsell nhiều món (`menuStep.text`) qua guardOutgoing trước reply.
+  assert.match(core, /guardOutgoing\(menuStep\.text, [^\n]*\n(?:[^\n]*\n){0,8}\s*await reply\(conv, seq, menuStep\.text\)/, "câu hỏi món của máy chủ qua guardOutgoing trước reply");
   assert.match(core, /guardOutgoing\(draftUnsaid, [^\n]*\n\s*await reply\(conv, seq\+\+, draftUnsaid\)/, "tóm tắt đơn qua guardOutgoing trước reply");
   assert.match(core, /guardOutgoing\(ask, [^\n]*\n(?:[^\n]*\n){0,12}\s*await reply\(conv, seq\+\+, fallback\)/, "câu hỏi lại qua guardOutgoing trước reply");
   assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.PRICE_DISPUTE), [], "câu an toàn khi khách phản đối giá không mang khẳng định");
