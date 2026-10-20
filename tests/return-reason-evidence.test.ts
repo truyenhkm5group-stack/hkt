@@ -315,14 +315,15 @@ export async function testEvidenceOnDb(db: Db) {
     }
 
     /* Cờ thật trong settings đổi cách xếp của lượt đọc không ép — và nằm trong khoá nhớ đệm. */
-    await setSettingJson(REASON_TAXONOMY_KEY, "EVIDENCE");
+    // Dạng OBJECT, đúng thứ `set-setting` ghi ra (nó gộp object — một chuỗi trần sẽ bị băm thành ký tự).
+    await setSettingJson(REASON_TAXONOMY_KEY, { taxonomy: "EVIDENCE" });
     clearMemo();
     assert.equal((await getReturnReasonReport(loc)).taxonomy, "EVIDENCE");
-    await setSettingJson(REASON_TAXONOMY_KEY, "LEGACY");
+    await setSettingJson(REASON_TAXONOMY_KEY, { taxonomy: "LEGACY" });
     clearMemo();
     assert.equal((await getReturnReasonReport(loc)).taxonomy, "LEGACY", "đặt lại LEGACY là về số cũ — đảo ngược được");
   } finally {
-    await setSettingJson(REASON_TAXONOMY_KEY, "LEGACY");
+    await setSettingJson(REASON_TAXONOMY_KEY, { taxonomy: "LEGACY" });
     clearMemo();
     await db.delete(schema.returnReasonObservations).where(inArray(schema.returnReasonObservations.orderId, DON));
     await db.delete(schema.shipmentReturnReasons).where(inArray(schema.shipmentReturnReasons.shipmentId, KIEN));

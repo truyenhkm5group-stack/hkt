@@ -304,7 +304,10 @@ export const REASON_TAXONOMY_KEY = "returns.reason-taxonomy";
 export const REASON_TAXONOMIES = ["LEGACY", "EVIDENCE"] as const;
 export type ReasonTaxonomy = (typeof REASON_TAXONOMIES)[number];
 
-/** Giá trị lạ / thiếu ⇒ `LEGACY`: mọi nhánh lỗi rơi về cách đọc đang chạy, không về cách mới. */
+/**
+ * Đọc trường `taxonomy` của dòng `settings` (giá trị là OBJECT — xem `getReasonTaxonomy`). Giá trị
+ * lạ / thiếu ⇒ `LEGACY`: mọi nhánh lỗi rơi về cách đọc đang chạy, không về cách mới.
+ */
 export function parseReasonTaxonomy(v: unknown): ReasonTaxonomy {
   return v === "EVIDENCE" ? "EVIDENCE" : "LEGACY";
 }

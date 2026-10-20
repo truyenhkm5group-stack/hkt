@@ -20,11 +20,16 @@ export async function saveReasonGroupOverrides(next: ReasonGroupOverrides): Prom
 
 /**
  * CÁCH ĐỌC NHÓM ĐANG BẬT (`returns.reason-taxonomy`). Mặc định `LEGACY` = đúng số cũ; chủ shop
- * duyệt bảng chạy thử (`ops reason-taxonomy-dryrun`) rồi mới bật `EVIDENCE` bằng `set-setting`.
+ * duyệt bảng chạy thử (`ops reason-taxonomy-dryrun`) rồi mới bật bằng
+ * `set-setting returns.reason-taxonomy '{"taxonomy":"EVIDENCE"}'`.
+ *
+ * GIÁ TRỊ LÀ OBJECT, KHÔNG PHẢI CHUỖI — cố ý: `scripts/set-setting.ts` GỘP object (`{...cũ, ...mới}`),
+ * nên một cờ kiểu chuỗi đi qua ops sẽ thành `{0:"E",1:"V",…}` và đọc ra `LEGACY` trong im lặng —
+ * chủ shop tưởng đã bật mà màn hình vẫn số cũ.
  * Đảo ngược được: đặt lại `LEGACY` là về số cũ, không dòng lịch sử nào bị ghi lại.
  */
 export async function getReasonTaxonomy(): Promise<ReasonTaxonomy> {
-  return memo("returns-reason-taxonomy", 60_000, async () => parseReasonTaxonomy(await getSettingJson<unknown>(REASON_TAXONOMY_KEY, "LEGACY")));
+  return memo("returns-reason-taxonomy", 60_000, async () => parseReasonTaxonomy((await getSettingJson<{ taxonomy?: unknown }>(REASON_TAXONOMY_KEY, {})).taxonomy));
 }
 
 /**

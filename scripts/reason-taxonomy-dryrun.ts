@@ -13,8 +13,8 @@
  *      tách sang "Khách vắng nhà" không (đổi luật chữ là một quyết định riêng, không làm ở đây).
  *
  * KHÔNG ghi gì: không `settings`, không quan sát, không backfill. Bật cách xếp mới là MỘT lượt
- * `set-setting returns.reason-taxonomy "EVIDENCE"` sau khi chủ shop duyệt bảng này; đặt lại
- * `"LEGACY"` là về số cũ.
+ * `set-setting returns.reason-taxonomy '{"taxonomy":"EVIDENCE"}'` sau khi chủ shop duyệt bảng này;
+ * `'{"taxonomy":"LEGACY"}'` là về số cũ. (Object, không phải chuỗi: set-setting GỘP object.)
  *
  * ops lấy SCRIPT từ main nhưng lib/ từ IMAGE: chạy được sau lượt deploy mang `return-reason-evidence`.
  *
