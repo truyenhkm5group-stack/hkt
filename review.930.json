@@ -1,0 +1,8 @@
+{
+  "pr": 930,
+  "sha": "6ea3750301690f1ed7a60fb98bf2010ae6ecedad",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-20T22:04:10.246Z",
+  "note": "review lead: menuOfferStep thuần, chỉ khi lời mời là câu SHOP không có món đích. Hỏi «Dạ mình muốn thêm món nào ạ[: A hay B]?» MỘT lần mỗi lời mời khi tin ngắn ≤8 từ có ý THÊM, chưa gọi tên món nào của danh mục, không phủ định (chữ có dấu), chưa từ chối; kể tên chỉ khi chính câu shop gọi tên. Trả lời đúng một món ⇒ hỏi xác nhận món + giá ⇒ «đúng rồi» mới thêm. «ok» trơn không hỏi; không bao giờ tự"
+}
