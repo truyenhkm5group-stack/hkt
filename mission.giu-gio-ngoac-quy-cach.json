@@ -3,7 +3,7 @@
   "mission_id": "giu-gio-ngoac-quy-cach",
   "title": "Câu hỏi xác nhận lời mời sau chốt không bị thay bằng câu giữ đơn (quy cách trong ngoặc)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-giu-gio-ngoac",
@@ -25,11 +25,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-20T02:43:28.696Z",
-  "updated_at": "2026-10-20T04:17:43.219Z",
+  "updated_at": "2026-10-20T04:31:59.603Z",
   "last_heartbeat": "2026-10-20T02:57:23.950Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#918 → 5c3508ac3a59cfe5796b3fb7a91ddb5a02ca5327"
+    "merged": "#918 → 5c3508ac3a59cfe5796b3fb7a91ddb5a02ca5327",
+    "verify": "PASS 5c3508ac3a59cfe5796b3fb7a91ddb5a02ca5327 2026-10-20T04:31:39.654Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39368895427"
   },
   "handoff": {
     "branch": "claude/giu-gio-ngoac-quy-cach",
