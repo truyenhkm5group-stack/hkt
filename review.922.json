@@ -1,0 +1,8 @@
+{
+  "pr": 922,
+  "sha": "5a6c2475f88034d812a2c911875ef93d0e60af93",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-20T11:56:34.136Z",
+  "note": "review lead: 16 nhóm theo chứng cứ, MỘT bảng lý do → {verified, unverified, phòng}, khoá cũ giữ; resolveEvidence thuần (HUMAN_CONFIRMED · CARE_REPORTED · CARRIER_OBSERVED · CONFLICTED · UNKNOWN, một nguyên nhân chính + phụ); sau CỜ object returns.reason-taxonomy mặc định LEGACY. Vá 7 lỗi a–g; CARE_NOTE ghi ở đường ghi lib/care/service.ts (lỗi ghi quan sát bị nuốt, không làm hỏng lượt care); webhoo"
+}
