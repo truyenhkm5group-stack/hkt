@@ -714,6 +714,8 @@ export type UpsellProbeObs = {
   productsEnd: string[];
   accepted: boolean;
   lastReply: string;
+  /** Tổng tiền của đơn đã chốt sau lượt cuối (giá MÁY CHỦ — `state.confirmed.total`); `null` = không đọc được. */
+  endTotal: number | null;
 };
 /** Chấm một ca upsell — HÀM THUẦN. Không tự chốt / không có món kèm hợp lệ ⇒ KHÔNG ÁP DỤNG (không phải ĐẠT); lời mời hỏng ⇒ TRƯỢT. */
 export function judgeUpsellProbe(c: UpsellProbeCase, o: UpsellProbeObs): { verdict: ProbeVerdict; why: string } {
@@ -726,7 +728,11 @@ export function judgeUpsellProbe(c: UpsellProbeCase, o: UpsellProbeObs): { verdi
   if (c.expectAdded) {
     if (!o.offer.productId || !o.productsEnd.includes(o.offer.productId)) return { verdict: "FAIL", why: "khách đồng ý mà món được mời KHÔNG vào đơn" };
     if (!o.accepted) return { verdict: "FAIL", why: "món đã vào đơn mà lời mời không ghi «khách nhận»" };
-    if (!/Tổng đơn mới/.test(o.lastReply)) return { verdict: "FAIL", why: "thêm món mà không báo khách tổng đơn mới" };
+    // Khách phải được báo ĐÚNG tổng mới (số của máy chủ), không phải một câu chữ cố định — model diễn đạt lại «tổng 480.000 ₫» là đúng
+    // (production 20/10/2026, run 39370132272); báo sai số thì TRƯỢT dù có chữ «Tổng đơn mới».
+    if (o.endTotal !== null ? !extractVndAmounts(o.lastReply).includes(o.endTotal) : !/Tổng đơn mới/.test(o.lastReply)) {
+      return { verdict: "FAIL", why: `thêm món mà không báo khách đúng tổng đơn mới${o.endTotal !== null ? ` (${o.endTotal.toLocaleString("vi-VN")} ₫)` : ""}` };
+    }
     return { verdict: "PASS", why: "mời ⇒ hỏi một câu ⇒ đồng ý ⇒ thêm đúng món + tổng mới" };
   }
   if ([...o.productsEnd].sort().join(",") !== before) return { verdict: "FAIL", why: "«ok» trả lời tin xác nhận mà đơn bị đổi món" };
@@ -1385,7 +1391,7 @@ async function probeUpsell(org: Org): Promise<number> {
     const db = await getDb();
     const c = schema.salesChatConversations;
     const pv = schema.productVariants;
-    type St = { confirmed?: { auto?: boolean } | null; draft?: { lines?: { variantId: string }[] }; postConfirmOffer?: { outcome?: string; sent?: boolean; productId?: string; text?: string; accepted?: unknown } };
+    type St = { confirmed?: { auto?: boolean; total?: number } | null; draft?: { lines?: { variantId: string }[] }; postConfirmOffer?: { outcome?: string; sent?: boolean; productId?: string; text?: string; accepted?: unknown } };
     const readState = async (id: string): Promise<St> => ((await db.select({ state: c.state }).from(c).where(eq(c.id, id)))[0]?.state ?? {}) as St;
     const productsOf = async (st: St): Promise<string[]> => {
       const vids = (st.draft?.lines ?? []).map((l) => l.variantId).filter(Boolean);
@@ -1415,6 +1421,7 @@ async function probeUpsell(org: Org): Promise<number> {
           productsEnd: await productsOf(end),
           accepted: Boolean(end.postConfirmOffer?.accepted),
           lastReply: replies[replies.length - 1] ?? "",
+          endTotal: typeof end.confirmed?.total === "number" ? end.confirmed.total : null,
         };
         res.push({ key: k.key, ...judgeUpsellProbe(k, obs), replies, outcome: obs.offer?.outcome ?? "—" });
       } catch (e) {

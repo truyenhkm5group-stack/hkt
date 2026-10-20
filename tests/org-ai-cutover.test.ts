@@ -572,9 +572,12 @@ export function testOrgAiCutoverPure() {
     const dy = UPSELL_PROBE_CASES.find((x) => x.key === "moi-sau-chot-dong-y")!;
     const okc = UPSELL_PROBE_CASES.find((x) => x.key === "moi-sau-chot-ok-khong-them")!;
     const MOI = "Bên em có thêm Chả mực giã tay (0,5kg) giá 200.000 ₫ ăn kèm rất hợp";
-    const o = { confirmedAfterInfo: true, offer: { outcome: "OFFERED", sent: true, productId: "p-muc", text: MOI }, infoReply: `Dạ em đã lên đơn ạ. ${MOI}`, productsAfterInfo: ["p-ca"], productsEnd: ["p-ca", "p-muc"], accepted: true, lastReply: "Dạ em lên đơn Chả cá thu và Chả mực. Tổng đơn mới 480.000 ₫ ạ." };
+    const o = { confirmedAfterInfo: true, offer: { outcome: "OFFERED", sent: true, productId: "p-muc", text: MOI }, infoReply: `Dạ em đã lên đơn ạ. ${MOI}`, productsAfterInfo: ["p-ca"], productsEnd: ["p-ca", "p-muc"], accepted: true, lastReply: "Dạ em lên đơn Chả cá thu và Chả mực. Tổng đơn mới 480.000 ₫ ạ.", endTotal: 480_000 };
     assert.equal(judgeUpsellProbe(dy, o).verdict, "PASS");
     assert.equal(judgeUpsellProbe(dy, { ...o, productsEnd: ["p-ca"], accepted: false }).verdict, "FAIL", "đồng ý mà không thêm ⇒ TRƯỢT");
+    assert.equal(judgeUpsellProbe(dy, { ...o, lastReply: "Dạ em đã cập nhật đơn gồm 1kg chả cá thu và 0,5kg chả mực giã tay (tổng 480.000 ₫, miễn ship) cho mình rồi ạ." }).verdict, "PASS", "model diễn đạt lại nhưng báo ĐÚNG tổng mới ⇒ ĐẠT");
+    assert.equal(judgeUpsellProbe(dy, { ...o, lastReply: "Dạ em lên đơn rồi ạ. Tổng đơn mới 400.000 ₫ ạ." }).verdict, "FAIL", "có chữ «Tổng đơn mới» mà SAI số ⇒ TRƯỢT");
+    assert.equal(judgeUpsellProbe(dy, { ...o, endTotal: null }).verdict, "PASS", "không đọc được tổng ⇒ lùi về câu «Tổng đơn mới»");
     assert.equal(judgeUpsellProbe(dy, { ...o, lastReply: "Dạ em thêm rồi ạ." }).verdict, "FAIL", "thêm mà không báo tổng mới ⇒ TRƯỢT");
     assert.equal(judgeUpsellProbe(dy, { ...o, infoReply: "Dạ em đã lên đơn ạ." }).verdict, "FAIL", "câu mời không nằm trong tin xác nhận ⇒ TRƯỢT");
     const k = { ...o, productsEnd: ["p-ca"], accepted: false, lastReply: "Dạ vâng ạ." };
