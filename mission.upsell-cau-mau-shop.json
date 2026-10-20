@@ -3,7 +3,7 @@
   "mission_id": "upsell-cau-mau-shop",
   "title": "Upsell sau chốt dùng đúng câu mẫu + ảnh shop đã cài, không tự sáng tác",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-upsell-tpl",
@@ -18,7 +18,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-20T16:17:46.627Z",
-  "updated_at": "2026-10-20T16:17:46.627Z",
-  "last_heartbeat": "2026-10-20T16:17:46.627Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-20T19:01:38.257Z",
+  "last_heartbeat": "2026-10-20T19:01:38.257Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/upsell-cau-mau-shop",
+    "sha": "19477c5e0a9eee13f99f997472de23fdaa59fe5f",
+    "at": "2026-10-20T19:01:38.257Z",
+    "actor": "DESKTOP-56TH98Y:wt-upsell-tpl",
+    "title": "Lời mời sau chốt dùng ĐÚNG câu upsell + ảnh shop đã cài; không tự sáng tác",
+    "summary": "Một bộ điều phối: câu upsell shop dùng được luôn thắng (tin riêng + ảnh sau tin xác nhận); không có thì chỉ tự soạn khi shop bật autoUpsellOffer (mặc định tắt); log nguồn/ảnh/lý do",
+    "tests": [
+      "typecheck: sạch",
+      "lint: sạch",
+      "npm test (cây sạch 19477c5e0a9e): TẤT CẢ KIỂM THỬ ĐẠT",
+      "build: OK",
+      "đột biến: 7/7 đỏ"
+    ]
+  }
 }
