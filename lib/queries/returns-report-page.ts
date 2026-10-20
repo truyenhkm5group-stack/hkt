@@ -19,6 +19,7 @@ import { isReasonGroupKey } from "@/lib/constants/return-reason-evidence";
 import { getReturnRateBySource, getReturnRateByTier, getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant, RETURN_RATE_SORTABLE } from "@/lib/queries/return-rate";
 import { logisticsPerformance } from "@/lib/queries/logistics";
 import { getReturnReasonReport } from "@/lib/queries/return-reason-report";
+import { buildCauseBoard } from "@/lib/returns/cause-board";
 import { getReturnIntelligence, TREND_GRAINS, type TrendGrain } from "@/lib/queries/return-intelligence";
 import { listAttributedMarketers } from "@/lib/queries/order-marketer";
 import { listProductCodes } from "@/lib/queries/product-code";
@@ -120,7 +121,16 @@ export async function loadReturnsPage(p: ReturnsPageParams) {
     Mọi lời hứa nằm trong CÙNG một `Promise.all`: không lời hứa nào bị bỏ lơ nếu một nhánh khác lỗi trước.
   */
   const reasonP = getReturnReasonReport(reasonFilter);
-  const [{ rows, total, pageCount, all, productRows, projectionError: loiBang }, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia] = await Promise.all([
+  /*
+    BẢNG NGUYÊN NHÂN THEO CHỨNG CỨ (P0 21/10/2026, `lib/returns/cause-board.ts`): CHỈ khi cờ cách xếp = EVIDENCE — cờ còn LEGACY thì không
+    dựng (hai cách xếp không đứng chung một trang). Kỳ trước dùng ĐÚNG bộ lọc của khối intelligence nên đọc lại cùng bản nhớ đệm.
+  */
+  const causeP = reasonP.then(async (bc) => {
+    if (bc.taxonomy !== "EVIDENCE") return null;
+    const truoc = previous ? await getReturnReasonReport({ ...reasonFilter, period: { ...params.period, from: previous.from, to: previous.to } }) : null;
+    return buildCauseBoard(bc, truoc && truoc.taxonomy === "EVIDENCE" ? truoc : null);
+  });
+  const [{ rows, total, pageCount, all, productRows, projectionError: loiBang }, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia, causeBoard] = await Promise.all([
     getReturnRateByVariant({ period: params.period, basis, value: giaTriDon, q: params.q, minShipped, sort: params.sort, dir: params.dir, page: params.page, pageSize: params.pageSize }),
     getReturnRateSummary(params.period, params.q, basis, giaTriDon),
     variantKey ? listOrdersForVariant(variantKey, params.period) : Promise.resolve([]),
@@ -131,6 +141,7 @@ export async function loadReturnsPage(p: ReturnsPageParams) {
     logisticsPerformance(params.period, giaTriDon),
     reasonP.then((baoCaoLyDo) => getReturnIntelligence({ period: params.period, previous, basis, codes, marketerIds, trendGrain, reasonReport: baoCaoLyDo, value: giaTriDon })),
     getReturnRateByTier(params.period, params.q, basis),
+    causeP,
   ]);
-  return { rows, total, pageCount, all, productRows, loiBang, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia };
+  return { rows, total, pageCount, all, productRows, loiBang, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia, causeBoard };
 }

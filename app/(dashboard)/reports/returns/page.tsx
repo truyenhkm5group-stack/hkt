@@ -2,6 +2,7 @@ import { AlertTriangle, Download, FlaskConical, PackageCheck, Percent, Timer, Tr
 import Link from "next/link";
 import { ReturnRateTable } from "@/app/(dashboard)/reports/returns/return-rate-table";
 import { ActionBoard } from "@/app/(dashboard)/reports/returns/action-board";
+import { CauseBoardTable } from "@/app/(dashboard)/reports/returns/cause-board";
 import { CarePerformance, ComparePeriod, CoverageStrip, IntelSection, MarketerQualityTable, ProductRiskTable, TrendSection } from "@/app/(dashboard)/reports/returns/intelligence-sections";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
@@ -67,7 +68,7 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
   // để khoá đệm trang đọc trùng khoá job làm ấm theo cấu trúc, không theo trí nhớ.
   const thamSo = returnsPageParams(raw);
   const { params, minShipped, variantKey, giaTriDon, dangLocGiaTri, basis, codes, marketerIds, openReason, openGroup, openProduct, reasonFilter } = thamSo;
-  const { rows, total, pageCount, all, productRows, loiBang, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia } = await loadReturnsPage(thamSo);
+  const { rows, total, pageCount, all, productRows, loiBang, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia, causeBoard } = await loadReturnsPage(thamSo);
   // Hồ sơ ngành chỉ để đổi NHÃN chữ biến thể (shop thực phẩm: «Size: 1kg» ⇒ «Quy cách: 1kg») — đổi trên DỮ LIỆU trước khi truyền
   // xuống bảng client; KHÔNG đổi trong `loadReturnsPage` vì khoá đệm của nó dùng chung với job giữ ấm.
   const displayProfile = await readDisplayProfile();
@@ -686,6 +687,19 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
 
       {/* ═════════ E. PHÂN TÍCH LÝ DO HOÀN ═════════ */}
       <ReturnReasonSection report={reasonReport} filter={reasonFilter} hrefWith={hrefWith} openReason={openReason} openGroup={openGroup} openProduct={openProduct} />
+
+      {/* ═════════ E2. NGUYÊN NHÂN → GIẢI PHÁP → PHÒNG XỬ LÝ (chỉ khi cờ cách xếp = theo chứng cứ) ═════════ */}
+      <IntelSection
+        title="Nguyên nhân hoàn và giải pháp"
+        description={causeBoard ? `${causeBoard.rows.length} nhóm nguyên nhân` : "Cần bật cách xếp theo chứng cứ"}
+        hint="Mỗi dòng là một nhóm của bảng lý do hoàn ngay trên (cách xếp theo CHỨNG CỨ), cùng số. Phòng xử lý là phòng đi SỬA, không phải phòng có lỗi; nhóm dưới cỡ mẫu hoặc chưa đủ căn cứ chỉ một phòng thì không giao. Giải pháp là câu cố định của nhóm."
+      >
+        {causeBoard ? (
+          <CauseBoardTable board={causeBoard} periodLabel={params.period.label} />
+        ) : (
+          <p className="text-[13px] text-muted-foreground">Bật cách xếp lý do theo chứng cứ để giao phòng — cách xếp cũ gộp quan sát với kết luận (giao lâu · cố ý boom), nên không giao việc theo nó.</p>
+        )}
+      </IntelSection>
 
       {/* ═════════ F. CHĂM SÓC & CỨU ĐƠN ═════════ */}
       <IntelSection

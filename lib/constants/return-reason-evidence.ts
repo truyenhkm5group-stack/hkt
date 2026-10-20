@@ -125,10 +125,11 @@ export const REASON_EVIDENCE: Record<ReturnReason, { verified: EvidenceGroup; un
   SIZE_DOES_NOT_FIT: { verified: "SAI_SIZE", unverified: "KHACH_TU_CHOI_CHUA_RO", department: "SALES" },
   /*
     GIAO CHẬM CHỈ KHI CÓ NGƯỜI XÁC NHẬN HOẶC CÓ CHỨNG CỨ THỜI GIAN. Không nguồn máy nào hôm nay sinh
-    ra lý do này (không luật chữ ĐVVC, không mã ĐVVC nào trỏ tới nó) — nên vế `unverified` chỉ để
-    đóng bảng cho đủ, và nó KHÔNG được là "giao chậm".
+    ra lý do này (không luật chữ ĐVVC, không mã ĐVVC nào trỏ tới nó). Lời «giao chậm» chưa xác minh
+    (Pancake ghi, không đo được thời gian) về CHƯA XÁC ĐỊNH — vào hàng đợi người xác nhận, không nằm
+    lẫn trong «lý do khác» như một nguyên nhân đã hiểu (Tech Lead 21/10/2026).
   */
-  SLOW_DELIVERY: { verified: "GIAO_CHAM_XAC_NHAN", unverified: "LY_DO_KHAC", department: "LOGISTICS" },
+  SLOW_DELIVERY: { verified: "GIAO_CHAM_XAC_NHAN", unverified: "CHUA_XAC_DINH", department: "LOGISTICS" },
   CUSTOMER_AWAY: { verified: "KHACH_VANG_NHA", unverified: "KHACH_VANG_NHA", department: "LOGISTICS" },
   BOOM_NO_REASON: { verified: "BOM_DA_XAC_MINH", unverified: "KHACH_TU_CHOI_CHUA_RO", department: "SALES" },
   BOOM_MULTIPLE_ATTEMPTS: { verified: "BOM_DA_XAC_MINH", unverified: "KHACH_TU_CHOI_CHUA_RO", department: "SALES" },
@@ -158,6 +159,12 @@ export const REASON_EVIDENCE: Record<ReturnReason, { verified: EvidenceGroup; un
 export const AUTHORITY_REQUIRED_GROUPS: readonly EvidenceGroup[] = [
   ...new Set(Object.values(REASON_EVIDENCE).filter((m) => m.verified !== m.unverified).map((m) => m.verified)),
 ];
+
+/**
+ * Nhãn cột phòng trên mọi màn hình: phòng ĐI SỬA, không phải phòng CÓ LỖI (AGENTS.md mục 24) — «không liên lạc» ⇒ Kinh doanh là phòng
+ * xác thực SĐT lúc chốt, không phải lỗi của sale.
+ */
+export const DEPARTMENT_COLUMN_LABEL = "Phòng xử lý";
 
 /**
  * Phòng của một nhóm, dẫn xuất từ CÙNG bảng: mọi lý do trong nhóm chỉ cùng một phòng ⇒ phòng đó;
@@ -356,8 +363,13 @@ export type ReasonGrouping = {
   taxonomy: ReasonTaxonomy;
   /** Nhóm hiện trên bảng, theo thứ tự in. KHÔNG có nhóm chỗ trống (UNKNOWN / CHUA_XAC_DINH). */
   groups: { key: ReasonGroupKey; label: string; action: string; department: DepartmentCode | null }[];
-  /** Nhóm của MỘT ca. `null` = chỗ trống (chưa xác định) — nó đi vào ô độ phủ, không vào bảng nhóm. */
-  groupOf: (v: { reason: ReturnReason; items: readonly ReasonEvidenceItem[] }) => ReasonGroupKey | null;
+  /**
+   * Nhóm của MỘT ca. `null` = chỗ trống (chưa xác định) — nó đi vào ô «chưa xếp nhóm», không vào bảng nhóm. Ở cách xếp theo chứng cứ,
+   * chỗ trống gồm cả lời khai có lý do mà chưa đủ căn cứ cho nhóm nào (giao chậm chưa xác minh) — nên «chưa xếp nhóm» KHÔNG bằng «lý do
+   * UNKNOWN»; bất biến của báo cáo là «nhóm + chưa xếp nhóm = tổng hoàn».
+   * `slowByTime` = chứng cứ thời gian của kiện (bàn giao ĐVVC → lần phát đầu quá hạn) — chỉ nơi gọi đo được mới có.
+   */
+  groupOf: (v: { reason: ReturnReason; items: readonly ReasonEvidenceItem[]; slowByTime?: boolean | null }) => ReasonGroupKey | null;
   /** Bậc chứng cứ của MỘT ca — cùng hàm với `groupOf`, nên ô bậc và ô nhóm không lệch nhau. */
   tierOf: (v: { items: readonly ReasonEvidenceItem[] }) => EvidenceTier;
   /** Câu phải hiện ra màn hình (ghi đè không chuyển được). Rỗng = không có gì phải báo. */
@@ -396,7 +408,7 @@ export function buildReasonGrouping(
     groups: EVIDENCE_GROUPS.filter((g) => g !== "CHUA_XAC_DINH").map((g) => ({ key: g, label: EVIDENCE_GROUP_LABEL[g], action: EVIDENCE_GROUP_ACTION[g], department: evidenceGroupDepartment(g) })),
     groupOf: (v) => {
       if (v.reason === "UNKNOWN") return null;
-      const g = resolveEvidence(v.items, { overrides: applied }).primary?.group ?? null;
+      const g = resolveEvidence(v.items, { overrides: applied, slowByTime: v.slowByTime ?? null }).primary?.group ?? null;
       return g === "CHUA_XAC_DINH" ? null : g;
     },
     tierOf,

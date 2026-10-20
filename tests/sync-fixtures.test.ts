@@ -439,6 +439,8 @@ import {
 import {
   testEvidenceOnDb,
   testVtpBeatsPancakeRelayOnDb,
+  testSlowByTimeOnDb,
+  testCauseBoard,
   testEvidenceObservationShapes,
   testEvidenceOverrideTransition,
   testEvidenceResolution,
@@ -2292,6 +2294,8 @@ async function main() {
   if (khoi.chay("K06")) {
     await testEvidenceOnDb(db);
     await testVtpBeatsPancakeRelayOnDb(db);
+  await testSlowByTimeOnDb(db);
+  testCauseBoard();
     await testReasonTextLatestParity(db);
     testUseServerExports();
     testClientBoundaryExports();

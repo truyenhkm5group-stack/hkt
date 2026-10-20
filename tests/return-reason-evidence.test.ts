@@ -7,6 +7,8 @@ import { RETURN_REASONS, RETURN_REASON_TEXT_RULES, VTP_REASON_TO_RETURN_REASON, 
 import { REASON_SOURCES, SOURCE_CAN_CONCLUDE_SHOP_FAULT, carrierCodeText, vtpCodeOfObservation } from "@/lib/constants/return-reason-source";
 import {
   AUTHORITY_REQUIRED_GROUPS,
+  DEPARTMENT_COLUMN_LABEL,
+  EVIDENCE_GROUP_ACTION,
   EVIDENCE_GROUPS,
   REASON_EVIDENCE,
   REASON_TAXONOMY_KEY,
@@ -23,7 +25,11 @@ import {
 } from "@/lib/constants/return-reason-evidence";
 import { reasonGroupTable } from "@/lib/constants/return-reason-mapping";
 import { carrierCodeObservation, carrierEventObservations, humanReasonObservation, reasonDedupeKey } from "@/lib/returns/reason-observe";
-import { reasonsForShipments } from "@/lib/queries/return-reason";
+import { reasonsForShipments, slowByTimeOf } from "@/lib/queries/return-reason";
+import { buildCauseBoard } from "@/lib/returns/cause-board";
+import { ALERT_MIN_SAMPLE } from "@/lib/constants/return-intelligence";
+import { DWELL_SLA } from "@/lib/constants/shipment-status-age";
+import type { DepartmentCode } from "@/lib/constants/departments";
 import { getReturnReasonReport, listReasonShipments } from "@/lib/queries/return-reason-report";
 import { setSettingJson } from "@/lib/settings";
 import type { Period } from "@/lib/search-params";
@@ -70,9 +76,19 @@ export function testEvidenceTaxonomyContract() {
     assert.notEqual(evidenceGroupOf("CUSTOMER_RESCHEDULE_FAILED", src), "GIAO_CHAM_XAC_NHAN", "hẹn lại không thành KHÔNG phải giao chậm");
   }
   /* Giao chậm chỉ khi có người xác nhận HOẶC chứng cứ thời gian. */
-  assert.equal(evidenceGroupOf("SLOW_DELIVERY", "PANCAKE_ORDER_NOTE"), "LY_DO_KHAC");
+  // 21/10/2026 (Tech Lead): «giao chậm» chưa xác minh về CHƯA XÁC ĐỊNH — hàng đợi người xác nhận, không nằm lẫn trong «lý do khác».
+  assert.equal(evidenceGroupOf("SLOW_DELIVERY", "PANCAKE_ORDER_NOTE"), "CHUA_XAC_DINH");
   assert.equal(evidenceGroupOf("SLOW_DELIVERY", "PANCAKE_ORDER_NOTE", { slowByTime: true }), "GIAO_CHAM_XAC_NHAN", "có chứng cứ thời gian ⇒ được nói giao chậm");
-  assert.equal(evidenceGroupOf("SLOW_DELIVERY", "PANCAKE_ORDER_NOTE", { slowByTime: null }), "LY_DO_KHAC", "chưa đo thời gian (null) ≠ đã đo được chậm");
+  assert.equal(evidenceGroupOf("SLOW_DELIVERY", "PANCAKE_ORDER_NOTE", { slowByTime: null }), "CHUA_XAC_DINH", "chưa đo thời gian (null) ≠ đã đo được chậm");
+  assert.equal(evidenceGroupOf("SLOW_DELIVERY", "PANCAKE_ORDER_NOTE", { slowByTime: false }), "CHUA_XAC_DINH", "đo được KHÔNG chậm ⇒ không phải giao chậm");
+  {
+    // Cách xếp truyền chứng cứ thời gian của kiện: giao chậm chưa xác minh KHÔNG vào bảng nhóm (chưa xếp nhóm), có chứng cứ thời gian thì vào.
+    const g = buildReasonGrouping("EVIDENCE", reasonGroupTable({}), {});
+    const slow = { reason: "SLOW_DELIVERY" as const, items: [it("PANCAKE_ORDER_NOTE", "SLOW_DELIVERY", 1)] };
+    assert.equal(g.groupOf(slow), null, "giao chậm chưa xác minh ⇒ chưa xếp nhóm");
+    assert.equal(g.groupOf({ ...slow, slowByTime: true }), "GIAO_CHAM_XAC_NHAN");
+    assert.equal(buildReasonGrouping("LEGACY", reasonGroupTable({}), {}).groupOf(slow), "SLOW", "cách xếp cũ giữ nguyên");
+  }
   assert.equal(evidenceGroupOf("SLOW_DELIVERY", "HUMAN_CONFIRMED"), "GIAO_CHAM_XAC_NHAN");
 
   /* Phòng ban dẫn xuất từ CÙNG bảng; nhóm chưa đủ căn cứ không chỉ phòng nào (mục 24). */
@@ -315,7 +331,8 @@ export async function testEvidenceOnDb(db: Db) {
     clearMemo();
     const cu = await getReturnReasonReport({ ...loc, taxonomy: "LEGACY" });
     const moi = await getReturnReasonReport({ ...loc, taxonomy: "EVIDENCE" });
-    const tong = (bc: typeof cu) => bc.groups.reduce((n, g) => n + g.count, 0) + bc.reasonCoverage.unknown;
+    // Bất biến «nhóm + CHƯA XẾP NHÓM = tổng hoàn» ở CẢ HAI cách xếp (21/10/2026 — chưa xếp nhóm ≠ lý do UNKNOWN ở cách xếp mới).
+    const tong = (bc: typeof cu) => bc.groups.reduce((n, g) => n + g.count, 0) + bc.ungrouped;
     assert.equal(cu.returned, 6);
     assert.equal(moi.returned, cu.returned, "bật cách xếp mới KHÔNG được đổi tổng ca hoàn");
     assert.equal(moi.finished, cu.finished);
@@ -370,12 +387,13 @@ export async function testEvidenceOnDb(db: Db) {
 /* ───── 6 · Trên CSDL: sự kiện Pancake chuyển tiếp không đè lời VTP (đo production 20/10: −266 ca) ───── */
 export async function testVtpBeatsPancakeRelayOnDb(db: Db) {
   const Q = "rrv-";
-  const KIEN = [1, 2, 3].map((i) => `${Q}s${i}`);
-  const DON = [1, 2, 3].map((i) => `${Q}o${i}`);
+  // s4: kiện hoàn KHÔNG có chứng từ lý do nào ⇒ «chưa xếp nhóm» ở cả hai cách xếp (khoá bất biến nhóm + chưa xếp nhóm = tổng).
+  const KIEN = [1, 2, 3, 4].map((i) => `${Q}s${i}`);
+  const DON = [1, 2, 3, 4].map((i) => `${Q}o${i}`);
   const t = (ngay: number) => new Date(Date.UTC(2026, 7, ngay, 3, 0, 0));
   await db.insert(schema.products).values({ id: `${Q}p1`, name: "Đầm RRV", customId: "RRV1", isRemoved: false }).onConflictDoNothing();
   await db.insert(schema.productVariants).values({ id: `${Q}v1`, productId: `${Q}p1`, sku: "RRV1-S", detail: "S" }).onConflictDoNothing();
-  for (const so of [1, 2, 3]) {
+  for (const so of [1, 2, 3, 4]) {
     await db.insert(schema.orders).values({ id: `${Q}o${so}`, stage: "CONFIRMED", status: 2, insertedAt: t(10), totalPriceAfterDiscount: 500_000, billFullName: `RRV ${so}`, billPhone: "0900000000" }).onConflictDoNothing();
     await db.insert(schema.orderItems).values({ id: `${Q}i${so}`, orderId: `${Q}o${so}`, variantId: `${Q}v1`, sku: "RRV1-S", productName: "Đầm RRV", quantity: 1, lineTotal: 500_000, isBonus: false }).onConflictDoNothing();
     await db
@@ -392,6 +410,8 @@ export async function testVtpBeatsPancakeRelayOnDb(db: Db) {
     ev(`${Q}e2b`, `${Q}s2`, "PANCAKE", "Tồn - Khách không có nhu cầu", 23),
     // s3: CHỈ có Pancake ⇒ dùng Pancake.
     ev(`${Q}e3`, `${Q}s3`, "PANCAKE", "Tồn - Khách từ chối nhận", 22),
+    // s4: chỉ có bước đi, không câu nào nói lý do.
+    ev(`${Q}e4`, `${Q}s4`, "VTP_WEBHOOK", "Đã trả", 22),
   ]);
   await db.insert(schema.returnReasonObservations).values({ shipmentId: `${Q}s1`, orderId: `${Q}o1`, source: "CARRIER_TEXT", rawText: "Tồn - Khách hàng nghỉ, không có nhà", reasonAtWrite: "UNKNOWN", occurredAt: t(20), dedupeKey: `${Q}s1|CARRIER_TEXT|20` });
   try {
@@ -412,6 +432,8 @@ export async function testVtpBeatsPancakeRelayOnDb(db: Db) {
       assert.equal(dem.get("CUSTOMER_REFUSED"), 1, `${taxonomy}: chỉ ca không có lời VTP mới theo Pancake`);
       assert.equal(dem.get("CUSTOMER_CHANGED_MIND") ?? 0, 0, `${taxonomy}: lời Pancake mới hơn không kéo ca sang "đổi ý"`);
       assert.equal(bc.evidenceTiers.CONFLICTED, 0, `${taxonomy}: VTP và Pancake chuyển tiếp không phải mâu thuẫn`);
+      assert.equal(bc.ungrouped, 1, `${taxonomy}: kiện không có chứng từ lý do nằm ở «chưa xếp nhóm»`);
+      assert.equal(bc.groups.reduce((n, g) => n + g.count, 0) + bc.ungrouped, bc.returned, `${taxonomy}: nhóm + chưa xếp nhóm = tổng hoàn`);
     }
   } finally {
     clearMemo();
@@ -422,6 +444,70 @@ export async function testVtpBeatsPancakeRelayOnDb(db: Db) {
     await db.delete(schema.orders).where(inArray(schema.orders.id, DON));
   }
   console.log("✓ VTP trước Pancake: quan sát / sự kiện VTP thắng sự kiện Pancake mới hơn · chỉ Pancake thì dùng Pancake · cả hai cách xếp · không mâu thuẫn giả");
+}
+
+/* ───── 7 · Chứng cứ thời gian: bàn giao ĐVVC → lần phát đầu so DWELL_SLA (không đặt số mới) ───── */
+export async function testSlowByTimeOnDb(db: Db) {
+  const Q = "rrt-";
+  const KIEN = [1, 2, 3].map((i) => `${Q}s${i}`);
+  const h = (gio: number) => new Date(Date.UTC(2026, 7, 1, 0, 0, 0) + gio * 3_600_000);
+  const lim = DWELL_SLA.IN_TRANSIT?.exception ?? 0;
+  assert.ok(lim > 0, "ngưỡng lấy từ DWELL_SLA.IN_TRANSIT.exception");
+  await db.insert(schema.shipments).values(KIEN.map((id, i) => ({ id, vtpOrderNumber: `${Q}T${i}`, trackingCode: `${Q}T${i}`, stage: "RETURNED" as const, pickedUpAt: h(0) }))).onConflictDoNothing();
+  await db.insert(schema.shipmentEvents).values([
+    // s1: lần phát đầu SAU ngưỡng ⇒ chậm. s2: trước ngưỡng ⇒ không chậm. s3: chưa có lần phát nào ⇒ không đo được (vắng mặt, không phải false).
+    { shipmentId: `${Q}s1`, source: "VTP_WEBHOOK", status: "500", statusName: "Đang giao", normalizedStage: "OUT_FOR_DELIVERY", occurredAt: h(lim + 8) },
+    { shipmentId: `${Q}s2`, source: "VTP_WEBHOOK", status: "500", statusName: "Đang giao", normalizedStage: "OUT_FOR_DELIVERY", occurredAt: h(lim - 8) },
+  ]);
+  try {
+    const m = await slowByTimeOf(db, KIEN);
+    assert.equal(m.get(`${Q}s1`), true);
+    assert.equal(m.get(`${Q}s2`), false);
+    assert.equal(m.has(`${Q}s3`), false, "thiếu mốc ⇒ KHÔNG có kết luận (nơi gọi ghi null), không phải «không chậm»");
+  } finally {
+    await db.delete(schema.shipmentEvents).where(inArray(schema.shipmentEvents.shipmentId, KIEN));
+    await db.delete(schema.shipments).where(inArray(schema.shipments.id, KIEN));
+  }
+  console.log(`✓ Chứng cứ thời gian giao chậm: bàn giao → lần phát đầu > ${lim} giờ (DWELL_SLA.IN_TRANSIT) ⇒ chậm · thiếu mốc ⇒ không kết luận`);
+}
+
+/* ───── 8 · Bảng nguyên nhân: phòng xử lý chỉ khi đủ mẫu + một phòng · ưu tiên theo giá trị đã biết rồi số đơn · giải pháp cố định ───── */
+export function testCauseBoard() {
+  const tiers = (n: number) => ({ HUMAN_CONFIRMED: 0, CARE_REPORTED: 0, CARRIER_OBSERVED: n, CONFLICTED: 0, UNKNOWN: 0 });
+  const grp = (group: string, count: number, lost: number, lostUnknown: number, department: DepartmentCode | null) => ({ group: group as never, label: group, count, incidence: 1, lostRevenue: lost, lostRevenueUnknown: lostUnknown, department, tiers: tiers(count) });
+  const cur = {
+    returned: 100,
+    eligibleSent: 300,
+    ungrouped: 20,
+    evidenceTiers: { HUMAN_CONFIRMED: 10, CARE_REPORTED: 0, CARRIER_OBSERVED: 65, CONFLICTED: 5, UNKNOWN: 20 },
+    groups: [
+      grp("KHONG_LIEN_LAC", 40, 4_000_000, 0, "SALES"),
+      grp("KHACH_TU_CHOI_CHUA_RO", 30, 9_000_000, 0, null),
+      grp("SAI_DIA_CHI_SDT", 6, 0, 6, "SALES"),
+      grp("SHOP_YEU_CAU_HOAN", 3, 2_000_000, 0, "LOGISTICS"),
+      grp("CHAT_LUONG", 0, 0, 0, null),
+    ],
+  };
+  const b = buildCauseBoard(cur, { ...cur, returned: 100, groups: [grp("KHONG_LIEN_LAC", 30, 0, 0, "SALES")] });
+  assert.equal(b.minSample, ALERT_MIN_SAMPLE.minReasonCases, "cỡ mẫu dùng lại ngưỡng đã có, không đặt số mới");
+  assert.deepEqual(b.rows.map((r) => r.group), ["KHACH_TU_CHOI_CHUA_RO", "KHONG_LIEN_LAC", "SHOP_YEU_CAU_HOAN", "SAI_DIA_CHI_SDT"], "xếp theo giá trị đã biết rồi số đơn; chưa biết giá trị đứng sau; nhóm 0 ca không hiện");
+  const r = new Map(b.rows.map((x) => [x.group, x]));
+  assert.equal(r.get("KHACH_TU_CHOI_CHUA_RO")?.department, null, "chưa rõ vì sao ⇒ không giao phòng nào");
+  assert.match(r.get("KHACH_TU_CHOI_CHUA_RO")?.departmentWhy ?? "", /chưa đủ căn cứ/);
+  assert.equal(r.get("KHONG_LIEN_LAC")?.department, "SALES");
+  assert.equal(r.get("SHOP_YEU_CAU_HOAN")?.department, null, "dưới cỡ mẫu ⇒ không giao phòng");
+  assert.equal(r.get("SHOP_YEU_CAU_HOAN")?.rank, null, "dưới cỡ mẫu ⇒ không xếp hạng");
+  assert.deepEqual([r.get("KHACH_TU_CHOI_CHUA_RO")?.rank, r.get("KHONG_LIEN_LAC")?.rank, r.get("SAI_DIA_CHI_SDT")?.rank], [1, 2, 3]);
+  assert.equal(r.get("SAI_DIA_CHI_SDT")?.lostValue, null, "mọi đơn chưa có giá trị ⇒ «—», không phải 0 ₫");
+  assert.equal(r.get("KHONG_LIEN_LAC")?.action, EVIDENCE_GROUP_ACTION.KHONG_LIEN_LAC, "giải pháp là câu cố định của nhóm");
+  assert.deepEqual(r.get("KHONG_LIEN_LAC")?.trend, { prevCount: 30, deltaPoints: 10 }, "so kỳ trước: 30% ⇒ 40% = +10 điểm");
+  assert.equal(r.get("KHACH_TU_CHOI_CHUA_RO")?.trend, null, "kỳ trước không có nhóm ⇒ không mũi tên");
+  assert.equal(r.get("KHONG_LIEN_LAC")?.shareOfReturns, 40, "tỷ lệ trên TỔNG ca hoàn (kể cả chưa xếp nhóm)");
+  assert.equal(b.verificationRate, 10);
+  assert.equal(b.conflictRate, 5);
+  assert.equal(buildCauseBoard({ ...cur, returned: 0 }, null).verificationRate, null, "không có ca hoàn ⇒ không có tỷ lệ");
+  assert.equal(DEPARTMENT_COLUMN_LABEL, "Phòng xử lý", "phòng ĐI SỬA, không phải «lỗi của»");
+  console.log("✓ Bảng nguyên nhân: phòng xử lý chỉ khi đủ mẫu + đúng một phòng · ưu tiên theo giá trị đã biết rồi số đơn · «—» khi chưa biết · giải pháp cố định · so kỳ trước");
 }
 
 /** Chủ thể của mục 0 trong đặc tả: nguồn có thẩm quyền khai ở MỘT chỗ — bảng mới không khai lại. */
