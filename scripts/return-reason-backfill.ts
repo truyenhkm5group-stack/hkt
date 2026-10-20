@@ -28,21 +28,18 @@ import { sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { classifyRaw } from "@/lib/returns/reason-classify";
 import { REASON_SOURCE_LABEL, type ReasonSource } from "@/lib/constants/return-reason-source";
-import { RETURN_REASON_LABEL, type ReturnReason } from "@/lib/constants/return-reason";
-import { dangGhiQuanSat, reasonDedupeKey } from "@/lib/returns/reason-observe";
+import { isReturnReason, RETURN_REASON_LABEL, type ReturnReason } from "@/lib/constants/return-reason";
+import { carrierCodeObservation, carrierEventObservations, dangGhiQuanSat, dungDongQuanSat, humanReasonObservation, reasonDedupeKey, type QuanSatMoi } from "@/lib/returns/reason-observe";
 
 const APPLY = process.argv.includes("--apply");
 const so = (n: number) => n.toLocaleString("vi-VN");
 
-type QuanSat = {
-  shipmentId: string | null;
-  orderId: string | null;
-  source: ReasonSource;
-  rawText: string;
-  occurredAt: Date;
-  sourceRef: string;
-  actorEmail: string;
-};
+/*
+  CÙNG KIỂU với đường webhook / action (`QuanSatMoi`): ba loại quan sát có hai đường ghi (chữ sự
+  kiện ĐVVC · mã lý do · người xác nhận) được DỰNG bằng cùng một hàm ở cả hai phía, nên cùng một
+  sự việc ra cùng một khoá chống trùng.
+*/
+type QuanSat = QuanSatMoi;
 
 /*
   KHOÁ CHỐNG TRÙNG VÀ BỘ LỌC "CÓ PHẢI LÝ DO KHÔNG" DÙNG CHUNG VỚI ĐƯỜNG WEBHOOK
@@ -98,9 +95,8 @@ async function main() {
          and (coalesce(e.status_name,'') <> '' or coalesce(e.note,'') <> '')`),
   );
   for (const e of ev) {
-    for (const [txt, ref] of [[e.status_name, "status"], [e.note, "note"]] as const) {
-      if (!dangGhi(txt, "CARRIER_TEXT")) continue;
-      gom.push({ shipmentId: e.shipment_id, orderId: e.order_id, source: "CARRIER_TEXT", rawText: txt.trim(), occurredAt: new Date(e.occurred_at), sourceRef: `shipment_events:${e.id}:${ref}`, actorEmail: "" });
+    for (const q of carrierEventObservations({ shipmentId: e.shipment_id, orderId: e.order_id, statusName: e.status_name, note: e.note, at: new Date(e.occurred_at), sourceRef: `shipment_events:${e.id}` })) {
+      if (dangGhi(q.rawText, "CARRIER_TEXT")) gom.push(q);
     }
   }
 
@@ -111,7 +107,7 @@ async function main() {
         from shipments s where s.vtp_reason_code is not null and s.order_id is not null`),
   );
   for (const m of ma) {
-    gom.push({ shipmentId: m.id, orderId: m.order_id, source: "CARRIER_CODE", rawText: `Mã lý do ĐVVC ${m.code}`, occurredAt: new Date(m.at), sourceRef: `shipments:${m.id}:vtp_reason_code`, actorEmail: "" });
+    gom.push(carrierCodeObservation({ shipmentId: m.id, orderId: m.order_id, code: m.code, at: new Date(m.at), sourceRef: `shipments:${m.id}:vtp_reason_code` }));
   }
 
   /* ───────────── 3 · GHI CHÚ CHĂM SÓC KIỆN ───────────── */
@@ -160,16 +156,19 @@ async function main() {
   }
 
   /* ───────────── 7 · NGƯỜI ĐÃ XÁC NHẬN (bảng kết luận có sẵn) ───────────── */
-  const nguoi = rowsOf<{ id: string; shipment_id: string; reason: string; note: string; raw_reason: string; at: Date; by: string }>(
+  const nguoi = rowsOf<{ id: string; shipment_id: string; reason: string; note: string; actor_id: string | null; at: Date; by: string }>(
     await db.execute(sql`
-      select x.id, x.shipment_id, x.reason, coalesce(x.note,'') as note, coalesce(x.raw_reason,'') as raw_reason,
+      select x.id, x.shipment_id, x.reason, coalesce(x.note,'') as note, x.actor_id,
              coalesce(x.updated_at, x.created_at) as at, coalesce(x.actor_email,'') as by
         from shipment_return_reasons x`),
   );
   for (const n of nguoi) {
-    const txt = n.note.trim() || n.raw_reason.trim() || RETURN_REASON_LABEL[n.reason as ReturnReason] || n.reason;
-    if (!txt) continue;
-    gom.push({ shipmentId: n.shipment_id, orderId: null, source: "HUMAN_CONFIRMED", rawText: txt, occurredAt: new Date(n.at), sourceRef: `shipment_return_reasons:${n.id}`, actorEmail: n.by });
+    /*
+      CÙNG câu với `setReturnReason` (nhãn — ghi chú), KHÔNG lấy chữ ĐVVC (`raw_reason`) làm lời của
+      người: đó là chữ của bưu tá, chép kèm để đối chiếu, không phải điều người này nói.
+    */
+    if (!isReturnReason(n.reason)) continue;
+    gom.push(humanReasonObservation({ shipmentId: n.shipment_id, reason: n.reason, note: n.note, at: new Date(n.at), actorId: n.actor_id, actorEmail: n.by, sourceRef: `shipment_return_reasons:${n.id}` }));
   }
 
   /* ───────────── THỐNG KÊ THEO NGUỒN ───────────── */
@@ -180,7 +179,7 @@ async function main() {
     const key = dedupeKey(q);
     if (khoa.has(key)) continue;
     khoa.add(key);
-    const xep = classifyRaw(q.rawText, q.source);
+    const xep = q.source === "HUMAN_CONFIRMED" && q.chosenReason ? { reason: q.chosenReason, matched: true, blockedBySource: undefined } : classifyRaw(q.rawText, q.source, q.vtpCode);
     const t = theoNguon.get(q.source) ?? { tong: 0, xepDuoc: 0, chan: 0, lyDo: new Map() };
     t.tong += 1;
     if (xep.matched) {
@@ -214,19 +213,8 @@ async function main() {
     const lo = ghi.slice(i, i + LO);
     await db
       .insert(schema.returnReasonObservations)
-      .values(
-        lo.map((g) => ({
-          shipmentId: g.q.shipmentId,
-          orderId: g.q.orderId,
-          source: g.q.source,
-          rawText: g.q.rawText.slice(0, 2000),
-          reasonAtWrite: g.reason,
-          occurredAt: g.q.occurredAt,
-          sourceRef: g.q.sourceRef,
-          actorEmail: g.q.actorEmail.slice(0, 200),
-          dedupeKey: g.key,
-        })),
-      )
+      // CÙNG hàm dựng dòng với webhook / action — một chỗ quyết cột nào mang gì.
+      .values(lo.map((g) => dungDongQuanSat(g.q)))
       // Chạy lại KHÔNG sinh thêm dòng: khoá là nội dung, không phải số thứ tự.
       .onConflictDoNothing({ target: schema.returnReasonObservations.dedupeKey });
     daGhi += lo.length;

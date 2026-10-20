@@ -4,7 +4,8 @@ import { InfoHint } from "@/components/info-hint";
 import { DataWarnings } from "@/components/data-warnings";
 import { Button } from "@/components/ui/button";
 import { ReasonGroupTable } from "@/app/(dashboard)/reports/returns/reason-group-table";
-import { REASON_CONFIDENCE_LABEL, RETURN_REASON_GROUP_LABEL, RETURN_REASON_LABEL, type ReturnReason, type ReturnReasonGroup } from "@/lib/constants/return-reason";
+import { REASON_CONFIDENCE_LABEL, RETURN_REASON_LABEL, type ReturnReason } from "@/lib/constants/return-reason";
+import type { ReasonGroupKey } from "@/lib/constants/return-reason-evidence";
 import { MARKETER_UNRESOLVED_LABEL } from "@/lib/constants/marketer-attribution";
 import { REASON_COVERAGE_ACTION, REASON_COVERAGE_LABEL } from "@/lib/constants/return-reason-source";
 import { TIME_BASIS_LABEL } from "@/lib/constants/report-time-basis";
@@ -107,7 +108,7 @@ export async function ReturnReasonSection({
   /** Lý do CHI TIẾT đang mở drilldown (từ URL). `null` = không mở ở tầng này. */
   openReason: ReturnReason | null;
   /** NHÓM lý do đang mở. Tầng rộng hơn `openReason` — bấm vào dòng nhóm thì mở tầng này. */
-  openGroup: ReturnReasonGroup | null;
+  openGroup: ReasonGroupKey | null;
   /** MÃ HÀNG đang thu hẹp trong drilldown — tầng GIỮA. `null` = xem mọi mã của nhóm/lý do đó. */
   openProduct: string | null;
 }) {
@@ -136,13 +137,14 @@ export async function ReturnReasonSection({
     Bảng vỡ theo mã cố ý KHÔNG nhận `pcode`: nó phải hiện đủ mọi mã để người đọc còn đổi lựa chọn.
   */
   const dangMo = openReason !== null || openGroup !== null;
-  const locMo = { ...filter, ...(openReason ? { reason: openReason } : {}), ...(openGroup && !openReason ? { group: openGroup } : {}) };
+  // Lý do VÀ nhóm cùng đi: ở cách xếp theo chứng cứ một lý do nằm được ở hai nhóm (xem `chonCaHoan`).
+  const locMo = { ...filter, ...(openReason ? { reason: openReason } : {}), ...(openGroup ? { group: openGroup } : {}) };
   const [drilldown, voTheoMa, ten] = await Promise.all([
     dangMo ? listReasonShipments({ ...locMo, productCode: openProduct ?? undefined, limit: 300 }) : Promise.resolve([]),
     dangMo ? reasonProductBreakdown(locMo) : Promise.resolve({ rows: [], cases: 0, unmapped: 0 }),
     marketerNames(),
   ]);
-  const tenTangTren = openReason ? `“${RETURN_REASON_LABEL[openReason]}”` : openGroup ? `nhóm “${RETURN_REASON_GROUP_LABEL[openGroup]}”` : "";
+  const tenTangTren = openReason ? `“${RETURN_REASON_LABEL[openReason]}”` : openGroup ? `nhóm “${bc.groups.find((g) => g.group === openGroup)?.label ?? openGroup}”` : "";
 
   return (
     <>
@@ -190,7 +192,7 @@ export async function ReturnReasonSection({
             known={bc.reasonCoverage.known}
             eligibleSent={bc.eligibleSent}
             /* Bảng tra dựng SẴN ở máy chủ — không truyền hàm qua ranh giới client (docs/CONVENTIONS.md). */
-            drilldownHref={Object.fromEntries(bc.groups.flatMap((g) => g.details.map((d) => [d.reason, `${hrefWith({ reason: d.reason, group: null, pcode: null })}#ly-do-chi-tiet`])))}
+            drilldownHref={Object.fromEntries(bc.groups.flatMap((g) => g.details.map((d) => [d.reason, `${hrefWith({ reason: d.reason, group: g.group, pcode: null })}#ly-do-chi-tiet`])))}
             /* Tầng ĐẦU của drilldown: bấm con số của cả NHÓM, không cần xổ ra chọn từng lý do. */
             groupHref={Object.fromEntries(bc.groups.map((g) => [g.group, `${hrefWith({ group: g.group, reason: null, pcode: null })}#ly-do-chi-tiet`]))}
           />

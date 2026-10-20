@@ -31,6 +31,7 @@ import { IntegrationError } from "@/lib/integrations/http";
 import { getViettelPostClient, VTP_ORDER_ACTIONS } from "@/lib/integrations/viettelpost/client";
 import { syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
 import { carrierRequestView } from "@/lib/care/carrier-requests";
+import { ghiQuanSatChamSoc } from "@/lib/returns/reason-observe";
 import type { CareState, CarrierRequestView } from "@/lib/care/contracts";
 
 /**
@@ -318,7 +319,12 @@ export async function setCareStatus(user: CareActor, input: z.input<typeof statu
         updatedAt: now,
       })
       .where(eq(schema.shipmentCare.id, before.id));
-    if (note) await db.insert(schema.careActions).values({ shipmentId, actorId: user.id, actorEmail: user.email, kind: "OTHER", note, stageAtAction: "" });
+    if (note) {
+      // `created_at` = ĐÚNG mốc `last_note_at` ở trên: lượt rút quan sát đọc cả hai cột, cùng mốc
+      // + cùng chữ ⇒ cùng khoá chống trùng ⇒ một quan sát, không phải hai.
+      await db.insert(schema.careActions).values({ shipmentId, actorId: user.id, actorEmail: user.email, kind: "OTHER", note, stageAtAction: "", createdAt: now });
+      await ghiQuanSatChamSoc(db, { shipmentId, orderId: before.orderId, note, at: now, actorId: user.id, actorEmail: user.email, sourceRef: `shipment_care:${before.id}` });
+    }
     await recordCareEvent(user, before, { action: status === "RESOLVED" ? "RESOLVE" : status === "CANCELLED" ? "CANCEL" : "STATUS", note, nextStatus: status, followUpAt: terminal || waiting ? nextFollowUp : undefined });
     states[shipmentId] = await loadCareState(shipmentId);
   }
@@ -536,7 +542,14 @@ export async function addCareNote(user: CareActor, input: z.input<typeof noteSch
   if (!before) return { error: "Không tìm thấy vận đơn" };
   const now = new Date();
   const [s] = await db.select({ stage: schema.shipments.stage, cod: schema.shipments.codAmount, orderId: schema.shipments.orderId }).from(schema.shipments).where(eq(schema.shipments.id, shipmentId));
-  await db.insert(schema.careActions).values({ shipmentId, orderId: s?.orderId ?? null, actorId: user.id, actorEmail: user.email, kind: kind as CareActionKind, note, stageAtAction: s?.stage ?? "", codAtAction: s?.cod ?? null });
+  await db.insert(schema.careActions).values({ shipmentId, orderId: s?.orderId ?? null, actorId: user.id, actorEmail: user.email, kind: kind as CareActionKind, note, stageAtAction: s?.stage ?? "", codAtAction: s?.cod ?? null, createdAt: now });
+  /*
+    GHI CHÚ CHĂM SÓC LÀ MỘT LỜI KHAI VỀ LÝ DO HOÀN — ghi ngay, không đợi lượt rút. Trước bản này
+    chỉ lượt rút (chạy tay) mới đưa ghi chú vào bảng quan sát, nên một câu "khách chê vải mỏng" gõ
+    hôm nay không có mặt trong báo cáo lý do cho tới khi ai đó nhớ chạy lại. Cùng mốc với
+    `care_actions.created_at` / `last_note_at` ⇒ lượt rút sau đó không đẻ thêm dòng.
+  */
+  await ghiQuanSatChamSoc(db, { shipmentId, orderId: s?.orderId ?? null, note, at: now, actorId: user.id, actorEmail: user.email, sourceRef: `shipment_care:${before.id}` });
   const from = before.careStatus as CareStatus;
   const next: CareStatus = from === "NEW" || from === "ASSIGNED" ? "IN_PROGRESS" : from;
   await db
@@ -687,6 +700,8 @@ export async function recordCareDecision(user: CareActor, input: z.input<typeof 
       updatedAt: now,
     })
     .where(eq(schema.shipmentCare.id, careRow.id));
+  // Ghi chú đi kèm quyết định cũng là một lời khai về lý do — cùng mốc với `last_note_at`.
+  if (note) await ghiQuanSatChamSoc(db, { shipmentId, orderId: careRow.orderId, note, at: now, actorId: user.id, actorEmail: user.email, sourceRef: `shipment_care:${careRow.id}` });
 
   await recordCareEvent(user, careRow, { action: "STATUS", note, nextStatus: sau, followUpAt: henXemLai, payload: { careDecision: decision, reasonCode: lyDo.reasonCode ?? null, carrierStageAtDecision: kien.stage, carrierSubstateAtDecision: substate } });
   await audit({ userId: user.id, userEmail: user.email, action: "CARE_DECISION", entity: "SHIPMENT", entityId: shipmentId, detail: { decision, reasonCode: lyDo.reasonCode ?? null, reasonFromNote: lyDo.fromNote, previous: truoc, next: sau, carrierStage: kien.stage, carrierSubstate: substate } });
@@ -1093,6 +1108,8 @@ export async function recordBusinessAction(user: CareActor, input: z.input<typeo
       updatedAt: now,
     })
     .where(eq(schema.shipmentCare.id, careRow.id));
+  // Ghi chú đi kèm quyết định cũng là một lời khai về lý do — cùng mốc với `last_note_at`.
+  if (note) await ghiQuanSatChamSoc(db, { shipmentId, orderId: careRow.orderId, note, at: now, actorId: user.id, actorEmail: user.email, sourceRef: `shipment_care:${careRow.id}` });
 
   // LỊCH SỬ CHỈ THÊM — không lệnh `update` nào chạm vào dòng đã ghi.
   await db.insert(schema.careBusinessActions).values({

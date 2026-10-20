@@ -23,9 +23,9 @@
 import { createHash } from "node:crypto";
 import type { Db } from "@/db";
 import { schema } from "@/db";
-import { boDau, RETURN_STEP_NOT_REASON } from "@/lib/constants/return-reason";
+import { boDau, RETURN_REASON_LABEL, RETURN_STEP_NOT_REASON, type ReturnReason } from "@/lib/constants/return-reason";
 import { classifyRaw } from "@/lib/returns/reason-classify";
-import { SOURCE_IS_HUMAN, type ReasonSource } from "@/lib/constants/return-reason-source";
+import { carrierCodeText, SOURCE_IS_HUMAN, type ReasonSource } from "@/lib/constants/return-reason-source";
 
 export type QuanSatMoi = {
   shipmentId: string | null;
@@ -42,6 +42,11 @@ export type QuanSatMoi = {
   actorEmail?: string;
   /** Mã lý do có cấu trúc của ĐVVC, nếu gói tin mang theo. Thắng phép đọc chữ. */
   vtpCode?: number | null;
+  /**
+   * Lý do NGƯỜI ĐÃ CHỌN trong danh mục (chỉ cho `HUMAN_CONFIRMED`). Lựa chọn của người không phải
+   * một câu chữ để máy đọc lại: đọc lại nhãn "Khách đổi ý" qua bảng luật chữ có thể ra lý do khác.
+   */
+  chosenReason?: ReturnReason;
 };
 
 /** Vân tay chữ: cùng một câu, cùng một kiện, cùng một mốc ⇒ cùng một quan sát. */
@@ -109,7 +114,7 @@ export function dungDongQuanSat(q: QuanSatMoi) {
     orderId: q.orderId,
     source: q.source,
     rawText: q.rawText.slice(0, 1000),
-    reasonAtWrite: xep.reason,
+    reasonAtWrite: q.source === "HUMAN_CONFIRMED" && q.chosenReason ? q.chosenReason : xep.reason,
     occurredAt: q.occurredAt,
     sourceRef: q.sourceRef.slice(0, 200),
     actorId: q.actorId ?? null,
@@ -135,4 +140,61 @@ export async function ghiQuanSat(db: Db, ds: QuanSatMoi[]): Promise<number> {
   const rows = [...theoKhoa.values()].map(dungDongQuanSat);
   await db.insert(schema.returnReasonObservations).values(rows).onConflictDoNothing({ target: schema.returnReasonObservations.dedupeKey });
   return rows.length;
+}
+
+/* ═══════════ BA LOẠI QUAN SÁT CÓ HAI ĐƯỜNG GHI — MỖI LOẠI MỘT HÀM DỰNG ═══════════
+ *
+ * Mỗi loại dưới đây được ghi từ HAI chỗ: đường nghiệp vụ (action / webhook / ca chăm sóc) và lượt
+ * rút dữ liệu cũ (`scripts/return-reason-backfill.ts`). Khoá chống trùng là nội dung — nên hai chỗ
+ * phải dựng ra CÙNG chữ, CÙNG mốc. Bản trước mỗi chỗ tự viết câu của mình: webhook ghi
+ * "trạng thái — ghi chú" thành MỘT dòng còn lượt rút ghi HAI dòng; người xác nhận ghi "nhãn — ghi
+ * chú" còn lượt rút ghi "ghi chú" hoặc chữ ĐVVC. Cùng một sự việc vì thế nằm hai, ba dòng.
+ */
+
+/** Người của shop chọn lý do. `at` = mốc dòng `shipment_return_reasons` được ghi (cột `updated_at`). */
+export function humanReasonObservation(i: { shipmentId: string; reason: ReturnReason; note: string; at: Date; actorId: string | null; actorEmail: string; sourceRef: string }): QuanSatMoi {
+  const note = i.note.trim();
+  return {
+    shipmentId: i.shipmentId,
+    orderId: null,
+    source: "HUMAN_CONFIRMED",
+    rawText: note ? `${RETURN_REASON_LABEL[i.reason]} — ${note}` : RETURN_REASON_LABEL[i.reason],
+    occurredAt: i.at,
+    sourceRef: i.sourceRef,
+    actorId: i.actorId,
+    actorEmail: i.actorEmail,
+    chosenReason: i.reason,
+  };
+}
+
+/** Mã lý do có cấu trúc của ĐVVC — một quan sát RIÊNG, không dính vào chữ của từng bước hành trình. */
+export function carrierCodeObservation(i: { shipmentId: string; orderId: string | null; code: number; at: Date; sourceRef: string }): QuanSatMoi {
+  return { shipmentId: i.shipmentId, orderId: i.orderId, source: "CARRIER_CODE", rawText: carrierCodeText(i.code), occurredAt: i.at, sourceRef: i.sourceRef, vtpCode: i.code };
+}
+
+/**
+ * Chữ ĐVVC của MỘT sự kiện: trạng thái và ghi chú là HAI quan sát, đúng như lượt rút. Mốc là mốc
+ * của sự kiện, không phải giờ nhận gói tin — VTP gửi lại 5 lần thì vẫn một mốc.
+ */
+export function carrierEventObservations(i: { shipmentId: string; orderId: string | null; statusName?: string | null; note?: string | null; at: Date; sourceRef: string }): QuanSatMoi[] {
+  const out: QuanSatMoi[] = [];
+  for (const [txt, ref] of [[i.statusName ?? "", "status"], [i.note ?? "", "note"]] as const) {
+    if (!txt.trim()) continue;
+    out.push({ shipmentId: i.shipmentId, orderId: i.orderId, source: "CARRIER_TEXT", rawText: txt.trim(), occurredAt: i.at, sourceRef: `${i.sourceRef}:${ref}` });
+  }
+  return out;
+}
+
+/**
+ * GHI CHÚ CHĂM SÓC KIỆN — ghi NGAY trên đường ghi của ca chăm sóc (`lib/care/service.ts`).
+ *
+ * `at` phải là ĐÚNG mốc đã ghi vào `shipment_care.last_note_at` và `care_actions.created_at`: lượt
+ * rút đọc hai cột ấy, nên cùng mốc + cùng chữ ⇒ cùng khoá ⇒ một dòng.
+ *
+ * Không bao giờ làm hỏng thao tác chăm sóc: mất một dòng quan sát là mất một chứng cứ phụ, còn mất
+ * lượt ghi note là mất việc của người trực.
+ */
+export async function ghiQuanSatChamSoc(db: Db, i: { shipmentId: string; orderId: string | null; note: string; at: Date; actorId: string | null; actorEmail: string; sourceRef: string }): Promise<void> {
+  if (!i.note.trim()) return;
+  await ghiQuanSat(db, [{ shipmentId: i.shipmentId, orderId: i.orderId, source: "CARE_NOTE", rawText: i.note.trim(), occurredAt: i.at, sourceRef: i.sourceRef, actorId: i.actorId, actorEmail: i.actorEmail }]).catch(() => 0);
 }

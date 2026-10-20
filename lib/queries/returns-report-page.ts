@@ -14,7 +14,8 @@
 import { parseListParams, param, type SearchParams } from "@/lib/search-params";
 import { orderValueActive, parseOrderValue } from "@/lib/constants/order-value";
 import { TIME_BASES, type TimeBasis } from "@/lib/constants/report-time-basis";
-import { RETURN_REASONS, RETURN_REASON_GROUPS, type ReturnReason, type ReturnReasonGroup } from "@/lib/constants/return-reason";
+import { RETURN_REASONS, type ReturnReason } from "@/lib/constants/return-reason";
+import { isReasonGroupKey } from "@/lib/constants/return-reason-evidence";
 import { getReturnRateBySource, getReturnRateByTier, getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant, RETURN_RATE_SORTABLE } from "@/lib/queries/return-rate";
 import { logisticsPerformance } from "@/lib/queries/logistics";
 import { getReturnReasonReport } from "@/lib/queries/return-reason-report";
@@ -69,7 +70,10 @@ export function returnsPageParams(raw: SearchParams) {
     Giá trị lạ bị bỏ về `null` chứ không làm sập trang — URL là đầu vào của người ngoài.
   */
   const openReason = (RETURN_REASONS as readonly string[]).includes(params.filters.reason?.[0] ?? "") ? (params.filters.reason![0] as ReturnReason) : null;
-  const openGroup = (RETURN_REASON_GROUPS as readonly string[]).includes(params.filters.group?.[0] ?? "") ? (params.filters.group![0] as ReturnReasonGroup) : null;
+  // Khoá của CẢ HAI cách xếp nhóm: link mở từ lúc cờ còn tắt vẫn đọc được sau khi bật (và ngược lại
+  // — nhóm không có ở cách xếp đang bật thì drilldown ra rỗng, không phải lỗi).
+  const nhomMo = params.filters.group?.[0] ?? "";
+  const openGroup = isReasonGroupKey(nhomMo) ? nhomMo : null;
   const openProduct = (param(raw, "pcode") || "").trim() || null;
 
   /*

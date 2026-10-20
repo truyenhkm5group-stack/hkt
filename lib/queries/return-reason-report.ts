@@ -38,18 +38,11 @@ import { OM_CONFLICT, OM_EVIDENCE, OM_MARKETER_ID, OM_STATE, orderMarketerJoin, 
 import { MARKETER_EVIDENCE, MARKETER_UNRESOLVED, type MarketerCoverage, type MarketerEvidence, type MarketerLinkState } from "@/lib/constants/marketer-attribution";
 import { rowsOf } from "@/lib/sql-rows";
 import { orderHasProductCode, variantIdsOfCodes } from "@/lib/queries/product-code";
-import { reasonGroupTable } from "@/lib/constants/return-reason-mapping";
-import { getReasonGroupOverrides } from "@/lib/queries/return-reason-config";
+import { getReasonGrouping, getReasonTaxonomy } from "@/lib/queries/return-reason-config";
 import { reasonsForShipments, type ReasonVerdict } from "@/lib/queries/return-reason";
-import {
-  RETURN_REASON_GROUP_LABEL,
-  RETURN_REASON_GROUPS,
-  RETURN_REASON_LABEL,
-  REASON_NEEDS_HUMAN,
-  type ReasonConfidence,
-  type ReturnReason,
-  type ReturnReasonGroup,
-} from "@/lib/constants/return-reason";
+import { EMPTY_CONFIDENCE_COUNTS, RETURN_REASON_LABEL, REASON_NEEDS_HUMAN, RETURN_REASONS, type ReasonConfidence, type ReturnReason } from "@/lib/constants/return-reason";
+import { EVIDENCE_TIERS, resolveEvidence, type EvidenceTier, type ReasonGroupKey, type ReasonGrouping, type ReasonTaxonomy } from "@/lib/constants/return-reason-evidence";
+import type { DepartmentCode } from "@/lib/constants/departments";
 import { rescueRate, type RescueRate } from "@/lib/constants/return-rescue";
 import { timeBasisColumnSql, type TimeBasis } from "@/lib/constants/report-time-basis";
 import type { Period } from "@/lib/search-params";
@@ -82,8 +75,18 @@ export type ReasonDetailRow = {
 };
 
 export type ReasonGroupRow = {
-  group: ReturnReasonGroup;
+  /** Khoá nhóm của CÁCH XẾP ĐANG BẬT (`report.taxonomy`) — nhóm cũ hoặc nhóm theo chứng cứ. */
+  group: ReasonGroupKey;
   label: string;
+  /** Một câu: nhóm này sửa ở đâu. Đi kèm dòng để màn hình không phải tra bảng của từng cách xếp. */
+  action: string;
+  /** Phòng đi sửa — `null` khi chưa đủ căn cứ chỉ một phòng (mục 24), và luôn `null` ở cách xếp cũ. */
+  department: DepartmentCode | null;
+  /**
+   * BẬC CHỨNG CỨ của các ca HOÀN trong nhóm. Cộng lại = `count`. Một nhóm 300 ca mà 290 ca chỉ có
+   * lời ĐVVC là một nhóm khác hẳn nhóm 300 ca đã có người xác nhận — dù con số đầu dòng như nhau.
+   */
+  tiers: Record<EvidenceTier, number>;
   count: number;
   rescued: number;
   rescue: RescueRate;
@@ -133,6 +136,12 @@ export type MarketerReturnRow = {
 };
 
 export type ReturnReasonReport = {
+  /** Cách xếp nhóm của lượt dựng này. Màn hình in ra để không ai so số của hai cách xếp với nhau. */
+  taxonomy: ReasonTaxonomy;
+  /** Câu phải hiện ra (ghi đè nhóm cũ không chuyển được). Rỗng = không có gì phải báo. */
+  taxonomyNotes: string[];
+  /** Bậc chứng cứ trên MỌI ca hoàn của tập — kể cả ca chưa xác định (`UNKNOWN`). Cộng lại = `returned`. */
+  evidenceTiers: Record<EvidenceTier, number>;
   period: Period;
   basis: TimeBasis;
   finished: number;
@@ -202,8 +211,13 @@ export type ReasonFilter = {
    * một lựa chọn HỢP LỆ: đó thường là nhóm cần đi lấp dữ liệu nhất.
    */
   marketerIds?: string[];
-  groups?: ReturnReasonGroup[];
+  groups?: ReasonGroupKey[];
   reasons?: ReturnReason[];
+  /**
+   * ÉP một cách xếp nhóm — CHỈ cho lượt chạy thử (`scripts/reason-taxonomy-dryrun.ts`) dựng cả hai
+   * cách trên cùng một tập ca. Màn hình KHÔNG truyền: nó đọc cờ `returns.reason-taxonomy`.
+   */
+  taxonomy?: ReasonTaxonomy;
 };
 
 /**
@@ -329,8 +343,12 @@ async function baseRows(f: ReasonFilter) {
  * Kết quả trả về là đối tượng DÙNG CHUNG giữa các lượt đọc — nơi nhận không được sửa tại chỗ.
  */
 export async function getReturnReasonReport(f: ReasonFilter): Promise<ReturnReasonReport> {
+  // Cờ cách xếp NẰM TRONG khoá nhớ đệm: bật cờ xong mà còn đọc bản dựng theo cách cũ là một lượt
+  // màn hình nói một đằng, `settings` nói một nẻo (AGENTS.md mục 2: tham số đổi kết quả ⇒ vào khoá).
+  const taxonomy = f.taxonomy ?? (await getReasonTaxonomy());
   const key = [
     "return-reason-report",
+    taxonomy,
     f.basis ?? "-",
     f.period.from?.toISOString() ?? "-",
     f.period.to?.toISOString() ?? "-",
@@ -341,17 +359,24 @@ export async function getReturnReasonReport(f: ReasonFilter): Promise<ReturnReas
     (f.groups ?? []).join("+"),
     (f.reasons ?? []).join("+"),
   ].join(":");
-  return memo(key, 90_000, () => dungBaoCaoLyDo(f));
+  return memo(key, 90_000, () => dungBaoCaoLyDo({ ...f, taxonomy }));
 }
 
+const demBac = (): Record<EvidenceTier, number> => Object.fromEntries(EVIDENCE_TIERS.map((t) => [t, 0])) as Record<EvidenceTier, number>;
+
+/**
+ * Nhóm "nhà" của một lý do khi CHƯA có ca nào — để in dòng 0. Hỏi chính `groupOf` với một lời khai
+ * của NGƯỜI: dòng 0 đứng ở nhóm mà lý do đó sẽ vào nếu có người xác nhận, cùng một hàm với ca thật.
+ */
+const nhomNha = (grouping: ReasonGrouping, reason: ReturnReason) => grouping.groupOf({ reason, items: [{ source: "HUMAN_CONFIRMED", reason, at: 0 }] });
+
 async function dungBaoCaoLyDo(f: ReasonFilter): Promise<ReturnReasonReport> {
-  const [{ basis, rows: tatCa }, ghiDeNhom] = await Promise.all([baseRows(f), getReasonGroupOverrides()]);
+  const [{ basis, rows: tatCa }, grouping] = await Promise.all([baseRows(f), getReasonGrouping(f.taxonomy)]);
   /*
-    BẢNG TRA NHÓM dựng MỘT lần cho cả lượt báo cáo, đã áp phần ghi đè của chủ shop. Mọi chỗ xếp
-    nhóm trong hàm này đọc `nhomCua`, KHÔNG đọc thẳng `RETURN_REASON_GROUP_OF` — hai đường tra
-    khác nhau là hai con số khác nhau giữa bảng nhóm và bảng chi tiết.
+    CÁCH XẾP NHÓM dựng MỘT lần cho cả lượt báo cáo (cờ + ghi đè của chủ shop). Mọi chỗ xếp nhóm
+    trong hàm này đọc `grouping.groupOf`, KHÔNG đọc thẳng một bảng tĩnh — hai đường tra khác nhau
+    là hai con số khác nhau giữa bảng nhóm và bảng chi tiết.
   */
-  const nhomCua = reasonGroupTable(ghiDeNhom);
 
   /*
     LỌC KỲ TRONG BỘ NHỚ, KHÔNG Ở SQL — cố ý.
@@ -386,15 +411,27 @@ async function dungBaoCaoLyDo(f: ReasonFilter): Promise<ReturnReasonReport> {
   const moiShipmentId = ketThucRows.map((r) => r.shipmentId).filter((x): x is string => Boolean(x));
   const verdicts = await reasonsForShipments(moiShipmentId);
 
-  type Acc = { count: number; rescued: number; eligible: number; withIntervention: number; lostRevenue: number; confidence: Record<ReasonConfidence, number> };
-  const moi = (): Acc => ({ count: 0, rescued: 0, eligible: 0, withIntervention: 0, lostRevenue: 0, confidence: { CONFIRMED: 0, CARRIER_CODE: 0, CARRIER_TEXT: 0, NONE: 0 } });
-  const theoLyDo = new Map<ReturnReason, Acc>();
+  /*
+    GỘP THEO (NHÓM, LÝ DO), không theo lý do. Ở cách xếp theo chứng cứ, CÙNG một lý do vào hai nhóm
+    tuỳ ai nói ra ("vải mỏng" của nhân viên ⇒ chất lượng; của bưu tá ⇒ khách từ chối chưa rõ) —
+    gộp theo lý do là trộn hai thứ ấy lại. Ở cách xếp cũ mỗi lý do đúng một nhóm nên hai cách gộp
+    cho cùng con số.
+  */
+  type Acc = { group: ReasonGroupKey | null; reason: ReturnReason; count: number; rescued: number; eligible: number; withIntervention: number; lostRevenue: number; confidence: Record<ReasonConfidence, number>; tiers: Record<EvidenceTier, number> };
+  const moi = (group: ReasonGroupKey | null, reason: ReturnReason): Acc => ({ group, reason, count: 0, rescued: 0, eligible: 0, withIntervention: 0, lostRevenue: 0, confidence: EMPTY_CONFIDENCE_COUNTS(), tiers: demBac() });
+  const theoLyDo = new Map<string, Acc>();
   const lyDoTheoDon = new Map<string, ReturnReason>();
+  const evidenceTiers = demBac();
+  // Người đã động vào ca (xác nhận HOẶC ghi nhận) — mẫu của cột "đã cứu". Ghi chú chăm sóc là một
+  // thao tác người thật; tách nhãn "Người xác nhận" ra khỏi nó không được làm cột cứu mất ca.
+  const coNguoi = (c: ReasonConfidence | undefined) => c === "CONFIRMED" || c === "STAFF_REPORTED";
 
   for (const r of ketThucRows) {
     const v = r.shipmentId ? verdicts.get(r.shipmentId) : undefined;
     const reason: ReturnReason = v?.reason ?? "UNKNOWN";
-    const cur = theoLyDo.get(reason) ?? moi();
+    const group = v ? grouping.groupOf(v) : null;
+    const k = `${group ?? "-"}|${reason}`;
+    const cur = theoLyDo.get(k) ?? moi(group, reason);
     if (r.outcome === "DELIVERED") {
       /*
         ĐƠN GIAO THÀNH CÔNG MÀ VẪN MANG LÝ DO HOÀN = ca đã được cứu.
@@ -405,20 +442,23 @@ async function dungBaoCaoLyDo(f: ReasonFilter): Promise<ReturnReasonReport> {
       if (reason !== "UNKNOWN") {
         cur.rescued += 1;
         cur.eligible += 1;
-        if (v?.confidence === "CONFIRMED") cur.withIntervention += 1;
+        if (coNguoi(v?.confidence)) cur.withIntervention += 1;
       }
     } else {
+      const tier = v ? grouping.tierOf(v) : "UNKNOWN";
       cur.count += 1;
       cur.lostRevenue += r.revenue;
       cur.confidence[v?.confidence ?? "NONE"] += 1;
+      cur.tiers[tier] += 1;
+      evidenceTiers[tier] += 1;
       if (reason !== "UNKNOWN") cur.eligible += 1;
-      if (v?.confidence === "CONFIRMED") cur.withIntervention += 1;
+      if (coNguoi(v?.confidence)) cur.withIntervention += 1;
       if (r.shipmentId) lyDoTheoDon.set(r.orderId, reason);
     }
-    theoLyDo.set(reason, cur);
+    theoLyDo.set(k, cur);
   }
 
-  const unknown = theoLyDo.get("UNKNOWN")?.count ?? 0;
+  const unknown = [...theoLyDo.values()].filter((a) => a.reason === "UNKNOWN").reduce((n, a) => n + a.count, 0);
   const known = returned - unknown;
   /*
     ─── TÁCH PHẦN CHƯA BIẾT LÀM HAI, VÌ CHÚNG LÀ HAI VIỆC KHÁC NHAU ───
@@ -447,10 +487,14 @@ async function dungBaoCaoLyDo(f: ReasonFilter): Promise<ReturnReasonReport> {
   */
   const mauTyTrong = known;
 
-  const details = new Map<ReturnReasonGroup, ReasonDetailRow[]>();
-  for (const [reason, a] of theoLyDo) {
-    if (reason === "UNKNOWN") continue;
-    const g = nhomCua[reason];
+  const details = new Map<ReasonGroupKey, ReasonDetailRow[]>();
+  const bacTheoNhom = new Map<ReasonGroupKey, Record<EvidenceTier, number>>();
+  for (const a of theoLyDo.values()) {
+    const { reason, group: g } = a;
+    if (reason === "UNKNOWN" || g === null) continue;
+    const b = bacTheoNhom.get(g) ?? demBac();
+    for (const t of EVIDENCE_TIERS) b[t] += a.tiers[t];
+    bacTheoNhom.set(g, b);
     const list = details.get(g) ?? [];
     list.push({
       reason,
@@ -474,10 +518,11 @@ async function dungBaoCaoLyDo(f: ReasonFilter): Promise<ReturnReasonReport> {
     khi sự thật là chưa ai ghi lý do size lần nào. Dòng 0 kèm cờ `needsHuman` phân biệt được hai
     chuyện đó.
   */
-  for (const reason of Object.keys(nhomCua) as ReturnReason[]) {
+  for (const reason of RETURN_REASONS) {
     if (reason === "UNKNOWN") continue;
     if (f.reasons?.length && !f.reasons.includes(reason)) continue;
-    const g = nhomCua[reason];
+    const g = nhomNha(grouping, reason);
+    if (g === null) continue;
     const list = details.get(g) ?? [];
     if (!list.some((d) => d.reason === reason)) {
       list.push({
@@ -489,16 +534,16 @@ async function dungBaoCaoLyDo(f: ReasonFilter): Promise<ReturnReasonReport> {
         share: 0,
         incidence: eligibleSent ? 0 : null,
         lostRevenue: 0,
-        confidence: { CONFIRMED: 0, CARRIER_CODE: 0, CARRIER_TEXT: 0, NONE: 0 },
+        confidence: EMPTY_CONFIDENCE_COUNTS(),
         needsHuman: REASON_NEEDS_HUMAN[reason],
       });
     }
     details.set(g, list);
   }
 
-  const groups: ReasonGroupRow[] = RETURN_REASON_GROUPS.filter((g) => g !== "UNKNOWN")
-    .filter((g) => !f.groups?.length || f.groups.includes(g))
-    .map((g) => {
+  const groups: ReasonGroupRow[] = grouping.groups
+    .filter((x) => !f.groups?.length || f.groups.includes(x.key))
+    .map(({ key: g, label, action, department }) => {
       const list = (details.get(g) ?? []).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "vi"));
       const count = list.reduce((n, d) => n + d.count, 0);
       const rescued = list.reduce((n, d) => n + d.rescued, 0);
@@ -506,7 +551,10 @@ async function dungBaoCaoLyDo(f: ReasonFilter): Promise<ReturnReasonReport> {
       const withIntervention = list.reduce((n, d) => n + (d.rescue.state === "MEASURED" ? 1 : 0), 0);
       return {
         group: g,
-        label: RETURN_REASON_GROUP_LABEL[g],
+        label,
+        action,
+        department,
+        tiers: bacTheoNhom.get(g) ?? demBac(),
         count,
         rescued,
         rescue: rescueRate({ eligible, withIntervention, rescued }),
@@ -518,11 +566,15 @@ async function dungBaoCaoLyDo(f: ReasonFilter): Promise<ReturnReasonReport> {
     });
 
   const products = await productRows(f, hoanRows, lyDoTheoDon, ketThucRows);
-  const eligibleTong = [...theoLyDo].filter(([r]) => r !== "UNKNOWN").reduce((n, [, a]) => n + a.eligible, 0);
-  const interventionTong = [...theoLyDo].filter(([r]) => r !== "UNKNOWN").reduce((n, [, a]) => n + a.withIntervention, 0);
-  const rescuedTong = [...theoLyDo].filter(([r]) => r !== "UNKNOWN").reduce((n, [, a]) => n + a.rescued, 0);
+  const daBiet = [...theoLyDo.values()].filter((a) => a.reason !== "UNKNOWN");
+  const eligibleTong = daBiet.reduce((n, a) => n + a.eligible, 0);
+  const interventionTong = daBiet.reduce((n, a) => n + a.withIntervention, 0);
+  const rescuedTong = daBiet.reduce((n, a) => n + a.rescued, 0);
 
   return {
+    taxonomy: grouping.taxonomy,
+    taxonomyNotes: grouping.notes,
+    evidenceTiers,
     period: f.period,
     basis,
     finished,
@@ -620,6 +672,8 @@ export type ReasonDrilldownRow = {
   reason: ReturnReason;
   reasonLabel: string;
   confidence: ReasonConfidence;
+  /** Bậc chứng cứ của ca — cùng hàm với ô bậc ở bảng nhóm. */
+  evidenceTier: EvidenceTier;
   evidence: string;
   /** CHỮ GỐC của ĐVVC, nguyên văn. Rỗng = không có chứng từ nào — khác "có nhưng không khớp danh mục". */
   rawReason: string;
@@ -646,7 +700,7 @@ export type ReasonDrilldownRow = {
  * cả đơn ra, vì nó là bộ lọc của cả báo cáo), còn ở đây người đọc vừa bấm vào MỘT ô mã trong bảng
  * vỡ theo mã — họ muốn đúng những đơn có mã đó, kể cả đơn còn mang mã khác.
  */
-export type ReasonDrilldownFilter = ReasonFilter & { reason?: ReturnReason; group?: ReturnReasonGroup; productCode?: string; limit?: number };
+export type ReasonDrilldownFilter = ReasonFilter & { reason?: ReturnReason; group?: ReasonGroupKey; productCode?: string; limit?: number };
 
 /**
  * Chọn tập ca hoàn khớp bộ lọc lý do. Dùng chung cho danh sách vận đơn VÀ bảng vỡ theo mã hàng —
@@ -667,14 +721,18 @@ async function chonCaHoan(f: ReasonDrilldownFilter) {
   if (!rows.length) return RONG;
 
   const shipmentIds = rows.map((r) => r.shipmentId).filter((x): x is string => Boolean(x));
-  const [verdicts, ghiDeNhom] = await Promise.all([reasonsForShipments(shipmentIds), getReasonGroupOverrides()]);
-  // CÙNG bảng tra nhóm với bảng tổng hợp: bấm vào một nhóm phải ra đúng số dòng nhóm đó in ra.
-  const nhomCua = reasonGroupTable(ghiDeNhom);
+  const [verdicts, grouping] = await Promise.all([reasonsForShipments(shipmentIds), getReasonGrouping(f.taxonomy)]);
+  // CÙNG cách xếp nhóm với bảng tổng hợp: bấm vào một nhóm phải ra đúng số dòng nhóm đó in ra.
   const chon = rows.filter((r) => {
     const v = r.shipmentId ? verdicts.get(r.shipmentId) : undefined;
     const reason: ReturnReason = v?.reason ?? "UNKNOWN";
-    if (f.reason) return reason === f.reason;
-    if (f.group) return reason !== "UNKNOWN" && nhomCua[reason] === f.group;
+    /*
+      Lý do VÀ nhóm cùng lúc: ở cách xếp theo chứng cứ một lý do nằm được ở hai nhóm, nên bấm vào
+      dòng "Vải mỏng" của nhóm "Khách từ chối — chưa rõ" phải ra đúng các ca của dòng đó.
+    */
+    if (f.reason && reason !== f.reason) return false;
+    if (f.group) return reason !== "UNKNOWN" && v !== undefined && grouping.groupOf(v) === f.group;
+    if (f.reason) return true;
     // MỘT MÃ HÀNG trong một nhóm — tầng giữa của drilldown. Lọc mã ở đây chứ không ở `baseRows`
     // vì một đơn có thể mang nhiều mã, và `f.codes` lọc theo ĐƠN (cả đơn vào hay cả đơn ra).
     return true;
@@ -690,6 +748,15 @@ async function chonCaHoan(f: ReasonDrilldownFilter) {
   const maCuaDon = await maHangCuaDon(chon.map((r) => r.orderId));
   const loc = f.productCode ? chon.filter((r) => (maCuaDon.get(r.orderId) ?? []).includes(f.productCode as string)) : chon;
   return { chon: loc, verdicts, maCuaDon };
+}
+
+/**
+ * TẬP CA HOÀN kèm lời khai — CHỈ cho lượt chạy thử đổi cách xếp (`scripts/reason-taxonomy-dryrun.ts`).
+ * Dùng ĐÚNG `chonCaHoan` của drilldown, nên ma trận chuyển nhóm đứng trên cùng tập ca với bảng.
+ */
+export async function returnedReasonCases(f: ReasonDrilldownFilter): Promise<{ orderId: string; shipmentId: string | null; verdict: ReasonVerdict | null }[]> {
+  const { chon, verdicts } = await chonCaHoan(f);
+  return chon.map((r) => ({ orderId: r.orderId, shipmentId: r.shipmentId, verdict: r.shipmentId ? (verdicts.get(r.shipmentId) ?? null) : null }));
 }
 
 /** Mã hàng của một tập đơn. Đơn nhiều mã trả về nhiều mã — không chọn hộ một mã "chính". */
@@ -799,6 +866,7 @@ export async function listReasonShipments(f: ReasonDrilldownFilter): Promise<Rea
       reason,
       reasonLabel: RETURN_REASON_LABEL[reason],
       confidence: v?.confidence ?? "NONE",
+      evidenceTier: v ? resolveEvidence(v.items).tier : "UNKNOWN",
       evidence: v?.evidence ?? "",
       rawReason: v?.rawReason ?? "",
       careOwner: d?.care_owner ?? "",

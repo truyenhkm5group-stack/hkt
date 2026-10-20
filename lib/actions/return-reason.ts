@@ -25,8 +25,10 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
-import { RETURN_REASON_GROUP_OF, RETURN_REASON_LABEL, RETURN_REASONS } from "@/lib/constants/return-reason";
-import { ghiQuanSat } from "@/lib/returns/reason-observe";
+import { RETURN_REASONS } from "@/lib/constants/return-reason";
+import { effectiveGroupOf } from "@/lib/constants/return-reason-mapping";
+import { ghiQuanSat, humanReasonObservation } from "@/lib/returns/reason-observe";
+import { getReasonGroupOverrides } from "@/lib/queries/return-reason-config";
 import { reasonsForShipments } from "@/lib/queries/return-reason";
 
 const schemaInput = z.object({
@@ -54,6 +56,15 @@ export async function setReturnReason(input: unknown): Promise<{ ok: true } | { 
   const vanDon = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, shipmentId), columns: { id: true, vtpOrderNumber: true } });
   if (!vanDon) return { error: "Không tìm thấy vận đơn" };
 
+  /*
+    BẤM LẠI ĐÚNG LÝ DO CŨ, ĐÚNG GHI CHÚ CŨ ⇒ KHÔNG GHI GÌ (cùng luật với mục 61). Bản trước ghi
+    lại dòng kết luận với `updated_at` mới VÀ thêm một quan sát mốc `new Date()` — khoá chống trùng
+    chứa mốc, nên mỗi cú bấm lại là một "lời khai" mới của cùng một người về cùng một điều, và
+    lượt rút dữ liệu cũ đọc `updated_at` đã dời sẽ đẻ thêm dòng thứ ba.
+  */
+  const daCo = await db.query.shipmentReturnReasons.findFirst({ where: eq(schema.shipmentReturnReasons.shipmentId, shipmentId), columns: { reason: true, note: true } });
+  if (daCo && daCo.reason === reason && (daCo.note ?? "") === note) return { ok: true };
+
   // Lý do ĐANG có hiệu lực trước khi ghi đè — chép vào nhật ký để so được về sau.
   const truoc = (await reasonsForShipments([shipmentId])).get(shipmentId);
 
@@ -62,7 +73,16 @@ export async function setReturnReason(input: unknown): Promise<{ ok: true } | { 
     `effectiveGroupOf` để chủ shop chỉnh được cách xếp mà không phải viết lại lịch sử. Cột này
     giữ lại câu "hồi đó xếp vào đâu".
   */
-  const reasonGroup = RETURN_REASON_GROUP_OF[reason];
+  /*
+    Ảnh chụp theo CÁCH XẾP ĐANG CHẠY (đã áp ghi đè của chủ shop), không theo bảng mặc định trong
+    mã: chụp bảng mặc định là ghi lại một câu "hồi đó xếp vào đâu" mà màn hình hồi đó không nói.
+  */
+  const reasonGroup = effectiveGroupOf(reason, await getReasonGroupOverrides());
+  /*
+    MỘT MỐC cho cả dòng kết luận lẫn dòng quan sát: lượt rút dữ liệu cũ đọc `updated_at` của dòng
+    kết luận, nên hai đường phải ra cùng một khoá chống trùng.
+  */
+  const luc = new Date();
   /*
     CHỮ GỐC CỦA ĐVVC ĐƯỢC CHÉP LẠI, NGUYÊN VĂN.
 
@@ -84,6 +104,8 @@ export async function setReturnReason(input: unknown): Promise<{ ok: true } | { 
       confidence: "CONFIRMED",
       actorId: user.id,
       actorEmail: user.email,
+      createdAt: luc,
+      updatedAt: luc,
     })
     .onConflictDoUpdate({
       target: schema.shipmentReturnReasons.shipmentId,
@@ -103,7 +125,7 @@ export async function setReturnReason(input: unknown): Promise<{ ok: true } | { 
         confidence: "CONFIRMED",
         actorId: user.id,
         actorEmail: user.email,
-        updatedAt: new Date(),
+        updatedAt: luc,
       },
     });
 
@@ -119,19 +141,9 @@ export async function setReturnReason(input: unknown): Promise<{ ok: true } | { 
     bấm lại đúng lý do cũ là không-thao-tác, đổi sang lý do khác là một quan sát mới.
   */
   await ghiQuanSat(db, [
-    {
-      shipmentId,
-      orderId: null,
-      source: "HUMAN_CONFIRMED",
-      // Chữ gốc của quan sát NÀY là nhãn người đó chọn, cộng ghi chú. Đây là chữ của NGƯỜI — khác
-      // hẳn `raw_reason` của ĐVVC ở trên, và hai cái cùng sống, không cái nào xoá cái nào.
-      rawText: note ? `${RETURN_REASON_LABEL[reason]} — ${note}` : RETURN_REASON_LABEL[reason],
-      occurredAt: new Date(),
-      sourceRef: "action:setReturnReason",
-      // QUY KẾT ĐI BẰNG KHOÁ TÀI KHOẢN; ô chữ chỉ là ảnh chụp tên (AGENTS.md mục 34).
-      actorId: user.id,
-      actorEmail: user.email,
-    },
+    // Chữ gốc của quan sát NÀY là nhãn người đó chọn, cộng ghi chú — chữ của NGƯỜI, khác hẳn
+    // `raw_reason` của ĐVVC ở trên; hai cái cùng sống. Quy kết bằng khoá tài khoản (mục 34).
+    humanReasonObservation({ shipmentId, reason, note, at: luc, actorId: user.id, actorEmail: user.email, sourceRef: "action:setReturnReason" }),
   ]);
 
   await audit({

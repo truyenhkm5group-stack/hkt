@@ -11,28 +11,33 @@
  * một điều kiện hoàn ở đây là tạo ra bộ số thứ hai cho cùng một câu hỏi, đúng thứ AGENTS.md mục
  * 8 cấm.
  *
- * ─── BỐN BẬC CHỨNG CỨ, HẸP DẦN ───
+ * ─── NGUỒN CHỨNG CỨ, XẾP THEO `SOURCE_RANK` ───
  *
- *   1. NGƯỜI XÁC NHẬN (`shipment_return_reasons`)  → `CONFIRMED`
- *   2. MÃ LÝ DO của ĐVVC (`shipments.vtp_reason_code`) → `CARRIER_CODE`
- *   3. CHỮ trong trạng thái ĐVVC ("Tồn - …")       → `CARRIER_TEXT`
- *   4. không có gì                                  → `UNKNOWN` / `NONE`
+ *   NGƯỜI XÁC NHẬN (`shipment_return_reasons` + quan sát `HUMAN_CONFIRMED`) → `CONFIRMED`
+ *   KHO / GHI CHÚ CHĂM SÓC / CSKH (quan sát)                              → `STAFF_REPORTED`
+ *   MÃ LÝ DO của ĐVVC (`shipments.vtp_reason_code`, quan sát)              → `CARRIER_CODE`
+ *   CHỮ trong trạng thái ĐVVC ("Tồn - …")                                 → `CARRIER_TEXT`
+ *   CHỮ Pancake (phiếu đổi trả, ghi chú đơn)                               → `EXTERNAL_TEXT`
+ *   không có gì                                                           → `UNKNOWN` / `NONE`
  *
- * Không có bậc thứ năm. Đặc biệt KHÔNG suy từ tiền: xem chú thích đầu tệp hằng số.
+ * Đặc biệt KHÔNG suy từ tiền: xem chú thích đầu tệp hằng số.
  */
 import { and, desc, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { classifyRaw } from "@/lib/returns/reason-classify";
 import {
+  carrierCodeText,
   REASON_SOURCE_LABEL,
-  SOURCE_IS_HUMAN,
   SOURCE_RANK,
   isReasonSource,
+  vtpCodeOfObservation,
   type ReasonCoverageState,
   type ReasonSource,
 } from "@/lib/constants/return-reason-source";
+import { resolveEvidence, type ReasonEvidenceItem } from "@/lib/constants/return-reason-evidence";
 import {
   boDau,
+  isReturnReason,
   RETURN_REASON_TEXT_RULES,
   RETURN_STEP_NOT_REASON,
   VTP_REASON_TO_RETURN_REASON,
@@ -74,9 +79,15 @@ export type ReasonVerdict = {
   coverage: ReasonCoverageState;
   /** Nguồn của quan sát đang được dùng. `null` = không có quan sát nào. */
   source: ReasonSource | null;
+  /**
+   * MỌI lời khai đã xếp được của kiện (nguồn · lý do · mốc) — đầu vào của `resolveEvidence()`.
+   * Giữ lại để nơi gọi dựng được NHÓM THEO CHỨNG CỨ (cần cả ghi đè của chủ shop) mà không phải
+   * truy vấn lại, và để thấy được kiện nào có các nguồn nói khác nhau.
+   */
+  items: ReasonEvidenceItem[];
 };
 
-const KHONG_BIET: ReasonVerdict = { reason: "UNKNOWN", confidence: "NONE", evidence: "Không có mã lý do, không có sự kiện nào nêu lý do.", rawReason: "", manual: false, actorEmail: "", coverage: "NO_EVIDENCE", source: null };
+const KHONG_BIET: ReasonVerdict = { reason: "UNKNOWN", confidence: "NONE", evidence: "Không có mã lý do, không có sự kiện nào nêu lý do.", rawReason: "", manual: false, actorEmail: "", coverage: "NO_EVIDENCE", source: null, items: [] };
 
 /** Phân loại một chuỗi trạng thái ĐVVC. Trả `null` khi chuỗi chỉ là BƯỚC ĐI chứ không phải lý do. */
 export function reasonFromStatusText(statusName: string): ReturnReason | null {
@@ -108,7 +119,7 @@ export function reasonFromStatusText(statusName: string): ReturnReason | null {
  * — tức đúng dòng muộn nhất trong số dòng có lý do. Hai dòng CÙNG mốc thì bản cũ lấy theo thứ tự
  * ngẫu nhiên của CSDL; ở đây phá hoà bằng `id` giảm dần để chạy hai lần ra cùng một kết quả.
  */
-async function suKienCoLyDoMuonNhat(db: Awaited<ReturnType<typeof getDb>>, ids: string[]): Promise<{ shipmentId: string; statusName: string; reason: ReturnReason }[]> {
+async function suKienCoLyDoMuonNhat(db: Awaited<ReturnType<typeof getDb>>, ids: string[]): Promise<{ shipmentId: string; statusName: string; reason: ReturnReason; at: Date }[]> {
   const e = schema.shipmentEvents;
   const coChu = sql`${e.shipmentId} in ${ids} and coalesce(${e.statusName}, '') <> ''`;
   const cauChu = await db.selectDistinct({ statusName: e.statusName }).from(e).where(coChu);
@@ -119,11 +130,11 @@ async function suKienCoLyDoMuonNhat(db: Awaited<ReturnType<typeof getDb>>, ids: 
   }
   if (!lyDoCua.size) return [];
   const dong = await db
-    .selectDistinctOn([e.shipmentId], { shipmentId: e.shipmentId, statusName: e.statusName })
+    .selectDistinctOn([e.shipmentId], { shipmentId: e.shipmentId, statusName: e.statusName, at: e.occurredAt })
     .from(e)
     .where(and(coChu, inArray(e.statusName, [...lyDoCua.keys()])))
     .orderBy(e.shipmentId, desc(e.occurredAt), desc(e.id));
-  return dong.map((d) => ({ shipmentId: d.shipmentId, statusName: d.statusName, reason: lyDoCua.get(d.statusName) as ReturnReason }));
+  return dong.map((d) => ({ shipmentId: d.shipmentId, statusName: d.statusName, reason: lyDoCua.get(d.statusName) as ReturnReason, at: d.at }));
 }
 
 /**
@@ -131,6 +142,21 @@ async function suKienCoLyDoMuonNhat(db: Awaited<ReturnType<typeof getDb>>, ids: 
  *
  * Vận đơn không nằm trong kết quả trả về = chưa xét (gọi sai tập), khác với vận đơn trả về
  * `UNKNOWN` = đã xét và không có chứng từ. Hai thứ đó không được lẫn.
+ *
+ * ═══ MỌI NGUỒN THÀNH MỘT DANH SÁCH LỜI KHAI, MỘT HÀM THUẦN QUYẾT ═══
+ *
+ * Bản trước chạy bốn bậc nối tiếp, mỗi bậc ghi đè `out` theo luật riêng của nó, và luật "ai đè
+ * được ai" nằm rải ở bốn chỗ. Đo được bốn lỗi từ đúng cấu trúc đó:
+ *   · ghi chú chăm sóc ĐÈ một kết luận của người trong `shipment_return_reasons` (vì "người" được
+ *     tính là cả ghi chú) — và mang nhãn "Người xác nhận";
+ *   · quan sát chỉ có `order_id` (phiếu đổi trả Pancake) không bao giờ được đọc;
+ *   · quan sát `CARRIER_CODE` được xếp lại bằng chữ mà không truyền mã, nên không bao giờ xếp được;
+ *   · một quan sát chữ ĐVVC mới hơn đè được mã lý do có cấu trúc.
+ *
+ * Nay mọi nguồn — sự kiện ĐVVC, mã lý do, bảng người xác nhận, bảng quan sát — đổ vào MỘT danh
+ * sách lời khai mỗi kiện, và `resolveEvidence()` (hàm thuần, kiểm được không cần CSDL) chọn
+ * nguyên nhân chính theo `SOURCE_RANK`. Cùng một hàm cho ra cả lý do cũ lẫn nhóm theo chứng cứ —
+ * hai cách đọc không thể chọn hai lời khai khác nhau.
  */
 export async function reasonsForShipments(shipmentIds: readonly string[]): Promise<Map<string, ReasonVerdict>> {
   const out = new Map<string, ReasonVerdict>();
@@ -140,139 +166,134 @@ export async function reasonsForShipments(shipmentIds: readonly string[]): Promi
 
   const [thuCong, vanDon, suKien] = await Promise.all([
     db.select().from(schema.shipmentReturnReasons).where(inArray(schema.shipmentReturnReasons.shipmentId, ids)),
-    db.select({ id: schema.shipments.id, code: schema.shipments.vtpReasonCode }).from(schema.shipments).where(inArray(schema.shipments.id, ids)),
+    db.select({ id: schema.shipments.id, orderId: schema.shipments.orderId, code: schema.shipments.vtpReasonCode, at: schema.shipments.vtpStatusDate }).from(schema.shipments).where(inArray(schema.shipments.id, ids)),
     suKienCoLyDoMuonNhat(db, ids),
   ]);
 
-  for (const id of ids) out.set(id, KHONG_BIET);
-
-  // Bậc 3 — chữ trong trạng thái: sự kiện MUỘN NHẤT mang chữ dịch ra lý do (kiện hẹn lại rồi vẫn
-  // không giao được thì lý do cuối mới là lý do nó hoàn). Mỗi kiện tối đa MỘT dòng — xem hàm dưới.
-  for (const e of suKien) {
-    const r = e.reason;
-    out.set(e.shipmentId, {
-      reason: r,
-      confidence: "CARRIER_TEXT",
-      evidence: `Sự kiện ĐVVC: “${e.statusName}”`,
-      rawReason: (e.statusName ?? "").trim(),
-      manual: false,
-      actorEmail: "",
-      coverage: "CLASSIFIED",
-      source: "CARRIER_TEXT",
-    });
-  }
-
-  // Bậc 2 — mã lý do. Đè lên chữ, vì mã là thứ ĐVVC khai có cấu trúc.
-  for (const s of vanDon) {
-    if (s.code === null || s.code === undefined) continue;
-    const r = VTP_REASON_TO_RETURN_REASON[s.code];
-    if (!r) continue;
-    // Chữ gốc của bậc CHỮ vẫn được giữ khi mã đè lên: hai chứng từ nói về cùng một kiện, mất một
-    // cái là mất đường kiểm chứng xem chúng có mâu thuẫn nhau không.
-    out.set(s.id, { reason: r, confidence: "CARRIER_CODE", evidence: `Mã lý do ĐVVC ${s.code}`, rawReason: out.get(s.id)?.rawReason || `Mã lý do ĐVVC ${s.code}`, manual: false, actorEmail: "", coverage: "CLASSIFIED", source: "CARRIER_CODE" });
-  }
-
-  // Bậc 1 — người xác nhận. Đè lên tất cả: người vừa gọi cho khách biết nhiều hơn mọi suy luận.
-  for (const m of thuCong) {
-    /*
-      NGƯỜI ĐÈ LÊN MÁY, NHƯNG KHÔNG XOÁ CHỨNG TỪ CỦA MÁY.
-
-      `raw_reason` là chữ ĐVVC nói lúc người đó bấm xác nhận (cột ghi từ 0085; dòng cũ để rỗng,
-      KHÔNG backfill). Thiếu nó thì rơi về chữ máy đang đọc được — vẫn không bịa ra gì.
-    */
-    out.set(m.shipmentId, {
-      reason: m.reason as ReturnReason,
-      confidence: "CONFIRMED",
-      evidence: m.note ? `${m.actorEmail} xác nhận: ${m.note}` : `${m.actorEmail} xác nhận`,
-      rawReason: (m.rawReason || "").trim() || out.get(m.shipmentId)?.rawReason || "",
-      manual: true,
-      actorEmail: m.actorEmail,
-      coverage: "CLASSIFIED",
-      source: "HUMAN_CONFIRMED",
-    });
-  }
-
   /*
-    ═══════════ BẬC 0 — QUAN SÁT ĐÃ GHI: THẨM QUYỀN CAO NHẤT THẮNG ═══════════
-
-    Ba bậc phía trên suy LẠI TỪ ĐẦU mỗi lượt đọc, và chúng chỉ với tới được chữ của ĐVVC. Bảng
-    `return_reason_observations` là chỗ MỌI nguồn cùng đổ về — kể cả những nguồn ba bậc kia không
-    bao giờ thấy: khách nhắn qua chat, nhân viên gọi hỏi, kho mở kiện ra xem.
-
-    Chọn quan sát theo `SOURCE_RANK` (người > kho > chăm sóc > mã ĐVVC > chữ ĐVVC), bằng hạng thì
-    lấy cái MUỘN HƠN — kiện hẹn lại rồi vẫn hoàn thì lý do cuối mới là lý do nó hoàn.
-
-    Và đây là chỗ `RAW_ONLY` sinh ra: có chữ thật mà xếp không được thì KHÔNG im lặng trả
-    `NO_EVIDENCE`. Hai thứ ấy dẫn tới hai việc khác hẳn nhau — một cái là đọc chữ rồi chọn lý do,
-    cái kia là đi hỏi khách.
+    Quan sát gắn ĐƠN chứ không gắn kiện (phiếu đổi trả Pancake, ghi chú đơn) — bản trước chỉ hỏi
+    `shipment_id in ids`, nên cả lớp này chưa từng vào báo cáo. Gắn nó cho MỌI kiện của đơn đó
+    trong tập: đơn gửi lại hai lần thì cả hai kiện cùng mang lời khai của đơn.
   */
+  const kienCuaDon = new Map<string, string[]>();
+  for (const s of vanDon) if (s.orderId) kienCuaDon.set(s.orderId, [...(kienCuaDon.get(s.orderId) ?? []), s.id]);
+  const donIds = [...kienCuaDon.keys()];
+  const r = schema.returnReasonObservations;
   const quanSat = await db
     .select()
-    .from(schema.returnReasonObservations)
-    .where(sql`${schema.returnReasonObservations.shipmentId} in ${ids}`)
-    .orderBy(sql`${schema.returnReasonObservations.occurredAt} asc`);
+    .from(r)
+    .where(donIds.length ? sql`(${r.shipmentId} in ${ids} or (${r.shipmentId} is null and ${r.orderId} in ${donIds}))` : sql`${r.shipmentId} in ${ids}`)
+    .orderBy(sql`${r.occurredAt} asc`);
 
-  /*
-    ═══ CHỌN QUAN SÁT: THẨM QUYỀN CAO THẮNG — NHƯNG CHỈ KHI NÓ NÓI ĐƯỢC ĐIỀU GÌ ═══
+  const loiKhai = new Map<string, LoiKhai[]>();
+  const tho = new Map<string, LoiKhai>();
+  const them = (id: string, k: LoiKhai) => loiKhai.set(id, [...(loiKhai.get(id) ?? []), k]);
+  const chuDvvc = new Map<string, string>();
 
-    Bản đầu chọn quan sát hạng cao nhất rồi ghi đè thẳng. Số đo trên production cho thấy ngay vì
-    sao như thế là sai: trong 103 ghi chú chăm sóc kiện, chỉ 5 câu xếp được vào danh mục — 98 câu
-    còn lại là "đã gọi lần 2", "khách hẹn chiều mai". Ghi chú chăm sóc xếp hạng CAO HƠN chữ ĐVVC,
-    nên một kiện mà Viettel Post đã nói rõ "Khách hàng nghỉ, không có nhà" sẽ bị một câu "đã gọi
-    lần 2" đè lên và rơi về CHƯA XÁC ĐỊNH.
-
-    Tức là thêm dữ liệu vào lại LÀM GIẢM độ phủ. Đúng thứ ngược đời mà không ai đi tìm, vì con số
-    vẫn ra và vẫn trông hợp lý.
-
-    Luật đúng: chọn quan sát hạng cao nhất TRONG SỐ NHỮNG CÁI XẾP ĐƯỢC. Không cái nào xếp được thì
-    kết luận cũ ở lại — và chỉ khi kết luận cũ cũng chưa có gì, quan sát thô mới lên tiếng để nói
-    "CÓ chữ, chưa ai đọc" (`RAW_ONLY`), khác hẳn "chưa ai nói gì".
-  */
-  type ChonLoc = { rank: number; at: number; row: (typeof quanSat)[number]; xep: ReturnType<typeof classifyRaw> };
-  const totNhat = new Map<string, ChonLoc>();
-  const thoNhat = new Map<string, ChonLoc>();
-  const hon = (a: ChonLoc, b: ChonLoc | undefined) => !b || a.rank > b.rank || (a.rank === b.rank && a.at >= b.at);
-  for (const q of quanSat) {
-    if (!q.shipmentId || !isReasonSource(q.source)) continue;
-    const ung: ChonLoc = { rank: SOURCE_RANK[q.source], at: q.occurredAt.getTime(), row: q, xep: classifyRaw(q.rawText, q.source) };
-    // Hạng cao hơn thắng; bằng hạng thì muộn hơn thắng — kiện hẹn lại rồi vẫn hoàn thì lý do cuối
-    // mới là lý do nó hoàn.
-    if (ung.xep.matched && hon(ung, totNhat.get(q.shipmentId))) totNhat.set(q.shipmentId, ung);
-    if (hon(ung, thoNhat.get(q.shipmentId))) thoNhat.set(q.shipmentId, ung);
+  // Chữ ĐVVC muộn nhất mang lý do — mỗi kiện tối đa MỘT dòng (xem `suKienCoLyDoMuonNhat`).
+  for (const e of suKien) {
+    const raw = (e.statusName ?? "").trim();
+    chuDvvc.set(e.shipmentId, raw);
+    them(e.shipmentId, { source: "CARRIER_TEXT", reason: e.reason, at: e.at.getTime(), evidence: `Sự kiện ĐVVC: “${e.statusName}”`, rawReason: raw, actorEmail: "" });
   }
-
-  const dat = (id: string, { row, xep }: ChonLoc, coverage: ReasonCoverageState) => {
-    const src = row.source as ReasonSource;
-    const nguoi = SOURCE_IS_HUMAN[src];
-    const truoc = out.get(id);
+  for (const s of vanDon) {
+    if (s.code === null || s.code === undefined) continue;
+    const reason = VTP_REASON_TO_RETURN_REASON[s.code];
+    if (!reason) continue;
+    // Chữ gốc của bậc CHỮ vẫn đi kèm khi mã thắng: mất một cái là mất đường kiểm chứng xem hai
+    // chứng từ có mâu thuẫn nhau không.
+    them(s.id, { source: "CARRIER_CODE", reason, at: s.at?.getTime() ?? 0, evidence: `Mã lý do ĐVVC ${s.code}`, rawReason: chuDvvc.get(s.id) || carrierCodeText(s.code), actorEmail: "" });
+  }
+  for (const m of thuCong) {
+    if (!isReturnReason(m.reason)) continue;
     /*
-      QUAN SÁT CỦA MÁY KHÔNG ĐƯỢC HẠ CẤP MỘT KẾT LUẬN CỦA NGƯỜI. Bậc 1 phía trên đã ghi
-      `HUMAN_CONFIRMED`; một quan sát `CARRIER_TEXT` mới hơn không được đè lên nó.
+      NGƯỜI THẮNG MÁY, NHƯNG KHÔNG XOÁ CHỨNG TỪ CỦA MÁY. `raw_reason` là chữ ĐVVC lúc người đó bấm
+      (cột ghi từ 0085; dòng cũ rỗng, KHÔNG backfill) — thiếu thì rơi về chữ máy đang đọc được.
     */
-    if (truoc?.source === "HUMAN_CONFIRMED" && !nguoi) return;
-    out.set(id, {
-      reason: coverage === "CLASSIFIED" ? xep.reason : "UNKNOWN",
-      confidence: nguoi ? "CONFIRMED" : src === "CARRIER_CODE" ? "CARRIER_CODE" : "CARRIER_TEXT",
-      evidence: `${REASON_SOURCE_LABEL[src]}: “${row.rawText}”${row.note ? ` — ${row.note}` : ""}`,
-      rawReason: row.rawText,
-      manual: nguoi,
-      actorEmail: row.actorEmail,
-      coverage,
-      source: src,
+    them(m.shipmentId, {
+      source: "HUMAN_CONFIRMED",
+      reason: m.reason,
+      at: m.updatedAt.getTime(),
+      evidence: m.note ? `${m.actorEmail} xác nhận: ${m.note}` : `${m.actorEmail} xác nhận`,
+      rawReason: (m.rawReason || "").trim() || chuDvvc.get(m.shipmentId) || "",
+      actorEmail: m.actorEmail,
     });
-  };
-
-  for (const [id, chon] of totNhat) dat(id, chon, "CLASSIFIED");
-  for (const [id, chon] of thoNhat) {
-    if (totNhat.has(id)) continue;
+  }
+  for (const q of quanSat) {
+    if (!isReasonSource(q.source)) continue;
+    const kien = q.shipmentId ? [q.shipmentId] : q.orderId ? (kienCuaDon.get(q.orderId) ?? []) : [];
     /*
-      KHÔNG HẠ CẤP MỘT KẾT LUẬN ĐÃ CÓ. Bậc 1–3 phía trên có thể đã xếp được kiện này từ chữ ĐVVC;
-      một ghi chú chăm sóc không đọc được KHÔNG phải lý do để xoá kết luận ấy đi. Chữ thô chỉ lên
-      tiếng khi chỗ đó đang thật sự trống.
+      Lựa chọn của NGƯỜI là chính nó, không đọc lại qua bảng luật chữ (`reason_at_write` giữ khoá
+      người đó chọn). Mọi nguồn khác xếp lại LÚC ĐỌC — sửa luật là số đổi theo, không viết lại lịch sử.
     */
-    if (out.get(id)?.coverage === "CLASSIFIED") continue;
-    dat(id, chon, "RAW_ONLY");
+    const reason: ReturnReason =
+      q.source === "HUMAN_CONFIRMED" && isReturnReason(q.reasonAtWrite) && q.reasonAtWrite !== "UNKNOWN"
+        ? q.reasonAtWrite
+        : classifyRaw(q.rawText, q.source, vtpCodeOfObservation(q.source, q.rawText)).reason;
+    const k: LoiKhai = {
+      source: q.source,
+      reason,
+      at: q.occurredAt.getTime(),
+      evidence: `${REASON_SOURCE_LABEL[q.source]}: “${q.rawText}”${q.note ? ` — ${q.note}` : ""}`,
+      rawReason: q.rawText,
+      actorEmail: q.actorEmail,
+    };
+    for (const id of kien) {
+      them(id, k);
+      if (hon(k, tho.get(id))) tho.set(id, k);
+    }
   }
 
+  for (const id of ids) {
+    const ds = loiKhai.get(id) ?? [];
+    const ket = resolveEvidence(ds);
+    const p = ket.primary ? ds.find((k) => k.source === ket.primary?.source && k.reason === ket.primary.reason && k.at === ket.primary.at) : undefined;
+    if (p) {
+      out.set(id, {
+        reason: p.reason,
+        confidence: CONFIDENCE_OF_SOURCE[p.source],
+        evidence: p.evidence,
+        rawReason: p.rawReason,
+        manual: p.source === "HUMAN_CONFIRMED",
+        actorEmail: p.actorEmail,
+        coverage: "CLASSIFIED",
+        source: p.source,
+        items: ds.map(({ source, reason, at }) => ({ source, reason, at })),
+      });
+      continue;
+    }
+    /*
+      Có chữ thật mà xếp không được ⇒ `RAW_ONLY`, KHÔNG im lặng trả `NO_EVIDENCE`: một cái là đọc
+      chữ rồi chọn lý do, cái kia là đi hỏi khách.
+    */
+    const t = tho.get(id);
+    out.set(
+      id,
+      t
+        ? { reason: "UNKNOWN", confidence: CONFIDENCE_OF_SOURCE[t.source], evidence: t.evidence, rawReason: t.rawReason, manual: false, actorEmail: t.actorEmail, coverage: "RAW_ONLY", source: t.source, items: [] }
+        : KHONG_BIET,
+    );
+  }
   return out;
 }
+
+/** Một lời khai kèm phần để HIỂN THỊ — chỉ `source/reason/at` đi vào phép chọn. */
+type LoiKhai = ReasonEvidenceItem & { evidence: string; rawReason: string; actorEmail: string };
+
+const hon = (a: LoiKhai, b: LoiKhai | undefined) => !b || SOURCE_RANK[a.source] > SOURCE_RANK[b.source] || (SOURCE_RANK[a.source] === SOURCE_RANK[b.source] && a.at >= b.at);
+
+/**
+ * `CONFIRMED` CHỈ cho người bấm xác nhận. Ghi chú chăm sóc / phiếu kho là lời nhân viên GHI NHẬN —
+ * bản trước gắn cả hai nhãn "Người xác nhận" (`SOURCE_IS_HUMAN`), nên một câu trong ô ghi chú
+ * trông y hệt một kết luận đã chốt.
+ */
+const CONFIDENCE_OF_SOURCE: Record<ReasonSource, ReasonConfidence> = {
+  HUMAN_CONFIRMED: "CONFIRMED",
+  WAREHOUSE_INSPECTION: "STAFF_REPORTED",
+  CARE_NOTE: "STAFF_REPORTED",
+  CS_NOTE: "STAFF_REPORTED",
+  CARRIER_CODE: "CARRIER_CODE",
+  CARRIER_TEXT: "CARRIER_TEXT",
+  PANCAKE_RETURN: "EXTERNAL_TEXT",
+  PANCAKE_ORDER_NOTE: "EXTERNAL_TEXT",
+};
