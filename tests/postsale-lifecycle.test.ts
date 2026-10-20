@@ -16,6 +16,7 @@
  * Vòng đời đầu-cuối tư vấn → chốt → hậu mãi → khiếu nại chạy ở bộ hội thoại vàng (`hau-mai-da-nhan-hang`). Mốc theo đồng hồ THẬT (AGENTS 50).
  */
 import assert from "node:assert/strict";
+import { vnDateKey, vnEndOfDay } from "@/lib/format";
 import { readFileSync, rmSync } from "node:fs";
 import { and, eq, like, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
@@ -42,6 +43,17 @@ import { parseReleaseArgs } from "@/scripts/sales-postorder-handoff-release";
 const ORG = "hau-mai-ai-dung";
 const ORG2 = "hau-mai-cach-ly";
 const MIN = 60_000;
+
+/**
+ * Một mốc SAU `now` mà vẫn cùng NGÀY VN với nó. Luật 26 đếm tin «phòng trống» theo NGÀY VN, nên "quét lại
+ * trong ngày" phải thật sự trong ngày: `now + 5 phút` lúc 23:57 VN đã sang ngày sau và tin báo thứ hai là
+ * ĐÚNG luật — bài kiểm đỏ trong 5 phút cuối mỗi ngày (bom hẹn giờ, AGENTS mục 50). Bình thường vẫn là
+ * `now + ms`; sát nửa đêm thì lấy giữa `now` và cuối ngày VN.
+ */
+function sauMaCungNgayVn(now: Date, ms: number): Date {
+  const cuoiNgay = vnEndOfDay(vnDateKey(now)).getTime();
+  return new Date(Math.min(now.getTime() + ms, now.getTime() + Math.floor((cuoiNgay - now.getTime()) / 2)));
+}
 const POST_ORDER_REASON = `${LEGACY_POST_ORDER_REASON_PREFIX} — nhân viên xử lý (đổi địa chỉ / lịch giao / hỏi thêm)`;
 
 function testPhases() {
@@ -252,7 +264,11 @@ async function testDb() {
       assert.equal(sw.unowned.responders, 0, "tổ chức mới cấp: phòng phụ trách chưa có thành viên");
       assert.ok(sw.unowned.viewers >= 1 && sw.unowned.shared > 0, "phòng trống, chủ shop xem được hộp thư ⇒ hàng đợi chung");
       assert.equal(sw.noResponderAlerts, 1, "phòng trống + có việc STALE (p1 vỡ hạn > 24 giờ, chưa ai cầm) ⇒ một tin quản trị");
-      const again = await sweepHandoffOwnership(new Date(now.getTime() + 5 * MIN));
+      // Hàm mốc (thuần, mốc cố định chỉ đi vào hàm — không trộn với dữ liệu theo đồng hồ thật): sát nửa đêm VN vẫn cùng ngày.
+      const satNuaDem = new Date("2030-01-01T16:58:00.000Z"); // 23:58 giờ VN
+      assert.ok(sauMaCungNgayVn(satNuaDem, 5 * MIN) > satNuaDem && vnDateKey(sauMaCungNgayVn(satNuaDem, 5 * MIN)) === vnDateKey(satNuaDem), "23:58 VN + «5 phút» vẫn trong ngày VN");
+      assert.equal(sauMaCungNgayVn(new Date("2030-01-01T03:00:00.000Z"), 5 * MIN).getTime(), new Date("2030-01-01T03:05:00.000Z").getTime(), "giữa ngày ⇒ đúng +5 phút như cũ");
+      const again = await sweepHandoffOwnership(sauMaCungNgayVn(now, 5 * MIN));
       assert.equal(again.noResponderAlerts, 0, "quét lại trong ngày ⇒ không báo thêm (luật 26)");
       const n = await db.select({ k: schema.notifications.dedupeKey, title: schema.notifications.title }).from(schema.notifications).where(like(schema.notifications.dedupeKey, "sales-chat:handoff-no-responder:%"));
       assert.equal(n.length, 1);
