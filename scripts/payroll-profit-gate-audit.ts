@@ -171,6 +171,11 @@ async function main() {
     console.log(`     nhóm chi phí: ${(Object.keys(COST_CLASS_LABEL) as CostClass[]).map((c) => `${COST_CLASS_LABEL[c]} ${tien(rc.classes[c])}`).join(" · ")}`);
     console.log(`     mã: ${rc.codes.total} có số · ${rc.codes.withCustomId} có mã hàng · ${rc.codes.profitComplete} đủ dữ liệu LN · ${rc.codes.assigned} đã phân công`);
     for (const i of rc.issues) console.log(`     ✗ ${i.label}${i.count !== null ? ` · ${i.count} mục` : ""}${i.amount !== null ? ` · ${tien(i.amount)}` : ""}`);
+    // Tác động quyết định 20/10/2026 (phí chiều hoàn vào cơ sở lương): bỏ khoản ấy thì lợi nhuận tăng ĐÚNG
+    // `returnLeg.amount` (khoá bằng tests/payroll-recon-center.test.ts), nên "trước" = "sau" + khoản ấy.
+    const rl = t.returnLeg;
+    console.log(`   PHÍ CHIỀU HOÀN ${m}: ${tien(rl.amount)} = gắn mã ${tien(rl.toCodes)} + chi phí chung ${tien(rl.shared)} · LN tính lương TRƯỚC ${tien(r.totalProfit + rl.amount)} → SAU ${tien(r.totalProfit)}`);
+    tomTat(`${m}: phí chiều hoàn ${tien(rl.amount)} (gắn mã ${tien(rl.toCodes)} · chung ${tien(rl.shared)}) · LN tính lương trước ${tien(r.totalProfit + rl.amount)} → sau ${tien(r.totalProfit)}`);
     tomTat(`${m}: đối soát ${rc.status} (${rc.issues.length} khoản chưa) · DT có chứng từ ${pt(rc.coverage.revenueWithMoneyPct)} · đơn có kết quả ${pt(rc.coverage.revenueSettledPct)} · chi phí khớp ${pt(rc.coverage.costReconciledPct)} · mã đủ dữ liệu ${rc.codes.profitComplete}/${rc.codes.total} · đã phân công ${rc.codes.assigned}/${rc.codes.total} · chưa rõ nguồn ${tien(rc.classes.UNKNOWN_SOURCE)} · chưa vào cơ sở ${tien(rc.classes.NOT_IN_BASIS)}`);
     // ─── V2 Trung tâm: tách COD của tháng ───
     const cod = await codSplit(m);
