@@ -1,0 +1,8 @@
+{
+  "pr": 929,
+  "sha": "bff5ad5bc2774d9fdffd71778687bcac728db704",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-20T21:19:49.211Z",
+  "note": "review lead: khối script: | của ops-vps.yml 124.750 ⇒ 85.411 B (trần 125.000 giữ). 60 cụm chú thích ≥4 dòng chuyển nguyên văn sang docs/ops-vps-script-notes.md «Đợt 2», chỗ cũ một dòng trỏ; tiêu đề «# ═══» giữ (ops-concurrency cắt theo nó). Lead kiểm độc lập: diff -U0 ops-vps.yml không có dòng không-chú-thích nào đổi. Worker: declare -f trước/sau trùng từng byte. Nghiệm thu sau gộp: chạy một ops n"
+}
