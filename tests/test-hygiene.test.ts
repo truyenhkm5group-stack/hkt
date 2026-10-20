@@ -286,7 +286,7 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
   "tests/agent-dispatch.test.ts":
     "Đặt ERP_GITHUB_DISPATCH_TOKEN / ERP_GITHUB_REPO để dựng ba tình huống (chưa khai khoá · đã khai · khoá thiếu quyền), rồi trả lại nguyên trạng trong finally. Đó là ĐẦU VÀO của cổng cấu hình đang đo, không phải điều kiện của kết luận.",
   "tests/setup-env.ts":
-    "Tệp dựng môi trường của bộ kiểm thử: nó GHI DATABASE_URL trỏ vào CSDL dùng-một-lần của chính tiến trình này. Đó là việc của nó.",
+    "Tệp dựng môi trường của bộ kiểm thử: nó GHI DATABASE_URL trỏ vào CSDL dùng-một-lần của chính tiến trình này, và đọc TEST_GIU_CSDL (giữ thư mục CSDL lại để soi lỗi) — chỉ quyết có XOÁ thư mục tạm hay không, không khẳng định nào rẽ nhánh theo nó. process.kill(pid, 0) chỉ hỏi PID còn sống để không xoá CSDL của lượt song song khác. Đó là việc của nó.",
 
   /* ───── ĐẶT biến để DỰNG TÌNH HUỐNG, rồi trả lại nguyên trạng — đầu vào, không phải điều kiện của kết luận ───── */
   "tests/company-os-registry-catchup.test.ts":

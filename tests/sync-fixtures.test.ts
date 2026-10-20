@@ -452,6 +452,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ensureMigrated } from "@/db/migrate";
 import { taoCongShard } from "./test-shards";
+import { testPgliteTestDirs } from "./pglite-test-dirs.test";
 import { testTestShardsPlan } from "./test-shards-plan.test";
 import { recordInspection } from "@/lib/returns/inspection";
 import { markReturnReceived } from "@/lib/returns/warehouse";
@@ -3407,6 +3408,7 @@ async function main() {
     testErrorBoundary();
   }
   if (khoi.chay("K24")) {
+    testPgliteTestDirs();
     // ERP a11y + bố cục hẹp (Commercial Sweep PR G): h1 màn không tìm thấy, công tắc / ô số có tên, /payroll không tràn 390 px.
     testErpA11y();
     // Cổng nối thẳng Facebook (review #706): khách thấy «sắp mở» khi cờ meta.direct-connect.open đóng; người vận hành thấy nút thật.
