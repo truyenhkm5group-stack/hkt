@@ -264,6 +264,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "Kiểm chính githubConfig(), thứ SINH RA từ biến môi trường — nên đọc biến ở đây là đọc đầu vào của cái đang đo. Kỳ vọng dựng từ prDetailBudget(githubConfig().auth), KHÔNG gõ lại con số.",
   "tests/tech-pr-projection.test.ts":
     "Cùng lý do: trần request phụ thuộc chế độ xác thực, và bài dựng kỳ vọng từ chính hàm khai trần đó.",
+  "tests/test-shards-plan.test.ts":
+    "Chép process.env cho tiến trình node CON chạy kịch bản gom bằng chứng shard của gates.yml, ĐÈ SHARDS_DIR / SHARD_COUNT / SHA_TINH / TREE_TINH bằng giá trị BỊA trong thư mục tạm — đó là ĐẦU VÀO của kịch bản đang đo; cổng chạy khối nhận `env` làm THAM SỐ (bài truyền đối tượng tự dựng), nên không khẳng định nào rẽ nhánh theo máy có TEST_SHARD hay không.",
   "tests/ops-concurrency.test.ts":
     "Truyền biến xuống tiến trình bash con để dựng tình huống khoá — đầu vào của kịch bản đang đo; và dùng process.platform để nói CHƯA ĐO ĐƯỢC, không để bỏ qua một khẳng định.",
   "tests/test-hygiene.test.ts": "Chính bài này.",
