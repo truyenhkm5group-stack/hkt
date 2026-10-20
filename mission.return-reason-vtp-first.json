@@ -3,7 +3,7 @@
   "mission_id": "return-reason-vtp-first",
   "title": "Lý do hoàn: sự kiện VTP thắng sự kiện Pancake chuyển tiếp",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-return-reason",
@@ -20,9 +20,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-20T13:03:31.330Z",
-  "updated_at": "2026-10-20T14:29:15.547Z",
+  "updated_at": "2026-10-20T15:14:27.033Z",
   "last_heartbeat": "2026-10-20T14:27:33.334Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#924 → 0132ed90be91210e80795178995f0ad846aed959"
+  },
   "handoff": {
     "branch": "claude/return-reason-vtp-first",
     "sha": "5fdffe07e0fcc9f1c12ce5d97f297da1e4350eff",
