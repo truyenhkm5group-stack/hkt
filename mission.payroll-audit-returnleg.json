@@ -3,7 +3,7 @@
   "mission_id": "payroll-audit-returnleg",
   "title": "Kiểm toán lương in tác động phí chiều hoàn từng tháng (chỉ-script)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-audit-rl",
@@ -20,7 +20,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-20T15:00:00.738Z",
-  "updated_at": "2026-10-20T15:00:00.738Z",
-  "last_heartbeat": "2026-10-20T15:00:00.738Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-20T15:00:32.928Z",
+  "last_heartbeat": "2026-10-20T15:00:32.928Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/payroll-audit-returnleg",
+    "sha": "bc371bd776f6c8aff86d4cc5ffaa551ec1a98a45",
+    "at": "2026-10-20T15:00:32.928Z",
+    "actor": "DESKTOP-56TH98Y:wt-audit-rl",
+    "title": "Kiểm toán lương in tác động phí chiều hoàn từng tháng (chỉ-script)",
+    "summary": "Chỉ-script, 1 tệp (+5 dòng): scripts/payroll-profit-gate-audit.ts in mỗi tháng phí chiều hoàn = gắn mã + chi phí chung, và LN tính lương TRƯỚC (= sau + phí chiều hoàn, khoá bằng bài 42K của payroll-recon-center.test) → SAU. Không cần deploy (lib đã có trong image 45014719b). Gộp xong thì chạy ops payroll-profit-gate-audit --from-month 2026-06.",
+    "tests": [
+      "npm run typecheck",
+      "eslint scripts/payroll-profit-gate-audit.ts",
+      "ops-log-leak testKenhTomTat + testDanhSachMaHoa (689 dòng tóm tắt không trường người)",
+      "ops-script-size 123.826/125.000 B (không chạm ops-vps.yml)"
+    ]
+  }
 }
