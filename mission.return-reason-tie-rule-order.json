@@ -3,7 +3,7 @@
   "mission_id": "return-reason-tie-rule-order",
   "title": "Lý do hoàn: cùng hạng cùng mốc ⇒ luật chữ đứng trước thắng",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-return-reason",
@@ -18,7 +18,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-20T21:03:22.718Z",
-  "updated_at": "2026-10-20T21:03:22.718Z",
-  "last_heartbeat": "2026-10-20T21:03:22.718Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-20T23:17:06.235Z",
+  "last_heartbeat": "2026-10-20T23:17:06.235Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/return-reason-tie-rule-order",
+    "sha": "ea584f9ce4f0ce3d5601ef1fb7d91bbf5a380cba",
+    "at": "2026-10-20T23:17:06.235Z",
+    "actor": "DESKTOP-56TH98Y:wt-return-reason",
+    "title": "Lý do hoàn: cùng hạng cùng mốc ⇒ luật chữ đứng trước thắng",
+    "summary": "ruleOrderOf theo thứ tự classifyRaw (HUMAN_TEXT_RULES rồi RETURN_REASON_TEXT_RULES); evidenceBeats: hạng → mốc → thứ tự luật → khoá (chốt cuối)",
+    "tests": [
+      "typecheck: sạch",
+      "lint: sạch",
+      "npm test (cây sạch ea584f9c): TẤT CẢ KIỂM THỬ ĐẠT",
+      "build: OK",
+      "đột biến bỏ bước luật: đỏ"
+    ]
+  }
 }
