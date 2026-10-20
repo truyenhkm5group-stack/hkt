@@ -95,7 +95,17 @@ function testCongSongSong() {
   }
   assert.equal(g.split("run: npm test").length - 1, 2, "vẫn đúng HAI lượt bộ kiểm thử (ẩn danh + token giả) — song song, không bỏ lượt nào");
   for (const lenh of ["npx tsc --noEmit", "npx eslint --max-warnings=0", "npm run build", "tests/repo-integrity.test.ts"]) assert.ok(g.includes(lenh), `cổng phải còn ${lenh}`);
-  assert.ok(!/\n\s*strategy:\s*\n\s*matrix:/.test(g), "không matrix — tên check bắt buộc sẽ mất");
+  // Matrix CHỈ ở hai nhánh kiểm thử (chia shard, 20/10/2026) — job gom KHÔNG BAO GIỜ matrix, vì tên check
+  // bắt buộc `gates / gates` sẽ thành `gates / gates (x)` và biến mất. Chi tiết shard: tests/test-shards-plan.test.ts.
+  const jobGom = g.slice(g.indexOf("\n  gates:\n"), g.indexOf("\n  tinh:\n"));
+  assert.ok(!/matrix:/.test(jobGom), "job gom không matrix — tên check bắt buộc sẽ mất");
+  assert.equal((g.match(/\n\s*strategy:\s*\n\s*fail-fast: false\n\s*matrix:/g) ?? []).length, 2, "matrix đúng ở HAI nhánh kiểm thử (ẩn danh + token giả), không ở đâu khác");
+  for (const job of ["tinh", "dung_ban"]) {
+    const i = g.indexOf(`\n  ${job}:\n`);
+    const rest = g.slice(i + 1);
+    const next = rest.slice(1).search(/\n {2}[a-z_]+:\n/);
+    assert.ok(!/matrix:/.test(next > 0 ? rest.slice(0, next + 1) : rest), `${job} không matrix`);
+  }
 
   // Chạy THẬT kịch bản gom bằng bash với từng tổ hợp kết quả: không một tổ hợp nào ngoài "bốn xanh,
   // bốn SHA trùng" được thoát 0.

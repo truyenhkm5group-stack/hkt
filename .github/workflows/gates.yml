@@ -20,10 +20,20 @@
 # SAU: bốn job chạy CÙNG LÚC trên bốn máy riêng, đường găng = một lượt kiểm thử (~15′ + cài đặt).
 # Không bài kiểm nào bị bỏ, không bước nào bị nới: cùng bốn lệnh, cùng hai chế độ xác thực.
 #
-# VÌ SAO KHÔNG `matrix`: ruleset của `main` bắt buộc ĐÚNG một check tên `gates / gates`. Matrix biến
-# tên thành `gates / gates (x)` và check bắt buộc không bao giờ xuất hiện. Ở đây tên `gates` thuộc về
-# job GOM đứng đầu tệp; bốn job làm việc mang tên riêng (`gates / tinh` …) và KHÔNG bắt buộc từng cái
-# — job gom bắt buộc thay cho cả bốn.
+# MATRIX CHỈ Ở HAI NHÁNH KIỂM THỬ, KHÔNG BAO GIỜ Ở JOB GOM: ruleset của `main` bắt buộc ĐÚNG một check
+# tên `gates / gates`. Matrix trên job gom biến tên thành `gates / gates (x)` và check bắt buộc không bao
+# giờ xuất hiện. Tên `gates` thuộc về job GOM đứng đầu tệp; các job làm việc mang tên riêng và KHÔNG bắt
+# buộc từng cái — job gom bắt buộc thay cho cả bốn nhánh (kể cả mọi shard của chúng).
+#
+# ═══════════ BỘ KIỂM THỬ CHIA SHARD (20/10/2026) ═══════════
+#
+# Một lượt `npm test` đã chạm 43–45′ và hai lượt cổng hôm nay bị HUỶ ở trần 45′ khi đang chạy (#919,
+# #923). Không nâng trần, không bỏ bài: mỗi nhánh kiểm thử chạy `matrix.shard` 1..4, mỗi shard một phần
+# các KHỐI của `tests/sync-fixtures.test.ts` (sổ khối + bảng phân ở `tests/test-shards.ts`, phần dựng
+# fixture chung chạy ở mọi shard). Mỗi shard tải lên một tệp BẰNG CHỨNG (khối đã chạy · SHA · cây), và job
+# gom đòi: đủ 4 shard ở MỖI chế độ, cùng SHA + cùng cây với nhánh tĩnh, hợp các khối đã chạy = sổ khối,
+# không khối nào chạy hai lần. `npm test` không tham số vẫn chạy ĐỦ (máy dev, deploy cục bộ).
+# `fail-fast: false`: một shard đỏ không huỷ shard khác — huỷ là mất thông tin ba shard kia có xanh không.
 #
 # VÌ SAO JOB GOM LUÔN CHẠY (`if: always()`): job phụ thuộc bị BỎ QUA khi một job cần nó đỏ, và GitHub
 # coi một check bắt buộc ở trạng thái "skipped" là ĐẠT. Thiếu `always()` thì đúng lúc một nhánh đỏ,
@@ -104,6 +114,64 @@ jobs:
           # không đổi cây. Tệp chỉ GHI NHẬN, không đổi kết quả của nhánh nào.
           mkdir -p "$RUNNER_TEMP/tested-tree"
           printf 'tree=%s\ncommit=%s\nrun_id=%s\nrun_attempt=%s\n' "$TREE_TINH" "$SHA_TINH" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/tested-tree/tested-tree.txt"
+      # MỌI lần chạy (attempt) của lượt này, không riêng lần hiện tại: «Re-run failed jobs» chỉ chạy lại shard
+      # đỏ, nên bằng chứng của các shard xanh nằm ở attempt TRƯỚC. Artifact v4 thuộc về LƯỢT chạy (mọi
+      # attempt); tên tệp mang attempt nên `merge-multiple` không đè nhau, và kịch bản dưới chọn attempt CAO
+      # NHẤT cho mỗi (chế độ, shard). Shard đỏ không tải lên gì ⇒ chỉ còn attempt đỏ là thiếu ⇒ ĐỎ.
+      - name: Tải bằng chứng của mọi shard kiểm thử (mọi attempt của lượt này)
+        uses: actions/download-artifact@v4
+        with:
+          pattern: shard-*
+          path: ${{ runner.temp }}/shards
+          merge-multiple: true
+      - name: Mỗi khối kiểm thử chạy ĐÚNG MỘT lần ở mỗi chế độ — đủ shard, cùng SHA, cùng cây
+        id: shard
+        env:
+          SHARDS_DIR: ${{ runner.temp }}/shards
+          SHARD_COUNT: "4"
+          SHA_TINH: ${{ needs.tinh.outputs.sha }}
+          TREE_TINH: ${{ needs.tinh.outputs.tree }}
+        # Node chứ không jq: cùng một kịch bản chạy THẬT trong `tests/test-shards-plan.test.ts` trên máy dev.
+        run: |
+          node - <<'KIEM_SHARD'
+          const fs = require("fs");
+          const path = require("path");
+          const dir = process.env.SHARDS_DIR;
+          const n = Number(process.env.SHARD_COUNT);
+          const hong = (m) => { console.log(`::error::${m}`); process.exit(1); };
+          const tep = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => /^shard-.+\.json$/.test(f)) : [];
+          for (const mode of ["an-danh", "token"]) {
+            // Mỗi shard: bằng chứng của attempt CAO NHẤT (lần chạy lại gần nhất mà shard ấy xanh).
+            const moiNhat = new Map();
+            for (const f of tep.filter((x) => x.startsWith(`shard-${mode}-`))) {
+              const d = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+              if (!Number.isInteger(d.attempt) || d.attempt < 1) hong(`${mode}: bằng chứng ${f} không khai attempt`);
+              const cu = moiNhat.get(d.shard);
+              if (cu && cu.attempt === d.attempt) hong(`${mode}: shard ${d.shard} có hai bằng chứng cùng attempt ${d.attempt}`);
+              if (!cu || d.attempt > cu.attempt) moiNhat.set(d.shard, d);
+            }
+            const ds = [...moiNhat.values()];
+            if (ds.length !== n) hong(`${mode}: có ${ds.length}/${n} bằng chứng shard — thiếu shard là thiếu khối kiểm thử`);
+            const can = Array.from({ length: n }, (_, i) => `${i + 1}/${n}`);
+            const co = ds.map((d) => d.shard).sort();
+            if (JSON.stringify(co) !== JSON.stringify(can)) hong(`${mode}: các shard ${JSON.stringify(co)} không phải đúng ${JSON.stringify(can)}`);
+            const all = JSON.stringify(ds[0].all);
+            for (const d of ds) {
+              if (d.mode !== mode) hong(`${mode}: bằng chứng shard ${d.shard} khai chế độ ${d.mode}`);
+              if (JSON.stringify(d.all) !== all) hong(`${mode}: shard ${d.shard} đọc một sổ khối khác`);
+              if (!d.sha || d.sha !== process.env.SHA_TINH) hong(`${mode}: shard ${d.shard} đứng trên SHA ${d.sha}, nhánh tĩnh ${process.env.SHA_TINH}`);
+              if (!d.tree || d.tree !== process.env.TREE_TINH) hong(`${mode}: shard ${d.shard} đứng trên một CÂY mã khác`);
+            }
+            const ran = ds.flatMap((d) => d.ran);
+            const lap = [...new Set(ran.filter((x, i) => ran.indexOf(x) !== i))];
+            if (lap.length) hong(`${mode}: khối chạy HAI lần: ${lap.join(", ")}`);
+            const roi = ds[0].all.filter((x) => !ran.includes(x));
+            if (roi.length) hong(`${mode}: khối KHÔNG shard nào chạy: ${roi.join(", ")}`);
+            const la = ran.filter((x) => !ds[0].all.includes(x));
+            if (la.length) hong(`${mode}: khối ngoài sổ: ${la.join(", ")}`);
+            console.log(`✓ ${mode}: ${ran.length}/${ds[0].all.length} khối, mỗi khối đúng một lần, ${n} shard (attempt ${ds.map((d) => `${d.shard}@${d.attempt}`).join(" ")}) trên ${process.env.SHA_TINH}`);
+          }
+          KIEM_SHARD
       - name: Lưu cây mã đã qua cổng (bằng chứng cho deploy)
         uses: actions/upload-artifact@v4
         with:
@@ -156,11 +224,15 @@ jobs:
       - name: Kiểm tra chuẩn mã nguồn
         run: npx eslint --max-warnings=0
 
-  # ═══ NHÁNH 2 · BỘ KIỂM THỬ, CHẾ ĐỘ ẨN DANH (~15′ — đường găng) ═══
+  # ═══ NHÁNH 2 · BỘ KIỂM THỬ, CHẾ ĐỘ ẨN DANH — 4 SHARD SONG SONG (~11′ mỗi shard, đường găng) ═══
   kiem_thu:
-    name: Kiểm thử (ẩn danh)
+    name: Kiểm thử (ẩn danh) · shard ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
-    # 13/10/2026: bộ kiểm thử đã chạm 32–35 phút/job — một lượt trên chính main và #827 bị huỷ ở 35 phút (cancelled, không đỏ thật). 45 phút để còn chỗ; chia bộ kiểm thử là việc sau.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    # Trần 45′ GIỮ NGUYÊN (không nâng). Mỗi shard đo ~11′ trên máy dev — trần còn để bắt treo, không để chứa.
     timeout-minutes: 45
     outputs:
       sha: ${{ steps.ghim.outputs.sha }}
@@ -184,9 +256,29 @@ jobs:
       # GUARDRAIL NGHIỆP VỤ: contract test khoá luật "đơn giao thành công / đơn hoàn"
       # (docs/business-rules/ORDER_OUTCOME.md). Đây là điều kiện CHẶN, không phải cảnh báo.
       - name: Kiểm thử (gồm contract test luật nghiệp vụ)
+        env:
+          TEST_SHARD: ${{ matrix.shard }}/4
+          TEST_SHARD_MANIFEST: ${{ runner.temp }}/shard/manifest.json
         run: npm test
+      - name: Ghi bằng chứng shard (khối đã chạy · SHA · cây)
+        env:
+          IN: ${{ runner.temp }}/shard/manifest.json
+          OUT: ${{ runner.temp }}/bang-chung/shard-an-danh-${{ matrix.shard }}-a${{ github.run_attempt }}.json
+          MODE: an-danh
+          ATTEMPT: ${{ github.run_attempt }}
+          SHA: ${{ steps.ghim.outputs.sha }}
+          TREE: ${{ steps.ghim.outputs.tree }}
+        run: |
+          mkdir -p "$(dirname "$OUT")"
+          node -e 'const fs = require("fs"); const m = JSON.parse(fs.readFileSync(process.env.IN, "utf8")); fs.writeFileSync(process.env.OUT, JSON.stringify({ ...m, mode: process.env.MODE, sha: process.env.SHA, tree: process.env.TREE, attempt: Number(process.env.ATTEMPT) }));'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shard-an-danh-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bang-chung/shard-an-danh-${{ matrix.shard }}-a${{ github.run_attempt }}.json
+          retention-days: 7
+          if-no-files-found: error
 
-  # ═══ NHÁNH 3 · BỘ KIỂM THỬ, NHÁNH CÓ TOKEN (~15′ — chạy CÙNG LÚC với nhánh 2) ═══
+  # ═══ NHÁNH 3 · BỘ KIỂM THỬ, NHÁNH CÓ TOKEN — 4 SHARD (chạy CÙNG LÚC với nhánh 2) ═══
   #
   # ─── VÌ SAO CẦN LƯỢT NÀY ───
   #
@@ -205,9 +297,13 @@ jobs:
   # thứ duy nhất cần là một chuỗi KHÁC RỖNG để `auth` rẽ sang nhánh TOKEN. Đưa token thật vào
   # đây là đổi một lớp kiểm lấy một lượt rò rỉ.
   kiem_thu_token:
-    name: Kiểm thử (có token giả)
+    name: Kiểm thử (có token giả) · shard ${{ matrix.shard }}/4
     runs-on: ubuntu-latest
-    # 13/10/2026: bộ kiểm thử đã chạm 32–35 phút/job — một lượt trên chính main và #827 bị huỷ ở 35 phút (cancelled, không đỏ thật). 45 phút để còn chỗ; chia bộ kiểm thử là việc sau.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    # Trần 45′ GIỮ NGUYÊN (không nâng). Mỗi shard đo ~11′ trên máy dev — trần còn để bắt treo, không để chứa.
     timeout-minutes: 45
     outputs:
       sha: ${{ steps.ghim.outputs.sha }}
@@ -231,7 +327,26 @@ jobs:
       - name: Kiểm thử lần hai — nhánh CÓ TOKEN (token GIẢ, kho public không cần token thật)
         env:
           GITHUB_TOKEN: "ghp_TOKEN_GIA_KHONG_CO_THAT_chi_de_re_nhanh_auth_000"
+          TEST_SHARD: ${{ matrix.shard }}/4
+          TEST_SHARD_MANIFEST: ${{ runner.temp }}/shard/manifest.json
         run: npm test
+      - name: Ghi bằng chứng shard (khối đã chạy · SHA · cây)
+        env:
+          IN: ${{ runner.temp }}/shard/manifest.json
+          OUT: ${{ runner.temp }}/bang-chung/shard-token-${{ matrix.shard }}-a${{ github.run_attempt }}.json
+          MODE: token
+          ATTEMPT: ${{ github.run_attempt }}
+          SHA: ${{ steps.ghim.outputs.sha }}
+          TREE: ${{ steps.ghim.outputs.tree }}
+        run: |
+          mkdir -p "$(dirname "$OUT")"
+          node -e 'const fs = require("fs"); const m = JSON.parse(fs.readFileSync(process.env.IN, "utf8")); fs.writeFileSync(process.env.OUT, JSON.stringify({ ...m, mode: process.env.MODE, sha: process.env.SHA, tree: process.env.TREE, attempt: Number(process.env.ATTEMPT) }));'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shard-token-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bang-chung/shard-token-${{ matrix.shard }}-a${{ github.run_attempt }}.json
+          retention-days: 7
+          if-no-files-found: error
 
   # ═══ NHÁNH 4 · BẢN DỰNG PRODUCTION (~4′) ═══
   # Bắt lỗi ranh giới client/server mà `tsc` không thấy.

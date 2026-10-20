@@ -451,6 +451,8 @@ import path from "node:path";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ensureMigrated } from "@/db/migrate";
+import { taoCongShard } from "./test-shards";
+import { testTestShardsPlan } from "./test-shards-plan.test";
 import { recordInspection } from "@/lib/returns/inspection";
 import { markReturnReceived } from "@/lib/returns/warehouse";
 import { parseJsonSafeInts } from "@/lib/integrations/http";
@@ -2059,1345 +2061,1399 @@ async function main() {
       assert.equal(differences.length, 0, `Yêu cầu P0 chưa được implementation đáp ứng:\n${differences.join("\n")}`);
     }
   }
+  // Từ đây là các KHỐI chia shard (`tests/test-shards.ts`): `TEST_SHARD=i/N` chỉ chạy khối của shard i; không đặt ⇒ chạy đủ.
+  const khoi = taoCongShard(process.env);
+  if (khoi.chay("K01")) {
+    testTestShardsPlan();
 
-  await testOrderOutcomeContract(db);
-  await testOrderValueFilter(db);
-  await testCanonicalTruth(db);
-  await testDataQuality(db);
-  await testBackfill(db);
-  await testConsistency(db);
-  await testMetricsContract(db);
-  await testMetricShapeConsistency(db);
-  await testBusinessInvariants(db);
-  await testFinancialTruth(db);
-  await testPrepaidCash(db);
-  await testProductIntelligence(db);
-  await testProductVerdict(db);
-  await testActionQueue(db);
-  await testCsCaseGrouping(db);
-  await testCsWorkqueue(db);
-  await testSalesFunnel(db);
-  await testStaffPerformance(db);
-  /*
-    HAI KHỐI NÀY CHÈN RỒI DỌN FIXTURE CỦA CHÍNH CHÚNG.
+    await testOrderOutcomeContract(db);
+    await testOrderValueFilter(db);
+    await testCanonicalTruth(db);
+    await testDataQuality(db);
+    await testBackfill(db);
+    await testConsistency(db);
+    await testMetricsContract(db);
+    await testMetricShapeConsistency(db);
+    await testBusinessInvariants(db);
+    await testFinancialTruth(db);
+    await testPrepaidCash(db);
+    await testProductIntelligence(db);
+    await testProductVerdict(db);
+    await testActionQueue(db);
+    await testCsCaseGrouping(db);
+    await testCsWorkqueue(db);
+    await testSalesFunnel(db);
+    await testStaffPerformance(db);
+    /*
+      HAI KHỐI NÀY CHÈN RỒI DỌN FIXTURE CỦA CHÍNH CHÚNG.
 
-    Đặt sau phễu bán hàng để so chéo được hai con số (đơn được tạo / đã xác nhận phải khớp). Cả hai
-    dọn sạch trong `finally`, nên thứ tự với các khối sau không quan trọng — nhưng nếu có khối nào
-    đếm tổng đơn thì vẫn nên giữ hai khối này ở đây.
-  */
-  await testConversionFunnel(db);
-  testOrderHourAuditPure();
-  await testOrderHourAuditDb(db);
-  testCancelAnalysisPure();
-  await testCancelAnalysisDb(db);
-  // Hồ sơ khách: giao thành công / hoàn CHỈ theo ORDER_OUTCOME (bộ đếm Pancake ở ô tham khảo riêng); tự gieo và tự dọn.
-  testCustomerOutcomeTruthPure();
-  await testCustomerOutcomeTruthDb(db);
-  await testPreshipRisk(db);
-  // Hình dạng câu báo cáo: biểu thức regex đắt tính MỘT lần (trạng thái con ĐVVC · đuôi SĐT của backtest) — đo production 28/09/2026.
-  await testReportQueryShape(db);
-  await testAdsRoas(db);
-  await testMarketingDaily();
-  await testMarketerDailyNominal();
-  await testProfitTarget();
-  await testProfitShipFee();
-  await testAdsDecision(db);
-  testAdsIntraday();
-  await testMarketingDecisionLedger();
-  testCompanyOsEconomicsPure();
-  await testCompanyOsEconomicsDb(db);
-  testAdsWrite();
-  testCreativeLoop();
-  testCreativeDesignPure();
-  await testCreativeDesignDb(db);
-  await testCreativeGenerate(db);
-  await testCreativeEvaluate(db);
-  // Tab ④ Đang chạy (30/09/2026): tên đồng bộ Ads Manager · bộ lọc kỳ · tìm · số đo trong kỳ, phán quyết toàn đời.
-  testCreativeLiveBoardPure();
-  await testCreativeLiveBoardDb(db);
-  // Company OS · Agent B — đơn creative qua ORDER_AD_ID, chi nhóm/mẩu theo hạt mẩu, tóm tắt theo mẫu, lọc thư viện.
-  await testCompanyOsCreativeAds(db);
-  testCreativeWrite();
-  await testCreativeWriteDb(db);
-  testCreativeScalePure();
-  await testCreativeScaleDb(db);
-  testCreativeMoqPure();
-  await testCreativeMoqDb(db);
-  // Company OS · B2 — MOQ thiết kế + /ads/daily nhóm/mẩu đếm đơn QC bằng ORDER_AD_ID / ORDER_ADSET_ID (một cách đếm với /ads).
-  await testCompanyOsAdOrderUnify(db);
-  testAdsKillSwitchPure();
-  await testAdsKillSwitchDb(db);
-  await testCreativeLoopTick(db);
-  await testCreativeExtendedWindow(db);
-  await testCreativeEmptyBatch(db);
-  testCreativeManualPure();
-  await testCreativeManualDb(db);
-  testCreativeManualGenPure();
-  await testCreativeManualGenDb(db);
-  // Xếp fanpage theo camp (chủ shop 28/09/2026): mã win ⇒ page đã ra đơn mã ấy; TEST ⇒ page chưa ra đơn đã chạy mẫu tương tự.
-  testFanpageRankPure();
-  await testFanpageRankDb(db);
-  // Video Scale cho mã win (docs/video-scale.md): hàng đợi, trần tiền, AMBIGUOUS, hậu kỳ + QC thật khi máy có ffmpeg.
-  testVideoScalePure();
-  await testVideoScaleDb(db);
-  testVideoScaleReelPure();
-  await testVideoScaleReelDb(db);
-  testVideoScaleAdsPure();
-  await testVideoScaleAdsDb(db);
-  testVideoScaleOptimizePure();
-  await testVideoScaleOptimizeDb(db);
-  testVideoScaleOmniPure();
-  await testVideoScaleOmniFlow();
-  await testVideoScaleOmniDb(db);
-  testVideoScaleProgressPure();
-  await testVideoScaleProgressDb(db);
-  testVideoScaleEditPure();
-  await testVideoScaleEditDb(db);
-  testVideoScaleEditorPure();
-  await testVideoScaleEditorDb(db);
-  testVideoScaleUxPure();
-  await testVideoScaleUxDb(db);
-  testVideoScaleShowcasePure();
-  await testVideoScaleShowcaseDb(db);
-  testIdeaPresets();
-  testCreativeStudioPure();
-  await testCreativeStudioDb(db);
-  testVideoScaleMusicPure();
-  await testVideoScaleMusicDb(db);
-  testCreativeManualDesignPure();
-  await testCreativeManualDesignDb(db);
-  testCreativeImportPure();
-  await testCreativeImportDb(db);
-  testCreativeCopyPure();
-  await testCreativeCopyDb(db);
-  // Thư viện Media cho shop thực phẩm + khoá AI của tổ chức (04/10/2026) — hai tổ chức thử tự cấp, tự dọn.
-  testCreativeFoodIndustryPure();
-  await testCreativeFoodIndustryOrg();
-  await testCreativeImageBatch(db);
-  testCreativeScreens();
-  testCreativeScreens2();
-  await testAdsBrakeByDecision(db);
-  testAdsLevelProbe();
-  testAdsGrain();
-  await testAdsAttribution(db);
-  await testAdsAnomaly(db);
-  await testAdsIdentity(db);
-  await testAdsAttributionLink(db);
-  await testAuditTrail(db);
-  testFormatNullSafety();
-  testColumnResize();
-  testNominalTableDisplay();
-  testHandoffStageSet();
-  testHandoffPureFunction();
-  await testHandoffSqlMatchesTypescript(db);
-  testMetricRegistry();
-  testPersonTargetGuard();
-  testProductTargetGuard();
-  testTargetWindowAndPeriod();
-  testRangeAndBands();
-  testScorecardEvaluator();
-  testScorecardContract();
-  testDataQualityIssues();
-  await testReturnReceiveSelector(db);
-  testSearchTermParsing();
-  await testShipmentSearch(db);
-  await testCsOrderReconcile(db);
-  await testCsSemantic(db);
-  await testCsSemanticCache(db);
-  testCsNextAction();
-  testCsUiContrast();
-  testOutreachErrorClassify();
-  await testOutreachIdempotentSend(db);
-  testBroadcastVerdictPure();
-  await testBroadcastFlowDb(db);
-  testNurtureWindowPure();
-  await testNurtureWindowSendDb(db);
-  testOutreachEligibility();
-  await testOutreachOutcomeFacet(db);
-  await testCsCustomerQueue(db);
-  testCareUiContrast();
-  testCareFilters();
-  testCareRounds();
-  testCareDateFilters();
-  testPhraseFilter();
-  testSizeMatrix();
-  await testProductNotes(db);
-  testSmokeTiming();
-  testUiConsistency();
-  testNavigationCoverage();
-  testDepartmentMap();
-  testLoadingUxContract();
-  testDrilldownContract();
-  testAlertConfig();
-  testMigrationJournal();
-  testSchedulerCoverage();
-  await testSchedulerClock();
-  testShipmentJoinGrain();
-  testFastPathWiring();
-  testBankMatch();
-  testActionWiring();
-
-  // ═══ RÕ NGHĨA CHỈ SỐ VẬN ĐƠN + BÁO CÁO LÝ DO HOÀN ═══
-  testReasonTaxonomy();
-  testMachineNeverInventsHumanReason();
-  testRescueRateNeverFakesZero();
-  testTimeBasisHasNoSilentFallback();
-  await testKpiCohortUsesHandoffDate(db);
-  await testProductRowCountsOrdersOnce(db);
-  await testNoHandoffEvidenceStaysOut(db);
-  await testReasonReportDefaultsToOutcomeDate();
-
-  // ═══ TẦNG QUYẾT ĐỊNH CỦA BÁO CÁO HOÀN (14/09/2026) ═══
-  testConditioningHierarchy();
-  testNoDoubleCountAcrossEvents();
-  testMarketerAttributionGoesByKey();
-  testProblemClassification();
-  testRiskBadgeReadsTargets();
-  testActionEngineGates();
-  await testReasonDenominatorsAndFilters(db);
-  testReasonGroupContract();
-  await testReasonRegroupAndThreeLevelDrilldown(db);
-  await testIntelligenceRuns(db);
-
-  // ═══ LỚP QUAN SÁT LÝ DO HOÀN (14/09/2026) ═══
-  testReasonSourceRegistry();
-  testClassifierNeverConcludesForCarrier();
-  testClassifierStepsAndCodes();
-  testQuickPickHasNoFreeText();
-  testObservationDedupeKeyIsShared();
-  await testObservationResolution(db);
-
-  // ═══ NHÓM LÝ DO THEO CHỨNG CỨ (20/10/2026) ═══
-  testEvidenceTaxonomyContract();
-  testEvidenceResolution();
-  testEvidenceOverrideTransition();
-  testEvidenceObservationShapes();
-  testEvidenceUsesOneAuthorityTable();
-  await testEvidenceOnDb(db);
-  await testVtpBeatsPancakeRelayOnDb(db);
-  await testReasonTextLatestParity(db);
-  testUseServerExports();
-  testClientBoundaryExports();
-  testVtpTrackingLink();
-  testSmokeCoverage();
-  testOperatingFunnel();
-  testLogisticsFreshness();
-  testShipmentStatusAgePure();
-  testOrderDuplicatePure();
-  testPreshipValidationPure();
-  testPromisedDeliveryPure();
-  await testMemoInflight();
-  await testCacheSemantics();
-  // Team Premium F3: khoá «một job một lượt» của runSyncJob giữ TRƯỚC lượt await đầu — hai lượt cùng nhịp chỉ chạy thân job một lần;
-  // chèn sync_runs ném thì khoá vẫn được nhả (không kẹt job tới khi khởi động lại).
-  {
-    const r = await testSyncRunnerConcurrentStart();
-    assert.deepEqual(r.failed, [], `sync-runner-concurrent-start: ${r.failed.join(" · ")}`);
+      Đặt sau phễu bán hàng để so chéo được hai con số (đơn được tạo / đã xác nhận phải khớp). Cả hai
+      dọn sạch trong `finally`, nên thứ tự với các khối sau không quan trọng — nhưng nếu có khối nào
+      đếm tổng đơn thì vẫn nên giữ hai khối này ở đây.
+    */
+    await testConversionFunnel(db);
+    testOrderHourAuditPure();
+    await testOrderHourAuditDb(db);
+    testCancelAnalysisPure();
+    await testCancelAnalysisDb(db);
+    // Hồ sơ khách: giao thành công / hoàn CHỈ theo ORDER_OUTCOME (bộ đếm Pancake ở ô tham khảo riêng); tự gieo và tự dọn.
+    testCustomerOutcomeTruthPure();
+    await testCustomerOutcomeTruthDb(db);
+    await testPreshipRisk(db);
+    // Hình dạng câu báo cáo: biểu thức regex đắt tính MỘT lần (trạng thái con ĐVVC · đuôi SĐT của backtest) — đo production 28/09/2026.
+    await testReportQueryShape(db);
+    await testAdsRoas(db);
+    await testMarketingDaily();
+    await testMarketerDailyNominal();
+    await testProfitTarget();
+    await testProfitShipFee();
+    await testAdsDecision(db);
+    testAdsIntraday();
+    await testMarketingDecisionLedger();
+    testCompanyOsEconomicsPure();
+    await testCompanyOsEconomicsDb(db);
+    testAdsWrite();
   }
-  await testRefreshButton();
-  testCommandCatalog();
-  testExperienceProfile();
-  testIndustryTerms();
-  testDetailCrumb();
-  testReportOverrideLatency();
-  testActionRefreshOnce();
-  testPurchaseValuation();
-  await testBankPipeline(db);
-  testFinanceOpsPure();
-  await testFinanceOpsQueries(db);
-  testAutomationLadderPure();
-  await testAutomationLadderQueries(db);
-  await testFbTokenScopes();
-  testPackingWavesPure();
-  await testPackingWavesQueries(db);
-  await testApproval(db);
-  // Company OS · Agent G — duyệt hai bước tiêu thụ được, approvals:decide, nguồn việc APPROVAL, audit, sync_runs.
-  await testCompanyOsControlPlane(db);
-  await testMultiAttemptMoney(db);
-  await testCashflow(db);
-  await testPurchasing(db);
-  testSuppliersPure();
-  await testSuppliersQueries(db);
-  testWorkshopLedgerPure();
-  await testWorkshopLedgerQueries(db);
-  testWorkshopSheetImportPure();
-  await testWorkshopSheetImportDb(db);
-  await testWorkshopBankLink(db);
-  testMarketerPricePure();
-  await testMarketerPriceQueries(db);
-  testReceiptPricingPure();
-  await testReceiptPricingDb(db);
-  testCompanyOsModelsPure();
-  await testCompanyOsModelsQueries(db);
-  // Company OS · A2 — trang Model 360: bảng tín hiệu, đề xuất, khối không sập trang, ý tưởng → mẫu.
-  testCompanyOsModel360Pure();
-  await testCompanyOsModel360Db(db);
-  await testCrm(db);
-  testScenario();
-  testAccessControl();
-  // Relay Telegram (01/10/2026): máy chủ ở Việt Nam bị chặn api.telegram.org — TELEGRAM_API_BASE + worker của nền tảng.
-  await testTelegramRelay();
-  // Gemini cho chatbot bán hàng (01/10/2026): provider REST + kết nối gemini-byok + giá — không gọi mạng thật.
-  await testGeminiProvider();
-  // Chi phí AI của chatbot theo ngày (02/10/2026): tiền / đơn chốt / SĐT theo ngày VN, chưa định giá ≠ 0.
-  testChatCostReport();
-  testAdvisorySafety();
-  await testBusinessBrief(db);
-  await testSearch(db);
-  await testEntityTimeline(db);
-  await testInventory(db);
-  // Giá vốn CHƯA BIẾT không in ra 0 ₫ (mục 42): chi tiết đơn · trang sản phẩm · kế hoạch · kinh tế khách SaaS.
-  await testUnknownCost(db);
-  await testInventoryForecast(db);
-  testPlanExplain();
-  await testSlowMoving(db);
-  await testInventoryDecision(db);
-  testSizeBreakPure();
-  await testSizeBreakReport();
-  testOrderBudgetPure();
-  await testOrderBudgetReport();
-  testClearanceFloorPure();
-  await testClearanceFloorReport();
-  // Company OS · Agent D: tự dọn dữ liệu mã `cosd-` (kể cả khoá settings inventory.slowMoving).
-  testCompanyOsInventoryPure();
-  await testCompanyOsInventoryDb(db);
-  // Company OS · Agent C: sản xuất nửa đầu. Dọn hàng đợi + cờ của chính nó (mã `cosc-`); bảng append-only giữ nguyên (CSDL dùng một lần).
-  testCompanyOsProductionPure();
-  await testCompanyOsProductionDb(db);
-  // Company OS · Agent E: tự dọn dữ liệu mã `cose-` (kể cả sổ kết cục và sự kiện của nó).
-  testCompanyOsReturnsPure();
-  await testCompanyOsReturnsDb(db);
-  // Company OS · Agent R: kết cục cho hàng hoàn KHÔNG NHÃN (mã `cosr-` / `UR-COSR-`, tự dọn cả sổ kết cục và sự kiện của nó).
-  testCompanyOsUnidentifiedDispositionsPure();
-  await testCompanyOsUnidentifiedDispositionsDb(db);
-  // Company OS · Agent U: xác định mẫu mã món không nhãn (mã `cosu-` / `UR-COSU-`, tự dọn cả sổ kết cục, phiếu và sự kiện của nó).
-  testCompanyOsUnidentifiedIdentifyPure();
-  await testCompanyOsUnidentifiedIdentifyDb(db);
-  // Company OS · Agent H: "Cần anh quyết". Dọn nguồn của chính nó (mã `cosh-`); sổ phản ứng và sự kiện append-only giữ nguyên (CSDL dùng một lần).
-  testCompanyOsCockpitPure();
-  await testCompanyOsCockpitDb(db);
-  // Company OS · Agent S: tín hiệu mẫu theo lô = getModelSignal từng mẫu (mã `cos-s-` / `COSS-`, tự dọn).
-  testCompanyOsSignalBatchSource();
-  await testCompanyOsSignalBatchDb(db);
-  // Company OS · Agent L: "Cần anh quyết" → nhóm Lark Quản lý. Đường gửi là hàm giả (không gọi mạng); tự dọn khoá settings `owner.digest*`.
-  testCompanyOsOwnerDigestPure();
-  await testCompanyOsOwnerDigestDb(db);
-  // Company OS · Agent T: topic sản xuất mở SỚM cho mẫu TRIỂN VỌNG (quy tắc chủ shop 25/09/2026).
-  testCompanyOsEarlyTopicPure();
-  await testCompanyOsEarlyTopicDb(db);
-  // Topic sản xuất cho mẫu CHƯA CÓ MÃ (mã tạm → chốt mã khi thắng) + ảnh / video đính kèm (chủ shop 26/09/2026; mã `ptf-` / `PTFQ`).
-  testProductionTopicFilesPure();
-  await testProductionTopicFilesDb(db);
-  testProductionTopicAccessPure();
-  await testProductionTopicAccessDb(db);
-  // Company OS · Agent X: vòng phản hồi tồn → creative / quảng cáo (mã `cos-x-` / `COSX-`, tự dọn; một dòng sổ phản ứng append-only giữ nguyên).
-  testCompanyOsStockFeedbackPure();
-  await testCompanyOsStockFeedbackDb(db);
-  // Company OS · Agent W: job giữ ấm phủ khoá đệm của "Cần anh quyết" (so TẬP KHOÁ, không gõ tên) + ops company-os-summary (mã `cos-w-` / `COSW`, tự dọn, trả lại `owner.digest`).
-  await testCompanyOsWarmPure();
-  await testCompanyOsWarmDb();
-  await testWorkWarmDb();
-  testCompanyOsSummaryPure();
-  await testCompanyOsSummaryDb(db);
-  // ops org-summary: tóm tắt MỘT tổ chức khách, chỉ đọc, không lộ dữ liệu người — tổ chức THẬT `os-sum` (tự cấp, tự dọn).
-  testOrgSummaryPure();
-  testOrgAiCutoverPure();
-  await testOrgAiCutoverApply();
-  await testOrgSummaryDb();
-  // ops org-offboard: xoá workspace TỰ ĐĂNG KÝ (08/10/2026) — chạy thử không ghi, từ chối nhà / người vận hành / có tiền, xoá đúng + idempotent (`ob-*`, tự dọn).
-  testOrgOffboardPure();
-  await testWaitForNoConnections();
-  await testOrgOffboardDb();
-  // ops org-lifecycle: LƯU TRỮ / KÍCH HOẠT LẠI tổ chức (17/10/2026) — không xoá, đứng ngoài migration / job / webhook, kích hoạt lại chỉ khi checkDb khớp (`lc-thu`, tự dọn).
-  testOrgLifecyclePure();
-  await testOrgLifecycleDb();
-  // ops org-order-audit: hội thoại có SĐT ↔ đơn ERP của một ngày (HSLC 05/10/2026: POS 26 vs ERP 23).
-  testOrgOrderAuditPure();
-  // Bot HSLC sót tin vì Pancake 429 lúc gửi (10/10/2026): gửi lại đoạn bị từ chối · nhập lịch sử nhường · gửi bù có điều kiện.
-  await testPancakeSendRetry();
-  // Bot HSLC tính sai tiền (10/10/2026, «Việt Phệ»): «lấy 2kg» + mẫu mã 2kg ⇒ không bao giờ 2kg × 2.
-  testPackQuantity();
-  // ops org-volume-discount: cài luật giá gói đơn vị cho một tổ chức (chủ shop HSLC 10/10/2026).
-  await testOrgVolumeDiscount();
-  // Sự kiện Purchase gửi Meta khi chốt đơn (0236 — chủ shop HSLC 08/10/2026) — tổ chức THẬT `capi-hslc` (tự cấp, tự dọn), Graph giả.
-  testMetaCapiPure();
-  await testMetaCapiDb();
-  // ops org-catalog: danh mục · bảng giá sỉ · câu mẫu · công tắc bot của một tổ chức khách, chỉ đọc (HSLC 08/10/2026: quy cách 0,5kg · giá sỉ · chốt không kiểm tồn) — tổ chức THẬT `os-cat` (tự cấp, tự dọn).
-  testOrgCatalogPure();
-  await testOrgCatalogDb();
-  // Chuẩn hoá địa chỉ theo địa giới 01/07/2025 — đơn bot / máy ghi chỉ có một dòng chữ (05/10/2026).
-  testVnAddress();
-  // P0 address-normalize (11/10/2026): địa chỉ tự do ⇒ mức tin cậy + câu hỏi khách; bot không chốt đơn địa chỉ mơ hồ khi khách chưa được hỏi.
-  testAddressNormalizePure();
-  await testAddressNormalizeTools();
-  // P0 15/10/2026 (ca «Tuyet Nguyen Thi» · «Lê Văn Dụ»): phường khách ghi rõ không bị hỏi lại · chữ khách thắng bản model chép · mơ hồ ⇒
-  // một câu ngắn, không danh sách 6 phường · phần đã hỏi không hỏi lại · hàng rào chữ gửi khách; ops address-reask-audit đo phạm vi.
-  testAddressWardExplicitPure();
-  await testAddressWardExplicitTools();
-  await testAddressReaskAudit();
-  await testP0855Address(); // #855: địa giới cũ / «như cũ» / địa chỉ mới thắng / không hỏi lại SĐT · tên · địa chỉ · phường
-  await testP0871ContactMemory(); // #871: SĐT + địa chỉ đã biết không hỏi lại khi đổi chủ đề · câu mẫu cũng chịu hàng rào · hẹn giờ giao = ghi chú · hậu mãi không bán tiếp · gói tin trùng
-  // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
-  testVelocityUnifyPure();
-  testOutreachClearanceUnit();
-  // Lượt mở trang theo mục menu — không ghi ai mở, chưa đo ≠ 0 (dữ liệu ngày 2001, tự dọn).
-  testMigrationRenumber();
-  testPageUsagePure();
-  testPageUsageSource();
-  await testPageUsageDb(db);
-  await testVelocityUnifyDb(db);
-  // Company OS · Agent P2: lời khai ≠ chứng cứ — trạng thái sản xuất khai mà ERP không có chứng từ · phiếu nhập chưa nối có lệnh SX khớp (mã `cos-p2-`, tự dọn; ngày cố định 2001).
-  testCompanyOsEvidenceGapsPure();
-  await testCompanyOsEvidenceGapsDb(db);
-  // Company OS · Agent Q: "Khai theo gợi ý" — chứng cứ theo lô = từng mẫu, người xác nhận gợi ý, hàng rào màn hình cũ (mã `cos-q-` / `COSQ`, tự dọn).
-  testCompanyOsBulkDeclarePure();
-  testCompanyOsBulkDeclareSource();
-  await testCompanyOsBulkDeclareDb(db);
-  // Company OS · Agent BD: Bảng quy trình mẫu (/models?view=bang) — cột theo trạng thái khai, việc tiếp theo nhặt từ bộ máy có sẵn, thẻ = đường một-mẫu của trang 360 (mã `cos-bd-` / `COSBD`, tự dọn).
-  testCompanyOsPipelineBoardPure();
-  testCompanyOsPipelineBoardSource();
-  testCompanyOsPipelineBoardGate();
-  await testCompanyOsPipelineBoardDb(db);
-  // Company OS · Agent ST: lời khai đi SAU thực tế — máy đề xuất cập nhật, người bấm (mã `cos-st-`, dữ liệu 2002, tự dọn).
-  testCompanyOsStaleStatePure();
-  testCompanyOsStaleStateSource();
-  await testCompanyOsStaleStateDb(db);
-  // Company OS · Agent SC: lối tắt sản xuất — bản duyệt → lập lệnh SX · lệnh đã gửi → nhập kho theo lệnh · topic đã chốt → giá thành V1 (mã `cos-sc-`, tự dọn).
-  testCompanyOsProductionShortcutsPure();
-  testCompanyOsProductionShortcutsSource();
-  await testCompanyOsProductionShortcutsDb(db);
-  await testCodReconciliation();
-  await testCodStatementAudit();
-  await testOrderSource();
-  testDuplicateEvidencePure();
-  await testFanpageAttribution();
-  testFanpageAccessPure();
-  testPageEvidencePure();
-  await testFanpageHistoryDb();
-  testLandingAttributionPure();
-  await testLandingAttributionDb();
-  // Mẩu quảng cáo → creative → bài viết (kể cả dark post): chuẩn hoá đầu vào, bộ tra với Graph GIẢ, ghi idempotent vào fb_ads.
-  testMetaAdPostPure();
-  await testMetaAdPostResolver();
-  await testMetaAdParents();
-  await testMetaAdPostStoreDb();
-  await testIdeas();
-  await testPermissions();
-  await testPlatformModules();
-  await testVtpImportTruth(db);
-  await testVtpImportRecovery(db);
-  await testCostAllocation(db);
-  await testBankLedger(db);
-  await testSepayWebhook(db);
-  await testSepayApi(db);
-  await testBankAccounts(db);
-  await testCashPosition(db);
-  await testFinanceCockpit(db);
-  await testCostDoubleCount(db);
-  await testPayrollCostPreservation(db);
-  await testPayrollCarryover(db);
-  await testPayrollProfitGate(db);
-  await testPayrollCodeLedger(db);
-  testPayrollReconciliationPure();
-  await testPayrollReconCenter(db);
-  testOpsScriptSize();
-  await testDataTruth(db);
-  await testPayrollCogsCutoff(db);
-  await testProfitCarryover();
-  testCompensationProfitBasis();
-  testPayrollEngine();
-  testPayrollProductionReadiness();
-  testPayrollLifecycle();
-  testPayrollDependencyDirection();
-  testCompensationBasisArithmetic();
-  testPayrollPreviewAndActivation();
-  testPayrollReconcileScript();
-  await testPayrollReconcileContext(db);
-  await testPayrollPolicyEngine(db);
-  await testVtpState(db);
-  await testVtpIngestion(db);
-  await testVtpSourceOfTruth(db);
-  // Độ trễ webhook: hàm thuần + một lượt đọc truy vấn thật. KHÔNG gieo dòng nào vào
-  // `webhook_events`, nên nó không đổi tổng của bài nào khác.
-  await testWebhookLatency();
-  await testReconciliation(db);
-  await testLogisticsPerformance(db);
-  await testVtpHealth(db);
-  await testVtpCapability(db);
-  // Sửa đơn VTP: tự dọn mọi dòng đã gieo (đơn, vận đơn, bảng kê, nhật ký) nên không đổi tổng bài nào khác.
-  testVtpEditDefaultsPure();
-  await testVtpEditCodGuardDb(db);
-  await testCareWorkbench(db);
-  await testCareClosedAssign(db);
-  await testCareAutoAssign(db);
-  await testCareReturnLegQueue(db);
-  await testCareDecisionParks(db);
-  testCarrierManualPure();
-  await testCarrierManualDb(db);
-  await testAiCopilot(db);
-  testCodPaymentStatement();
-  await testVtpImportLimits();
-  await testVtpFileDetection();
-  await testVtpStatementFromMail();
-  await testStatementLedgerOrderIndependent();
-  await testCodStatusMeaning();
-  await testVtpCodPaymentColumn();
-  await testStatementDedupAcrossFilenames();
-  await testStatementIdentityByCash();
-  await testStatementDetailMatching(db);
-  // Chạy CUỐI CÙNG: bài này thêm mẫu mã và vận đơn riêng, để cuối thì không đụng tổng của bài khác.
-  await testReturnInspection(db);
-  await testReturnUnidentified(db);
-  await testReturnProductContext(db);
-  await testShipmentProductReport(db);
-  await testReturnItemInspection(db);
-  await testHmtReturnReconcile(db);
-  testInspectionFilter();
-  await testReturnFullReceive(db);
-  // Chạy CUỐI: bài này thêm phiếu nhập kho riêng, để giữa chừng sẽ làm lệch tổng phân bổ chi phí.
-  await testCogsRecognition(db);
-  await testAdsAttributionCoverage(db);
-  await testCanonicalOutcome(db);
-  // CHẠY SAU CÙNG, CỐ Ý: bài này thêm 5 kiện hoàn vào fixture chung. Đặt trước bài kiểm đếm hàng
-  // hoàn thì những kiện đó lọt vào lượt xử lý hàng loạt của bài kia và làm nó đỏ vì lý do sai.
-  await testReturnPipeline(db);
-  await testReturnExceptions(db);
-  // Dựng fixture riêng và TỰ DỌN ở cuối, nên tổng của các bài sau không đổi.
-  await testReturnWarehouseKpi(db);
-  // Dựng fixture riêng và TỰ DỌN ở cuối; đo bằng ĐỘ CHÊNH nên bài trước không làm nó đỏ.
-  await testInspectionTruth(db);
-  await testDeliveryTower(db);
-  // Ngay sau tháp giao vận: bài này cũng dựng rổ giao vận, và nó TỰ DỌN mọi dòng nó thêm vào nên
-  // tổng của các bài sau không đổi. Nó phải chạy SAU `testDeliveryTower` vì cả hai đọc cùng một
-  // đệm memo và bài này cố tình xoá đệm giữa chừng.
-  await testCareStates(db);
-  // Ngay sau đó: bài này dựng đợt chăm sóc, thao tác nghiệp vụ và sự kiện ĐVVC riêng, rồi TỰ DỌN
-  // sạch mọi dòng nó thêm — đặt giữa chừng thì những dòng đó lọt vào tổng của báo cáo khác.
-  await testCareOs(db);
-  testCareEffect();
-  await testCareReopen(db);
-  await testCarePendingDrilldown(db);
-  await testCareSettleClosed(db);
-  await testCareFalseReopenExclusion(db);
-  // Cùng nhóm: bài "đã duyệt hoàn" dựng kiện + đợt riêng mang tiền tố `cra-` và TỰ DỌN sạch.
-  await testCareReturnApproval(db);
-  testCareReturnCheckWiring();
-  // Ngay sau đó: bài kết quả xử lý dựng kiện + đợt riêng mang tiền tố `cres-` và TỰ DỌN sạch, nên
-  // không dòng nào của nó lọt vào tổng của báo cáo khác.
-  await testCareResolution(db);
-  await testShipmentsQaFixes(db);
-  await testSessionRenewal();
-  // Ngay sau đó: bài thu hồi phiên thêm hai tài khoản mang tiền tố `srev-` và tự dọn sạch cả dòng
-  // nhật ký lẫn tài khoản. Đặt cạnh bài gia hạn vì hai bài nói về cùng một token, từ hai phía.
-  await testSessionRevocation(db);
-  // Ngay sau đó: bài này gieo lịch sử vận đơn riêng để học xác suất, rồi TỰ DỌN sạch — đặt giữa
-  // chừng thì những dòng đó lọt vào mẫu của báo cáo khác.
-  await testReportingParity(db);
-  // Ngay sau đó: gieo ba mã riêng tiền tố `gvdt-` và một dòng settings giá dự tính, rồi TỰ DỌN sạch cả hai.
-  await testEstimatedCost(db);
-  // P0 hợp nhất giá vốn (13/10/2026): Trung tâm giá vốn + hai chế độ BCLN — tám kịch bản nghiệm thu của chủ shop.
-  await testCostCenter(db);
-  await testLoginThrottle();
-  await testWebhookHardening();
-  testWebhookLogRedaction();
-  testXlsxReader();
-  await testProjectedDeliveryV3(db);
-  // Chạy CUỐI CÙNG: thêm đơn/vận đơn riêng cho đúng bốn tình huống của nút thắt fulfillment, đặt
-  // sau mọi bài kiểm khác để không đơn nào trong số đó lọt vào tổng của báo cáo khác.
-  await testFulfillmentBottleneck(db);
-  // Cũng chạy CUỐI: bộ này thêm vận đơn riêng mang tiền tố `sage-` với lịch sử sự kiện dựng sẵn.
-  // Đặt trước bài khác thì những vận đơn đó lọt vào tổng của tháp giao vận và của care.
-  await testShipmentStatusAgeDb(db);
-  // Cũng chạy CUỐI: bộ này thêm đơn mang tiền tố `dup-` cố ý giống hệt nhau từng cặp. Đặt trước
-  // bài khác thì chúng lọt vào tổng doanh số và tổng đơn của mọi báo cáo.
-  await testOrderDuplicateDb(db);
-  // Cũng chạy CUỐI: bộ này thêm đơn mang tiền tố `pval-` cố ý thiếu dữ liệu từng kiểu một.
-  await testPreshipValidationDb(db);
-  // Cũng chạy CUỐI: bộ này gieo đơn mang tiền tố `prom-` và ĐỌC LẠI hàng đợi nút thắt kho để
-  // chứng minh vế lọc lời hẹn đổi đúng hành vi. Phải chạy SAU `testFulfillmentBottleneck`.
-  await testPromisedDeliveryDb(db);
-  // Thiếu hàng giao đơn: gieo mã `ssh-` với phiếu nhập, đơn đã chốt, lệnh xưởng; đọc lại sổ kho,
-  // Kế hoạch SX và hàng đợi fulfillment; rồi TỰ DỌN sạch — đơn CONFIRMED sót lại sẽ lọt vào tổng
-  // "đã chốt chưa gửi" của mọi bài phía sau.
-  testAlertsConfigForm();
-  testStockShortagePure();
-  await testStockShortageDb(db);
-  testStockWaitReportPure();
-  await testStockWaitReportDb(db);
-  // CHẠY SAU CÙNG trong khối dữ liệu: bộ này thêm tài khoản ngân hàng, dòng tiền, khoản chi và đơn
-  // riêng ở tháng 5/2027 rồi tự dọn sạch. Đặt giữa chừng thì những dòng đó lọt vào tổng của bài khác.
-  await testFinanceTruth(db);
-  // Cổng phát hành của bản gộp tài chính: chỗ hỏng của một bản gộp không nằm trong nhánh nào cả,
-  // nó nằm ở chỗ hai nhánh cùng chạm một con số. Chạy sau `testFinanceTruth` và tự dọn.
-  await testFinanceInvariants(db);
-  /*
-    CHẠY SAU CÙNG TRONG KHỐI DỮ LIỆU. Hệ điều hành công việc CHIẾU lên toàn bộ dữ liệu của mọi bài
-    phía trên (case CSKH, kiện care, đơn, dòng tiền, cảnh báo) — chạy giữa chừng thì nó nhìn thấy
-    một nửa thế giới, và mọi con số tổng hợp của nó nói về một tập khác với tập cuối cùng. Bài tự
-    gieo dữ liệu mang tiền tố `wos-` rồi tự dọn sạch.
-  */
-  await testWorkOs(db);
-  /*
-    MẶT PHẲNG ĐIỀU KHIỂN PHÒNG TECH AI. Chạy SAU `testWorkOs` và tự dọn bằng tiền tố `tech-t-`:
-    nó gieo một tài khoản, hai việc Tech, sổ agent, một lượt chạy, hai lượt deploy và một sự cố —
-    tất cả nằm trong các bảng `tech_*` nên không đụng tới con số của bài nào phía trên.
-  */
-  await testTechControlPlaneDb();
-  await testTechControlPlaneGoalsDb();
-  await testTechWorkerDb();
-  await testTechDeliveryDb();
-  await testTechPolicyDb();
-  // Mission Control: phép chiếu sổ Tech Room (GitHub giả, không mạng) — tự dọn hai bảng tech_registry_* của nó.
-  await testTechMissionControlDb();
-  /*
-    PHASE 2A. Chạy ngay sau mặt phẳng điều khiển và tự dọn bằng tiền tố `p2a-`. Ba khối đầu đụng
-    CSDL; khối runner còn dựng KHO GIT TẠM và chạy tiến trình con thật (`npm run typecheck` trong
-    một cây làm việc riêng) — đó là điểm của nó: cổng phải đo bằng exit code, không bằng lời khai.
-  */
-  await testGithubDeploymentSync();
-  /*
-    PHÉP CHIẾU PR + SỰ CỐ TỰ MỞ. Chạy ngay sau lượt đọc deploy vì cùng dùng `fetch` giả của adapter
-    GitHub — chạy liền nhau thì trạng thái tiêm/gỡ không đi lạc qua bài khác. Tự dọn bằng tiền tố
-    `prj-`.
-  */
-  await testGithubPrSync();
-  await testSyncIncidentWatch();
-  await cleanupPrProjectionFixtures();
-  /*
-    NẤC 1 — CỬA HẸP CHÉP SỔ LƯỢT CHẠY AGENT. Chạy sau phép chiếu PR vì cùng họ `tech_*`, và tự dọn
-    bằng tiền tố `ing-` / `ING-`. Bài này KHÔNG gọi mạng: nó chạy thẳng hàm dịch vụ, còn tầng HTTP
-    được khoá bằng quét mã nguồn ở khối 3 (dựng một máy chủ Next thật chỉ để gửi một POST là đổi
-    nhiều phút CI lấy một lớp kiểm mà quét mã nguồn đã nói được chắc hơn).
-  */
-  await testAgentIngestDb();
-  await cleanupAgentIngestFixtures();
-  /*
-    SỨC KHOẺ AI. Chạy `getTechSystemHealth()` THẬT rồi gieo đúng hình dạng lỗi giả mà `ops ai-check`
-    để lại trên production, và đòi kết luận KHÔNG đổi. Tự dọn bằng tiền tố `ai-sel-`.
-  */
-  await testAiHealthKhongDemLuotTuKiem();
-  await cleanupAiHealthFixtures();
-  /* LỖI CSDL ĐỌC ĐƯỢC — gây lỗi Postgres THẬT trên PGlite rồi đọc lại, không mô phỏng bằng lời. */
-  await testMoTaLoiCsdl();
-  /*
-    CANH KHOÁ AI. Chạy bộ canh THẬT trên CSDL và gieo đúng hình dạng lỗi đã xảy ra 20/09 (hết
-    credit). Tự dọn bằng tiền tố `ai-inc-` và tiêu đề sự cố.
-  */
-  await testAiIncidentWatchDb();
-  await cleanupAiIncidentFixtures();
-  /*
-    NẤC 3 — ERP giao việc cho agent. Chạy `fetch` GIẢ (không gọi mạng thật) và tự dọn bằng tiền tố
-    `disp-` / `DISP-`. Khối cửa ghi đặt biến môi trường để dựng tình huống rồi trả lại nguyên trạng.
-  */
-  await testDispatchCua();
-  await testDispatchService();
-  await cleanupDispatchFixtures();
-  /* NẤC 3B — cửa ĐỌC việc. Chạy hàm thật trên CSDL; tự dọn bằng tiền tố `rd-` / `RD-`. */
-  await testAgentTaskRead();
-  await cleanupAgentTaskReadFixtures();
-  /* NẤC 4 — đẩy trạng thái việc theo bằng chứng GitHub. Tự dọn bằng tiền tố `ADV-`. */
-  await testGuiLaiKhongDamKhoa();
-  await testHaiLuatKhongTroiXaNhau();
-  await cleanupShipmentPickFixtures();
-  await testTaskAdvanceDb();
-  await testNhacFinishDungMotLan();
-  await testDemTienLuotChay();
-  await testLedgerReconcile();
-  /* Bài kiểm do chính agent viết và tự đăng ký — xem `lib/constants/agent-test-registry.ts`. */
-  await chayBaiKiemAgentTuDangKy();
-  await cleanupLedgerFixtures();
-  await cleanupTaskAdvanceFixtures();
-  /* NỬA SAU DÂY CHUYỀN — dispatch mang mã việc, nhánh về tới dòng việc. Tự dọn bằng tiền tố `VDT-`/`vdt-`. */
-  await testDispatchKemMaViec();
-  await testGiaoLaiSuaTuErp();
-  await testIngestGhiNhanhViec();
-  await cleanupViecDiTiepFixtures();
-  /*
-    GHÉP QUẢNG CÁO TREO. Bài này chạy `reapplyAdsMapping()` THẬT, mà hàm đó quét toàn bộ dòng
-    Facebook — nên nó tự chụp lại và trả về nguyên trạng `product_id`/`marketer_id` của mọi dòng
-    (fixture `landing-attribution` có ba dòng như vậy). Xem `chupVaTraVe` trong bài.
-  */
-  await testAdsMappingDangling();
-  await testTechWorkProjection();
-  await testAgentRunner();
-  await testPhase2aBarriers();
-  await testAgentGithubIdentityModule();
-  // Ngay sau đó: cầu nối mở PR dùng chung adapter ấy. Bài này chỉ quét mã nguồn — không mạng,
-  // không token, không CSDL — nên nó chạy được ở bất kỳ chỗ nào trong chuỗi.
-  testAgentPrBridge();
-  testEnvironmentOnlyAgentSecrets();
-  await testCtoProposal();
-  await testWorkforce(db);
-  await testOrgMembership(db);
-  await testAccessModel(db);
-  await testScopeDecisions(db);
-  await testSnapshotImmutability(db);
-  testNoEmptyValueSelect();
-  testOneMembershipReadPath();
-  testNoAutoReassignOnOrgChange();
-  testPositionGrantsNothing();
-  testRoleBuilderCannotEscalate();
-  await testPayrollPeriod(db);
-  testPayrollAutopilotPure();
-  await testPayrollAutopilotFlow(db);
-  testEveryScopedRouteIsGuarded();
-  testPayrollOwnLineNeedsAccountKey();
-  testPayrollAuthorization();
-  testAuthSecretHasNoProdFallback();
-  testMetricConfidenceIsAFunction();
-  testPeriodKeys();
-  testScopeOnlyNarrows();
-  testDisabledRoleFallsBackNarrow();
-  testCustomRoleViewImplies();
-
-  // ═══ PHASE 3.1 · QUY KẾT & DANH MỤC CHỈ SỐ CÓ THẨM QUYỀN ═══
-  testMetricCatalogIsComplete();
-  testDeptKeysDeriveFromCatalog();
-  testObservedLinkage();
-  testMetricTrust();
-  testTargetResolution();
-  testKrDataInsufficient();
-  testSourceVersionIsTracked();
-  await testCsAssignmentUsesKey(db);
-  await testInspectionCarriesActorKey(db);
-  await testCoverageSeparatesMachineFromPerson(db);
-
-  // ═══ KIỂM TRA TOÀN VẸN KHO MÃ (không phụ thuộc dữ liệu) ═══
-  console.log("\n─ Toàn vẹn kho mã");
-  testTechLifecycle();
-  testAgentSandbox();
-  testPhase2aSourceGuards();
-  testPrPureMappers();
-  testSyncIncidentPure();
-  testAgentIngestPure();
-  // Trang giới thiệu ở tên miền gốc: định tuyến host thuần + gác mã nguồn (middleware, Caddy, đường đọc công khai).
-  testPublicSiteHost();
-  testPublicSiteSource();
-  testChotDonBrand();
-  testMissedOrdersCalculator();
-  testChotDonAssets();
-  // Sổ pháp lý có kiểu (docs/legal/*): văn bản + băm nội dung, bên xử lý phụ, xuyên biên giới, lưu trữ, hệ thống AI, cổng theo
-  // chiều — tài liệu ↔ hằng khớp, UNKNOWN hiện ra, LEGAL READY dẫn xuất, mã nguồn không gọi bên ngoài chưa khai.
-  testLegalRegisters();
-  testOrgLinkOrigin();
-  testAgentIngestSourceGuards();
-  testTestHygiene();
-  // Sổ bàn giao chỉ được THÊM: lượt ghi dựng từ bản đọc trước đã ăn mất chữ của phiên khác 13/10/2026.
-  testCheckpointChiDuocThem();
-  // Bảng thời gian: hàm thuần dựng bảng nhóm chậm nhất (đo để chia job, không để nâng trần).
-  testTestTiming();
-  testAiHealthSourceGuards();
-  testAiIncidentPure();
-  testAiIncidentSourceGuards();
-  testMoTaLoiSourceGuards();
-  testPhamViTheoVai();
-  testRerunPure();
-  testRerunPhanHoi();
-  testRerunDeBai();
-  testRerunWorktree();
-  testRerunGuards();
-  await testRerunDinhNhanh();
-  testHangRaoTuyetDoi();
-  testVungSoDoChiDocDuoc();
-  testHangRaoBaiKiem();
-  testPhamViSourceGuards();
-  testDispatchPure();
-  testDispatchSourceGuards();
-  testDuongKhaiKhoaKhoiDong();
-  testAgentTaskReadGuards();
-  testChuPrKhongLoNoiDungViec();
-  testDieuKienMoPr();
-  testCauNoiVanGiuHangRao();
-  testQuyenNoiGoiDuChoNoiDuocGoi();
-  testMaViecLaMaProduction();
-  testVaiAgentTheoViec();
-  testPhamViDocTuSoVai();
-  testBanKhaiGanLai();
-  testScriptDayChuyenPhaiThoat();
-  testNganSachDocTep();
-  testLoiGoiHongVanGiuTien();
-  testTienLuotChay();
-  testTienLuotChayGuards();
-  testLoiCongDocDuoc();
-  testLoiCongGuards();
-  testKyLoat();
-  testKyLoatGuards();
-  testPhanhTienAi();
-  testPhanhTienAiGuards();
-  testNhanModelNoiThat();
-  testBacModelTheoVai();
-  testTranChoTachKhoiBac();
-  testPhepDoJit();
-  testChuoiSach();
-  testMetricResolverTatJit();
-  testTrangChamTatJit();
-  testPancakeLinks();
-  testPhoneReputation();
-  await testPhoneRiskAlert(db);
-  testTraGiaTheoTienTo();
-  testDemHoiThoai();
-  testKhongNangBacAmTham();
-  testGanLaiSourceGuards();
-  testKhongCoBaiKiemMoCoi();
-  testKheDangKyAgent();
-  testPromptTheoVai();
-  testSuaCongTrongLuot();
-  testLedgerPure();
-  testLedgerGuards();
-  testChonVanDonPure();
-  testKhongCoOneTrenKhoaNgoaiKhongDuyNhat();
-  testNhanhVeToiViecPure();
-  testViecDiTiepGuards();
-  testTaskAdvancePure();
-  testTaskAdvanceGuards();
-  testAdsMappingGuards();
-  testAdsIngestGuardsProductFk();
-  testTechRiskEngine();
-  testTechControlPlaneVocabulary();
-  testTechWorkerPure();
-  testTechDeliveryPure();
-  testTechPolicyPure();
-  testTechMissionControlPure();
-  testTechMissionControlSourceGuards();
-  testTechPermissions();
-  testTechHealthParsing();
-  testRepoIntegrity();
-  // AI Tech Room: điều phối worktree / DAG / dọn an toàn — kho git TẠM, không chạm cây thật (docs/ai-tech-room/README.md).
-  await testAiTechRoom();
-  // Điều phối V2: cổng song song · deploy dùng lại bằng chứng cổng · sổ xuyên sứ mệnh · khoá Integration Lead · giữ chỗ migration (docs/ai-tech-room/delivery-v2.md).
-  await testDeliveryV2();
-  // Team Premium F7/F8: job chạm VPS chỉ chạy từ main + Environment production; checkout của workflow agent / có quyền GHI
-  // không giữ credential; agent-run không dán đầu ra bước vào shell, token GHI chỉ ở bước đẩy nhánh.
-  testWorkflowHardening();
-  // #856: đo tin khách bị chốt «Page đã trả lời» nhầm (chỉ đọc, luật buildCustomerTurns).
-  testPageAutoSkipAudit();
-  // qa × 0245: chỉ mục 0247 = công cụ tạo trước (chỉ qa, có tiền điều kiện) = ứng viên rehearsal.
-  testQa0245Index();
-  // Hậu kiểm production chạy trên máy Actions (`ai-verify.yml`): chỉ main · chỉ lệnh verify · đỏ khi KHÔNG ĐẠT.
-  testAiVerifyWorkflow();
-  // Nền tảng đa tổ chức: máy quét cô lập mức tiến trình (thuần, không CSDL) — cạnh các bài quét mã nguồn khác.
-  testPlatformIsolationStatic();
-  // Hồi quy 27/09: script trên GitHub Actions (không CSDL) vẫn phân giải được tổ chức nhà.
-  testPlatformNoDb();
-  testChatbotNoSecretsInRepo();
-  testChatbotDeployShape();
-  await testChatbotImportGuards();
-  await testChatbotAdBots();
-  await testChatbotVoice();
-  testChatbotOrderBotAlerts();
-  testDeployScript();
-  testApplyGithubEnvBlock();
-  testOpsConcurrency();
-  await testSaoLuu();
-  testPitr();
-  // ops migration-rehearsal: chạy thử migration còn thiếu trên BẢN SAO một CSDL tổ chức (P0 0245 trên qa).
-  testMigrationRehearsal();
-  testMigrationAppendOnly();
-  await testMigrationUpgradePath();
-  testMigrationNumberUnique();
-  testDuplicateMetrics();
-  testLogisticsStatusBoundary();
-  await testOpsLogLeak();
-  await testFeedAutomation(db);
-  // Company OS · K: gia cố năm chỗ hở (mã `cos-k-` / `COSK`). Đứng ngay trước QA để không đổi tổng của bài nào phía trên.
-  await testHardeningLifecycleInTx(db);
-  await testHardeningSettingsPrimitive(db);
-  await testHardeningApprovalExecution(db);
-  // Lệnh đặt xưởng chưa có giá: NULL không phải 0, cổng duyệt dùng giá đã nhập → giá dự tính → bắt duyệt.
-  await testProductionUnpricedApproval(db);
-  await testHardeningReceiptLinkedEvent(db);
-  await testHardeningTopicTrackSemantics(db);
-  // Company OS · N: gửi lại tin Lark hỏng + dọn lời duyệt kẹt (mã `cos-n-`; dòng thông báo tự xoá).
-  testNotificationRetryPure();
-  await testNotificationRetryDb(db);
-  await testApprovalReservationSweep(db);
-  // Company OS · QA: MỘT mẫu đi hết vòng đời qua mọi agent (A–G). Đứng CUỐI để không đổi tổng của bài nào; tự dọn mã `cosqa-` / `COSQA`.
-  testCompanyOsE2ePure();
-  await testCompanyOsE2eLifecycle(db);
-  // Company OS · P1: nhãn nhật ký (quét mã nguồn) + sổ mẫu tự bắt kịp sau đồng bộ sản phẩm. Bài sau đổi
-  // fetch / biến môi trường Pancake (khôi phục trong finally) và đăng ký mọi mã đang có — nên đứng SAU CÙNG.
-  testCompanyOsAuditLabels();
-  await testRegistryCatchUpAfterProductSync(db);
-  // Phase 2 · dịch vụ metadata: hai tổ chức THẬT `pm-a` / `pm-b` (CSDL riêng, tự cấp và tự dọn) — field custom,
-  // giá trị, form, danh sách, trạng thái; tấn công theo id chéo tổ chức chạm 0 dòng.
-  await testMetadataService();
-  // Nền tảng · quản trị metadata (Phase 2): bốn màn hình /settings/{data-model,forms,lists,statuses} — lõi action.
-  await testMetadataAdmin();
-  // Phase 2 · form runtime + danh sách theo metadata (M8, M9): hàm thuần + hàng rào tạo khách.
-  await testMetadataRuntime();
-  // Phase 3 · bộ máy workflow: hai tổ chức THẬT `pw-a` / `pw-b` (tự cấp, tự dọn) — lưu luật, chạy thử, cửa duyệt,
-  // đúng một việc sau khi duyệt, vòng lặp bị chặn, lượt đầu không xử lý lịch sử, cô lập tổ chức.
-  await testWorkflowEngine();
-  // Phase 3.1 · phục hồi lượt chạy treo: tổ chức THẬT `pr-a` (tự cấp, tự dọn) — chết sau khi chiếm / giữa hai hành
-  // động ⇒ chiếm lại đúng một lần, bước đã xong không làm lại, quá số lần thử ⇒ FAILED, listStaleRuns + chẩn đoán.
-  await testWorkflowRecovery();
-  // Phase 3.1 · tải tệp field `file`: hai tổ chức THẬT `pf-a` / `pf-b` — HANDLER route trong phiên thật, 404 cùng
-  // một câu cho id chéo tổ chức / id rác / field lưu trữ / bản ghi đã xoá, .html ⇒ attachment, module tắt ⇒ 403.
-  await testMetadataFiles();
-  // Phase 3 · giao diện luật tự động: lõi màn hình /settings/workflows (quyền, bản nháp form) + vòng đời thật trên tổ chức `wa-wf` (tự cấp, tự dọn).
-  await testWorkflowAdmin();
-  // Phase 4 · sổ nguồn + sổ action + trình phân giải khối trang động: hai tổ chức THẬT `pd-a` / `pd-b` (tự cấp, tự dọn) —
-  // số đơn khớp orderKpis, module tắt / thiếu quyền / lọc sai ⇒ 0 lượt gọi nguồn, action đọc bản ĐÃ XUẤT BẢN.
-  await testPageData();
-  // Phase 4 · trang động: sổ loại khối + kiểm schema (sổ giả tiêm vào), dựng trang cô lập lỗi, menu động, vòng đời
-  // trang trên hai tổ chức THẬT `pr4-a` / `pr4-b` (tự cấp, tự dọn) — nháp / xuất bản / phiên bản / lưu trữ / mẫu.
-  await testPageRuntime();
-  // Phase 4 · trình soạn trang tuỳ biến: lõi màn hình /settings/pages (quyền, module chủ, lỗi theo path).
-  await testPageAdmin();
-  // Phase 7 · blueprint + mẫu ngành: hai tổ chức THẬT `bp-a` / `bp-b` (tự cấp, tự dọn) — kiểm / lập kế hoạch / cài /
-  // nâng phiên bản ba chiều (UNCHANGED · UPDATE · SKIP_CUSTOMIZED · SKIP_DELETED · CONFLICT · BLOCKED), cô lập tổ chức.
-  await testBlueprints();
-  // Phase 5 · trình dựng trang kéo-thả: phép biến đổi schema thuần + lõi máy chủ (quyền, tự lưu, xuất bản, menu) trên tổ chức `pb-p5`.
-  await testPageBuilder();
-  // Nền tảng · giao diện module: cấp tổ chức `pu-` riêng, tự dọn dòng mặt phẳng điều khiển khi xong.
-  // Phase 9 · sổ connector ↔ mã, mã hoá bí mật kết nối (AAD theo tổ chức), kiểm tra chỉ tới Lark / Telegram, hai tổ
-  // chức THẬT `pc-a` / `pc-b` (tự cấp, tự dọn) không thấy kết nối của nhau; tổ chức nhà chỉ đọc, CSDL nhà không đổi.
-  await testConnectors();
-  // Cổng mở bán A: PLATFORM_SECRETS_KEY đi đủ ba chặng secret → workflow → bootstrap/install → .env, rỗng không đè, không in.
-  await testLaunchGatesPipeline();
-  // ops platform-secrets-verify: kiểm khoá bí mật trên production (canary niêm / giải / xoay, quét CSDL + log) — khoá giả.
-  await testPlatformSecretsVerify();
-  await testCustomObjects();
-  // Phase 8 · AI Builder: provider GIẢ (không mạng), hai tổ chức THẬT `ai-a` / `ai-b` (tự cấp, tự dọn) — không-nhà không
-  // có kết nối ⇒ không AI (không rơi về khoá nhà), khoá BYOK chỉ tới nhà cung cấp, soạn → bỏ chọn → xem trước → áp dụng.
-  await testAiBuilder();
-  // Phase 10 · tự phục vụ: ba tổ chức THẬT `ob-a` / `ob-b` / `ob-c` (tự cấp, tự dọn) — cờ off / mã mời / tạo từ mẫu
-  // bán sỉ bỏ Mua hàng / đăng nhập đúng tổ chức / chạy lại không nhân đôi / SETUP_FAILED / hạn mức gói / cô lập logo.
-  await testOnboarding();
-  // Phase 6 × 4/5 · đối tượng tuỳ biến làm nguồn trang động: hai tổ chức THẬT `pco-a` / `pco-b` (tự cấp, tự dọn) — bảng,
-  // KPI tổng hợp, kanban, dòng thời gian trên x_contract đúng số + đúng phạm vi, x_other không lọt, B không thấy khoá của A.
-  await testPageCustomObjects();
-  // Phase 11 · H1 tấn công cô lập: hai tổ chức THẬT `ta-a` / `ta-b` (B dựng qua /start, tự dọn) — phiên thật của A gọi thẳng
-  // server action / route / page component / dịch vụ bằng id, khoá, slug, tệp, mã mời của B; CSDL B + dòng mặt phẳng điều khiển
-  // của B không đổi một dòng, 0 kết quả mang dữ liệu của B, 0 request mạng.
-  await testTenantAttack();
-  // AI bán hàng (0180+) — hội thoại, câu mẫu, ảnh, sổ AI: hai tổ chức THẬT `asi-a` / `asi-b` tấn công nhau bằng id.
-  await testAiSalesIsolation();
-  // Trần tần suất chat công khai (/chat · /chat/embed): xô thuần + khách thật / bão trên ngưỡng thật, lõi thật trên hai tổ chức
-  // THẬT `pcl-a` / `pcl-b` (tự cấp, tự dọn, provider giả) — vượt trần ⇒ không AI, không ghi; hai shop không chung trần.
-  await testPublicChatLimits();
-  // Phase 11 · H2 · ngân sách câu truy vấn: tổ chức THẬT `pqb-a` (tự cấp, tự dọn, client mang bộ đếm) — bảng hệ thống,
-  // bảng x_…, kanban, KPI / biểu đồ tổng hợp, cả trang, /o/<khoá>, /o/<khoá>/<id>, getCustomValues: 10 dòng = 200 dòng câu.
-  await testPageQueryBudget();
-  // Phase 11 · H3 · xuất / khôi phục cấu hình: hai tổ chức THẬT `ox-a` / `ox-b` (tự cấp, tự dọn) — A cài mẫu + tuỳ biến ⇒
-  // xuất ⇒ B trống cài TỪ TỆP ⇒ xuất lại bằng A (băm ổn định); gói không mang email / bí mật / bản ghi / id.
-  await testOrgExport();
-  // Commercial readiness C · diễn tập khôi phục cấu hình: phán quyết (đột biến từng vế) + phạm vi khai báo khớp lược đồ /
-  // migrateOrganizationDb + CHẠY THẬT scripts/restore-drill-org-config.ts (cùng mã, CSDL + sổ bị xoá giữa hai tiến trình).
-  testRestoreDrillConfig();
-  // Launch gates C · diễn tập khôi phục tổ chức trên Postgres THẬT (lượt chạy ở .github/workflows/restore-drill.yml):
-  // tên + hàng rào DROP / môi trường, lệnh = erp-backup.sh + runbook, phán quyết (34 đột biến), workflow 0 secret 0 SSH.
-  testRestoreDrillPg();
-  // Phase 11 · H4: chẩn đoán MỘT tổ chức (/platform/org/<mã>) trên tổ chức THẬT `pdg-a` (tự cấp, tự dọn) — đúng số, chỉ
-  // đọc, không lộ bí mật, chỉ người vận hành; hạn mức đối tượng / bản ghi / nháp AI; gỡ dấu VNX + favicon theo thương hiệu.
-  await testPlatformDiagnosticsOrg();
-  // Phase 12 · năm lỗi của bài chấp nhận: trang Duyệt LÕI + lối duyệt, /platform chỉ ở nhà, not-found theo thương hiệu,
-  // số tiền của yêu cầu duyệt, bộ quét menu × module tắt — hai tổ chức THẬT `ap-svc` (cài mẫu dịch vụ) / `ap-si` (tự cấp, tự dọn).
-  await testApprovalsCore();
-  // Pilot bán buôn · P0 #1/#2 + P1 #9/#11–#14: tổ chức THẬT `pp-si` (mẫu bán buôn, không Pancake; tự cấp, tự dọn) — tạo sản
-  // phẩm + mẫu mã tay (erp-, SKU duy nhất, products:write) ⇒ phiếu nhập đơn giá khai tay ⇒ sổ kho; nhà: không nút, action từ
-  // chối, giá báo MKT, chữ trang lõi nguyên từng ký tự; nút đồng bộ theo nguồn; khách tạo tay sửa được, khách Pancake không.
-  await testPilotProducts();
-  // Nhập sản phẩm hàng loạt từ tệp (gap P0 «Import Products»): hai tổ chức THẬT `pi-food` / `pi-other` (không Pancake; tự cấp,
-  // tự dọn) — CSV + XLSX, chạy thử 0 dòng ghi, SKU tự sinh, field tuỳ biến, MỘT phiếu tồn đầu, nhập lại = đã có; nhà từ chối.
-  await testProductImport();
-  // Pilot bán buôn · P0 #3 + P1 #7/#8 + P2 #17/#18: tổ chức THẬT `po-si` (mẫu bán buôn, không Pancake; tự cấp, tự dọn) — đơn tay
-  // (erp-, orders:write, nhật ký, /orders), ORDER_OUTCOME + tồn thực tế không đổi; nhà: action từ chối, marketer 3.9 không đổi
-  // khi có đơn erp-; luật custom_record trên đối tượng hệ thống bị chặn; nhãn KPI sổ cố định; số tiền duyệt; vai trò AI.
-  await testPilotOrders();
-  // Đơn tay: giao không thành công · phí giao đồng giá · doanh thu khi đã giao (ORDER_OUTCOME.md 11.2/11.3): tổ chức THẬT `mo-hslc`.
-  await testManualOrderOutcome();
-  // Bảng giá sỉ + hạn mức nợ + công nợ + thu nợ gộp (0188): tổ chức THẬT `pl-si` (không Pancake; tự cấp, tự dọn).
-  await testPriceListsReceivables();
-  // Nhắc mua lại + sổ liên hệ khách (0189): tổ chức THẬT `ro-si` (không Pancake; tự cấp, tự dọn).
-  await testReorderReminders();
-  // Seafood OS · mẫu hải sản + chatbot báo giá sỉ: tổ chức THẬT `sf-si` (không Pancake; tự cấp, tự dọn).
-  await testSeafoodOs();
-  // Lịch hẹn & liệu trình (0190) + mẫu spa: tổ chức THẬT `ap-spa` (tự cấp, tự dọn).
-  await testAppointments();
-  await testWarranty();
-  await testStays();
-  await testStockLots();
-  await testFieldJobs();
-  await testRealEstate();
-  await testAppointmentBookingBot();
-  // Ghi đơn từ hội thoại fanpage (công tắc riêng, bot tắt vẫn ghi) + khách mua lại: tổ chức THẬT `os-hslc` (tự cấp, tự dọn).
-  await testSalesOrderSync();
-  // Phát lại hội thoại cũ (Historical Replay): tổ chức THẬT `rp-shop` / `rp-khac`, provider giả, tự cấp, tự dọn.
-  await testSalesReplay();
-  // Chế độ vận hành (quan sát · copilot · thử nghiệm · tự động): tổ chức THẬT `om-shop`, Pancake + provider giả.
-  await testSalesOperatingMode();
-  await testSalesInbox();
-  // Đồng bộ tin Pancake → hộp thư (P0 HSLC 14/10/2026): câu nhân viên trên Pancake đẩy hội thoại lên đầu + phát sự kiện; trùng / chậm / sai thứ tự; sức khoẻ trễ webhook → sổ.
-  await testInboxMessageSync();
-  await testP0856Images();
-  // Hộp thư nâng cao: level khách · lọc · lịch sử giao · góp ý cho AI — tổ chức THẬT `hop-thu-nang-cao` (tự cấp, tự dọn).
-  await testInboxAdvanced();
-  // Ô soạn hộp thư: chèn câu mẫu / dòng sản phẩm (giá = giá bot, tồn chỉ khi đọc được), quyền ≡ «Gửi», cô lập — `o-soan-a` / `o-soan-b`.
-  await testInboxComposer();
-  // INBOX-V2-A: bộ lọc gọn (14 tham số cũ còn đủ) · chưa đọc trước ở MÁY CHỦ (phân trang ổn định) · hàng đang mở đứng yên · ảnh không link Facebook giả — tổ chức `hop-thu-v2a`.
-  await testInboxV2A();
-  // Ảnh đại diện khách + bấm ảnh mở trang Facebook (chủ shop 10/10/2026 mục E · F): PSID / fb_id không bao giờ thành link Facebook,
-  // năm trạng thái PROFILE_*, đường ghi Pancake dùng chung một lõi, ops inbox-avatar-audit chỉ đọc. Thuần + quét mã nguồn.
-  await testInboxAvatarProfile();
-  // Ops pancake-avatar-shape (11/10/2026): dáng payload Pancake để tìm khoá ảnh thật — chỉ in đường khoá + kiểu + dạng, không giá trị. Thuần + quét mã nguồn.
-  testPancakeAvatarShape();
-  // Ops avatar-proxy-check (11/10/2026): ảnh qua proxy hỏng ở bước nào — đi lại từng bước bằng chính lib, chỉ in mã bước. Thuần + quét mã nguồn.
-  testAvatarProxyCheck();
-  // Ops sender-provenance-probe (11/10/2026): tin phía page mang dấu người gửi gì — đo rủi ro AI chen vào cuộc chat người trước deploy P0. Thuần + quét mã nguồn.
-  testSenderProvenanceProbe();
-  // Ops pancake-thread-diff (P0 HSLC 14/10/2026): tin Pancake đối chiếu sổ tin ERP + hộp thư — khớp mã/chữ, quá mới, trễ webhook. Thuần + quét mã nguồn.
-  testPancakeThreadDiff();
-  // Ops inbox-unread-dryrun (11/10/2026, điều kiện duyệt #792): chạy thử «chưa đọc» theo hàm #803 so với luật đang chạy + bấm giờ câu dẫn xuất — CHỈ ĐỌC. Thuần + quét mã nguồn + PGlite.
-  await testInboxUnreadDryrun();
-  // Migrate CSDL tổ chức cô lập (sự cố 0245 ở qa 12/10/2026): khoá theo tổ chức có trần chờ · lùi sau lỗi · trần mỗi tổ chức của verify-migrations · ops org-migrate-probe chỉ đọc. Thuần + PGlite + quét mã nguồn.
-  await testOrgMigrateIsolation();
-  // Phục vụ bằng lược đồ cũ (chủ shop 12/10/2026, «Serve with old schema»): sổ tương thích 0245 chứng minh bằng PGlite dừng ở 0244 + mã hiện tại; DEGRADED_MIGRATION chỉ khi hết giờ VÀ mọi mục thiếu trong sổ — tổ chức `serve-compat-0245`.
-  await testMigrationServeCompat();
-  // Ops stuck-conversation-audit (HOTFIX P0 12/10/2026, ca «Khanh Nhung»): hội thoại AI kẹt theo nhóm lý do · không chủ · SLA · nhắn lại sau đơn · đơn chưa đồng bộ — CHỈ ĐỌC. Thuần + quét mã nguồn + PGlite.
-  await testStuckConversationAudit();
-  // Ảnh khách qua proxy ERP (11/10/2026): URL Pancake mang khoá ⇒ cất bản KHÔNG khoá, máy chủ gắn token lúc tải; chặn SSRF, đệm LRU, quyền theo tổ chức — tổ chức `anh-dai-dien-proxy`, fetch giả.
-  await testAvatarProxy();
-  // INBOX-SEMANTICS-V3 (chủ shop 10/10/2026): bốn khái niệm tách riêng — chưa đọc (AI trả lời không xoá) · chờ trả lời · cần người thật · người đang xử lý; ma trận 20 hội thoại × mọi bộ lọc — tổ chức `hop-thu-sem-v3`.
-  await testInboxSemanticsV3();
-  // AI IM THÌ PHẢI CÓ CHỦ (P0 11/10/2026, yêu cầu 9): chuyển người ⇒ hàng đợi phòng (work.ownership) + hạn (work.sla) · một tin mỗi đợt · tin khách mới ⇒ một thông báo · trả AI xoá hạn · phân việc bật ⇒ người còn chỗ · câu đếm «không chủ» = 0 — tổ chức `chuyen-nguoi-co-chu`.
-  await testHandoffOwnership();
-  // HẬU MÃI + AI DỪNG + HÀNG ĐỢI CHUNG (HOTFIX P0 12/10/2026, ca HSLC «Khanh Nhung»): giai đoạn khách sau khi có đơn (lời khách không đổi logistics) · đồng hồ AI hỏng đọc mốc thật · watchdog mở lại nhường hết hạn, không đụng chuyển người bắt buộc · phòng trống ⇒ hàng đợi chung + 1 tin quản trị/ngày · trả-cho-AI luật cũ chạy thử / --apply / idempotent · cách ly tổ chức — tổ chức `hau-mai-ai-dung` + `hau-mai-cach-ly`.
-  await testPostSaleLifecycle();
-  // INBOX READ V3 (chủ shop 10/10/2026 tối, P0): «chưa đọc» = có tin KHÁCH thật sau con trỏ đọc CỦA NGƯỜI XEM (0239); nạp khung chat ≠ đọc; con trỏ = tin khách cuối của payload, chỉ tiến; xem trước tin khách khi chưa đọc; danh sách vá theo xác nhận đọc; audit FALSE-UNREAD = 0 — tổ chức `hop-thu-doc-v3`.
-  await testInboxReadV3();
-  // INBOX UNREAD PERF (chủ shop 11/10/2026, OWNER CORRECTION): «tin khách chưa đọc» = lượt khách mới nhất chưa xử lý — hàm của response-ownership (#803) sau cổng rẻ 0245 (trigger CSDL); ma trận chủ shop qua listInbox · A→B · parity cổng + hàm ≡ hàm trần ≡ bản TS trên 3.000 hội thoại · cổng đúng sau mọi đường ghi · audit TRƯỚC/SAU — tổ chức `hop-thu-unread-perf`.
-  await testInboxUnreadPerf();
-  // TÌM KIẾM HỘP THƯ (P0 inbox-search, chủ shop 11/10/2026): SĐT chuẩn hoá 0/+84/khoảng trắng · SĐT trong tin / đơn / Pancake / web · tên bỏ dấu + khoảng trắng · mã đơn · tìm × bộ lọc × phân trang · UNREAD rỗng ⇒ gợi ý «Tất cả» đúng số · danh sách mới không mang hội thoại cũ · 3.000 hội thoại — `tim-hop-thu-a` / `tim-hop-thu-b`.
-  await testInboxSearch();
-  // «Trả tất cả cho AI» (chủ shop 10/10/2026, mục D): quyền · cách ly tổ chức · trả được / bị chặn theo lý do · sự kiện + nhật ký người bấm · chạy lại 0 dòng mới — `hop-thu-bulk-a` / `hop-thu-bulk-b`.
-  await testInboxBulkAi();
-  // Nhập đủ lịch sử hội thoại vào hộp thư (0221): tổ chức THẬT `hop-thu-lich-su`, Pancake giả, tự cấp, tự dọn.
-  await testSalesInboxHistory();
-  // E2E trọn vòng: tin khách → AI → đơn → giao → Hiệu quả → mốc kích hoạt → sổ dùng → Owner Cockpit (tổ chức `e2e-shop`).
-  await testE2eAiSalesPlatform();
-  // AI vs người theo nhánh + drill-down về hội thoại (DoD #9, #15): tổ chức THẬT `xr-shop` / `xr-khac`.
-  await testSalesExperimentReport();
-  await testCommerceAgent();
-  await testZaloOa();
-  await testSalesEvents();
-  // Quảng cáo dẫn khách vào hội thoại ⇒ đơn bot mang ad_id (0225) — tổ chức THẬT `chat-ad-attr`, tự dọn.
-  await testChatAdAttribution();
-  await testOrderAttribution();
-  await testLostReasons();
-  await testAiQuality();
-  testPancakePoll();
-  testPageConfig();
-  await testMetaAdsOrgSync();
-  // Sổ mẩu + mẫu thắng làm nguồn ảnh của tổ chức khách: tổ chức THẬT `ma-hslc-thang` (tự cấp, tự dọn).
-  await testMetaAdsOrgWinners();
-  await testMetaAdsOrgPublish();
-  await testPancakePosOrgSync();
-  await testViettelPostOrg();
-  await testCarrierVtp();
-  await testCarrierGhn();
-  await testErpNative();
-  await testChatOrder();
-  await testCarrierGhtk();
-  await testShippingRouting();
-  await testFashionCodF3();
-  await testWholesaleLeadHunter();
-  await testRestaurantTemplate();
-  await testSelfServiceJourney();
-  await testQuickStart();
-  await testPhoneOtp();
-  await testSalesPacks();
-  // Bộ hội thoại vàng (M1): phát lại hội thoại kịch bản qua chatTurn, so ảnh chụp — tổ chức THẬT `gd-food` / `gd-fashion`.
-  await testSalesAgentGolden();
-  // Bộ đo đơn vàng v2 (sứ mệnh saas-order-accuracy): dataset hội thoại có nhãn × 2 biến thể công tắc tự xác nhận qua chatTurn
-  // thật, bộ đo thuần, số đo hiện trạng khớp tests/order-golden/BASELINE.md — tổ chức THẬT `og-food-off` / `og-food-on`.
-  await testOrderGolden();
-  // P0 10/10/2026 — AI không khẳng định điều chưa xác minh («đã nhận tiền» / «đã chốt đơn»): bảng chân lý thuần, quét mã nguồn
-  // mọi đường chữ bot, tổ chức THẬT `gd-food-cg` (bot tắt · chứng từ thu đủ số · đơn nháp · nối cùng luồng page + hội thoại).
-  await testSalesClaimGuard();
-  // P0 11/10/2026 — báo giá do MÁY CHỦ quyết (quote.ts): 2kg = 2 × 1kg − giảm, catalog mâu thuẫn ⇒ chưa xác thực, số tiền trong chữ bot
-  // phải thuộc báo giá đã xác thực, «đã lên đơn» chỉ khi đơn qua kiểm — tổ chức THẬT `gd-food-qi1` / `gd-food-qi2`.
-  await testSalesQuoteIntegrity();
-  // P0 12/10/2026 — giỏ có thẩm quyền (cart-commitment.ts): số lượng khách nói tường minh DÍNH tới khi khách sửa tường minh; công cụ
-  // ghi đơn hạ / bỏ món ⇒ máy chủ từ chối; ma trận G1–G6 qua chatTurn thật — tổ chức THẬT `gd-food-cc1` / `gd-food-cc2`.
-  await testSalesCartCommitment();
-  await testP0855Cart();
-  // P0 #855 phần còn lại (sau #860 / #861): báo giá phải có căn cứ + tổng giỏ bị từ chối không tới khách, phủ nhận món bot đưa ra ⇒ người
-  // ngay lần đầu + giữ tuyến giao ORDER_REVIEW, lời nhắc khách cũ, không lặp câu xin lỗi — tổ chức THẬT `gd-food-p855d`.
-  await testP0855Delta();
-  await testP0RepeatBuyer();
-  // P0 #863 — tin phía page tới giữa lượt ⇒ bot không gửi · khách huỷ sau lỗi bot ⇒ xin lỗi cụ thể + đơn đã sửa · huỷ lần hai ⇒ vòng đời đơn — tổ chức THẬT `gd-food-p863`.
-  await testP0863CancelFlow();
-  // P0 14/10/2026 — tổng tiền trong chữ bot = tổng máy chủ của giỏ hiện tại (ca «Châu Dương» 640k cho 1kg 280k) · lượt im không «nói rõ
-  // hơn» (ca «Viet Nguyen Thi») · upsell chưa đồng ý không vào đơn · tin vọng lại / trùng không sinh tin — tổ chức THẬT `gd-food-q640`.
-  await testSalesQuote640();
-  // P0 #868 (chủ shop 16/10/2026) — lời mời mua thêm THÔNG MINH: không còn cổng «chưa mời thêm món», một lời mời mỗi lượt mua, không mời lúc
-  // khách gửi SĐT / địa chỉ / đã từ chối; khách đã chọn 2kg ⇒ không «1kg hay 2kg»; món kèm phải đủ điều kiện — thuần + chatTurn thật (`gd-food-nba`).
-  await testSalesNextBestAction();
-  // P0 18/10/2026 (ca «ThanhPhương») — câu mẫu phải nói ĐÚNG món khách hỏi: «xin giá chả cá» không còn ra câu nem đang mang nhầm cách
-  // hỏi đó; page tự động nói chả cá · khách từ chối nem · khách hỏi hai món · model gửi câu mẫu sai món — thuần + chatTurn thật (`gd-food-qrf`).
-  await testP0QuickReplyFocus();
-  // P0 19/10/2026 (ca «Trung Dinh») — lời mời SAU CHỐT: một câu gộp vào tin xác nhận, «ok» không thêm món, gọi tên món ⇒ thêm vào đơn tự
-  // chốt, đã mời / từ chối / hết hàng / vận đơn đã chạy / đơn đồng ý — thuần + chatTurn thật (`gd-food-pco`).
-  await testP0UpsellAfterConfirm();
-  // P0 11/10/2026 — ops sales-integrity-audit: giá bot ≠ giá đơn · giá tự đổi · xác nhận giả · chuyển người không ai nhận ·
-  // địa chỉ chưa ghép · nhắc sau đơn chốt — thuần + CSDL thật (mã `erp-ia-`, tự dọn), tóm tắt không lọt PII.
-  await testSalesIntegrityAudit();
-  // P0 12/10/2026 — ops cart-intent-audit: bot tự hạ số lượng khách đã nói / đơn đủ ORDER_READY vẫn bị hỏi · mời — thuần + CSDL thật
-  // (hội thoại dựng theo ca HSLC, tự dọn), tóm tắt không lọt PII, chỉ đọc, ops khai đủ bốn chỗ.
-  await testCartIntentAudit();
-  // P0 14/10/2026 — ops conv-money-trace: số TỔNG trong tin bot ≠ báo giá giỏ (ca «Châu Dương» 640k cho 1kg 280k) · câu «nói rõ hơn»
-  // của engine khi khách không nhắn gì (ca «Viet Nguyen Thi») — thuần + CSDL thật (tự dọn), tóm tắt không lọt PII, chỉ đọc.
-  await testConvMoneyTrace();
-  // P0 #868 — ops upsell-offer-audit: phễu + upsell (sổ sự kiện) và lời mời đọc từ chữ đã gửi (mời lặp · sau từ chối · sau khi đã chọn) —
-  // thuần + CSDL thật (tự dọn), chỉ đọc, khai đủ bốn chỗ.
-  await testUpsellOfferAudit();
-  // Chủ shop 18/10/2026 (HSLC) — ops shipment-origin-audit: vận đơn do ERP · POS/Pancake · hay ngoài ERP tạo (chỉ hãng, không đơn) —
-  // thuần + CSDL thật (tự dọn), «đã có vận đơn dù ERP đang giữ» hỏi bằng decideShippingRoute, tóm tắt chỉ số đếm, chỉ đọc.
-  await testShipmentOriginAudit();
-  // Chủ shop 18/10/2026 (luồng vận đơn HSLC) — ops shipping-source-probe: vận đơn đang được TẠO Ở ĐÂU (ERP · Pancake POS · Viettel Post),
-  // ghép POS ↔ ERP (LINK · gợi ý), rủi ro hai vận đơn, kết luận MEASURED / HINT / UNKNOWN — thuần + CSDL thật (tự dọn), Pancake giả, chỉ đọc.
-  await testShippingSourceProbe();
-  // P0 11/10/2026 (KimThu Le) — vòng đời khách dùng chung + follow-up đọc lại ngay trước khi gửi (đơn thật · chứng từ thu ·
-  // từ chối nhận tin · người / nguồn khác vừa nhắn), khoá gửi chống trùng, vết quyết định — tổ chức THẬT `fu-life` (tự cấp, tự dọn).
-  await testFollowupLifecycle();
-  // Customer 360 (11/10/2026, ca «Nga Ho Thien»): nhận diện khách cũ qua đơn của chính hội thoại / SĐT, địa chỉ cũ ĐÃ XÁC MINH,
-  // «vẫn địa chỉ cũ» ⇒ tra trước khi hỏi — tổ chức THẬT `gd-food-c360` / `gd-fashion-c360` (tổ chức khác không lọt).
-  await testCustomer360();
-  // Đơn cần người kiểm (chủ shop 08/10/2026): khách huỷ ⇒ ghi chú + cờ, xã chưa ghép ⇒ cờ, nút nhanh Xác nhận / Huỷ, lời xác nhận,
-  // SĐT chuẩn hoá — tổ chức THẬT `or-rv` (không Pancake; tự cấp, tự dọn).
-  await testOrderReview();
-  // Khách huỷ đơn (sự cố #189A435E, chủ shop 10/10/2026 — thay luật 08/10): giữ đơn một lần ⇒ khách vẫn huỷ ⇒ tự «Đã huỷ» theo vòng
-  // đời vận đơn (hãng xác nhận mới huỷ; đã lấy / hãng lỗi ⇒ hàng ngoại lệ + cảnh báo), trùng = một lần, ghi hỏng ⇒ không nói đã huỷ,
-  // đối soát chạy thử — tổ chức THẬT `oc-cx` + `gd-food-oc` (tự cấp, tự dọn), hãng giả.
-  await testOrderCancelConsistency();
-  // Hộp thư V2-B: «Đơn đang chốt» đầu cột phải — đọc đơn bot ghi (một câu SQL), kiểm từng ô bằng validator của lõi, nút xác nhận
-  // = `confirmOrderReviewCore` — tổ chức THẬT `or-ib` (tự cấp, tự dọn).
-  await testInboxOrderPanel();
-  // Trang «Sản phẩm» của khách vỏ: danh sách gọn (tên · SKU · giá · tồn khả dụng · thiếu gì) · số gọn dấu phẩy · «0 kho» — thuần + mã nguồn.
-  await testProductsShellV2();
-  await testGoLive();
-  // Danh sách «giá trị đầu tiên» chín bước của vỏ Chốt Đơn (chủ shop 10/10/2026) — tổ chức THẬT `fv-shop`, Pancake GIẢ.
-  await testOnboardingV2();
-  await testSalesVision();
-  testChatWidget();
-  await testWebProductImport();
-  await testMessenger();
-  // AI ↔ người trên từng hội thoại (Tiếp quản / AI gợi ý / Trả lại AI) + cổng gửi chống trả lời đôi — tổ chức THẬT
-  // `kiem-soat-hoi-thoai`, Messenger trực tiếp qua Graph giả.
-  await testConversationControl();
-  // AI nhường người: AI_ACTIVE · HUMAN_COOLDOWN (đếm ngược, «Cho AI tiếp tục ngay») · HUMAN_TAKEOVER («Trả lại cho AI») — tổ chức
-  // THẬT `nhuong-nguoi` (+ `nhuong-nguoi-khac` cho cô lập), Messenger trực tiếp + fanpage Pancake giả, đồng hồ nhường tường minh.
-  await testSalesHumanTakeover();
-  // P0 11/10/2026 — lượt khách & chủ trả lời: tin chào / tự động / chữ hệ thống không còn là «đã trả lời» hay «người»; chỉ người đã
-  // xác minh làm AI nhường; hết nhường ⇒ đánh giá lại tồn một lần; câu đếm + hàng đợi cứu đơn — tổ chức THẬT `tra-loi-dung-luot`.
-  await testResponseOwnership();
-  // Hộp thư hợp nhất + song song Pancake / Meta trực tiếp (0233): đường canonical theo page + backfill giữ đường hôm nay, khử
-  // trùng hai nguồn, đường phụ không kích AI, người trả lời ba nguồn ⇒ nhường, số phút nhường theo workspace, thẻ lọc ≡ aiHoldOf —
-  // tổ chức THẬT `l3-hop-thu` (+ `l3-hop-thu-khac` cho cô lập), Graph + Pancake giả.
-  await testSaasL3Inbox();
-  // Bot tra trạng thái đơn (Commerce Truth): chỉ đơn của CHÍNH hội thoại, trạng thái = lời khai ĐVVC — tổ chức THẬT `bot-tra-don`.
-  await testBotOrderStatus();
-  // P0 #855: hỏi lịch giao ≠ hỏi trạng thái — máy chủ quyết câu trả lời / chuyển người, không hứa giờ — tổ chức THẬT `p0-855-lich-giao`.
-  await testP0855DeliveryIntent();
-  // Order Truth: đơn bot chốt mang dấu lời nhắc + cấu hình + model + bản mã; sổ chi phí AI của lượt chat mang mã hội thoại.
-  testOrderTruthStamp();
-  // Đơn ↔ hội thoại ↔ khách: link hội thoại của đơn mở Hộp thư ERP (mọi kênh); hồ sơ khách chỉ thấy hội thoại nối bằng
-  // khoá cứng — tổ chức THẬT `truy-vet-hoi-thoai`.
-  await testConversationTrace();
-  // Messenger trực tiếp — token hỏng (Graph 190) ⇒ kết nối về Nháp + báo người một lần; lỗi ngoài 24 giờ không đụng kết nối.
-  await testMessengerHealth();
-  testConnectorsLegacy();
-  // Shop CHỈ nối Facebook trực tiếp: ghi đơn từ hội thoại đọc sổ tin ERP (không Pancake) + trọn đường nhận → bot → nhân viên →
-  // đơn → ghi đơn với 0 lời gọi pages.fm — tổ chức THẬT `chi-facebook`.
-  await testNativeOrderSync();
-  // Vòng đời page Meta + lịch sử hội thoại trực tiếp: phân trang /me/accounts, gỡ page ⇒ gỡ đăng ký webhook, nhập 20 tin gần nhất
-  // mỗi hội thoại qua Conversations API — tổ chức THẬT `vong-doi-page`.
-  await testMessengerLifecycle();
-  // Khám phá page Facebook: tách 6 lý do «không có page» (sự cố 06/10/2026) — Graph giả, không mạng.
-  await testMessengerDiscovery();
-  // App Meta riêng cho Messenger (cấu hình thử): bắt tay GET + chữ ký của hai app + đường đưa secret lên máy chủ.
-  await testMessengerWebhookSecrets();
-  // Kênh kết nối hợp nhất: gộp hai nguồn · sức khoẻ ba mức · câu khách không từ kỹ thuật · Configuration ID · cô lập tổ chức.
-  await testChannelsOverview();
-  testSalesAiDownAlert();
-  // Giám sát AI bán hàng (sau sự cố P0 06/10/2026): sự cố hết tiền phải ĐỎ đúng nguyên nhân, báo một lần mỗi khung.
-  await testAiSalesHealth();
-  // Thử lại có lùi dần + dead-letter + không trả lời trùng (đường fanpage thật, Pancake giả).
-  await testAiSalesRetry();
-  // Khoá AI chính → khoá dự phòng → người (sự cố 06/10/2026): phân loại · ngắt mạch · không gửi trùng — tổ chức THẬT
-  // `fo-ai-failover`, provider giả.
-  await testAiProviderFailover();
-  // Cứu hội thoại bị bỏ sót trong sự cố AI — chỉ đọc, bốn lớp, không gửi gì.
-  await testAiSalesRecovery();
-  await testMessengerMultiPage();
-  await testPush();
-  // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò
-  // hệ thống + tuỳ chỉnh ⇒ tài khoản đúng tổ chức, phiên đúng claim; dùng lại / hết hạn / thu hồi / chép chéo ⇒ một câu chung;
-  // song song ⇒ một tài khoản; hạn mức gói lúc tạo (tính ghế đã hứa) và lúc nhận; bảng không chứa mã thô; chặn dò theo IP.
-  await testUserInvites();
-  testTestOrgCodes();
-  await testPasswordReset();
-  // PUB-07: «Quên mật khẩu» tự phục vụ — OTP Zalo (lõi phone-otp) ⇒ phiếu qua lõi password-reset; OTP tắt ⇒ một yêu cầu hỗ trợ. Tổ chức
-  // THẬT `fq-*`, tự cấp, tự dọn; Zalo là hàm giả.
-  await testForgotPassword();
-  // P0 08/10/2026: khách do admin tạo (job cấp phát) đăng nhập bằng email + mật khẩu KHÔNG cần mã tổ chức — chỉ mục danh tính ghi
-  // ngay lúc cấp phát / tạo hộ / mời / đặt mật khẩu; gửi lại kích hoạt; email trùng hai workspace; đối chiếu dữ liệu cũ. Tổ chức
-  // THẬT `iel-*`, tự cấp, tự dọn; loginAction / logoutAction chạy trong phạm vi request dựng tay của Next.
-  await testIdentityEmailLogin();
-  // Ops `saas-acceptance` (lượt đi vai KHÁCH Chốt Đơn trên production): lá chắn sổ khai · cấp phát qua job «Tạo khách» (máy) ·
-  // kích hoạt → /reset → /login không mã tổ chức · xoay mật khẩu rồi vứt · không lộ bí mật · E2E chat → AI → đơn với AI giả.
-  await testSaasAcceptance();
-  // LAUNCH SPRINT §11 «Observability before sales» (sứ mệnh saas-ops-signals): tám tín hiệu vận hành của MỘT khách — lỗi đăng nhập có
-  // lý do (không lộ cho người dùng, không email / mật khẩu thô, chặn dò không nhân dòng) · ghi đơn hỏng KHÔNG thành «AI hỏng» · AI im
-  // có tên · gương sức khoẻ ở CSDL nhà (job sales-health, hết lỗi ⇒ về OK) · khung chỉ người vận hành đọc được. Tổ chức THẬT `ops-sig*`.
-  await testOpsSignals();
-  // Ops `ops-signals-check`: tám tín hiệu O1–O8 tính bằng ĐÚNG hàm của khung cho mọi tổ chức, CHỈ ĐỌC — hỏng ⇒ FAIL nêu đúng tín hiệu,
-  // UNKNOWN đếm riêng không FAIL, kênh công khai chỉ mã + số; người vận hành máy qua bộ tính quyền của phiên.
-  await testOpsSignalsCheck();
-  // Ops `security-acceptance` (LAUNCH_GATE §3): quét bí mật trong trang · phán quyết dò cô lập (200 dựng bản ghi tổ chức kia = RÒ) ·
-  // phong bì bản mã (bản rõ = FAIL) · CHỈ ĐỌC, chỉ GET, công khai chỉ trạng thái + số.
-  await testSecurityAcceptance();
-  // Ops `inbox-perf-probe`: Hộp thư khách — tải / chuyển hội thoại bấm giờ ĐÚNG chuỗi hàm máy chủ của page.tsx, CHỈ ĐỌC (handle chỉ đọc,
-  // danh tính chỉ xem không ghi staff_seen_at), công khai che tổ chức thành org#i, mẫu < 3 ⇒ chưa kết luận, không đích. Tổ chức THẬT `ipp-a`.
-  await testInboxPerfProbe();
-  // P0 inbox-list-perf (13/10/2026): thứ tự rẻ trước ≡ bản chuẩn #803 từng hội thoại · listInbox tính trực tiếp ≡ lưu sẵn trên ≥ 5.000
-  // hội thoại (số đo in ra) · chuyển hội thoại không dựng lại danh sách · tự làm mới không chồng lượt. Tổ chức THẬT `hop-thu-list-perf`.
-  await testInboxListPerf();
-  testHelpGuides();
-  // Trang giới thiệu: bảng giá đọc thật từ platform_plans, gói khởi điểm không bao giờ in thành 0 ₫.
-  await testPublicSiteData();
-  await testDataExport();
-  // Sổ dùng AI + hạn mức AI theo gói + công tắc AI: hai tổ chức THẬT `au-a` / `au-b` (tự cấp, tự dọn), provider GIẢ —
-  // một dòng / lượt đúng nguồn, BLOCKED_QUOTA không gọi model, A không trừ B, BYOK không trừ credit nền tảng, không rơi về khoá nhà.
-  await testAiUsage();
-  // Platform AI Model Control (06/10/2026): model AI dùng chung đổi qua chính sách có cổng (kiểm khả dụng → chạy thử → áp dụng
-  // → hoàn tác), model mới hỏng ⇒ cùng lượt đi model dự phòng, sổ AI ghi đúng model thật.
-  await testPlatformAiModel();
-  // Vận hành khách pilot: vòng đời (checklist tính từ dữ liệu thật, ghi đè có lý do), trang sức khoẻ (không dữ liệu
-  // nghiệp vụ, mỗi lượt xem có vết), công tắc khẩn (đình chỉ · tạm dừng luật · tắt kết nối) — hai tổ chức THẬT `pop-a`
-  // (tạo hộ qua /start) / `pop-b` (tự cấp, tự dọn).
-  await testPilotOps();
-  await testPlatformBilling();
-  // Số dư AI + nạp QR (0235): sổ cái chỉ ghi thêm, phiếu nạp ERPNAP, tiền về cộng đúng một lần, tự lành, cô lập tổ chức —
-  // hai tổ chức THẬT `aib-a` / `aib-b`, tự cấp, tự dọn; khôi phục tài khoản nhận tiền trong finally.
-  await testAiBalance();
-  // Trừ Số dư AI cho khách AI vượt phần gồm + cổng hết số dư (chỉ chặn khách MỚI) + báo số dư — tổ chức THẬT `aibu-*`, tự dọn.
-  await testAiBalanceUsage();
-  // Số dư AI trong kinh tế đơn vị /platform: tiền thật đã dùng = doanh thu, không cộng hai lần với phần vượt ước tính.
-  await testAiBalanceEconomics();
-  // AI dùng chung TRẢ TRƯỚC theo khách AI (AI_BALANCE_V1 §7): phiên bản giá chỉ-ghim, mọi khách AI trừ Số dư, ops một bước một
-  // lượt — hai tổ chức THẬT `pai-*` ở giá cũ, tự dọn; khôi phục tài khoản nhận tiền + mốc đồng hồ trong finally.
-  await testOrgPrepaidAi();
-  // Nền móng giá & thu phí (0222): gói cấu hình được, tính năng, hạn mức mềm / cứng, đồng hồ đo, sự kiện trùng, kinh tế đơn vị —
-  // ba tổ chức THẬT `prc-a` / `prc-b` / `prc-c`, tự cấp, tự dọn; khôi phục cấu hình gói + ngưỡng trong finally.
-  await testPricingBilling();
-  await testSaasPlatform();
-  // Sức khoẻ khách SaaS (/platform/customers): phân loại thuần + ba tổ chức THẬT `skh-*` (khoẻ · nguy cấp · cần chú ý), tự cấp,
-  // tự dọn; chỉ người vận hành; thiếu dữ liệu không bao giờ ra «Khoẻ».
-  await testCustomerHealth();
-  // Trung tâm giá trị SaaS PR-1 (thuần): sổ chỉ số theo tổ chức, bốn nhãn quy kết, null ≠ 0, sức khoẻ / rủi ro rời bỏ có mã lý do.
-  await testSaasValueCenter();
-  await testPricingV1();
-  // Chuyển tổ chức legacy → V1 (ops saas-v1-migration) + phần gồm tính tiền dùng chung — không thu đôi ghế mua thêm (OVERAGE O1).
-  await testSaasV1Migration();
-  await testAiCustomerSend();
-  await testSaasL5BillingTrial();
-  // Phase 14: workspace nhà đi ĐÚNG đường thương mại của khách (gói gán → ghi đè → giữ từ trước) — bài so trước/sau từng
-  // quyết định (tính năng · hạn mức · hạn mức tháng · gói · trang gói) + năm đột biến dữ liệu; khôi phục sổ gói trong finally.
-  await testSaasInternalPlan();
-  // Che dữ liệu AI nội bộ khỏi khách (07/10/2026): DTO máy chủ + lưu cấu hình giữ động cơ AI + quét mã + khối vận hành —
-  // tổ chức THẬT `hi-shop`, tự cấp, tự dọn; khoá bí mật kiểm thử trả lại nguyên trạng trong finally.
-  await testSaasHideInternal();
-  // F-02 (kiểm vỏ khách 08/10/2026): cửa hàng tự đăng ký qua /start có thuê bao sản phẩm theo module mẫu vừa bật, lỗi không làm
-  // hỏng đăng ký mà để vết, trang Gói của khách không in nhãn nội bộ, sửa bù chạy thử không ghi — tổ chức THẬT `ssu-*`, tự dọn.
-  await testSaasSignupSubscription();
-  // «Tạo khách mới» của người vận hành (kiểm khởi chạy 08/10/2026): thương hiệu theo bộ sản phẩm, gói theo bảng giá niêm yết (máy
-  // chủ chặn giá cũ / `internal` cho khách ngoài), mẫu «Chỉ cần AI bán hàng» cài bằng bộ cài /start (chạy lại không nhân đôi, hỏng có
-  // vết), form nói vì sao chưa bấm được; nội bộ / nhà không đổi — tổ chức THẬT `ccr-*`, tự cấp, tự dọn.
-  await testCreateCustomerRules();
-  // Sổ kinh tế SaaS + Owner Cockpit (0203): hai tổ chức THẬT `saas-a` / `saas-b`, tự cấp, tự dọn.
-  await testPlatformSaas();
-  // Trung tâm giá trị SaaS PR-3 (0240): ảnh giá trị theo tổ chức + sức khoẻ theo ngày — một lần mỗi ngày VN, chỉ đường JOB, nguồn hỏng ⇒
-  // chỉ ô của nó null + source_errors, ngày cũ không bị ghi. Hai tổ chức THẬT `tvs-a` / `tvs-b`, tự cấp, tự dọn.
-  await testSaasValueSnapshots();
-  await testPlatformUi();
-  // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,
-  // credential, khoá job, hẹn giờ, webhook. Đứng ngay trước bài ngữ cảnh để mọi bài phía trên không thấy tổ chức nào khác.
-  await testPlatformProcessIsolation();
-  // Nền tảng 1.x: module của từng job, client chia ngăn theo tổ chức, fan-out lịch, webhook, R-17 (mã `ph-`,
-  // tự cấp và tự dọn; tắt thử một module của nhà rồi khôi phục trong finally).
-  await testPlatformJobs();
-  // G-SCHED: luật tự động của tổ chức khách tự chạy qua fan-out tuần tự (mã `gs-`, tự cấp và tự dọn); nhà giữ nguyên.
-  await testGSched();
-  // Phase 8b: nhà chạy được runtime Chốt Đơn KHI bật ai_sales — webhook fanpage/Zalo, lịch job, nguồn AI HOME; nhà tắt ⇒ như
-  // cũ; khách không đổi (mã `vr-`, tự cấp và tự dọn; dòng ai_sales của nhà trả lại nguyên trạng trong finally).
-  await testSaasVnxRuntime();
-  // Cổng page của nhà: module ai_sales + bot bật mà danh sách page rỗng ⇒ 0 tin trên mọi đường; BÓNG lưu câu soạn, 0 gửi;
-  // LIVE như khách; khách không đổi (CSDL nhà dọn trong finally, tổ chức `pg-khach` tự cấp và tự dọn).
-  await testSaasPageGate();
-  // Vỏ app Chốt Đơn Tự Động: workspace Sales Agent thấy đúng 8 mục, route ERP nội bộ chặn ở máy chủ (`/` ⇒ hộp thư), ERP / nhà
-  // không đổi; hợp đồng mobile (tổ chức `sa-shell` tự cấp và tự dọn).
-  await testSaasShell();
-  // Vỏ Chốt Đơn: vai trò chỉ ba lựa chọn (Chủ cửa hàng · Nhân viên bán hàng = mã BAN_HANG · Chỉ xem), máy chủ từ chối lựa chọn
-  // ngoài bộ; ERP / nhà không đổi; không quyền / mẫu nào sửa (tổ chức `ssr-shell` tự cấp và tự dọn).
-  testShellStaffRolesPure();
-  await testShellStaffRolesServer();
-  // Vai trò «Nhân viên bán hàng» (BAN_HANG) nhận ai_sales:reply — chủ shop duyệt 09/10/2026: mẫu 1.1.0 + ops nâng tổ chức cũ qua
-  // bộ cài mẫu (chạy thử không ghi · idempotent · đã tự sửa / nền khác ⇒ bỏ qua). Tổ chức `bhr-*` tự cấp và tự dọn.
-  testBanHangReplyPure();
-  await testBanHangReplyServer();
-  // F-01: đăng nhập / đăng ký trong vỏ Chốt Đơn tính đích cuối ngay trong action — không `redirect("/")` mà layout chuyển
-  // hướng (vòng lặp trang trắng); nhà / workspace ERP đúng safeNextPath (tổ chức `dich-dang-nhap` tự cấp và tự dọn).
-  await testShellLoginLanding();
-  // Cùng lớp vòng trắng ở tầng CỔNG: thiếu quyền ⇒ người vỏ về trang nhà của vỏ ?forbidden=1 (không «/» mà layout vỏ chặn), ERP
-  // giữ /?forbidden=1; /module-disabled đứng ngoài nhóm (dashboard) (tổ chức `sgr-cong` tự cấp và tự dọn).
-  await testShellGateRedirects();
-  // Màn hình lỗi dashboard + gốc: không in error.message / DATABASE_URL, chỉ mã tham chiếu, lối ra <a href="/"> (Commercial Sweep C1 #11).
-  testErrorBoundary();
-  // ERP a11y + bố cục hẹp (Commercial Sweep PR G): h1 màn không tìm thấy, công tắc / ô số có tên, /payroll không tràn 390 px.
-  testErpA11y();
-  // Cổng nối thẳng Facebook (review #706): khách thấy «sắp mở» khi cờ meta.direct-connect.open đóng; người vận hành thấy nút thật.
-  await testDirectConnectGate();
-  // Vỏ Chốt Đơn không có chữ dưới 11 px (docs/design-system.md mục 10 · Commercial Sweep PR B).
-  testShellTypography();
-  // Trang chi tiết ERP đuôi dài (Commercial Sweep): «%» lẻ không 500, khách sỉ không mã thô, phiếu sản xuất cuộn ngang, lượt nhập VTP hỏng.
-  testErpDetailTail();
-  // Ô nhập ở trang chi tiết ERP có tên cho trình đọc màn hình (Commercial Sweep — lô xưởng, khách sỉ, topic, mẫu, luật tự động).
-  testErpFormNames();
-  // Trang chi tiết đơn / khách / hội thoại: không chữ, bộ đếm, ô tiền Pancake ở tổ chức không Pancake (Commercial Sweep P0 động).
-  testDetailPagesShell();
-  // Vỏ Chốt Đơn C1 #6 · #7: /login sau redirect() của server action mang thương hiệu của host; chữ kỹ thuật (webhook · token ·
-  // ERP · API · TEST · field · connector · module · Viettel) không lộ ở nhánh người vỏ thấy — quét cây cú pháp, miễn trừ có lý do.
-  testShellCopyR3();
-  // AI Sales settings V2 (bề mặt 3 của VISIBLE_PRODUCT_FINISH_BOARD): ô trạng thái đầu trang — thiếu dữ kiện ⇒ «Chưa rõ», không «Đang chạy» —
-  // một nút chính qua cổng vỏ; nhánh khách không nhận / không in khoá AI · model · tên hãng · chi phí USD. Thuần + quét mã nguồn.
-  testAiSalesSettingsV2();
-  // Kiến thức của shop cho chatbot (sổ AIS-05): câu thường gặp · chính sách · khuyến mãi — zod, hạn theo giờ VN, rỗng ⇒ lời nhắc giống hệt,
-  // ô khuyến mãi không vào phép tính tiền (quét mã nguồn).
-  testAiSalesKnowledge();
-  // Team Premium F2: dấu «model không dùng được» nhớ theo tổ chức + kết nối — khoá BYOK hỏng của shop A không lùi IM LẶNG
-  // model của shop B (hay của khoá nền tảng cùng tổ chức) về model mặc định; mỗi shop được báo lỗi của chính mình. Provider giả.
-  {
-    const r = await testSalesModelFallbackTenant();
-    assert.deepEqual(r.failed, [], `sales-model-fallback-tenant: ${r.failed.join(" · ")}`);
+  if (khoi.chay("K02")) {
+    testCreativeLoop();
+    testCreativeDesignPure();
+    await testCreativeDesignDb(db);
+    await testCreativeGenerate(db);
+    await testCreativeEvaluate(db);
+    // Tab ④ Đang chạy (30/09/2026): tên đồng bộ Ads Manager · bộ lọc kỳ · tìm · số đo trong kỳ, phán quyết toàn đời.
+    testCreativeLiveBoardPure();
+    await testCreativeLiveBoardDb(db);
+    // Company OS · Agent B — đơn creative qua ORDER_AD_ID, chi nhóm/mẩu theo hạt mẩu, tóm tắt theo mẫu, lọc thư viện.
+    await testCompanyOsCreativeAds(db);
+    testCreativeWrite();
+    await testCreativeWriteDb(db);
+    testCreativeScalePure();
+    await testCreativeScaleDb(db);
+    testCreativeMoqPure();
+    await testCreativeMoqDb(db);
+    // Company OS · B2 — MOQ thiết kế + /ads/daily nhóm/mẩu đếm đơn QC bằng ORDER_AD_ID / ORDER_ADSET_ID (một cách đếm với /ads).
+    await testCompanyOsAdOrderUnify(db);
+    testAdsKillSwitchPure();
+    await testAdsKillSwitchDb(db);
+    await testCreativeLoopTick(db);
+    await testCreativeExtendedWindow(db);
+    await testCreativeEmptyBatch(db);
+    testCreativeManualPure();
+    await testCreativeManualDb(db);
+    testCreativeManualGenPure();
+    await testCreativeManualGenDb(db);
+    // Xếp fanpage theo camp (chủ shop 28/09/2026): mã win ⇒ page đã ra đơn mã ấy; TEST ⇒ page chưa ra đơn đã chạy mẫu tương tự.
+    testFanpageRankPure();
+    await testFanpageRankDb(db);
+    // Video Scale cho mã win (docs/video-scale.md): hàng đợi, trần tiền, AMBIGUOUS, hậu kỳ + QC thật khi máy có ffmpeg.
+    testVideoScalePure();
+    await testVideoScaleDb(db);
+    testVideoScaleReelPure();
+    await testVideoScaleReelDb(db);
+    testVideoScaleAdsPure();
+    await testVideoScaleAdsDb(db);
+    testVideoScaleOptimizePure();
+    await testVideoScaleOptimizeDb(db);
+    testVideoScaleOmniPure();
+    await testVideoScaleOmniFlow();
+    await testVideoScaleOmniDb(db);
+    testVideoScaleProgressPure();
   }
-  // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
-  // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
-  await testPlatformRbac();
-  // Nền tảng đa tổ chức: cấp một tổ chức THẬT thứ hai (CSDL PGlite riêng, mã `pt-`) — đứng cuối để mọi
-  // bài phía trên chạy đúng như trước nền tảng, không thấy tổ chức nào khác ngoài nhà.
-  await testPlatformContext();
-  // Kịch bản chấp nhận §55 + tấn công truy cập trực tiếp theo id (mã `pq-`).
-  await testPlatformIsolation();
-  // Hardening Số dư AI (review #644, LOW): báo «hết» tách theo mức chặn · gợi ý người bình luận bỏ dòng bot / page tự gửi ·
-  // đối chiếu sổ thu phí chỉ ở tổ chức nhà — tổ chức THẬT `aibh-growth`, tự cấp, tự dọn.
-  await testAiBalanceHardening();
-  // Nền tảng · 1.x: trang tổng hợp / công cụ AI theo module, chẩn đoán chỉ đọc, tệp hai tổ chức (mã `ph-`, tự cấp và tự dọn).
-  await testPlatformHardening();
-  console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
+  if (khoi.chay("K03")) {
+    await testVideoScaleProgressDb(db);
+    testVideoScaleEditPure();
+    await testVideoScaleEditDb(db);
+    testVideoScaleEditorPure();
+    await testVideoScaleEditorDb(db);
+    testVideoScaleUxPure();
+    await testVideoScaleUxDb(db);
+    testVideoScaleShowcasePure();
+    await testVideoScaleShowcaseDb(db);
+    testIdeaPresets();
+    testCreativeStudioPure();
+    await testCreativeStudioDb(db);
+    testVideoScaleMusicPure();
+    await testVideoScaleMusicDb(db);
+    testCreativeManualDesignPure();
+    await testCreativeManualDesignDb(db);
+    testCreativeImportPure();
+    await testCreativeImportDb(db);
+    testCreativeCopyPure();
+    await testCreativeCopyDb(db);
+    // Thư viện Media cho shop thực phẩm + khoá AI của tổ chức (04/10/2026) — hai tổ chức thử tự cấp, tự dọn.
+    testCreativeFoodIndustryPure();
+    await testCreativeFoodIndustryOrg();
+    await testCreativeImageBatch(db);
+    testCreativeScreens();
+    testCreativeScreens2();
+    await testAdsBrakeByDecision(db);
+    testAdsLevelProbe();
+    testAdsGrain();
+    await testAdsAttribution(db);
+    await testAdsAnomaly(db);
+    await testAdsIdentity(db);
+    await testAdsAttributionLink(db);
+    await testAuditTrail(db);
+    testFormatNullSafety();
+    testColumnResize();
+    testNominalTableDisplay();
+    testHandoffStageSet();
+    testHandoffPureFunction();
+  }
+  if (khoi.chay("K04")) {
+    await testHandoffSqlMatchesTypescript(db);
+    testMetricRegistry();
+    testPersonTargetGuard();
+    testProductTargetGuard();
+    testTargetWindowAndPeriod();
+    testRangeAndBands();
+    testScorecardEvaluator();
+    testScorecardContract();
+    testDataQualityIssues();
+    await testReturnReceiveSelector(db);
+    testSearchTermParsing();
+    await testShipmentSearch(db);
+    await testCsOrderReconcile(db);
+    await testCsSemantic(db);
+    await testCsSemanticCache(db);
+    testCsNextAction();
+    testCsUiContrast();
+    testOutreachErrorClassify();
+    await testOutreachIdempotentSend(db);
+    testBroadcastVerdictPure();
+    await testBroadcastFlowDb(db);
+    testNurtureWindowPure();
+    await testNurtureWindowSendDb(db);
+    testOutreachEligibility();
+    await testOutreachOutcomeFacet(db);
+    await testCsCustomerQueue(db);
+    testCareUiContrast();
+    testCareFilters();
+    testCareRounds();
+    testCareDateFilters();
+    testPhraseFilter();
+    testSizeMatrix();
+    await testProductNotes(db);
+    testSmokeTiming();
+    testUiConsistency();
+    testNavigationCoverage();
+    testDepartmentMap();
+    testLoadingUxContract();
+  }
+  if (khoi.chay("K05")) {
+    testDrilldownContract();
+    testAlertConfig();
+    testMigrationJournal();
+    testSchedulerCoverage();
+    await testSchedulerClock();
+    testShipmentJoinGrain();
+    testFastPathWiring();
+    testBankMatch();
+    testActionWiring();
+
+    // ═══ RÕ NGHĨA CHỈ SỐ VẬN ĐƠN + BÁO CÁO LÝ DO HOÀN ═══
+    testReasonTaxonomy();
+    testMachineNeverInventsHumanReason();
+    testRescueRateNeverFakesZero();
+    testTimeBasisHasNoSilentFallback();
+    await testKpiCohortUsesHandoffDate(db);
+    await testProductRowCountsOrdersOnce(db);
+    await testNoHandoffEvidenceStaysOut(db);
+    await testReasonReportDefaultsToOutcomeDate();
+
+    // ═══ TẦNG QUYẾT ĐỊNH CỦA BÁO CÁO HOÀN (14/09/2026) ═══
+    testConditioningHierarchy();
+    testNoDoubleCountAcrossEvents();
+    testMarketerAttributionGoesByKey();
+    testProblemClassification();
+    testRiskBadgeReadsTargets();
+    testActionEngineGates();
+    await testReasonDenominatorsAndFilters(db);
+    testReasonGroupContract();
+    await testReasonRegroupAndThreeLevelDrilldown(db);
+    await testIntelligenceRuns(db);
+
+    // ═══ LỚP QUAN SÁT LÝ DO HOÀN (14/09/2026) ═══
+    testReasonSourceRegistry();
+    testClassifierNeverConcludesForCarrier();
+    testClassifierStepsAndCodes();
+    testQuickPickHasNoFreeText();
+    testObservationDedupeKeyIsShared();
+    await testObservationResolution(db);
+
+    // ═══ NHÓM LÝ DO THEO CHỨNG CỨ (20/10/2026) ═══
+    testEvidenceTaxonomyContract();
+    testEvidenceResolution();
+    testEvidenceOverrideTransition();
+    testEvidenceObservationShapes();
+    testEvidenceUsesOneAuthorityTable();
+  }
+  if (khoi.chay("K06")) {
+    await testEvidenceOnDb(db);
+    await testVtpBeatsPancakeRelayOnDb(db);
+    await testReasonTextLatestParity(db);
+    testUseServerExports();
+    testClientBoundaryExports();
+    testVtpTrackingLink();
+    testSmokeCoverage();
+    testOperatingFunnel();
+    testLogisticsFreshness();
+    testShipmentStatusAgePure();
+    testOrderDuplicatePure();
+    testPreshipValidationPure();
+    testPromisedDeliveryPure();
+    await testMemoInflight();
+    await testCacheSemantics();
+    // Team Premium F3: khoá «một job một lượt» của runSyncJob giữ TRƯỚC lượt await đầu — hai lượt cùng nhịp chỉ chạy thân job một lần;
+    // chèn sync_runs ném thì khoá vẫn được nhả (không kẹt job tới khi khởi động lại).
+    {
+      const r = await testSyncRunnerConcurrentStart();
+      assert.deepEqual(r.failed, [], `sync-runner-concurrent-start: ${r.failed.join(" · ")}`);
+    }
+    await testRefreshButton();
+    testCommandCatalog();
+    testExperienceProfile();
+    testIndustryTerms();
+    testDetailCrumb();
+    testReportOverrideLatency();
+    testActionRefreshOnce();
+    testPurchaseValuation();
+    await testBankPipeline(db);
+    testFinanceOpsPure();
+    await testFinanceOpsQueries(db);
+    testAutomationLadderPure();
+    await testAutomationLadderQueries(db);
+    await testFbTokenScopes();
+    testPackingWavesPure();
+    await testPackingWavesQueries(db);
+    await testApproval(db);
+    // Company OS · Agent G — duyệt hai bước tiêu thụ được, approvals:decide, nguồn việc APPROVAL, audit, sync_runs.
+    await testCompanyOsControlPlane(db);
+    await testMultiAttemptMoney(db);
+    await testCashflow(db);
+    await testPurchasing(db);
+    testSuppliersPure();
+    await testSuppliersQueries(db);
+  }
+  if (khoi.chay("K07")) {
+    testWorkshopLedgerPure();
+    await testWorkshopLedgerQueries(db);
+    testWorkshopSheetImportPure();
+    await testWorkshopSheetImportDb(db);
+    await testWorkshopBankLink(db);
+    testMarketerPricePure();
+    await testMarketerPriceQueries(db);
+    testReceiptPricingPure();
+    await testReceiptPricingDb(db);
+    testCompanyOsModelsPure();
+    await testCompanyOsModelsQueries(db);
+    // Company OS · A2 — trang Model 360: bảng tín hiệu, đề xuất, khối không sập trang, ý tưởng → mẫu.
+    testCompanyOsModel360Pure();
+    await testCompanyOsModel360Db(db);
+    await testCrm(db);
+    testScenario();
+    testAccessControl();
+    // Relay Telegram (01/10/2026): máy chủ ở Việt Nam bị chặn api.telegram.org — TELEGRAM_API_BASE + worker của nền tảng.
+    await testTelegramRelay();
+    // Gemini cho chatbot bán hàng (01/10/2026): provider REST + kết nối gemini-byok + giá — không gọi mạng thật.
+    await testGeminiProvider();
+    // Chi phí AI của chatbot theo ngày (02/10/2026): tiền / đơn chốt / SĐT theo ngày VN, chưa định giá ≠ 0.
+    testChatCostReport();
+    testAdvisorySafety();
+    await testBusinessBrief(db);
+    await testSearch(db);
+    await testEntityTimeline(db);
+    await testInventory(db);
+    // Giá vốn CHƯA BIẾT không in ra 0 ₫ (mục 42): chi tiết đơn · trang sản phẩm · kế hoạch · kinh tế khách SaaS.
+    await testUnknownCost(db);
+    await testInventoryForecast(db);
+    testPlanExplain();
+    await testSlowMoving(db);
+    await testInventoryDecision(db);
+    testSizeBreakPure();
+    await testSizeBreakReport();
+    testOrderBudgetPure();
+    await testOrderBudgetReport();
+    testClearanceFloorPure();
+    await testClearanceFloorReport();
+    // Company OS · Agent D: tự dọn dữ liệu mã `cosd-` (kể cả khoá settings inventory.slowMoving).
+    testCompanyOsInventoryPure();
+    await testCompanyOsInventoryDb(db);
+    // Company OS · Agent C: sản xuất nửa đầu. Dọn hàng đợi + cờ của chính nó (mã `cosc-`); bảng append-only giữ nguyên (CSDL dùng một lần).
+    testCompanyOsProductionPure();
+  }
+  if (khoi.chay("K08")) {
+    await testCompanyOsProductionDb(db);
+    // Company OS · Agent E: tự dọn dữ liệu mã `cose-` (kể cả sổ kết cục và sự kiện của nó).
+    testCompanyOsReturnsPure();
+    await testCompanyOsReturnsDb(db);
+    // Company OS · Agent R: kết cục cho hàng hoàn KHÔNG NHÃN (mã `cosr-` / `UR-COSR-`, tự dọn cả sổ kết cục và sự kiện của nó).
+    testCompanyOsUnidentifiedDispositionsPure();
+    await testCompanyOsUnidentifiedDispositionsDb(db);
+    // Company OS · Agent U: xác định mẫu mã món không nhãn (mã `cosu-` / `UR-COSU-`, tự dọn cả sổ kết cục, phiếu và sự kiện của nó).
+    testCompanyOsUnidentifiedIdentifyPure();
+    await testCompanyOsUnidentifiedIdentifyDb(db);
+    // Company OS · Agent H: "Cần anh quyết". Dọn nguồn của chính nó (mã `cosh-`); sổ phản ứng và sự kiện append-only giữ nguyên (CSDL dùng một lần).
+    testCompanyOsCockpitPure();
+    await testCompanyOsCockpitDb(db);
+    // Company OS · Agent S: tín hiệu mẫu theo lô = getModelSignal từng mẫu (mã `cos-s-` / `COSS-`, tự dọn).
+    testCompanyOsSignalBatchSource();
+    await testCompanyOsSignalBatchDb(db);
+    // Company OS · Agent L: "Cần anh quyết" → nhóm Lark Quản lý. Đường gửi là hàm giả (không gọi mạng); tự dọn khoá settings `owner.digest*`.
+    testCompanyOsOwnerDigestPure();
+    await testCompanyOsOwnerDigestDb(db);
+    // Company OS · Agent T: topic sản xuất mở SỚM cho mẫu TRIỂN VỌNG (quy tắc chủ shop 25/09/2026).
+    testCompanyOsEarlyTopicPure();
+    await testCompanyOsEarlyTopicDb(db);
+    // Topic sản xuất cho mẫu CHƯA CÓ MÃ (mã tạm → chốt mã khi thắng) + ảnh / video đính kèm (chủ shop 26/09/2026; mã `ptf-` / `PTFQ`).
+    testProductionTopicFilesPure();
+    await testProductionTopicFilesDb(db);
+    testProductionTopicAccessPure();
+    await testProductionTopicAccessDb(db);
+    // Company OS · Agent X: vòng phản hồi tồn → creative / quảng cáo (mã `cos-x-` / `COSX-`, tự dọn; một dòng sổ phản ứng append-only giữ nguyên).
+    testCompanyOsStockFeedbackPure();
+    await testCompanyOsStockFeedbackDb(db);
+    // Company OS · Agent W: job giữ ấm phủ khoá đệm của "Cần anh quyết" (so TẬP KHOÁ, không gõ tên) + ops company-os-summary (mã `cos-w-` / `COSW`, tự dọn, trả lại `owner.digest`).
+    await testCompanyOsWarmPure();
+    await testCompanyOsWarmDb();
+    await testWorkWarmDb();
+    testCompanyOsSummaryPure();
+    await testCompanyOsSummaryDb(db);
+    // ops org-summary: tóm tắt MỘT tổ chức khách, chỉ đọc, không lộ dữ liệu người — tổ chức THẬT `os-sum` (tự cấp, tự dọn).
+    testOrgSummaryPure();
+    testOrgAiCutoverPure();
+    await testOrgAiCutoverApply();
+    await testOrgSummaryDb();
+    // ops org-offboard: xoá workspace TỰ ĐĂNG KÝ (08/10/2026) — chạy thử không ghi, từ chối nhà / người vận hành / có tiền, xoá đúng + idempotent (`ob-*`, tự dọn).
+    testOrgOffboardPure();
+    await testWaitForNoConnections();
+    await testOrgOffboardDb();
+    // ops org-lifecycle: LƯU TRỮ / KÍCH HOẠT LẠI tổ chức (17/10/2026) — không xoá, đứng ngoài migration / job / webhook, kích hoạt lại chỉ khi checkDb khớp (`lc-thu`, tự dọn).
+    testOrgLifecyclePure();
+    await testOrgLifecycleDb();
+    // ops org-order-audit: hội thoại có SĐT ↔ đơn ERP của một ngày (HSLC 05/10/2026: POS 26 vs ERP 23).
+    testOrgOrderAuditPure();
+    // Bot HSLC sót tin vì Pancake 429 lúc gửi (10/10/2026): gửi lại đoạn bị từ chối · nhập lịch sử nhường · gửi bù có điều kiện.
+    await testPancakeSendRetry();
+    // Bot HSLC tính sai tiền (10/10/2026, «Việt Phệ»): «lấy 2kg» + mẫu mã 2kg ⇒ không bao giờ 2kg × 2.
+    testPackQuantity();
+  }
+  if (khoi.chay("K09")) {
+    // ops org-volume-discount: cài luật giá gói đơn vị cho một tổ chức (chủ shop HSLC 10/10/2026).
+    await testOrgVolumeDiscount();
+    // Sự kiện Purchase gửi Meta khi chốt đơn (0236 — chủ shop HSLC 08/10/2026) — tổ chức THẬT `capi-hslc` (tự cấp, tự dọn), Graph giả.
+    testMetaCapiPure();
+    await testMetaCapiDb();
+    // ops org-catalog: danh mục · bảng giá sỉ · câu mẫu · công tắc bot của một tổ chức khách, chỉ đọc (HSLC 08/10/2026: quy cách 0,5kg · giá sỉ · chốt không kiểm tồn) — tổ chức THẬT `os-cat` (tự cấp, tự dọn).
+    testOrgCatalogPure();
+    await testOrgCatalogDb();
+    // Chuẩn hoá địa chỉ theo địa giới 01/07/2025 — đơn bot / máy ghi chỉ có một dòng chữ (05/10/2026).
+    testVnAddress();
+    // P0 address-normalize (11/10/2026): địa chỉ tự do ⇒ mức tin cậy + câu hỏi khách; bot không chốt đơn địa chỉ mơ hồ khi khách chưa được hỏi.
+    testAddressNormalizePure();
+    await testAddressNormalizeTools();
+    // P0 15/10/2026 (ca «Tuyet Nguyen Thi» · «Lê Văn Dụ»): phường khách ghi rõ không bị hỏi lại · chữ khách thắng bản model chép · mơ hồ ⇒
+    // một câu ngắn, không danh sách 6 phường · phần đã hỏi không hỏi lại · hàng rào chữ gửi khách; ops address-reask-audit đo phạm vi.
+    testAddressWardExplicitPure();
+    await testAddressWardExplicitTools();
+    await testAddressReaskAudit();
+    await testP0855Address(); // #855: địa giới cũ / «như cũ» / địa chỉ mới thắng / không hỏi lại SĐT · tên · địa chỉ · phường
+    await testP0871ContactMemory(); // #871: SĐT + địa chỉ đã biết không hỏi lại khi đổi chủ đề · câu mẫu cũng chịu hàng rào · hẹn giờ giao = ghi chú · hậu mãi không bán tiếp · gói tin trùng
+    // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
+    testVelocityUnifyPure();
+    testOutreachClearanceUnit();
+    // Lượt mở trang theo mục menu — không ghi ai mở, chưa đo ≠ 0 (dữ liệu ngày 2001, tự dọn).
+    testMigrationRenumber();
+    testPageUsagePure();
+    testPageUsageSource();
+    await testPageUsageDb(db);
+    await testVelocityUnifyDb(db);
+    // Company OS · Agent P2: lời khai ≠ chứng cứ — trạng thái sản xuất khai mà ERP không có chứng từ · phiếu nhập chưa nối có lệnh SX khớp (mã `cos-p2-`, tự dọn; ngày cố định 2001).
+    testCompanyOsEvidenceGapsPure();
+    await testCompanyOsEvidenceGapsDb(db);
+    // Company OS · Agent Q: "Khai theo gợi ý" — chứng cứ theo lô = từng mẫu, người xác nhận gợi ý, hàng rào màn hình cũ (mã `cos-q-` / `COSQ`, tự dọn).
+    testCompanyOsBulkDeclarePure();
+    testCompanyOsBulkDeclareSource();
+    await testCompanyOsBulkDeclareDb(db);
+    // Company OS · Agent BD: Bảng quy trình mẫu (/models?view=bang) — cột theo trạng thái khai, việc tiếp theo nhặt từ bộ máy có sẵn, thẻ = đường một-mẫu của trang 360 (mã `cos-bd-` / `COSBD`, tự dọn).
+    testCompanyOsPipelineBoardPure();
+    testCompanyOsPipelineBoardSource();
+    testCompanyOsPipelineBoardGate();
+    await testCompanyOsPipelineBoardDb(db);
+    // Company OS · Agent ST: lời khai đi SAU thực tế — máy đề xuất cập nhật, người bấm (mã `cos-st-`, dữ liệu 2002, tự dọn).
+    testCompanyOsStaleStatePure();
+    testCompanyOsStaleStateSource();
+    await testCompanyOsStaleStateDb(db);
+    // Company OS · Agent SC: lối tắt sản xuất — bản duyệt → lập lệnh SX · lệnh đã gửi → nhập kho theo lệnh · topic đã chốt → giá thành V1 (mã `cos-sc-`, tự dọn).
+    testCompanyOsProductionShortcutsPure();
+    testCompanyOsProductionShortcutsSource();
+    await testCompanyOsProductionShortcutsDb(db);
+    await testCodReconciliation();
+    await testCodStatementAudit();
+    await testOrderSource();
+  }
+  if (khoi.chay("K10")) {
+    testDuplicateEvidencePure();
+    await testFanpageAttribution();
+    testFanpageAccessPure();
+    testPageEvidencePure();
+    await testFanpageHistoryDb();
+    testLandingAttributionPure();
+    await testLandingAttributionDb();
+    // Mẩu quảng cáo → creative → bài viết (kể cả dark post): chuẩn hoá đầu vào, bộ tra với Graph GIẢ, ghi idempotent vào fb_ads.
+    testMetaAdPostPure();
+    await testMetaAdPostResolver();
+    await testMetaAdParents();
+    await testMetaAdPostStoreDb();
+    await testIdeas();
+    await testPermissions();
+    await testPlatformModules();
+    await testVtpImportTruth(db);
+    await testVtpImportRecovery(db);
+    await testCostAllocation(db);
+    await testBankLedger(db);
+    await testSepayWebhook(db);
+    await testSepayApi(db);
+    await testBankAccounts(db);
+    await testCashPosition(db);
+    await testFinanceCockpit(db);
+    await testCostDoubleCount(db);
+    await testPayrollCostPreservation(db);
+    await testPayrollCarryover(db);
+    await testPayrollProfitGate(db);
+    await testPayrollCodeLedger(db);
+    testPayrollReconciliationPure();
+    await testPayrollReconCenter(db);
+    testOpsScriptSize();
+    await testDataTruth(db);
+    await testPayrollCogsCutoff(db);
+    await testProfitCarryover();
+    testCompensationProfitBasis();
+    testPayrollEngine();
+    testPayrollProductionReadiness();
+    testPayrollLifecycle();
+    testPayrollDependencyDirection();
+  }
+  if (khoi.chay("K11")) {
+    testCompensationBasisArithmetic();
+    testPayrollPreviewAndActivation();
+    testPayrollReconcileScript();
+    await testPayrollReconcileContext(db);
+    await testPayrollPolicyEngine(db);
+    await testVtpState(db);
+    await testVtpIngestion(db);
+    await testVtpSourceOfTruth(db);
+    // Độ trễ webhook: hàm thuần + một lượt đọc truy vấn thật. KHÔNG gieo dòng nào vào
+    // `webhook_events`, nên nó không đổi tổng của bài nào khác.
+    await testWebhookLatency();
+    await testReconciliation(db);
+    await testLogisticsPerformance(db);
+    await testVtpHealth(db);
+    await testVtpCapability(db);
+    // Sửa đơn VTP: tự dọn mọi dòng đã gieo (đơn, vận đơn, bảng kê, nhật ký) nên không đổi tổng bài nào khác.
+    testVtpEditDefaultsPure();
+    await testVtpEditCodGuardDb(db);
+    await testCareWorkbench(db);
+    await testCareClosedAssign(db);
+    await testCareAutoAssign(db);
+    await testCareReturnLegQueue(db);
+    await testCareDecisionParks(db);
+    testCarrierManualPure();
+    await testCarrierManualDb(db);
+    await testAiCopilot(db);
+    testCodPaymentStatement();
+    await testVtpImportLimits();
+    await testVtpFileDetection();
+    await testVtpStatementFromMail();
+    await testStatementLedgerOrderIndependent();
+    await testCodStatusMeaning();
+    await testVtpCodPaymentColumn();
+    await testStatementDedupAcrossFilenames();
+    await testStatementIdentityByCash();
+    await testStatementDetailMatching(db);
+    // Chạy CUỐI CÙNG: bài này thêm mẫu mã và vận đơn riêng, để cuối thì không đụng tổng của bài khác.
+    await testReturnInspection(db);
+    await testReturnUnidentified(db);
+    await testReturnProductContext(db);
+    await testShipmentProductReport(db);
+    await testReturnItemInspection(db);
+  }
+  if (khoi.chay("K12")) {
+    await testHmtReturnReconcile(db);
+    testInspectionFilter();
+    await testReturnFullReceive(db);
+    // Chạy CUỐI: bài này thêm phiếu nhập kho riêng, để giữa chừng sẽ làm lệch tổng phân bổ chi phí.
+    await testCogsRecognition(db);
+    await testAdsAttributionCoverage(db);
+    await testCanonicalOutcome(db);
+    // CHẠY SAU CÙNG, CỐ Ý: bài này thêm 5 kiện hoàn vào fixture chung. Đặt trước bài kiểm đếm hàng
+    // hoàn thì những kiện đó lọt vào lượt xử lý hàng loạt của bài kia và làm nó đỏ vì lý do sai.
+    await testReturnPipeline(db);
+    await testReturnExceptions(db);
+    // Dựng fixture riêng và TỰ DỌN ở cuối, nên tổng của các bài sau không đổi.
+    await testReturnWarehouseKpi(db);
+    // Dựng fixture riêng và TỰ DỌN ở cuối; đo bằng ĐỘ CHÊNH nên bài trước không làm nó đỏ.
+    await testInspectionTruth(db);
+    await testDeliveryTower(db);
+    // Ngay sau tháp giao vận: bài này cũng dựng rổ giao vận, và nó TỰ DỌN mọi dòng nó thêm vào nên
+    // tổng của các bài sau không đổi. Nó phải chạy SAU `testDeliveryTower` vì cả hai đọc cùng một
+    // đệm memo và bài này cố tình xoá đệm giữa chừng.
+    await testCareStates(db);
+    // Ngay sau đó: bài này dựng đợt chăm sóc, thao tác nghiệp vụ và sự kiện ĐVVC riêng, rồi TỰ DỌN
+    // sạch mọi dòng nó thêm — đặt giữa chừng thì những dòng đó lọt vào tổng của báo cáo khác.
+    await testCareOs(db);
+    testCareEffect();
+    await testCareReopen(db);
+    await testCarePendingDrilldown(db);
+    await testCareSettleClosed(db);
+    await testCareFalseReopenExclusion(db);
+    // Cùng nhóm: bài "đã duyệt hoàn" dựng kiện + đợt riêng mang tiền tố `cra-` và TỰ DỌN sạch.
+    await testCareReturnApproval(db);
+    testCareReturnCheckWiring();
+    // Ngay sau đó: bài kết quả xử lý dựng kiện + đợt riêng mang tiền tố `cres-` và TỰ DỌN sạch, nên
+    // không dòng nào của nó lọt vào tổng của báo cáo khác.
+    await testCareResolution(db);
+    await testShipmentsQaFixes(db);
+    await testSessionRenewal();
+    // Ngay sau đó: bài thu hồi phiên thêm hai tài khoản mang tiền tố `srev-` và tự dọn sạch cả dòng
+    // nhật ký lẫn tài khoản. Đặt cạnh bài gia hạn vì hai bài nói về cùng một token, từ hai phía.
+    await testSessionRevocation(db);
+    // Ngay sau đó: bài này gieo lịch sử vận đơn riêng để học xác suất, rồi TỰ DỌN sạch — đặt giữa
+    // chừng thì những dòng đó lọt vào mẫu của báo cáo khác.
+    await testReportingParity(db);
+    // Ngay sau đó: gieo ba mã riêng tiền tố `gvdt-` và một dòng settings giá dự tính, rồi TỰ DỌN sạch cả hai.
+    await testEstimatedCost(db);
+    // P0 hợp nhất giá vốn (13/10/2026): Trung tâm giá vốn + hai chế độ BCLN — tám kịch bản nghiệm thu của chủ shop.
+    await testCostCenter(db);
+    await testLoginThrottle();
+    await testWebhookHardening();
+    testWebhookLogRedaction();
+    testXlsxReader();
+    await testProjectedDeliveryV3(db);
+    // Chạy CUỐI CÙNG: thêm đơn/vận đơn riêng cho đúng bốn tình huống của nút thắt fulfillment, đặt
+    // sau mọi bài kiểm khác để không đơn nào trong số đó lọt vào tổng của báo cáo khác.
+    await testFulfillmentBottleneck(db);
+    // Cũng chạy CUỐI: bộ này thêm vận đơn riêng mang tiền tố `sage-` với lịch sử sự kiện dựng sẵn.
+    // Đặt trước bài khác thì những vận đơn đó lọt vào tổng của tháp giao vận và của care.
+    await testShipmentStatusAgeDb(db);
+    // Cũng chạy CUỐI: bộ này thêm đơn mang tiền tố `dup-` cố ý giống hệt nhau từng cặp. Đặt trước
+    // bài khác thì chúng lọt vào tổng doanh số và tổng đơn của mọi báo cáo.
+    await testOrderDuplicateDb(db);
+    // Cũng chạy CUỐI: bộ này thêm đơn mang tiền tố `pval-` cố ý thiếu dữ liệu từng kiểu một.
+    await testPreshipValidationDb(db);
+    // Cũng chạy CUỐI: bộ này gieo đơn mang tiền tố `prom-` và ĐỌC LẠI hàng đợi nút thắt kho để
+    // chứng minh vế lọc lời hẹn đổi đúng hành vi. Phải chạy SAU `testFulfillmentBottleneck`.
+    await testPromisedDeliveryDb(db);
+    // Thiếu hàng giao đơn: gieo mã `ssh-` với phiếu nhập, đơn đã chốt, lệnh xưởng; đọc lại sổ kho,
+    // Kế hoạch SX và hàng đợi fulfillment; rồi TỰ DỌN sạch — đơn CONFIRMED sót lại sẽ lọt vào tổng
+    // "đã chốt chưa gửi" của mọi bài phía sau.
+    testAlertsConfigForm();
+  }
+  if (khoi.chay("K13")) {
+    testStockShortagePure();
+    await testStockShortageDb(db);
+    testStockWaitReportPure();
+    await testStockWaitReportDb(db);
+    // CHẠY SAU CÙNG trong khối dữ liệu: bộ này thêm tài khoản ngân hàng, dòng tiền, khoản chi và đơn
+    // riêng ở tháng 5/2027 rồi tự dọn sạch. Đặt giữa chừng thì những dòng đó lọt vào tổng của bài khác.
+    await testFinanceTruth(db);
+    // Cổng phát hành của bản gộp tài chính: chỗ hỏng của một bản gộp không nằm trong nhánh nào cả,
+    // nó nằm ở chỗ hai nhánh cùng chạm một con số. Chạy sau `testFinanceTruth` và tự dọn.
+    await testFinanceInvariants(db);
+    /*
+      CHẠY SAU CÙNG TRONG KHỐI DỮ LIỆU. Hệ điều hành công việc CHIẾU lên toàn bộ dữ liệu của mọi bài
+      phía trên (case CSKH, kiện care, đơn, dòng tiền, cảnh báo) — chạy giữa chừng thì nó nhìn thấy
+      một nửa thế giới, và mọi con số tổng hợp của nó nói về một tập khác với tập cuối cùng. Bài tự
+      gieo dữ liệu mang tiền tố `wos-` rồi tự dọn sạch.
+    */
+    await testWorkOs(db);
+    /*
+      MẶT PHẲNG ĐIỀU KHIỂN PHÒNG TECH AI. Chạy SAU `testWorkOs` và tự dọn bằng tiền tố `tech-t-`:
+      nó gieo một tài khoản, hai việc Tech, sổ agent, một lượt chạy, hai lượt deploy và một sự cố —
+      tất cả nằm trong các bảng `tech_*` nên không đụng tới con số của bài nào phía trên.
+    */
+    await testTechControlPlaneDb();
+    await testTechControlPlaneGoalsDb();
+    await testTechWorkerDb();
+    await testTechDeliveryDb();
+    await testTechPolicyDb();
+    // Mission Control: phép chiếu sổ Tech Room (GitHub giả, không mạng) — tự dọn hai bảng tech_registry_* của nó.
+    await testTechMissionControlDb();
+    /*
+      PHASE 2A. Chạy ngay sau mặt phẳng điều khiển và tự dọn bằng tiền tố `p2a-`. Ba khối đầu đụng
+      CSDL; khối runner còn dựng KHO GIT TẠM và chạy tiến trình con thật (`npm run typecheck` trong
+      một cây làm việc riêng) — đó là điểm của nó: cổng phải đo bằng exit code, không bằng lời khai.
+    */
+    await testGithubDeploymentSync();
+    /*
+      PHÉP CHIẾU PR + SỰ CỐ TỰ MỞ. Chạy ngay sau lượt đọc deploy vì cùng dùng `fetch` giả của adapter
+      GitHub — chạy liền nhau thì trạng thái tiêm/gỡ không đi lạc qua bài khác. Tự dọn bằng tiền tố
+      `prj-`.
+    */
+    await testGithubPrSync();
+    await testSyncIncidentWatch();
+    await cleanupPrProjectionFixtures();
+    /*
+      NẤC 1 — CỬA HẸP CHÉP SỔ LƯỢT CHẠY AGENT. Chạy sau phép chiếu PR vì cùng họ `tech_*`, và tự dọn
+      bằng tiền tố `ing-` / `ING-`. Bài này KHÔNG gọi mạng: nó chạy thẳng hàm dịch vụ, còn tầng HTTP
+      được khoá bằng quét mã nguồn ở khối 3 (dựng một máy chủ Next thật chỉ để gửi một POST là đổi
+      nhiều phút CI lấy một lớp kiểm mà quét mã nguồn đã nói được chắc hơn).
+    */
+    await testAgentIngestDb();
+    await cleanupAgentIngestFixtures();
+    /*
+      SỨC KHOẺ AI. Chạy `getTechSystemHealth()` THẬT rồi gieo đúng hình dạng lỗi giả mà `ops ai-check`
+      để lại trên production, và đòi kết luận KHÔNG đổi. Tự dọn bằng tiền tố `ai-sel-`.
+    */
+    await testAiHealthKhongDemLuotTuKiem();
+    await cleanupAiHealthFixtures();
+    /* LỖI CSDL ĐỌC ĐƯỢC — gây lỗi Postgres THẬT trên PGlite rồi đọc lại, không mô phỏng bằng lời. */
+    await testMoTaLoiCsdl();
+    /*
+      CANH KHOÁ AI. Chạy bộ canh THẬT trên CSDL và gieo đúng hình dạng lỗi đã xảy ra 20/09 (hết
+      credit). Tự dọn bằng tiền tố `ai-inc-` và tiêu đề sự cố.
+    */
+    await testAiIncidentWatchDb();
+    await cleanupAiIncidentFixtures();
+    /*
+      NẤC 3 — ERP giao việc cho agent. Chạy `fetch` GIẢ (không gọi mạng thật) và tự dọn bằng tiền tố
+      `disp-` / `DISP-`. Khối cửa ghi đặt biến môi trường để dựng tình huống rồi trả lại nguyên trạng.
+    */
+    await testDispatchCua();
+    await testDispatchService();
+    await cleanupDispatchFixtures();
+    /* NẤC 3B — cửa ĐỌC việc. Chạy hàm thật trên CSDL; tự dọn bằng tiền tố `rd-` / `RD-`. */
+    await testAgentTaskRead();
+    await cleanupAgentTaskReadFixtures();
+    /* NẤC 4 — đẩy trạng thái việc theo bằng chứng GitHub. Tự dọn bằng tiền tố `ADV-`. */
+    await testGuiLaiKhongDamKhoa();
+    await testHaiLuatKhongTroiXaNhau();
+    await cleanupShipmentPickFixtures();
+    await testTaskAdvanceDb();
+    await testNhacFinishDungMotLan();
+    await testDemTienLuotChay();
+    await testLedgerReconcile();
+    /* Bài kiểm do chính agent viết và tự đăng ký — xem `lib/constants/agent-test-registry.ts`. */
+    await chayBaiKiemAgentTuDangKy();
+    await cleanupLedgerFixtures();
+  }
+  if (khoi.chay("K14")) {
+    await cleanupTaskAdvanceFixtures();
+    /* NỬA SAU DÂY CHUYỀN — dispatch mang mã việc, nhánh về tới dòng việc. Tự dọn bằng tiền tố `VDT-`/`vdt-`. */
+    await testDispatchKemMaViec();
+    await testGiaoLaiSuaTuErp();
+    await testIngestGhiNhanhViec();
+    await cleanupViecDiTiepFixtures();
+    /*
+      GHÉP QUẢNG CÁO TREO. Bài này chạy `reapplyAdsMapping()` THẬT, mà hàm đó quét toàn bộ dòng
+      Facebook — nên nó tự chụp lại và trả về nguyên trạng `product_id`/`marketer_id` của mọi dòng
+      (fixture `landing-attribution` có ba dòng như vậy). Xem `chupVaTraVe` trong bài.
+    */
+    await testAdsMappingDangling();
+    await testTechWorkProjection();
+    await testAgentRunner();
+    await testPhase2aBarriers();
+    await testAgentGithubIdentityModule();
+    // Ngay sau đó: cầu nối mở PR dùng chung adapter ấy. Bài này chỉ quét mã nguồn — không mạng,
+    // không token, không CSDL — nên nó chạy được ở bất kỳ chỗ nào trong chuỗi.
+    testAgentPrBridge();
+    testEnvironmentOnlyAgentSecrets();
+    await testCtoProposal();
+    await testWorkforce(db);
+    await testOrgMembership(db);
+    await testAccessModel(db);
+    await testScopeDecisions(db);
+    await testSnapshotImmutability(db);
+    testNoEmptyValueSelect();
+    testOneMembershipReadPath();
+    testNoAutoReassignOnOrgChange();
+    testPositionGrantsNothing();
+    testRoleBuilderCannotEscalate();
+    await testPayrollPeriod(db);
+    testPayrollAutopilotPure();
+    await testPayrollAutopilotFlow(db);
+    testEveryScopedRouteIsGuarded();
+    testPayrollOwnLineNeedsAccountKey();
+    testPayrollAuthorization();
+    testAuthSecretHasNoProdFallback();
+    testMetricConfidenceIsAFunction();
+    testPeriodKeys();
+    testScopeOnlyNarrows();
+    testDisabledRoleFallsBackNarrow();
+    testCustomRoleViewImplies();
+
+    // ═══ PHASE 3.1 · QUY KẾT & DANH MỤC CHỈ SỐ CÓ THẨM QUYỀN ═══
+    testMetricCatalogIsComplete();
+    testDeptKeysDeriveFromCatalog();
+    testObservedLinkage();
+  }
+  if (khoi.chay("K15")) {
+    testMetricTrust();
+    testTargetResolution();
+    testKrDataInsufficient();
+    testSourceVersionIsTracked();
+    await testCsAssignmentUsesKey(db);
+    await testInspectionCarriesActorKey(db);
+    await testCoverageSeparatesMachineFromPerson(db);
+
+    // ═══ KIỂM TRA TOÀN VẸN KHO MÃ (không phụ thuộc dữ liệu) ═══
+    console.log("\n─ Toàn vẹn kho mã");
+    testTechLifecycle();
+    testAgentSandbox();
+    testPhase2aSourceGuards();
+    testPrPureMappers();
+    testSyncIncidentPure();
+    testAgentIngestPure();
+    // Trang giới thiệu ở tên miền gốc: định tuyến host thuần + gác mã nguồn (middleware, Caddy, đường đọc công khai).
+    testPublicSiteHost();
+    testPublicSiteSource();
+    testChotDonBrand();
+    testMissedOrdersCalculator();
+    testChotDonAssets();
+    // Sổ pháp lý có kiểu (docs/legal/*): văn bản + băm nội dung, bên xử lý phụ, xuyên biên giới, lưu trữ, hệ thống AI, cổng theo
+    // chiều — tài liệu ↔ hằng khớp, UNKNOWN hiện ra, LEGAL READY dẫn xuất, mã nguồn không gọi bên ngoài chưa khai.
+    testLegalRegisters();
+    testOrgLinkOrigin();
+    testAgentIngestSourceGuards();
+    testTestHygiene();
+    // Sổ bàn giao chỉ được THÊM: lượt ghi dựng từ bản đọc trước đã ăn mất chữ của phiên khác 13/10/2026.
+    testCheckpointChiDuocThem();
+    // Bảng thời gian: hàm thuần dựng bảng nhóm chậm nhất (đo để chia job, không để nâng trần).
+    testTestTiming();
+    testAiHealthSourceGuards();
+    testAiIncidentPure();
+    testAiIncidentSourceGuards();
+    testMoTaLoiSourceGuards();
+    testPhamViTheoVai();
+    testRerunPure();
+    testRerunPhanHoi();
+    testRerunDeBai();
+    testRerunWorktree();
+    testRerunGuards();
+    await testRerunDinhNhanh();
+    testHangRaoTuyetDoi();
+    testVungSoDoChiDocDuoc();
+  }
+  if (khoi.chay("K16")) {
+    testHangRaoBaiKiem();
+    testPhamViSourceGuards();
+    testDispatchPure();
+    testDispatchSourceGuards();
+    testDuongKhaiKhoaKhoiDong();
+    testAgentTaskReadGuards();
+    testChuPrKhongLoNoiDungViec();
+    testDieuKienMoPr();
+    testCauNoiVanGiuHangRao();
+    testQuyenNoiGoiDuChoNoiDuocGoi();
+    testMaViecLaMaProduction();
+    testVaiAgentTheoViec();
+    testPhamViDocTuSoVai();
+    testBanKhaiGanLai();
+    testScriptDayChuyenPhaiThoat();
+    testNganSachDocTep();
+    testLoiGoiHongVanGiuTien();
+    testTienLuotChay();
+    testTienLuotChayGuards();
+    testLoiCongDocDuoc();
+    testLoiCongGuards();
+    testKyLoat();
+    testKyLoatGuards();
+    testPhanhTienAi();
+    testPhanhTienAiGuards();
+    testNhanModelNoiThat();
+    testBacModelTheoVai();
+    testTranChoTachKhoiBac();
+    testPhepDoJit();
+    testChuoiSach();
+    testMetricResolverTatJit();
+    testTrangChamTatJit();
+    testPancakeLinks();
+    testPhoneReputation();
+    await testPhoneRiskAlert(db);
+    testTraGiaTheoTienTo();
+    testDemHoiThoai();
+    testKhongNangBacAmTham();
+  }
+  if (khoi.chay("K17")) {
+    testGanLaiSourceGuards();
+    testKhongCoBaiKiemMoCoi();
+    testKheDangKyAgent();
+    testPromptTheoVai();
+    testSuaCongTrongLuot();
+    testLedgerPure();
+    testLedgerGuards();
+    testChonVanDonPure();
+    testKhongCoOneTrenKhoaNgoaiKhongDuyNhat();
+    testNhanhVeToiViecPure();
+    testViecDiTiepGuards();
+    testTaskAdvancePure();
+    testTaskAdvanceGuards();
+    testAdsMappingGuards();
+    testAdsIngestGuardsProductFk();
+    testTechRiskEngine();
+    testTechControlPlaneVocabulary();
+    testTechWorkerPure();
+    testTechDeliveryPure();
+    testTechPolicyPure();
+    testTechMissionControlPure();
+    testTechMissionControlSourceGuards();
+    testTechPermissions();
+    testTechHealthParsing();
+    testRepoIntegrity();
+    // AI Tech Room: điều phối worktree / DAG / dọn an toàn — kho git TẠM, không chạm cây thật (docs/ai-tech-room/README.md).
+    await testAiTechRoom();
+    // Điều phối V2: cổng song song · deploy dùng lại bằng chứng cổng · sổ xuyên sứ mệnh · khoá Integration Lead · giữ chỗ migration (docs/ai-tech-room/delivery-v2.md).
+    await testDeliveryV2();
+    // Team Premium F7/F8: job chạm VPS chỉ chạy từ main + Environment production; checkout của workflow agent / có quyền GHI
+    // không giữ credential; agent-run không dán đầu ra bước vào shell, token GHI chỉ ở bước đẩy nhánh.
+    testWorkflowHardening();
+    // #856: đo tin khách bị chốt «Page đã trả lời» nhầm (chỉ đọc, luật buildCustomerTurns).
+    testPageAutoSkipAudit();
+    // qa × 0245: chỉ mục 0247 = công cụ tạo trước (chỉ qa, có tiền điều kiện) = ứng viên rehearsal.
+    testQa0245Index();
+    // Hậu kiểm production chạy trên máy Actions (`ai-verify.yml`): chỉ main · chỉ lệnh verify · đỏ khi KHÔNG ĐẠT.
+    testAiVerifyWorkflow();
+    // Nền tảng đa tổ chức: máy quét cô lập mức tiến trình (thuần, không CSDL) — cạnh các bài quét mã nguồn khác.
+    testPlatformIsolationStatic();
+    // Hồi quy 27/09: script trên GitHub Actions (không CSDL) vẫn phân giải được tổ chức nhà.
+    testPlatformNoDb();
+    testChatbotNoSecretsInRepo();
+    testChatbotDeployShape();
+    await testChatbotImportGuards();
+    await testChatbotAdBots();
+    await testChatbotVoice();
+  }
+  if (khoi.chay("K18")) {
+    testChatbotOrderBotAlerts();
+    testDeployScript();
+    testApplyGithubEnvBlock();
+    testOpsConcurrency();
+    await testSaoLuu();
+    testPitr();
+    // ops migration-rehearsal: chạy thử migration còn thiếu trên BẢN SAO một CSDL tổ chức (P0 0245 trên qa).
+    testMigrationRehearsal();
+    testMigrationAppendOnly();
+    await testMigrationUpgradePath();
+    testMigrationNumberUnique();
+    testDuplicateMetrics();
+    testLogisticsStatusBoundary();
+    await testOpsLogLeak();
+    await testFeedAutomation(db);
+    // Company OS · K: gia cố năm chỗ hở (mã `cos-k-` / `COSK`). Đứng ngay trước QA để không đổi tổng của bài nào phía trên.
+    await testHardeningLifecycleInTx(db);
+    await testHardeningSettingsPrimitive(db);
+    await testHardeningApprovalExecution(db);
+    // Lệnh đặt xưởng chưa có giá: NULL không phải 0, cổng duyệt dùng giá đã nhập → giá dự tính → bắt duyệt.
+    await testProductionUnpricedApproval(db);
+    await testHardeningReceiptLinkedEvent(db);
+    await testHardeningTopicTrackSemantics(db);
+    // Company OS · N: gửi lại tin Lark hỏng + dọn lời duyệt kẹt (mã `cos-n-`; dòng thông báo tự xoá).
+    testNotificationRetryPure();
+    await testNotificationRetryDb(db);
+    await testApprovalReservationSweep(db);
+    // Company OS · QA: MỘT mẫu đi hết vòng đời qua mọi agent (A–G). Đứng CUỐI để không đổi tổng của bài nào; tự dọn mã `cosqa-` / `COSQA`.
+    testCompanyOsE2ePure();
+    await testCompanyOsE2eLifecycle(db);
+    // Company OS · P1: nhãn nhật ký (quét mã nguồn) + sổ mẫu tự bắt kịp sau đồng bộ sản phẩm. Bài sau đổi
+    // fetch / biến môi trường Pancake (khôi phục trong finally) và đăng ký mọi mã đang có — nên đứng SAU CÙNG.
+    testCompanyOsAuditLabels();
+    await testRegistryCatchUpAfterProductSync(db);
+    // Phase 2 · dịch vụ metadata: hai tổ chức THẬT `pm-a` / `pm-b` (CSDL riêng, tự cấp và tự dọn) — field custom,
+    // giá trị, form, danh sách, trạng thái; tấn công theo id chéo tổ chức chạm 0 dòng.
+    await testMetadataService();
+    // Nền tảng · quản trị metadata (Phase 2): bốn màn hình /settings/{data-model,forms,lists,statuses} — lõi action.
+    await testMetadataAdmin();
+    // Phase 2 · form runtime + danh sách theo metadata (M8, M9): hàm thuần + hàng rào tạo khách.
+    await testMetadataRuntime();
+    // Phase 3 · bộ máy workflow: hai tổ chức THẬT `pw-a` / `pw-b` (tự cấp, tự dọn) — lưu luật, chạy thử, cửa duyệt,
+    // đúng một việc sau khi duyệt, vòng lặp bị chặn, lượt đầu không xử lý lịch sử, cô lập tổ chức.
+    await testWorkflowEngine();
+    // Phase 3.1 · phục hồi lượt chạy treo: tổ chức THẬT `pr-a` (tự cấp, tự dọn) — chết sau khi chiếm / giữa hai hành
+    // động ⇒ chiếm lại đúng một lần, bước đã xong không làm lại, quá số lần thử ⇒ FAILED, listStaleRuns + chẩn đoán.
+    await testWorkflowRecovery();
+    // Phase 3.1 · tải tệp field `file`: hai tổ chức THẬT `pf-a` / `pf-b` — HANDLER route trong phiên thật, 404 cùng
+    // một câu cho id chéo tổ chức / id rác / field lưu trữ / bản ghi đã xoá, .html ⇒ attachment, module tắt ⇒ 403.
+    await testMetadataFiles();
+    // Phase 3 · giao diện luật tự động: lõi màn hình /settings/workflows (quyền, bản nháp form) + vòng đời thật trên tổ chức `wa-wf` (tự cấp, tự dọn).
+    await testWorkflowAdmin();
+    // Phase 4 · sổ nguồn + sổ action + trình phân giải khối trang động: hai tổ chức THẬT `pd-a` / `pd-b` (tự cấp, tự dọn) —
+    // số đơn khớp orderKpis, module tắt / thiếu quyền / lọc sai ⇒ 0 lượt gọi nguồn, action đọc bản ĐÃ XUẤT BẢN.
+    await testPageData();
+    // Phase 4 · trang động: sổ loại khối + kiểm schema (sổ giả tiêm vào), dựng trang cô lập lỗi, menu động, vòng đời
+    // trang trên hai tổ chức THẬT `pr4-a` / `pr4-b` (tự cấp, tự dọn) — nháp / xuất bản / phiên bản / lưu trữ / mẫu.
+    await testPageRuntime();
+    // Phase 4 · trình soạn trang tuỳ biến: lõi màn hình /settings/pages (quyền, module chủ, lỗi theo path).
+    await testPageAdmin();
+    // Phase 7 · blueprint + mẫu ngành: hai tổ chức THẬT `bp-a` / `bp-b` (tự cấp, tự dọn) — kiểm / lập kế hoạch / cài /
+    // nâng phiên bản ba chiều (UNCHANGED · UPDATE · SKIP_CUSTOMIZED · SKIP_DELETED · CONFLICT · BLOCKED), cô lập tổ chức.
+    await testBlueprints();
+  }
+  if (khoi.chay("K19")) {
+    // Phase 5 · trình dựng trang kéo-thả: phép biến đổi schema thuần + lõi máy chủ (quyền, tự lưu, xuất bản, menu) trên tổ chức `pb-p5`.
+    await testPageBuilder();
+    // Nền tảng · giao diện module: cấp tổ chức `pu-` riêng, tự dọn dòng mặt phẳng điều khiển khi xong.
+    // Phase 9 · sổ connector ↔ mã, mã hoá bí mật kết nối (AAD theo tổ chức), kiểm tra chỉ tới Lark / Telegram, hai tổ
+    // chức THẬT `pc-a` / `pc-b` (tự cấp, tự dọn) không thấy kết nối của nhau; tổ chức nhà chỉ đọc, CSDL nhà không đổi.
+    await testConnectors();
+    // Cổng mở bán A: PLATFORM_SECRETS_KEY đi đủ ba chặng secret → workflow → bootstrap/install → .env, rỗng không đè, không in.
+    await testLaunchGatesPipeline();
+    // ops platform-secrets-verify: kiểm khoá bí mật trên production (canary niêm / giải / xoay, quét CSDL + log) — khoá giả.
+    await testPlatformSecretsVerify();
+    await testCustomObjects();
+    // Phase 8 · AI Builder: provider GIẢ (không mạng), hai tổ chức THẬT `ai-a` / `ai-b` (tự cấp, tự dọn) — không-nhà không
+    // có kết nối ⇒ không AI (không rơi về khoá nhà), khoá BYOK chỉ tới nhà cung cấp, soạn → bỏ chọn → xem trước → áp dụng.
+    await testAiBuilder();
+    // Phase 10 · tự phục vụ: ba tổ chức THẬT `ob-a` / `ob-b` / `ob-c` (tự cấp, tự dọn) — cờ off / mã mời / tạo từ mẫu
+    // bán sỉ bỏ Mua hàng / đăng nhập đúng tổ chức / chạy lại không nhân đôi / SETUP_FAILED / hạn mức gói / cô lập logo.
+    await testOnboarding();
+    // Phase 6 × 4/5 · đối tượng tuỳ biến làm nguồn trang động: hai tổ chức THẬT `pco-a` / `pco-b` (tự cấp, tự dọn) — bảng,
+    // KPI tổng hợp, kanban, dòng thời gian trên x_contract đúng số + đúng phạm vi, x_other không lọt, B không thấy khoá của A.
+    await testPageCustomObjects();
+    // Phase 11 · H1 tấn công cô lập: hai tổ chức THẬT `ta-a` / `ta-b` (B dựng qua /start, tự dọn) — phiên thật của A gọi thẳng
+    // server action / route / page component / dịch vụ bằng id, khoá, slug, tệp, mã mời của B; CSDL B + dòng mặt phẳng điều khiển
+    // của B không đổi một dòng, 0 kết quả mang dữ liệu của B, 0 request mạng.
+    await testTenantAttack();
+    // AI bán hàng (0180+) — hội thoại, câu mẫu, ảnh, sổ AI: hai tổ chức THẬT `asi-a` / `asi-b` tấn công nhau bằng id.
+    await testAiSalesIsolation();
+    // Trần tần suất chat công khai (/chat · /chat/embed): xô thuần + khách thật / bão trên ngưỡng thật, lõi thật trên hai tổ chức
+    // THẬT `pcl-a` / `pcl-b` (tự cấp, tự dọn, provider giả) — vượt trần ⇒ không AI, không ghi; hai shop không chung trần.
+    await testPublicChatLimits();
+    // Phase 11 · H2 · ngân sách câu truy vấn: tổ chức THẬT `pqb-a` (tự cấp, tự dọn, client mang bộ đếm) — bảng hệ thống,
+    // bảng x_…, kanban, KPI / biểu đồ tổng hợp, cả trang, /o/<khoá>, /o/<khoá>/<id>, getCustomValues: 10 dòng = 200 dòng câu.
+    await testPageQueryBudget();
+    // Phase 11 · H3 · xuất / khôi phục cấu hình: hai tổ chức THẬT `ox-a` / `ox-b` (tự cấp, tự dọn) — A cài mẫu + tuỳ biến ⇒
+    // xuất ⇒ B trống cài TỪ TỆP ⇒ xuất lại bằng A (băm ổn định); gói không mang email / bí mật / bản ghi / id.
+    await testOrgExport();
+    // Commercial readiness C · diễn tập khôi phục cấu hình: phán quyết (đột biến từng vế) + phạm vi khai báo khớp lược đồ /
+    // migrateOrganizationDb + CHẠY THẬT scripts/restore-drill-org-config.ts (cùng mã, CSDL + sổ bị xoá giữa hai tiến trình).
+    testRestoreDrillConfig();
+    // Launch gates C · diễn tập khôi phục tổ chức trên Postgres THẬT (lượt chạy ở .github/workflows/restore-drill.yml):
+    // tên + hàng rào DROP / môi trường, lệnh = erp-backup.sh + runbook, phán quyết (34 đột biến), workflow 0 secret 0 SSH.
+    testRestoreDrillPg();
+    // Phase 11 · H4: chẩn đoán MỘT tổ chức (/platform/org/<mã>) trên tổ chức THẬT `pdg-a` (tự cấp, tự dọn) — đúng số, chỉ
+    // đọc, không lộ bí mật, chỉ người vận hành; hạn mức đối tượng / bản ghi / nháp AI; gỡ dấu VNX + favicon theo thương hiệu.
+    await testPlatformDiagnosticsOrg();
+    // Phase 12 · năm lỗi của bài chấp nhận: trang Duyệt LÕI + lối duyệt, /platform chỉ ở nhà, not-found theo thương hiệu,
+    // số tiền của yêu cầu duyệt, bộ quét menu × module tắt — hai tổ chức THẬT `ap-svc` (cài mẫu dịch vụ) / `ap-si` (tự cấp, tự dọn).
+    await testApprovalsCore();
+    // Pilot bán buôn · P0 #1/#2 + P1 #9/#11–#14: tổ chức THẬT `pp-si` (mẫu bán buôn, không Pancake; tự cấp, tự dọn) — tạo sản
+    // phẩm + mẫu mã tay (erp-, SKU duy nhất, products:write) ⇒ phiếu nhập đơn giá khai tay ⇒ sổ kho; nhà: không nút, action từ
+    // chối, giá báo MKT, chữ trang lõi nguyên từng ký tự; nút đồng bộ theo nguồn; khách tạo tay sửa được, khách Pancake không.
+    await testPilotProducts();
+    // Nhập sản phẩm hàng loạt từ tệp (gap P0 «Import Products»): hai tổ chức THẬT `pi-food` / `pi-other` (không Pancake; tự cấp,
+    // tự dọn) — CSV + XLSX, chạy thử 0 dòng ghi, SKU tự sinh, field tuỳ biến, MỘT phiếu tồn đầu, nhập lại = đã có; nhà từ chối.
+    await testProductImport();
+    // Pilot bán buôn · P0 #3 + P1 #7/#8 + P2 #17/#18: tổ chức THẬT `po-si` (mẫu bán buôn, không Pancake; tự cấp, tự dọn) — đơn tay
+    // (erp-, orders:write, nhật ký, /orders), ORDER_OUTCOME + tồn thực tế không đổi; nhà: action từ chối, marketer 3.9 không đổi
+    // khi có đơn erp-; luật custom_record trên đối tượng hệ thống bị chặn; nhãn KPI sổ cố định; số tiền duyệt; vai trò AI.
+    await testPilotOrders();
+    // Đơn tay: giao không thành công · phí giao đồng giá · doanh thu khi đã giao (ORDER_OUTCOME.md 11.2/11.3): tổ chức THẬT `mo-hslc`.
+    await testManualOrderOutcome();
+    // Bảng giá sỉ + hạn mức nợ + công nợ + thu nợ gộp (0188): tổ chức THẬT `pl-si` (không Pancake; tự cấp, tự dọn).
+    await testPriceListsReceivables();
+    // Nhắc mua lại + sổ liên hệ khách (0189): tổ chức THẬT `ro-si` (không Pancake; tự cấp, tự dọn).
+    await testReorderReminders();
+    // Seafood OS · mẫu hải sản + chatbot báo giá sỉ: tổ chức THẬT `sf-si` (không Pancake; tự cấp, tự dọn).
+    await testSeafoodOs();
+    // Lịch hẹn & liệu trình (0190) + mẫu spa: tổ chức THẬT `ap-spa` (tự cấp, tự dọn).
+    await testAppointments();
+    await testWarranty();
+    await testStays();
+    await testStockLots();
+    await testFieldJobs();
+    await testRealEstate();
+    await testAppointmentBookingBot();
+    // Ghi đơn từ hội thoại fanpage (công tắc riêng, bot tắt vẫn ghi) + khách mua lại: tổ chức THẬT `os-hslc` (tự cấp, tự dọn).
+    await testSalesOrderSync();
+    // Phát lại hội thoại cũ (Historical Replay): tổ chức THẬT `rp-shop` / `rp-khac`, provider giả, tự cấp, tự dọn.
+    await testSalesReplay();
+    // Chế độ vận hành (quan sát · copilot · thử nghiệm · tự động): tổ chức THẬT `om-shop`, Pancake + provider giả.
+    await testSalesOperatingMode();
+    await testSalesInbox();
+    // Đồng bộ tin Pancake → hộp thư (P0 HSLC 14/10/2026): câu nhân viên trên Pancake đẩy hội thoại lên đầu + phát sự kiện; trùng / chậm / sai thứ tự; sức khoẻ trễ webhook → sổ.
+    await testInboxMessageSync();
+    await testP0856Images();
+    // Hộp thư nâng cao: level khách · lọc · lịch sử giao · góp ý cho AI — tổ chức THẬT `hop-thu-nang-cao` (tự cấp, tự dọn).
+    await testInboxAdvanced();
+  }
+  if (khoi.chay("K20")) {
+    // Ô soạn hộp thư: chèn câu mẫu / dòng sản phẩm (giá = giá bot, tồn chỉ khi đọc được), quyền ≡ «Gửi», cô lập — `o-soan-a` / `o-soan-b`.
+    await testInboxComposer();
+    // INBOX-V2-A: bộ lọc gọn (14 tham số cũ còn đủ) · chưa đọc trước ở MÁY CHỦ (phân trang ổn định) · hàng đang mở đứng yên · ảnh không link Facebook giả — tổ chức `hop-thu-v2a`.
+    await testInboxV2A();
+    // Ảnh đại diện khách + bấm ảnh mở trang Facebook (chủ shop 10/10/2026 mục E · F): PSID / fb_id không bao giờ thành link Facebook,
+    // năm trạng thái PROFILE_*, đường ghi Pancake dùng chung một lõi, ops inbox-avatar-audit chỉ đọc. Thuần + quét mã nguồn.
+    await testInboxAvatarProfile();
+    // Ops pancake-avatar-shape (11/10/2026): dáng payload Pancake để tìm khoá ảnh thật — chỉ in đường khoá + kiểu + dạng, không giá trị. Thuần + quét mã nguồn.
+    testPancakeAvatarShape();
+    // Ops avatar-proxy-check (11/10/2026): ảnh qua proxy hỏng ở bước nào — đi lại từng bước bằng chính lib, chỉ in mã bước. Thuần + quét mã nguồn.
+    testAvatarProxyCheck();
+    // Ops sender-provenance-probe (11/10/2026): tin phía page mang dấu người gửi gì — đo rủi ro AI chen vào cuộc chat người trước deploy P0. Thuần + quét mã nguồn.
+    testSenderProvenanceProbe();
+    // Ops pancake-thread-diff (P0 HSLC 14/10/2026): tin Pancake đối chiếu sổ tin ERP + hộp thư — khớp mã/chữ, quá mới, trễ webhook. Thuần + quét mã nguồn.
+    testPancakeThreadDiff();
+    // Ops inbox-unread-dryrun (11/10/2026, điều kiện duyệt #792): chạy thử «chưa đọc» theo hàm #803 so với luật đang chạy + bấm giờ câu dẫn xuất — CHỈ ĐỌC. Thuần + quét mã nguồn + PGlite.
+    await testInboxUnreadDryrun();
+    // Migrate CSDL tổ chức cô lập (sự cố 0245 ở qa 12/10/2026): khoá theo tổ chức có trần chờ · lùi sau lỗi · trần mỗi tổ chức của verify-migrations · ops org-migrate-probe chỉ đọc. Thuần + PGlite + quét mã nguồn.
+    await testOrgMigrateIsolation();
+    // Phục vụ bằng lược đồ cũ (chủ shop 12/10/2026, «Serve with old schema»): sổ tương thích 0245 chứng minh bằng PGlite dừng ở 0244 + mã hiện tại; DEGRADED_MIGRATION chỉ khi hết giờ VÀ mọi mục thiếu trong sổ — tổ chức `serve-compat-0245`.
+    await testMigrationServeCompat();
+    // Ops stuck-conversation-audit (HOTFIX P0 12/10/2026, ca «Khanh Nhung»): hội thoại AI kẹt theo nhóm lý do · không chủ · SLA · nhắn lại sau đơn · đơn chưa đồng bộ — CHỈ ĐỌC. Thuần + quét mã nguồn + PGlite.
+    await testStuckConversationAudit();
+    // Ảnh khách qua proxy ERP (11/10/2026): URL Pancake mang khoá ⇒ cất bản KHÔNG khoá, máy chủ gắn token lúc tải; chặn SSRF, đệm LRU, quyền theo tổ chức — tổ chức `anh-dai-dien-proxy`, fetch giả.
+    await testAvatarProxy();
+    // INBOX-SEMANTICS-V3 (chủ shop 10/10/2026): bốn khái niệm tách riêng — chưa đọc (AI trả lời không xoá) · chờ trả lời · cần người thật · người đang xử lý; ma trận 20 hội thoại × mọi bộ lọc — tổ chức `hop-thu-sem-v3`.
+    await testInboxSemanticsV3();
+    // AI IM THÌ PHẢI CÓ CHỦ (P0 11/10/2026, yêu cầu 9): chuyển người ⇒ hàng đợi phòng (work.ownership) + hạn (work.sla) · một tin mỗi đợt · tin khách mới ⇒ một thông báo · trả AI xoá hạn · phân việc bật ⇒ người còn chỗ · câu đếm «không chủ» = 0 — tổ chức `chuyen-nguoi-co-chu`.
+    await testHandoffOwnership();
+    // HẬU MÃI + AI DỪNG + HÀNG ĐỢI CHUNG (HOTFIX P0 12/10/2026, ca HSLC «Khanh Nhung»): giai đoạn khách sau khi có đơn (lời khách không đổi logistics) · đồng hồ AI hỏng đọc mốc thật · watchdog mở lại nhường hết hạn, không đụng chuyển người bắt buộc · phòng trống ⇒ hàng đợi chung + 1 tin quản trị/ngày · trả-cho-AI luật cũ chạy thử / --apply / idempotent · cách ly tổ chức — tổ chức `hau-mai-ai-dung` + `hau-mai-cach-ly`.
+    await testPostSaleLifecycle();
+    // INBOX READ V3 (chủ shop 10/10/2026 tối, P0): «chưa đọc» = có tin KHÁCH thật sau con trỏ đọc CỦA NGƯỜI XEM (0239); nạp khung chat ≠ đọc; con trỏ = tin khách cuối của payload, chỉ tiến; xem trước tin khách khi chưa đọc; danh sách vá theo xác nhận đọc; audit FALSE-UNREAD = 0 — tổ chức `hop-thu-doc-v3`.
+    await testInboxReadV3();
+    // INBOX UNREAD PERF (chủ shop 11/10/2026, OWNER CORRECTION): «tin khách chưa đọc» = lượt khách mới nhất chưa xử lý — hàm của response-ownership (#803) sau cổng rẻ 0245 (trigger CSDL); ma trận chủ shop qua listInbox · A→B · parity cổng + hàm ≡ hàm trần ≡ bản TS trên 3.000 hội thoại · cổng đúng sau mọi đường ghi · audit TRƯỚC/SAU — tổ chức `hop-thu-unread-perf`.
+    await testInboxUnreadPerf();
+    // TÌM KIẾM HỘP THƯ (P0 inbox-search, chủ shop 11/10/2026): SĐT chuẩn hoá 0/+84/khoảng trắng · SĐT trong tin / đơn / Pancake / web · tên bỏ dấu + khoảng trắng · mã đơn · tìm × bộ lọc × phân trang · UNREAD rỗng ⇒ gợi ý «Tất cả» đúng số · danh sách mới không mang hội thoại cũ · 3.000 hội thoại — `tim-hop-thu-a` / `tim-hop-thu-b`.
+    await testInboxSearch();
+    // «Trả tất cả cho AI» (chủ shop 10/10/2026, mục D): quyền · cách ly tổ chức · trả được / bị chặn theo lý do · sự kiện + nhật ký người bấm · chạy lại 0 dòng mới — `hop-thu-bulk-a` / `hop-thu-bulk-b`.
+    await testInboxBulkAi();
+    // Nhập đủ lịch sử hội thoại vào hộp thư (0221): tổ chức THẬT `hop-thu-lich-su`, Pancake giả, tự cấp, tự dọn.
+    await testSalesInboxHistory();
+    // E2E trọn vòng: tin khách → AI → đơn → giao → Hiệu quả → mốc kích hoạt → sổ dùng → Owner Cockpit (tổ chức `e2e-shop`).
+    await testE2eAiSalesPlatform();
+    // AI vs người theo nhánh + drill-down về hội thoại (DoD #9, #15): tổ chức THẬT `xr-shop` / `xr-khac`.
+    await testSalesExperimentReport();
+    await testCommerceAgent();
+    await testZaloOa();
+    await testSalesEvents();
+    // Quảng cáo dẫn khách vào hội thoại ⇒ đơn bot mang ad_id (0225) — tổ chức THẬT `chat-ad-attr`, tự dọn.
+    await testChatAdAttribution();
+    await testOrderAttribution();
+    await testLostReasons();
+    await testAiQuality();
+    testPancakePoll();
+    testPageConfig();
+    await testMetaAdsOrgSync();
+    // Sổ mẩu + mẫu thắng làm nguồn ảnh của tổ chức khách: tổ chức THẬT `ma-hslc-thang` (tự cấp, tự dọn).
+    await testMetaAdsOrgWinners();
+    await testMetaAdsOrgPublish();
+    await testPancakePosOrgSync();
+    await testViettelPostOrg();
+    await testCarrierVtp();
+    await testCarrierGhn();
+  }
+  if (khoi.chay("K21")) {
+    await testErpNative();
+    await testChatOrder();
+    await testCarrierGhtk();
+    await testShippingRouting();
+    await testFashionCodF3();
+    await testWholesaleLeadHunter();
+    await testRestaurantTemplate();
+    await testSelfServiceJourney();
+    await testQuickStart();
+    await testPhoneOtp();
+    await testSalesPacks();
+    // Bộ hội thoại vàng (M1): phát lại hội thoại kịch bản qua chatTurn, so ảnh chụp — tổ chức THẬT `gd-food` / `gd-fashion`.
+    await testSalesAgentGolden();
+    // Bộ đo đơn vàng v2 (sứ mệnh saas-order-accuracy): dataset hội thoại có nhãn × 2 biến thể công tắc tự xác nhận qua chatTurn
+    // thật, bộ đo thuần, số đo hiện trạng khớp tests/order-golden/BASELINE.md — tổ chức THẬT `og-food-off` / `og-food-on`.
+    await testOrderGolden();
+    // P0 10/10/2026 — AI không khẳng định điều chưa xác minh («đã nhận tiền» / «đã chốt đơn»): bảng chân lý thuần, quét mã nguồn
+    // mọi đường chữ bot, tổ chức THẬT `gd-food-cg` (bot tắt · chứng từ thu đủ số · đơn nháp · nối cùng luồng page + hội thoại).
+    await testSalesClaimGuard();
+    // P0 11/10/2026 — báo giá do MÁY CHỦ quyết (quote.ts): 2kg = 2 × 1kg − giảm, catalog mâu thuẫn ⇒ chưa xác thực, số tiền trong chữ bot
+    // phải thuộc báo giá đã xác thực, «đã lên đơn» chỉ khi đơn qua kiểm — tổ chức THẬT `gd-food-qi1` / `gd-food-qi2`.
+    await testSalesQuoteIntegrity();
+    // P0 12/10/2026 — giỏ có thẩm quyền (cart-commitment.ts): số lượng khách nói tường minh DÍNH tới khi khách sửa tường minh; công cụ
+    // ghi đơn hạ / bỏ món ⇒ máy chủ từ chối; ma trận G1–G6 qua chatTurn thật — tổ chức THẬT `gd-food-cc1` / `gd-food-cc2`.
+    await testSalesCartCommitment();
+    await testP0855Cart();
+    // P0 #855 phần còn lại (sau #860 / #861): báo giá phải có căn cứ + tổng giỏ bị từ chối không tới khách, phủ nhận món bot đưa ra ⇒ người
+    // ngay lần đầu + giữ tuyến giao ORDER_REVIEW, lời nhắc khách cũ, không lặp câu xin lỗi — tổ chức THẬT `gd-food-p855d`.
+    await testP0855Delta();
+    await testP0RepeatBuyer();
+    // P0 #863 — tin phía page tới giữa lượt ⇒ bot không gửi · khách huỷ sau lỗi bot ⇒ xin lỗi cụ thể + đơn đã sửa · huỷ lần hai ⇒ vòng đời đơn — tổ chức THẬT `gd-food-p863`.
+    await testP0863CancelFlow();
+    // P0 14/10/2026 — tổng tiền trong chữ bot = tổng máy chủ của giỏ hiện tại (ca «Châu Dương» 640k cho 1kg 280k) · lượt im không «nói rõ
+    // hơn» (ca «Viet Nguyen Thi») · upsell chưa đồng ý không vào đơn · tin vọng lại / trùng không sinh tin — tổ chức THẬT `gd-food-q640`.
+    await testSalesQuote640();
+    // P0 #868 (chủ shop 16/10/2026) — lời mời mua thêm THÔNG MINH: không còn cổng «chưa mời thêm món», một lời mời mỗi lượt mua, không mời lúc
+    // khách gửi SĐT / địa chỉ / đã từ chối; khách đã chọn 2kg ⇒ không «1kg hay 2kg»; món kèm phải đủ điều kiện — thuần + chatTurn thật (`gd-food-nba`).
+    await testSalesNextBestAction();
+    // P0 18/10/2026 (ca «ThanhPhương») — câu mẫu phải nói ĐÚNG món khách hỏi: «xin giá chả cá» không còn ra câu nem đang mang nhầm cách
+    // hỏi đó; page tự động nói chả cá · khách từ chối nem · khách hỏi hai món · model gửi câu mẫu sai món — thuần + chatTurn thật (`gd-food-qrf`).
+    await testP0QuickReplyFocus();
+    // P0 19/10/2026 (ca «Trung Dinh») — lời mời SAU CHỐT: một câu gộp vào tin xác nhận, «ok» không thêm món, gọi tên món ⇒ thêm vào đơn tự
+    // chốt, đã mời / từ chối / hết hàng / vận đơn đã chạy / đơn đồng ý — thuần + chatTurn thật (`gd-food-pco`).
+    await testP0UpsellAfterConfirm();
+    // P0 11/10/2026 — ops sales-integrity-audit: giá bot ≠ giá đơn · giá tự đổi · xác nhận giả · chuyển người không ai nhận ·
+    // địa chỉ chưa ghép · nhắc sau đơn chốt — thuần + CSDL thật (mã `erp-ia-`, tự dọn), tóm tắt không lọt PII.
+    await testSalesIntegrityAudit();
+    // P0 12/10/2026 — ops cart-intent-audit: bot tự hạ số lượng khách đã nói / đơn đủ ORDER_READY vẫn bị hỏi · mời — thuần + CSDL thật
+    // (hội thoại dựng theo ca HSLC, tự dọn), tóm tắt không lọt PII, chỉ đọc, ops khai đủ bốn chỗ.
+    await testCartIntentAudit();
+    // P0 14/10/2026 — ops conv-money-trace: số TỔNG trong tin bot ≠ báo giá giỏ (ca «Châu Dương» 640k cho 1kg 280k) · câu «nói rõ hơn»
+    // của engine khi khách không nhắn gì (ca «Viet Nguyen Thi») — thuần + CSDL thật (tự dọn), tóm tắt không lọt PII, chỉ đọc.
+    await testConvMoneyTrace();
+    // P0 #868 — ops upsell-offer-audit: phễu + upsell (sổ sự kiện) và lời mời đọc từ chữ đã gửi (mời lặp · sau từ chối · sau khi đã chọn) —
+    // thuần + CSDL thật (tự dọn), chỉ đọc, khai đủ bốn chỗ.
+    await testUpsellOfferAudit();
+    // Chủ shop 18/10/2026 (HSLC) — ops shipment-origin-audit: vận đơn do ERP · POS/Pancake · hay ngoài ERP tạo (chỉ hãng, không đơn) —
+    // thuần + CSDL thật (tự dọn), «đã có vận đơn dù ERP đang giữ» hỏi bằng decideShippingRoute, tóm tắt chỉ số đếm, chỉ đọc.
+    await testShipmentOriginAudit();
+    // Chủ shop 18/10/2026 (luồng vận đơn HSLC) — ops shipping-source-probe: vận đơn đang được TẠO Ở ĐÂU (ERP · Pancake POS · Viettel Post),
+    // ghép POS ↔ ERP (LINK · gợi ý), rủi ro hai vận đơn, kết luận MEASURED / HINT / UNKNOWN — thuần + CSDL thật (tự dọn), Pancake giả, chỉ đọc.
+    await testShippingSourceProbe();
+    // P0 11/10/2026 (KimThu Le) — vòng đời khách dùng chung + follow-up đọc lại ngay trước khi gửi (đơn thật · chứng từ thu ·
+    // từ chối nhận tin · người / nguồn khác vừa nhắn), khoá gửi chống trùng, vết quyết định — tổ chức THẬT `fu-life` (tự cấp, tự dọn).
+    await testFollowupLifecycle();
+    // Customer 360 (11/10/2026, ca «Nga Ho Thien»): nhận diện khách cũ qua đơn của chính hội thoại / SĐT, địa chỉ cũ ĐÃ XÁC MINH,
+    // «vẫn địa chỉ cũ» ⇒ tra trước khi hỏi — tổ chức THẬT `gd-food-c360` / `gd-fashion-c360` (tổ chức khác không lọt).
+    await testCustomer360();
+    // Đơn cần người kiểm (chủ shop 08/10/2026): khách huỷ ⇒ ghi chú + cờ, xã chưa ghép ⇒ cờ, nút nhanh Xác nhận / Huỷ, lời xác nhận,
+    // SĐT chuẩn hoá — tổ chức THẬT `or-rv` (không Pancake; tự cấp, tự dọn).
+    await testOrderReview();
+    // Khách huỷ đơn (sự cố #189A435E, chủ shop 10/10/2026 — thay luật 08/10): giữ đơn một lần ⇒ khách vẫn huỷ ⇒ tự «Đã huỷ» theo vòng
+    // đời vận đơn (hãng xác nhận mới huỷ; đã lấy / hãng lỗi ⇒ hàng ngoại lệ + cảnh báo), trùng = một lần, ghi hỏng ⇒ không nói đã huỷ,
+    // đối soát chạy thử — tổ chức THẬT `oc-cx` + `gd-food-oc` (tự cấp, tự dọn), hãng giả.
+    await testOrderCancelConsistency();
+    // Hộp thư V2-B: «Đơn đang chốt» đầu cột phải — đọc đơn bot ghi (một câu SQL), kiểm từng ô bằng validator của lõi, nút xác nhận
+    // = `confirmOrderReviewCore` — tổ chức THẬT `or-ib` (tự cấp, tự dọn).
+    await testInboxOrderPanel();
+    // Trang «Sản phẩm» của khách vỏ: danh sách gọn (tên · SKU · giá · tồn khả dụng · thiếu gì) · số gọn dấu phẩy · «0 kho» — thuần + mã nguồn.
+    await testProductsShellV2();
+    await testGoLive();
+    // Danh sách «giá trị đầu tiên» chín bước của vỏ Chốt Đơn (chủ shop 10/10/2026) — tổ chức THẬT `fv-shop`, Pancake GIẢ.
+    await testOnboardingV2();
+  }
+  if (khoi.chay("K22")) {
+    await testSalesVision();
+    testChatWidget();
+    await testWebProductImport();
+    await testMessenger();
+    // AI ↔ người trên từng hội thoại (Tiếp quản / AI gợi ý / Trả lại AI) + cổng gửi chống trả lời đôi — tổ chức THẬT
+    // `kiem-soat-hoi-thoai`, Messenger trực tiếp qua Graph giả.
+    await testConversationControl();
+    // AI nhường người: AI_ACTIVE · HUMAN_COOLDOWN (đếm ngược, «Cho AI tiếp tục ngay») · HUMAN_TAKEOVER («Trả lại cho AI») — tổ chức
+    // THẬT `nhuong-nguoi` (+ `nhuong-nguoi-khac` cho cô lập), Messenger trực tiếp + fanpage Pancake giả, đồng hồ nhường tường minh.
+    await testSalesHumanTakeover();
+    // P0 11/10/2026 — lượt khách & chủ trả lời: tin chào / tự động / chữ hệ thống không còn là «đã trả lời» hay «người»; chỉ người đã
+    // xác minh làm AI nhường; hết nhường ⇒ đánh giá lại tồn một lần; câu đếm + hàng đợi cứu đơn — tổ chức THẬT `tra-loi-dung-luot`.
+    await testResponseOwnership();
+    // Hộp thư hợp nhất + song song Pancake / Meta trực tiếp (0233): đường canonical theo page + backfill giữ đường hôm nay, khử
+    // trùng hai nguồn, đường phụ không kích AI, người trả lời ba nguồn ⇒ nhường, số phút nhường theo workspace, thẻ lọc ≡ aiHoldOf —
+    // tổ chức THẬT `l3-hop-thu` (+ `l3-hop-thu-khac` cho cô lập), Graph + Pancake giả.
+    await testSaasL3Inbox();
+    // Bot tra trạng thái đơn (Commerce Truth): chỉ đơn của CHÍNH hội thoại, trạng thái = lời khai ĐVVC — tổ chức THẬT `bot-tra-don`.
+    await testBotOrderStatus();
+    // P0 #855: hỏi lịch giao ≠ hỏi trạng thái — máy chủ quyết câu trả lời / chuyển người, không hứa giờ — tổ chức THẬT `p0-855-lich-giao`.
+    await testP0855DeliveryIntent();
+    // Order Truth: đơn bot chốt mang dấu lời nhắc + cấu hình + model + bản mã; sổ chi phí AI của lượt chat mang mã hội thoại.
+    testOrderTruthStamp();
+    // Đơn ↔ hội thoại ↔ khách: link hội thoại của đơn mở Hộp thư ERP (mọi kênh); hồ sơ khách chỉ thấy hội thoại nối bằng
+    // khoá cứng — tổ chức THẬT `truy-vet-hoi-thoai`.
+    await testConversationTrace();
+    // Messenger trực tiếp — token hỏng (Graph 190) ⇒ kết nối về Nháp + báo người một lần; lỗi ngoài 24 giờ không đụng kết nối.
+    await testMessengerHealth();
+    testConnectorsLegacy();
+    // Shop CHỈ nối Facebook trực tiếp: ghi đơn từ hội thoại đọc sổ tin ERP (không Pancake) + trọn đường nhận → bot → nhân viên →
+    // đơn → ghi đơn với 0 lời gọi pages.fm — tổ chức THẬT `chi-facebook`.
+    await testNativeOrderSync();
+    // Vòng đời page Meta + lịch sử hội thoại trực tiếp: phân trang /me/accounts, gỡ page ⇒ gỡ đăng ký webhook, nhập 20 tin gần nhất
+    // mỗi hội thoại qua Conversations API — tổ chức THẬT `vong-doi-page`.
+    await testMessengerLifecycle();
+    // Khám phá page Facebook: tách 6 lý do «không có page» (sự cố 06/10/2026) — Graph giả, không mạng.
+    await testMessengerDiscovery();
+    // App Meta riêng cho Messenger (cấu hình thử): bắt tay GET + chữ ký của hai app + đường đưa secret lên máy chủ.
+    await testMessengerWebhookSecrets();
+    // Kênh kết nối hợp nhất: gộp hai nguồn · sức khoẻ ba mức · câu khách không từ kỹ thuật · Configuration ID · cô lập tổ chức.
+    await testChannelsOverview();
+    testSalesAiDownAlert();
+    // Giám sát AI bán hàng (sau sự cố P0 06/10/2026): sự cố hết tiền phải ĐỎ đúng nguyên nhân, báo một lần mỗi khung.
+    await testAiSalesHealth();
+    // Thử lại có lùi dần + dead-letter + không trả lời trùng (đường fanpage thật, Pancake giả).
+    await testAiSalesRetry();
+    // Khoá AI chính → khoá dự phòng → người (sự cố 06/10/2026): phân loại · ngắt mạch · không gửi trùng — tổ chức THẬT
+    // `fo-ai-failover`, provider giả.
+    await testAiProviderFailover();
+    // Cứu hội thoại bị bỏ sót trong sự cố AI — chỉ đọc, bốn lớp, không gửi gì.
+    await testAiSalesRecovery();
+    await testMessengerMultiPage();
+    await testPush();
+    // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò
+    // hệ thống + tuỳ chỉnh ⇒ tài khoản đúng tổ chức, phiên đúng claim; dùng lại / hết hạn / thu hồi / chép chéo ⇒ một câu chung;
+    // song song ⇒ một tài khoản; hạn mức gói lúc tạo (tính ghế đã hứa) và lúc nhận; bảng không chứa mã thô; chặn dò theo IP.
+    await testUserInvites();
+    testTestOrgCodes();
+    await testPasswordReset();
+    // PUB-07: «Quên mật khẩu» tự phục vụ — OTP Zalo (lõi phone-otp) ⇒ phiếu qua lõi password-reset; OTP tắt ⇒ một yêu cầu hỗ trợ. Tổ chức
+    // THẬT `fq-*`, tự cấp, tự dọn; Zalo là hàm giả.
+    await testForgotPassword();
+    // P0 08/10/2026: khách do admin tạo (job cấp phát) đăng nhập bằng email + mật khẩu KHÔNG cần mã tổ chức — chỉ mục danh tính ghi
+    // ngay lúc cấp phát / tạo hộ / mời / đặt mật khẩu; gửi lại kích hoạt; email trùng hai workspace; đối chiếu dữ liệu cũ. Tổ chức
+    // THẬT `iel-*`, tự cấp, tự dọn; loginAction / logoutAction chạy trong phạm vi request dựng tay của Next.
+    await testIdentityEmailLogin();
+    // Ops `saas-acceptance` (lượt đi vai KHÁCH Chốt Đơn trên production): lá chắn sổ khai · cấp phát qua job «Tạo khách» (máy) ·
+    // kích hoạt → /reset → /login không mã tổ chức · xoay mật khẩu rồi vứt · không lộ bí mật · E2E chat → AI → đơn với AI giả.
+    await testSaasAcceptance();
+    // LAUNCH SPRINT §11 «Observability before sales» (sứ mệnh saas-ops-signals): tám tín hiệu vận hành của MỘT khách — lỗi đăng nhập có
+    // lý do (không lộ cho người dùng, không email / mật khẩu thô, chặn dò không nhân dòng) · ghi đơn hỏng KHÔNG thành «AI hỏng» · AI im
+    // có tên · gương sức khoẻ ở CSDL nhà (job sales-health, hết lỗi ⇒ về OK) · khung chỉ người vận hành đọc được. Tổ chức THẬT `ops-sig*`.
+    await testOpsSignals();
+    // Ops `ops-signals-check`: tám tín hiệu O1–O8 tính bằng ĐÚNG hàm của khung cho mọi tổ chức, CHỈ ĐỌC — hỏng ⇒ FAIL nêu đúng tín hiệu,
+    // UNKNOWN đếm riêng không FAIL, kênh công khai chỉ mã + số; người vận hành máy qua bộ tính quyền của phiên.
+    await testOpsSignalsCheck();
+    // Ops `security-acceptance` (LAUNCH_GATE §3): quét bí mật trong trang · phán quyết dò cô lập (200 dựng bản ghi tổ chức kia = RÒ) ·
+    // phong bì bản mã (bản rõ = FAIL) · CHỈ ĐỌC, chỉ GET, công khai chỉ trạng thái + số.
+    await testSecurityAcceptance();
+    // Ops `inbox-perf-probe`: Hộp thư khách — tải / chuyển hội thoại bấm giờ ĐÚNG chuỗi hàm máy chủ của page.tsx, CHỈ ĐỌC (handle chỉ đọc,
+    // danh tính chỉ xem không ghi staff_seen_at), công khai che tổ chức thành org#i, mẫu < 3 ⇒ chưa kết luận, không đích. Tổ chức THẬT `ipp-a`.
+    await testInboxPerfProbe();
+    // P0 inbox-list-perf (13/10/2026): thứ tự rẻ trước ≡ bản chuẩn #803 từng hội thoại · listInbox tính trực tiếp ≡ lưu sẵn trên ≥ 5.000
+    // hội thoại (số đo in ra) · chuyển hội thoại không dựng lại danh sách · tự làm mới không chồng lượt. Tổ chức THẬT `hop-thu-list-perf`.
+    await testInboxListPerf();
+    testHelpGuides();
+  }
+  if (khoi.chay("K23")) {
+    // Trang giới thiệu: bảng giá đọc thật từ platform_plans, gói khởi điểm không bao giờ in thành 0 ₫.
+    await testPublicSiteData();
+    await testDataExport();
+    // Sổ dùng AI + hạn mức AI theo gói + công tắc AI: hai tổ chức THẬT `au-a` / `au-b` (tự cấp, tự dọn), provider GIẢ —
+    // một dòng / lượt đúng nguồn, BLOCKED_QUOTA không gọi model, A không trừ B, BYOK không trừ credit nền tảng, không rơi về khoá nhà.
+    await testAiUsage();
+    // Platform AI Model Control (06/10/2026): model AI dùng chung đổi qua chính sách có cổng (kiểm khả dụng → chạy thử → áp dụng
+    // → hoàn tác), model mới hỏng ⇒ cùng lượt đi model dự phòng, sổ AI ghi đúng model thật.
+    await testPlatformAiModel();
+    // Vận hành khách pilot: vòng đời (checklist tính từ dữ liệu thật, ghi đè có lý do), trang sức khoẻ (không dữ liệu
+    // nghiệp vụ, mỗi lượt xem có vết), công tắc khẩn (đình chỉ · tạm dừng luật · tắt kết nối) — hai tổ chức THẬT `pop-a`
+    // (tạo hộ qua /start) / `pop-b` (tự cấp, tự dọn).
+    await testPilotOps();
+    await testPlatformBilling();
+    // Số dư AI + nạp QR (0235): sổ cái chỉ ghi thêm, phiếu nạp ERPNAP, tiền về cộng đúng một lần, tự lành, cô lập tổ chức —
+    // hai tổ chức THẬT `aib-a` / `aib-b`, tự cấp, tự dọn; khôi phục tài khoản nhận tiền trong finally.
+    await testAiBalance();
+    // Trừ Số dư AI cho khách AI vượt phần gồm + cổng hết số dư (chỉ chặn khách MỚI) + báo số dư — tổ chức THẬT `aibu-*`, tự dọn.
+    await testAiBalanceUsage();
+    // Số dư AI trong kinh tế đơn vị /platform: tiền thật đã dùng = doanh thu, không cộng hai lần với phần vượt ước tính.
+    await testAiBalanceEconomics();
+    // AI dùng chung TRẢ TRƯỚC theo khách AI (AI_BALANCE_V1 §7): phiên bản giá chỉ-ghim, mọi khách AI trừ Số dư, ops một bước một
+    // lượt — hai tổ chức THẬT `pai-*` ở giá cũ, tự dọn; khôi phục tài khoản nhận tiền + mốc đồng hồ trong finally.
+    await testOrgPrepaidAi();
+    // Nền móng giá & thu phí (0222): gói cấu hình được, tính năng, hạn mức mềm / cứng, đồng hồ đo, sự kiện trùng, kinh tế đơn vị —
+    // ba tổ chức THẬT `prc-a` / `prc-b` / `prc-c`, tự cấp, tự dọn; khôi phục cấu hình gói + ngưỡng trong finally.
+    await testPricingBilling();
+    await testSaasPlatform();
+    // Sức khoẻ khách SaaS (/platform/customers): phân loại thuần + ba tổ chức THẬT `skh-*` (khoẻ · nguy cấp · cần chú ý), tự cấp,
+    // tự dọn; chỉ người vận hành; thiếu dữ liệu không bao giờ ra «Khoẻ».
+    await testCustomerHealth();
+    // Trung tâm giá trị SaaS PR-1 (thuần): sổ chỉ số theo tổ chức, bốn nhãn quy kết, null ≠ 0, sức khoẻ / rủi ro rời bỏ có mã lý do.
+    await testSaasValueCenter();
+    await testPricingV1();
+    // Chuyển tổ chức legacy → V1 (ops saas-v1-migration) + phần gồm tính tiền dùng chung — không thu đôi ghế mua thêm (OVERAGE O1).
+    await testSaasV1Migration();
+    await testAiCustomerSend();
+    await testSaasL5BillingTrial();
+    // Phase 14: workspace nhà đi ĐÚNG đường thương mại của khách (gói gán → ghi đè → giữ từ trước) — bài so trước/sau từng
+    // quyết định (tính năng · hạn mức · hạn mức tháng · gói · trang gói) + năm đột biến dữ liệu; khôi phục sổ gói trong finally.
+    await testSaasInternalPlan();
+    // Che dữ liệu AI nội bộ khỏi khách (07/10/2026): DTO máy chủ + lưu cấu hình giữ động cơ AI + quét mã + khối vận hành —
+    // tổ chức THẬT `hi-shop`, tự cấp, tự dọn; khoá bí mật kiểm thử trả lại nguyên trạng trong finally.
+    await testSaasHideInternal();
+    // F-02 (kiểm vỏ khách 08/10/2026): cửa hàng tự đăng ký qua /start có thuê bao sản phẩm theo module mẫu vừa bật, lỗi không làm
+    // hỏng đăng ký mà để vết, trang Gói của khách không in nhãn nội bộ, sửa bù chạy thử không ghi — tổ chức THẬT `ssu-*`, tự dọn.
+    await testSaasSignupSubscription();
+    // «Tạo khách mới» của người vận hành (kiểm khởi chạy 08/10/2026): thương hiệu theo bộ sản phẩm, gói theo bảng giá niêm yết (máy
+    // chủ chặn giá cũ / `internal` cho khách ngoài), mẫu «Chỉ cần AI bán hàng» cài bằng bộ cài /start (chạy lại không nhân đôi, hỏng có
+    // vết), form nói vì sao chưa bấm được; nội bộ / nhà không đổi — tổ chức THẬT `ccr-*`, tự cấp, tự dọn.
+    await testCreateCustomerRules();
+    // Sổ kinh tế SaaS + Owner Cockpit (0203): hai tổ chức THẬT `saas-a` / `saas-b`, tự cấp, tự dọn.
+    await testPlatformSaas();
+    // Trung tâm giá trị SaaS PR-3 (0240): ảnh giá trị theo tổ chức + sức khoẻ theo ngày — một lần mỗi ngày VN, chỉ đường JOB, nguồn hỏng ⇒
+    // chỉ ô của nó null + source_errors, ngày cũ không bị ghi. Hai tổ chức THẬT `tvs-a` / `tvs-b`, tự cấp, tự dọn.
+    await testSaasValueSnapshots();
+    await testPlatformUi();
+    // Nền tảng đa tổ chức: hai tổ chức THẬT trong một tiến trình (mã `pi-`, tự cấp và tự dọn) — đệm, bus,
+    // credential, khoá job, hẹn giờ, webhook. Đứng ngay trước bài ngữ cảnh để mọi bài phía trên không thấy tổ chức nào khác.
+    await testPlatformProcessIsolation();
+    // Nền tảng 1.x: module của từng job, client chia ngăn theo tổ chức, fan-out lịch, webhook, R-17 (mã `ph-`,
+    // tự cấp và tự dọn; tắt thử một module của nhà rồi khôi phục trong finally).
+    await testPlatformJobs();
+    // G-SCHED: luật tự động của tổ chức khách tự chạy qua fan-out tuần tự (mã `gs-`, tự cấp và tự dọn); nhà giữ nguyên.
+    await testGSched();
+    // Phase 8b: nhà chạy được runtime Chốt Đơn KHI bật ai_sales — webhook fanpage/Zalo, lịch job, nguồn AI HOME; nhà tắt ⇒ như
+    // cũ; khách không đổi (mã `vr-`, tự cấp và tự dọn; dòng ai_sales của nhà trả lại nguyên trạng trong finally).
+    await testSaasVnxRuntime();
+    // Cổng page của nhà: module ai_sales + bot bật mà danh sách page rỗng ⇒ 0 tin trên mọi đường; BÓNG lưu câu soạn, 0 gửi;
+    // LIVE như khách; khách không đổi (CSDL nhà dọn trong finally, tổ chức `pg-khach` tự cấp và tự dọn).
+    await testSaasPageGate();
+    // Vỏ app Chốt Đơn Tự Động: workspace Sales Agent thấy đúng 8 mục, route ERP nội bộ chặn ở máy chủ (`/` ⇒ hộp thư), ERP / nhà
+    // không đổi; hợp đồng mobile (tổ chức `sa-shell` tự cấp và tự dọn).
+    await testSaasShell();
+    // Vỏ Chốt Đơn: vai trò chỉ ba lựa chọn (Chủ cửa hàng · Nhân viên bán hàng = mã BAN_HANG · Chỉ xem), máy chủ từ chối lựa chọn
+    // ngoài bộ; ERP / nhà không đổi; không quyền / mẫu nào sửa (tổ chức `ssr-shell` tự cấp và tự dọn).
+    testShellStaffRolesPure();
+    await testShellStaffRolesServer();
+    // Vai trò «Nhân viên bán hàng» (BAN_HANG) nhận ai_sales:reply — chủ shop duyệt 09/10/2026: mẫu 1.1.0 + ops nâng tổ chức cũ qua
+    // bộ cài mẫu (chạy thử không ghi · idempotent · đã tự sửa / nền khác ⇒ bỏ qua). Tổ chức `bhr-*` tự cấp và tự dọn.
+    testBanHangReplyPure();
+    await testBanHangReplyServer();
+    // F-01: đăng nhập / đăng ký trong vỏ Chốt Đơn tính đích cuối ngay trong action — không `redirect("/")` mà layout chuyển
+    // hướng (vòng lặp trang trắng); nhà / workspace ERP đúng safeNextPath (tổ chức `dich-dang-nhap` tự cấp và tự dọn).
+    await testShellLoginLanding();
+    // Cùng lớp vòng trắng ở tầng CỔNG: thiếu quyền ⇒ người vỏ về trang nhà của vỏ ?forbidden=1 (không «/» mà layout vỏ chặn), ERP
+    // giữ /?forbidden=1; /module-disabled đứng ngoài nhóm (dashboard) (tổ chức `sgr-cong` tự cấp và tự dọn).
+    await testShellGateRedirects();
+    // Màn hình lỗi dashboard + gốc: không in error.message / DATABASE_URL, chỉ mã tham chiếu, lối ra <a href="/"> (Commercial Sweep C1 #11).
+    testErrorBoundary();
+  }
+  if (khoi.chay("K24")) {
+    // ERP a11y + bố cục hẹp (Commercial Sweep PR G): h1 màn không tìm thấy, công tắc / ô số có tên, /payroll không tràn 390 px.
+    testErpA11y();
+    // Cổng nối thẳng Facebook (review #706): khách thấy «sắp mở» khi cờ meta.direct-connect.open đóng; người vận hành thấy nút thật.
+    await testDirectConnectGate();
+    // Vỏ Chốt Đơn không có chữ dưới 11 px (docs/design-system.md mục 10 · Commercial Sweep PR B).
+    testShellTypography();
+    // Trang chi tiết ERP đuôi dài (Commercial Sweep): «%» lẻ không 500, khách sỉ không mã thô, phiếu sản xuất cuộn ngang, lượt nhập VTP hỏng.
+    testErpDetailTail();
+    // Ô nhập ở trang chi tiết ERP có tên cho trình đọc màn hình (Commercial Sweep — lô xưởng, khách sỉ, topic, mẫu, luật tự động).
+    testErpFormNames();
+    // Trang chi tiết đơn / khách / hội thoại: không chữ, bộ đếm, ô tiền Pancake ở tổ chức không Pancake (Commercial Sweep P0 động).
+    testDetailPagesShell();
+    // Vỏ Chốt Đơn C1 #6 · #7: /login sau redirect() của server action mang thương hiệu của host; chữ kỹ thuật (webhook · token ·
+    // ERP · API · TEST · field · connector · module · Viettel) không lộ ở nhánh người vỏ thấy — quét cây cú pháp, miễn trừ có lý do.
+    testShellCopyR3();
+    // AI Sales settings V2 (bề mặt 3 của VISIBLE_PRODUCT_FINISH_BOARD): ô trạng thái đầu trang — thiếu dữ kiện ⇒ «Chưa rõ», không «Đang chạy» —
+    // một nút chính qua cổng vỏ; nhánh khách không nhận / không in khoá AI · model · tên hãng · chi phí USD. Thuần + quét mã nguồn.
+    testAiSalesSettingsV2();
+    // Kiến thức của shop cho chatbot (sổ AIS-05): câu thường gặp · chính sách · khuyến mãi — zod, hạn theo giờ VN, rỗng ⇒ lời nhắc giống hệt,
+    // ô khuyến mãi không vào phép tính tiền (quét mã nguồn).
+    testAiSalesKnowledge();
+    // Team Premium F2: dấu «model không dùng được» nhớ theo tổ chức + kết nối — khoá BYOK hỏng của shop A không lùi IM LẶNG
+    // model của shop B (hay của khoá nền tảng cùng tổ chức) về model mặc định; mỗi shop được báo lỗi của chính mình. Provider giả.
+    {
+      const r = await testSalesModelFallbackTenant();
+      assert.deepEqual(r.failed, [], `sales-model-fallback-tenant: ${r.failed.join(" · ")}`);
+    }
+    // Nền tảng · phiên & RBAC (agent C): claim org, cổng module, platform:operate, đăng nhập theo tổ chức. Tự cấp
+    // tổ chức `pr-` (CSDL riêng) và tự dọn; đứng cạnh bài ngữ cảnh vì cùng lý do.
+    await testPlatformRbac();
+    // Nền tảng đa tổ chức: cấp một tổ chức THẬT thứ hai (CSDL PGlite riêng, mã `pt-`) — đứng cuối để mọi
+    // bài phía trên chạy đúng như trước nền tảng, không thấy tổ chức nào khác ngoài nhà.
+    await testPlatformContext();
+    // Kịch bản chấp nhận §55 + tấn công truy cập trực tiếp theo id (mã `pq-`).
+    await testPlatformIsolation();
+    // Hardening Số dư AI (review #644, LOW): báo «hết» tách theo mức chặn · gợi ý người bình luận bỏ dòng bot / page tự gửi ·
+    // đối chiếu sổ thu phí chỉ ở tổ chức nhà — tổ chức THẬT `aibh-growth`, tự cấp, tự dọn.
+    await testAiBalanceHardening();
+    // Nền tảng · 1.x: trang tổng hợp / công cụ AI theo module, chẩn đoán chỉ đọc, tệp hai tổ chức (mã `ph-`, tự cấp và tự dọn).
+    await testPlatformHardening();
+  }
+  const keKhai = khoi.ketThuc();
+  // Chỉ lượt chạy ĐỦ được in đúng câu "TẤT CẢ KIỂM THỬ ĐẠT" (AGENTS 6.3); lượt chia shard / chẩn đoán nói rõ nó chạy phần nào.
+  console.log(keKhai.shard ? `\nTẤT CẢ KIỂM THỬ CỦA ${khoi.shard ? "SHARD " : ""}${keKhai.shard} ĐẠT (${keKhai.ran.length}/${keKhai.all.length} khối + phần chung)` : "\nTẤT CẢ KIỂM THỬ ĐẠT");
   console.log = inGoc; // bảng tự nó không phải một nhóm kiểm thử
   inGoc("\n" + bangThoiGian(nhip).join("\n"));
+  inGoc("\n" + khoi.bangThoiGian().join("\n"));
   process.exit(0);
 
 }

@@ -363,11 +363,21 @@ export async function testInboxPerfProbeDb() {
       const seen = await (await getDb()).select({ id: schema.salesChatConversations.id }).from(schema.salesChatConversations).where(isNotNull(schema.salesChatConversations.staffSeenAt));
       assert.equal(seen.length, 0, "danh tính chỉ xem KHÔNG ghi staff_seen_at — lượt đo không xoá dấu «chưa đọc» của shop");
     });
-    // Câu chậm nhất + chẩn đoán 0245 + EXPLAIN (đường thật trên PGlite).
-    const [rSlow] = await collectInboxPerf([ORG], 2, { orgReadOnly: async () => true }, { explain: true, analyze: true, top: 8 });
+    /*
+      Câu chậm nhất + chẩn đoán 0245 + EXPLAIN (đường thật trên PGlite).
+
+      KHẲNG ĐỊNH TRÊN TẬP CÂU BẮT ĐƯỢC, KHÔNG TRÊN THỨ HẠNG THỜI GIAN (20/10/2026). Bản trước xin `top: 8`
+      rồi đòi hai câu của listInbox nằm trong tám câu CHẬM NHẤT theo mili-giây ĐO THẬT — đỏ chập chờn ít nhất
+      ba lần (#918, một lượt cổng khác, shard 3 khi chạy song song): đó là đo CÁI MÁY (AGENTS mục 65). Ý của
+      bài là "đi ĐÚNG đường của page.tsx thì bắt ĐỦ các câu của listInbox", nên xin MỌI hình dạng (không cắt
+      top) và kiểm tập khối. Phần EXPLAIN vẫn lấy hai hình dạng chậm nhất — nó kiểm "đọc được kế hoạch", không
+      kiểm hình dạng nào đứng đầu.
+    */
+    const [rSlow] = await collectInboxPerf([ORG], 2, { orgReadOnly: async () => true }, { explain: true, analyze: true, top: Number.MAX_SAFE_INTEGER });
     assert.ok(rSlow.result.ok && rSlow.result.slow && rSlow.result.diag, JSON.stringify(rSlow.result).slice(0, 300));
     const slow = rSlow.result.slow;
-    assert.ok(slow.top.some((t) => t.block === "listInbox.đếm-thẻ") && slow.top.some((t) => t.block === "listInbox.hàng"), `bắt được câu của listInbox: ${slow.top.map((t) => t.block).join(", ")}`);
+    const khoiBat = new Set(slow.top.map((t) => t.block));
+    for (const can of ["listInbox.đếm-thẻ", "listInbox.hàng"]) assert.ok(khoiBat.has(can), `bắt được câu ${can} của listInbox (tập khối bắt được: ${[...khoiBat].join(", ")})`);
     assert.equal(slow.plans.length, 2, "EXPLAIN hai hình dạng chậm nhất");
     assert.ok(slow.plans.every((p) => p.structure[0] !== "kế hoạch: không đọc được"), `EXPLAIN đọc được: ${JSON.stringify(slow.plans.map((p) => p.structure[0]))}`);
     assert.equal(rSlow.result.diag.columns, 2, "CSDL kiểm thử có đủ cột 0245");
