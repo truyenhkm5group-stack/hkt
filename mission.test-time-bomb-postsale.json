@@ -3,7 +3,7 @@
   "mission_id": "test-time-bomb-postsale",
   "title": "postsale-lifecycle.test.ts:256 đỏ trong 5 phút cuối ngày VN — mốc phải đi theo đồng hồ hoặc dữ liệu (luật 50)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -20,9 +20,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-20T21:19:02.252Z",
-  "updated_at": "2026-10-20T22:30:40.621Z",
+  "updated_at": "2026-10-20T22:44:36.376Z",
   "last_heartbeat": "2026-10-20T21:45:25.297Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#931 → 25ffdb822fb9908958cec7ace01fceea5df712fb"
+  },
   "handoff": {
     "branch": "claude/test-time-bomb-postsale",
     "sha": "2c10ab27c8c5d8d1ade7dcf545e724a2cd761221",

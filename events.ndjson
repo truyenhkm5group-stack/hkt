@@ -1,4 +1,3 @@
-{"at":"2026-10-13T10:51:43.108Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"gates-test-timeout","detail":"OVERLAP_ACCEPTED với sync-runner-lock: điểm nóng SERIAL .github/ — cách tích hợp: một dòng gates.yml"}
 {"at":"2026-10-13T10:52:01.050Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"gates-test-timeout","detail":"fix/gates-test-timeout @ 16fb61f0f060 · 1 lệnh kiểm thử"}
 {"at":"2026-10-13T10:52:36.552Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"gates-test-timeout","detail":"#830 cho fix/gates-test-timeout @ 16fb61f0f060"}
 {"at":"2026-10-13T10:52:54.657Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#830 @ b5296e6d9f23 · Chỉ nâng timeout-minutes hai job kiểm thử 35→45"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-20T22:31:11.668Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#931 @ 2c10ab27c8c5 · review lead: bom hẹn giờ luật 50 — quét lại ở now+5′ từ 23:55 VN sang ngày sau ⇒ đỏ. sauMaCungNgayVn giữ mốc thứ hai trong cùng ngày VN (sát nửa đêm lấy điểm giữa tới cuối ngày), now vẫn theo đồng hồ thật; hai khẳng định thuần 23:58 VN / giữa ngày; đột biến đỏ ở mọi giờ. Chỉ tệp kiểm thử."}
 {"at":"2026-10-20T22:32:23.773Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"8b9f93be6eac · run 39508786568 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39508786568"}
 {"at":"2026-10-20T22:43:21.219Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"upsell-hoi-mon-khi-chua-goi-ten","detail":"PASS 8b9f93be6eacfc196e51ad51810abda35ba3e79e 2026-10-20T22:42:56.047Z"}
+{"at":"2026-10-20T22:44:36.420Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"test-time-bomb-postsale","detail":"#931 @ 2c10ab27c8c5 → 25ffdb822fb9 (MERGE_NOW · LOW · gates success)"}
