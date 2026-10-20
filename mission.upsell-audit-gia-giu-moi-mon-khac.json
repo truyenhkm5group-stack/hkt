@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "upsell-audit-gia-giu-moi-mon-khac",
+  "title": "Đo upsell không che lời mời món khác khi khách vừa hỏi giá",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-audit-cross",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/upsell-audit-gia-giu-moi-mon-khac",
+  "base_sha": "24276c0c85f9603676d24f9f5d11c9907b3f6a87",
+  "domains": [],
+  "owned_paths": [
+    "scripts/upsell-offer-audit.ts",
+    "tests/upsell-offer-audit.test.ts"
+  ],
+  "dependencies": [
+    "upsell-audit-hoi-gia"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-20T08:24:22.024Z",
+  "updated_at": "2026-10-20T08:24:22.024Z",
+  "last_heartbeat": "2026-10-20T08:24:22.024Z",
+  "definition_of_done": []
+}
