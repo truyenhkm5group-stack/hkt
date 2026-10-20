@@ -131,14 +131,14 @@ function testKichBanGom() {
   const TREE = "b".repeat(40);
   const all = ["K1", "K2", "K3", "K4", "K5"];
   const chia = (k: number) => all.filter((_, i) => i % SHARD_COUNT === k - 1);
-  type BC = { shard: string; mode: string; sha: string; tree: string; ran: string[]; all: string[] };
+  type BC = { shard: string; mode: string; sha: string; tree: string; ran: string[]; all: string[]; attempt: number };
   const du = (): BC[] =>
-    ["an-danh", "token"].flatMap((mode) => Array.from({ length: SHARD_COUNT }, (_, i) => ({ shard: `${i + 1}/${SHARD_COUNT}`, mode, sha: SHA, tree: TREE, ran: chia(i + 1), all })));
+    ["an-danh", "token"].flatMap((mode) => Array.from({ length: SHARD_COUNT }, (_, i) => ({ shard: `${i + 1}/${SHARD_COUNT}`, mode, sha: SHA, tree: TREE, ran: chia(i + 1), all, attempt: 1 })));
   const chay = (ds: BC[]) => {
     const dir = mkdtempSync(path.join(os.tmpdir(), "gom-shard-"));
     try {
       mkdirSync(dir, { recursive: true });
-      ds.forEach((d, i) => writeFileSync(path.join(dir, `shard-${d.mode}-${i}.json`), JSON.stringify(d)));
+      ds.forEach((d, i) => writeFileSync(path.join(dir, `shard-${d.mode}-${i}-a${d.attempt}.json`), JSON.stringify(d)));
       const r = spawnSync(process.execPath, ["-e", js], { encoding: "utf8", env: { ...process.env, SHARDS_DIR: dir, SHARD_COUNT: String(SHARD_COUNT), SHA_TINH: SHA, TREE_TINH: TREE } });
       assert.ok(!r.error, String(r.error));
       return { code: r.status, out: r.stdout + r.stderr };
@@ -148,6 +148,16 @@ function testKichBanGom() {
   };
   const ok = chay(du());
   assert.equal(ok.code, 0, `đủ shard, đúng một lần ⇒ xanh:\n${ok.out}`);
+  // «Re-run failed jobs»: attempt 2 chỉ chạy lại shard 3 (ẩn danh) — bảy shard xanh còn lại nằm ở attempt 1.
+  const chayLai = chay([...du(), { ...du().find((d) => d.mode === "an-danh" && d.shard === `3/${SHARD_COUNT}`)!, attempt: 2 }]);
+  assert.equal(chayLai.code, 0, `chạy lại MỘT shard ⇒ vẫn xanh (shard khác lấy bằng chứng attempt trước):\n${chayLai.out}`);
+  assert.match(chayLai.out, new RegExp(`3/${SHARD_COUNT}@2`), "chọn bằng chứng của attempt CAO NHẤT");
+  // Attempt 1 shard 3 đỏ (không tải lên gì), chưa chạy lại ⇒ thiếu đúng shard ấy ⇒ ĐỎ.
+  const doChuaChayLai = chay(du().filter((d) => !(d.mode === "an-danh" && d.shard === `3/${SHARD_COUNT}`)));
+  assert.notEqual(doChuaChayLai.code, 0, "shard đỏ chưa chạy lại xanh ⇒ ĐỎ");
+  // Attempt mới hơn của shard 3 lại chạy KHỐI KHÁC (bảng phân đổi giữa hai attempt) ⇒ bảng gom lộ ra, không trộn.
+  const lechBang = chay([...du(), { ...du().find((d) => d.mode === "token" && d.shard === `1/${SHARD_COUNT}`)!, attempt: 2, ran: [] }]);
+  assert.notEqual(lechBang.code, 0, "attempt mới nhất của một shard thiếu khối ⇒ ĐỎ (không lấy bù từ attempt cũ)");
   const hong: [string, (ds: BC[]) => BC[], RegExp][] = [
     ["thiếu một shard", (ds) => ds.filter((d) => !(d.mode === "token" && d.shard === `2/${SHARD_COUNT}`)), /thiếu shard/],
     ["một khối không shard nào chạy", (ds) => ds.map((d) => (d.shard === `1/${SHARD_COUNT}` ? { ...d, ran: d.ran.slice(1) } : d)), /KHÔNG shard nào chạy/],
@@ -155,7 +165,8 @@ function testKichBanGom() {
     ["shard đứng trên SHA khác", (ds) => ds.map((d, i) => (i === 0 ? { ...d, sha: "c".repeat(40) } : d)), /SHA/],
     ["shard đứng trên cây khác", (ds) => ds.map((d, i) => (i === 3 ? { ...d, tree: "d".repeat(40) } : d)), /CÂY/],
     ["shard đọc sổ khối khác", (ds) => ds.map((d, i) => (i === 1 ? { ...d, all: [...d.all, "K9"] } : d)), /sổ khối khác/],
-    ["hai bằng chứng cùng shard", (ds) => ds.map((d, i) => (i === 1 ? { ...d, shard: `1/${SHARD_COUNT}` } : d)), /không phải đúng/],
+    ["hai bằng chứng cùng shard cùng attempt", (ds) => ds.map((d, i) => (i === 1 ? { ...d, shard: `1/${SHARD_COUNT}` } : d)), /cùng attempt/],
+    ["bằng chứng không khai attempt", (ds) => ds.map((d, i) => (i === 2 ? { ...d, attempt: 0 } : d)), /không khai attempt/],
     ["khối ngoài sổ", (ds) => ds.map((d, i) => (i === 0 ? { ...d, ran: [...d.ran, "K7"] } : d)), /ngoài sổ/],
     ["không có bằng chứng nào", () => [], /thiếu shard/],
   ];

@@ -114,10 +114,14 @@ jobs:
           # không đổi cây. Tệp chỉ GHI NHẬN, không đổi kết quả của nhánh nào.
           mkdir -p "$RUNNER_TEMP/tested-tree"
           printf 'tree=%s\ncommit=%s\nrun_id=%s\nrun_attempt=%s\n' "$TREE_TINH" "$SHA_TINH" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$RUNNER_TEMP/tested-tree/tested-tree.txt"
-      - name: Tải bằng chứng của mọi shard kiểm thử
+      # MỌI lần chạy (attempt) của lượt này, không riêng lần hiện tại: «Re-run failed jobs» chỉ chạy lại shard
+      # đỏ, nên bằng chứng của các shard xanh nằm ở attempt TRƯỚC. Artifact v4 thuộc về LƯỢT chạy (mọi
+      # attempt); tên tệp mang attempt nên `merge-multiple` không đè nhau, và kịch bản dưới chọn attempt CAO
+      # NHẤT cho mỗi (chế độ, shard). Shard đỏ không tải lên gì ⇒ chỉ còn attempt đỏ là thiếu ⇒ ĐỎ.
+      - name: Tải bằng chứng của mọi shard kiểm thử (mọi attempt của lượt này)
         uses: actions/download-artifact@v4
         with:
-          pattern: shard-*-${{ github.run_attempt }}
+          pattern: shard-*
           path: ${{ runner.temp }}/shards
           merge-multiple: true
       - name: Mỗi khối kiểm thử chạy ĐÚNG MỘT lần ở mỗi chế độ — đủ shard, cùng SHA, cùng cây
@@ -137,7 +141,16 @@ jobs:
           const hong = (m) => { console.log(`::error::${m}`); process.exit(1); };
           const tep = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => /^shard-.+\.json$/.test(f)) : [];
           for (const mode of ["an-danh", "token"]) {
-            const ds = tep.filter((f) => f.startsWith(`shard-${mode}-`)).map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")));
+            // Mỗi shard: bằng chứng của attempt CAO NHẤT (lần chạy lại gần nhất mà shard ấy xanh).
+            const moiNhat = new Map();
+            for (const f of tep.filter((x) => x.startsWith(`shard-${mode}-`))) {
+              const d = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+              if (!Number.isInteger(d.attempt) || d.attempt < 1) hong(`${mode}: bằng chứng ${f} không khai attempt`);
+              const cu = moiNhat.get(d.shard);
+              if (cu && cu.attempt === d.attempt) hong(`${mode}: shard ${d.shard} có hai bằng chứng cùng attempt ${d.attempt}`);
+              if (!cu || d.attempt > cu.attempt) moiNhat.set(d.shard, d);
+            }
+            const ds = [...moiNhat.values()];
             if (ds.length !== n) hong(`${mode}: có ${ds.length}/${n} bằng chứng shard — thiếu shard là thiếu khối kiểm thử`);
             const can = Array.from({ length: n }, (_, i) => `${i + 1}/${n}`);
             const co = ds.map((d) => d.shard).sort();
@@ -156,7 +169,7 @@ jobs:
             if (roi.length) hong(`${mode}: khối KHÔNG shard nào chạy: ${roi.join(", ")}`);
             const la = ran.filter((x) => !ds[0].all.includes(x));
             if (la.length) hong(`${mode}: khối ngoài sổ: ${la.join(", ")}`);
-            console.log(`✓ ${mode}: ${ran.length}/${ds[0].all.length} khối, mỗi khối đúng một lần, ${n} shard trên ${process.env.SHA_TINH}`);
+            console.log(`✓ ${mode}: ${ran.length}/${ds[0].all.length} khối, mỗi khối đúng một lần, ${n} shard (attempt ${ds.map((d) => `${d.shard}@${d.attempt}`).join(" ")}) trên ${process.env.SHA_TINH}`);
           }
           KIEM_SHARD
       - name: Lưu cây mã đã qua cổng (bằng chứng cho deploy)
@@ -250,17 +263,18 @@ jobs:
       - name: Ghi bằng chứng shard (khối đã chạy · SHA · cây)
         env:
           IN: ${{ runner.temp }}/shard/manifest.json
-          OUT: ${{ runner.temp }}/bang-chung/shard-an-danh-${{ matrix.shard }}.json
+          OUT: ${{ runner.temp }}/bang-chung/shard-an-danh-${{ matrix.shard }}-a${{ github.run_attempt }}.json
           MODE: an-danh
+          ATTEMPT: ${{ github.run_attempt }}
           SHA: ${{ steps.ghim.outputs.sha }}
           TREE: ${{ steps.ghim.outputs.tree }}
         run: |
           mkdir -p "$(dirname "$OUT")"
-          node -e 'const fs = require("fs"); const m = JSON.parse(fs.readFileSync(process.env.IN, "utf8")); fs.writeFileSync(process.env.OUT, JSON.stringify({ ...m, mode: process.env.MODE, sha: process.env.SHA, tree: process.env.TREE }));'
+          node -e 'const fs = require("fs"); const m = JSON.parse(fs.readFileSync(process.env.IN, "utf8")); fs.writeFileSync(process.env.OUT, JSON.stringify({ ...m, mode: process.env.MODE, sha: process.env.SHA, tree: process.env.TREE, attempt: Number(process.env.ATTEMPT) }));'
       - uses: actions/upload-artifact@v4
         with:
           name: shard-an-danh-${{ matrix.shard }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/bang-chung/shard-an-danh-${{ matrix.shard }}.json
+          path: ${{ runner.temp }}/bang-chung/shard-an-danh-${{ matrix.shard }}-a${{ github.run_attempt }}.json
           retention-days: 7
           if-no-files-found: error
 
@@ -319,17 +333,18 @@ jobs:
       - name: Ghi bằng chứng shard (khối đã chạy · SHA · cây)
         env:
           IN: ${{ runner.temp }}/shard/manifest.json
-          OUT: ${{ runner.temp }}/bang-chung/shard-token-${{ matrix.shard }}.json
+          OUT: ${{ runner.temp }}/bang-chung/shard-token-${{ matrix.shard }}-a${{ github.run_attempt }}.json
           MODE: token
+          ATTEMPT: ${{ github.run_attempt }}
           SHA: ${{ steps.ghim.outputs.sha }}
           TREE: ${{ steps.ghim.outputs.tree }}
         run: |
           mkdir -p "$(dirname "$OUT")"
-          node -e 'const fs = require("fs"); const m = JSON.parse(fs.readFileSync(process.env.IN, "utf8")); fs.writeFileSync(process.env.OUT, JSON.stringify({ ...m, mode: process.env.MODE, sha: process.env.SHA, tree: process.env.TREE }));'
+          node -e 'const fs = require("fs"); const m = JSON.parse(fs.readFileSync(process.env.IN, "utf8")); fs.writeFileSync(process.env.OUT, JSON.stringify({ ...m, mode: process.env.MODE, sha: process.env.SHA, tree: process.env.TREE, attempt: Number(process.env.ATTEMPT) }));'
       - uses: actions/upload-artifact@v4
         with:
           name: shard-token-${{ matrix.shard }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/bang-chung/shard-token-${{ matrix.shard }}.json
+          path: ${{ runner.temp }}/bang-chung/shard-token-${{ matrix.shard }}-a${{ github.run_attempt }}.json
           retention-days: 7
           if-no-files-found: error
 
