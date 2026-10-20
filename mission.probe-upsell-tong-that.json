@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "probe-upsell-tong-that",
+  "title": "Bộ thử lời mời sau chốt chấm theo đúng tổng tiền máy chủ",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-probe-tong",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/probe-upsell-tong-that",
+  "base_sha": "5c3508ac3a59cfe5796b3fb7a91ddb5a02ca5327",
+  "domains": [],
+  "owned_paths": [
+    "scripts/org-ai-cutover.ts",
+    "tests/org-ai-cutover.test.ts"
+  ],
+  "dependencies": [
+    "giu-gio-ngoac-quy-cach"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-20T04:38:41.012Z",
+  "updated_at": "2026-10-20T04:38:41.012Z",
+  "last_heartbeat": "2026-10-20T04:38:41.012Z",
+  "definition_of_done": []
+}
