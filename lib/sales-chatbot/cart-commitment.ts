@@ -137,8 +137,51 @@ const accentTokens = (s: string) =>
     .replace(/[^\p{L}\p{N}\s]+/gu, " ")
     .split(/\s+/)
     .filter(Boolean);
-/** `run` nằm LIỀN NHAU, đúng thứ tự trong `tokens`. HÀM THUẦN. */
-const hasRun = (tokens: readonly string[], run: readonly string[]) => tokens.some((_, i) => run.every((w, k) => tokens[i + k] === w));
+/** Dấu THANH của một từ (hỏi ≡ ngã — khách gõ nhầm hai dấu này rất thường); không thanh ⇒ `null`. HÀM THUẦN. */
+const toneOf = (w: string): string | null => {
+  const m = w.normalize("NFD").match(/[\u0300\u0301\u0303\u0309\u0323]/);
+  return m ? (m[0] === "\u0303" ? "\u0309" : m[0]) : null;
+};
+/**
+ * Hai từ là CÙNG một từ của tên món? Cùng dạng bỏ dấu, và chỉ dấu THANH phân xử — chỉ khi CẢ HAI cùng mang thanh, hỏi ≡ ngã (review
+ * gio-dau-con-lai: «chã mực» là gõ nhầm «chả mực», không phải món khác; «chả» / «chà» — hỏi với huyền — mới là hai món; «bê» / «bề» một
+ * bên không thanh ⇒ không phân xử). MỘT luật cho mọi phép so dấu của bộ đọc giỏ. HÀM THUẦN.
+ */
+const sameWord = (a: string, b: string): boolean => {
+  if (a === b) return true;
+  if (foldVi(a) !== foldVi(b)) return false;
+  const ta = toneOf(a);
+  const tb = toneOf(b);
+  return !ta || !tb || ta === tb;
+};
+/** `run` nằm LIỀN NHAU, đúng thứ tự trong `tokens` (so từng từ bằng `same`). HÀM THUẦN. */
+const hasRun = (tokens: readonly string[], run: readonly string[], same: (a: string, b: string) => boolean = (a, b) => a === b) =>
+  tokens.some((_, i) => run.every((w, k) => i + k < tokens.length && same(tokens[i + k], w)));
+/**
+ * Nhiều tên khớp khi BỎ DẤU ⇒ tên DUY NHẤT chứa mọi từ CÓ DẤU khách gõ VÀ chứa cụm ấy liền nhau, đúng thứ tự (#915: «chả cá thu» ⇒ Chả cá
+ * thu, không phải «Ruốc bông (chà bông) cá thu»; «chà cá thu» gõ nhầm ⇒ mơ hồ; áo thun nam / nữ ⇒ mơ hồ). `said` = `null` (chữ khách không
+ * thẳng hàng với dạng bỏ dấu) ⇒ không phân xử. MỘT luật cho mọi nơi đọc tên món của bộ đọc giỏ. HÀM THUẦN.
+ */
+function accentPick(hits: readonly string[], said: readonly string[] | null): string | null {
+  if (hits.length < 2 || !said?.length) return null;
+  const accented = hits.filter((n) => said.every((w) => accentTokens(n).some((x) => sameWord(x, w))));
+  return accented.length === 1 && hasRun(accentTokens(accented[0]), said, sameWord) ? accented[0] : null;
+}
+/** Từ có dấu của chữ khách thẳng hàng với dạng bỏ dấu `folded` (cùng số từ) ⇒ dãy ấy; không ⇒ `null`. HÀM THUẦN. */
+const saidAligned = (raw: string, folded: readonly string[]) => {
+  const said = accentTokens(raw);
+  return said.length === folded.length ? said : null;
+};
+/**
+ * Từ của TÊN (bỏ dấu `f`, có dấu `a`) có mặt trong chữ khách `said` (từ có dấu): cùng dạng bỏ dấu và KHÔNG khác dấu khi cả hai cùng có
+ * dấu («chả» ≠ «chà»); một bên không dấu ⇒ không phân xử được ⇒ tính là có. HÀM THUẦN.
+ */
+const saidHas = (said: readonly string[], f: string, a: string) => said.some((s) => foldVi(s) === f && sameWord(s, a));
+/** Cặp (bỏ dấu, có dấu) cho từng từ của một tên — bỏ số / «kg» / «g». HÀM THUẦN. */
+const namePairs = (name: string) =>
+  accentTokens(name)
+    .map((a) => [foldVi(a), a] as const)
+    .filter(([f]) => f && !/^\d/.test(f) && f !== "kg" && f !== "g");
 
 /** Tên sản phẩm bỏ phần quy cách trong ngoặc («Chả mực giã tay (Size: 1kg)» ⇒ «Chả mực giã tay»). */
 const productName = (name: string) => name.replace(/\s*\([^)]*\)\s*$/, "").trim() || name;
@@ -152,8 +195,7 @@ function resolveLabel(raw: { match: string; display: string }, catalog?: readonl
   const names = [...new Set(catalog.map(productName))];
   const tokens = raw.match.split(" ").filter(Boolean);
   // Chữ khách CÓ DẤU, thẳng hàng với `tokens` (không thẳng hàng ⇒ không phân xử theo dấu, giữ mơ hồ).
-  const said = accentTokens(raw.display);
-  const saidAligned = said.length === tokens.length;
+  const said = saidAligned(raw.display, tokens);
   for (let len = tokens.length; len >= 1; len--) {
     for (let s = 0; s + len <= tokens.length; s++) {
       const sub = tokens.slice(s, s + len);
@@ -167,10 +209,7 @@ function resolveLabel(raw: { match: string; display: string }, catalog?: readonl
       // «Áo thun cổ tròn nữ» phải vẫn mơ hồ); khách gõ không dấu, hay «cá thu» có ở cả hai ⇒ vẫn mơ hồ. Tên thắng còn phải chứa cụm có dấu
       // của khách LIỀN NHAU, đúng thứ tự (review NB1): «1kg chà cá thu» — gõ nhầm một phím của «chả» — không được thành 1kg ruốc «chà bông) cá
       // thu» mà phải vẫn mơ hồ.
-      const subSaid = saidAligned ? said.slice(s, s + len) : null;
-      const accented = hits.length > 1 && subSaid ? hits.filter((n) => subSaid.every((w) => accentTokens(n).includes(w))) : [];
-      const exact = accented.length === 1 && subSaid && hasRun(accentTokens(accented[0]), subSaid) ? accented : [];
-      const hit = hits.length === 1 ? hits[0] : exact.length === 1 ? exact[0] : null;
+      const hit = hits.length === 1 ? hits[0] : accentPick(hits, said ? said.slice(s, s + len) : null);
       if (hit) {
         // Từ ngay sau DANH TỪ MÓN mà tên danh mục không có (và không phải cỡ / màu) ⇒ khách gọi một món KHÁC cùng danh từ («nem chua» khi shop
         // chỉ có «Nem hải sản tôm bề bề», «nem rán») — không phải món này (review c0b7eb96). Trả «không khớp» ⇒ tên ngoài danh mục ⇒ hỏi lại.
@@ -231,7 +270,8 @@ function oneNameOf(words: readonly string[], catalog: readonly string[]): string
     const nt = labelTokens(nm);
     return toks.every((w) => nt.includes(w));
   });
-  return hits.length === 1 ? hits[0] : null;
+  // «Lấy 2 Gói Chả Cá Thu» (gõ hoa đầu từ) với danh mục HSLC: «chả cá thu» khớp CẢ ruốc «chà bông cá thu» khi bỏ dấu ⇒ phân xử bằng dấu (#915).
+  return hits.length === 1 ? hits[0] : accentPick(hits, saidAligned(words.join(" "), toks));
 }
 /** Sau dãy chữ là «, <đơn vị hành chính>» («12 Chả Cá, Hoàn Kiếm» · «…, Phường Hoàn Kiếm») ⇒ đây là ĐỊA CHỈ. HÀM THUẦN. */
 function adminAfter(rest: string): boolean {
@@ -256,9 +296,11 @@ export function amountsIn(text: string, catalog?: readonly string[]): CartAmount
     const unbound = Boolean(catalog && rawLb.match && !lb.match && !lb.ambiguous);
     out.push({ value, unit, label: lb.match, display: lb.display, index: idx, end: idx + len, ...(lb.ambiguous ? { ambiguous: true, hint: lb.hint } : {}), ...(pieces ? { pieces: true } : {}), ...(unitWord ? { word: unitWord } : {}), ...(unbound ? { unbound: true, raw: rawLb.display } : {}) });
   };
+  // Số viết bằng CHỮ phải có khoảng trắng trước đơn vị: «ruoc bong» gõ không dấu từng thành «bon» (bốn) + «g» = 4 g; «hai kg» vẫn là 2 kg.
+  const wordNumGlued = (m: RegExpMatchArray) => !/^\d/.test(m[1]) && !/^\s/.test(text.slice((m.index ?? 0) + m[1].length));
   for (const m of text.matchAll(WEIGHT_RE)) {
     const n = numOf(m[1]);
-    if (n === null) continue;
+    if (n === null || wordNumGlued(m)) continue;
     const unit = foldVi(m[2]);
     const half = m[3] ? 0.5 : 0;
     const grams = Math.round(/^(?:gram|gr|g)$/.test(unit) ? n + half : (n + half) * 1000);
@@ -266,7 +308,7 @@ export function amountsIn(text: string, catalog?: readonly string[]): CartAmount
   }
   for (const m of text.matchAll(PACK_RE)) {
     const n = numOf(m[1]);
-    if (n === null || !Number.isInteger(n)) continue;
+    if (n === null || !Number.isInteger(n) || wordNumGlued(m)) continue;
     const idx = m.index ?? 0;
     // ĐỊA CHỈ, không phải số lượng (review #855 — golden «230/20 Phan Huy Ích» từng thành «20 phần»): số đứng sau «/» (số nhà 230/20), hoặc chữ
     // «đơn vị» VIẾT HOA mà từ kế tiếp cũng viết hoa (tên riêng «Phan Huy Ích», «Lò Đúc»).
@@ -316,8 +358,10 @@ export function amountsIn(text: string, catalog?: readonly string[]): CartAmount
         const nt = labelTokens(nm);
         return toks.every((w) => nt.includes(w));
       });
-      if (hits.length !== 1) continue;
-      out.push({ value: n, unit: "pack", label: foldVi(hits[0]), display: hits[0], index: idx, end: idx + m[1].length, bare: true });
+      // «1 chả cá thu» với danh mục HSLC: khớp CẢ ruốc «chà bông cá thu» khi bỏ dấu ⇒ phân xử bằng dấu (#915), không bỏ con số.
+      const hit = hits.length === 1 ? hits[0] : accentPick(hits, saidAligned(take.join(" "), toks));
+      if (!hit) continue;
+      out.push({ value: n, unit: "pack", label: foldVi(hit), display: hit, index: idx, end: idx + m[1].length, bare: true });
     }
   }
   out.sort((a, b) => a.index - b.index);
@@ -686,7 +730,12 @@ export function labelsMatch(a: string, b: string): boolean {
   const tb = labelTokens(b).filter((w) => !/^\d/.test(w) && w !== "kg" && w !== "g");
   if (!ta.length || !tb.length) return false;
   const [short, long] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
-  return short.every((w) => long.includes(w));
+  if (!short.every((w) => long.includes(w))) return false;
+  // Hai nhãn CÙNG có dấu mà một từ khác dấu («Chả cá thu» với «Ruốc bông (chà bông) cá thu») ⇒ không phải cùng món. Nhãn đã bỏ dấu (ô `match`
+  // của giỏ) không mang dấu ⇒ không phân xử, giữ như cũ.
+  const [rs, rl] = ta.length <= tb.length ? [a, b] : [b, a];
+  const longSaid = accentTokens(rl);
+  return namePairs(rs).every(([f, w]) => saidHas(longSaid, f, w));
 }
 
 /** Món của giỏ khớp một tên (đúng MỘT món — khớp nhiều là mơ hồ ⇒ `null`). */
@@ -968,11 +1017,12 @@ export function cartDraftDiff(cart: CartCommitment | undefined, asked: readonly 
  */
 export function mentionsProduct(name: string, customerSaid: string): boolean {
   if (!customerSaid.trim()) return false;
-  const words = labelTokens(productName(name)).filter((w) => !/^\d/.test(w) && w !== "kg" && w !== "g");
+  // So từng từ theo dạng bỏ dấu NHƯNG không nhận từ khác dấu khi cả hai cùng có dấu («chà bông cá thu» không gọi tên «Chả cá thu»).
+  const words = namePairs(productName(name));
   if (!words.length) return false;
-  const said = new Set(labelTokens(customerSaid));
-  if (!said.has(words[0])) return false;
-  return words.filter((w) => said.has(w)).length >= Math.min(2, new Set(words).size);
+  const said = accentTokens(customerSaid);
+  if (!saidHas(said, ...words[0])) return false;
+  return words.filter(([f, a]) => saidHas(said, f, a)).length >= Math.min(2, new Set(words.map(([f]) => f)).size);
 }
 
 /**
@@ -981,9 +1031,13 @@ export function mentionsProduct(name: string, customerSaid: string): boolean {
  */
 export function calledByName(name: string, customerSaid: string): boolean {
   if (mentionsProduct(name, customerSaid)) return true;
-  const rest = [...new Set(labelTokens(productName(name)).slice(1).filter((w) => !/^\d/.test(w) && w !== "kg" && w !== "g"))];
-  const said = new Set(labelTokens(customerSaid));
-  return rest.length >= 2 && rest.filter((w) => said.has(w)).length >= 2;
+  const pairs = namePairs(productName(name));
+  const rest = pairs.slice(1).filter(([f], i, all) => all.findIndex(([g]) => g === f) === i);
+  const said = accentTokens(customerSaid);
+  // Khách gõ một từ CÙNG dạng bỏ dấu với một từ của tên mà KHÁC dấu («chả» với «chà» của «Ruốc bông (chà bông) cá thu») ⇒ khách đang gọi món
+  // KHÁC, không phải tên này — «cá thu» trùng hai từ còn lại không đủ (hàng rào thay món từng mù: bot đưa ruốc thay chả cá thu vẫn lọt).
+  const clash = pairs.some(([f, a]) => said.some((s) => foldVi(s) === f && !sameWord(s, a)));
+  return !clash && rest.length >= 2 && rest.filter(([f, a]) => saidHas(said, f, a)).length >= 2;
 }
 
 /** Mệnh đề KHÔNG phải lời mua: phủ định / bỏ / huỷ · hỏi giá / hỏi điều kiện · giả định. */
@@ -1069,7 +1123,8 @@ export function unrequestedProducts(cart: CartCommitment | undefined, asked: rea
   const strange = products.filter((p) => {
     const lines = asked.filter((l) => keyOfLine(l) === p);
     if (lines.some((l) => mentionsProduct(l.name, customerSaid))) return false;
-    return !explicit.some((it) => (it.productId && it.productId === p) || (it.match && lines.some((l) => labelsMatch(it.match, l.name))));
+    // Nhãn CÓ DẤU của món trong giỏ (`label`) trước ô bỏ dấu (`match`): «cha ca thu» khớp cả ruốc «chà bông cá thu» ⇒ hàng rào thay món mù.
+    return !explicit.some((it) => (it.productId && it.productId === p) || (it.match && lines.some((l) => labelsMatch(it.label || it.match, l.name))));
   });
   const unnamed = explicit.filter((it) => !it.productId && !it.match).length;
   if (strange.length <= unnamed) return [];
@@ -1092,7 +1147,7 @@ export function lineBasisViolation(cart: CartCommitment | undefined, asked: read
   if (explicit.length && !explicit.some((it) => !it.productId && !it.match)) {
     for (const p of [...new Set(asked.map(keyOfLine))].filter((k) => !grounded.has(k))) {
       const lines = asked.filter((l) => keyOfLine(l) === p);
-      const inCart = explicit.some((it) => (it.productId && it.productId === p) || (it.match && lines.some((l) => labelsMatch(it.match, l.name))));
+      const inCart = explicit.some((it) => (it.productId && it.productId === p) || (it.match && lines.some((l) => labelsMatch(it.label || it.match, l.name))));
       const qty = lines.reduce((t, l) => t + l.quantity, 0);
       if (!inCart && qty > 1 && lines.some((l) => mentionsProduct(l.name, customerSaid))) {
         return `KHÔNG tự đặt ${qty} × «${productName(lines[0].name)}»: khách mới gọi tên món, CHƯA nói số lượng. HỎI khách lấy mấy rồi mới thêm vào đơn.`;
