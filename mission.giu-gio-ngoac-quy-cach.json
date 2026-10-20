@@ -23,18 +23,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-20T02:43:28.696Z",
-  "updated_at": "2026-10-20T02:43:54.963Z",
-  "last_heartbeat": "2026-10-20T02:43:54.963Z",
+  "updated_at": "2026-10-20T02:45:29.044Z",
+  "last_heartbeat": "2026-10-20T02:45:29.044Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/giu-gio-ngoac-quy-cach",
-    "sha": "fccf727dfcd3ccd1aba7f7bbb05dc0dd526516bf",
-    "at": "2026-10-20T02:43:54.963Z",
+    "sha": "14f334c23720784825c3e20ac8e04c87cfe978c1",
+    "at": "2026-10-20T02:45:29.044Z",
     "actor": "DESKTOP-56TH98Y:wt-giu-gio-ngoac",
     "title": "Câu hỏi xác nhận lời mời sau chốt không bị thay bằng câu giữ đơn (quy cách trong ngoặc)",
     "summary": "",
     "tests": [
-      "sales-cart-commitment (+ testHoldParenSpec; đột biến đỏ); #855 cart/delta; #863; #871; sales-agent-golden 23; order-golden 33×2; P0 upsell; P0 câu mẫu; báo giá; tsc + eslint sạch"
+      "sales-cart-commitment (+ testHoldParenSpec; đột biến đỏ); conv-money-trace (biến thể mới); #855; #863; #871; goldens; P0 upsell; P0 câu mẫu; báo giá; tsc + eslint sạch"
     ]
   }
 }
