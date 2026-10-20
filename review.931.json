@@ -1,0 +1,8 @@
+{
+  "pr": 931,
+  "sha": "2c10ab27c8c5d8d1ade7dcf545e724a2cd761221",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-20T22:30:44.527Z",
+  "note": "review lead: bom hẹn giờ luật 50 — quét lại ở now+5′ từ 23:55 VN sang ngày sau ⇒ đỏ. sauMaCungNgayVn giữ mốc thứ hai trong cùng ngày VN (sát nửa đêm lấy điểm giữa tới cuối ngày), now vẫn theo đồng hồ thật; hai khẳng định thuần 23:58 VN / giữa ngày; đột biến đỏ ở mọi giờ. Chỉ tệp kiểm thử."
+}
