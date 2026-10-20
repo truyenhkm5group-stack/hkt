@@ -20,7 +20,7 @@
  * ở đây ghi rõ ra thay vì để người đọc tưởng đã xong.
  */
 import { and, count, eq, inArray, isNotNull, isNull, notInArray, sql, type SQL } from "drizzle-orm";
-import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import type { ExpenseCategory } from "@/db/schema";
@@ -103,6 +103,11 @@ export type RecognizedCosts = {
   payroll: PayrollRecognition;
   /** Đã nằm TRONG `components.SHIPPING` / `components.RETURN_COST` — nêu riêng để báo cáo khác dùng lại. */
   logisticsAdjustment: LogisticsAdjustmentTotal;
+  /**
+   * Σ khoản chi nhóm “Lương” ở bảng Chi phí của kỳ (CHỨNG TỪ), bất kể nguồn nào đang cầm quyền — chỉ để
+   * người đọc biết bao nhiêu tiền lương có chứng từ; không thành phần nào cộng nó thêm lần nữa.
+   */
+  salaryExpenseDocs: number;
 };
 
 /** Khối "chi phí vận hành theo kỳ" — phần engine là nguồn DUY NHẤT */
@@ -155,6 +160,50 @@ function periodConds(column: AnyPgColumn | SQL, from: Date | null, to: Date | nu
   if (from) conds.push(sql`${column} >= ${from}`);
   if (to) conds.push(sql`${column} <= ${to}`);
   return conds;
+}
+
+/**
+ * PHÍ CHIỀU HOÀN CHIA THEO MÃ (Payroll V2, chủ shop 20/10/2026: "ưu tiên gắn theo vận đơn và SKU").
+ * CÙNG hai vế, cùng mốc ngày với thành phần `RETURN_COST` ở dưới:
+ *  · vận đơn CHIỀU VỀ (`order_id` rỗng) — nối về đơn gốc qua `order_reference` = mã vận đơn gốc
+ *    (AGENTS mục 7), theo ngày chiều hoàn; chia theo giá trị dòng hàng của đơn gốc;
+ *  · `orders.return_fee` của đơn HOÀN lên trong kỳ — chia theo dòng hàng của chính đơn ấy.
+ * Phần không nối được (không thấy đơn gốc, đơn tổng 0, dòng không mã) KHÔNG có mặt ở đây: người gọi lấy
+ * tổng từ `RETURN_COST` rồi đưa phần dư vào chi phí chung. Không bao giờ cộng thêm vào tổng.
+ */
+export async function returnCostByProduct(period: Period): Promise<Map<string, number>> {
+  const db = await getDb();
+  const s = schema.shipments;
+  const g = alias(schema.shipments, "g");
+  const o = schema.orders;
+  const i = schema.orderItems;
+  const pv = schema.productVariants;
+  const productKey = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
+  const tyLe = sql`${i.lineTotal}::numeric / nullif(${o.totalPriceAfterDiscount}, 0)`;
+  const chieuHoanAt = sql`coalesce(${s.deliveredAt}, ${s.returnedAt}, ${s.pickedUpAt}, ${s.createdAt})`;
+  const [chieuVe, phiDon] = await chayKhongJit(db, async (tx) => {
+    const a = await tx
+      .select({ productId: productKey, fee: sql<number>`coalesce(sum(${s.shippingFee} * ${tyLe}), 0)` })
+      .from(s)
+      .innerJoin(g, and(eq(g.vtpOrderNumber, s.orderReference), isNotNull(g.orderId)))
+      .innerJoin(o, eq(o.id, g.orderId))
+      .innerJoin(i, and(eq(i.orderId, o.id), eq(i.isBonus, false)))
+      .leftJoin(pv, eq(pv.id, i.variantId))
+      .where(and(isNull(s.orderId), isNotNull(s.orderReference), ...periodConds(chieuHoanAt, period.from, period.to)))
+      .groupBy(productKey);
+    const b = await tx
+      .select({ productId: productKey, fee: sql<number>`coalesce(sum(${o.returnFee} * ${tyLe}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)` })
+      .from(i)
+      .innerJoin(o, eq(o.id, i.orderId))
+      .leftJoin(pv, eq(pv.id, i.variantId))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+      .where(and(eq(i.isBonus, false), sql`${o.returnFee} > 0`, ...periodConds(o.insertedAt, period.from, period.to)))
+      .groupBy(productKey);
+    return [a, b] as const;
+  });
+  const out = new Map<string, number>();
+  for (const x of [...chieuVe, ...phiDon]) if (x.productId) out.set(x.productId, (out.get(x.productId) ?? 0) + Number(x.fee ?? 0));
+  return out;
 }
 
 export async function getRecognizedCosts(period: Period): Promise<RecognizedCosts> {
@@ -451,7 +500,7 @@ async function build(period: Period): Promise<RecognizedCosts> {
     amount: shipAdjust.amount + returnAdjust.amount,
     count: shipAdjust.n + returnAdjust.n,
   };
-  return { period, components, operatingTotal, operatingCount, total, warnings, payroll, logisticsAdjustment };
+  return { period, components, operatingTotal, operatingCount, total, warnings, payroll, logisticsAdjustment, salaryExpenseDocs: salaryLegacy.amount };
 }
 
 /**

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SectionCard } from "@/components/ui-bits";
-import { endCodeRow, revokeCodeRow, saveCodeAssignment, saveCodeTerms } from "@/lib/actions/payroll-code";
+import { approveCodeRow, endCodeRow, revokeCodeRow, saveCodeAssignment, saveCodeTerms } from "@/lib/actions/payroll-code";
 
 type Option = { id: string; name: string };
 export type Suggestion = {
@@ -48,7 +48,8 @@ const METHOD_LABEL: Record<string, string> = {
  * ═══ GIAO MKTer VÀO MÃ · KHAI Y% VÀ TRẦN · KẾT THÚC / HUỶ ═══
  *
  * Không có ô sửa tỷ lệ của một dòng: đổi là KẾT THÚC + THÊM MỚI (server action từ chối mọi đường
- * khác). Action `revalidatePath` trang này nên không cần `router.refresh()`.
+ * khác). Khai chỉ tạo dòng CHỜ DUYỆT — bảng lương chưa đọc nó cho tới khi có người bấm Duyệt (người
+ * khai không tự duyệt, trừ chủ shop). Action `revalidatePath` trang này nên không cần `router.refresh()`.
  */
 export function CodeBookManager({ employees, codes, rows, suggestions }: { employees: Option[]; codes: { id: string; label: string }[]; rows: Row[]; suggestions: Suggestion[] }) {
   const [pending, start] = useTransition();
@@ -182,7 +183,7 @@ export function CodeBookManager({ employees, codes, rows, suggestions }: { emplo
                   weightMethod: a.role === "SUPPORT" ? a.weightMethod : undefined,
                   weightPercent: a.role === "SUPPORT" && a.weightMethod === "MANUAL" && a.weightPercent !== "" ? a.weightPercent : undefined,
                 }),
-              "Đã giao MKTer vào mã",
+              "Đã khai phân công — CHỜ DUYỆT, chưa áp vào lương",
             )
           }
         >
@@ -227,7 +228,7 @@ export function CodeBookManager({ employees, codes, rows, suggestions }: { emplo
             <Input value={t.note} onChange={(e) => setT({ ...t, note: e.target.value })} />
           </div>
         </div>
-        <Button className="mt-3" disabled={pending} onClick={() => run(() => saveCodeTerms(t), "Đã khai điều khoản")}>
+        <Button className="mt-3" disabled={pending} onClick={() => run(() => saveCodeTerms(t), "Đã khai điều khoản — CHỜ DUYỆT, chưa áp vào lương")}>
           <Plus className="mr-1 size-4" /> Khai điều khoản
         </Button>
       </SectionCard>
@@ -260,8 +261,9 @@ export function CodeBookManager({ employees, codes, rows, suggestions }: { emplo
 function RowView({ r, pending, run }: { r: Row; pending: boolean; run: (fn: () => Promise<{ ok: true } | { error: string }>, done: string) => void }) {
   const [den, setDen] = useState("");
   const active = r.status === "APPROVED";
+  const cho = r.status === "PENDING";
   return (
-    <tr className={`border-t align-top ${active ? "" : "text-muted-foreground line-through"}`}>
+    <tr className={`border-t align-top ${active ? "" : cho ? "bg-amber-50/60 dark:bg-amber-950/20" : "text-muted-foreground line-through"}`}>
       <td className="py-1.5 pr-3 font-medium">{r.code}</td>
       <td className="py-1.5 pr-3">{r.kind === "TERMS" ? "Điều khoản" : `${r.employeeName} · ${r.role}`}</td>
       <td className="py-1.5 pr-3">{r.detail}</td>
@@ -270,7 +272,7 @@ function RowView({ r, pending, run }: { r: Row; pending: boolean; run: (fn: () =
       </td>
       <td className="py-1.5 pr-3">
         {r.policyRef}
-        <div className="text-xs text-muted-foreground">{r.approvedByName || "—"}</div>
+        <div className="text-xs text-muted-foreground">{cho ? "Chờ duyệt — chưa áp vào lương" : r.approvedByName || "—"}</div>
       </td>
       <td className="py-1.5">
         {active ? (
@@ -289,6 +291,23 @@ function RowView({ r, pending, run }: { r: Row; pending: boolean; run: (fn: () =
               }}
             >
               Huỷ
+            </Button>
+          </div>
+        ) : cho ? (
+          <div className="flex flex-wrap items-center gap-1">
+            <Button size="sm" disabled={pending} onClick={() => run(() => approveCodeRow({ kind: r.kind, id: r.id }), "Đã duyệt — dòng có hiệu lực từ ngày bắt đầu")}>
+              Duyệt
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={pending}
+              onClick={() => {
+                const ly = window.prompt("Lý do từ chối:");
+                if (ly) run(() => revokeCodeRow({ kind: r.kind, id: r.id, reason: ly }), "Đã từ chối dòng chờ");
+              }}
+            >
+              Từ chối
             </Button>
           </div>
         ) : (

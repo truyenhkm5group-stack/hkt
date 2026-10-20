@@ -231,8 +231,9 @@ giá vốn, QC của mã đều có người.
 
 1. **Giá vốn không biết = 0 ₫** (`LINE_UNIT_COST` rơi về 0): lợi nhuận cao hơn thật. Sửa ở dữ liệu
    (phiếu nhập / giá nhập mẫu mã), đối soát chặn tới khi hết.
-2. **Phí chiều hoàn không vào cơ sở lương** dù máy chi phí đã ghi nhận: lợi nhuận tính lương cao hơn Báo
-   cáo lợi nhuận đúng bằng khoản ấy. Đưa vào cơ sở là ĐỔI CÁCH TÍNH THƯỞNG ⇒ việc của chủ shop (AGENTS §7).
+2. ~~**Phí chiều hoàn không vào cơ sở lương**~~ — **ĐÃ SỬA 20/10/2026, chủ shop quyết** ("các khoản thực
+   tế công ty phải chịu phải được tính vào P&L; ưu tiên gắn theo vận đơn và SKU; khoản không xác định được
+   mã thì hạch toán chi phí chung; không ghi trùng"). Xem §10.2.
 3. **Kiện đang đi** đã chịu cước + chi phí theo đơn mà chưa có doanh thu: số của tháng còn đổi cho tới khi
    mọi đơn có kết quả.
 
@@ -277,3 +278,68 @@ cho mọi tháng chưa khoá.
 X% khai trên TỪNG phân công (nhân viên × mã × khoảng hiệu lực); Y% và trần trên điều khoản (theo mã, hoặc
 mặc định công ty), có hiệu lực theo thời gian; mỗi dòng mang số hiệu quy chế (`policyRef`). Không có tỷ lệ
 mặc định nào ghi cứng.
+
+## 10. Payroll V2 — Trung tâm đối soát (chủ shop 20/10/2026, sau #916)
+
+Màn hình `/payroll/reconciliation/center` (`lib/queries/payroll-recon-center.ts` · hàm thuần
+`lib/payroll/recon-center.ts`). CHỈ ĐỌC — không nút nào ghi một con số.
+
+### 10.1 Ba khối
+
+- **Đã tự đối soát**: dòng của bảng tháng (§9) đã KHỚP nguồn / chênh đo được — dữ liệu nguồn đã có thì máy
+  kết luận, không ai phải nhập lại.
+- **Chưa đối soát**: mỗi khoản có PHÒNG chịu trách nhiệm (`issueOwner` — phòng ban, không bao giờ một
+  người, AGENTS mục 22), nguyên nhân và lối sửa.
+- **MỘT danh sách phê duyệt** (`buildApprovalList`): `DECIDE` = người có quyền phải chọn (số dư mở sổ,
+  phân công chờ duyệt, mã chưa có OWNER, tháng chờ ký cấp 1); `SUPPLY` = phòng phải bổ sung chứng từ ERP
+  chưa có (ngày vào làm, giá vốn, bảng kê COD, khoản chi trùng nguồn). Dữ liệu đủ ⇒ danh sách RỖNG.
+
+### 10.2 Phí chiều hoàn trong cơ sở lương
+
+`returnCostByProduct()` sống trong `cost-engine.ts`, cạnh thành phần `RETURN_COST` mà nó chia — cùng hai
+vế, cùng mốc ngày: (a) vận đơn chiều về (`order_id` rỗng) nối về đơn gốc qua `order_reference` = mã vận
+đơn gốc, theo ngày chiều hoàn, chia theo giá trị dòng hàng của đơn gốc; (b) `orders.return_fee` của đơn
+HOÀN, chia theo dòng hàng. TỔNG lấy từ máy chi phí (`returnLegCost` = `RETURN_COST` − điều chỉnh tay đã
+nằm trong `logisticsAdjustment`). Phần gắn được mã ⇒ cột vận chuyển của mã; phần dư ⇒ quỹ chi phí chung
+(chia theo doanh thu cùng chi phí vận hành). `toCodes + shared = amount` — không ghi trùng, không bỏ sót.
+Bảng đối soát so cơ sở ↔ máy chi phí ở dòng `return-cost`; `NOT_IN_BASIS` chỉ còn phần thiếu.
+
+### 10.3 Lương cứng: căn cứ tách riêng, lá chắn chốt lương GIỮ NGUYÊN
+
+Người chưa khai ngày vào làm thì `employmentWindow` coi như có mặt mọi kỳ — đó là lý do lịch sử từ 08/2025
+"lỗ" 8 triệu lương mỗi tháng. `getRecognizedPayrollCost` nay tách `fixedSalaryDueEvidenced` (người có ngày
+vào làm) / `fixedSalaryDueUndated` (người chưa khai) — THUẦN theo dữ liệu, không đọc đồng hồ.
+
+Phép tách KHÔNG đổi phép ghi nhận: máy chi phí, cảnh báo `PAYROLL_OBLIGATION_NOT_RECOGNIZED` và quyền cầm
+nguồn của bảng Lương vẫn dùng `fixedSalaryDue`. Bản nháp đầu coi phần chưa khai ngày ở "kỳ đã qua" là chưa
+biết ngay trong máy chi phí; rà soát độc lập chỉ ra kỳ ĐANG CHỐT LƯƠNG luôn là kỳ đã qua (lương tháng M chốt
+trong tháng M+1) ⇒ cảnh báo tắt đúng lúc cần, kỳ chốt được trên lợi nhuận 0 ₫ lương, và cùng một tháng ra
+hai số khác nhau ở hai bên mốc đầu tháng. Nên phần chưa khai ngày chỉ là CHƯA BIẾT ở chỗ DỰNG LẠI LỊCH SỬ —
+đề xuất số dư mở sổ (§10.6) — và thành một mục "bổ sung" của phòng Nhân sự trong danh sách phê duyệt.
+
+### 10.4 Phân công / điều khoản: CHỜ DUYỆT (migration `0250`)
+
+Lưu ⇒ `PENDING` (bảng lương không đọc, không tỷ lệ mặc định nào áp thay). `approveCodeRow` là đường DUY
+NHẤT sang `APPROVED`: duyệt người thứ hai nhóm `PAYROLL_EDIT`; người khai không tự duyệt (trừ `ADMIN` —
+chủ shop); bàn giao OWNER / đóng điều khoản cũ làm LÚC DUYỆT, dưới khoá tên của mã, tháng khoá đọc lại.
+"Huỷ" một dòng chờ = từ chối. CSDL chặn `APPROVED` không có mốc duyệt; mặc định cột là `PENDING`.
+
+### 10.5 Giá vốn và COD
+
+- `cogsGapsByVariant`: dòng đã giao có giá vốn 0, gom theo mẫu mã, NGUYÊN NHÂN đo được (không nối mẫu mã ·
+  phiếu nhập không ghi giá · chưa có phiếu nhập và Pancake không có giá) + mã đơn để tra. KHÔNG tự điền.
+- `codSplit`: doanh thu KẾ TOÁN (đã giao, đã ghi nhận) · PHẢI THU chưa xác minh (đã giao, chưa chứng từ
+  tiền — theo nguyên nhân `codGapCause` và tuổi) · TIỀN THỰC NHẬN (trả trước + COD đã về ngân hàng) · COD
+  ĐVVC đã thu nhưng chưa ghi trả về (tiền ở ĐVVC, chưa phải tiền của shop). Chứng từ tiền dùng chung
+  `MONEY_EVIDENCE_SQL` với bảng đối soát tháng.
+
+### 10.6 Đề xuất số dư mở sổ
+
+`buildOpeningProposal`: Σ (doanh thu đã ghi nhận − chi phí máy chi phí đã ghi nhận − lương CÓ căn cứ chưa
+ghi nhận) của các tháng từ đầu kỳ dữ liệu tới trước mốc mở sổ. Lương của người chưa khai ngày: bảng Lương
+cầm nguồn ⇒ trừ ngược khỏi chi phí ghi nhận; bảng Chi phí chưa có khoản lương ⇒ chỉ lấy phần có ngày của cảnh
+báo nghĩa vụ; bảng Chi phí có khoản lương thật ⇒ đó là chứng từ. KHÔNG cộng giả định (chi phí cố định khai
+tay, định mức theo đơn, lương người chưa khai ngày). Tháng thiếu căn cứ (trước khoản chi đầu tiên được nhập
+⇒ chi phí vận hành CHƯA BIẾT; giá vốn 0; đơn chưa kết quả; doanh thu chưa chứng từ tiền; lương chưa biết)
+nói rõ thiếu gì, và còn một tháng thiếu thì đề xuất là "CHƯA ĐỦ CĂN CỨ". ERP không bao giờ tự khai số này vào
+quy chế cổng.

@@ -197,6 +197,7 @@ const MOI = [
   "0247_sales_chat_inbound_text_hash_idx",
   "0248_org_migration_status",
   "0249_product_marketer_assignments",
+  "0250_payroll_code_pending",
 ] as const;
 
 /*

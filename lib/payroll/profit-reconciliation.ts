@@ -43,8 +43,12 @@ export type MonthReconInput = {
     adsTest: number;
     /** Σ `marketers[].products[].adSpend` (mọi dòng, kể cả nhóm chưa gán) — phần QC của mã ĐI VÀO quy kết người. */
     adsCodeInPersonLines: number;
-    /** Cước chiều đi theo vận đơn (gồm kiện đang đi), KHÔNG gồm điều chỉnh tay. */
+    /** Cước chiều đi theo vận đơn (gồm kiện đang đi), KHÔNG gồm điều chỉnh tay, KHÔNG gồm phí chiều hoàn. */
     shippingPerShipment: number;
+    /** Phí chiều hoàn (vận đơn chiều về + phí hoàn trên đơn) đã GẮN được về mã qua đơn gốc. */
+    returnLegToCodes: number;
+    /** Phí chiều hoàn không nối được về mã ⇒ vào quỹ chi phí chung, chia theo doanh thu. */
+    returnLegShared: number;
     logisticsAdjustment: number;
     logisticsAdjustmentUnallocated: number;
     operatingEntered: number;
@@ -281,14 +285,23 @@ export function buildMonthReconciliation(x: MonthReconInput, periodQuery: string
     href: `/shipments?${periodQuery}`,
   });
   add({ key: "logistics-adj", label: "Điều chỉnh cước / phí hoàn có lý do (gõ tay)", basis: r(b.logisticsAdjustment), source: r(b.logisticsAdjustment), status: "MATCHED", cls: "BY_CODE", note: "Cùng một con số của máy chi phí (không phải đối chiếu độc lập).", href: "/expenses" });
+  // Phí chiều hoàn VÀO cơ sở lương (chủ shop 20/10/2026): phần nối được về đơn gốc gắn mã, phần còn lại
+  // vào quỹ chi phí chung. Cùng tập dòng, cùng mốc ngày với máy chi phí ⇒ hai vế phải BẰNG nhau.
+  const hoanCoSo = b.returnLegToCodes + b.returnLegShared;
+  const hoanThieu = Math.max(0, e.returnCost - hoanCoSo);
   add({
     key: "return-cost",
-    label: "Phí chiều hoàn (vận đơn chiều về)",
-    basis: null,
+    label: "Phí chiều hoàn (vận đơn chiều về + phí hoàn trên đơn)",
+    basis: r(hoanCoSo),
     source: r(e.returnCost),
-    status: e.returnCost > 0 ? "UNRECONCILED" : "MATCHED",
-    cls: "NOT_IN_BASIS",
-    note: e.returnCost > 0 ? "Máy chi phí ghi nhận khoản này nhưng cơ sở lương CHƯA trừ — lợi nhuận tính lương cao hơn Báo cáo lợi nhuận đúng bằng số này. Đưa vào cơ sở là đổi cách tính thưởng ⇒ chủ shop quyết." : "Không có phí chiều hoàn trong kỳ.",
+    status: r(hoanCoSo) === r(e.returnCost) ? "MATCHED" : "UNRECONCILED",
+    cls: "BY_CODE",
+    note:
+      r(hoanCoSo) === r(e.returnCost)
+        ? e.returnCost > 0
+          ? `${vnd(b.returnLegToCodes)} gắn được về mã qua đơn gốc; ${vnd(b.returnLegShared)} không nối được ⇒ chi phí chung, chia theo doanh thu. Tổng là CÙNG con số của máy chi phí — dòng này kiểm phép chia không làm rơi / nhân đôi, không phải đối chiếu độc lập với chứng từ ĐVVC.`
+          : "Không có phí chiều hoàn trong kỳ."
+        : `Cơ sở lương và máy chi phí lệch ${vnd(hoanCoSo - e.returnCost)} — hai đường phải đọc cùng tập vận đơn chiều về; chưa giải thích.`,
     href: `/shipments?${periodQuery}`,
   });
 
@@ -325,10 +338,10 @@ export function buildMonthReconciliation(x: MonthReconInput, periodQuery: string
 
   // ── NHÓM CHI PHÍ ── (chi phí chung CHIA xuống mã theo doanh thu vẫn là chi phí chung)
   const classes: Record<CostClass, number> = {
-    BY_CODE: r(b.cogs + b.adsCode + b.shippingPerShipment + (b.logisticsAdjustment - b.logisticsAdjustmentUnallocated) + b.perOrderOpsEstimate),
-    SHARED: r(b.operatingEntered + b.fixedCostAssumption + q.testWithMarketer + b.logisticsAdjustmentUnallocated),
+    BY_CODE: r(b.cogs + b.adsCode + b.shippingPerShipment + b.returnLegToCodes + (b.logisticsAdjustment - b.logisticsAdjustmentUnallocated) + b.perOrderOpsEstimate),
+    SHARED: r(b.operatingEntered + b.fixedCostAssumption + q.testWithMarketer + b.logisticsAdjustmentUnallocated + b.returnLegShared),
     UNKNOWN_SOURCE: r(q.testNoMarketer),
-    NOT_IN_BASIS: r(e.returnCost + x.costWarnings.filter((w) => NOT_IN_BASIS_WARNINGS.has(w.rule)).reduce((t, w) => t + w.amount, 0)),
+    NOT_IN_BASIS: r(hoanThieu + x.costWarnings.filter((w) => NOT_IN_BASIS_WARNINGS.has(w.rule)).reduce((t, w) => t + w.amount, 0)),
   };
 
   // ── ĐỘ PHỦ ──

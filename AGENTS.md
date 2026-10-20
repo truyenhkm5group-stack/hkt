@@ -694,8 +694,16 @@ deploy dừng, không phải cảnh báo.
     ƯỚC TÍNH, không đếm là khớp; "đã giải thích" chỉ khi ĐO được phần giải thích. Ảnh chụp kỳ mang bảng
     đối soát; chữ ký cấp 1 ký trên ẢNH CHỤP (không trên số sống); tháng có thưởng đủ điều kiện > 0 thì DUYỆT
     đòi chữ ký còn hiệu lực trên đúng ảnh ấy + người duyệt KHÁC người ký, KHOÁ đòi chữ ký vẫn còn hiệu lực.
-    Tính kỳ không bị chặn; tháng không có khoản đủ điều kiện thì không giữ lương của ai vì bảng đối soát. Đưa phí chiều hoàn hay bất kỳ khoản nào vào cơ sở lương là đổi cách
-    tính thưởng ⇒ chủ shop quyết.
+    Tính kỳ không bị chặn; tháng không có khoản đủ điều kiện thì không giữ lương của ai vì bảng đối soát. Đưa thêm một
+    khoản vào cơ sở lương là đổi cách tính thưởng ⇒ chủ shop quyết — phí chiều hoàn ĐÃ được quyết 20/10/2026 (mục 79).
+
+79. **CHI PHÍ CÓ THẬT VÀO P&L LƯƠNG, CHƯA BIẾT KHÔNG ĐƯỢC NHÂN LÊN** (`docs/payroll-code-ledger.md` §10):
+    phí chiều hoàn đi vào cơ sở lương với TỔNG từ máy chi phí và phép chia ở `returnCostByProduct` (nối về đơn
+    gốc ⇒ mã; phần dư ⇒ chi phí chung) — `toCodes + shared = amount`. Lương cứng của người CHƯA khai ngày vào
+    làm là CHƯA BIẾT khi DỰNG LẠI LỊCH SỬ (đề xuất số dư mở sổ) — nhưng lá chắn chốt lương (cảnh báo nghĩa
+    vụ lương, quyền cầm nguồn của bảng Lương) KHÔNG được hạ vì nó: kỳ đang chốt lương luôn là kỳ đã qua. Phân công / điều khoản thưởng theo mã lưu ra là `PENDING`; chỉ `approveCodeRow`
+    đưa sang `APPROVED`. Trung tâm đối soát CHỈ ĐỌC và chỉ ĐỀ XUẤT số dư mở sổ — không tự khai, không tự đặt
+    giá vốn, không tự phân công; mỗi việc còn lại có một PHÒNG chịu trách nhiệm.
 
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng

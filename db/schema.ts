@@ -12328,8 +12328,8 @@ export const productMarketerAssignments = pgTable(
     effectiveTo: ts("effective_to"),
     /** Số hiệu quy chế / phiên bản chính sách dòng này áp theo — để đối chiếu với hợp đồng. */
     policyRef: text("policy_ref").notNull().default(""),
-    /** `APPROVED` · `REVOKED` (huỷ một dòng nhập nhầm; kỳ đã khoá đọc ảnh chụp, không đọc bảng này). */
-    status: text("status").notNull().default("APPROVED"),
+    /** `PENDING` (đã khai, CHỜ DUYỆT — bảng lương không đọc) · `APPROVED` · `REVOKED` (huỷ dòng nhập nhầm / từ chối dòng chờ). Kỳ đã khoá đọc ảnh chụp, không đọc bảng này. */
+    status: text("status").notNull().default("PENDING"),
     note: text("note").notNull().default(""),
     createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
     approvedBy: text("approved_by").references(() => users.id, { onDelete: "set null" }),
@@ -12341,7 +12341,8 @@ export const productMarketerAssignments = pgTable(
     index("product_marketer_assignments_product_idx").on(t.productId, t.effectiveFrom),
     index("product_marketer_assignments_employee_idx").on(t.employeeId, t.effectiveFrom),
     check("product_marketer_assignments_role_check", sql`${t.role} IN ('OWNER', 'SUPPORT')`),
-    check("product_marketer_assignments_status_check", sql`${t.status} IN ('APPROVED', 'REVOKED')`),
+    check("product_marketer_assignments_status_check", sql`${t.status} IN ('PENDING', 'APPROVED', 'REVOKED')`),
+    check("product_marketer_assignments_approved_check", sql`${t.status} <> 'APPROVED' OR ${t.approvedAt} IS NOT NULL`),
     check("product_marketer_assignments_range_check", sql`${t.effectiveTo} IS NULL OR ${t.effectiveTo} >= ${t.effectiveFrom}`),
     check(
       "product_marketer_assignments_owner_check",
@@ -12372,7 +12373,7 @@ export const productBonusTerms = pgTable(
     effectiveFrom: ts("effective_from").notNull(),
     effectiveTo: ts("effective_to"),
     policyRef: text("policy_ref").notNull().default(""),
-    status: text("status").notNull().default("APPROVED"),
+    status: text("status").notNull().default("PENDING"),
     note: text("note").notNull().default(""),
     createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
     approvedBy: text("approved_by").references(() => users.id, { onDelete: "set null" }),
@@ -12382,7 +12383,8 @@ export const productBonusTerms = pgTable(
   },
   (t) => [
     index("product_bonus_terms_product_idx").on(t.productId, t.effectiveFrom),
-    check("product_bonus_terms_status_check", sql`${t.status} IN ('APPROVED', 'REVOKED')`),
+    check("product_bonus_terms_status_check", sql`${t.status} IN ('PENDING', 'APPROVED', 'REVOKED')`),
+    check("product_bonus_terms_approved_check", sql`${t.status} <> 'APPROVED' OR ${t.approvedAt} IS NOT NULL`),
     check("product_bonus_terms_range_check", sql`${t.effectiveTo} IS NULL OR ${t.effectiveTo} >= ${t.effectiveFrom}`),
     check("product_bonus_terms_pool_check", sql`${t.supportPoolBp} BETWEEN 0 AND 10000`),
     check("product_bonus_terms_cap_check", sql`${t.maxBonusAmount} IS NULL OR ${t.maxBonusAmount} >= 0`),

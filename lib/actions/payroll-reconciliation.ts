@@ -20,7 +20,7 @@ import { revokeProfitReconAs, signProfitReconAs } from "@/lib/payroll/recon-sign
 
 export type ReconActionResult = { ok: true; id?: string } | { error: string };
 
-const SURFACES = ["/payroll", "/payroll/reconciliation", "/payroll/codes"] as const;
+const SURFACES = ["/payroll", "/payroll/reconciliation", "/payroll/reconciliation/center", "/payroll/codes"] as const;
 function revalidate() {
   for (const p of SURFACES) revalidatePath(p);
 }

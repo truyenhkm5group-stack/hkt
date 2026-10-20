@@ -33,7 +33,7 @@ import { inclusiveDays, prorateMonthlyAmount } from "@/lib/constants/cost-alloca
 import type { CoverageState } from "@/lib/constants/cost-authority";
 import { COMPENSATION_PROFIT_BASIS, COMPENSATION_PROFIT_LABEL, type CompensationProfitBasis } from "@/lib/constants/compensation-profit";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
-import { employmentWindow } from "@/lib/constants/payroll-employment";
+import { employmentWindow, isDateKey } from "@/lib/constants/payroll-employment";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 
@@ -105,6 +105,19 @@ export type PayrollRecognition = {
    * này tồn tại.
    */
   fixedSalaryDue: number;
+  /**
+   * TÁCH `fixedSalaryDue` THEO CĂN CỨ (Payroll V2, chủ shop 20/10/2026: "không tự nhân 8 triệu cho mọi
+   * tháng"). `Evidenced` = lương của người đã khai NGÀY VÀO LÀM (cửa sổ làm việc thật); `Undated` = lương
+   * của người CHƯA khai ngày — `employmentWindow` coi họ có mặt mọi kỳ.
+   *
+   * CHỈ LÀ LỜI KHAI, KHÔNG ĐỔI PHÉP GHI NHẬN: máy chi phí, cảnh báo nghĩa vụ lương và quyền cầm nguồn của
+   * bảng Lương vẫn dùng `fixedSalaryDue` như trước — kỳ đang chốt lương luôn là một kỳ ĐÃ QUA, và hạ lá chắn
+   * ở đó là cho chốt kỳ trên lợi nhuận 0 ₫ lương. Phần `Undated` chỉ được coi là CHƯA BIẾT ở chỗ dựng lại
+   * lịch sử (đề xuất số dư mở sổ — `lib/queries/payroll-recon-center.ts`). Không đọc đồng hồ.
+   */
+  fixedSalaryDueEvidenced: number;
+  fixedSalaryDueUndated: number;
+  undatedEmployees: { id: string; name: string; monthlyFixed: number }[];
 };
 
 /**
@@ -136,6 +149,12 @@ export async function getRecognizedPayrollCost(period: Period): Promise<PayrollR
   const unclipped = windows.filter((x) => x.w.included && !x.w.clipped).reduce((t, x) => t + monthly(x.e), 0);
   const clippedPart = windows.reduce((t, x) => (x.w.included && x.w.clipped ? t + prorateMonthlyAmount(monthly(x.e), x.w.from, x.w.to) : t), 0);
   const fixedSalary = prorateMonthlyAmount(unclipped, period.from, period.to) + clippedPart;
+  // Người đã khai NGÀY VÀO LÀM có cửa sổ làm việc thật; người chưa khai thì không (xem chú thích của kiểu).
+  const coCanCu = (e: Employee) => isDateKey(e.startedOn);
+  const phanCua = (x: (typeof windows)[number]) => (x.w.included ? (x.w.clipped ? prorateMonthlyAmount(monthly(x.e), x.w.from, x.w.to) : prorateMonthlyAmount(monthly(x.e), period.from, period.to)) : 0);
+  const fixedSalaryDueUndated = windows.filter((x) => x.w.included && !coCanCu(x.e)).reduce((t, x) => t + phanCua(x), 0);
+  const fixedSalaryDueEvidenced = Math.max(0, fixedSalary - fixedSalaryDueUndated);
+  const undatedEmployees = windows.filter((x) => x.w.included && !coCanCu(x.e) && monthly(x.e) > 0).map((x) => ({ id: x.e.id, name: x.e.shortName || x.e.name, monthlyFixed: monthly(x.e) }));
   // Cùng hàm đếm ngày với `prorateMonthlyAmount`: mốc cuối là 23:59:59 nên chia rồi làm tròn ra
   // thừa một ngày (7 ngày thành 8), và con số ấy hiện thẳng ra màn hình.
   const days = period.from && period.to ? Math.max(0, inclusiveDays(period.from, period.to)) : 0;
@@ -178,5 +197,8 @@ export async function getRecognizedPayrollCost(period: Period): Promise<PayrollR
     activeEmployees: active.length,
     monthlyFixedTotal,
     fixedSalaryDue: fixedSalary,
+    fixedSalaryDueEvidenced,
+    fixedSalaryDueUndated,
+    undatedEmployees,
   };
 }

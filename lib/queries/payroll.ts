@@ -24,7 +24,7 @@ import {
   type NominalReport,
 } from "@/lib/queries/profit-nominal";
 import { fixedCostForPeriod, opsCosts, periodMonths, rescuedFromRate } from "@/lib/constants/profit";
-import { type CostEngineWarning } from "@/lib/queries/cost-engine";
+import { returnCostByProduct, type CostEngineWarning } from "@/lib/queries/cost-engine";
 import { accountingProfitAfterCompensation, getOperatingCostForCompensationBasis, type BasisExclusion } from "@/lib/queries/compensation-basis";
 import { distributeProportionally, inclusiveDays, prorateMonthlyAmount } from "@/lib/constants/cost-allocation";
 import { wholeMonthKey } from "@/lib/constants/payroll-carryover";
@@ -169,6 +169,11 @@ export type MarketerReport = {
     logisticsAdjustmentCount: number;
     /** Phần điều chỉnh KHÔNG chia được xuống mã nào (kỳ không có đơn gửi lẫn doanh thu) — vẫn trừ ở cấp shop. */
     logisticsAdjustmentUnallocated: number;
+    /**
+     * PHÍ VẬN ĐƠN CHIỀU HOÀN (Payroll V2, 20/10/2026): `toCodes` đã nằm trong `shipping` của từng mã,
+     * `shared` vào quỹ chi phí chung (chia theo doanh thu, phần không chia được nằm trong `sharedUnallocated`).
+     */
+    returnLeg: { amount: number; toCodes: number; shared: number };
     months: number;
     testSpend: number;
     profit: number;
@@ -446,6 +451,9 @@ async function productEconomics(period: Period) {
     resolveAssumptions(),
   ]);
   const purchase = new Map(receipts.filter((r) => r.productId).map((r) => [r.productId as string, Number(r.cost)]));
+  // Tổng phí chiều hoàn lấy từ MÁY CHI PHÍ (cùng con số Báo cáo lợi nhuận trừ); phép chia theo mã cũng
+  // sống ở đó, cạnh thành phần `RETURN_COST` mà nó chia — không có công thức thứ hai ở bảng lương.
+  const returnLeg = { total: exp.returnLegCost, byProduct: await returnCostByProduct(period) };
   const operatingEntered = exp.amount;
   // chi phí cố định (văn phòng, điện nước…) theo giả định báo cáo lợi nhuận, quy đổi theo số ngày của kỳ
   const dates = (v: (string | null)[]) => v.map((x) => (x ? new Date(x) : null)).filter((d): d is Date => !!d && !Number.isNaN(d.getTime()));
@@ -467,9 +475,24 @@ async function productEconomics(period: Period) {
   const perOrderTotal = rows.reduce((a, r) => a + r.packingCost + r.opsStaffCost, 0);
   // CP vận hành phân bổ của mã = (đã nhập + cố định) theo tỷ trọng doanh thu GTC + đóng hàng & NV vận đơn theo đơn của chính mã
   const operating = operatingEntered + fixedCost + perOrderTotal;
-  // Chia bằng largest remainder ⇒ Σ phần phân bổ của các mã = ĐÚNG (đã nhập + cố định), không lệch
+  /*
+    PHÍ VẬN ĐƠN CHIỀU HOÀN (chủ shop 20/10/2026: "các khoản thực tế công ty phải chịu phải được tính vào
+    P&L, ưu tiên gắn theo vận đơn và SKU; khoản không xác định được mã thì hạch toán chi phí chung theo quy
+    tắc phân bổ đã duyệt; không ghi trùng"). Phần nối được về đơn gốc đi vào cột vận chuyển của ĐÚNG mã
+    (theo giá trị dòng hàng của đơn gốc); phần không nối được vào QUỸ CHI PHÍ CHUNG cùng chi phí vận hành,
+    chia theo doanh thu — đúng quy tắc chi phí chung đang chạy. Phí hoàn gõ tay có lý do đã nằm trong
+    `logisticsAdjustment` nên không đếm lại ở đây.
+  */
+  // Largest remainder trên phần NỐI ĐƯỢC (không làm tròn từng mã): Σ phần của các mã không bao giờ vượt tổng.
+  const returnWeights = rows.map((r) => Math.max(0, returnLeg.byProduct.get(r.productId) ?? 0));
+  const returnMatched = Math.min(returnLeg.total, Math.round(returnWeights.reduce((t, v) => t + v, 0)));
+  const returnParts = returnMatched > 0 ? distributeProportionally(returnMatched, returnWeights) : rows.map(() => 0);
+  const returnToCode = new Map(rows.map((r, idx) => [r.productId, returnParts[idx]] as const));
+  const returnToCodes = returnParts.reduce((t, v) => t + v, 0);
+  const returnShared = Math.max(0, returnLeg.total - returnToCodes);
+  // Chia bằng largest remainder ⇒ Σ phần phân bổ của các mã = ĐÚNG (đã nhập + cố định + phí hoàn chung), không lệch
   // vì làm tròn từng dòng; lương/hoa hồng cộng lại phải khớp tổng chi phí của shop.
-  const sharedParts = distributeProportionally(operatingEntered + fixedCost, rows.map((r) => r.revenue));
+  const sharedParts = distributeProportionally(operatingEntered + fixedCost + returnShared, rows.map((r) => r.revenue));
   /*
     ═══ CHI PHÍ KHÔNG PHÂN BỔ ĐƯỢC VẪN LÀ CHI PHÍ ═══
 
@@ -489,7 +512,7 @@ async function productEconomics(period: Period) {
     không liên quan.
   */
   const sharedAllocated = sharedParts.reduce((t, v) => t + v, 0);
-  const sharedUnallocated = operatingEntered + fixedCost - sharedAllocated;
+  const sharedUnallocated = operatingEntered + fixedCost + returnShared - sharedAllocated;
   /*
     ═══ CƯỚC / PHÍ HOÀN ĐIỀU CHỈNH CÓ LÝ DO — TIỀN THẬT, VÀO CỘT VẬN CHUYỂN CỦA TỪNG MÃ ═══
 
@@ -513,7 +536,9 @@ async function productEconomics(period: Period) {
   const adjustParts = distributeProportionally(logisticsAdjustment.amount, adjustWeights);
   const logisticsAdjustmentUnallocated = logisticsAdjustment.amount - adjustParts.reduce((t, v) => t + v, 0);
   return {
-    rows: rows.map((r, idx) => ({ ...r, shipping: r.shipping + adjustParts[idx], operatingAlloc: sharedParts[idx] + r.packingCost + r.opsStaffCost })),
+    rows: rows.map((r, idx) => ({ ...r, shipping: r.shipping + adjustParts[idx] + (returnToCode.get(r.productId) ?? 0), operatingAlloc: sharedParts[idx] + r.packingCost + r.opsStaffCost })),
+    /** Phí vận đơn chiều hoàn của kỳ: phần gắn được mã (đã nằm trong `shipping` của mã) và phần vào quỹ chi phí chung. */
+    returnLeg: { amount: returnLeg.total, toCodes: returnToCodes, shared: returnShared },
     /** Cước / phí hoàn điều chỉnh có lý do của kỳ (đã nằm trong `shipping` của các mã, trừ phần chưa chia). */
     logisticsAdjustment: { amount: logisticsAdjustment.amount, count: logisticsAdjustment.count, unallocated: logisticsAdjustmentUnallocated },
     operating,
@@ -612,7 +637,7 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
   };
   const products: ProductProfitLine[] = [];
   let shopRetained = 0;
-  const totals = { revenue: 0, adSpend: 0, cogs: 0, shipping: 0, operating: econ.operating, operatingEntered: econ.operatingEntered, fixedCost: econ.fixedCost, perOrderOps: econ.perOrderTotal, sharedUnallocated: econ.sharedUnallocated, logisticsAdjustment: econ.logisticsAdjustment.amount, logisticsAdjustmentCount: econ.logisticsAdjustment.count, logisticsAdjustmentUnallocated: econ.logisticsAdjustment.unallocated, months: econ.months, testSpend: 0, profit: 0, basisExclusions: econ.basisExclusions, marketerPriceMargin: 0, workshopPenaltyCredited: 0, workshopPenaltyUncredited: 0, workshopPenaltyUndatedBatches: penalties.undatedBatches };
+  const totals = { revenue: 0, adSpend: 0, cogs: 0, shipping: 0, operating: econ.operating, operatingEntered: econ.operatingEntered, fixedCost: econ.fixedCost, perOrderOps: econ.perOrderTotal, sharedUnallocated: econ.sharedUnallocated, logisticsAdjustment: econ.logisticsAdjustment.amount, logisticsAdjustmentCount: econ.logisticsAdjustment.count, logisticsAdjustmentUnallocated: econ.logisticsAdjustment.unallocated, returnLeg: econ.returnLeg, months: econ.months, testSpend: 0, profit: 0, basisExclusions: econ.basisExclusions, marketerPriceMargin: 0, workshopPenaltyCredited: 0, workshopPenaltyUncredited: 0, workshopPenaltyUndatedBatches: penalties.undatedBatches };
   let unattributedProfit = 0;
   let unattributedRevenue = 0;
   const coverage = { snapshot: 0, legacyPage: 0, ads: 0, unmapped: 0, total: 0 };
