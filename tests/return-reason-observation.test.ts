@@ -46,7 +46,7 @@ export function testReasonSourceRegistry() {
     Viettel Post và Pancake là hai hệ ngoài: họ thấy kiện đi tới đâu, không thấy vải dày hay mỏng.
     Cho một trong hai quyền kết luận là mở đường để một cột "Vải xấu" đầy số mà không ai kiểm được.
   */
-  for (const s of ["CARRIER_CODE", "CARRIER_TEXT", "PANCAKE_RETURN", "PANCAKE_ORDER_NOTE"] as const) {
+  for (const s of ["CARRIER_CODE", "CARRIER_TEXT", "CARRIER_TEXT_VIA_PANCAKE", "PANCAKE_RETURN", "PANCAKE_ORDER_NOTE"] as const) {
     assert.equal(SOURCE_CAN_CONCLUDE_SHOP_FAULT[s], false, `${REASON_SOURCE_LABEL[s]} là hệ NGOÀI shop — không được kết luận lỗi sản phẩm`);
     assert.equal(SOURCE_IS_HUMAN[s], false, `${s} là máy đọc ra, không phải người gõ`);
   }
@@ -62,7 +62,7 @@ export function testReasonSourceRegistry() {
     assert.ok(REASON_COVERAGE_ACTION[c], `${c}: thiếu câu "việc phải làm" — một bảng chỉ in con số là bảng không ai mở lần thứ hai`);
   }
   assert.notEqual(REASON_COVERAGE_ACTION.RAW_ONLY, REASON_COVERAGE_ACTION.NO_EVIDENCE, "hai chỗ trống này dẫn tới hai việc khác hẳn nhau");
-  console.log(`✓ Sổ nguồn lý do: ${REASON_SOURCES.length} nguồn · 4 nguồn ngoài shop bị chặn kết luận lỗi shop · 3 trạng thái độ phủ, mỗi cái một việc phải làm`);
+  console.log(`✓ Sổ nguồn lý do: ${REASON_SOURCES.length} nguồn · 5 nguồn ngoài shop bị chặn kết luận lỗi shop · 3 trạng thái độ phủ, mỗi cái một việc phải làm`);
 }
 
 /* ───── 2 · MÁY KHÔNG BỊA LÝ DO CỦA NGƯỜI — chặn ở chính hàm xếp loại ───── */

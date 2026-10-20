@@ -119,7 +119,7 @@ export function reasonFromStatusText(statusName: string): ReturnReason | null {
  * — tức đúng dòng muộn nhất trong số dòng có lý do. Hai dòng CÙNG mốc thì bản cũ lấy theo thứ tự
  * ngẫu nhiên của CSDL; ở đây phá hoà bằng `id` giảm dần để chạy hai lần ra cùng một kết quả.
  */
-async function suKienCoLyDoMuonNhat(db: Awaited<ReturnType<typeof getDb>>, ids: string[]): Promise<{ shipmentId: string; statusName: string; reason: ReturnReason; at: Date }[]> {
+async function suKienCoLyDoMuonNhat(db: Awaited<ReturnType<typeof getDb>>, ids: string[]): Promise<{ shipmentId: string; statusName: string; reason: ReturnReason; at: Date; viaPancake: boolean }[]> {
   const e = schema.shipmentEvents;
   const coChu = sql`${e.shipmentId} in ${ids} and coalesce(${e.statusName}, '') <> ''`;
   const cauChu = await db.selectDistinct({ statusName: e.statusName }).from(e).where(coChu);
@@ -129,12 +129,18 @@ async function suKienCoLyDoMuonNhat(db: Awaited<ReturnType<typeof getDb>>, ids: 
     if (r) lyDoCua.set(statusName, r);
   }
   if (!lyDoCua.size) return [];
+  /*
+    MUỘN NHẤT MỖI KIỆN, TÁCH THEO ĐƯỜNG TỚI: tối đa một dòng VTP và một dòng Pancake chuyển tiếp.
+    Lấy một dòng muộn nhất chung thì sự kiện Pancake mới hơn che mất lời VTP — đúng lỗi đã đo (xem
+    `SOURCE_RANK.CARRIER_TEXT_VIA_PANCAKE`). Chọn giữa hai dòng là việc của `resolveEvidence`.
+  */
+  const quaPancake = sql<boolean>`(${e.source} = 'PANCAKE')`;
   const dong = await db
-    .selectDistinctOn([e.shipmentId], { shipmentId: e.shipmentId, statusName: e.statusName, at: e.occurredAt })
+    .selectDistinctOn([e.shipmentId, quaPancake], { shipmentId: e.shipmentId, statusName: e.statusName, at: e.occurredAt, viaPancake: quaPancake })
     .from(e)
     .where(and(coChu, inArray(e.statusName, [...lyDoCua.keys()])))
-    .orderBy(e.shipmentId, desc(e.occurredAt), desc(e.id));
-  return dong.map((d) => ({ shipmentId: d.shipmentId, statusName: d.statusName, reason: lyDoCua.get(d.statusName) as ReturnReason, at: d.at }));
+    .orderBy(e.shipmentId, quaPancake, desc(e.occurredAt), desc(e.id));
+  return dong.map((d) => ({ shipmentId: d.shipmentId, statusName: d.statusName, reason: lyDoCua.get(d.statusName) as ReturnReason, at: d.at, viaPancake: Boolean(d.viaPancake) }));
 }
 
 /**
@@ -193,8 +199,16 @@ export async function reasonsForShipments(shipmentIds: readonly string[]): Promi
   // Chữ ĐVVC muộn nhất mang lý do — mỗi kiện tối đa MỘT dòng (xem `suKienCoLyDoMuonNhat`).
   for (const e of suKien) {
     const raw = (e.statusName ?? "").trim();
-    chuDvvc.set(e.shipmentId, raw);
-    them(e.shipmentId, { source: "CARRIER_TEXT", reason: e.reason, at: e.at.getTime(), evidence: `Sự kiện ĐVVC: “${e.statusName}”`, rawReason: raw, actorEmail: "" });
+    // Chữ ĐVVC đi kèm kết luận người / mã: chữ đến thẳng từ VTP thắng chữ Pancake chuyển tiếp.
+    if (!e.viaPancake || !chuDvvc.has(e.shipmentId)) chuDvvc.set(e.shipmentId, raw);
+    them(e.shipmentId, {
+      source: e.viaPancake ? "CARRIER_TEXT_VIA_PANCAKE" : "CARRIER_TEXT",
+      reason: e.reason,
+      at: e.at.getTime(),
+      evidence: `${e.viaPancake ? "Sự kiện ĐVVC qua Pancake" : "Sự kiện ĐVVC"}: “${e.statusName}”`,
+      rawReason: raw,
+      actorEmail: "",
+    });
   }
   for (const s of vanDon) {
     if (s.code === null || s.code === undefined) continue;
@@ -294,6 +308,7 @@ const CONFIDENCE_OF_SOURCE: Record<ReasonSource, ReasonConfidence> = {
   CS_NOTE: "STAFF_REPORTED",
   CARRIER_CODE: "CARRIER_CODE",
   CARRIER_TEXT: "CARRIER_TEXT",
+  CARRIER_TEXT_VIA_PANCAKE: "CARRIER_TEXT",
   PANCAKE_RETURN: "EXTERNAL_TEXT",
   PANCAKE_ORDER_NOTE: "EXTERNAL_TEXT",
 };

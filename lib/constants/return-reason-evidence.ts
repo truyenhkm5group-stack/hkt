@@ -192,6 +192,9 @@ const FAMILY_OF: Record<ReasonSource, "HUMAN" | "WAREHOUSE" | "CARE" | "CARRIER"
   CS_NOTE: "CARE",
   CARRIER_CODE: "CARRIER",
   CARRIER_TEXT: "CARRIER",
+  // CÙNG HỌ với ĐVVC: đó là lời của ĐVVC qua tay Pancake, không phải một bên thứ ba nói khác — nên
+  // VTP thắng theo HẠNG (không theo mốc) và hai bên không bao giờ thành "mâu thuẫn" giả.
+  CARRIER_TEXT_VIA_PANCAKE: "CARRIER",
   PANCAKE_RETURN: "PANCAKE",
   PANCAKE_ORDER_NOTE: "PANCAKE",
 };

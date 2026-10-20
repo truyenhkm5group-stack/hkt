@@ -437,6 +437,7 @@ import {
 } from "./return-reason-observation.test";
 import {
   testEvidenceOnDb,
+  testVtpBeatsPancakeRelayOnDb,
   testEvidenceObservationShapes,
   testEvidenceOverrideTransition,
   testEvidenceResolution,
@@ -2272,6 +2273,7 @@ async function main() {
   testEvidenceObservationShapes();
   testEvidenceUsesOneAuthorityTable();
   await testEvidenceOnDb(db);
+  await testVtpBeatsPancakeRelayOnDb(db);
   await testReasonTextLatestParity(db);
   testUseServerExports();
   testClientBoundaryExports();
