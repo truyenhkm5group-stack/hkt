@@ -1,0 +1,8 @@
+{
+  "pr": 928,
+  "sha": "ec576caab5bbeec1f7d8e74f0015390659af2889",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-20T20:18:10.222Z",
+  "note": "review lead: evidenceBeats thứ tự toàn phần (hạng → mốc → khoá nguồn|lý do, chỉ để ổn định); resolveEvidence + bộ chọn chữ gốc trong reasonsForShipments dùng chung; cùng nguồn·lý do·mốc thì rawReason phá hoà; câu đọc ORDER BY occurred_at, id. Sửa đúng lệch 705/702 giữa ma trận và bảng SAU của cùng lượt dryrun (run 39460159981). Bài kiểm 6 hoán vị ⇒ một kết quả; đột biến đỏ. Điều kiện bật cờ: sau d"
+}
