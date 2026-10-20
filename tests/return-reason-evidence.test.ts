@@ -11,6 +11,7 @@ import {
   REASON_EVIDENCE,
   REASON_TAXONOMY_KEY,
   buildReasonGrouping,
+  evidenceBeats,
   evidenceGroupDepartment,
   evidenceGroupOf,
   parseReasonTaxonomy,
@@ -138,6 +139,14 @@ export function testEvidenceResolution() {
   assert.deepEqual(resolveEvidence([]), { primary: null, secondary: [], tier: "UNKNOWN" });
   assert.equal(resolveEvidence([it("CARE_NOTE", "UNKNOWN", 1)]).tier, "UNKNOWN");
 
+  /*
+    CÙNG HẠNG, CÙNG MỐC, KHÁC LÝ DO (production 20/10/2026: 3 kiện đổi lý do giữa hai lượt đọc) ⇒ mọi thứ tự đầu vào ra CÙNG một nguyên
+    nhân chính. Bản cũ «cái đứng sau thắng» nên kết quả là thứ tự dòng CSDL trả về.
+  */
+  const hoa = [it("CARRIER_TEXT", "CUSTOMER_UNREACHABLE", 5), it("CARRIER_TEXT", "CUSTOMER_RESCHEDULE_FAILED", 5), it("CARRIER_TEXT", "CUSTOMER_REFUSED", 5)];
+  const perms = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]].map((o) => resolveEvidence(o.map((i) => hoa[i])).primary?.reason);
+  assert.equal(new Set(perms).size, 1, `cùng hạng + cùng mốc phải ra MỘT nguyên nhân dù đọc theo thứ tự nào: ${perms.join(", ")}`);
+  assert.ok(evidenceBeats(hoa[0], hoa[1]) !== evidenceBeats(hoa[1], hoa[0]), "thứ tự ưu tiên toàn phần: đúng một trong hai thắng");
   /* Chạy hai lần, đảo thứ tự đầu vào ⇒ cùng kết quả. */
   const ds = [it("CARRIER_TEXT", "CUSTOMER_REFUSED", 3), it("CARE_NOTE", "CUSTOMER_UNREACHABLE", 1), it("CARRIER_CODE", "WRONG_ADDRESS", 2)];
   assert.deepEqual(resolveEvidence(ds), resolveEvidence([...ds].reverse()), "kết quả không được phụ thuộc thứ tự đọc từ CSDL");

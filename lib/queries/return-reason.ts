@@ -28,13 +28,12 @@ import { classifyRaw } from "@/lib/returns/reason-classify";
 import {
   carrierCodeText,
   REASON_SOURCE_LABEL,
-  SOURCE_RANK,
   isReasonSource,
   vtpCodeOfObservation,
   type ReasonCoverageState,
   type ReasonSource,
 } from "@/lib/constants/return-reason-source";
-import { resolveEvidence, type ReasonEvidenceItem } from "@/lib/constants/return-reason-evidence";
+import { evidenceBeats, resolveEvidence, type ReasonEvidenceItem } from "@/lib/constants/return-reason-evidence";
 import {
   boDau,
   isReturnReason,
@@ -189,7 +188,8 @@ export async function reasonsForShipments(shipmentIds: readonly string[]): Promi
     .select()
     .from(r)
     .where(donIds.length ? sql`(${r.shipmentId} in ${ids} or (${r.shipmentId} is null and ${r.orderId} in ${donIds}))` : sql`${r.shipmentId} in ${ids}`)
-    .orderBy(sql`${r.occurredAt} asc`);
+    // `id` phá hoà: hai quan sát cùng mốc phải đọc ra cùng một thứ tự mọi lượt (xem `evidenceBeats`).
+    .orderBy(sql`${r.occurredAt} asc`, sql`${r.id} asc`);
 
   const loiKhai = new Map<string, LoiKhai[]>();
   const tho = new Map<string, LoiKhai>();
@@ -261,7 +261,9 @@ export async function reasonsForShipments(shipmentIds: readonly string[]): Promi
   for (const id of ids) {
     const ds = loiKhai.get(id) ?? [];
     const ket = resolveEvidence(ds);
-    const p = ket.primary ? ds.find((k) => k.source === ket.primary?.source && k.reason === ket.primary.reason && k.at === ket.primary.at) : undefined;
+    // Lời khai đứng sau nguyên nhân chính (chữ gốc · căn cứ) — chọn bằng CÙNG thứ tự toàn phần, không lấy dòng đầu tiên gặp được.
+    let p: LoiKhai | undefined;
+    for (const k of ds) if (ket.primary && k.source === ket.primary.source && k.reason === ket.primary.reason && k.at === ket.primary.at && hon(k, p)) p = k;
     if (p) {
       out.set(id, {
         reason: p.reason,
@@ -294,7 +296,8 @@ export async function reasonsForShipments(shipmentIds: readonly string[]): Promi
 /** Một lời khai kèm phần để HIỂN THỊ — chỉ `source/reason/at` đi vào phép chọn. */
 type LoiKhai = ReasonEvidenceItem & { evidence: string; rawReason: string; actorEmail: string };
 
-const hon = (a: LoiKhai, b: LoiKhai | undefined) => !b || SOURCE_RANK[a.source] > SOURCE_RANK[b.source] || (SOURCE_RANK[a.source] === SOURCE_RANK[b.source] && a.at >= b.at);
+/** Cùng thứ tự với `evidenceBeats`; cùng nguồn · lý do · mốc thì chữ gốc phá hoà — chữ hiện ra cũng phải giống nhau mọi lượt đọc. */
+const hon = (a: LoiKhai, b: LoiKhai | undefined) => !b || (evidenceBeats(a, b) && (!evidenceBeats(b, a) || a.rawReason >= b.rawReason));
 
 /**
  * `CONFIRMED` CHỈ cho người bấm xác nhận. Ghi chú chăm sóc / phiếu kho là lời nhân viên GHI NHẬN —
