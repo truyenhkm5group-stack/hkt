@@ -438,15 +438,95 @@ export function templateOfferTarget(
   orderProductIds: readonly (string | null)[],
   orderNames: readonly string[],
   money: (n: number) => string,
-): { named: string[]; target: CrossSellOffer | null } | null {
+): { named: string[]; target: CrossSellOffer | null; offerable: CrossSellOffer[] } | null {
   const named = namedIn(renderedText, facts.catalogNames);
-  if (!named.length) return { named, target: null };
-  const has = new Set(orderProductIds.filter((x): x is string => Boolean(x)));
-  const families = new Set(orderNames.map(familyOf).filter(Boolean));
-  const offerable = (facts.crossSellOffers ?? []).filter((o) => named.includes(o.name) && !has.has(o.productId) && !families.has(familyOf(o.name)));
+  if (!named.length) return { named, target: null, offerable: [] };
+  const offerable = offersNotInOrder(facts.crossSellOffers ?? [], orderProductIds, orderNames).filter((o) => named.includes(o.name));
   if (!offerable.length) return null;
   const one = named.length === 1 && offerable.length === 1 ? offerable[0] : null;
-  return { named, target: one && renderedText.includes(money(one.price)) ? one : null };
+  return { named, target: one && renderedText.includes(money(one.price)) ? one : null, offerable };
+}
+
+/* ═══════════ CÂU UPSELL NHIỀU MÓN — KHÁCH CÓ Ý THÊM MÀ CHƯA GỌI TÊN (P0 21/10/2026) ═══════════
+ *
+ * Kênh TEST HSLC sau #927 (run 39490699163): câu shop «…còn có các món ngon bán chạy khác, mình lấy thêm món nào báo em…» không có món
+ * đích ⇒ khách nhắn «ok thêm giúp chị» thì bot đáp «Dạ vâng ạ, mình cần hỗ trợ gì…»: không thêm món là ĐÚNG, nhưng không hỏi món nào là
+ * bỏ lỡ lời mời khách vừa nhận. Luật: hỏi ĐÚNG MỘT câu «món nào», một lần mỗi lời mời; khách gọi đúng một món của câu ⇒ món đó thành món
+ * đích và luồng có món đích chạy tiếp (hỏi xác nhận ⇒ «đúng rồi» ⇒ thêm đúng mẫu mã). KHÔNG BAO GIỜ tự chọn món, không thêm vào đơn.
+ */
+
+/**
+ * Món bổ trợ còn mời được cho ĐƠN NÀY: chưa có trong đơn (theo sản phẩm) và không cùng họ món với món khách vừa mua (review NB3). Cùng
+ * luật với `pickPostConfirmOffer`. HÀM THUẦN.
+ */
+export function offersNotInOrder(offers: readonly CrossSellOffer[], orderProductIds: readonly (string | null)[], orderNames: readonly string[]): CrossSellOffer[] {
+  const has = new Set(orderProductIds.filter((x): x is string => Boolean(x)));
+  const families = new Set(orderNames.map(familyOf).filter(Boolean));
+  return offers.filter((o) => !has.has(o.productId) && !families.has(familyOf(o.name)));
+}
+
+/** Ý THÊM món — chặt hơn `ADD_CUE_RE`: «ok» / «ừ» / «được» trơn là ghi nhận đơn chính, không phải xin thêm. */
+const MORE_CUE_RE = /(?:^| )(?:them|lay them|cho them|mua them|dat them)(?: |$)/;
+/**
+ * Phủ định / do dự / hỏi lại đọc trên chữ CÓ DẤU: bỏ dấu thì «đừng thêm» thành «dung them» — trùng «dùng thêm». Có một trong các từ
+ * này ⇒ không hỏi «món nào» (model đọc tin).
+ */
+const MENU_NOT_ASK_RAW_RE = /(?:^|\s)(?:đừng|không|hông|ko|k|chưa|thôi|khỏi|bỏ|hủy|huỷ|à|hả|hở)(?:\s|$|[?!.,])|\?/iu;
+/** Tin dài (kèm câu hỏi giao hàng, đổi địa chỉ…) không bị một câu hỏi máy chủ chặn ngang — model đọc cả tin. */
+const MENU_ASK_MAX_WORDS = 8;
+
+export type MenuOfferRef = {
+  outcome: string;
+  sent?: boolean;
+  source?: string;
+  productId?: string;
+  menu?: readonly CrossSellOffer[];
+  /** `true` = các món của `menu` do CHÍNH câu shop gọi tên ⇒ được kể tên trong câu hỏi; `false` = chỉ để đối chiếu câu trả lời. */
+  menuListed?: boolean;
+  menuAskTurn?: number;
+};
+
+/**
+ * Bước máy chủ cho tin khách SAU câu upsell nhiều món của shop. HÀM THUẦN.
+ *   `ASK_WHICH` — có ý thêm, tin ngắn, chưa gọi tên món nào ⇒ hỏi một câu (kể tên các món câu shop nhắc tới, ≤ 4 món).
+ *   `CONFIRM`   — câu shop chỉ còn MỘT món mời được ⇒ hỏi xác nhận đúng món đó ngay (món đích); hoặc khách vừa trả lời câu «món nào» bằng
+ *                 tên ĐÚNG MỘT món của câu ⇒ món đó thành món đích + hỏi xác nhận.
+ *   `null`      — không phải việc của máy chủ: model trả lời như thường.
+ */
+export function menuOfferStep(input: {
+  offer: MenuOfferRef | undefined;
+  text: string;
+  prevTurn: number | undefined;
+  catalogNames: readonly string[];
+  declinedTurn?: number;
+  money: (n: number) => string;
+}): { kind: "ASK_WHICH"; text: string } | { kind: "CONFIRM"; target: CrossSellOffer; text: string } | null {
+  const o = input.offer;
+  if (!o || o.outcome !== "OFFERED" || !o.sent || o.source !== "SHOP_TEMPLATE" || o.productId) return null;
+  if (input.declinedTurn !== undefined || offerDeclinedBy(input.text) || MENU_NOT_ASK_RAW_RE.test(input.text)) return null;
+  const menu = o.menu ?? [];
+  const confirm = (t: CrossSellOffer) => {
+    const label = offerVariantLabel(t.variant);
+    const what = label && label !== t.name ? `${t.name} (${label})` : t.name;
+    return { kind: "CONFIRM" as const, target: t, text: `Dạ mình muốn thêm ${what} giá ${input.money(t.price)} vào đơn đúng không ạ?` };
+  };
+  const said = (n: string) => mentionsProduct(n, input.text) || calledByName(n, input.text);
+  // Khách đang trả lời câu «món nào» của máy chủ: gọi tên ĐÚNG MỘT món của câu ⇒ món đích. Gọi tên món khác / nhiều món ⇒ model.
+  if (o.menuAskTurn !== undefined && input.prevTurn === o.menuAskTurn) {
+    const hit = menu.filter((m) => said(m.name));
+    return hit.length === 1 ? confirm(hit[0]) : null;
+  }
+  if (o.menuAskTurn !== undefined) return null;
+  const fb = foldVi(buyingText([input.text]));
+  if (!fb || !MORE_CUE_RE.test(fb) || fb.split(" ").filter(Boolean).length > MENU_ASK_MAX_WORDS) return null;
+  // Đã gọi tên một món (của danh mục, không chỉ của câu shop) ⇒ đó là lời mua — luồng gọi tên lo, không hỏi lại.
+  if (input.catalogNames.some(said)) return null;
+  // Câu shop chỉ gọi tên MỘT món còn mời được ⇒ hỏi xác nhận đúng món đó. Món chỉ để đối chiếu (câu shop không gọi tên) thì không kể ra:
+  // kể món khác với ảnh menu của shop là tự sáng tác lời mời.
+  if (o.menuListed && menu.length === 1) return confirm(menu[0]);
+  const names = o.menuListed ? menu.map((m) => m.name) : [];
+  const list = names.length >= 2 && names.length <= 4 ? `: ${names.slice(0, -1).join(", ")} hay ${names[names.length - 1]}` : "";
+  return { kind: "ASK_WHICH", text: `Dạ mình muốn thêm món nào ạ${list}?` };
 }
 
 export type ReplyGuardInput = {

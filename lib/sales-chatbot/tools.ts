@@ -61,7 +61,7 @@ import { customerOrderStatus } from "@/lib/sales-chatbot/order-status-shared";
 import { classifyDeliveryQuestion, deliveryPreferenceNote, deliveryTimeAnswer, pickDeliveryOrder, staffDeliveryCommitment } from "@/lib/sales-chatbot/delivery-intent";
 import { futurePurchaseOnly, postSaleDropsIn } from "@/lib/sales-chatbot/post-sale-guard";
 import { customerComplaintSignal, LIFECYCLE_ORDER_LOOKBACK_DAYS } from "@/lib/sales-chatbot/lifecycle";
-import { choosePostConfirmSource, confirmedAddIssue, needsOfferFacts, OFFER_BLOCK_LABEL, type CrossSellOffer, type OfferBlock, type OfferFacts, offerWindow, pickPostConfirmOffer, type PostConfirmOfferSource, postConfirmOfferText, postConfirmOfferWindow, quickReplySizeConflict, type SentenceClass, templateOfferTarget, type TemplateSkip, withOfferDrops } from "@/lib/sales-chatbot/next-best-action";
+import { choosePostConfirmSource, confirmedAddIssue, offersNotInOrder, needsOfferFacts, OFFER_BLOCK_LABEL, type CrossSellOffer, type OfferBlock, type OfferFacts, offerWindow, pickPostConfirmOffer, type PostConfirmOfferSource, postConfirmOfferText, postConfirmOfferWindow, quickReplySizeConflict, type SentenceClass, templateOfferTarget, type TemplateSkip, withOfferDrops } from "@/lib/sales-chatbot/next-best-action";
 import { loadOfferFacts } from "@/lib/sales-chatbot/offer-facts";
 import { fanpageVisitorKeyMirror } from "@/lib/pricing/ai-customer-identity";
 import type { PromptStamp } from "@/lib/sales-chatbot/prompt-stamp";
@@ -168,6 +168,15 @@ export type ChatState = {
     notSentReason?: "NO_CONFIRM_MESSAGE" | "HANDOFF" | "WRITE_FAILED" | "TURN_FAILED" | "MEDIA_SLOT_BUSY" | "GUARD_BLOCKED" | "APPEND_FAILED";
     /** Ảnh đã giao cho kênh gửi (`QUEUED`) / không có ảnh (`NONE`). Kết quả gửi ảnh thật nằm ở nhật ký kênh. */
     imageStatus?: "QUEUED" | "NONE";
+    /**
+     * Món CÂU SHOP nhắc tới mà còn mời được (giá đã xác thực · còn hàng · chưa có trong đơn) — chỉ khi câu nói nhiều món / không có món
+     * đích. Khách có ý thêm mà chưa gọi tên ⇒ máy chủ hỏi «món nào» từ danh sách này; khách gọi đúng một món ⇒ món đó thành món đích.
+     */
+    menu?: CrossSellOffer[];
+    /** `true` = `menu` là món CHÍNH câu shop gọi tên (được kể ra khi hỏi); `false` = món bổ trợ chỉ để đối chiếu câu trả lời của khách. */
+    menuListed?: boolean;
+    /** Lượt máy chủ đã hỏi «mình muốn thêm món nào ạ» — MỘT lần mỗi lời mời (`menuOfferStep`). */
+    menuAskTurn?: number;
     text?: string;
     name?: string;
     productId?: string;
@@ -1756,7 +1765,11 @@ async function notePostConfirmOffer(state: ChatState, ctx: ToolContext, orderPro
       quickReplyId: tpl.quickReplyId,
       text: tpl.text,
       imageIds: tpl.imageIds,
-      ...(t ? { name: t.name, productId: t.productId, variantId: t.variantId, variant: t.variant, price: t.price } : {}),
+      ...(t
+        ? { name: t.name, productId: t.productId, variantId: t.variantId, variant: t.variant, price: t.price }
+        : tpl.offerable.length
+          ? { menu: tpl.offerable, menuListed: true }
+          : { menu: offersNotInOrder(facts.crossSellOffers ?? [], orderProductIds, orderNames), menuListed: false }),
     };
     return;
   }
@@ -1782,7 +1795,7 @@ async function templateVerdict(
   facts: OfferFacts,
   orderProductIds: readonly (string | null)[],
   orderNames: readonly string[],
-): Promise<{ ok: true; quickReplyId: string; text: string; imageIds: string[]; target: CrossSellOffer | null } | { ok: false; reason: TemplateSkip }> {
+): Promise<{ ok: true; quickReplyId: string; text: string; imageIds: string[]; target: CrossSellOffer | null; offerable: CrossSellOffer[] } | { ok: false; reason: TemplateSkip }> {
   const rendered = await renderQuickReplyForSend(id, ctx.config).catch(() => null);
   if (!rendered) return { ok: false, reason: "TEMPLATE_UNAVAILABLE" };
   // Page / nhân viên / bot vừa gửi đúng câu này (chữ shop trong hội thoại) ⇒ không gửi trùng. Menu page gửi CHỈ bằng ảnh thì không có chữ
@@ -1792,7 +1805,7 @@ async function templateVerdict(
   if (quickReplySizeConflict(rendered.text, { cart: state.cart, lastUserText: ctx.lastUserText, facts })) return { ok: false, reason: "TEMPLATE_SIZE_CONFLICT" };
   const target = templateOfferTarget(rendered.text, facts, orderProductIds, orderNames, formatVND);
   if (!target) return { ok: false, reason: "TEMPLATE_NOTHING_TO_OFFER" };
-  return { ok: true, quickReplyId: id, text: rendered.text, imageIds: rendered.imageIds, target: target.target };
+  return { ok: true, quickReplyId: id, text: rendered.text, imageIds: rendered.imageIds, target: target.target, offerable: target.offerable };
 }
 
 /** Câu chốt ngắn khi máy chủ tự chốt — «Dạ em lên đơn 2 × Chả cá thu (1kg) cho mình rồi ạ, shop giao theo thông tin mình vừa gửi nhé.» */

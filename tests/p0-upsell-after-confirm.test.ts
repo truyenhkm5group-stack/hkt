@@ -27,7 +27,7 @@ import { stockFor } from "@/lib/sales-chatbot/catalog";
 import type { CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { DEFAULT_SALES_CHATBOT_CONFIG } from "@/lib/sales-chatbot/config";
 import { pricingContextOf, verifiedUnitPrices } from "@/lib/sales-chatbot/quote";
-import { choosePostConfirmSource, confirmedAddIssue, isShortYes, pickPostConfirmOffer, postConfirmOfferText, postConfirmOfferWindow, templateOfferTarget } from "@/lib/sales-chatbot/next-best-action";
+import { choosePostConfirmSource, confirmedAddIssue, isShortYes, menuOfferStep, pickPostConfirmOffer, postConfirmOfferText, postConfirmOfferWindow, templateOfferTarget } from "@/lib/sales-chatbot/next-best-action";
 import { SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { parseQuickReplySettings, QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -139,9 +139,39 @@ function testThuan() {
   assert.equal(templateOfferTarget("Bên em còn chả mực giã tay 400.000 ₫ ạ", F, ["p1"], ["Chả cá thu (1kg)"], formatVND)?.target?.productId, "p2", "một món + đúng giá ⇒ món đích");
   assert.equal(templateOfferTarget("Bên em còn chả mực giã tay ngon lắm ạ", F, ["p1"], ["Chả cá thu (1kg)"], formatVND)?.target, null, "không ghi giá ⇒ không đoán mẫu mã");
   assert.equal(templateOfferTarget("Chả mực giã tay, ruốc bông tôm 100% đang bán chạy ạ", F, ["p1"], ["Chả cá thu (1kg)"], formatVND)?.target, null, "nhiều món ⇒ khách phải gọi tên");
-  assert.deepEqual(templateOfferTarget("Menu các món bán chạy bên em ạ 👇", F, ["p1"], ["Chả cá thu (1kg)"], formatVND), { named: [], target: null }, "menu chỉ có ảnh ⇒ vẫn gửi");
+  assert.deepEqual(templateOfferTarget("Menu các món bán chạy bên em ạ 👇", F, ["p1"], ["Chả cá thu (1kg)"], formatVND), { named: [], target: null, offerable: [] }, "menu chỉ có ảnh ⇒ vẫn gửi");
   assert.equal(templateOfferTarget("Bên em còn chả mực giã tay 400.000 ₫ ạ", F, ["p2"], ["Chả mực giã tay (1kg)"], formatVND), null, "món duy nhất đã có trong đơn ⇒ không gửi");
   assert.equal(templateOfferTarget("Bên em còn chả mực giã tay 400.000 ₫ ạ", { ...F, crossSellOffers: [] }, ["p1"], [], formatVND), null, "hết hàng / chưa có giá ⇒ không gửi");
+  // P0 21/10/2026 — câu shop nhiều món, khách có ý thêm mà chưa gọi tên ⇒ máy chủ hỏi ĐÚNG MỘT câu «món nào»; gọi đúng một món ⇒ món đích.
+  {
+    const muc = { name: "Chả mực giã tay", productId: "p2", variantId: "v2", variant: "1kg", price: 400_000 };
+    const kho = { name: "Mực khô câu", productId: "p5", variantId: "v5", variant: "500g", price: 1_200_000 };
+    const base = { outcome: "OFFERED", sent: true, source: "SHOP_TEMPLATE", menu: [muc, kho], menuListed: true };
+    const CATS = ["Chả mực giã tay", "Mực khô câu", "Ruốc bông tôm 100%"];
+    const step = (text: string, offer: object = base, prevTurn?: number, declinedTurn?: number) => menuOfferStep({ offer: offer as never, text, prevTurn, catalogNames: CATS, declinedTurn, money: formatVND });
+    assert.deepEqual(step("ok thêm giúp chị"), { kind: "ASK_WHICH", text: "Dạ mình muốn thêm món nào ạ: Chả mực giã tay hay Mực khô câu?" });
+    for (const t of ["lấy thêm nhé em", "thêm cho chị nha", "cho chị thêm"]) assert.equal(step(t)?.kind, "ASK_WHICH", `«${t}» là ý thêm`);
+    for (const t of ["ok", "ok em", "ừ", "dạ", "được em", "cảm ơn em", "đừng thêm nhé em", "thôi khỏi thêm em", "không thêm đâu", "thêm à?", "thêm gì hả em"]) assert.equal(step(t), null, `«${t}» KHÔNG hỏi`);
+    assert.equal(step("ok thêm giúp chị, mai giao sáng sớm giúp chị được không em vì chị đi làm"), null, "tin dài ⇒ model đọc cả tin");
+    assert.equal(step("thêm 1 chả mực giã tay nhé"), null, "đã gọi tên món ⇒ luồng gọi tên lo, không hỏi lại");
+    assert.equal(step("ok thêm giúp chị", base, undefined, 7), null, "khách đã từ chối lời mời ⇒ không hỏi");
+    assert.equal(step("ok thêm giúp chị", { ...base, menuAskTurn: 9 }, 12), null, "đã hỏi một lần ⇒ không hỏi lại");
+    assert.equal(step("ok thêm giúp chị", { ...base, source: "AUTO_GENERATED" }), null, "chỉ cho câu SHOP");
+    assert.equal(step("ok thêm giúp chị", { ...base, productId: "p2" }), null, "đã có món đích ⇒ luồng hỏi xác nhận cũ");
+    // Trả lời câu «món nào»: gọi đúng một món ⇒ món đích + hỏi xác nhận (đúng mẫu mã, đúng giá).
+    const ans = step("chả mực", { ...base, menuAskTurn: 9 }, 9);
+    assert.equal(ans?.kind, "CONFIRM");
+    assert.equal(ans?.kind === "CONFIRM" ? ans.target.productId : null, "p2");
+    assert.equal(ans?.text, "Dạ mình muốn thêm Chả mực giã tay (1kg) giá 400.000 ₫ vào đơn đúng không ạ?");
+    assert.equal(step("cả hai món nhé chả mực với mực khô câu", { ...base, menuAskTurn: 9 }, 9), null, "nhiều món ⇒ model");
+    assert.equal(step("chả mực", { ...base, menuAskTurn: 9 }, 14), null, "không phải tin ngay sau câu hỏi ⇒ không tính là trả lời");
+    // Câu shop KHÔNG gọi tên món: hỏi không kể tên (không kể món trái với ảnh menu); món chỉ để đối chiếu câu trả lời.
+    assert.deepEqual(step("ok thêm giúp chị", { ...base, menuListed: false }), { kind: "ASK_WHICH", text: "Dạ mình muốn thêm món nào ạ?" });
+    assert.equal(step("chả mực nhé", { ...base, menuListed: false, menuAskTurn: 9 }, 9)?.kind, "CONFIRM", "câu shop không gọi tên vẫn đối chiếu được câu trả lời");
+    // Câu shop chỉ gọi tên MỘT món còn mời được ⇒ hỏi xác nhận đúng món đó, không hỏi «món nào».
+    assert.equal(step("ok thêm giúp chị", { ...base, menu: [muc] })?.kind, "CONFIRM");
+    assert.equal(step("ok thêm giúp chị", { ...base, menu: [muc], menuListed: false })?.kind, "ASK_WHICH", "món chỉ để đối chiếu thì không tự chọn");
+  }
   // Một bộ điều phối: send_quick_reply không gửi câu upsell sau chốt; câu shop đi bằng đường ảnh của engine, không ghép vào tin xác nhận.
   const engSrc = readFileSync("lib/sales-chatbot/engine.ts", "utf8");
   assert.match(engSrc, /if \(pco\.source === "SHOP_TEMPLATE"\) \{[\s\S]{0,1400}await reply\(conv, seq\+\+, pco\.text\);[\s\S]{0,300}deliveredImages\.push\(\.\.\.imageIds\);/, "câu shop = tin riêng + ảnh qua TurnResult.media");
@@ -167,8 +197,20 @@ const AUTO = /Bên em có thêm/;
  * CÀI ĐẶT CÂU MẪU CỦA TỪNG CA (P0 20/10/2026): `TEMPLATE` = shop cài + bật câu upsell (mặc định) · `NO_TEMPLATE` = chưa chọn câu upsell ·
  * `QR_OFF` = tắt cả câu mẫu · `AUTO_*` = shop bật «bot tự soạn khi chưa có câu upsell», có / không có câu upsell.
  */
-type Mode = "TEMPLATE" | "NO_TEMPLATE" | "QR_OFF" | "AUTO_NO_TEMPLATE" | "AUTO_WITH_TEMPLATE";
-const MODE_OF: Record<string, Mode> = { "pco-khong-cau-mau": "NO_TEMPLATE", "pco-tat-cau-mau": "QR_OFF", "pco-tu-soan-khong-cau-mau": "AUTO_NO_TEMPLATE", "pco-tu-soan-co-cau-mau": "AUTO_WITH_TEMPLATE" };
+type Mode = "TEMPLATE" | "NO_TEMPLATE" | "QR_OFF" | "AUTO_NO_TEMPLATE" | "AUTO_WITH_TEMPLATE" | "MULTI";
+const MODE_OF: Record<string, Mode> = {
+  "pco-khong-cau-mau": "NO_TEMPLATE",
+  "pco-tat-cau-mau": "QR_OFF",
+  "pco-tu-soan-khong-cau-mau": "AUTO_NO_TEMPLATE",
+  "pco-tu-soan-co-cau-mau": "AUTO_WITH_TEMPLATE",
+  "pco-menu-hoi-mon": "MULTI",
+  "pco-menu-ok-tron": "MULTI",
+  "pco-menu-hoi-hai-lan": "MULTI",
+  "pco-menu-dung-them": "MULTI",
+};
+/** Câu upsell NHIỀU món (P0 21/10/2026): gọi tên hai món còn hàng, không ghi giá ⇒ không có món đích. */
+const MULTI = "Dạ bên em còn chả mực giã tay và mực khô câu ngon lắm ạ, mình lấy thêm món nào báo em nhé.";
+const ASK_WHICH = "Dạ mình muốn thêm món nào ạ: Chả mực giã tay hay Mực khô câu?";
 
 /**
  * Đồ dùng chung của các ca (một tổ chức thử `gd-food-pco`): câu mẫu UPSELL (kèm MỘT ảnh menu) + tồn nạp MỘT lần ở ca đầu; cài đặt câu mẫu
@@ -190,8 +232,10 @@ async function seedMenu(ids: ReadonlyMap<string, string>, mode: Mode): Promise<s
     await db.insert(schema.salesChatQuickReplyImages).values({ quickReplyId: id, position: 0, contentType: "image/png", bytes: png.length, sha256: createHash("sha256").update(png).digest("hex"), data: png });
   }
   const withTpl = mode === "TEMPLATE" || mode === "QR_OFF" || mode === "AUTO_WITH_TEMPLATE";
-  await setSettingJson(QUICK_REPLY_SETTING_KEY, { enabled: mode !== "QR_OFF", aiMatch: false, upsellReplyId: withTpl ? id : null, autoLearn: false, autoActivate: false, autoUpsellOffer: mode.startsWith("AUTO") });
-  return id;
+  const [multiRow] = await db.select({ id: qr.id }).from(qr).where(eq(qr.title, "Menu nhiều món")).limit(1);
+  const multiId = multiRow?.id ?? (await db.insert(qr).values({ title: "Menu nhiều món", triggers: ["menu nhiều món"], answer: MULTI, active: true }).returning({ id: qr.id }))[0].id;
+  await setSettingJson(QUICK_REPLY_SETTING_KEY, { enabled: mode !== "QR_OFF", aiMatch: false, upsellReplyId: mode === "MULTI" ? multiId : withTpl ? id : null, autoLearn: false, autoActivate: false, autoUpsellOffer: mode.startsWith("AUTO") });
+  return mode === "MULTI" ? multiId : id;
 }
 
 const orderInfo = (phone: string) => [
@@ -305,6 +349,25 @@ const CASES: GoldenCase[] = [
   ] },
   { key: "pco-tu-soan-khong-cau-mau", title: "(P0 20/10) Shop bật tự soạn, không có câu upsell ⇒ chỉ đường tự soạn được xét (ghi nguồn AUTO_GENERATED)", shop: "food", channel: "WEB", config: {}, turns: [
     { say: INFO("0961003220"), ai: orderInfo("0961003220") },
+  ] },
+  { key: "pco-menu-hoi-mon", title: "(P0 21/10) Câu shop nhiều món: «ok thêm giúp chị» ⇒ máy chủ hỏi MỘT câu món nào ⇒ «chả mực» ⇒ hỏi xác nhận ⇒ «đúng rồi em» ⇒ thêm đúng mẫu mã", shop: "food", channel: "WEB", config: {}, turns: [
+    { say: INFO("0961003221"), ai: orderInfo("0961003221") },
+    { say: "ok thêm giúp chị", ai: [] },
+    { say: "chả mực", ai: [] },
+    { say: "đúng rồi em", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em thêm vào đơn rồi ạ.")]] },
+  ] },
+  { key: "pco-menu-ok-tron", title: "(P0 21/10) Câu shop nhiều món: «ok» trơn ⇒ KHÔNG hỏi, KHÔNG thêm", shop: "food", channel: "WEB", config: {}, turns: [
+    { say: INFO("0961003222"), ai: orderInfo("0961003222") },
+    { say: "ok", ai: [() => [say("Dạ vâng ạ.")]] },
+  ] },
+  { key: "pco-menu-hoi-hai-lan", title: "(P0 21/10) Đã hỏi «món nào» một lần ⇒ khách vẫn chưa gọi tên ⇒ KHÔNG hỏi lần hai", shop: "food", channel: "WEB", config: {}, turns: [
+    { say: INFO("0961003223"), ai: orderInfo("0961003223") },
+    { say: "ok thêm giúp chị", ai: [] },
+    { say: "thêm giúp chị nhé", ai: [() => [say("Dạ vâng ạ.")]] },
+  ] },
+  { key: "pco-menu-dung-them", title: "(P0 21/10) «đừng thêm nhé em» ⇒ không hỏi, không thêm", shop: "food", channel: "WEB", config: {}, turns: [
+    { say: INFO("0961003224"), ai: orderInfo("0961003224") },
+    { say: "đừng thêm nhé em", ai: [() => [say("Dạ vâng ạ.")]] },
   ] },
   { key: "pco-don-co-mon-kem", title: "Đơn đã có đúng món câu upsell mời ⇒ không gửi câu mời món khách đã mua", shop: "food", channel: "WEB", config: {}, turns: [
     { say: `Cho chị 1kg chả mực giã tay, Lan 0961003207, ${ADDR}`, ai: [() => [tool("create_customer", { name: "Lan", phone: "0961003207", address: ADDR })], ({ v }) => [tool("create_draft_order", { items: [{ variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em lên đơn cho mình rồi ạ.")]] },
@@ -452,6 +515,29 @@ async function testChatTurn() {
         assert.equal(pco?.source, "AUTO_GENERATED", "shop bật tự soạn, không có câu upsell ⇒ chỉ đường tự soạn được xét");
         // Không câu upsell ⇒ không món nào được khai là món kèm (bộ dữ liệu không có mẫu mã chỉ bán kèm) ⇒ không có gì để mời.
         assert.equal(pco?.outcome, "NO_CANDIDATE");
+      }
+      if (c.key.startsWith("pco-menu-")) {
+        assert.ok(first.includes(MULTI), `[${c.key}] câu shop nhiều món được gửi: ${first}`);
+        assert.equal(pco?.source, "SHOP_TEMPLATE");
+        assert.equal(pco?.menuListed, true, "câu shop gọi tên món ⇒ được kể tên khi hỏi");
+        assert.deepEqual((pco?.menu ?? []).map((m) => m.name).sort(), ["Chả mực giã tay", "Mực khô câu"], "chỉ món câu shop nhắc mà còn mời được");
+      }
+      if (c.key === "pco-menu-hoi-mon") {
+        assert.deepEqual(t.turns[1].shown, [ASK_WHICH], `«ok thêm giúp chị» ⇒ ĐÚNG MỘT câu hỏi món: ${t.turns[1].shown.join(" | ")}`);
+        assert.equal(t.turns[1].rounds.length, 0, "máy chủ hỏi, không gọi AI");
+        assert.deepEqual(t.turns[2].shown, ["Dạ mình muốn thêm Chả mực giã tay (1kg) giá 400.000 ₫ vào đơn đúng không ạ?"], t.turns[2].shown.join(" | "));
+        assert.deepEqual(lines, ["CHA-MUC×1", "RUOC-TOM×1"], `«đúng rồi em» sau câu xác nhận ⇒ thêm đúng món: ${results}`);
+        assert.equal(pco?.productId !== undefined, true, "món khách chọn thành món đích");
+        assert.equal(pco?.accepted?.amount, 400_000);
+      }
+      if (c.key === "pco-menu-ok-tron" || c.key === "pco-menu-dung-them") {
+        assert.ok(!all.some((x) => x.startsWith("Dạ mình muốn thêm")), `[${c.key}] không hỏi: ${all.join(" | ")}`);
+        assert.equal(pco?.menuAskTurn, undefined);
+        assert.deepEqual(lines, ["RUOC-TOM×1"]);
+      }
+      if (c.key === "pco-menu-hoi-hai-lan") {
+        assert.equal(all.filter((x) => x === ASK_WHICH).length, 1, `hỏi «món nào» đúng MỘT lần: ${all.join(" | ")}`);
+        assert.deepEqual(lines, ["RUOC-TOM×1"]);
       }
       if (c.key === "pco-don-co-mon-kem" || c.key === "pco-het-hang") {
         assert.ok(!first.includes(TPL), `[${c.key}] ${first}`);
