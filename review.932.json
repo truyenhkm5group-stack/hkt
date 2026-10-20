@@ -1,0 +1,8 @@
+{
+  "pr": 932,
+  "sha": "e8391f40b3241a92efe8c3186519fc685ba01100",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-20T22:45:40.599Z",
+  "note": "review lead: dọn data/pglite-test-<pid>(-org-*) — mẫu chặt ^pglite-test-(\\d+)(?:-org-.+)?$, chỉ dưới data/ của cây; khởi động xoá thư mục của PID đã chết (EPERM ⇒ coi còn sống, không đụng), thoát xoá của chính mình kể cả khi đỏ; TEST_GIU_CSDL=1 giữ lại. Hàm thuần có bài kiểm với PID giả; đo thật Windows; 4 shard đạt, 0 thư mục sót. Gốc của sự cố ổ C đầy 34,8 GB / PGlite PANIC."
+}
