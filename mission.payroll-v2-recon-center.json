@@ -3,7 +3,7 @@
   "mission_id": "payroll-v2-recon-center",
   "title": "Payroll V2 — Trung tâm đối soát: phí chiều hoàn vào P&L theo vận đơn/mã, lương cứng chỉ tính khi có căn cứ, phân công chờ duyệt, truy vết giá vốn/COD, đề xuất số dư mở sổ",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -46,7 +46,7 @@
     "0250": "2026-10-20T08:22:07.390Z"
   },
   "created_at": "2026-10-20T08:21:38.802Z",
-  "updated_at": "2026-10-20T14:55:54.806Z",
+  "updated_at": "2026-10-20T16:41:03.316Z",
   "last_heartbeat": "2026-10-20T13:02:18.942Z",
   "definition_of_done": [],
   "intake": {
@@ -54,7 +54,9 @@
     "evidence": []
   },
   "evidence": {
-    "merged": "#923 → 45014719b64897cf1e316163cbfb060bc9d8216d"
+    "merged": "#923 → 45014719b64897cf1e316163cbfb060bc9d8216d",
+    "verify": "PASS 8bffcbf7c8768222d4604d5379d51568b6608128 2026-10-20T16:40:39.368Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39457359179"
   },
   "handoff": {
     "branch": "claude/payroll-v2-recon-center",
