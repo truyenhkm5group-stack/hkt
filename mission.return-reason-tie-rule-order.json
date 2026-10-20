@@ -3,7 +3,7 @@
   "mission_id": "return-reason-tie-rule-order",
   "title": "Lý do hoàn: cùng hạng cùng mốc ⇒ luật chữ đứng trước thắng",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-return-reason",
@@ -20,9 +20,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-20T21:03:22.718Z",
-  "updated_at": "2026-10-20T23:18:43.279Z",
+  "updated_at": "2026-10-20T23:32:39.821Z",
   "last_heartbeat": "2026-10-20T23:17:06.235Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#933 → c2a5b9eb1d63611bf29c802eaf57384e417b4539"
+  },
   "handoff": {
     "branch": "claude/return-reason-tie-rule-order",
     "sha": "ea584f9ce4f0ce3d5601ef1fb7d91bbf5a380cba",
