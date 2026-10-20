@@ -1,4 +1,3 @@
-{"at":"2026-10-12T20:29:57.611Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"e6b979618a2a · run 38304573431 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38304573431"}
 {"at":"2026-10-12T21:42:32.710Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"cart-intent-audit-sync","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-12T21:42:32.710Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"cart-intent-audit-sync","detail":"OVERLAP_ACCEPTED với cart-intent-audit: phạm vi scripts/cart-intent-audit.ts, tests/cart-intent-audit.test.ts — cách tích hợp: nhánh cũ của #818, chỉ còn đồng bộ luật"}
 {"at":"2026-10-12T21:42:50.444Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"cart-intent-audit-sync","detail":"fix/cart-intent-audit @ 75c0b8cdf938 · 1 lệnh kiểm thử"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-20T08:24:48.736Z","actor":"DESKTOP-56TH98Y:wt-audit-cross","kind":"HANDOFF","mission":"upsell-audit-gia-giu-moi-mon-khac","detail":"claude/upsell-audit-gia-giu-moi-mon-khac @ c67e0ecce0d2 · 1 lệnh kiểm thử"}
 {"at":"2026-10-20T08:39:33.279Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"24276c0c85f9 · run 39394916539 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39394916539"}
 {"at":"2026-10-20T08:53:32.144Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"upsell-audit-hoi-gia","detail":"PASS 24276c0c85f9603676d24f9f5d11c9907b3f6a87 2026-10-20T08:53:10.059Z"}
+{"at":"2026-10-20T08:54:23.664Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"upsell-audit-gia-giu-moi-mon-khac","detail":"#921 cho claude/upsell-audit-gia-giu-moi-mon-khac @ c67e0ecce0d2"}
