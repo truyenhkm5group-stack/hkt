@@ -1,0 +1,8 @@
+{
+  "pr": 933,
+  "sha": "ea584f9ce4f0ce3d5601ef1fb7d91bbf5a380cba",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-20T23:18:47.242Z",
+  "note": "review lead: evidenceBeats cùng hạng + cùng mốc ⇒ LUẬT CHỮ đứng trước thắng (ruleOrderOf = vị trí luật đầu tiên theo đúng thứ tự classifyRaw: HUMAN_TEXT_RULES rồi RETURN_REASON_TEXT_RULES); khoá nguồn|lý do chỉ còn chốt cuối. Thay phá hoà abc của #928 (abc không mang nghĩa). Cặp không liên lạc/hẹn lại giữ nguyên; cặp abc ngược luật ⇒ theo luật; đột biến đỏ. Nghiệm thu: reason-coverage sau deploy, "
+}
