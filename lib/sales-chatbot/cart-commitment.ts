@@ -23,7 +23,7 @@
 import { foldVnText, isAdminName, resolveRecipientPlace } from "@/lib/address/vn-address";
 import { manualOrderGaps } from "@/lib/constants/manual-orders";
 import { formatVND } from "@/lib/format";
-import { foldVi } from "@/lib/sales-chatbot/text";
+import { foldVi, sentencesOf } from "@/lib/sales-chatbot/text";
 
 export type CartUnit = "g" | "pack";
 
@@ -1370,7 +1370,7 @@ export function cartHoldVerdict(botText: string, cart: CartCommitment | undefine
   if (customerText && (hasEditCue(customerText, cart.selectedItems.map((x) => x.match)) || ["SET", "REDUCE", "KEEP", "REMOVE", "CANCEL"].includes(classifyCartMessage(customerText).kind))) return null;
   const reason = holdReason(botText, cart, customerText);
   if (!reason) return null;
-  const rest = (botText.match(/[^.!?\n]+[.!?]*/g) ?? []).map((s) => s.trim()).filter((s) => s && !holdReason(s, cart, customerText) && !amountsIn(s).length);
+  const rest = sentencesOf(botText).filter((s) => !holdReason(s, cart, customerText) && !amountsIn(s).length);
   const note = reason === "TRIAL" ? "AI gợi ý gói ăn thử / lấy ít hơn sau khi khách đã chốt số lượng — đã thay bằng câu giữ đơn" : reason === "DOWNSELL" ? "AI đề xuất số lượng thấp hơn số khách đã chốt — đã thay bằng câu giữ đơn" : "AI hỏi lại số lượng khách đã nói — đã thay bằng câu giữ đơn";
   return { reason, safeText: [holdCartText(cart, opts), ...rest].join(" "), note };
 }

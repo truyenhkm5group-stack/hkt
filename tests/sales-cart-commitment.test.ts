@@ -38,6 +38,7 @@ import {
   type CartIntentKind,
 } from "@/lib/sales-chatbot/cart-commitment";
 import type { SalesChatbotConfig } from "@/lib/sales-chatbot/config";
+import { sentencesOf } from "@/lib/sales-chatbot/text";
 import { autoConfirmBlocker, customerHesitates, type ChatState } from "@/lib/sales-chatbot/tools";
 import { setSettingJson } from "@/lib/settings";
 import { runGoldenCases, say, tool, type GoldenCase, type GoldenHookCtx } from "./sales-agent-golden/harness";
@@ -873,6 +874,12 @@ function testHoldParenSpec() {
   // Hạ số lượng thật của CHÍNH món trong giỏ — kể cả ghi trong ngoặc — vẫn bị giữ.
   assert.ok(cartHoldVerdict("Dạ chị lấy Chả cá thu (0,5kg) ăn thử trước nhé?", cart, "ok", { hasDraft: true }), "chả cá thu 0,5kg ăn thử ⇒ vẫn giữ đơn 1kg");
   assert.ok(cartHoldVerdict("Dạ chị lấy 0,5kg chả cá thu ăn thử trước nhé?", cart, "ok", { hasDraft: true }));
+  // Review: hàng rào bật THẬT mà phần còn lại có giá VND (dấu chấm ngăn nghìn) ⇒ câu gửi khách giữ NGUYÊN «480.000 ₫», không «480. 000».
+  const held = cartHoldVerdict("Dạ chị lấy Chả cá thu (0,5kg) ăn thử trước nhé? Tổng tiền 480.000 ₫ (miễn phí ship). Cho em xin SĐT nhé.", cart, "ok", { hasDraft: true });
+  assert.ok(held);
+  assert.match(held.safeText, /Tổng tiền 480\.000 ₫ \(miễn phí ship\)\./, held.safeText);
+  assert.doesNotMatch(held.safeText, /480\. 000/, held.safeText);
+  assert.deepEqual(sentencesOf("Gói 0.5kg giá 200.000 ₫. Tổng 480.000 ₫! Ship 1–2 ngày?"), ["Gói 0.5kg giá 200.000 ₫.", "Tổng 480.000 ₫!", "Ship 1–2 ngày?"]);
 }
 
 export async function testSalesCartCommitment() {
