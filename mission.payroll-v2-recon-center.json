@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "mission_id": "payroll-v2-recon-center",
+  "title": "Payroll V2 — Trung tâm đối soát: phí chiều hoàn vào P&L theo vận đơn/mã, lương cứng chỉ tính khi có căn cứ, phân công chờ duyệt, truy vết giá vốn/COD, đề xuất số dư mở sổ",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/payroll-v2-recon-center",
+  "base_sha": "24276c0c85f9603676d24f9f5d11c9907b3f6a87",
+  "domains": [],
+  "owned_paths": [
+    "lib/queries/payroll.ts",
+    "lib/queries/payroll-cost.ts",
+    "lib/queries/cost-engine.ts",
+    "lib/payroll/profit-reconciliation.ts",
+    "lib/queries/payroll-reconciliation.ts",
+    "lib/queries/payroll-code-ledger.ts",
+    "lib/actions/payroll-code.ts",
+    "lib/constants/payroll-code.ts",
+    "db/schema.ts",
+    "drizzle",
+    "app/(dashboard)/payroll/reconciliation",
+    "app/(dashboard)/payroll/codes",
+    "app/(dashboard)/payroll/tabs.tsx",
+    "docs/payroll-code-ledger.md",
+    "scripts/payroll-profit-gate-audit.ts",
+    "tests/payroll-reconciliation.test.ts",
+    "tests/payroll-code-ledger.test.ts",
+    "tests/cost-double-count.test.ts"
+  ],
+  "dependencies": [
+    "payroll-v2-operational"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-20T08:21:38.802Z",
+  "updated_at": "2026-10-20T08:21:38.802Z",
+  "last_heartbeat": "2026-10-20T08:21:38.802Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "IN_PROGRESS",
+    "evidence": []
+  }
+}
