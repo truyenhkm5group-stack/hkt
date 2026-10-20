@@ -59,6 +59,7 @@ export const codeTermsSchema = z
 
 export const codeRowKindSchema = z.enum(["ASSIGNMENT", "TERMS"]);
 export const codeEndSchema = z.object({ kind: codeRowKindSchema, id: z.string().min(1), effectiveTo: ngay });
+export const codeApproveSchema = z.object({ kind: codeRowKindSchema, id: z.string().min(1) });
 export const codeRevokeSchema = z.object({ kind: codeRowKindSchema, id: z.string().min(1), reason: z.string().trim().min(1, "Ghi lý do huỷ").max(500) });
 export const codeWeightRevokeSchema = z.object({ id: z.string().min(1), reason: z.string().trim().min(10, "Ghi rõ vì sao huỷ (ít nhất 10 ký tự)").max(500) });
 export const codeWeightConfirmSchema = z.object({

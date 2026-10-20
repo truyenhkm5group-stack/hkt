@@ -33,7 +33,9 @@ import { inclusiveDays, prorateMonthlyAmount } from "@/lib/constants/cost-alloca
 import type { CoverageState } from "@/lib/constants/cost-authority";
 import { COMPENSATION_PROFIT_BASIS, COMPENSATION_PROFIT_LABEL, type CompensationProfitBasis } from "@/lib/constants/compensation-profit";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
-import { employmentWindow } from "@/lib/constants/payroll-employment";
+import { employmentWindow, isDateKey } from "@/lib/constants/payroll-employment";
+import { monthKeyOf } from "@/lib/constants/payroll-carryover";
+import { vnStartOfDay } from "@/lib/format";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 
@@ -105,6 +107,15 @@ export type PayrollRecognition = {
    * này tồn tại.
    */
   fixedSalaryDue: number;
+  /**
+   * PHẦN CỦA `fixedSalaryDue` CÓ CĂN CỨ (Payroll V2, chủ shop 20/10/2026: "không tự nhân 8 triệu cho mọi
+   * tháng"). Một người được tính vào kỳ khi hoặc đã khai NGÀY VÀO LÀM (cửa sổ làm việc thật), hoặc kỳ chạm
+   * tới THÁNG HIỆN TẠI trở đi — cờ "đang làm việc" chứng minh HÔM NAY, không chứng minh tháng 08/2025.
+   */
+  fixedSalaryDueEvidenced: number;
+  /** Phần còn lại: nhân sự CHƯA khai ngày vào làm, ở một kỳ đã qua ⇒ CHƯA BIẾT có thuộc kỳ hay không. */
+  fixedSalaryDueUndated: number;
+  undatedEmployees: { id: string; name: string; monthlyFixed: number }[];
 };
 
 /**
@@ -136,6 +147,17 @@ export async function getRecognizedPayrollCost(period: Period): Promise<PayrollR
   const unclipped = windows.filter((x) => x.w.included && !x.w.clipped).reduce((t, x) => t + monthly(x.e), 0);
   const clippedPart = windows.reduce((t, x) => (x.w.included && x.w.clipped ? t + prorateMonthlyAmount(monthly(x.e), x.w.from, x.w.to) : t), 0);
   const fixedSalary = prorateMonthlyAmount(unclipped, period.from, period.to) + clippedPart;
+  /*
+    CĂN CỨ CỦA TỪNG NGƯỜI CHO KỲ NÀY. Không khai ngày vào làm thì `employmentWindow` (luật cũ) coi như có
+    mặt ở MỌI kỳ — đúng cho kỳ đang chạy (người ấy đang làm), nhưng áp ngược lương cứng khai hôm nay cho
+    những tháng trước khi shop hoạt động là bịa ra chi phí. Kỳ đã qua + không ngày vào làm ⇒ CHƯA BIẾT.
+  */
+  const thangNay = vnStartOfDay(`${monthKeyOf(new Date())}-01`);
+  const coCanCu = (e: Employee) => isDateKey(e.startedOn) || (period.to !== null && period.to.getTime() >= thangNay.getTime());
+  const phanCua = (x: (typeof windows)[number]) => (x.w.included ? (x.w.clipped ? prorateMonthlyAmount(monthly(x.e), x.w.from, x.w.to) : prorateMonthlyAmount(monthly(x.e), period.from, period.to)) : 0);
+  const fixedSalaryDueUndated = windows.filter((x) => x.w.included && !coCanCu(x.e)).reduce((t, x) => t + phanCua(x), 0);
+  const fixedSalaryDueEvidenced = Math.max(0, fixedSalary - fixedSalaryDueUndated);
+  const undatedEmployees = windows.filter((x) => x.w.included && !coCanCu(x.e) && monthly(x.e) > 0).map((x) => ({ id: x.e.id, name: x.e.shortName || x.e.name, monthlyFixed: monthly(x.e) }));
   // Cùng hàm đếm ngày với `prorateMonthlyAmount`: mốc cuối là 23:59:59 nên chia rồi làm tròn ra
   // thừa một ngày (7 ngày thành 8), và con số ấy hiện thẳng ra màn hình.
   const days = period.from && period.to ? Math.max(0, inclusiveDays(period.from, period.to)) : 0;
@@ -158,7 +180,17 @@ export async function getRecognizedPayrollCost(period: Period): Promise<PayrollR
     `Hoa hồng được khai là khoản trừ SAU cơ sở “${COMPENSATION_PROFIT_LABEL}”, không nằm trong cơ sở của chính nó. Bảng Lương chưa ghi nhận nó vì đường gọi hàm sẽ đi vòng (chi phí → bảng lương → chi phí); hoa hồng vẫn vào lợi nhuận qua bảng Chi phí.`,
   );
 
-  const fixedCoverage: CoverageState = mode === "PAYROLL" && period.from && period.to && fixedSalary > 0 ? "COMPLETE" : "INCOMPLETE";
+  /*
+    NGUỒN MỚI CHƯA PHỦ ĐỦ ⇒ LÙI VỀ NGUỒN CŨ (AGENTS mục 18). Kỳ đã qua có người chưa khai ngày vào làm thì
+    bảng Lương KHÔNG biết người ấy có thuộc kỳ hay không — ghi nhận đủ thì bịa chi phí, ghi nhận thiếu thì
+    giấu chi phí. Cả hai đều sai, nên bảng Lương không cầm quyền kỳ ấy và bảng Chi phí giữ thẩm quyền.
+  */
+  if (mode === "PAYROLL" && fixedSalaryDueUndated > 0) {
+    reasons.push(
+      `${undatedEmployees.length} nhân sự chưa khai ngày vào làm (${fixedSalaryDueUndated.toLocaleString("vi-VN")} ₫ lương cứng của kỳ đã qua là CHƯA BIẾT có thuộc kỳ hay không) — khai ngày vào làm theo hợp đồng thì bảng Lương mới cầm quyền kỳ này.`,
+    );
+  }
+  const fixedCoverage: CoverageState = mode === "PAYROLL" && period.from && period.to && fixedSalary > 0 && fixedSalaryDueUndated === 0 ? "COMPLETE" : "INCOMPLETE";
   // Hoa hồng chưa có nguồn nào ngoài bảng Chi phí, và điều đó KHÔNG đổi theo cấu hình — nên đây là
   // hằng số có lý do, không phải một giá trị chờ điền. Lý do nay là đường GỌI HÀM đi vòng, không
   // còn là cơ sở nghiệp vụ chưa chốt (xem khối đầu file).
@@ -178,5 +210,8 @@ export async function getRecognizedPayrollCost(period: Period): Promise<PayrollR
     activeEmployees: active.length,
     monthlyFixedTotal,
     fixedSalaryDue: fixedSalary,
+    fixedSalaryDueEvidenced,
+    fixedSalaryDueUndated,
+    undatedEmployees,
   };
 }

@@ -19,6 +19,8 @@ const goc = (): MonthReconInput => ({
     adsTest: 2 * TR,
     adsCodeInPersonLines: 20 * TR,
     shippingPerShipment: 5 * TR,
+    returnLegToCodes: 0,
+    returnLegShared: 0,
     logisticsAdjustment: 0,
     logisticsAdjustmentUnallocated: 0,
     operatingEntered: 10 * TR,
@@ -30,7 +32,7 @@ const goc = (): MonthReconInput => ({
     basisExclusionEstimated: 0,
   },
   adsRaw: { codeWithMarketer: 20 * TR, codeNoMarketer: 0, testWithMarketer: 2 * TR, testNoMarketer: 0 },
-  engine: { cogs: 30 * TR, ads: 22 * TR, shipping: 5 * TR, returnCost: 0, operatingTotal: 10 * TR },
+  engine: { cogs: 30 * TR, ads: 22 * TR, shipping: 5 * TR, returnCost: 0, operatingTotal: 10 * TR, payrollUndated: { amount: 0, employees: 0 } },
   orders: {
     deliveredRevenue: 100 * TR,
     deliveredRevenueNoProduct: 0,
@@ -62,6 +64,7 @@ const lech = (f: (x: MonthReconInput) => void) => {
   return buildMonthReconciliation(x, Q);
 };
 const dong = (rc: ReturnType<typeof buildMonthReconciliation>, k: string) => rc.lines.find((l) => l.key === k);
+const goc0 = buildMonthReconciliation(goc(), "period=custom&from=2029-03-01&to=2029-03-31");
 
 function testPure() {
   /* ── Tháng sạch: mọi dòng khớp ⇒ ĐÃ ĐỐI SOÁT, độ phủ 100% ── */
@@ -161,6 +164,31 @@ function testPure() {
   });
   assert.equal(phiHoan.classes.NOT_IN_BASIS, 4 * TR, "phí chiều hoàn có thật mà chưa vào cơ sở lương");
   assert.ok(phiHoan.issues.some((i) => i.code === "return-cost"));
+  // Phí chiều hoàn VÀO cơ sở (20/10/2026): phần gắn mã là chi phí theo mã, phần không nối được là chi phí chung.
+  const hoanVao = lech((x) => {
+    x.engine.returnCost = 4 * TR;
+    x.basis.returnLegToCodes = 3 * TR;
+    x.basis.returnLegShared = 1 * TR;
+  });
+  assert.equal(dong(hoanVao, "return-cost")?.status, "MATCHED", "cơ sở lương = máy chi phí ⇒ khớp");
+  assert.equal(hoanVao.classes.NOT_IN_BASIS, 0, "đã vào cơ sở thì KHÔNG còn là 'chưa vào cơ sở' — không ghi trùng");
+  assert.equal(hoanVao.classes.BY_CODE - goc0.classes.BY_CODE, 3 * TR, "phần nối được về đơn gốc là chi phí THEO MÃ");
+  assert.equal(hoanVao.classes.SHARED - goc0.classes.SHARED, 1 * TR, "phần không nối được là chi phí CHUNG");
+  assert.ok(!hoanVao.issues.some((i) => i.code === "return-cost"));
+  const hoanLech = lech((x) => {
+    x.engine.returnCost = 4 * TR;
+    x.basis.returnLegToCodes = 3 * TR;
+  });
+  assert.equal(dong(hoanLech, "return-cost")?.status, "UNRECONCILED", "cơ sở thiếu 1 triệu so với máy chi phí ⇒ chưa đối soát");
+  assert.equal(hoanLech.classes.NOT_IN_BASIS, 1 * TR, "phần thiếu là có thật mà chưa vào cơ sở");
+
+  /* ── Lương của người chưa khai ngày vào làm: CHƯA BIẾT — không cộng, không coi là 0, là một việc chờ khai ── */
+  const chuaNgay = lech((x) => {
+    x.engine.payrollUndated = { amount: 8 * TR, employees: 1 };
+  });
+  assert.equal(chuaNgay.classes.NOT_IN_BASIS, 0, "CHƯA BIẾT không được cộng vào nhóm chi phí nào (không bịa 8 triệu mỗi tháng)");
+  assert.ok(chuaNgay.issues.some((i) => i.code === "payroll-undated" && i.amount === 8 * TR && i.count === 1), "nhưng phải là một khoản chờ khai");
+  assert.equal(chuaNgay.status, "UNRECONCILED", "tháng còn khoản chưa biết thì chưa đối soát xong");
 
   /* ── Cảnh báo: chỉ "lương cứng chưa ghi nhận" là chưa vào cơ sở; trùng nguồn là khoản bị LOẠI ── */
   const canhBao = lech((x) => {
