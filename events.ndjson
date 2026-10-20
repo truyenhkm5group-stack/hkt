@@ -1,4 +1,3 @@
-{"at":"2026-10-13T04:58:27.632Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-list-perf","detail":"fix/inbox-list-perf @ f4feed095d2e · 2 lệnh kiểm thử"}
 {"at":"2026-10-13T04:59:15.877Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"inbox-list-perf","detail":"#827 cho fix/inbox-list-perf @ f4feed095d2e"}
 {"at":"2026-10-13T04:59:52.560Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#826 @ 73449b810f3d · Chỉ script đo CHỈ ĐỌC + test + mô tả ops: top-N câu chậm theo khối, chẩn đoán đường chưa đọc, EXPLAIN không ANALYZE; công khai chỉ cấu trúc"}
 {"at":"2026-10-13T05:37:55.386Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"postorder-release-batch","detail":"#824 @ 4f468cdecc12 → 89a20d7c496f (MERGE_ISOLATED · HIGH · gates success)"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-20T16:26:20.125Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"8bffcbf7c876 · run 39457359179 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39457359179"}
 {"at":"2026-10-20T16:41:03.358Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"payroll-v2-recon-center","detail":"PASS 8bffcbf7c8768222d4604d5379d51568b6608128 2026-10-20T16:40:39.368Z"}
 {"at":"2026-10-20T16:41:32.705Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"return-reason-vtp-first","detail":"PASS 8bffcbf7c8768222d4604d5379d51568b6608128 2026-10-20T16:41:10.223Z"}
+{"at":"2026-10-20T16:57:50.410Z","actor":"DESKTOP-56TH98Y:wt-return-reason","kind":"CLAIM","mission":"return-reason-tie-break","detail":"PLANNING · 0 mẫu phạm vi · MEDIUM"}
