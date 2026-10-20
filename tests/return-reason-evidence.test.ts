@@ -12,6 +12,7 @@ import {
   REASON_TAXONOMY_KEY,
   buildReasonGrouping,
   evidenceBeats,
+  ruleOrderOf,
   evidenceGroupDepartment,
   evidenceGroupOf,
   parseReasonTaxonomy,
@@ -147,6 +148,19 @@ export function testEvidenceResolution() {
   const perms = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]].map((o) => resolveEvidence(o.map((i) => hoa[i])).primary?.reason);
   assert.equal(new Set(perms).size, 1, `cùng hạng + cùng mốc phải ra MỘT nguyên nhân dù đọc theo thứ tự nào: ${perms.join(", ")}`);
   assert.ok(evidenceBeats(hoa[0], hoa[1]) !== evidenceBeats(hoa[1], hoa[0]), "thứ tự ưu tiên toàn phần: đúng một trong hai thắng");
+  /*
+    PHÁ HOÀ THEO THỨ TỰ LUẬT CHỮ, KHÔNG THEO ABC (21/10/2026). «không liên lạc» / «hẹn lại» giữ nguyên kết quả của #928 (cả hai cách
+    trùng nhau); «từ chối» / «sai địa chỉ» thì abc và thứ tự luật NGƯỢC nhau (W > R theo abc, nhưng luật «tu choi» đứng trước «sai dia
+    chi») ⇒ phải theo luật.
+  */
+  assert.equal(resolveEvidence([it("CARRIER_TEXT", "CUSTOMER_RESCHEDULE_FAILED", 5), it("CARRIER_TEXT", "CUSTOMER_UNREACHABLE", 5)]).primary?.reason, "CUSTOMER_UNREACHABLE", "cặp đã đo: kết quả không đổi");
+  assert.ok(ruleOrderOf("CUSTOMER_REFUSED") < ruleOrderOf("WRONG_ADDRESS") && "CARRIER_TEXT|WRONG_ADDRESS" > "CARRIER_TEXT|CUSTOMER_REFUSED", "cặp mẫu: abc và thứ tự luật NGƯỢC nhau");
+  for (const ds of [[it("CARRIER_TEXT", "WRONG_ADDRESS", 5), it("CARRIER_TEXT", "CUSTOMER_REFUSED", 5)], [it("CARRIER_TEXT", "CUSTOMER_REFUSED", 5), it("CARRIER_TEXT", "WRONG_ADDRESS", 5)]]) {
+    assert.equal(resolveEvidence(ds).primary?.reason, "CUSTOMER_REFUSED", "cùng hạng + cùng mốc ⇒ luật chữ đứng trước thắng, không theo abc");
+  }
+  // Luật chữ của NGƯỜI đứng trước luật chữ ĐVVC — đúng thứ tự classifyRaw đọc chữ.
+  assert.ok(ruleOrderOf("QUALITY_FABRIC_THIN") < ruleOrderOf("CUSTOMER_UNREACHABLE"));
+  assert.equal(ruleOrderOf("CARRIER_NO_SUPPORT"), Number.MAX_SAFE_INTEGER, "lý do không đến từ luật chữ nào ⇒ đứng sau");
   /* Chạy hai lần, đảo thứ tự đầu vào ⇒ cùng kết quả. */
   const ds = [it("CARRIER_TEXT", "CUSTOMER_REFUSED", 3), it("CARE_NOTE", "CUSTOMER_UNREACHABLE", 1), it("CARRIER_CODE", "WRONG_ADDRESS", 2)];
   assert.deepEqual(resolveEvidence(ds), resolveEvidence([...ds].reverse()), "kết quả không được phụ thuộc thứ tự đọc từ CSDL");

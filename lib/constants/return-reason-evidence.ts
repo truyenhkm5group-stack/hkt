@@ -31,7 +31,8 @@
  * đảo ngược được, không ghi lại một dòng lịch sử nào.
  */
 import type { DepartmentCode } from "@/lib/constants/departments";
-import { RETURN_REASON_GROUP_ACTION, RETURN_REASON_GROUP_LABEL, RETURN_REASON_GROUPS, type ReturnReason, type ReturnReasonGroup } from "@/lib/constants/return-reason";
+import { RETURN_REASON_GROUP_ACTION, RETURN_REASON_GROUP_LABEL, RETURN_REASON_GROUPS, RETURN_REASON_TEXT_RULES, type ReturnReason, type ReturnReasonGroup } from "@/lib/constants/return-reason";
+import { HUMAN_TEXT_RULES } from "@/lib/returns/reason-classify";
 import { SOURCE_CAN_CONCLUDE_SHOP_FAULT, SOURCE_RANK, type ReasonSource } from "@/lib/constants/return-reason-source";
 
 export const EVIDENCE_GROUPS = [
@@ -233,8 +234,23 @@ export type EvidenceVerdict = {
 };
 
 /**
+ * THỨ TỰ LUẬT CHỮ của một lý do — vị trí luật ĐẦU TIÊN trỏ tới nó, theo ĐÚNG thứ tự `classifyRaw` đọc chữ: luật chữ của NGƯỜI
+ * (`HUMAN_TEXT_RULES`) rồi luật chữ ĐVVC (`RETURN_REASON_TEXT_RULES`). Hai bảng ấy đã khai «mẫu cụ thể đứng trước mẫu chung» — đó là ý
+ * định có nghĩa duy nhất để quyết hai lời khai cùng hạng, cùng mốc. Lý do không đến từ luật chữ nào (mã ĐVVC, lý do người chọn) ⇒ đứng sau.
+ */
+const RULE_ORDER: ReadonlyMap<ReturnReason, number> = (() => {
+  const m = new Map<ReturnReason, number>();
+  [...HUMAN_TEXT_RULES, ...RETURN_REASON_TEXT_RULES].forEach((r, i) => {
+    if (!m.has(r.reason)) m.set(r.reason, i);
+  });
+  return m;
+})();
+export const ruleOrderOf = (r: ReturnReason): number => RULE_ORDER.get(r) ?? Number.MAX_SAFE_INTEGER;
+
+/**
  * Thứ tự ƯU TIÊN giữa hai lời khai — TOÀN PHẦN, không phụ thuộc thứ tự đọc. Hạng cao thắng; bằng hạng thì muộn hơn thắng; CÙNG hạng
- * CÙNG mốc thì phá hoà bằng khoá `nguồn|lý do` (chỉ để ổn định, không mang nghĩa).
+ * CÙNG mốc thì LUẬT CHỮ ĐỨNG TRƯỚC thắng (`ruleOrderOf`); cùng luật thì khoá `nguồn|lý do` là chốt cuối (chỉ để ổn định, không mang
+ * nghĩa). Bản #928 phá hoà thẳng bằng thứ tự abc của khoá — thứ tự abc không mang nghĩa nên không được quyết lý do (Tech Lead 21/10/2026).
  *
  * Đo production 20/10/2026 (ops reason-taxonomy-dryrun run 39460159981): ma trận chuyển và bảng SAU của CÙNG một lượt đếm «không liên lạc»
  * 705 và 702 — 3 kiện có hai lời khai cùng hạng, cùng mốc, khác lý do; bản cũ để «cái đứng sau thắng», mà thứ tự ấy là thứ tự dòng
@@ -244,6 +260,9 @@ export function evidenceBeats(a: ReasonEvidenceItem, b: ReasonEvidenceItem | und
   if (!b) return true;
   if (SOURCE_RANK[a.source] !== SOURCE_RANK[b.source]) return SOURCE_RANK[a.source] > SOURCE_RANK[b.source];
   if (a.at !== b.at) return a.at > b.at;
+  const ra = ruleOrderOf(a.reason);
+  const rb = ruleOrderOf(b.reason);
+  if (ra !== rb) return ra < rb;
   return `${a.source}|${a.reason}` >= `${b.source}|${b.reason}`;
 }
 const hon = evidenceBeats;
