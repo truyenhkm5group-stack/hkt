@@ -3,7 +3,7 @@
   "mission_id": "upsell-audit-gia-giu-moi-mon-khac",
   "title": "Đo upsell không che lời mời món khác khi khách vừa hỏi giá",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-audit-cross",
@@ -23,7 +23,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-20T08:24:22.024Z",
-  "updated_at": "2026-10-20T08:24:22.024Z",
-  "last_heartbeat": "2026-10-20T08:24:22.024Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-20T08:24:48.697Z",
+  "last_heartbeat": "2026-10-20T08:24:48.697Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/upsell-audit-gia-giu-moi-mon-khac",
+    "sha": "c67e0ecce0d2c53ab45f946f6c69f7041c5735ad",
+    "at": "2026-10-20T08:24:48.697Z",
+    "actor": "DESKTOP-56TH98Y:wt-audit-cross",
+    "title": "Đo upsell không che lời mời món khác khi khách vừa hỏi giá",
+    "summary": "",
+    "tests": [
+      "testUpsellOfferAudit (+ ca hỏi giá + mời món khác; đột biến đỏ); ops-log-leak; tsc + eslint sạch"
+    ]
+  }
 }
