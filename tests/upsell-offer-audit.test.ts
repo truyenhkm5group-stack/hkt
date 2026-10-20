@@ -84,6 +84,20 @@ function testPure() {
   assert.deepEqual([khongHoi.offers, khongHoi.priceAnswers, khongHoi.upsellAfterSize, khongHoi.upsellAfterSizePrice], [2, 0, 1, 0], JSON.stringify(khongHoi));
   const t3 = addConversation(addConversation(emptyTotals(), hoiGia, [], true), khongHoi, [], true);
   assert.deepEqual([t3.repeated, t3.repeatedPriceOnly, t3.repeatedWithPost, t3.upsellAfterSize, t3.upsellAfterSizePrice], [1, 1, 1, 1, 1], JSON.stringify(t3));
+  // Nghiệm thu 20/10/2026: bot vừa trả lời giá VỪA mời MÓN KHÁC ⇒ lời mời thật, KHÔNG bị che thành «trả lời câu hỏi giá».
+  const giaVaMoi = offersOfConversation(
+    [
+      { role: "user", content: txt("Cho chị 1kg chả cá thu") },
+      { role: "assistant", content: txt("Dạ em lên đơn rồi ạ. Bên em có thêm chả mực giã tay ăn kèm rất hợp ạ.") },
+      { role: "user", content: txt("xin giá chả cá thu?") },
+      { role: "assistant", content: txt("Dạ chả cá thu 1kg 280.000 ₫ ạ. Bên em còn nem hải sản ăn kèm rất hợp ạ.") },
+    ],
+    {},
+    { askedPrice: customerAskedPrice },
+  );
+  assert.deepEqual([giaVaMoi.offers, giaVaMoi.crossSells, giaVaMoi.priceAnswers], [2, 2, 0], JSON.stringify(giaVaMoi));
+  const t4 = addConversation(emptyTotals(), giaVaMoi, [], true);
+  assert.deepEqual([t4.repeated, t4.repeatedPriceOnly, t4.repeatedWithPost, t4.repeatedCrossSell], [1, 0, 1, 1], "hai lời mời món khác ⇒ VẪN là lặp, có lời mời sau chốt");
   // Không có phép đọc «hỏi giá» (ảnh cũ) ⇒ đếm như trước, không loại gì.
   assert.equal(offersOfConversation(sauChot("xin giá chả cá thu?"), {}).priceAnswers, 0);
 }

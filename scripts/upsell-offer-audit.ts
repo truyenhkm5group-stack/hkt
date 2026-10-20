@@ -112,11 +112,15 @@ export function offersOfConversation(
     if (sizeChosen && kinds.includes("SIZE_REASK")) out.reaskAfterSize += 1;
     if (!kinds.some((k) => k === "UPSELL" || k === "CROSS_SELL")) return;
     out.offers += 1;
-    if (priceAsk) out.priceAnswers += 1;
+    // Chỉ tin TOÀN là mời gói lớn hơn cùng món (UPSELL) mới là trả lời câu hỏi giá — guardReply chỉ miễn UPSELL khi khách hỏi giá. Tin
+    // có câu MỜI MÓN KHÁC (CROSS_SELL) là lời mời THẬT dù khách vừa hỏi giá (nghiệm thu 20/10/2026: «Dạ chả cá thu 1kg 280k ạ. Bên em
+    // còn nem hải sản ăn kèm…» từng bị đếm thành trả lời giá ⇒ che mất lời mời thật khỏi «lặp»).
+    const priceAnswer = priceAsk && !kinds.includes("CROSS_SELL");
+    if (priceAnswer) out.priceAnswers += 1;
     if (kinds.includes("CROSS_SELL")) out.crossSells += 1;
     if (declined) out.afterDecline += 1;
     if (sizeChosen && kinds.includes("UPSELL")) {
-      if (priceAsk) out.upsellAfterSizePrice += 1;
+      if (priceAnswer) out.upsellAfterSizePrice += 1;
       else out.upsellAfterSize += 1;
     }
     awaiting = true;
