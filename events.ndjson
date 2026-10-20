@@ -1,4 +1,3 @@
-{"at":"2026-10-12T10:22:31.582Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#815 @ b0d7296b662c · c6341cc6 + gộp main (#816 heap build) — không đổi mã của nhánh"}
 {"at":"2026-10-12T10:54:15.501Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"bfac9afcbf3d · run 38239184896 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38239184896"}
 {"at":"2026-10-12T11:23:25.854Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"cart-intent-audit","detail":"RUNNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-12T11:23:43.710Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"cart-intent-audit","detail":"fix/cart-intent-audit @ ce54c8990cbc · 3 lệnh kiểm thử"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-20T04:38:41.118Z","actor":"DESKTOP-56TH98Y:wt-probe-tong","kind":"OVERLAP_ACCEPTED","mission":"probe-upsell-tong-that","detail":"OVERLAP_ACCEPTED với probe-upsell: phạm vi scripts/org-ai-cutover.ts, tests/org-ai-cutover.test.ts — cách tích hợp: probe-upsell (#909) và các sứ mệnh cutover đã vào main; nhánh tách từ main 5c3508ac; chỉ sửa hàm chấm judgeUpsellProbe"}
 {"at":"2026-10-20T04:38:41.118Z","actor":"DESKTOP-56TH98Y:wt-probe-tong","kind":"OVERLAP_ACCEPTED","mission":"probe-upsell-tong-that","detail":"OVERLAP_ACCEPTED với quick-reply-probe: phạm vi scripts/org-ai-cutover.ts — cách tích hợp: probe-upsell (#909) và các sứ mệnh cutover đã vào main; nhánh tách từ main 5c3508ac; chỉ sửa hàm chấm judgeUpsellProbe"}
 {"at":"2026-10-20T04:39:06.495Z","actor":"DESKTOP-56TH98Y:wt-probe-tong","kind":"HANDOFF","mission":"probe-upsell-tong-that","detail":"claude/probe-upsell-tong-that @ e81f0bbf3ae2 · 1 lệnh kiểm thử"}
+{"at":"2026-10-20T04:42:23.816Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"probe-upsell-tong-that","detail":"#919 cho claude/probe-upsell-tong-that @ e81f0bbf3ae2"}
