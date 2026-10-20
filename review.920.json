@@ -1,0 +1,8 @@
+{
+  "pr": 920,
+  "sha": "0460a182a2d8b220eb01560bcd88ad695e8734a0",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-20T07:10:00.982Z",
+  "note": "review lead: upsell-offer-audit loại câu trả lời ngay sau tin khách HỎI GIÁ khỏi «lặp» / «gói lớn sau khi đã chọn» và ĐẾM RIÊNG (dòng «TRẢ LỜI CÂU HỎI GIÁ», luật 64). Phép đọc = customerAskedPrice export từ next-best-action (cùng PRICE_ASK_RE + foldVi của guardReply, không chép regex; hành vi bot không đổi). Script dò bằng import động: ảnh chưa có hàm ⇒ in «CHƯA ĐO ĐƯỢC», không loại gì. Quyết định"
+}
