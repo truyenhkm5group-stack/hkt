@@ -18,24 +18,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-20T14:13:12.483Z",
-  "updated_at": "2026-10-20T18:43:19.296Z",
-  "last_heartbeat": "2026-10-20T18:43:19.296Z",
+  "updated_at": "2026-10-20T18:47:43.644Z",
+  "last_heartbeat": "2026-10-20T18:47:43.644Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/ci-test-shard",
-    "sha": "ce97423fd8b87676765267426e9e2a1829824b4b",
-    "at": "2026-10-20T18:43:19.296Z",
+    "sha": "365ba43cc82c24a5bcef72187a980dac646cac75",
+    "at": "2026-10-20T18:47:43.644Z",
     "actor": "DESKTOP-56TH98Y:wt-ci-shard",
     "title": "Chia npm test thành shard cân theo thời gian, ma trận CI ẩn danh + token giả, job tổng hợp gates/gates",
-    "summary": "npm test chia 24 khối (sổ tests/test-shards.ts, cân theo số đo ⇒ 700·700·701·704 s/shard trên máy dev, phần chung ~14 s chạy mọi shard). gates.yml: kiem_thu + kiem_thu_token chạy matrix shard 1..4 (fail-fast tắt, trần 45′ giữ nguyên); mỗi shard tải bằng chứng; job gom gates / gates (không matrix — tên check giữ nguyên) đòi đủ 4 shard/chế độ, cùng SHA+cây với nhánh tĩnh, mỗi khối đúng một lần, rồi mới ghi tested-tree (deploy reuse-by-tree đọc như cũ). Phụ thuộc ẩn đo bằng TEST_KHOI: K03/K04/K07/K11 cần K01 ⇒ SHARD_GROUPS chung shard. inbox-perf-probe:370 khẳng định trên TẬP câu thay vì top-8 theo ms thật (luật 65). Lượt token thật chỉ đo được trên CI; trên máy dev 2 shard song song tranh CPU nên 898–1.239 s/shard — CI máy riêng.",
+    "summary": "Như handoff trước + sửa review: job gom tải bằng chứng MỌI attempt (pattern shard-*), tệp mang attempt, chọn attempt cao nhất cho mỗi (chế độ, shard). Cần đo trên CI: Re-run một shard ⇒ gates / gates vẫn xanh (download-artifact@v4 liệt kê artifact attempt trước).",
     "tests": [
-      "npm run typecheck",
-      "npm run lint",
-      "npm test (đủ, không tham số) — TẤT CẢ KIỂM THỬ ĐẠT",
-      "TEST_SHARD=1/4..4/4 npm test — cả 4 shard ĐẠT trên cây sạch",
-      "kịch bản gom trích từ gates.yml chạy trên 4 bằng chứng thật — 24/24 khối, mỗi khối đúng một lần",
-      "test-shards-plan: 9 tổ hợp hỏng của kịch bản gom đều đỏ",
-      "đột biến inbox-perf-probe (bộ phân loại bỏ listInbox.hàng) ⇒ đỏ"
+      "npm test đủ + 4 shard ĐẠT trên cây sạch (ce97423fd)",
+      "test-shards-plan + delivery-v2 + test-hygiene CI sau sửa attempt — ĐẠT",
+      "kịch bản gom: chạy lại một shard ⇒ xanh (chọn 3/4@2); shard đỏ chưa chạy lại ⇒ đỏ; 10 tổ hợp hỏng đều đỏ"
     ]
   }
 }

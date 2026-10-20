@@ -1,4 +1,3 @@
-{"at":"2026-10-13T05:37:55.386Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"postorder-release-batch","detail":"#824 @ 4f468cdecc12 → 89a20d7c496f (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-13T05:50:25.461Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"89a20d7c496f · run 38353433315 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38353433315"}
 {"at":"2026-10-13T06:29:18.151Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-perf-probe-topn","detail":"fix/inbox-perf-probe-topn @ 73449b810f3d · 1 lệnh kiểm thử"}
 {"at":"2026-10-13T06:29:34.485Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#826 @ 89a20d7c496f · + allowlist probe chỉ đọc trong bài kiểm cột 0245"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-20T16:57:50.410Z","actor":"DESKTOP-56TH98Y:wt-return-reason","kind":"CLAIM","mission":"return-reason-tie-break","detail":"PLANNING · 0 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-20T18:43:19.349Z","actor":"DESKTOP-56TH98Y:wt-ci-shard","kind":"HANDOFF","mission":"ci-test-shard","detail":"claude/ci-test-shard @ ce97423fd8b8 · 7 lệnh kiểm thử"}
 {"at":"2026-10-20T18:44:09.003Z","actor":"DESKTOP-56TH98Y:wt-ci-shard","kind":"CLAIM","mission":"ops-script-root-fix","detail":"PLANNING · 0 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-20T18:47:43.686Z","actor":"DESKTOP-56TH98Y:wt-ci-shard","kind":"HANDOFF","mission":"ci-test-shard","detail":"claude/ci-test-shard @ 365ba43cc82c · 3 lệnh kiểm thử"}
