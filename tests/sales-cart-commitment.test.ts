@@ -38,6 +38,7 @@ import {
   type CartIntentKind,
 } from "@/lib/sales-chatbot/cart-commitment";
 import type { SalesChatbotConfig } from "@/lib/sales-chatbot/config";
+import { sentencesOf } from "@/lib/sales-chatbot/text";
 import { autoConfirmBlocker, customerHesitates, type ChatState } from "@/lib/sales-chatbot/tools";
 import { setSettingJson } from "@/lib/settings";
 import { runGoldenCases, say, tool, type GoldenCase, type GoldenHookCtx } from "./sales-agent-golden/harness";
@@ -858,7 +859,31 @@ function testRealHslcCatalog() {
   assert.deepEqual(one("2 hộp nem hải sản tôm bê bê"), [["Nem hải sản tôm bề bề", 2, "pack", true]]);
 }
 
+/**
+ * Production 20/10/2026 (kênh TEST HSLC, sau #915 giỏ ghi đúng «1kg chả cá thu»): câu hỏi xác nhận lời mời sau chốt mang quy cách trong
+ * ngoặc («Chả mực giã tay (0,5kg (1 túi 0,5kg))») bị đọc thành bot HẠ chả cá thu 1kg ⇒ 0,5kg ⇒ thay bằng câu giữ đơn. Số lượng trong ngoặc
+ * thuộc tên đứng trước ngoặc; hạ số lượng THẬT của chính món trong giỏ vẫn bị giữ.
+ */
+function testHoldParenSpec() {
+  const REAL = ["Chả cá thu", "Chả mực giã tay", "Nem hải sản tôm bề bề", "Ruốc bông (chà bông) cá thu nguyên chất"];
+  const cart = applyCustomerCartMessage(undefined, "cho chị 1kg chả cá thu", 1, new Date("2026-10-20T02:30:00Z"), { catalog: REAL });
+  const ASK = "Dạ, mình muốn thêm Chả mực giã tay (0,5kg (1 túi 0,5kg)) vào đơn đúng không ạ?";
+  assert.equal(cartHoldVerdict(ASK, cart, "ok thêm giúp chị", { hasDraft: true }), null, "câu hỏi xác nhận món mời KHÔNG bị thay bằng câu giữ đơn");
+  const SAID = "Dạ em lên đơn 1 × Chả mực giã tay (Size: 0,5kg (1 túi 0,5kg)), 1 × Chả cá thu (Size: 1kg (2 túi 0,5kg)) cho mình rồi ạ. Tổng đơn mới 480.000 ₫ ạ.";
+  assert.equal(cartHoldVerdict(SAID, cart, "đúng rồi", { hasDraft: true }), null);
+  // Hạ số lượng thật của CHÍNH món trong giỏ — kể cả ghi trong ngoặc — vẫn bị giữ.
+  assert.ok(cartHoldVerdict("Dạ chị lấy Chả cá thu (0,5kg) ăn thử trước nhé?", cart, "ok", { hasDraft: true }), "chả cá thu 0,5kg ăn thử ⇒ vẫn giữ đơn 1kg");
+  assert.ok(cartHoldVerdict("Dạ chị lấy 0,5kg chả cá thu ăn thử trước nhé?", cart, "ok", { hasDraft: true }));
+  // Review: hàng rào bật THẬT mà phần còn lại có giá VND (dấu chấm ngăn nghìn) ⇒ câu gửi khách giữ NGUYÊN «480.000 ₫», không «480. 000».
+  const held = cartHoldVerdict("Dạ chị lấy Chả cá thu (0,5kg) ăn thử trước nhé? Tổng tiền 480.000 ₫ (miễn phí ship). Cho em xin SĐT nhé.", cart, "ok", { hasDraft: true });
+  assert.ok(held);
+  assert.match(held.safeText, /Tổng tiền 480\.000 ₫ \(miễn phí ship\)\./, held.safeText);
+  assert.doesNotMatch(held.safeText, /480\. 000/, held.safeText);
+  assert.deepEqual(sentencesOf("Gói 0.5kg giá 200.000 ₫. Tổng 480.000 ₫! Ship 1–2 ngày?"), ["Gói 0.5kg giá 200.000 ₫.", "Tổng 480.000 ₫!", "Ship 1–2 ngày?"]);
+}
+
 export async function testSalesCartCommitment() {
+  testHoldParenSpec();
   testRealHslcCatalog();
   testClassify();
   testApply();

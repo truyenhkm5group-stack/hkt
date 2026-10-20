@@ -15,6 +15,16 @@ export function foldVi(s: string): string {
     .trim();
 }
 
+/**
+ * Câu của một đoạn chữ bot — cắt ở «.» «!» «?» và xuống dòng, NHƯNG dấu chấm đứng TRƯỚC một chữ số không phải ranh giới câu (ngăn nghìn
+ * «480.000 ₫», số lẻ «0.5kg»). Review giu-gio-ngoac-quy-cach (20/10/2026): cách cắt cũ (theo MỌI dấu chấm) tách «Tổng tiền 480.000 ₫»
+ * thành «…480.» + «000 ₫», rồi nơi ghép lại (câu giữ đơn · bỏ câu hỏi lại SĐT / địa chỉ) gửi khách «480. 000». MỘT hàm cho mọi nơi tách
+ * rồi GHÉP LẠI chữ gửi khách. Trả câu đã trim, bỏ câu rỗng. HÀM THUẦN.
+ */
+export function sentencesOf(text: string): string[] {
+  return (text.match(/(?:[^.!?\n]|\.(?=\d))+[.!?]*/g) ?? []).map((s) => s.trim()).filter(Boolean);
+}
+
 /** Số chữ cái / chữ số TỐI THIỂU của một lời trích sau khi gấp dấu — dưới mức này lời trích không chứng minh được gì. */
 export const QUOTE_MIN_ALNUM = 2;
 

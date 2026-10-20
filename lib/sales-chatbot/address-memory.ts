@@ -19,6 +19,7 @@ import { canAutoFill, customerStatedAddresses, hasStreetDetail, legacyAddressUnm
 export { wantsAddressChange };
 import { findProvince, foldVnText, isAdminName } from "@/lib/address/vn-address";
 import { classifyDeliveryQuestion } from "@/lib/sales-chatbot/delivery-intent";
+import { sentencesOf } from "@/lib/sales-chatbot/text";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 
 // ─────────────────────────── TRÍ NHỚ ĐÃ HỎI ───────────────────────────
@@ -704,7 +705,6 @@ const isAsking = (sentence: string) => {
   const f = foldVnText(sentence);
   return isQuestion(sentence, f) || /(?:^| )(?:xin|cho em|gui giup|gui lai giup|cung cap|de lai)(?: |$)/.test(f);
 };
-const sentencesOf = (text: string) => (text.match(/[^.!?\n]+[.!?]*/g) ?? []).map((s) => s.trim()).filter(Boolean);
 /** Tin page / nhân viên chép vào lịch sử — không phải câu của bot. */
 const SHOP_SAID_RE = /^\s*\[Shop đã nhắn\]/;
 

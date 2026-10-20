@@ -23,7 +23,7 @@
 import { foldVnText, isAdminName, resolveRecipientPlace } from "@/lib/address/vn-address";
 import { manualOrderGaps } from "@/lib/constants/manual-orders";
 import { formatVND } from "@/lib/format";
-import { foldVi } from "@/lib/sales-chatbot/text";
+import { foldVi, sentencesOf } from "@/lib/sales-chatbot/text";
 
 export type CartUnit = "g" | "pack";
 
@@ -1319,9 +1319,34 @@ function holdReason(botText: string, cart: CartCommitment, customerText: string)
   const said = all.filter((a) => !/(?:^| )(?:them|lay them|cong|cong them|kem|tang|tang kem)$/.test(tail(botText.slice(0, a.index))) && !asked.some((q) => q.unit === a.unit && q.value === a.value) && !unitPrice(a));
   const single = explicit.length === 1 ? explicit[0] : null;
   // Chỉ lượng nói về ĐÚNG món đó: tên khớp, hoặc không tên VÀ câu không nêu món nào khác.
+  /**
+   * Số lượng KHÔNG tên nằm trong ngoặc ngay sau một tên món thuộc tên đứng TRƯỚC ngoặc — cách ghi quy cách của mẫu mã («Chả mực giã tay
+   * (0,5kg (1 túi 0,5kg))»). Production 20/10/2026 (kênh TEST HSLC): câu hỏi xác nhận lời mời sau chốt «Mình muốn thêm Chả mực giã tay
+   * (0,5kg (1 túi 0,5kg)) vào đơn đúng không ạ?» bị đọc thành bot HẠ 1kg chả cá thu xuống 0,5kg ⇒ thay bằng «em giữ đơn 1kg chả cá thu».
+   * Lấy ngoặc MỞ NGOÀI CÙNG chưa đóng trong câu; không có ⇒ «».
+   */
+  const parenLabel = (a: CartAmount): string => {
+    const pre = botText.slice(0, a.index);
+    const s = pre.slice(Math.max(pre.lastIndexOf("?"), pre.lastIndexOf("!"), pre.lastIndexOf("\n")) + 1);
+    let depth = 0;
+    let open = -1;
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === "(") {
+        if (depth === 0) open = i;
+        depth += 1;
+      } else if (s[i] === ")" && depth > 0) {
+        depth -= 1;
+        if (depth === 0) open = -1;
+      }
+    }
+    if (open < 0) return "";
+    return s.slice(0, open).match(/([\p{L}\s]+)$/u)?.[1].trim() ?? "";
+  };
   const aboutItem = (a: CartAmount) => {
     if (!single || a.unit !== single.unit) return false;
     if (a.label) return Boolean(single.match) && labelsMatch(a.label, single.match);
+    const pl = parenLabel(a);
+    if (pl) return Boolean(single.match) && labelsMatch(pl, single.match);
     return !all.some((x) => x.label && single.match && !labelsMatch(x.label, single.match));
   };
   const smaller = said.some((a) => aboutItem(a) && a.value < single!.quantity);
@@ -1345,7 +1370,7 @@ export function cartHoldVerdict(botText: string, cart: CartCommitment | undefine
   if (customerText && (hasEditCue(customerText, cart.selectedItems.map((x) => x.match)) || ["SET", "REDUCE", "KEEP", "REMOVE", "CANCEL"].includes(classifyCartMessage(customerText).kind))) return null;
   const reason = holdReason(botText, cart, customerText);
   if (!reason) return null;
-  const rest = (botText.match(/[^.!?\n]+[.!?]*/g) ?? []).map((s) => s.trim()).filter((s) => s && !holdReason(s, cart, customerText) && !amountsIn(s).length);
+  const rest = sentencesOf(botText).filter((s) => !holdReason(s, cart, customerText) && !amountsIn(s).length);
   const note = reason === "TRIAL" ? "AI gợi ý gói ăn thử / lấy ít hơn sau khi khách đã chốt số lượng — đã thay bằng câu giữ đơn" : reason === "DOWNSELL" ? "AI đề xuất số lượng thấp hơn số khách đã chốt — đã thay bằng câu giữ đơn" : "AI hỏi lại số lượng khách đã nói — đã thay bằng câu giữ đơn";
   return { reason, safeText: [holdCartText(cart, opts), ...rest].join(" "), note };
 }
