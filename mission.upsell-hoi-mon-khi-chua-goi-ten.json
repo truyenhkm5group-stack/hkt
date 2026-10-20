@@ -3,7 +3,7 @@
   "mission_id": "upsell-hoi-mon-khi-chua-goi-ten",
   "title": "Câu upsell nhiều món: khách có ý thêm mà chưa gọi tên ⇒ hỏi một câu món nào",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-upsell-tpl",
@@ -20,9 +20,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-20T20:22:45.370Z",
-  "updated_at": "2026-10-20T22:04:05.626Z",
+  "updated_at": "2026-10-20T22:17:18.969Z",
   "last_heartbeat": "2026-10-20T22:02:04.911Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#930 → 8b9f93be6eacfc196e51ad51810abda35ba3e79e"
+  },
   "handoff": {
     "branch": "claude/upsell-hoi-mon-khi-chua-goi-ten",
     "sha": "6ea3750301690f1ed7a60fb98bf2010ae6ecedad",
