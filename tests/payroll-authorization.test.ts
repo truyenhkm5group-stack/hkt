@@ -257,6 +257,7 @@ export function testPayrollAuthorization() {
       "app/(dashboard)/payroll/codes/page.tsx",
       "app/(dashboard)/payroll/codes/assignments/page.tsx",
       "app/(dashboard)/payroll/reconciliation/page.tsx",
+      "app/(dashboard)/payroll/reconciliation/center/page.tsx",
       "app/(dashboard)/payroll/migration/page.tsx",
       "app/(dashboard)/payroll/settings/page.tsx",
       "lib/actions/payroll.ts",

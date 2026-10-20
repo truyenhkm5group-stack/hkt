@@ -98,9 +98,12 @@ export default async function PayrollReconciliationPage({ searchParams }: { sear
       />
       <PayrollTabs canManage />
       <DataTableToolbar period={{ defaultKey: "last_month" }} />
-      <p className="text-sm">
+      <p className="flex flex-wrap gap-4 text-sm">
         <Link href={prevMonth} className="text-primary hover:underline">
           ← Tháng trước
+        </Link>
+        <Link href="/payroll/reconciliation/center" className="text-primary hover:underline">
+          Trung tâm đối soát (nhiều tháng + danh sách phê duyệt) →
         </Link>
       </p>
 

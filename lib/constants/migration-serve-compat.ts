@@ -78,6 +78,16 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/payroll-code-ledger.test.ts",
   },
+  {
+    tag: "0250_payroll_code_pending",
+    why:
+      "Chỉ NỚI ràng buộc trạng thái (thêm 'PENDING'), thêm CHECK «APPROVED phải có mốc duyệt» và đổi MẶC ĐỊNH cột status — không " +
+      "thêm / đổi kiểu / xoá cột nào. Đường đọc (`loadCodeBook` chỉ lấy APPROVED, `listCodeBook` đọc mọi cột đã có từ 0249) chạy " +
+      "y như cũ trên lược đồ 0249. Đường GHI phân công / điều khoản (chèn dòng PENDING) báo lỗi ràng buộc cho tới khi 0250 áp — " +
+      "không ghi được thì không có gì sai để sửa sau, và không dòng nào được áp vào lương mà chưa duyệt.",
+    addedColumns: {},
+    proof: "tests/payroll-recon-center.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */

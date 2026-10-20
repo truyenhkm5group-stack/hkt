@@ -429,6 +429,8 @@ const asgRow = (id: string, product: "a" | "b", employeeId: string, role: "OWNER
   effectiveTo: o.to ? e(o.to) : null,
   policyRef: "QC-KIEM-THU",
   status: "APPROVED",
+  // Dòng ĐÃ DUYỆT mang mốc duyệt — CSDL chặn APPROVED không mốc (0250).
+  approvedAt: d("2028-12-01"),
 });
 
 async function testFlow(db: Db) {
@@ -468,7 +470,7 @@ async function testFlow(db: Db) {
     asgRow("cl-as-4", "b", M2.id, "OWNER", { x: 10, from: "2029-01-01", to: "2029-02-14" }),
     asgRow("cl-as-5", "b", M1.id, "OWNER", { x: 20, from: "2029-02-15" }),
   ]);
-  await db.insert(schema.productBonusTerms).values({ id: "cl-t-1", productId: null, supportPoolBp: 500, maxBonusAmount: null, effectiveFrom: d("2029-01-01"), effectiveTo: null, policyRef: "QC-KIEM-THU", status: "APPROVED" });
+  await db.insert(schema.productBonusTerms).values({ id: "cl-t-1", productId: null, supportPoolBp: 500, maxBonusAmount: null, effectiveFrom: d("2029-01-01"), effectiveTo: null, policyRef: "QC-KIEM-THU", status: "APPROVED", approvedAt: d("2028-12-01") });
   clearMemo();
   const T1 = monthReportPeriod("2029-01");
   const T2 = monthReportPeriod("2029-02");

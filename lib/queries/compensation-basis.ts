@@ -69,6 +69,8 @@ export type CompensationBasisCost = {
    * lao biến đổi nên không có gì để loại — đứng trong cơ sở như mọi chi phí thật khác.
    */
   logisticsAdjustment: LogisticsAdjustmentTotal;
+  /** Phí chiều hoàn của kỳ (`RETURN_COST` trừ điều chỉnh tay) — bảng lương chia nó về mã hoặc vào chi phí chung. */
+  returnLegCost: number;
 };
 
 /**
@@ -131,6 +133,11 @@ export async function getOperatingCostForCompensationBasis(period: Period): Prom
     exclusions,
     warnings: costs.warnings,
     logisticsAdjustment: costs.logisticsAdjustment,
+    /**
+     * Phí chiều hoàn (vận đơn chiều về + phí hoàn trên đơn) — `RETURN_COST` TRỪ phần điều chỉnh tay có
+     * lý do (phần ấy đã nằm trong `logisticsAdjustment`, cộng lại là ghi trùng).
+     */
+    returnLegCost: Math.max(0, costs.components.RETURN_COST.amount - costs.logisticsAdjustment.returnFee),
   };
 }
 

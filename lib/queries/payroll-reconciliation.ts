@@ -33,16 +33,25 @@ const OPEN_OUTCOMES_SQL = (Object.keys(OUTCOME_GROUP) as OrderOutcome[])
   .join(",");
 const CONFIRMED_SQL = CONFIRMED_STAGES.map((x) => `'${x}'`).join(",");
 
+/**
+ * CHỨNG TỪ TIỀN của một đơn: tiền trả trước / chuyển khoản / tiền mặt ghi trên đơn, hoặc COD thực thu > 0
+ * trên bất kỳ vận đơn nào của đơn. Dùng chung cho bảng đối soát tháng và Trung tâm đối soát
+ * (`payroll-recon-center.ts`) — một định nghĩa, không chép.
+ */
+export const MONEY_EVIDENCE_SQL = sql`(coalesce(${schema.orders.prepaid}, 0) + coalesce(${schema.orders.transferMoney}, 0) + coalesce(${schema.orders.cash}, 0) > 0 or exists (select 1 from shipments sh where sh.order_id = ${schema.orders.id} and coalesce(sh.cod_collected, 0) > 0))`;
+/** Đơn ĐÃ GIAO và ĐƯỢC GHI NHẬN doanh thu — đúng điều kiện cơ sở lương dùng (cần nối vận đơn chính `PRIMARY_ATTEMPT`). */
+export const DELIVERED_RECOGNIZED_SQL = sql`${ORDER_OUTCOME_FAST} = 'DELIVERED' and ${REVENUE_RECOGNIZED_ON_DELIVERY}`;
+
 /** Một lượt đo trên đơn của tháng (theo ngày lên đơn — cùng mốc với cơ sở lương). */
-async function orderFacts(from: Date, to: Date): Promise<{ total: MonthReconInput["orders"]; unknownByProduct: Map<string, number> }> {
+export async function orderFacts(from: Date, to: Date): Promise<{ total: MonthReconInput["orders"]; unknownByProduct: Map<string, number> }> {
   const db = await getDb();
   const i = schema.orderItems;
   const o = schema.orders;
   const s = schema.shipments;
   const pv = schema.productVariants;
   const ky: SQL[] = [gte(o.insertedAt, from), lte(o.insertedAt, to)];
-  const coTien = sql`(coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0) + coalesce(${o.cash}, 0) > 0 or exists (select 1 from shipments sh where sh.order_id = ${o.id} and coalesce(sh.cod_collected, 0) > 0))`;
-  const giao = sql`${ORDER_OUTCOME_FAST} = 'DELIVERED' and ${REVENUE_RECOGNIZED_ON_DELIVERY}`;
+  const coTien = MONEY_EVIDENCE_SQL;
+  const giao = DELIVERED_RECOGNIZED_SQL;
   const productKey = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
   const coMa = sql`${productKey} <> ''`;
   const cuoc = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)::bigint`;
@@ -164,7 +173,10 @@ export async function getMonthReconciliation(monthKey: string, given?: { report:
         adsCode: m.products.reduce((s, p) => s + p.adSpend, 0),
         adsTest: t.testSpend,
         adsCodeInPersonLines: m.marketers.reduce((s, mk) => s + mk.products.reduce((u, pl) => u + pl.adSpend, 0), 0),
-        shippingPerShipment: t.shipping - t.logisticsAdjustment,
+        // `t.shipping` của từng mã đã gồm phí chiều hoàn gắn được mã ⇒ tách ra để so với máy chi phí riêng.
+        shippingPerShipment: t.shipping - t.logisticsAdjustment - t.returnLeg.toCodes,
+        returnLegToCodes: t.returnLeg.toCodes,
+        returnLegShared: t.returnLeg.shared,
         logisticsAdjustment: t.logisticsAdjustment,
         logisticsAdjustmentUnallocated: t.logisticsAdjustmentUnallocated,
         operatingEntered: t.operatingEntered,

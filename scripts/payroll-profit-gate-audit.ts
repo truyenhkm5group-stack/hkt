@@ -25,6 +25,12 @@
  * nguồn · chưa vào cơ sở, số mã đủ dữ liệu / đã phân công, và các khoản chưa đối soát. Đầu kỳ dữ liệu
  * THỰC (tháng sớm nhất có đơn / QC / chi phí) in ra để không ai mặc định số dư 0 khi chưa đối soát.
  *
+ * PAYROLL V2 TRUNG TÂM ĐỐI SOÁT (`docs/payroll-code-ledger.md` §10): mỗi tháng thêm phép TÁCH COD (doanh thu
+ * kế toán · phải thu chưa xác minh theo nguyên nhân / tuổi · tiền thực nhận · COD ĐVVC đang giữ); cuối kỳ in
+ * truy giá vốn theo mẫu mã + nguyên nhân, ĐỀ XUẤT số dư mở sổ từ chuỗi số đo (kèm tháng thiếu căn cứ) và
+ * DANH SÁCH PHÊ DUYỆT duy nhất — đúng các hàm thuần trang Trung tâm dùng. Dòng tóm tắt công khai (`tomTat`) không mang
+ * tên người hay mã đơn (kho PUBLIC); chi tiết ở bản mã hoá.
+ *
  * KHÔNG ghi gì: Postgres ép chỉ đọc (`ERP_READ_ONLY=1` đặt TRƯỚC khi nạp `@/db`, rồi hỏi lại phiên).
  * Số dư mở sổ ở đây là GIẢ ĐỊNH của phép đo, KHÔNG phải số dư đã đối soát — quy chế thật do người có
  * quyền duyệt lương khai ở Lương → Cấu hình.
@@ -43,6 +49,10 @@ import { getMonthReconciliation, loadProfitSignoffs } from "@/lib/queries/payrol
 import { getProfitGateConfig } from "@/lib/queries/payroll-profit-gate";
 import { listCodeBook } from "@/lib/queries/payroll-code-ledger";
 import { COST_CLASS_LABEL, type CostClass } from "@/lib/payroll/profit-reconciliation";
+import { buildApprovalList, buildOpeningProposal, COD_GAP_CAUSE_LABEL, type CodGapCause } from "@/lib/payroll/recon-center";
+import { COGS_GAP_CAUSE_LABEL, codSplit, cogsGapsByVariant, openingSeries, type CogsGapCause } from "@/lib/queries/payroll-recon-center";
+import { getRecognizedCosts } from "@/lib/queries/cost-engine";
+import { loadCodeBook } from "@/lib/queries/payroll-code-ledger";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 
@@ -80,6 +90,9 @@ async function main() {
   const book = await listCodeBook();
   tomTat(`Sổ phân công: ${book.filter((x) => x.kind === "ASSIGNMENT" && x.status === "APPROVED").length} phân công · ${book.filter((x) => x.kind === "TERMS" && x.status === "APPROVED").length} điều khoản đang duyệt`);
   const tong = { dt: 0, dtTien: 0, mo: 0, cp: 0, cpKhop: 0, issues: 0, thangDu: 0, thang: 0 };
+  const center = { phaiThu: 0, phaiThuDon: 0, qua30: 0, tienVe: 0, codGiu: 0, keToan: 0, chuaKy: [] as string[], trungNguon: 0 };
+  const undated = new Map<string, { id: string; name: string; monthlyFixed: number }>();
+  const coDoanhThu = new Set<string>();
   const lop: Record<CostClass, number> = { BY_CODE: 0, SHARED: 0, UNKNOWN_SOURCE: 0, NOT_IN_BASIS: 0 };
 
   let opening: ProfitGateOpening = { cumulative: opening0, highWater: Math.max(0, opening0), paidToDate: 0, established: true, basis: "DECLARATION", reason: "giả định của phép đo" };
@@ -159,6 +172,21 @@ async function main() {
     console.log(`     mã: ${rc.codes.total} có số · ${rc.codes.withCustomId} có mã hàng · ${rc.codes.profitComplete} đủ dữ liệu LN · ${rc.codes.assigned} đã phân công`);
     for (const i of rc.issues) console.log(`     ✗ ${i.label}${i.count !== null ? ` · ${i.count} mục` : ""}${i.amount !== null ? ` · ${tien(i.amount)}` : ""}`);
     tomTat(`${m}: đối soát ${rc.status} (${rc.issues.length} khoản chưa) · DT có chứng từ ${pt(rc.coverage.revenueWithMoneyPct)} · đơn có kết quả ${pt(rc.coverage.revenueSettledPct)} · chi phí khớp ${pt(rc.coverage.costReconciledPct)} · mã đủ dữ liệu ${rc.codes.profitComplete}/${rc.codes.total} · đã phân công ${rc.codes.assigned}/${rc.codes.total} · chưa rõ nguồn ${tien(rc.classes.UNKNOWN_SOURCE)} · chưa vào cơ sở ${tien(rc.classes.NOT_IN_BASIS)}`);
+    // ─── V2 Trung tâm: tách COD của tháng ───
+    const cod = await codSplit(m);
+    console.log(`   COD ${m}: doanh thu kế toán ${tien(cod.accounting.revenue)} (${cod.accounting.orders} đơn) · có chứng từ tiền ${tien(cod.withMoney.revenue)} · PHẢI THU chưa xác minh ${tien(cod.receivable.revenue)} (${cod.receivable.orders} đơn; ≤7 ngày ${cod.receivable.age.le7.orders} · 8–30 ${cod.receivable.age.d8to30.orders} · >30 ${cod.receivable.age.over30.orders} · chưa có mốc giao ${cod.receivable.age.unknown.orders}) · tiền thực nhận ${tien(cod.cashReceived)} · COD ĐVVC đang giữ ${tien(cod.codHeldByCarrier)}`);
+    for (const k of Object.keys(COD_GAP_CAUSE_LABEL) as CodGapCause[]) if (cod.receivable.byCause[k].orders) console.log(`     phải thu · ${COD_GAP_CAUSE_LABEL[k]}: ${cod.receivable.byCause[k].orders} đơn · ${tien(cod.receivable.byCause[k].revenue)}`);
+    tomTat(`${m}: COD kế toán ${tien(cod.accounting.revenue)} · phải thu chưa xác minh ${tien(cod.receivable.revenue)} (${cod.receivable.orders} đơn, >30 ngày ${cod.receivable.age.over30.orders}) · tiền thực nhận ${tien(cod.cashReceived)} · ĐVVC đang giữ ${tien(cod.codHeldByCarrier)}`);
+    center.phaiThu += cod.receivable.revenue;
+    center.phaiThuDon += cod.receivable.orders;
+    center.qua30 += cod.receivable.age.over30.orders;
+    center.tienVe += cod.cashReceived;
+    center.codGiu += cod.codHeldByCarrier;
+    center.keToan += cod.accounting.revenue;
+    if ((r.profitGate.result.allocatedTotal ?? 0) > 0 && !ky) center.chuaKy.push(m);
+    center.trungNguon += rc.issues.filter((i) => i.code.startsWith("warn:") && i.code !== "warn:PAYROLL_OBLIGATION_NOT_RECOGNIZED").length;
+    for (const e of (await getRecognizedCosts(p)).payroll.undatedEmployees) undated.set(e.id, e);
+    for (const x of r.marketers.products) if (x.revenue > 0) coDoanhThu.add(x.productId);
     const rev = rc.lines.find((l) => l.key === "revenue");
     tong.dt += rev?.source ?? 0;
     tong.thang += 1;
@@ -181,6 +209,42 @@ async function main() {
   console.log(`   chi phí (cơ sở + chưa vào cơ sở) ${tien(tong.cp)} · khớp nguồn / đã giải thích ${pt2(tong.cpKhop, tong.cp)}`);
   console.log(`   nhóm: ${(Object.keys(COST_CLASS_LABEL) as CostClass[]).map((c) => `${COST_CLASS_LABEL[c]} ${tien(lop[c])}`).join(" · ")}`);
   tomTat(`CẢ KỲ: đủ ${tong.thangDu}/${tong.thang} tháng · DT có chứng từ ${pt2(tong.dtTien, tong.dt)} · chi phí khớp ${pt2(tong.cpKhop, tong.cp)} · chưa rõ nguồn ${tien(lop.UNKNOWN_SOURCE)} · chưa vào cơ sở ${tien(lop.NOT_IN_BASIS)}`);
+  // ─── V2 Trung tâm: giá vốn · mở sổ · danh sách phê duyệt ───
+  const dauKy = monthReportPeriod(fromMonth);
+  const cuoiKy = monthReportPeriod(toMonth);
+  const gaps = await cogsGapsByVariant(dauKy.from as Date, cuoiKy.to as Date);
+  console.log("\n═══ TRUY GIÁ VỐN (dòng đã giao, giá vốn 0) ═══");
+  for (const k of Object.keys(COGS_GAP_CAUSE_LABEL) as CogsGapCause[]) {
+    const nhom = gaps.filter((g) => g.cause === k);
+    if (!nhom.length) continue;
+    console.log(`   ${COGS_GAP_CAUSE_LABEL[k]}: ${nhom.length} mẫu mã · ${nhom.reduce((t, g) => t + g.lines, 0)} dòng · ${tien(nhom.reduce((t, g) => t + g.revenue, 0))}`);
+    for (const g of nhom.slice(0, 20)) console.log(`     ${(g.code || g.productName).padEnd(16)} ${(g.sku || g.variantId || "—").padEnd(20)} ${String(g.lines).padStart(4)} dòng  ${tien(g.revenue).padStart(12)}  đơn: ${g.sampleOrderIds.join(", ")}`);
+  }
+  tomTat(`Giá vốn: ${gaps.length} mẫu mã · ${gaps.reduce((t, g) => t + g.lines, 0)} dòng · ${tien(gaps.reduce((t, g) => t + g.revenue, 0))} doanh thu đang tính giá vốn 0 · ${(Object.keys(COGS_GAP_CAUSE_LABEL) as CogsGapCause[]).map((k) => `${k} ${gaps.filter((g) => g.cause === k).length}`).join(" · ")}`);
+  const mocMoSo = cfg.active?.openingMonth ?? fromMonth;
+  const series = await openingSeries(mocMoSo);
+  const deXuat = buildOpeningProposal(mocMoSo, series.dataStart, series.months);
+  console.log(`\n═══ ĐỀ XUẤT SỐ DƯ MỞ SỔ tại ${mocMoSo} (${deXuat.complete ? "đủ căn cứ" : "CHƯA ĐỦ CĂN CỨ"}) ═══`);
+  for (const x of deXuat.months) console.log(`   ${x.monthKey}  DT ${tien(x.revenue).padStart(13)}  CP ghi nhận (trừ lương chưa căn cứ) ${tien(x.recognizedCost).padStart(13)}  lương có căn cứ chưa ghi ${tien(x.salaryGapEvidenced).padStart(11)}  LN đo được ${tien(x.measuredProfit).padStart(13)}  ${x.gaps.length ? `thiếu: ${x.gaps.join(" · ")}` : "đủ căn cứ"}`);
+  tomTat(`Mở sổ ${mocMoSo}: lũy kế ĐO ĐƯỢC ${tien(deXuat.measuredCumulative)} · đỉnh ${tien(deXuat.measuredHighWater)} · ${deXuat.months.length} tháng, ${deXuat.incompleteMonths.length} tháng thiếu căn cứ ⇒ ${deXuat.complete ? "đủ căn cứ" : "CHƯA ĐỦ CĂN CỨ — không dùng như số đã duyệt"}`);
+  const sobo = await loadCodeBook(dauKy.from, cuoiKy.to);
+  const owners = new Set(sobo.assignments.filter((a) => a.role === "OWNER").map((a) => a.productId));
+  const duyet = buildApprovalList({
+    opening: deXuat,
+    gatePolicyDeclared: Boolean(cfg.active),
+    undatedEmployees: [...undated.values()],
+    pendingAssignments: book.filter((x) => x.kind === "ASSIGNMENT" && x.status === "PENDING").length,
+    pendingTerms: book.filter((x) => x.kind === "TERMS" && x.status === "PENDING").length,
+    codesWithoutOwner: [...coDoanhThu].filter((id) => !owners.has(id)).length,
+    monthsNeedingSignoff: center.chuaKy,
+    cogsGaps: { variants: gaps.length, lines: gaps.reduce((t, g) => t + g.lines, 0), revenue: gaps.reduce((t, g) => t + g.revenue, 0) },
+    codReceivable: { orders: center.phaiThuDon, revenue: center.phaiThu, over30Orders: center.qua30 },
+    duplicateSourceWarnings: center.trungNguon,
+  });
+  console.log(`\n═══ DANH SÁCH PHÊ DUYỆT (${duyet.length} mục) ═══`);
+  for (const [i, x] of duyet.entries()) console.log(`   ${i + 1}. [${x.kind === "DECIDE" ? "QUYẾT" : "BỔ SUNG"} · ${x.owner}] ${x.title}${x.amount !== null ? ` · ${tien(x.amount)}` : ""}\n      nguyên nhân: ${x.cause}\n      việc: ${x.action} (${x.href})`);
+  tomTat(`Danh sách phê duyệt ${duyet.length} mục: ${duyet.map((x) => `${x.key}${x.count !== null ? `×${x.count}` : ""}`).join(" · ")} · COD cả kỳ: kế toán ${tien(center.keToan)} · phải thu ${tien(center.phaiThu)} · tiền thực nhận ${tien(center.tienVe)} · ĐVVC giữ ${tien(center.codGiu)}`);
+
   console.log("\n═══ THEO NHÂN VIÊN (cộng các tháng) ═══");
   for (const [id, e] of perEmp) console.log(`   ${e.name.padEnd(20)} ${id}   tạm tính ${tien(e.provisional).padStart(13)}   đủ ĐK ${tien(e.eligible).padStart(13)}   có nguy cơ tính sai ${tien(e.provisional - e.eligible).padStart(13)}`);
   console.log(`\nTỔNG thưởng % LN tạm tính ${tien(tongTamTinh)} · đủ điều kiện ${tien(tongDuDieuKien)} · CÓ NGUY CƠ TÍNH SAI ${tien(tongTamTinh - tongDuDieuKien)}`);
