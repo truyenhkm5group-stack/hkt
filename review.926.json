@@ -1,0 +1,8 @@
+{
+  "pr": 926,
+  "sha": "365ba43cc82c24a5bcef72187a980dac646cac75",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-20T19:30:42.030Z",
+  "note": "review lead 2 vòng. Vòng 1 FAIL: artifact gắn run_attempt ⇒ «Re-run failed jobs» làm job gom thấy 1/4 shard ⇒ không bao giờ chạy lại được một shard. Delta 365ba43c: tải mọi attempt, tệp mang attempt, chọn attempt cao nhất mỗi (chế độ, shard). ĐO THẬT trên CI run 39477996530: lượt 1 xanh, 8 shard 6–11′ (trước 43–45′, hai lượt bị huỷ ở trần); cố ý chạy lại job «ẩn danh shard 2/4» ⇒ attempt 2 job gom"
+}
