@@ -1,4 +1,3 @@
-{"at":"2026-10-13T10:52:01.050Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"gates-test-timeout","detail":"fix/gates-test-timeout @ 16fb61f0f060 · 1 lệnh kiểm thử"}
 {"at":"2026-10-13T10:52:36.552Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"gates-test-timeout","detail":"#830 cho fix/gates-test-timeout @ 16fb61f0f060"}
 {"at":"2026-10-13T10:52:54.657Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#830 @ b5296e6d9f23 · Chỉ nâng timeout-minutes hai job kiểm thử 35→45"}
 {"at":"2026-10-13T10:53:29.623Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#830 @ 16fb61f0f060 · Chỉ nâng timeout-minutes hai job kiểm thử 35→45"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-20T22:32:23.773Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"8b9f93be6eac · run 39508786568 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39508786568"}
 {"at":"2026-10-20T22:43:21.219Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"upsell-hoi-mon-khi-chua-goi-ten","detail":"PASS 8b9f93be6eacfc196e51ad51810abda35ba3e79e 2026-10-20T22:42:56.047Z"}
 {"at":"2026-10-20T22:44:36.420Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"test-time-bomb-postsale","detail":"#931 @ 2c10ab27c8c5 → 25ffdb822fb9 (MERGE_NOW · LOW · gates success)"}
+{"at":"2026-10-20T22:45:35.136Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"pglite-test-cleanup","detail":"#932 cho claude/pglite-test-cleanup @ e8391f40b324"}
