@@ -108,7 +108,7 @@ export function CodeBookManager({ employees, codes, rows, suggestions }: { emplo
         </SectionCard>
       ) : null}
 
-      <SectionCard title="Giao MKTer vào mã" description="OWNER: X% lợi nhuận đủ điều kiện được phân bổ của mã. SUPPORT: chia quỹ Y% theo trọng số. Mỗi mã tối đa một OWNER một lúc; OWNER mới tự đóng OWNER cũ ở ngày liền trước, sổ lũy kế của mã KHÔNG reset.">
+      <SectionCard title="Giao MKTer vào mã" description="OWNER: X% = TỔNG phần MKT của mã — OWNER nhận X% trên phần lợi nhuận mình làm ra và (X − Y)% trên phần người đẩy cùng làm ra. SUPPORT: Y% trên phần lợi nhuận chính họ làm ra (đo theo doanh thu quy kết / chi phí quảng cáo / đặt tay). Mỗi mã tối đa một OWNER một lúc; OWNER mới tự đóng OWNER cũ ở ngày liền trước, sổ lũy kế của mã KHÔNG reset.">
         <div className="grid gap-3 md:grid-cols-4">
           <div className="space-y-1">
             <Label>Mã sản phẩm</Label>
@@ -136,7 +136,7 @@ export function CodeBookManager({ employees, codes, rows, suggestions }: { emplo
           </div>
           {a.role === "OWNER" ? (
             <div className="space-y-1">
-              <Label>X% (thưởng OWNER)</Label>
+              <Label title="TỔNG phần MKT của mã. OWNER nhận X% trên phần lợi nhuận mình làm ra và (X − Y)% trên phần người đẩy cùng làm ra.">X% (tổng phần MKT của mã)</Label>
               <Input inputMode="decimal" value={a.ownerRatePercent} onChange={(e) => setA({ ...a, ownerRatePercent: e.target.value })} placeholder="vd 10" />
             </div>
           ) : (
@@ -150,7 +150,7 @@ export function CodeBookManager({ employees, codes, rows, suggestions }: { emplo
           )}
           {a.role === "SUPPORT" && a.weightMethod === "MANUAL" ? (
             <div className="space-y-1">
-              <Label>Trọng số đã duyệt (%)</Label>
+              <Label title="Phần lợi nhuận của mã do người đẩy cùng này làm ra. OWNER lấy phần còn lại của 100%.">% lợi nhuận mã do người này làm ra</Label>
               <Input inputMode="decimal" value={a.weightPercent} onChange={(e) => setA({ ...a, weightPercent: e.target.value })} placeholder="Σ các SUPPORT = 100" />
             </div>
           ) : null}
@@ -191,7 +191,7 @@ export function CodeBookManager({ employees, codes, rows, suggestions }: { emplo
         </Button>
       </SectionCard>
 
-      <SectionCard title="Điều khoản thưởng theo mã" description="Y% = quỹ thưởng SUPPORT trên lợi nhuận đủ điều kiện được phân bổ của mã; trần = tổng thưởng tối đa của mã mỗi tháng. Bỏ trống mã = điều khoản MẶC ĐỊNH công ty (điều khoản của mã thắng).">
+      <SectionCard title="Điều khoản thưởng theo mã" description="Y% = phần của người đẩy cùng trên lợi nhuận CHÍNH HỌ làm ra (không vượt X% của OWNER — tổng vẫn là X%); trần = tổng thưởng tối đa của mã mỗi tháng. Bỏ trống mã = điều khoản MẶC ĐỊNH công ty (điều khoản của mã thắng).">
         <div className="grid gap-3 md:grid-cols-4">
           <div className="space-y-1">
             <Label>Mã (bỏ trống = mặc định công ty)</Label>
@@ -204,7 +204,7 @@ export function CodeBookManager({ employees, codes, rows, suggestions }: { emplo
             </Select>
           </div>
           <div className="space-y-1">
-            <Label>Y% (quỹ SUPPORT)</Label>
+            <Label title="Phần của người đẩy cùng trên lợi nhuận CHÍNH HỌ làm ra. OWNER giữ (X − Y)% trên phần ấy — tổng vẫn là X%.">Y% (người đẩy cùng, trên phần họ làm ra)</Label>
             <Input inputMode="decimal" value={t.supportPoolPercent} onChange={(e) => setT({ ...t, supportPoolPercent: e.target.value })} placeholder="vd 5" />
           </div>
           <div className="space-y-1">

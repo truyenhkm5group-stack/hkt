@@ -35,16 +35,16 @@ export const codeAssignmentSchema = z
     note: z.string().trim().max(500).default(""),
   })
   .superRefine((d, ctx) => {
-    if (d.role === "OWNER" && d.ownerRatePercent === undefined) ctx.addIssue({ code: "custom", message: "OWNER phải có X% (tỷ lệ thưởng trên lợi nhuận đủ điều kiện của mã)" });
+    if (d.role === "OWNER" && d.ownerRatePercent === undefined) ctx.addIssue({ code: "custom", message: "OWNER phải có X% — TỔNG phần MKT trên lợi nhuận đủ điều kiện của mã (OWNER nhận X% trên phần mình làm ra, X−Y% trên phần người đẩy cùng)" });
     if (d.role === "SUPPORT" && !d.weightMethod) ctx.addIssue({ code: "custom", message: "SUPPORT phải chọn cách tính trọng số" });
-    if (d.role === "SUPPORT" && d.weightMethod === "MANUAL" && d.weightPercent === undefined) ctx.addIssue({ code: "custom", message: "Trọng số tay phải có % đã duyệt" });
+    if (d.role === "SUPPORT" && d.weightMethod === "MANUAL" && d.weightPercent === undefined) ctx.addIssue({ code: "custom", message: "Đặt tay phải ghi % lợi nhuận của mã do người đẩy cùng này làm ra (OWNER lấy phần còn lại)" });
     if (d.effectiveTo && d.effectiveTo < d.effectiveFrom) ctx.addIssue({ code: "custom", message: "Ngày kết thúc phải sau ngày bắt đầu" });
   });
 
 export const codeTermsSchema = z
   .object({
     productId: z.preprocess(blank, z.string().optional()),
-    supportPoolPercent: phanTram("Ghi Y% (quỹ thưởng SUPPORT) — bỏ trống không có nghĩa là 0%"),
+    supportPoolPercent: phanTram("Ghi Y% — phần của người đẩy cùng trên lợi nhuận CHÍNH HỌ làm ra (không vượt X% của OWNER) — bỏ trống không có nghĩa là 0%"),
     /** Trống = KHÔNG có trần riêng (vẫn chịu quỹ công ty). Không bao giờ là trần 0 ₫. */
     // "1.000.000" / "1 000 000" là cách người Việt gõ tiền — bỏ dấu phân cách trước khi đọc số.
     maxBonusAmount: z.preprocess((v) => blank(typeof v === "string" ? v.replace(/[.,\s]/g, "") : v), z.coerce.number({ error: "Trần thưởng là số tiền VND (chỉ chữ số)" }).int("Trần thưởng là số nguyên VND").min(0).optional()),

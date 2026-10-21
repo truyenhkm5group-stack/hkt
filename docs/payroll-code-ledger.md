@@ -32,10 +32,11 @@ Mã: `lib/payroll/code-ledger.ts` (hàm thuần) · `lib/queries/payroll-code-le
 2. CỔNG CÔNG TY
    Allocated(mã) = allocatePool(Eligible các mã, E công ty)     Σ Allocated ≤ min(Σ Eligible, E)
 
-3. CHIA THƯỞNG CỦA MÃ (mỗi ĐOẠN hiệu lực)
-   OwnerBonus      = Allocated × w_đoạn × X%
-   SupportPool     = Allocated × w_đoạn × Y%
-   SupportBonus(i) = SupportPool × Weight(i)       Σ Weight = 100%
+3. CHIA THƯỞNG CỦA MÃ (mỗi ĐOẠN hiệu lực) — theo người làm ra lợi nhuận (chủ shop 21/10/2026)
+   Share(p)        = Weight(p) / Σ Weight          p = OWNER + mọi SUPPORT, CÙNG một cách đo
+   SupportBonus(i) = Allocated × w_đoạn × Y% × Share(i)
+   OwnerBonus      = Allocated × w_đoạn × X% − Σ SupportBonus
+   ⇒ X% là TỔNG phần MKT của mã; OWNER nhận X% trên phần mình làm ra + (X − Y)% trên phần SUPPORT làm ra
    → mọi khoản đi vào CÙNG cổng V1: Σ được duyệt ≤ ⌊E × cap%⌋
 ```
 
@@ -62,8 +63,8 @@ TRONG đoạn. Sổ mã không đổi: nó không có tham số người.
 
 | Tình huống | Kết quả |
 |---|---|
-| SUPPORT mà chưa có điều khoản Y% hiệu lực | chờ (OWNER vẫn tính) |
-| Trọng số tay Σ ≠ 100% | chờ — không tự chuẩn hoá |
+| SUPPORT mà chưa có điều khoản Y% hiệu lực | chờ CẢ đoạn — phần OWNER = X% trừ phần SUPPORT, thiếu Y thì chưa biết |
+| Trọng số tay: Σ phần SUPPORT ≤ 0% hoặc > 100% (không OWNER thì phải đúng 100%) | chờ — không tự chuẩn hoá |
 | `AD_SPEND` / `ATTRIBUTED_REVENUE` mà không SUPPORT nào có số | chờ — không chia đều |
 | MỘT SUPPORT không có số đo trong đoạn (chiến dịch chưa ghép?) | chờ — không dồn cả quỹ cho người đã ghép |
 | Mã còn chi phí QC / doanh thu CHƯA GÁN cho MKTer nào trong đoạn | chờ — trọng số thiếu một phần chưa biết của ai |
@@ -71,7 +72,7 @@ TRONG đoạn. Sổ mã không đổi: nó không có tham số người.
 | Kỳ không phải trọn tháng lịch / cơ sở khác "Lợi nhuận tính lương" | chờ — thưởng theo mã CHƯA BIẾT, không phải 0 |
 | Các SUPPORT dùng hai cách tính trọng số trong cùng đoạn | chờ |
 | Hai OWNER / hai điều khoản cùng hiệu lực | chờ — ERP không chọn hộ |
-| X% + Y% > 100% | chờ |
+| Y% > X% (có OWNER) · Y% > 100% | chờ — OWNER sẽ nhận âm |
 | Người đang hưởng % LN CÁ NHÂN mà được giao thêm mã | chờ — cộng cả hai là trả hai lần |
 | MKTer không có dòng lương trong kỳ | chờ |
 | Sổ mã chưa dựng được (chưa khai quy chế / ảnh chụp trước V2) | chờ |
@@ -366,4 +367,19 @@ thể thay đổi theo khoảng thời gian khác nhau."
   Hiệu quả marketing theo ngày) còn cộng `orders.partner_fee` của Pancake; luật kết quả đơn "cước < 10K" (`return-rate.ts`) và các báo cáo quảng
   cáo / dòng tiền còn tự viết `coalesce(shipping_fee, partner_fee)` — đổi chúng là đổi số của báo cáo khác, cần
   đo trước/sau riêng.
+
+### 10.8 X% là TỔNG phần MKT của mã, Y% là phần người đẩy cùng (chủ shop 21/10/2026)
+
+"X% = 25% cho người chịu trách nhiệm mã và xử lý tồn kho của mã và Y% = 20% cho người đẩy cùng mã với người
+chịu trách nhiệm mã, khi đó, người chịu trách nhiệm mã sẽ được 5% từ lợi nhuận của người đẩy cùng. Tổng vẫn là
+25% trên mỗi đồng lợi nhuận sẽ được chia cho MKTer chạy ra doanh thu và lợi nhuận từng mã."
+
+- Trước: OWNER = phân bổ × X% CỘNG SUPPORT = phân bổ × Y% × trọng số ⇒ tổng X + Y. Nay tổng luôn đúng X%.
+- Phần "do ai làm ra" đo bằng ĐÚNG cách tính trọng số đã duyệt (chi phí QC đối soát được · doanh thu quy kết),
+  áp cho CẢ OWNER: OWNER cũng là một người làm ra lợi nhuận. Đặt tay (`MANUAL`) = % lợi nhuận mã do SUPPORT ấy
+  làm ra; OWNER lấy phần còn lại. Không có OWNER ⇒ SUPPORT chia Y% theo tỷ trọng giữa họ (như cũ).
+- Ví dụ: phân bổ 10tr, X 25%, Y 20%, SUPPORT làm 80% ⇒ SUPPORT 10tr × 80% × 20% = 1,6tr; OWNER
+  10tr × 25% − 1,6tr = 0,9tr (= 25% × 2tr + 5% × 8tr). Tổng 2,5tr = 25%.
+- Trọng số chưa đủ căn cứ ⇒ OWNER CŨNG chờ (số tạm `null`): phần của OWNER là phần còn lại sau SUPPORT.
+- Production 21/10/2026: 0 phân công · 0 điều khoản ⇒ đổi công thức không đổi một đồng lương nào hôm nay.
 
