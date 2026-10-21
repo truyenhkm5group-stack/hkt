@@ -23,6 +23,31 @@ import { buildCauseBoard } from "@/lib/returns/cause-board";
 import { getReturnIntelligence, TREND_GRAINS, type TrendGrain } from "@/lib/queries/return-intelligence";
 import { listAttributedMarketers } from "@/lib/queries/order-marketer";
 import { listProductCodes } from "@/lib/queries/product-code";
+import { POST_OFFICE_QUERY_MAX, REASON_FILTER_KEYS, REASON_OUTCOME_FILTERS } from "@/lib/constants/return-reason-filters";
+import type { OutcomeGroup } from "@/lib/constants/truth";
+import { reasonFiltersActive, type ReasonFilterSelection } from "@/lib/returns/reason-filters";
+
+/**
+ * 2b — bộ lọc của khối lý do hoàn đọc từ URL. Giá trị là đầu vào của người ngoài: trạng thái chỉ nhận nhóm trong danh sách đóng; các ô
+ * khác chỉ được SO KHỚP (không bao giờ ghép vào SQL), cắt trần độ dài. HÀM THUẦN.
+ */
+export function reasonFilterSelectionOf(raw: SearchParams): ReasonFilterSelection {
+  const list = (k: string) => {
+    const v = raw[k];
+    const xs = (Array.isArray(v) ? v : v === undefined ? [] : [v]).flatMap((x) => String(x).split(",")).map((x) => x.trim().slice(0, 80)).filter(Boolean);
+    return xs.length ? [...new Set(xs)].slice(0, 30) : undefined;
+  };
+  const outcomes = list(REASON_FILTER_KEYS.outcome)?.filter((x): x is OutcomeGroup => (REASON_OUTCOME_FILTERS as readonly string[]).includes(x));
+  const po = (param(raw, REASON_FILTER_KEYS.postOffice) ?? "").trim().slice(0, POST_OFFICE_QUERY_MAX);
+  return {
+    ...(list(REASON_FILTER_KEYS.source) ? { sources: list(REASON_FILTER_KEYS.source) } : {}),
+    ...(list(REASON_FILTER_KEYS.carrier) ? { carriers: list(REASON_FILTER_KEYS.carrier) } : {}),
+    ...(list(REASON_FILTER_KEYS.care) ? { careOwners: list(REASON_FILTER_KEYS.care) } : {}),
+    ...(list(REASON_FILTER_KEYS.province) ? { provinces: list(REASON_FILTER_KEYS.province) } : {}),
+    ...(po ? { postOffice: po } : {}),
+    ...(outcomes?.length ? { outcomes } : {}),
+  };
+}
 
 /** Tham số của trang, dựng từ URL. `{}` = trang mặc định (kỳ 90 ngày, mốc gửi hàng, không lọc). */
 /**
@@ -91,15 +116,22 @@ export function returnsPageParams(raw: SearchParams) {
         })()
       : null;
 
-  const reasonFilter = { period: params.period, basis, codes, marketerIds, value: giaTriDon };
-  return { params, minShipped, variantKey, giaTriDon, dangLocGiaTri, basis, codes, marketerIds, trendGrain, openReason, openGroup, openProduct, previous, reasonFilter };
+  /*
+    2b: bộ lọc RIÊNG của khối lý do hoàn (E) + nguyên nhân · giải pháp (E2) — `reasonFilterBase` là bộ lọc CHUNG của trang. Tầng quyết định
+    (D) đọc bản KHÔNG lọc 2b: các phần khác của D không lọc theo các ô ấy, trộn hai tập dưới một tiêu đề là đúng thứ trang này cấm.
+  */
+  const reasonFilterBase = { period: params.period, basis, codes, marketerIds, value: giaTriDon };
+  const reasonSelection = reasonFilterSelectionOf(raw);
+  const reasonFilter = { ...reasonFilterBase, ...reasonSelection };
+  const reasonFiltered = reasonFiltersActive(reasonSelection);
+  return { params, minShipped, variantKey, giaTriDon, dangLocGiaTri, basis, codes, marketerIds, trendGrain, openReason, openGroup, openProduct, previous, reasonFilter, reasonFilterBase, reasonSelection, reasonFiltered };
 }
 
 export type ReturnsPageParams = ReturnType<typeof returnsPageParams>;
 
 /** Mọi truy vấn của trang — một lượt song song. Xem chú thích trong thân về vì sao song song không phải chỗ sửa. */
 export async function loadReturnsPage(p: ReturnsPageParams) {
-  const { params, minShipped, variantKey, giaTriDon, basis, codes, marketerIds, trendGrain, previous, reasonFilter } = p;
+  const { params, minShipped, variantKey, giaTriDon, basis, codes, marketerIds, trendGrain, previous, reasonFilter, reasonFilterBase, reasonFiltered } = p;
 
   /*
     MỘT LƯỢT SONG SONG, KHÔNG PHẢI HAI LƯỢT NỐI ĐUÔI.
@@ -120,7 +152,9 @@ export async function loadReturnsPage(p: ReturnsPageParams) {
 
     Mọi lời hứa nằm trong CÙNG một `Promise.all`: không lời hứa nào bị bỏ lơ nếu một nhánh khác lỗi trước.
   */
-  const reasonP = getReturnReasonReport(reasonFilter);
+  // Không bật bộ lọc 2b ⇒ MỘT báo cáo (cùng khoá job giữ ấm); bật ⇒ thêm đúng một báo cáo đã lọc cho E / E2.
+  const reasonBaseP = getReturnReasonReport(reasonFilterBase);
+  const reasonP = reasonFiltered ? getReturnReasonReport(reasonFilter) : reasonBaseP;
   /*
     BẢNG NGUYÊN NHÂN THEO CHỨNG CỨ (P0 21/10/2026, `lib/returns/cause-board.ts`): CHỈ khi cờ cách xếp = EVIDENCE — cờ còn LEGACY thì không
     dựng (hai cách xếp không đứng chung một trang). Kỳ trước dùng ĐÚNG bộ lọc của khối intelligence nên đọc lại cùng bản nhớ đệm.
@@ -139,7 +173,7 @@ export async function loadReturnsPage(p: ReturnsPageParams) {
     listProductCodes(),
     listAttributedMarketers(),
     logisticsPerformance(params.period, giaTriDon),
-    reasonP.then((baoCaoLyDo) => getReturnIntelligence({ period: params.period, previous, basis, codes, marketerIds, trendGrain, reasonReport: baoCaoLyDo, value: giaTriDon })),
+    reasonBaseP.then((baoCaoLyDo) => getReturnIntelligence({ period: params.period, previous, basis, codes, marketerIds, trendGrain, reasonReport: baoCaoLyDo, value: giaTriDon })),
     getReturnRateByTier(params.period, params.q, basis),
     causeP,
   ]);

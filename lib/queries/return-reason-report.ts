@@ -37,6 +37,8 @@ import { ELIGIBLE_SENT_SQL } from "@/lib/constants/returns";
 import { OM_CONFLICT, OM_EVIDENCE, OM_MARKETER_ID, OM_STATE, orderMarketerJoin, summarizeMarketerCoverage } from "@/lib/queries/order-marketer";
 import { MARKETER_EVIDENCE, MARKETER_UNRESOLVED, type MarketerCoverage, type MarketerEvidence, type MarketerLinkState } from "@/lib/constants/marketer-attribution";
 import { rowsOf } from "@/lib/sql-rows";
+import { ORDER_SOURCE } from "@/lib/queries/order-source";
+import { matchesReasonFilters, postOfficeQuery, reasonFacetsOf, type ReasonFacets, type ReasonFilterFacts, type ReasonFilterSelection } from "@/lib/returns/reason-filters";
 import { orderHasProductCode, variantIdsOfCodes } from "@/lib/queries/product-code";
 import { getReasonGrouping, getReasonTaxonomy } from "@/lib/queries/return-reason-config";
 import { reasonsForShipments, type ReasonVerdict } from "@/lib/queries/return-reason";
@@ -199,6 +201,11 @@ export type ReturnReasonReport = {
   ungrouped: number;
   /** Đơn hoàn KHÔNG có giá trị đơn — `lostRevenue` không tính chúng. */
   lostRevenueUnknown: number;
+  /**
+   * 2b — số đơn của từng lựa chọn bộ lọc (nguồn · ĐVVC · care · tỉnh · trạng thái) trên tập TRƯỚC khi lọc 2b, + độ phủ bưu cục. Ô chọn
+   * in đúng các số này; KHÔNG có danh sách bưu cục (chữ ĐVVC có thể mang tên / SĐT bưu tá).
+   */
+  facets: ReasonFacets;
 };
 
 export type ReasonFilter = {
@@ -227,7 +234,7 @@ export type ReasonFilter = {
    * cách trên cùng một tập ca. Màn hình KHÔNG truyền: nó đọc cờ `returns.reason-taxonomy`.
    */
   taxonomy?: ReasonTaxonomy;
-};
+} & ReasonFilterSelection;
 
 /**
  * Dòng thô: mỗi ĐƠN một dòng, kèm kết quả chuẩn, vận đơn quyết định và mốc của cách lọc đang dùng.
@@ -295,9 +302,16 @@ async function baseRows(f: ReasonFilter) {
     marketer_state: MarketerLinkState;
     marketer_conflict: boolean;
     revenue: string | number | null;
+    src: string;
+    carrier: string | null;
+    province_raw: string | null;
+    post_office: string | null;
+    care_owner: string | null;
+    care_any: boolean | string | null;
   }>(
     await chayKhongJit(db, (tx) => tx.execute(sql`
-      select b.order_id, b.shipment_id, b.outcome, b.basis_at, b.marketer_id, b.marketer_evidence, b.marketer_state, b.marketer_conflict, b.revenue
+      select b.order_id, b.shipment_id, b.outcome, b.basis_at, b.marketer_id, b.marketer_evidence, b.marketer_state, b.marketer_conflict, b.revenue,
+             b.src, b.carrier, b.province_raw, b.post_office, b.care_owner, b.care_any
         from (
           select "orders"."id" as order_id,
                  "shipments"."id" as shipment_id,
@@ -308,7 +322,17 @@ async function baseRows(f: ReasonFilter) {
                  ${OM_MARKETER_ID} as marketer_id,
                  ${OM_EVIDENCE} as marketer_evidence,
                  ${OM_STATE} as marketer_state,
-                 ${OM_CONFLICT} as marketer_conflict
+                 ${OM_CONFLICT} as marketer_conflict,
+                 -- 2b (lib/returns/reason-filters.ts): dữ kiện lọc — nguồn đơn MỘT định nghĩa (ORDER_SOURCE), ĐVVC + bưu cục của vận đơn
+                 -- chính (vị trí lần phát cuối), người cầm đợt care mới nhất (users.id, luật 34). Lọc ở TS: tỉnh phải qua findProvince.
+                 ${ORDER_SOURCE} as src,
+                 "shipments"."carrier" as carrier,
+                 "orders"."ship_province" as province_raw,
+                 (select e.location from "shipment_events" e
+                   where e.shipment_id = "shipments"."id" and e.normalized_stage::text in ('OUT_FOR_DELIVERY', 'DELIVERY_FAILED', 'DELIVERED')
+                   order by e.occurred_at desc, e.id desc limit 1) as post_office,
+                 (select sc.owner_id from "shipment_care" sc where sc.shipment_id = "shipments"."id" order by sc.episode_no desc, sc.opened_at desc limit 1) as care_owner,
+                 exists (select 1 from "shipment_care" sc where sc.shipment_id = "shipments"."id") as care_any
             from "orders"
             left join "shipments" on "shipments"."order_id" = "orders"."id" and ${PRIMARY_ATTEMPT}
             ${orderMarketerJoin(sql`"orders"."ad_id"`, sql`coalesce("orders"."post_id", '')`, sql`"orders"."id"`)}
@@ -324,9 +348,26 @@ async function baseRows(f: ReasonFilter) {
     `)),
   );
 
+  const mapped = rows.map((r) => {
+    const careAny = r.care_any === true || r.care_any === "t";
+    const facts: ReasonFilterFacts = {
+      outcome: r.outcome,
+      source: r.src,
+      carrier: r.carrier,
+      provinceRaw: r.province_raw,
+      postOffice: r.post_office,
+      careOwner: r.care_owner,
+      careState: !careAny ? "NONE" : r.care_owner ? "OWNED" : "UNOWNED",
+    };
+    return { r, facts };
+  });
+  // Bộ đếm từng lựa chọn đứng trên tập TRƯỚC khi lọc 2b (mọi bộ lọc khác của trang đã áp trong SQL) — ô chọn in số ca có thật.
+  const facets = reasonFacetsOf(mapped.map((x) => x.facts));
+  const kept = mapped.filter((x) => matchesReasonFilters(x.facts, f)).map((x) => x.r);
   return {
     basis,
-    rows: rows.map((r) => ({
+    facets,
+    rows: kept.map((r) => ({
       orderId: r.order_id,
       shipmentId: r.shipment_id,
       outcome: r.outcome,
@@ -370,6 +411,13 @@ export async function getReturnReasonReport(f: ReasonFilter): Promise<ReturnReas
     (f.marketerIds ?? []).join("+"),
     (f.groups ?? []).join("+"),
     (f.reasons ?? []).join("+"),
+    // 2b — mọi bộ lọc vào khoá (AGENTS mục 2): thiếu một trường là hai bộ lọc khác nhau nhận cùng một kết quả.
+    (f.sources ?? []).join("+"),
+    (f.carriers ?? []).join("+"),
+    (f.careOwners ?? []).join("+"),
+    (f.provinces ?? []).join("+"),
+    encodeURIComponent(postOfficeQuery(f.postOffice)),
+    (f.outcomes ?? []).join("+"),
   ].join(":");
   return memo(key, 90_000, () => dungBaoCaoLyDo({ ...f, taxonomy }));
 }
@@ -383,7 +431,7 @@ const demBac = (): Record<EvidenceTier, number> => Object.fromEntries(EVIDENCE_T
 const nhomNha = (grouping: ReasonGrouping, reason: ReturnReason) => grouping.groupOf({ reason, items: [{ source: "HUMAN_CONFIRMED", reason, at: 0 }] });
 
 async function dungBaoCaoLyDo(f: ReasonFilter): Promise<ReturnReasonReport> {
-  const [{ basis, rows: tatCa }, grouping] = await Promise.all([baseRows(f), getReasonGrouping(f.taxonomy)]);
+  const [{ basis, rows: tatCa, facets }, grouping] = await Promise.all([baseRows(f), getReasonGrouping(f.taxonomy)]);
   /*
     CÁCH XẾP NHÓM dựng MỘT lần cho cả lượt báo cáo (cờ + ghi đè của chủ shop). Mọi chỗ xếp nhóm
     trong hàm này đọc `grouping.groupOf`, KHÔNG đọc thẳng một bảng tĩnh — hai đường tra khác nhau
@@ -590,6 +638,7 @@ async function dungBaoCaoLyDo(f: ReasonFilter): Promise<ReturnReasonReport> {
   const rescuedTong = daBiet.reduce((n, a) => n + a.rescued, 0);
 
   return {
+    facets,
     taxonomy: grouping.taxonomy,
     taxonomyNotes: grouping.notes,
     evidenceTiers,
