@@ -1,0 +1,8 @@
+{
+  "pr": 940,
+  "sha": "f8596102bdc5c058a766a7ff62a99776eb4b040a",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T05:38:24.189Z",
+  "note": "review lead: cước trong lương / đối soát / máy chi phí theo cước VTP ghi nhận (shipping-cost.ts), thiếu cước VTP ⇒ ước tính theo lịch cước có NHÃN; đổi số production đã khai (T8/T9/T10 đơn chỉ có cước Pancake 1/12/8; đơn có vận đơn không cước 13/7/9 nay có ước tính thay vì 0); ô logistic sổ ngân hàng đổi theo. pnl()/marketing còn partner_fee — ghi việc sau §10.7. Không migration. Đột biến 7/7."
+}
