@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "messenger-webhook-alerts",
+  "title": "Cảnh báo webhook Messenger theo ngưỡng chủ shop duyệt 21/10 (ORG_LOOKUP_FAILED ≥1 · SIGNATURE >20 / 24 giờ, một tin/ngày)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/messenger-webhook-alerts",
+  "base_sha": "3969110f16560da1224fa79cf9ab63aea5a63fe8",
+  "domains": [],
+  "owned_paths": [
+    "lib/constants/messenger-webhook-alerts.ts",
+    "lib/platform/webhook-rejections.ts",
+    "tests/messenger-webhook-alerts.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-21T07:42:11.678Z",
+  "updated_at": "2026-10-21T07:42:11.678Z",
+  "last_heartbeat": "2026-10-21T07:42:11.678Z",
+  "definition_of_done": []
+}
