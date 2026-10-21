@@ -82,6 +82,8 @@ export type ChatState = {
   quickGuardClosed?: { at: string; turn: number };
   /** Mốc mỗi lần câu mẫu NHƯỜNG AI vì khách đã chọn khối lượng (`quickReplySizeConflict`, có trần) — ops conv-money-trace đếm giá token. */
   quickSizeYields?: string[];
+  /** Mã câu mẫu đã gửi trong LƯỢT MUA này (P0 21/10/2026, ca «Lan Nguyen» / «Xuân Đoàn») — khoá của lượt mua, xoá cùng lượt mua. */
+  quickSentIds?: string[];
   /** `at` = lần ĐẦU khách để lại SĐT này (02/10/2026 — báo cáo chi phí AI / SĐT theo ngày); dòng cũ không có mốc. */
   /** `savedAddress` = địa chỉ do MÁY CHỦ điền từ đơn cũ khớp qua SĐT (`use_saved_address`) — bot chỉ thấy bản đã che. */
   /**

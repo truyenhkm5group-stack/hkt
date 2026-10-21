@@ -331,7 +331,9 @@ export const ORDER_GOLDEN_CASES: readonly OrderGoldenCase[] = [
     model: "GOOD",
     turns: [
       { say: "chả cá thu còn ko shop", ai: [() => [tool("search_products", { query: "chả cá thu" })], ({ results }) => [say(`Dạ chả cá thu có hộp 500g và hộp 1kg, từ ${priceText(results[0])}. Chị lấy loại nào ạ?`)]] },
-      { say: "lấy 1 hộp 1kg", ai: [reply("Dạ chị cho em xin SĐT và địa chỉ nhận hàng ạ.")] },
+      // Câu trả lời số lượng rõ ràng ngay sau câu hỏi chọn quy cách ⇒ MÁY CHỦ ghi nhận + xin phần còn thiếu, không gọi model (P0 21/10/2026,
+      // ca «Lan Nguyen» — round-check.ts `quantityOnlyAnswer`). Mẫu mã 1kg vẫn chọn theo khối lượng lúc lên đơn.
+      { say: "lấy 1 hộp 1kg", ai: [] },
       { say: "0920000909", ai: [reply("Dạ chị cho em xin địa chỉ giao hàng ạ.")] },
       infoTurn(`${HN_BAT_TRANG}. Tên Oanh nhé`, { name: "Oanh", phone: "0920000909", address: HN_BAT_TRANG }, [["CHA-CA-1KG", 1]]),
       consentTurn("ok giao đi em"),

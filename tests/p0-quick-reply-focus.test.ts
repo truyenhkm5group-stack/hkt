@@ -242,8 +242,10 @@ function testThuan() {
   const engQ = readFileSync("lib/sales-chatbot/engine.ts", "utf8");
   assert.match(engQ, /quickReplySizeConflict\(pick\.text, \{[^}]*covers: qrFocus\.coversOf\(pick\.entry\)/, "engine truyền món câu mẫu nói tới từ bộ lọc món");
   assert.match(readFileSync("lib/sales-chatbot/tools.ts", "utf8"), /covers: ctx\.quickReplyFocus\.coversOf\(pick\.entry\)/, "công cụ truyền món câu mẫu nói tới từ bộ lọc món");
-  assert.match(engQ, /quick\.kind === "ANSWER" && !quickReasks\(quick\.pick\) && !\(await quickSizeReask\(quick\.pick\)\)\) return sendQuick/, "đường khớp chữ qua luật quy cách");
-  assert.match(engQ, /qrFocus\.answers\(pick\.entry\)\) && !\(await quickSizeReask\(pick\)\)\) return sendQuick\(pick, pre\)/, "đường AI chọn mã qua luật quy cách");
+  // P0 21/10/2026: hai đường gửi câu mẫu đi qua MỘT hàm chặn chung (`quickBlocked`) — hàm đó gồm luật quy cách #868.
+  assert.match(engQ, /const quickBlocked = async \(pick: QuickReplyPick\): Promise<boolean> =>\n[^\n]*repeatsRecent\(pick\.text, recentSaid\) \|\| quickReasks\(pick\) \|\|[^\n]*\(await quickSizeReask\(pick\)\);/, "hàm chặn chung gồm câu vừa nói · hỏi lại thông tin · luật quy cách");
+  assert.match(engQ, /quick\.kind === "ANSWER" && !\(await quickBlocked\(quick\.pick\)\)\) return sendQuick/, "đường khớp chữ qua hàm chặn chung (luật quy cách)");
+  assert.match(engQ, /qrFocus\.answers\(pick\.entry\)\) && !\(await quickBlocked\(pick\)\)\) return sendQuick\(pick, pre\)/, "đường AI chọn mã qua hàm chặn chung (luật quy cách)");
 }
 
 // ═══ chatTurn THẬT + PGlite: đường khớp chữ, AI chọn mã và công cụ send_quick_reply ═══

@@ -8,7 +8,7 @@
  *  3. chỉ đọc, xả stdout trước khi thoát, khai đủ bốn chỗ ở ops-vps + platform-isolation-static.
  */
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { inArray } from "drizzle-orm";
@@ -122,6 +122,9 @@ async function testDb() {
         ["assistant", txt("Dạ chả cá thu 280.000 ₫/kg ạ. Mình muốn mua 1kg hay 2kg ạ?")],
         ["user", txt("lấy 2")],
         ["assistant", txt("Dạ em ghi nhận mình lấy 2kg Chả cá thu ạ. Mình cho em xin số điện thoại nhận hàng nhé.")],
+        // G (ca «Xuân Đoàn»): số lượng + hỏi thời gian giao ⇒ bot đọc lại bảng giá, không đụng tới chuyện giao.
+        ["user", txt("Cho chị 2kg. Mấy ngày nhận được hàng?")],
+        ["assistant", txt("Dạ chả cá thu 280.000 ₫/kg, 2kg 540.000 ₫ ạ.")],
       ]),
     ]);
     const ctx = { names: new Map([["v-1kg", "Chả cá thu · 1kg"]]), reference: new Set([0, 280000, 540000, 640000]), handoffText: null, aiDownText: null, templates: [] };
@@ -139,8 +142,14 @@ async function testDb() {
     const s3 = p3.filter((l) => l.startsWith("[ops:tom-tat]")).join("\n");
     assert.match(s3, /KHÔNG có tin khách mới kể từ tin bot trước [1-9]\d* tin/, s3);
     assert.match(s3, /≠ tổng giỏ \/ nháp máy chủ ngay trước: [1-9]\d* tin/, s3);
-    // F: đúng MỘT tin lặp (lượt «2kg»); lượt «lấy 2» được trả lời đúng ⇒ không tính; hai tin khách là câu trả lời số lượng (mẫu số).
-    assert.match(s3, /F trả lời số lượng ngắn mà bot hỏi lại \/ gửi lại câu đã gửi: 1 tin \/ 1 hội thoại · câu mẫu 0 \(0 token\) · AI 1 \(lời gọi model thừa\) · mẫu số 2 tin/, s3);
+    // F: ca gieo «2kg» ⇒ một tin lặp (câu báo giá gửi lại); lượt «lấy 2» được trả lời đúng ⇒ không tính; cả hai tin khách vào mẫu số.
+    // CSDL thử dùng chung với các bài khác ⇒ số đếm là SÀN, không phải số tuyệt đối (AGENTS mục 65); ca gieo ở đây phải nằm trong mẫu F.
+    assert.match(s3, /F CUSTOMER_SELECTED_QUANTITY_BUT_BOT_REASKED — trả lời số lượng ngắn mà bot hỏi lại \/ gửi lại câu đã gửi: [1-9]\d* tin \/ [1-9]\d* hội thoại · câu mẫu \d+ \(0 token\) · AI [1-9]\d* \(lời gọi model thừa\) · mẫu số (?:[2-9]|\d{2,})\d* tin/, s3);
+    assert.ok(p3.some((l) => l.startsWith("  mẫu F (≤ 20):") && l.includes(qty)), "hội thoại «2kg» bị gửi lại câu báo giá nằm trong mẫu F (phần mã hoá)");
+    assert.match(s3, /G UNANSWERED_SECONDARY_INTENT — tin khách có số lượng \+ hỏi thời gian giao mà tin bot ngay sau không đụng tới chuyện giao: [1-9]\d* tin \/ [1-9]\d* hội thoại · mẫu số [1-9]\d* tin hai ý/, s3);
+    assert.ok(p3.some((l) => l.startsWith("  mẫu G (≤ 20):") && l.includes(qty)), "hội thoại «2kg + mấy ngày» nằm trong mẫu G");
+    const hashQty = createHash("sha256").update(qty).digest("hex").slice(0, 8);
+    assert.ok(p3.some((l) => l.startsWith("  mẫu G băm (≤ 20):") && l.includes(hashQty)), "mẫu G có mã hội thoại băm");
     // E (chủ shop 18/10): tốc độ + chi phí trả lời — chạy thật trên CSDL thử (sổ sự kiện + sổ AI nền tảng), chỉ số đếm.
     const p4 = await capture(() => scanAiPerformance(db, "khong-co-to-chuc", new Date(Date.now() - 86_400_000), new Date()));
     const s4 = p4.filter((l) => l.startsWith("[ops:tom-tat]")).join(" | ");

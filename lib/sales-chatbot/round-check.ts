@@ -47,6 +47,16 @@ export function purchaseAmountIntent(text: string, catalog?: readonly string[]):
 */
 const QTY_FILLER = new Set(["thoi", "thui", "nhe", "nha", "nhen", "nghen", "a", "ah", "em", "e", "chi", "c", "anh", "lay", "cho", "mua", "dat", "minh", "ok", "oke", "okie", "vay", "di", "shop", "nhi", "luon", "con", "the", "duoc", "dc", "roi", "r", "thi", "la", "vang", "da", "u", "uh", "um", "ừ"]);
 
+/**
+ * Tin bot / page ngay trước là CÂU HỎI chọn số lượng / quy cách («… 1kg hay 2kg ạ?», «Chị lấy loại nào ạ?», «mình lấy mấy hộp?»). Chỉ khi
+ * đó một tin chỉ có số lượng mới là CÂU TRẢ LỜI — tin đầu tiên khách tự nói («1kg chả cá thu nhé em») là lượt chọn món, nơi luật #868
+ * đặt câu mời mua thêm. HÀM THUẦN.
+ */
+export function askedQuantityChoice(botText: string | null): boolean {
+  if (!botText || !botText.includes("?")) return false;
+  return /(?:^| )(?:hay|loai nao|bao nhieu|may (?:kg|ky|hop|goi|tui|hu|cai)|may)(?= |$)/.test(foldCart(botText));
+}
+
 /** Tin chỉ là MỘT câu trả lời số lượng («2kg», «2kg nhé», «lấy 2», «nửa ký», «2kg thôi») cho món `labels`. HÀM THUẦN. */
 export function quantityOnlyAnswer(text: string, labels: readonly string[]): boolean {
   if (!text.trim() || text.includes("?")) return false;
@@ -72,6 +82,24 @@ export function choiceAmountText(text: string, botText: string | null): string |
   const distinct = [...new Set(units)];
   return distinct.length === 1 ? `${m[1]}${distinct[0]}` : null;
 }
+
+/**
+ * TIN HAI Ý (P0 21/10/2026, ca «Xuân Đoàn»: «Cho chị 2kg. Mấy ngày nhận được hàng.»): tách theo câu; đúng MỘT câu là câu trả lời số lượng
+ * (`quantityOnlyAnswer`), mọi câu còn lại là câu hỏi thời gian giao (`isDeliveryAsk` — bộ phân loại lịch giao truyền vào, không chép luật).
+ * Trả `null` khi không đúng dáng đó (câu thứ hai là chuyện khác ⇒ để model đọc cả tin). HÀM THUẦN.
+ */
+export function quantityWithDeliveryAsk(text: string, labels: readonly string[], isDeliveryAsk: (s: string) => boolean): { quantity: string; delivery: string } | null {
+  // Tách tại dấu câu / dấu phẩy (không nhìn-ngược — Safari < 16.4); vế nào không phải số lượng thì phải là câu hỏi giao, không thì `null`.
+  const parts = text.split(/[.!?\n;,]+/u).map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 2) return null;
+  const qty = parts.filter((p) => quantityOnlyAnswer(p, labels));
+  if (qty.length !== 1) return null;
+  const rest = parts.filter((p) => p !== qty[0]);
+  return rest.length && rest.every(isDeliveryAsk) ? { quantity: qty[0], delivery: rest.join(" ") } : null;
+}
+
+/** Câu đáp phần hỏi thời gian giao khi CHƯA có địa chỉ: không mốc, không số ngày (máy chủ không có căn cứ trước khi biết nơi giao). */
+export const DELIVERY_ASK_NEEDS_ADDRESS = "Thời gian nhận hàng tuỳ địa chỉ giao — mình gửi em địa chỉ, em báo thời gian dự kiến cho mình ạ.";
 
 const LIVE_UNSHIPPED: readonly CustomerPhase[] = ["AWAITING_SHIPMENT"];
 const SHIPPED_OR_DONE: readonly CustomerPhase[] = ["IN_TRANSIT", "RECEIVED", "AFTER_SALES"];
