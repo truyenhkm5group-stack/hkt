@@ -28,7 +28,7 @@
  * bao giờ được chia lại — công ty lỗ sau một tháng đã thưởng thì phải lấy lại phần lỗ ấy TRƯỚC khi
  * phát sinh thưởng mới.
  */
-import { PROFIT_GATE_LOSS_MESSAGE, type ProfitGateLedgerAdjustment } from "@/lib/constants/payroll-profit-gate";
+import { poolCapPercentFor, PROFIT_GATE_LOSS_MESSAGE, type ProfitGateCapStep, type ProfitGateLedgerAdjustment } from "@/lib/constants/payroll-profit-gate";
 
 export type ProfitGateStatus =
   /** Có lợi nhuận đủ điều kiện chia (E > 0). */
@@ -85,7 +85,7 @@ export type ProfitGateInput = {
   monthKey: string | null;
   /** `ok: false` ⇒ NOT_APPLICABLE kèm lý do. */
   applicable: { ok: true } | { ok: false; reason: string };
-  policy: { poolCapPercent: number } | null;
+  policy: { poolCapPercent: number | null; poolCapSchedule?: readonly ProfitGateCapStep[]; residualClaimant?: { employeeId: string } | null } | null;
   opening: ProfitGateOpening | null;
   /** Vì sao `opening` là `null` / chưa xác lập — in thẳng ra màn hình. */
   openingProblem: string | null;
@@ -103,6 +103,21 @@ export type ProfitGateAllocation = ProfitGateClaim & {
   withheld: number | null;
   /** Vì sao chưa đủ điều kiện (hoặc vì sao bị giảm). `null` = đủ toàn bộ. */
   reason: string | null;
+};
+
+/**
+ * PHẦN CÒN LẠI CỦA QUỸ (chủ shop 21/10/2026). `amount` = quỹ − Σ đề nghị của người khác, không âm; người khác
+ * đòi vượt quỹ ⇒ `amount` 0, `overdrawnBy` > 0 và người khác chia tỷ lệ như cũ. Nằm trong ảnh chụp kỳ để kỳ đã
+ * khoá tự giải thích được.
+ */
+export type ProfitGateResidual = {
+  employeeId: string;
+  poolCap: number;
+  othersDemand: number;
+  amount: number;
+  overdrawnBy: number;
+  /** Khoá các khoản riêng của người nhận đã gộp vào phần còn lại (hiện trên phiếu, không trả riêng). */
+  mergedKeys: string[];
 };
 
 export type ProfitGateResult = {
@@ -132,6 +147,8 @@ export type ProfitGateResult = {
   closingCumulative: number | null;
   closingHighWater: number | null;
   allocations: ProfitGateAllocation[];
+  /** `null` = quy chế không có người nhận phần còn lại, hoặc cổng chưa kết luận. */
+  residual: ProfitGateResidual | null;
 };
 
 const vnd = (v: number) => `${Math.round(v).toLocaleString("vi-VN")} ₫`;
@@ -182,7 +199,7 @@ export function evaluateProfitGate(input: ProfitGateInput): ProfitGateResult {
     established: false,
     message: "",
     monthKey: input.monthKey,
-    poolCapPercent: input.policy?.poolCapPercent ?? null,
+    poolCapPercent: input.policy ? poolCapPercentFor(input.policy, input.monthKey) : null,
     openingCumulative: input.opening?.cumulative ?? null,
     openingHighWater: input.opening?.highWater ?? null,
     openingBasis: input.opening?.basis ?? null,
@@ -199,6 +216,7 @@ export function evaluateProfitGate(input: ProfitGateInput): ProfitGateResult {
     closingCumulative: null,
     closingHighWater: null,
     allocations: [],
+    residual: null,
   };
 
   /*
@@ -230,6 +248,14 @@ export function evaluateProfitGate(input: ProfitGateInput): ProfitGateResult {
       "Chưa khai quy chế chia thưởng lợi nhuận (số dư lỗ lũy kế đã đối soát + quỹ thưởng tối đa). Thưởng % lợi nhuận chưa đủ điều kiện duyệt cho tới khi người có quyền duyệt lương khai ở Lương → Cấu hình.",
     );
   }
+  const cap = poolCapPercentFor(input.policy, input.monthKey);
+  if (cap === null) {
+    const dau = [...(input.policy.poolCapSchedule ?? [])].map((m) => m.fromMonth).sort()[0] ?? "—";
+    return undecided(
+      "NOT_ESTABLISHED",
+      `CẦN QUYẾT ĐỊNH: quy chế chưa có trần quỹ cho tháng ${input.monthKey ?? "này"} — lịch trần bắt đầu từ ${dau} và không có trần chung. ERP không lấy mốc đầu áp ngược; khai trần cho tháng này ở Lương → Cấu hình.`,
+    );
+  }
   if (!input.opening) return undecided("NOT_ESTABLISHED", input.openingProblem ?? "Số dư lũy kế đầu tháng chưa xác lập.");
   if (demandTotal === null) return undecided("DATA_INCOMPLETE", "Một khoản thưởng % lợi nhuận tạm tính đang CHƯA BIẾT, nên chưa chia được quỹ.");
 
@@ -237,25 +263,41 @@ export function evaluateProfitGate(input: ProfitGateInput): ProfitGateResult {
   const B = input.periodBase;
   const L = Math.max(0, H - N);
   const E = Math.max(0, B - L);
-  const cap = input.policy.poolCapPercent;
   const Q = Math.floor((E * cap) / 100);
+  /*
+    NGƯỜI NHẬN PHẦN CÒN LẠI: các khoản riêng của họ KHÔNG đòi quỹ — gộp thành MỘT khoản = Q − Σ đề nghị của
+    người khác, không âm. Người khác đòi vượt quỹ ⇒ phần còn lại 0 và người khác chia tỷ lệ như cũ.
+  */
+  const rid = input.policy.residualClaimant?.employeeId ?? null;
+  const cuaNguoiNhan = rid ? input.claims.filter((c) => c.employeeId === rid) : [];
+  const nguoiKhac = rid ? input.claims.filter((c) => c.employeeId !== rid) : input.claims;
+  const othersDemand = nguoiKhac.reduce((t, c) => t + (c.demand ?? 0), 0);
+  const residualKey = rid ? `${rid}:RESIDUAL` : null;
+  const residualDemand = rid ? Math.max(0, Q - othersDemand) : 0;
   const alloc = allocatePool(
-    input.claims.map((c) => ({ key: c.key, demand: c.demand ?? 0 })),
+    [...nguoiKhac.map((c) => ({ key: c.key, demand: c.demand ?? 0 })), ...(residualKey ? [{ key: residualKey, demand: residualDemand }] : [])],
     Q,
   );
   const S = [...alloc.values()].reduce((t, v) => t + v, 0);
-  const scaled = demandTotal > Q;
+  const tongDeNghi = rid ? othersDemand + residualDemand : demandTotal;
+  const scaled = (rid ? othersDemand : demandTotal) > Q;
+  const vuot = rid ? Math.max(0, othersDemand - Q) : 0;
   /** Lỗ còn phải bù SAU tháng này (tháng lỗ thì lỗ tăng thêm). */
   const conLo = Math.max(0, L - B);
 
   const message =
     E > 0
-      ? `Lợi nhuận tháng ${vnd(B)}${L > 0 ? `, đã bù hết ${vnd(L)} lỗ lũy kế` : ""} ⇒ lợi nhuận đủ điều kiện chia ${vnd(E)}, quỹ thưởng tối đa ${cap}% = ${vnd(Q)}.${scaled ? ` Tổng đề nghị ${vnd(demandTotal)} vượt quỹ nên chia theo tỷ lệ.` : ""}`
+      ? `Lợi nhuận tháng ${vnd(B)}${L > 0 ? `, đã bù hết ${vnd(L)} lỗ lũy kế` : ""} ⇒ lợi nhuận đủ điều kiện chia ${vnd(E)}, quỹ thưởng tối đa ${cap}% = ${vnd(Q)}.${scaled ? ` Tổng đề nghị ${vnd(rid ? othersDemand : demandTotal)}${rid ? " của người khác" : ""} vượt quỹ nên chia theo tỷ lệ.` : ""}${rid ? ` Phần còn lại cho người nhận theo quy chế: ${vnd(alloc.get(residualKey!) ?? 0)}.` : ""}`
       : L > 0
         ? `${PROFIT_GATE_LOSS_MESSAGE} Lỗ lũy kế cần bù đầu tháng ${vnd(L)}; lợi nhuận tháng ${vnd(B)}${conLo > 0 ? ` — còn ${vnd(conLo)} phải bù trước khi phát sinh thưởng mới` : ""}.`
         : `Lợi nhuận tháng ${vnd(B)} ≤ 0 nên không có lợi nhuận đủ điều kiện chia.`;
 
+  const gop = new Set(cuaNguoiNhan.map((c) => c.key));
   const allocations: ProfitGateAllocation[] = input.claims.map((c) => {
+    // Khoản riêng của người nhận phần còn lại: HIỆN (tạm tính theo công thức cũ) nhưng không trả riêng.
+    if (gop.has(c.key)) {
+      return { ...c, eligible: 0, withheld: Math.max(0, c.provisional ?? 0), reason: "Gộp trong PHẦN CÒN LẠI của quỹ (người nhận phần còn lại theo quy chế) — không trả riêng; xem dòng «Phần còn lại của quỹ thưởng»." };
+    }
     const eligible = alloc.get(c.key) ?? 0;
     const prov = c.provisional ?? 0;
     const withheld = Math.max(0, prov - eligible);
@@ -265,12 +307,28 @@ export function evaluateProfitGate(input: ProfitGateInput): ProfitGateResult {
       else {
         const parts: string[] = [];
         if ((c.demand ?? 0) < prov) parts.push(`phần % lợi nhuận toàn công ty tính trên lợi nhuận đủ điều kiện ${vnd(E)} thay vì lợi nhuận tháng ${vnd(B)}`);
-        if (eligible < (c.demand ?? 0)) parts.push(`quỹ thưởng tối đa ${vnd(Q)} nhỏ hơn tổng đề nghị ${vnd(demandTotal)}, chia theo tỷ lệ`);
+        if (eligible < (c.demand ?? 0)) parts.push(`quỹ thưởng tối đa ${vnd(Q)} nhỏ hơn tổng đề nghị ${vnd(tongDeNghi)}, chia theo tỷ lệ`);
         reason = `Giảm vì ${parts.join("; ")}.`;
       }
     }
     return { ...c, eligible, withheld, reason };
   });
+  if (rid && residualKey) {
+    const amount = alloc.get(residualKey) ?? 0;
+    allocations.push({
+      key: residualKey,
+      employeeId: rid,
+      label: "Phần còn lại của quỹ thưởng",
+      provisional: 0,
+      demand: residualDemand,
+      eligible: amount,
+      withheld: 0,
+      reason:
+        vuot > 0
+          ? `Phần của người khác ${vnd(othersDemand)} vượt quỹ ${vnd(Q)} thêm ${vnd(vuot)} — phần còn lại bằng 0 (không bao giờ âm); người khác chia tỷ lệ cho vừa quỹ.`
+          : null,
+    });
+  }
 
   const established = input.opening.established;
   return {
@@ -286,6 +344,7 @@ export function evaluateProfitGate(input: ProfitGateInput): ProfitGateResult {
     closingCumulative: N + B - S,
     closingHighWater: E > 0 ? H + E - S : H,
     allocations,
+    residual: rid ? { employeeId: rid, poolCap: Q, othersDemand, amount: alloc.get(residualKey!) ?? 0, overdrawnBy: vuot, mergedKeys: [...gop] } : null,
   };
 }
 
@@ -329,6 +388,10 @@ export type ProfitGateSnapshot = {
   openingHighWater: number | null;
   eligibleProfit: number | null;
   poolCap: number | null;
+  /** Trần % ĐÃ DÙNG cho tháng này (lịch trần theo tháng). `undefined` = ảnh chụp trước 21/10/2026. */
+  poolCapPercent?: number | null;
+  /** Phần còn lại của quỹ (người nhận · Σ người khác · số vượt). `undefined` = ảnh chụp trước 21/10/2026. */
+  residual?: ProfitGateResidual | null;
   allocatedTotal: number | null;
   closingCumulative: number | null;
   closingHighWater: number | null;

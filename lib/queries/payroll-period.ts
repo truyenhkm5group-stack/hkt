@@ -203,6 +203,8 @@ export function buildPayrollSnapshot(report: PayrollReport, period: Period, key:
       openingHighWater: report.profitGate.result.openingHighWater,
       eligibleProfit: report.profitGate.result.eligibleProfit,
       poolCap: report.profitGate.result.poolCap,
+      poolCapPercent: report.profitGate.result.poolCapPercent,
+      residual: report.profitGate.result.residual,
       allocatedTotal: report.profitGate.result.allocatedTotal,
       closingCumulative: report.profitGate.result.closingCumulative,
       closingHighWater: report.profitGate.result.closingHighWater,
