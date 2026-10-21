@@ -4,7 +4,7 @@ Bộ tài liệu để chủ nền tảng nộp App Review cho app Meta **«Chot
 bằng `FACEBOOK_MESSENGER_APP_ID` / `FACEBOOK_MESSENGER_APP_SECRET`) — KHÔNG phải app «Đăng nhập bằng Facebook» như bản đầu ghi.
 Không ghi app secret, token hay mật khẩu nào vào kho — kho PUBLIC (App ID không phải bí mật).
 
-**Hồ sơ đã nộp 07/10/2026, đang xét.** Kiểm toán 17/10 và bộ video thay thế: [05-kiem-toan-ho-so-17-10.md](05-kiem-toan-ho-so-17-10.md)
+**Meta DUYỆT cả 5 quyền ngày 20/10/2026** — phần quay video / nộp lại ở 03–05 nay chỉ để tra; việc còn lại: [06 §5](06-kiem-thu-thuc-te-va-checklist.md#5-sau-khi-meta-duyệt-2010--từ-duyệt-tới-bán). Hồ sơ nộp 07/10/2026. Kiểm toán 17/10 và bộ video thay thế: [05-kiem-toan-ho-so-17-10.md](05-kiem-toan-ho-so-17-10.md)
 — đọc trước mọi mục khác.
 
 ## Vì sao cần (đo production 06/10/2026)

@@ -80,3 +80,50 @@ Không huỷ hồ sơ đang xét · không tạo app mới · không «Submit» 
 - [ ] Resubmit. Giữ nguyên cửa hàng demo, page thử, tài khoản người duyệt tới khi có kết quả.
 
 **Khi Meta duyệt:** `/platform` → cờ → «Mở cho mọi cửa hàng» (một lượt, có nhật ký) — đó là ngày MM-META-01.
+
+## 5. Sau khi Meta duyệt (20/10) — từ «duyệt» tới «bán»
+
+Đo 21/10/2026 (chỉ đọc): production chạy `7a0b95ea` = `main`; K3 + K8 CHƯA có trên `main` (chưa có PR); trang chính sách đang chạy
+vẫn 1.1 và vẫn ghi «tin nhắn cá nhân»; webhook GET sai token ⇒ 403, `/api/connect/messenger/start` chưa đăng nhập ⇒ 401 (đúng).
+
+### 5.1 Thao tác chủ shop trên Meta Developer (app `1794152675112502`)
+
+- [ ] **Phát hành**: thanh trên cùng App Mode = **Live** (app Business có thể hiện nút **Publish** thay cho công tắc). Chưa Live thì
+      quyền đã duyệt vẫn chỉ chạy cho người có vai trò.
+- [ ] **Permissions and features** của use case Messenger: 4 quyền page (và quyền thứ 5) hiện **Advanced access**.
+- [ ] **Business verification** vẫn Verified; **Data Use Checkup** hằng năm — để ý email Meta, quá hạn là mất quyền.
+- [ ] App settings → Basic: Privacy Policy URL + Data deletion URL vẫn mở được (nội dung sẽ đổi sang 1.2 khi deploy K3 — đó là
+      bổ sung cho đúng thực tế, không phải đổi cách dùng dữ liệu).
+- [ ] Webhooks (object Page): Callback URL đã xác minh; bật `messages · messaging_postbacks · message_echoes · feed`.
+- [ ] Valid OAuth Redirect URIs có `https://app.chotdontudong.com/api/connect/messenger/callback`.
+- [ ] KHÔNG đổi use case / quyền / app khác lúc này.
+
+### 5.2 Chạy thử end-to-end (MM-META-01) — sau khi deploy PR
+
+Dùng một tài khoản Facebook **KHÔNG có vai trò** trong app (đó mới là phép thử «Advanced access đã chạy») và một page thử của chủ
+shop (không nối Pancake). Cửa hàng: cửa hàng thử nội bộ (05 §7), cờ «Chỉ các cửa hàng được liệt kê» = mã cửa hàng đó.
+
+| # | Bước | ĐẠT khi |
+|---|---|---|
+| E1 | Kết nối Facebook Page | Log `[messenger-connect] … reason=OK … missing=-`; KHÔNG ra `PERMISSION_NEEDS_APP_REVIEW` |
+| E2 | Khối webhook theo page → Kiểm tra lại | Đã đăng ký đủ |
+| E3 | Khách nhắn page | Tin vào `/ai/sales-chatbot/inbox` trong vài giây |
+| E4 | AI trả lời | Khách nhận trên Messenger |
+| E5 | Khách gửi SĐT + địa chỉ, chốt món | Đơn (nháp / đơn) hiện trong ERP của ĐÚNG cửa hàng thử, đúng món + số lượng |
+| E6 | Bình luận dưới bài | Một tin riêng, đúng sản phẩm |
+| E7 | Một cửa hàng khác mở `/ai/sales-chatbot/messenger` | Vẫn «sắp mở» (cờ chưa mở cho tất cả) |
+
+Hoàn tác: cờ → Đóng · Gỡ page · đình chỉ cửa hàng thử (§3).
+
+### 5.3 Việc chặn thương mại hoá — theo thứ tự
+
+| Ưu tiên | Chặn | Xử lý | Ai |
+|---|---|---|---|
+| P0-1 | K3 + K8 chưa vào `main` / production | Mở PR → CI xanh → gộp → deploy | Chủ shop mở PR + duyệt deploy |
+| P0-2 | App chưa chắc đã Live / Publish | §5.1 | Chủ shop trên Meta |
+| P0-3 | Chưa có lượt end-to-end bằng tài khoản không vai trò | §5.2 E1–E7 | Chủ shop (tài khoản + page) |
+| P1-1 | Cờ vẫn ĐÓNG cho khách | Sau E1–E7 đạt: `/platform` → «Mở cho mọi cửa hàng» (có nhật ký) | Người vận hành |
+| P1-2 | Ba chỗ chữ GHI CỨNG vẫn hứa «sắp mở» / Pancake là lối chính, không đi theo cờ: `app/gioi-thieu/page.tsx:294,310` (trang công khai) · `lib/constants/help-guides.ts:112` · `app/(dashboard)/ai/channels/channels-panel.tsx:375` | PR nhỏ cùng ngày mở cờ (cho các chỗ này đọc cờ, như `go-live-card` đã làm) | Kỹ thuật |
+| P2-1 | Graph API `v21.0` hết hạn 21/01/2027 (MM-META-03) | Nâng phiên bản + chạy lại bài kiểm Messenger trước 12/2026 | Kỹ thuật |
+| P2-2 | Webhook rơi gói không tự nhặt lại (MM-META-02) | Job quét bù hội thoại theo page | Kỹ thuật |
+| P3 | Instagram DM | Một lần nộp riêng, không gộp | Sau |

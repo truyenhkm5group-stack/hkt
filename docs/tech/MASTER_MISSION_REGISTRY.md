@@ -266,14 +266,15 @@ Lý do: không mission nào dưới đây có ảnh TRƯỚC / SAU của trang p
 - TITLE: Kết nối Facebook Page trực tiếp — Meta chưa cấp quyền Page cho app nền tảng; App Review
 - BUSINESS_GOAL: Khách ngoài tự nối Page không qua Pancake (Launch Gate C6 — điều kiện «READY FOR FIRST PAYING CUSTOMER»)
 - OWNER: Chủ shop (App Dashboard Meta) · SESSION/AGENT: —
-- PRIORITY: P0 · STATUS: BLOCKED_EXTERNAL · CLASS: STILL REQUIRED
+- PRIORITY: P0 · STATUS: META_APPROVED_NOT_LIVE · CLASS: STILL REQUIRED
 - BRANCH / PR: — (mã phía ERP đã xong: #603 #608 #611 #614 #628)
 - BLOCKERS: thêm use case «Engage with customers on Messenger from Meta» + `pages_show_list` · `pages_messaging` · `pages_manage_metadata` · `pages_read_engagement`; bấm «Kết nối Facebook Page» một lần; nộp App Review / Business Verification
 - DONE: chẩn đoán 7 lý do, hướng dẫn chủ shop · REMAINING: việc của chủ shop + Meta duyệt
 - ACCEPTANCE_CRITERIA: `LAUNCH_GATE.md` §5 — smoke bằng tài khoản / Page KHÔNG có vai trò trong app
 - PRODUCTION_EVIDENCE: log 06/10 `reason=PERMISSION_NOT_GRANTED granted=public_profile` · hồ sơ App Review app `1794152675112502` NỘP 07/10, đang xét 5 quyền
 - AUDIT 17/10 (`docs/meta-app-review/05-kiem-toan-ho-so-17-10.md`): video đã nộp CHƯA XÁC MINH (không có trên máy / Drive chưa đọc được), chứng cứ gián tiếp cho thấy nộp trước khi luồng nối page chạy được; chính sách bảo mật production v1.1 chưa có mục Messenger (K3); tài khoản người duyệt thấy «sắp mở» thay cho nút vì không có đường bật `meta.direct-connect.open` (K8 = MM-FU-712)
-- NEXT_ACTION: K3 (chính sách 1.2) + K8 (công tắc cờ) CÓ MÃ trên nhánh `claude/meta-app-review-audit` — chủ shop đọc mục 3a rồi gộp + deploy; sau deploy: K4 cửa hàng demo (05 §7) → smoke §6.2 → quay 4 video (05 §2); chủ shop O1–O6 (05 §4). KHÔNG huỷ hồ sơ đang xét · LAST_UPDATED: 2026-10-17
+- APP REVIEW: **Meta DUYỆT cả 5 quyền ngày 20/10/2026** (chủ shop báo) — không làm lại hồ sơ / video.
+- NEXT_ACTION: chủ shop mở PR nhánh `claude/meta-app-review-audit` (K3 chính sách 1.2 + K8 công tắc cờ) → gộp → deploy; chủ shop kiểm Publish/Live + Advanced Access trên Meta; smoke MM-META-01 bằng tài khoản KHÔNG vai trò; đạt ⇒ /platform cờ «Mở cho mọi cửa hàng» + đổi chữ «sắp mở» ở 3 chỗ ghi cứng (gioi-thieu · help-guides · channels-panel) · LAST_UPDATED: 2026-10-21
 
 #### MM-META-01 — Smoke Meta Direct bằng tài khoản ngoài sau khi Meta duyệt
 - OWNER: Integration Lead · PRIORITY: P0 · STATUS: BLOCKED_EXTERNAL · CLASS: STILL REQUIRED
