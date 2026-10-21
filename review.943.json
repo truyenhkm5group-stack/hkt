@@ -1,0 +1,8 @@
+{
+  "pr": 943,
+  "sha": "7bd17098730afa605d5b6ceda2cd23d2bbd2d02c",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T06:44:37.023Z",
+  "note": "review lead: «mai» trong tên nơi (Hoàng Mai…) không còn bị đọc thành «giao ngày mai» — tên nơi lấy từ DANH MỤC địa giới (adminPlaceNames, gồm tên cũ), giới từ/tiền tố nơi chốn; cặp trùng cụm thời gian («giờ mai», «mai hả») không coi là nơi; 6 tên trùng chữ chat khi gập dấu chỉ nhận khi có dấu (bài #855 «Dạ mai giao» giữ đúng). Ghi chú hẹn giờ bỏ vế địa chỉ/SĐT. Regex chỉ nhìn-trước (an toàn Safari"
+}
