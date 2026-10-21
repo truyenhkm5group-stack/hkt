@@ -401,7 +401,9 @@ const CHAT_STREET_STOP = /(?:^|[\s,.])(?:giao|gửi|gui|ship|lâu|quá|mua|lấy
 /** Tiểu từ cuối câu chat (một hoặc nhiều, kèm dấu câu). */
 const CHAT_TAIL_PARTICLES = /(?:[\s,.!]+(?:nha|nhé|nhe|nhá|ạ|a|thôi|nữa|em|chị|anh|shop|ok|nhen|nghen|luôn|rồi|đi))+[\s.!,]*$/u;
 /** Tiền tố nơi chốn CÓ DẤU (hoặc viết tắt không mơ hồ) mở đầu một phần đường. */
-const CHAT_STREET_PREFIX = /^(?:khu|kđt|kdt|thôn|xóm|ấp|bản|ngõ|ngách|hẻm|kiệt|đường|phố|tổ|tdp|kp|kv|khối|khóm|buôn|làng|tiểu khu|cụm|lô|tòa|toà|chung cư|cc|số)\s+[\p{L}\d]/u;
+// Mốc địa danh (P0 21/10/2026, ca «Ngọc Bích»: «KCN Bắc Thăng Long, cổng công ty SANTOMAS») cũng là nơi giao: khu / cụm công nghiệp viết
+// tắt, khu chế xuất, công ty, cổng công ty. Chỉ là DÁNG địa chỉ — tỉnh / xã vẫn phải đọc được từ danh mục hoặc hỏi khách, không đoán.
+const CHAT_STREET_PREFIX = /^(?:khu|kđt|kdt|kcn|kcx|ccn|thôn|xóm|ấp|bản|ngõ|ngách|hẻm|kiệt|đường|phố|tổ|tdp|kp|kv|khối|khóm|buôn|làng|tiểu khu|cụm|lô|tòa|toà|chung cư|cc|công ty|cty|cổng|số)\s+[\p{L}\d]/u;
 
 /**
  * Phần đường của MỘT CÂU CHAT có thật là số nhà / đường / khu không — chặt hơn `streetLooksReal` (review #855: «2 bộ size L giao Hà Nội
