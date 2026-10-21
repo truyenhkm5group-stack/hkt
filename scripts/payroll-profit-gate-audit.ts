@@ -136,6 +136,21 @@ async function main() {
     tongTamTinh += tt;
     tongDuDieuKien += dk;
     tomTat(`${m}: trạng thái ${r.profitGate.result.status} · giả định cổng ${g.status} · ${g.allocations.filter((a) => (a.provisional ?? 0) > (a.eligible ?? 0)).length} khoản bị giữ lại`);
+    /*
+      THẬT THEO QUY CHẾ ĐÃ KHAI (chủ shop 21/10/2026: trần theo tháng + người nhận phần còn lại). Phần mô phỏng ở trên
+      dùng `--cap` / `--opening` của phép đo và KHÔNG có người nhận phần còn lại — nó không phải con số bảng lương in.
+      Đây là ĐÚNG kết quả `getPayrollReport` của tháng: tên + tiền từng người chỉ ở phần MÃ HOÁ, kênh tóm tắt chỉ số tổng.
+    */
+    const g0 = r.profitGate.result;
+    const conLai = g0.residual;
+    console.log(`   THẬT (quy chế đã khai): ${g0.status}${g0.established ? "" : " (chưa kết luận)"} · trần tháng ${g0.poolCapPercent === null ? "—" : `${g0.poolCapPercent}%`} · LN đủ ĐK ${tien(g0.eligibleProfit)} · quỹ ${tien(g0.poolCap)} · đã chia ${tien(g0.allocatedTotal)}${conLai ? ` · phần còn lại ${tien(conLai.amount)} · người khác ${tien(conLai.othersDemand)}${conLai.overdrawnBy > 0 ? ` · VƯỢT quỹ ${tien(conLai.overdrawnBy)}` : ""}` : ""}`);
+    console.log(`     vì sao: ${g0.message}`);
+    for (const l of r.lines) {
+      if (!l.profitShare.claims.length) continue;
+      console.log(`     THẬT ${(l.employee.shortName || l.employee.name).padEnd(14)} tạm tính ${tien(l.profitShare.provisional).padStart(13)}   đủ ĐK ${tien(l.profitShare.eligible).padStart(13)}   thực nhận được duyệt ${tien(l.salary).padStart(13)}${l.profitShare.reasons.length ? `   · ${l.profitShare.reasons.join(" | ").slice(0, 300)}` : ""}`);
+    }
+    tomTat(`${m} THẬT: ${g0.status} · trần ${g0.poolCapPercent ?? "—"}% · quỹ ${tien(g0.poolCap)} · đã chia ${tien(g0.allocatedTotal)}${conLai ? ` · có người nhận phần còn lại${conLai.overdrawnBy > 0 ? " · người khác VƯỢT quỹ" : ""}` : " · không có người nhận phần còn lại"}`);
+    // Kênh tóm tắt là log CÔNG KHAI: phần còn lại là tiền của MỘT người ⇒ chỉ in ở phần mã hoá phía trên.
 
     // ─── V2: sổ mã giả định + đối soát ───
     const t = r.marketers.totals;
