@@ -3,7 +3,7 @@
   "mission_id": "return-reason-filters",
   "title": "2b — bộ lọc khối lý do hoàn: nguồn đơn · nhân viên care · ĐVVC · bưu cục · tỉnh · trạng thái",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-rr-filters",
@@ -18,7 +18,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-21T15:34:22.703Z",
-  "updated_at": "2026-10-21T15:34:22.703Z",
-  "last_heartbeat": "2026-10-21T15:34:22.703Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-21T20:01:02.085Z",
+  "last_heartbeat": "2026-10-21T20:01:02.085Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/return-reason-filters",
+    "sha": "be04ec2f5a828152837ceed9cb0871c120b9bd67",
+    "at": "2026-10-21T20:01:02.085Z",
+    "actor": "DESKTOP-56TH98Y:wt-rr-filters",
+    "title": "2b — bộ lọc khối lý do hoàn: nguồn đơn · nhân viên care · ĐVVC · bưu cục · tỉnh · trạng thái",
+    "summary": "Sáu bộ lọc chỉ cho khối E/E2 (vào baseRows ⇒ bảng lý do, drilldown, nguyên nhân·giải pháp cùng tập; D và KPI đọc bản không lọc). Tỉnh quy về tỉnh mới bằng findProvince + «Chưa xác định tỉnh»; care theo owner_id đợt mới nhất (distinct on, không câu con theo đơn), «Chưa ai cầm» ≠ «Không có ca»; ĐVVC «Chưa có vận đơn» ≠ «Vận đơn chưa ghi ĐVVC»; bưu cục là ô tìm không gợi ý, bỏ vị trí rỗng, độ phủ cạnh ô; trạng thái theo ORDER_OUTCOME. Số đếm ô chọn: tập trước lọc 2b, chỉ đơn trong kỳ. Mọi trường vào URL + khoá nhớ đệm; trang mặc định giữ khoá giữ ấm.",
+    "tests": [
+      "cổng sạch @be04ec2f5: TYPECHECK 0 · LINT 0 · TEST 0 (TẤT CẢ KIỂM THỬ ĐẠT) · BUILD 0",
+      "tests/return-reason-filters.test.ts trong K06: hàm thuần · tham số URL · CSDL · mã nguồn",
+      "đột biến 9/9 đỏ"
+    ]
+  }
 }
