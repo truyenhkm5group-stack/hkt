@@ -1,0 +1,8 @@
+{
+  "pr": 947,
+  "sha": "5f381a42c4ddcb7b3e273c1de08a2b0b9573850c",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T08:44:42.403Z",
+  "note": "review lead: chủ shop 21/10 «tạo việc cho từng phòng trên /work» — làm đúng luật 19: SOURCE PAYROLL_RECON chiếu từng mục danh sách phê duyệt Trung tâm đối soát lên hàng đợi đúng PHÒNG, link màn hình nhập, tự rời hàng đợi khi điều kiện hết; 0 ghi production; SLA/phòng ở work-sla/work-ownership; kiểm ALERT_KINDS_OWNED_ELSEWHERE."
+}
