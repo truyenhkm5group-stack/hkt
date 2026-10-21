@@ -623,6 +623,7 @@ import { testOrderTruthStamp } from "./order-truth-stamp.test";
 import { testConversationTrace } from "./conversation-trace.test";
 import { testMessengerHealth } from "./messenger-health.test";
 import { testMessengerWebhookRejections } from "./messenger-webhook-rejections.test";
+import { testMessengerWebhookAlerts } from "./messenger-webhook-alerts.test";
 import { testMessengerConfigReport } from "./messenger-config-report.test";
 import { testConnectorsLegacy } from "./connectors-legacy.test";
 import { testNativeOrderSync } from "./native-order-sync.test";
@@ -3276,6 +3277,7 @@ async function main() {
     await testMessengerHealth();
     // M4: sổ gói webhook bị từ chối (0251) · check-integrations --messenger khai CÓ / KHÔNG, không in giá trị.
     await testMessengerWebhookRejections();
+    await testMessengerWebhookAlerts();
     testMessengerConfigReport();
     testConnectorsLegacy();
     // Shop CHỈ nối Facebook trực tiếp: ghi đơn từ hội thoại đọc sổ tin ERP (không Pancake) + trọn đường nhận → bot → nhân viên →

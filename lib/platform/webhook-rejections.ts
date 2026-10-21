@@ -1,5 +1,10 @@
 import { and, eq, gte, lt, sql } from "drizzle-orm";
-import { getPlatformDb, schema } from "@/db";
+import { getDb, getPlatformDb, schema } from "@/db";
+import { activeUserIdsWhoCan } from "@/lib/auth/session";
+import { messengerWebhookAlertKey, messengerWebhookAlertsDue } from "@/lib/constants/messenger-webhook-alerts";
+import { sendInboxMessages } from "@/lib/inbox/send";
+import { withOrganization } from "@/lib/platform/context";
+import { getHomeOrganization } from "@/lib/platform/organizations";
 
 /**
  * ═══════════ SỔ GÓI WEBHOOK BỊ TỪ CHỐI (0251 · M4 mục 4, 21/10/2026) — CSDL NHÀ, CHỈ MÁY CHỦ ═══════════
@@ -46,6 +51,14 @@ export async function noteWebhookRejection(provider: WebhookRejectionProvider, r
       .values({ provider, reason, bucket: rejectionBucket(at), count: n, lastAt: at })
       .onConflictDoUpdate({ target: [t.provider, t.reason, t.bucket], set: { count: sql`${t.count} + ${n}`, lastAt: sql`greatest(${t.lastAt}, excluded.last_at)` } });
     await pdb.delete(t).where(and(eq(t.provider, provider), lt(t.bucket, new Date(at.getTime() - WEBHOOK_REJECTION_RETENTION_DAYS * DAY_MS))));
+    // Ngưỡng chủ shop duyệt 21/10 (lib/constants/messenger-webhook-alerts.ts): kiểm NGAY sau lượt ghi — mỗi (nguồn, lý do) tối đa một
+    // lượt kiểm mỗi phút để một trận dò URL không biến thành một câu đọc sổ cho mỗi gói.
+    const slot = `${provider}:${reason}`;
+    const prev = lastAlertCheck.get(slot);
+    if (prev === undefined || at.getTime() - prev >= WEBHOOK_ALERT_CHECK_MIN_INTERVAL_MS) {
+      lastAlertCheck.set(slot, at.getTime());
+      await alertWebhookRejections(provider, at);
+    }
     return true;
   } catch (error) {
     if (!isMissingTable(error)) console.error(`[webhook-rejections] ghi ${provider}/${reason} hỏng: ${error instanceof Error ? error.message.slice(0, 200) : "lỗi lạ"}`);
@@ -81,3 +94,49 @@ export async function webhookRejectionSummary(provider: WebhookRejectionProvider
     return null;
   }
 }
+
+/** Tối thiểu giữa hai lượt kiểm ngưỡng của CÙNG (nguồn, lý do) — chặn tần suất trong tiến trình, không phải ngưỡng nghiệp vụ. */
+export const WEBHOOK_ALERT_CHECK_MIN_INTERVAL_MS = 60_000;
+const lastAlertCheck = new Map<string, number>();
+
+/** Chỉ cho kiểm thử: quên trần tần suất kiểm ngưỡng. */
+export function resetWebhookAlertThrottleForTests(): void {
+  lastAlertCheck.clear();
+}
+
+/**
+ * Luật nào tới ngưỡng ⇒ MỘT dòng `notifications` (loại SYSTEM, khoá chống trùng theo ngày giờ Việt Nam) ở tổ chức NHÀ + tin hộp thư
+ * cho người có `platform:operate`. Cùng đường với cảnh báo «Page cần nối lại» (lib/sales-chatbot/messenger-health.ts): hiện ở chuông /
+ * hộp thư / `/alerts` — Lark / Telegram chỉ đẩy dòng do lượt `alerts` tạo. Trả về khoá đã TẠO MỚI. KHÔNG BAO GIỜ ném.
+ */
+export async function alertWebhookRejections(provider: WebhookRejectionProvider, now: Date = new Date()): Promise<string[]> {
+  try {
+    const rows = await webhookRejectionSummary(provider, now);
+    if (!rows) return [];
+    const due = messengerWebhookAlertsDue(rows);
+    if (!due.length) return [];
+    const home = await getHomeOrganization();
+    return await withOrganization(home.code, async () => {
+      const db = await getDb();
+      const created: string[] = [];
+      for (const { rule, count24h } of due) {
+        const key = messengerWebhookAlertKey(rule.reason, now);
+        const title = rule.title(count24h);
+        const ins = await db
+          .insert(schema.notifications)
+          .values({ kind: "SYSTEM", severity: rule.severity, title, body: rule.body, href: "/platform", entityType: "PLATFORM_WEBHOOK", entityId: `${provider}:${rule.reason}`, dedupeKey: key, occurredAt: now })
+          .onConflictDoNothing({ target: schema.notifications.dedupeKey })
+          .returning({ id: schema.notifications.id });
+        if (!ins.length) continue;
+        const users = await activeUserIdsWhoCan("platform:operate");
+        await sendInboxMessages(users.map((userId) => ({ userId, kind: "CONNECTION_BROKEN", title, body: rule.body, href: "/platform", dedupeKey: `${key}:${userId}` })), db);
+        created.push(key);
+      }
+      return created;
+    });
+  } catch (error) {
+    console.error(`[webhook-rejections] cảnh báo ${provider} hỏng: ${error instanceof Error ? error.message.slice(0, 200) : "lỗi lạ"}`);
+    return [];
+  }
+}
+
