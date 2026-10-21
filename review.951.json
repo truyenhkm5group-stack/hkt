@@ -1,0 +1,8 @@
+{
+  "pr": 951,
+  "sha": "1b0fbdf5c1fbd3c96fb04f955e8a574a81936bab",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T11:09:41.610Z",
+  "note": "review lead: bộ nhắc tự động KHÔNG gửi tin bán hàng cho hội thoại còn đơn đã chốt CHƯA kết cục (kể cả lượt mua trước, linkedOrdersFor includePast) — OPEN_OUTCOMES chuẩn (lib/constants/truth); ≤ DWELL_SLA.PENDING.exception (96 giờ) ⇒ PENDING_PRIOR_ORDER, quá ⇒ _STALE (vẫn không gửi, để người); cửa sổ CONFIRMED_ORDER_WATCH_DAYS = 30 (khai giả định, org-order-audit dùng chung) để khách mua một lần ở "
+}
