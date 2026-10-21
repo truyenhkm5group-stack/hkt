@@ -270,14 +270,14 @@ export function inboxOrderBy(filter: InboxFilter, unread: SQL<boolean>, exactFir
  * nhắc `"state"` 26 lần mỗi dòng, câu lấy hàng 11 lần (đo bằng chữ câu) — và Postgres GIẢI NÉN TOÀN BỘ giá trị TOAST cho MỖI lần `->`
  * (không giữ bản đã giải nén giữa các biểu thức). `state` lớn (hồ sơ khách cũ, giỏ, báo giá, đồng bộ đơn…) ⇒ chi phí nhân lên theo cỡ
  * của nó: PGlite 4.000 hội thoại, state ~60 KB sau nén ⇒ listInbox 6,3 giây; state rỗng ⇒ 0,1 giây.
- * Sửa: (1) các câu quét cả hộp thư đọc từ một bảng dẫn xuất CÙNG TÊN `sales_chat_conversations` mà cột `state` chỉ còn ba nhánh SQL
+ * Sửa: (1) các câu quét cả hộp thư đọc từ một bảng dẫn xuất CÙNG TÊN `sales_chat_conversations` mà cột `state` chỉ còn các nhánh SQL
  * thật sự đọc (`INBOX_STATE_SQL_KEYS` — bài kiểm quét chữ câu, nhánh mới mà quên khai ⇒ đỏ), dựng từ state giải nén MỘT lần mỗi dòng;
  * mọi mảnh SQL dùng chung (inbox-states · handoff-routing) giữ nguyên chữ. (2) Câu lấy hàng tách HAI pha: pha 1 chỉ xếp + cắt trang (mã
  * hội thoại, cờ chưa đọc — không cột nào cần `state` trừ khi bộ lọc cần), pha 2 đọc chi tiết + `state` ĐẦY ĐỦ (`state_full`) cho đúng
  * các dòng của trang. Trước đây mọi biểu thức «rẻ» của danh sách cột (tên / SĐT trong state, AI im…) được Postgres tính cho CẢ hộp thư
  * trước phép xếp.
  */
-export const INBOX_STATE_SQL_KEYS = ["control", "handoff", "customer"] as const;
+export const INBOX_STATE_SQL_KEYS = ["control", "handoff", "customer", "knownPhone"] as const;
 
 /** Cột của hội thoại đọc qua bảng dẫn xuất cùng tên (drizzle chỉ nhận cột của bảng có trong FROM ⇒ bọc `sql`, giữ phép đổi kiểu của cột). */
 function viaSource<T extends AnyPgColumn>(col: T): SQL<T["_"]["data"]> {

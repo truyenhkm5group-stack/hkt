@@ -14,6 +14,7 @@ import { certainPhonesOf, loadCustomer360 } from "@/lib/sales-chatbot/customer-3
 import { SHOP_SAID, silenceFallbackText } from "@/lib/sales-chatbot/engine";
 import { inboxPhoneOf, knownPhoneOf, knownPhonePrompt, knownPhoneStateOf, normalizeVnPhone as kcNormalize, previousAddressQuestion, usableKnownPhone } from "@/lib/sales-chatbot/known-contact";
 import { normalizeVnPhone } from "@/lib/sales-chatbot/returning";
+import { listInbox } from "@/lib/sales-chatbot/inbox";
 import { roundCheckOrderOf } from "@/lib/sales-chatbot/round-check";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { setSettingJson } from "@/lib/settings";
@@ -148,6 +149,10 @@ async function testChatTurn() {
       assert.ok(!all.some((s) => s.includes("Số 12")), `[${c.key}] không đọc số nhà cho khách: ${all.join(" | ")}`);
       if (c.key === "kc-cung-luot") {
         assert.equal(st.knownPhone?.phone, PHONE, "SĐT đã biết vào state (hộp thư đọc)");
+        // Danh sách hộp thư đọc bản state RÚT GỌN (INBOX_STATE_SQL_KEYS) — khoá thiếu thì ô này rỗng dù state có số.
+        const listed = await listInbox(await ctx.admin(), { filter: "ALL", limit: 100 });
+        const row = "rows" in listed ? listed.rows.find((x) => x.id === ctx.conversationId) : undefined;
+        assert.equal(row?.customerPhone, PHONE, `danh sách hộp thư hiện SĐT đã biết, không «Chưa có SĐT»: ${JSON.stringify(row ?? listed).slice(0, 300)}`);
         assert.ok(all.length > 0, "lượt không im");
       }
       if (c.key === "kc-tu-nap-sdt") {
