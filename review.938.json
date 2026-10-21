@@ -1,0 +1,8 @@
+{
+  "pr": 938,
+  "sha": "01e387907cb1592a6659df848fd4d5311060b2cb",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T05:37:14.306Z",
+  "note": "review lead: khiếu nại giao chậm ⇒ ghi HANDOFF (nextFollowupAt null) TRƯỚC, mở ca cs_cases URGE_DELIVERY khoá theo đơn (lỗi ghi ca không chặn), rồi MỘT câu xin lỗi + đã chuyển nhân viên trên mọi kênh, không hứa mốc; notify khoá theo đơn. Lý do chuyển nêu số ngày chờ + «ERP chưa có thông tin vận chuyển — kiểm POS/ĐVVC» (HSLC vận đơn ngoài ERP ⇒ CHƯA BIẾT, không phải chưa gửi). Phân biệt than chậm v"
+}
