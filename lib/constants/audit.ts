@@ -112,6 +112,7 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   "approval.expire": "Yêu cầu duyệt hết hiệu lực",
   "approval.request": "Xin duyệt hai bước",
   "approval.skip": "Làm không qua duyệt (chưa cưỡng chế / dưới ngưỡng)",
+  "approval.owner-self": "Chủ shop tự duyệt (quy định 21/10/2026 — chủ shop làm bảng lương)",
   "approval.execute": "Thực hiện việc đã được duyệt",
   "approval.execute_failed": "Việc đã duyệt thực hiện hỏng — trả lại lời duyệt",
   "approval.blocked": "Chặn: cần duyệt mà chưa có người đủ tư cách duyệt",
