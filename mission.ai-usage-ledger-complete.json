@@ -50,18 +50,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-21T09:35:32.968Z",
-  "updated_at": "2026-10-21T09:37:19.241Z",
-  "last_heartbeat": "2026-10-21T09:36:08.837Z",
+  "updated_at": "2026-10-21T12:54:51.239Z",
+  "last_heartbeat": "2026-10-21T12:54:51.239Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/ai-usage-ledger-complete",
-    "sha": "d699e351f201cd3924482a14365759df81611479",
-    "at": "2026-10-21T09:36:08.837Z",
+    "sha": "03c90e1de83797ea37d3fd3c7fa03ac99e5117d1",
+    "at": "2026-10-21T12:54:51.239Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Sổ chi phí AI ghi đủ: mọi đường gọi khai workload (danh sách đóng) + conversation_id + khoá lời gọi đếm được retry/trùng",
     "summary": "",
     "tests": [
-      "worker code-erp-02: tsc · eslint ĐẠT · chạy riêng ĐẠT testAiUsageLedgerComplete (mới) + testAiUsage, testPlatformAiModel, pricing-billing, pricing-v1, sales-experiment-report, migration journal/upgrade/serve-compat, self-service-journey, inbox-advanced, tenant-attack, repo-integrity, test-hygiene · 3 đột biến ĐỎ · CHƯA ĐO cả bộ + build (CI)"
+      "vòng 2: sổ lib/constants/ai-systems.ts khai loại việc theo AI_USAGE_WORKLOADS (AI-03 followup · AI-04 playbook/lessons/inbox_feedback/quick_reply_learn · AI-05 copilot · AI-06 ai_builder · AI-07 lead_hunter · AI-08 creative), bài legal-registers SIẾT không nới. Shard 1/4 không tái hiện cục bộ (dáng runner hết RAM PGlite). Cổng 4 shard cây riêng TEST_SHARD 1–4/4 EXIT 0; tsc ĐẠT"
     ]
   }
 }
