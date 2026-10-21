@@ -3,7 +3,7 @@
   "mission_id": "return-reason-khach-vang-nha",
   "title": "Tách «Khách vắng nhà» khỏi «Không liên lạc được»: chữ ĐVVC «khách hàng nghỉ, không có nhà» ⇒ CUSTOMER_AWAY",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-vang-nha",
@@ -22,7 +22,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-21T04:17:34.789Z",
-  "updated_at": "2026-10-21T04:17:34.789Z",
-  "last_heartbeat": "2026-10-21T04:17:34.789Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-21T08:34:08.501Z",
+  "last_heartbeat": "2026-10-21T08:34:08.501Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/return-reason-khach-vang-nha",
+    "sha": "f25de1238b601f3ac5e392854a85537fd7b5960b",
+    "at": "2026-10-21T08:34:08.501Z",
+    "actor": "DESKTOP-56TH98Y:wt-vang-nha",
+    "title": "Tách «Khách vắng nhà» khỏi «Không liên lạc được»: chữ ĐVVC «khách hàng nghỉ, không có nhà» ⇒ CUSTOMER_AWAY",
+    "summary": "«Khách hàng nghỉ, không có nhà» ⇒ CUSTOMER_AWAY ⇒ nhóm Khách vắng nhà (Giao vận), tách khỏi Không liên lạc được (Bán hàng); reason-coverage kiểm từng hàng khối «Nguyên nhân hoàn và giải pháp»",
+    "tests": [
+      "cổng cây sạch @f25de1238: tsc 0 · lint 0 · npm test TẤT CẢ KIỂM THỬ ĐẠT · build 0",
+      "đột biến 3/3 đỏ",
+      "đo tập câu db-query run 39543012056"
+    ]
+  }
 }
