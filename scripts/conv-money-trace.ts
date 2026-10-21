@@ -504,6 +504,31 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
   return true;
 }
 
+/**
+ * Lý do «chưa gửi» của lời mời sau chốt mà lượt ĐỦ điều kiện mời (cửa sổ mở, câu dùng được) — khác HANDOFF / ghi đơn hỏng / lượt hỏng
+ * (không mời là đúng) và MEDIA_SLOT_BUSY (câu mẫu khác đã gửi ảnh trong lượt).
+ */
+export const UPSELL_SKIP_VALID_NOT_SENT: ReadonlySet<string> = new Set(["NO_CONFIRM_MESSAGE", "GUARD_BLOCKED", "APPEND_FAILED"]);
+
+/** Cửa sổ quanh lời mời ERP để tìm ảnh page gửi — CÙNG số với `PAGE_MEDIA_ROUND_FALLBACK_MS` (tools.ts; bài kiểm đối chiếu). */
+export const UPSELL_DUP_WINDOW_HOURS = 24;
+
+export type UpsellScanRow = { pco: Record<string, unknown> | null; confirmed: Record<string, unknown> | null; cancel: unknown; declined: unknown; dispute: Record<string, unknown> | null; pageMedia: boolean };
+
+/**
+ * H · UPSELL_SKIPPED_VALID_TEMPLATE / I · UPSELL_DUPLICATE (P0 21/10/2026, ca HSLC «Mai Le») cho lượt chốt GẦN NHẤT của một hội thoại
+ * (`state.postConfirmOffer` — lượt mua mới ghi đè lượt cũ). H: cửa sổ đóng CHỈ vì đơn còn chờ xác minh ĐỊA CHỈ (không huỷ · không từ chối ·
+ * không tranh chấp giá), hoặc lời mời đủ điều kiện mà không đi (`UPSELL_SKIP_VALID_NOT_SENT`). I: ERP đã gửi lời mời VÀ page / Pancake gửi
+ * ảnh trong ± `UPSELL_DUP_WINDOW_HOURS` giờ. HÀM THUẦN.
+ */
+export function upsellScanVerdict(r: UpsellScanRow): { sent: boolean; skippedValid: boolean; duplicate: boolean } {
+  const p = r.pco ?? {};
+  const sent = p.sent === true;
+  const addressOnly = r.confirmed?.valid === false && r.confirmed?.pending === "ADDRESS" && !r.cancel && !r.declined && r.dispute?.open !== true;
+  const skippedValid = (p.outcome === "ORDER_PROBLEM" && addressOnly) || (p.outcome === "NOT_SENT" && UPSELL_SKIP_VALID_NOT_SENT.has(String(p.notSentReason ?? "")));
+  return { sent, skippedValid, duplicate: sent && r.pageMedia };
+}
+
 /** Quét mẫu chung: (A) «nói rõ hơn» có / không có tin khách mới · (B) số TỔNG trong tin bot ≠ tổng giỏ / nháp ngay trước đó. */
 export async function scanPatterns(db: Db, days: number, now: Date, since?: Date) {
   const from = since ?? new Date(now.getTime() - days * 86_400_000);
@@ -523,6 +548,9 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   // G · UNANSWERED_SECONDARY_INTENT (P0 21/10/2026, ca «Xuân Đoàn»): tin khách có SỐ LƯỢNG + câu hỏi THỜI GIAN GIAO («Cho chị 2kg. Mấy ngày
   // nhận được hàng?») mà tin bot NGAY SAU không đụng tới chuyện giao (giao / nhận / ngày / địa chỉ / ship). Mẫu số = số tin hai ý như thế.
   const G = { base: 0, miss: 0, convs: new Set<string>() };
+  // J · BANNED_REPLY_USED (P0 21/10/2026, chủ shop bỏ câu «nhân viên sẽ xác nhận lại địa chỉ»): tin bot mang đúng câu ấy. Mẫu số = số lượt
+  // công cụ chốt đơn thành công (kết quả `"confirmed":true`) trong kỳ — mỗi lượt chốt là một chỗ câu ấy có thể xuất hiện.
+  const J = { base: 0, msgs: 0, convs: new Set<string>() };
   const hashConv = (id: string) => createHash("sha256")["update"](id).digest("hex").slice(0, 8);
   const rowsQr = await listQuickReplies().catch(() => []);
   const tpls = rowsQr.map((r) => ({ title: r.title, answer: r.answer, head: quickReplyHead(r.answer), images: r.images.length }));
@@ -576,6 +604,7 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
         }
         for (const b of blocksOf(r.content)) {
           if (b.type !== "tool_result" || b.isError) continue;
+          if (typeof b.content === "string" && b.content.includes('"confirmed":true')) J.base += 1;
           const mo = moneyOfToolResult(b.content);
           if (mo && (mo.total !== null || mo.subtotal !== null) && mo.lines.length) quoteTotal = mo.total ?? mo.subtotal;
           // Câu mẫu gửi qua công cụ là một tin bot tới khách — sau nó, «nói rõ hơn» không có tin khách mới là câu thừa.
@@ -593,6 +622,10 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
         lines.push({ who: "SHOP", text: t });
         prevBot = t.slice(SHOP_SAID.length).trim();
         continue;
+      }
+      if (t.includes(CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS)) {
+        J.msgs += 1;
+        J.convs.add(r.conv);
       }
       const headF = foldVi(t).replace(/\s+/g, " ").trim().slice(0, 60);
       if (qtyAnswer && userSince && (/\d+(?:[.,]\d+)?\s?kg\s+hay\s+\d+(?:[.,]\d+)?\s?kg|muốn (?:mua|lấy) \d/iu.test(t) || sentHeads.has(headF))) {
@@ -635,10 +668,12 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   console.log(`  mẫu F băm (≤ 20): ${[...F.convs].slice(0, 20).map(hashConv).join(" ") || "—"}`);
   console.log(`  mẫu G (≤ 20): ${[...G.convs].slice(0, 20).join(" ") || "—"}`);
   console.log(`  mẫu G băm (≤ 20): ${[...G.convs].slice(0, 20).map(hashConv).join(" ") || "—"}`);
+  console.log(`  mẫu J (≤ 20): ${[...J.convs].slice(0, 20).join(" ") || "—"}`);
   for (const [title, n] of [...D.byTitle.entries()].sort((a, b) => b[1] - a[1])) console.log(`  D câu mẫu «${title}»: ${n} tin`);
   tomTat(`conv-money-trace quét ${span}: ${ids.length}${convs.length > TRACE_MAX_SCAN_CONVERSATIONS ? "+" : ""} hội thoại`);
   tomTat(`F CUSTOMER_SELECTED_QUANTITY_BUT_BOT_REASKED — trả lời số lượng ngắn mà bot hỏi lại / gửi lại câu đã gửi: ${F.msgs} tin / ${F.convs.size} hội thoại · câu mẫu ${F.quick} (0 token) · AI ${F.model} (lời gọi model thừa) · mẫu số ${F.base} tin khách chỉ là câu trả lời số lượng (MEASURED)`);
   tomTat(`G UNANSWERED_SECONDARY_INTENT — tin khách có số lượng + hỏi thời gian giao mà tin bot ngay sau không đụng tới chuyện giao: ${G.miss} tin / ${G.convs.size} hội thoại · mẫu số ${G.base} tin hai ý (MEASURED)`);
+  tomTat(`J BANNED_REPLY_USED — tin bot mang câu «nhân viên sẽ xác nhận lại địa chỉ»: ${J.msgs} tin / ${J.convs.size} hội thoại · mẫu số ${J.base} lượt chốt đơn thành công (MEASURED)`);
   tomTat(`A câu «nói rõ hơn» của engine: ${A.total} tin · KHÔNG có tin khách mới kể từ tin bot trước ${A.noNew} tin / ${A.convs.size} hội thoại`);
   tomTat(`B tin bot có số TỔNG ≠ tổng giỏ / nháp máy chủ ngay trước: ${B.msgs} tin / ${B.convs.size} hội thoại · số TỔNG khi chưa có giỏ / nháp nào ${B.noQuote} tin`);
   tomTat(`D câu mẫu nói về món KHÁC món khách đang hỏi: ${D.msgs} tin / ${D.convs.size} hội thoại · kèm ảnh ${D.images} tin · ${D.byTitle.size} câu mẫu khác nhau · ${tpls.length} câu mẫu · ${products.length} sản phẩm`);
@@ -694,6 +729,34 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
     .groupBy(sql`1`);
   const kqDem = (k: string) => Number(kq.find((r) => r.k === k)?.n ?? 0);
   const kqTin = kq.reduce((s, r) => s + Number(r.tin), 0);
+  // H · I — lời mời sau chốt (lượt chốt gần nhất của mỗi hội thoại có mốc lời mời trong kỳ). Câu upsell chưa cài ⇒ H không áp dụng.
+  const upRows = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`select c.id, c.state->'postConfirmOffer' as pco, c.state->'confirmed' as confirmed, c.state->'cancelRequest' as cancel,
+        c.state->'declined' as declined, c.state->'priceDispute' as dispute,
+        exists (select 1 from "sales_chat_inbound" i where i.page_id = c.page_id and i.thread_id = c.thread_id and i.note = 'PAGE_REPLY'
+          and coalesce(i.sender_kind, '') not in ('AI_AGENT', 'META_SYSTEM')
+          and (case when jsonb_typeof(i.image_urls) = 'array' then jsonb_array_length(i.image_urls) else 0 end) > 0
+          and i.created_at between (c.state->'postConfirmOffer'->>'at')::timestamptz - ${UPSELL_DUP_WINDOW_HOURS} * interval '1 hour'
+            and (c.state->'postConfirmOffer'->>'at')::timestamptz + ${UPSELL_DUP_WINDOW_HOURS} * interval '1 hour') as page_media
+      from "sales_chat_conversations" c
+      where c.channel <> 'TEST' and c.state->'postConfirmOffer'->>'at' >= ${from.toISOString()} and c.state->'postConfirmOffer'->>'at' <= ${now.toISOString()}`),
+  );
+  const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === "object" ? (v as Record<string, unknown>) : null);
+  const UP = { rounds: upRows.length, sent: 0, skipped: 0, dup: 0, skippedIds: [] as string[], dupIds: [] as string[] };
+  for (const r of upRows) {
+    const v = upsellScanVerdict({ pco: obj(r.pco), confirmed: obj(r.confirmed), cancel: r.cancel, declined: r.declined, dispute: obj(r.dispute), pageMedia: r.page_media === true || r.page_media === "t" });
+    if (v.sent) UP.sent += 1;
+    if (v.skippedValid) [UP.skipped, UP.skippedIds] = [UP.skipped + 1, [...UP.skippedIds, String(r.id)]];
+    if (v.duplicate) [UP.dup, UP.dupIds] = [UP.dup + 1, [...UP.dupIds, String(r.id)]];
+  }
+  console.log(`  mẫu H (≤ 20): ${UP.skippedIds.slice(0, 20).join(" ") || "—"}`);
+  console.log(`  mẫu I (≤ 20): ${UP.dupIds.slice(0, 20).join(" ") || "—"}`);
+  tomTat(
+    upsellId
+      ? `H UPSELL_SKIPPED_VALID_TEMPLATE — shop có câu upsell, lượt chốt đủ điều kiện mà KHÔNG mời (cửa sổ đóng chỉ vì địa chỉ chờ xác minh · lời mời không đi vì không có tin xác nhận / hàng rào / ghép lỗi): ${UP.skipped} / ${UP.rounds} lượt chốt có ghi lời mời (MEASURED — lượt chốt gần nhất mỗi hội thoại)`
+      : `H UPSELL_SKIPPED_VALID_TEMPLATE — KHÔNG ÁP DỤNG: shop chưa chọn câu upsell (${UP.rounds} lượt chốt có ghi lời mời)`,
+  );
+  tomTat(`I UPSELL_DUPLICATE — ERP đã gửi lời mời VÀ page / Pancake gửi ảnh trong ± ${UPSELL_DUP_WINDOW_HOURS} giờ: ${UP.dup} / ${UP.sent} lời mời ERP đã gửi (MEASURED)`);
   tomTat(`C kết quả chép: chuyển cả hội thoại ${kqDem("MOVED")} · chép sang hộp thư ĐÃ CÓ ${kqDem("EXISTING_INBOX")} · mở hộp thư rồi chép ${kqDem("OPENED_NEW")} · đã chép từ trước ${kqDem("ALREADY_COPIED")} · không có hộp thư ${kqDem("NO_INBOX")} · lỗi ${kqDem("FAILED")} · KHÁC ${kqDem("KHAC")} · tin đã chép ${kqTin}`);
 }
 

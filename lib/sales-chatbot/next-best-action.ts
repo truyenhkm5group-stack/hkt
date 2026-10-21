@@ -400,16 +400,19 @@ export function postConfirmOfferText(o: CrossSellOffer, money: (n: number) => st
  *   2. Không có / không dùng được ⇒ bot chỉ tự soạn khi shop CHỦ ĐỘNG bật (`autoUpsellOffer`, mặc định TẮT). Không thì không mời.
  *   3. Một lời mời mỗi lượt mua: đã mời trước chốt (câu mẫu hay chữ) ⇒ cửa sổ sau chốt đóng (`postConfirmOfferWindow`).
  */
-export const TEMPLATE_SKIP_REASONS = ["TEMPLATE_UNAVAILABLE", "TEMPLATE_DUPLICATE", "TEMPLATE_ASKS_KNOWN_INFO", "TEMPLATE_SIZE_CONFLICT", "TEMPLATE_NOTHING_TO_OFFER"] as const;
+export const TEMPLATE_SKIP_REASONS = ["TEMPLATE_UNAVAILABLE", "TEMPLATE_DUPLICATE", "TEMPLATE_PAGE_SENT_MEDIA", "TEMPLATE_ASKS_KNOWN_INFO", "TEMPLATE_SIZE_CONFLICT", "TEMPLATE_NOTHING_TO_OFFER"] as const;
 export type TemplateSkip = (typeof TEMPLATE_SKIP_REASONS)[number];
 export const TEMPLATE_SKIP_LABEL: Record<TemplateSkip, string> = {
   TEMPLATE_UNAVAILABLE: "câu upsell đang thiếu số ERP (giá / tồn) hoặc vừa bị tắt",
   TEMPLATE_DUPLICATE: "shop / page vừa gửi đúng câu này trong hội thoại",
+  TEMPLATE_PAGE_SENT_MEDIA: "page / Pancake đã gửi ảnh (menu) trong lượt mua này",
   TEMPLATE_ASKS_KNOWN_INFO: "câu upsell xin lại SĐT / địa chỉ khách đã cho",
   TEMPLATE_SIZE_CONFLICT: "câu upsell chỉ mời gói khác của món khách vừa chọn khối lượng",
   TEMPLATE_NOTHING_TO_OFFER: "mọi món câu upsell nhắc tới đều đã có trong đơn hoặc đang hết hàng / chưa có giá",
 };
 export type PostConfirmOfferSource = "SHOP_TEMPLATE" | "AUTO_GENERATED";
+/** Lý do bỏ câu mẫu mang nghĩa «lượt này đã có một lời mời thật» — chặn luôn câu tự soạn. */
+export const OFFER_ALREADY_SENT_SKIPS: ReadonlySet<TemplateSkip> = new Set<TemplateSkip>(["TEMPLATE_DUPLICATE", "TEMPLATE_PAGE_SENT_MEDIA"]);
 
 /**
  * Chọn NGUỒN của lời mời sau chốt. `template` = `null` khi shop không có câu upsell đang bật; có thì kèm phán quyết dùng được hay không.
@@ -422,6 +425,9 @@ export function choosePostConfirmSource(input: { template: { usable: true } | { 
   const t = input.template;
   if (t?.usable) return { source: "SHOP_TEMPLATE" };
   const skip = t && !t.usable ? t.reason : null;
+  // Page / Pancake / nhân viên ĐÃ gửi lời mời THẬT trong lượt (đúng câu, hoặc ảnh menu) ⇒ không mời thêm bằng bất kỳ nguồn nào — kể cả
+  // câu bot tự soạn (P0 21/10/2026: tối đa MỘT lời mời mỗi lượt mua, đếm theo SỰ KIỆN GỬI, không chỉ theo cờ nội bộ).
+  if (skip && OFFER_ALREADY_SENT_SKIPS.has(skip)) return { source: null, reason: skip };
   if (input.autoEnabled) return { source: "AUTO_GENERATED", templateSkip: skip };
   return { source: null, reason: skip ?? "NO_TEMPLATE" };
 }
