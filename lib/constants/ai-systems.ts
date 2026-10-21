@@ -18,7 +18,7 @@
  * hệ thống, và `feature` / `workload` viết trong tệp đó phải thuộc hệ thống ấy.
  */
 import { PLATFORM_AI_ENV, PLATFORM_AI_PROVIDERS, PLATFORM_GEMINI_DEFAULT_MODEL } from "@/lib/ai-usage/platform-ai";
-import type { AiUsageFeature, PlatformWorkload } from "@/lib/ai-usage/types";
+import type { AiUsageFeature, AiUsageWorkload } from "@/lib/ai-usage/types";
 import { MODEL_BY_TIER } from "@/lib/ai/router";
 import { SALES_BOT_CONNECTORS } from "@/lib/sales-chatbot/config";
 
@@ -41,8 +41,8 @@ export type AiSystem = {
   facesEndCustomer: boolean;
   /** Giá trị `feature` của sổ dùng AI mà hệ thống ghi. */
   features: readonly AiUsageFeature[];
-  /** Loại việc của Platform AI Policy mà hệ thống ghi. */
-  workloads: readonly PlatformWorkload[];
+  /** Loại việc của sổ dùng AI (`AI_USAGE_WORKLOADS`, 0252) mà hệ thống ghi — gồm loại việc của Platform AI Policy. */
+  workloads: readonly AiUsageWorkload[];
   /** Tệp gọi model (bài kiểm mở từng tệp). */
   callSites: readonly string[];
   /** Nhà cung cấp có thể chạy — từ hằng cấu hình. */
@@ -110,7 +110,7 @@ export const AI_SYSTEMS: readonly AiSystem[] = [
     purpose: "Viết tin nhắc khách trong cửa sổ 24 giờ",
     facesEndCustomer: true,
     features: ["sales_chatbot"],
-    workloads: [],
+    workloads: ["followup"],
     callSites: ["lib/sales-chatbot/followup.ts"],
     providers: SALES_PROVIDERS,
     model: { defaults: SALES_DEFAULT_MODELS, runtimeSource: SALES_MODEL_SOURCE },
@@ -128,7 +128,7 @@ export const AI_SYSTEMS: readonly AiSystem[] = [
     purpose: "Rút bài học / sổ tay từ hội thoại cũ và phản hồi của nhân viên (che SĐT / tên trước khi học)",
     facesEndCustomer: false,
     features: ["sales_playbook"],
-    workloads: [],
+    workloads: ["playbook", "lessons", "inbox_feedback", "quick_reply_learn"],
     callSites: ["lib/sales-chatbot/playbook.ts", "lib/sales-chatbot/lessons.ts", "lib/sales-chatbot/inbox-feedback.ts", "lib/sales-chatbot/quick-replies-learn.ts"],
     providers: SALES_PROVIDERS,
     model: { defaults: SALES_DEFAULT_MODELS, runtimeSource: SALES_MODEL_SOURCE },
@@ -146,7 +146,7 @@ export const AI_SYSTEMS: readonly AiSystem[] = [
     purpose: "Trợ lý cho nhân viên VNX; phân loại hội thoại CSKH",
     facesEndCustomer: false,
     features: ["copilot"],
-    workloads: [],
+    workloads: ["copilot"],
     callSites: ["lib/ai/copilot.ts", "lib/cs/chat-detect.ts"],
     providers: ["anthropic", "openai"],
     model: { defaults: [MODEL_BY_TIER.anthropic.copilot], runtimeSource: "lib/ai/router.ts (MODEL_BY_TIER, AI_PROVIDER của nhà) — đọc lúc chạy" },
@@ -164,7 +164,7 @@ export const AI_SYSTEMS: readonly AiSystem[] = [
     purpose: "Soạn nháp cấu hình / module cho quản trị tổ chức",
     facesEndCustomer: false,
     features: ["ai_builder"],
-    workloads: [],
+    workloads: ["ai_builder"],
     callSites: ["lib/ai-builder/service.ts", "lib/ai-builder/providers.ts"],
     providers: ["anthropic-byok", "openai-byok", "gemini-byok", ...PLATFORM_AI_PROVIDERS.map((p) => `platform:${p}`)],
     model: { defaults: SALES_DEFAULT_MODELS, runtimeSource: "lib/ai-builder/providers.ts — kết nối của tổ chức / khoá nền tảng, đọc lúc chạy" },
@@ -182,7 +182,7 @@ export const AI_SYSTEMS: readonly AiSystem[] = [
     purpose: "Soạn lời mở đầu nhắn cơ sở kinh doanh tìm qua Google Places",
     facesEndCustomer: true,
     features: ["lead_hunter"],
-    workloads: [],
+    workloads: ["lead_hunter"],
     callSites: ["lib/wholesale/outreach.ts"],
     providers: SALES_PROVIDERS,
     model: { defaults: SALES_DEFAULT_MODELS, runtimeSource: "lib/wholesale/outreach.ts — kết nối AI của tổ chức, đọc lúc chạy" },
@@ -200,7 +200,7 @@ export const AI_SYSTEMS: readonly AiSystem[] = [
     purpose: "Vẽ ảnh, viết câu chữ quảng cáo; sinh video (Video Scale, nhà)",
     facesEndCustomer: false,
     features: ["creative_image", "creative_copy"],
-    workloads: [],
+    workloads: ["creative"],
     callSites: ["lib/creative/org-ai.ts", "lib/creative/byok-image.ts", "lib/video-scale/providers/omni.ts", "lib/video-scale/providers/veo.ts"],
     providers: ["gemini-byok", "openai-byok", "openai", "gemini"],
     model: { defaults: [], runtimeSource: "lib/creative/org-ai.ts · lib/video-scale/providers/* — kết nối của tổ chức / khoá nhà, đọc lúc chạy" },

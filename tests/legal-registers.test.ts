@@ -22,7 +22,7 @@ import PrivacyPolicyPage from "@/app/chinh-sach-bao-mat/page";
 import TermsOfServicePage from "@/app/dieu-khoan-su-dung/page";
 import { PRIVACY_CONTENT } from "@/components/legal/privacy-content";
 import { TERMS_CONTENT } from "@/components/legal/terms-content";
-import { AI_USAGE_FEATURES, PLATFORM_WORKLOADS } from "@/lib/ai-usage/types";
+import { AI_USAGE_FEATURES, AI_USAGE_WORKLOADS } from "@/lib/ai-usage/types";
 import { PLATFORM_GEMINI_DEFAULT_MODEL } from "@/lib/ai-usage/platform-ai";
 import { AI_SYSTEM_IDS, AI_SYSTEMS, AI_USAGE_SCAN_EXEMPT_FILES, aiSystemsForFile } from "@/lib/constants/ai-systems";
 import { PRIVACY_POLICY, SERVICE_COMMITMENTS, TERMS_OF_SERVICE } from "@/lib/constants/company";
@@ -264,7 +264,8 @@ function testAiSystems() {
   assert.ok(AI_SYSTEMS.every((s) => s.risk === "UNCLASSIFIED"), "chưa có văn bản phân loại nào (G-4) — mọi hệ thống UNCLASSIFIED");
   assert.ok(AI_SYSTEMS[0].model.defaults.includes(PLATFORM_GEMINI_DEFAULT_MODEL), "model mặc định đọc từ hằng cấu hình, không gõ lại");
   for (const f of AI_USAGE_FEATURES) assert.ok(AI_SYSTEMS.some((s) => s.features.includes(f)), `feature «${f}» của sổ dùng AI chưa thuộc hệ thống AI nào`);
-  for (const w of PLATFORM_WORKLOADS) assert.ok(AI_SYSTEMS.some((s) => s.workloads.includes(w)), `workload «${w}» chưa thuộc hệ thống AI nào`);
+  // 0252: MỌI loại việc của sổ dùng AI (không chỉ loại của chính sách model) phải có hệ thống chủ.
+  for (const w of AI_USAGE_WORKLOADS) assert.ok(AI_SYSTEMS.some((s) => s.workloads.includes(w)), `workload «${w}» chưa thuộc hệ thống AI nào`);
 
   // Quét: mỗi tệp gọi recordAiUsage( thuộc một hệ thống, và feature / workload viết thẳng trong tệp thuộc hệ thống đó.
   const files = tracked("lib", "app").filter((f) => /\.tsx?$/.test(f) && read(f).includes("recordAiUsage("));
