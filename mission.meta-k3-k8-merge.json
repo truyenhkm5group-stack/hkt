@@ -3,7 +3,7 @@
   "mission_id": "meta-k3-k8-merge",
   "title": "Meta Messenger K3/K8: chính sách quyền riêng tư 1.2 có mục Messenger + điều khiển cờ nối thẳng trên /platform + chữ «sắp mở» theo cờ",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -42,7 +42,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-21T02:39:47.012Z",
-  "updated_at": "2026-10-21T02:39:47.012Z",
-  "last_heartbeat": "2026-10-21T02:39:47.012Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-21T02:41:31.197Z",
+  "last_heartbeat": "2026-10-21T02:41:31.197Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/meta-app-review-audit-r2",
+    "sha": "94784a6d7b4ed22095c7d8eba12d4f91f1e0a417",
+    "at": "2026-10-21T02:41:31.197Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Meta Messenger K3/K8: chính sách quyền riêng tư 1.2 có mục Messenger + điều khiển cờ nối thẳng trên /platform + chữ «sắp mở» theo cờ",
+    "summary": "",
+    "tests": [
+      "worker code-erp-02 trên cây riêng: tsc ĐẠT (heap 6 GB) · eslint tệp sửa ĐẠT · next build ĐẠT · chạy riêng ĐẠT testDirectConnectGate/Write/Copy, testLegalRegisters, testHelpGuides, testPublicSiteSource, testChotDonBrand, testChannelsOverview, testSaasShell, testPlatformIsolationStatic, testRepoIntegrity · đột biến helpGuideForDirectConnect bỏ cờ ⇒ ĐỎ · CHƯA ĐO cả bộ npm test (CI của PR đo 8 shard)"
+    ]
+  }
 }
