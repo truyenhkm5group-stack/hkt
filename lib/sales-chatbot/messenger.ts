@@ -7,6 +7,7 @@ import type { SessionUser } from "@/lib/auth/session";
 import { adoptLegacyChannelPages, disableChannelPages, listChannelPages, messagingConnectionSummaries, noteChannelPageHealth, openActiveConnection, openChannelPageToken, saveConnection, setChannelPagesState, setConnectionStatus, testOrgConnection, upsertChannelPage } from "@/lib/connectors/service";
 import type { TesterDeps } from "@/lib/connectors/testers";
 import { appSecretProof, graphBase, instagramAccountOf, messengerApp, messengerBotAppIds, postMessage, sendMessengerImage, sendMessengerText, sendPrivateReply, subscribePage, unsubscribePage, MESSENGER_TEXT_MAX, type ConnectablePage, type MessengerEvent } from "@/lib/integrations/messenger/graph";
+import { graphErrorKindOfText } from "@/lib/integrations/messenger/graph-errors";
 import { chunkText } from "@/lib/messaging/providers";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { AI_DOWN_HANDOFF_REASON, chatTurn, conversationView, describeCustomerImages } from "@/lib/sales-chatbot/engine";
@@ -124,6 +125,19 @@ export async function messengerPageAiOn(pageId: string): Promise<boolean> {
 
 export const PAGE_AI_OFF_NOTE = "AI đang tắt cho page này — nhân viên trả lời ở Hộp thư";
 
+/**
+ * Lần gửi gần nhất của page bị Meta báo MÃ TRUY CẬP hỏng (TOKEN — 190 / 102): token đã thu hồi chỉ sống lại bằng NỐI LẠI (lấy token
+ * mới; upsertChannelPage xoá `last_error`). Trước 21/10/2026 cổng AI không hỏi điều này ⇒ bot vẫn soạn câu (tốn lượt AI) rồi gửi
+ * hỏng mãi. CỐ Ý chỉ TOKEN, không PERMISSION: thiếu quyền có thể tự hết (quản trị cấp lại vai trò trên page) mà không ai nối lại
+ * ⇒ chặn theo nó là bot im vĩnh viễn trên một page đã gửi được. Trạng thái page (lựa chọn của NGƯỜI) KHÔNG bị đổi.
+ */
+export async function messengerPageNeedsReconnect(pageId: string): Promise<boolean> {
+  const row = (await listChannelPages(MESSENGER_CONNECTOR)).find((r) => r.pageId === pageId);
+  return Boolean(row?.lastErrorAt) && graphErrorKindOfText(row?.lastError) === "TOKEN";
+}
+
+export const PAGE_NEEDS_RECONNECT_NOTE = "Page cần nối lại (Facebook báo mã truy cập / quyền hỏng) — bot không soạn câu để khỏi tốn lượt AI; tin vẫn ở Hộp thư";
+
 // ─────────────────────────── Nối / gỡ page ───────────────────────────
 
 export type MessengerConnectResult = { ok: true; message: string } | { error: string };
@@ -207,12 +221,30 @@ export async function connectMessengerPages(user: SessionUser, pages: readonly C
       continue;
     }
     if (igOk) await upsertChannelPage(user, { connectorKey: MESSENGER_CONNECTOR, pageId: igOk.id, kind: "INSTAGRAM", parentPageId: page.id, name: `Instagram @${igOk.username}`, token: page.token });
-    const indexed: [string, string][] = [[page.id, page.name], ...(igOk ? ([[igOk.id, `Instagram @${igOk.username}`]] as [string, string][]) : [])];
-    for (const [id, name] of indexed) {
-      await pdb
+    const candidates: [string, string][] = [[page.id, page.name], ...(igOk ? ([[igOk.id, `Instagram @${igOk.username}`]] as [string, string][]) : [])];
+    // Chỉ mục page ⇒ tổ chức: cập nhật CÓ ĐIỀU KIỆN (`where orgCode`) ⇒ hai cửa hàng nối cùng page cùng lúc thì một bên nhận 0 dòng.
+    // Trước 21/10/2026 không ai đọc số dòng: bên thua vẫn báo «Đã nối» trong khi tin của page đi về cửa hàng kia. Giờ 0 dòng ⇒
+    // hoàn dòng page vừa ghi ở cửa hàng này và báo đúng lý do.
+    const indexed: [string, string][] = [];
+    const lost: [string, string][] = [];
+    for (const [id, name] of candidates) {
+      const claimed = await pdb
         .insert(idx)
         .values({ pageId: id, orgCode, pageName: name.slice(0, 120), connectedByEmail: user.email })
-        .onConflictDoUpdate({ target: idx.pageId, set: { pageName: name.slice(0, 120), connectedByEmail: user.email, updatedAt: new Date() }, where: eq(idx.orgCode, orgCode) });
+        .onConflictDoUpdate({ target: idx.pageId, set: { pageName: name.slice(0, 120), connectedByEmail: user.email, updatedAt: new Date() }, where: eq(idx.orgCode, orgCode) })
+        .returning({ pageId: idx.pageId });
+      (claimed.length ? indexed : lost).push([id, name]);
+    }
+    if (lost.length) {
+      const pageLost = lost.some(([id]) => id === page.id);
+      const undo = pageLost ? candidates : lost;
+      await disableChannelPages(user, MESSENGER_CONNECTOR, undo.map(([id, name]) => ({ pageId: id, kind: id === page.id ? ("PAGE" as const) : ("INSTAGRAM" as const), parentPageId: id === page.id ? null : page.id, name })));
+      if (pageLost) {
+        if (indexed.length) await pdb.delete(idx).where(and(eq(idx.orgCode, orgCode), inArray(idx.pageId, indexed.map(([id]) => id))));
+        fail(`Page «${label}» vừa được nối với một cửa hàng khác trên nền tảng. Gỡ ở cửa hàng đó trước, hoặc liên hệ hỗ trợ.`);
+        continue;
+      }
+      notes.push(`Instagram của «${label}» vừa được nối với cửa hàng khác — chưa nối`);
     }
     connected.push(page.id);
     // PAGE MỚI ƯU TIÊN META TRỰC TIẾP (0233): Pancake không chạy page này ⇒ đường chính = Meta trực tiếp (nguồn CONNECT, người nối).
@@ -222,8 +254,8 @@ export async function connectMessengerPages(user: SessionUser, pages: readonly C
       const from = await recordPageMode(id, "META_DIRECT", "CONNECT", `Nối Meta trực tiếp cho page — Pancake không chạy page này (${user.name || user.email})`.slice(0, 300), user.id);
       await audit({ userId: user.id, userEmail: user.email, action: "SALES_CHANNEL_MODE_SET", entity: "CHANNEL_PAGE", entityId: id, detail: { from: from ?? "NONE", to: "META_DIRECT", reason: "CONNECT" } });
     }
-    if (igOk) notes.push(`Instagram @${igOk.username}`);
-    else if (ig) notes.push(`Instagram @${ig.username} của «${label}» đang nối với cửa hàng khác — chưa nối`);
+    if (igOk && indexed.some(([id]) => id === igOk.id)) notes.push(`Instagram @${igOk.username}`);
+    else if (ig && !igOk) notes.push(`Instagram @${ig.username} của «${label}» đang nối với cửa hàng khác — chưa nối`);
   }
   if (!connected.length) return { error: failed.map((f) => (pages.length > 1 ? `${f.name || f.id}: ${f.error}` : f.error)).join(" · ").slice(0, 600) || "Chưa nối được page nào." };
   const head = connected.length === 1 ? `Đã nối Messenger của page «${pages.find((p) => p.id === connected[0])?.name || connected[0]}»` : `Đã nối ${connected.length} page`;
@@ -688,6 +720,13 @@ export async function processMessengerThread(pageId: string, psid: string, deps:
       await finish("SKIPPED", PAGE_AI_OFF_NOTE);
       out.processed += ids.length;
       out.skipped = PAGE_AI_OFF_NOTE;
+      continue;
+    }
+    // PAGE CẦN NỐI LẠI: gửi chắc chắn hỏng ⇒ không gọi AI (mỗi lượt là tiền); tin vẫn ở Hộp thư, nối lại là bot chạy tiếp.
+    if (await messengerPageNeedsReconnect(pageId)) {
+      await finish("SKIPPED", PAGE_NEEDS_RECONNECT_NOTE);
+      out.processed += ids.length;
+      out.skipped = PAGE_NEEDS_RECONNECT_NOTE;
       continue;
     }
     for (const r of claimed) {

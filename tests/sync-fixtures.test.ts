@@ -632,6 +632,7 @@ import { testAiSalesRetry } from "./ai-sales-retry.test";
 import { testAiProviderFailover } from "./ai-provider-failover.test";
 import { testAiSalesRecovery } from "./ai-sales-recovery.test";
 import { testMessengerMultiPage } from "./messenger-multipage.test";
+import { testMessengerWebhookReliability } from "./messenger-webhook-reliability.test";
 import { testPush } from "./push.test";
 import { testUserInvites } from "./user-invites.test";
 import { testPasswordReset } from "./password-reset.test";
@@ -3290,6 +3291,8 @@ async function main() {
     // Cứu hội thoại bị bỏ sót trong sự cố AI — chỉ đọc, bốn lớp, không gửi gì.
     await testAiSalesRecovery();
     await testMessengerMultiPage();
+    // M4: lỗi CSDL khi tra page ⇒ 503 · token 190 ⇒ không gọi AI · cuộc đua nối cùng page ⇒ bên thua nhận lỗi.
+    await testMessengerWebhookReliability();
     await testPush();
     // Mời người dùng qua liên kết (gap «Invite User»): tổ chức THẬT `ui-a` / `ui-b` / `ui-t` (tự cấp, tự dọn) + nhà — vai trò
     // hệ thống + tuỳ chỉnh ⇒ tài khoản đúng tổ chức, phiên đúng claim; dùng lại / hết hạn / thu hồi / chép chéo ⇒ một câu chung;
