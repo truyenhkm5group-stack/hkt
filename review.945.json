@@ -1,0 +1,8 @@
+{
+  "pr": 945,
+  "sha": "fd2edf60c797f3155aef20de9a27153caa372994",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T07:47:19.348Z",
+  "note": "review lead (P0 KHẨN lặp báo giá — ca Lan Nguyen 10:32 + Xuân Đoàn 12:52 21/10): gốc = câu mẫu từ khoá #1 khớp «kg» gửi lại nguyên văn (0 token) vì giỏ ghi 2kg nhưng không gắn món vừa báo giá ⇒ #868 mù; thêm (a) đường câu mẫu từ khoá thiếu luật «câu vừa nói» và luật đó so nguyên văn; (b) tin có «?» làm bộ đọc giỏ mất «2kg». Sửa: giỏ trống gắn món được mời khi đơn vị từ danh mục; quickBlocked MỘT h"
+}
