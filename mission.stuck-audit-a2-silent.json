@@ -3,7 +3,7 @@
   "mission_id": "stuck-audit-a2-silent",
   "title": "stuck-audit A2 in tập /work (= tập 2B) cạnh tập cũ + tách dòng A2 cho lọt kênh tóm tắt",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-a2-silent",
@@ -23,7 +23,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-21T22:34:12.881Z",
-  "updated_at": "2026-10-21T22:34:12.881Z",
-  "last_heartbeat": "2026-10-21T22:34:12.881Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-21T22:34:44.614Z",
+  "last_heartbeat": "2026-10-21T22:34:44.614Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/stuck-audit-a2-silent",
+    "sha": "a1ca081da8668301ddfbd21dc1e7c3dd77310fa6",
+    "at": "2026-10-21T22:34:44.614Z",
+    "actor": "DESKTOP-56TH98Y:wt-a2-silent",
+    "title": "stuck-audit A2 in tập /work (= tập 2B) cạnh tập cũ + tách dòng A2 cho lọt kênh tóm tắt",
+    "summary": "collectHandoffFacts(db, now) tách khỏi collectHandoffUnanswered — MỘT câu SQL (aiSilentSql) cho tập /work; ops đọc bằng handle chỉ đọc. A2 in ba dòng ≤300 ký tự cho A2[cũ] và A2[/work] + dòng phần giao/lệch + HANDOFF_UNANSWERED từng tập. Image chưa có hàm ⇒ CHƯA ĐO ĐƯỢC.",
+    "tests": [
+      "cổng sạch @a1ca081da: TYPECHECK 0 · LINT 0 · TEST 0 (TẤT CẢ KIỂM THỬ ĐẠT) · BUILD 0",
+      "K20 stuck-conversation-audit + K22 sales-quality-daily",
+      "đột biến 5/5 đỏ"
+    ]
+  }
 }
