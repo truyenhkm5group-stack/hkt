@@ -3,7 +3,7 @@
   "mission_id": "return-reason-report-v2",
   "title": "Báo cáo lý do hoàn v2 — 2a: lõi số theo chứng cứ + bảng hành động",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-report-v2",
@@ -20,9 +20,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-20T22:05:17.584Z",
-  "updated_at": "2026-10-21T01:08:48.409Z",
+  "updated_at": "2026-10-21T01:23:11.785Z",
   "last_heartbeat": "2026-10-21T01:06:56.182Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#934 → 7a0b95ea36d983744d768e07eb4f2ae6c7431fc3"
+  },
   "handoff": {
     "branch": "claude/return-reason-report-v2",
     "sha": "286a29855af7efde6ed89ba0b358e4312eec0c75",
