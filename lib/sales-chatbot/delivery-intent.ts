@@ -17,8 +17,9 @@
  *
  * Không đọc / ghi CSDL. Không kết luận kết quả đơn (`ORDER_OUTCOME` vẫn là nguồn duy nhất); không suy «đã giao» từ tiền / COD.
  */
+import { adminPlaceNames, adminPlaceNamesFolded, foldVnText } from "@/lib/address/vn-address";
 import { NO_SHIPMENT_PHRASE } from "@/lib/sales-chatbot/order-status-shared";
-import { withoutPhones } from "@/lib/address/customer-address";
+import { looksLikeDeliveryAddress, looksLikeStreetFragment, parseCustomerAddress, withoutPhones } from "@/lib/address/customer-address";
 import { foldVi } from "@/lib/sales-chatbot/text";
 
 export type DeliveryNuance = "TODAY" | "TOMORROW" | "URGENT" | "GENERIC";
@@ -37,10 +38,52 @@ export const DELIVERY_SHOP_SAID_PREFIX = "[Shop đã nhắn]";
  * «đen» (màu) ≠ «đến», «mãi» / «khuyến mãi» / «khuyến mại» ≠ «mai» (ngày mai), «nhân viên» không phải «nhận». Câu gõ KHÔNG DẤU hoàn
  * toàn vẫn mơ hồ ⇒ giữ cách cũ, chỉ loại thêm «khuyen mai» / «xac nhan». Dùng chung cho câu khách và chữ model (`deliveryReplyViolation`).
  */
+/*
+  «MAI» TRONG TÊN NƠI KHÔNG PHẢI NGÀY MAI (P0 21/10/2026, HSLC #F12342D4): «… đường Lĩnh Nam, Hoàng Mai» có động từ «về / gửi / giao» và
+  chữ «mai» trần ⇒ bộ đọc ra «giao NGÀY MAI», bot nhắn «em đã nhận lời dặn giờ giao» và ghi một lời hẹn giao giả vào đơn. Tên nơi lấy từ
+  DANH MỤC địa giới (gồm tên cũ — `adminPlaceNamesFolded`), không gõ tay; cặp nào trùng một cụm thời gian / tiểu từ («giờ mai» — xã «Gio
+  Mai»; «mai hả», «mai sao») thì KHÔNG coi là tên nơi, vì ở đó nghĩa «ngày mai» mới là nghĩa thường gặp. Thêm: «mai» đứng ngay sau giới
+  từ / tiền tố nơi chốn («về Mai …», «phường Mai …») mà theo sau là một chữ tên (không phải tiểu từ / động từ giao) cũng là tên nơi.
+*/
+const MAI_TIME_BEFORE = new Set(["gio", "sang", "chieu", "toi", "buoitoi", "trua", "ngay", "hom"]);
+/*
+  Gập dấu làm một số tên nơi TRÙNG chữ chat thường: «Đa Mai» = «dạ / đã mai», «Trà Mai» = «trả mai», «Vạn Mai» = «vẫn mai», «Đông /
+  Đồng Mai» = «đóng mai», «Mai Lâm» = «mai làm», «Mai Động» = «mai đóng hàng». Các tên đó chỉ nhận khi khách gõ CÓ DẤU (khớp trên chữ có
+  dấu, trước khi gập) — «Dạ mai giao chị nhé» là ngày mai (bài #855).
+*/
+const MAI_FOLD_AMBIGUOUS = new Set(["da mai", "tra mai", "van mai", "dong mai", "mai lam", "mai dong"]);
+let placeMaiAccentCache: RegExp | null = null;
+/** Tên nơi có chữ «mai» trên chữ CÓ DẤU, chữ thường — khớp đúng mặt chữ, không lẫn «dạ mai». Không dùng nhìn-ngược (Safari < 16.4). */
+function placeMaiAccentRe(): RegExp {
+  if (placeMaiAccentCache) return placeMaiAccentCache;
+  const names = adminPlaceNames().filter((n) => n.split(" ").includes("mai") && n.split(" ").length >= 2);
+  const alts = [...new Set(names)].sort((a, b) => b.length - a.length).map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+"));
+  placeMaiAccentCache = alts.length ? new RegExp(String.raw`(^|[^\p{L}])(?:${alts.join("|")})(?=[^\p{L}]|$)`, "gu") : /$^/g;
+  return placeMaiAccentCache;
+}
+const MAI_TIME_AFTER = new Set(["ha", "a", "nhe", "nha", "nhi", "em", "e", "chi", "c", "anh", "duoc", "dc", "khong", "ko", "k", "sao", "nay", "co", "giao", "ship", "gui", "nhan", "toi", "den", "ve", "phat", "sang", "chieu", "trua", "buoitoi", "nhe"]);
+let placeMaiCache: RegExp | null = null;
+function placeMaiRe(): RegExp {
+  if (placeMaiCache) return placeMaiCache;
+  const names = new Set<string>();
+  for (const n of adminPlaceNamesFolded()) {
+    const w = n.split(" ");
+    const i = w.indexOf("mai");
+    if (i < 0 || w.length < 2) continue;
+    if ((i > 0 && MAI_TIME_BEFORE.has(w[i - 1])) || (i < w.length - 1 && MAI_TIME_AFTER.has(w[i + 1])) || MAI_FOLD_AMBIGUOUS.has(n)) continue;
+    names.add(n);
+  }
+  const alts = [...names].sort((a, b) => b.length - a.length).map((n) => n.replace(/\s+/g, "\\s+"));
+  placeMaiCache = alts.length ? new RegExp(String.raw`(?:^|\s)(?:${alts.join("|")})(?=\s|$)`, "g") : /$^/g;
+  return placeMaiCache;
+}
+const PLACE_PREP_MAI_RE = new RegExp(String.raw`(\s(?:ve|o|tai|duong|pho|quan|phuong|xa|huyen|thon|xom|ngo|khu|q|p))\smai(?=\s(?!(?:${[...MAI_TIME_AFTER].join("|")})(?:\s|$))[a-z])`, "g");
+
 function normalizeAsk(text: string): string {
   const raw = text
     .normalize("NFC")
     .toLowerCase()
+    .replace(placeMaiAccentRe(), "$1 diadanh ")
     .replace(/khuyến (?:mãi|mại)/g, " khuyenmai ")
     .replace(/mãi/g, " maimai ")
     .replace(/xác nhận/g, " xacnhan ")
@@ -58,7 +101,9 @@ function normalizeAsk(text: string): string {
     .replace(/\bnhan vien\b/g, "nhanvien")
     .replace(/\bgui (?:tien|anh|hinh|so|dia chi|sdt|stk|lai so)\b/g, "guithongtin")
     .replace(/\bhnay\b/g, "hom nay")
-    .replace(/\bbh\b/g, "bao gio")} `;
+    .replace(/\bbh\b/g, "bao gio")
+    .replace(placeMaiRe(), " diadanh ")
+    .replace(PLACE_PREP_MAI_RE, "$1 diadanh")} `;
 }
 
 const VERB = String.raw`(?:giao|ship|gui|nhan|co hang|toi|den|ve|phat|shipper|buu ta)`;
@@ -313,7 +358,19 @@ export function deliveryPreferenceOf(input: string): string | null {
   if (!anchored) return null;
   // CÂU HỎI chính sách («giao trong ngày được không», «mai có giao không?») không phải lời hẹn — câu trả lời theo chính sách shop đi bình thường.
   if (text.includes("?") || /(?:^|\s)(?:khong|ko|k|hong|hok|chua|kip khong|kip ko)(?:\s(?:a|em|shop|nhi|vay|ha|ban))?\s*$/.test(f)) return null;
-  return text.replace(/\s+/g, " ").trim().slice(0, 160);
+  // Tin GỘP món + SĐT + địa chỉ + giờ giao (P0 21/10/2026): vế là ĐỊA CHỈ (đọc bằng chính bộ đọc địa chỉ — có đường / khu, hoặc ra tỉnh)
+  // không vào ghi chú hẹn giờ; còn lại giữ nguyên chữ khách. Một vế duy nhất ⇒ giữ nguyên như cũ.
+  // Tách vế trên tin GỐC (bỏ SĐT sau): `withoutPhones` gộp xuống dòng, tin nhiều dòng sẽ thành một vế.
+  const parts = input.split(/[\n,;]+/).map((p) => withoutPhones(p).trim()).filter(Boolean);
+  const places = new Set(adminPlaceNamesFolded());
+  const isPlace = (p: string) => looksLikeDeliveryAddress(p) || looksLikeStreetFragment(p) || parseCustomerAddress(p).province !== null || places.has(foldVnText(p.replace(/^(?:quận|q\.?|phường|p\.?|huyện|xã|thị xã)\s+/iu, "")));
+  // Vế trộn món với nơi giao («1kg chả mực về ngõ 218 Lĩnh Nam») ⇒ bỏ phần «về / tới / đến / ở / tại + địa chỉ», giữ phần trước.
+  const headOf = (p: string) => {
+    const m = p.match(/^(.*?)\s+(?:về|tới|đến|ở|tại)\s+(.+)$/iu);
+    return m && m[1].trim() && isPlace(m[2]) ? m[1].trim() : p;
+  };
+  const kept = parts.length > 1 ? parts.filter((p) => !isPlace(p)).map(headOf) : parts;
+  return (kept.length ? kept.join(", ") : text).replace(/\s+/g, " ").trim().slice(0, 160);
 }
 
 /** Dòng ghi chú đơn cho mong muốn giờ giao — kèm MỐC KHÁCH NHẮN (giờ VN) để «sáng mai» đọc được ngày nào. HÀM THUẦN. */

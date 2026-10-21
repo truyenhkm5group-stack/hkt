@@ -618,6 +618,7 @@ import { testResponseOwnership } from "./response-ownership.test";
 import { testSaasL3Inbox } from "./saas-l3-inbox.test";
 import { testBotOrderStatus } from "./bot-order-status.test";
 import { testP0855DeliveryIntent } from "./p0-855-delivery-intent.test";
+import { testP0DeliveryPrefPlace } from "./p0-delivery-pref-place.test";
 import { testOrderTruthStamp } from "./order-truth-stamp.test";
 import { testConversationTrace } from "./conversation-trace.test";
 import { testMessengerHealth } from "./messenger-health.test";
@@ -3261,6 +3262,9 @@ async function main() {
     await testBotOrderStatus();
     // P0 #855: hỏi lịch giao ≠ hỏi trạng thái — máy chủ quyết câu trả lời / chuyển người, không hứa giờ — tổ chức THẬT `p0-855-lich-giao`.
     await testP0855DeliveryIntent();
+    // P0 21/10/2026 (ca HSLC #F12342D4) — «Hoàng Mai», «Mai Dịch» (tên nơi của danh mục) không còn là «giao ngày mai»; ghi chú hẹn giờ không mang
+    // địa chỉ / SĐT — thuần + chatTurn thật (`gd-food-dpp`).
+    await testP0DeliveryPrefPlace();
     // Order Truth: đơn bot chốt mang dấu lời nhắc + cấu hình + model + bản mã; sổ chi phí AI của lượt chat mang mã hội thoại.
     testOrderTruthStamp();
     // Đơn ↔ hội thoại ↔ khách: link hội thoại của đơn mở Hộp thư ERP (mọi kênh); hồ sơ khách chỉ thấy hội thoại nối bằng
