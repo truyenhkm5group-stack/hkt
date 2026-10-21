@@ -98,6 +98,7 @@ export const CONTROL_PLANE_TABLES = [
   "platform_payment_intents",
   "platform_org_health",
   "platform_auth_failures",
+  "platform_webhook_rejections",
   "platform_tenant_value_snapshots",
   "platform_tenant_health_daily",
   "platform_org_migration_status",

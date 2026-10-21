@@ -621,6 +621,8 @@ import { testP0855DeliveryIntent } from "./p0-855-delivery-intent.test";
 import { testOrderTruthStamp } from "./order-truth-stamp.test";
 import { testConversationTrace } from "./conversation-trace.test";
 import { testMessengerHealth } from "./messenger-health.test";
+import { testMessengerWebhookRejections } from "./messenger-webhook-rejections.test";
+import { testMessengerConfigReport } from "./messenger-config-report.test";
 import { testConnectorsLegacy } from "./connectors-legacy.test";
 import { testNativeOrderSync } from "./native-order-sync.test";
 import { testMessengerLifecycle } from "./messenger-lifecycle.test";
@@ -3268,6 +3270,9 @@ async function main() {
     await testConversationTrace();
     // Messenger trực tiếp — token hỏng (Graph 190) ⇒ kết nối về Nháp + báo người một lần; lỗi ngoài 24 giờ không đụng kết nối.
     await testMessengerHealth();
+    // M4: sổ gói webhook bị từ chối (0251) · check-integrations --messenger khai CÓ / KHÔNG, không in giá trị.
+    await testMessengerWebhookRejections();
+    testMessengerConfigReport();
     testConnectorsLegacy();
     // Shop CHỈ nối Facebook trực tiếp: ghi đơn từ hội thoại đọc sổ tin ERP (không Pancake) + trọn đường nhận → bot → nhân viên →
     // đơn → ghi đơn với 0 lời gọi pages.fm — tổ chức THẬT `chi-facebook`.

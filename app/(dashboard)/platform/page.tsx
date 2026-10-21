@@ -33,6 +33,7 @@ import { loginConfigMode, loginModeText } from "@/lib/integrations/messenger/per
 import { messengerRedirectUris } from "@/lib/integrations/messenger/connect";
 import { directConnectFlagState } from "@/lib/platform/direct-connect-flag";
 import { DirectConnectControl } from "@/components/platform/direct-connect-control";
+import { webhookRejectionSummary } from "@/lib/platform/webhook-rejections";
 import { PILOT_STAGE_LABEL } from "@/lib/constants/pilot";
 import { listOrgSupportSummaries } from "@/lib/platform/support";
 import { getPlatformHealth, type OrgHealth } from "@/lib/queries/platform-health";
@@ -491,6 +492,10 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
           </dd>
           <dt className="text-muted-foreground">Chữ ký được chấp nhận</dt>
           <dd className="text-xs">{messengerWebhookSecrets().length} app secret</dd>
+          <dt className="text-muted-foreground">Gói bị từ chối (24 giờ · 7 ngày)</dt>
+          <dd className="text-xs" data-testid="platform-messenger-rejections">
+            <MessengerRejections />
+          </dd>
           <dt className="text-muted-foreground">Nối page dùng app</dt>
           <dd className="text-xs">{messengerApp()?.source === "MESSENGER_APP" ? "App Messenger riêng" : messengerApp() ? "App đăng nhập (chưa khai đủ app Messenger)" : "Chưa khai app nào"}</dd>
           <dt className="text-muted-foreground">Cách xin quyền</dt>
@@ -542,6 +547,25 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
  * Configuration ID) rồi đọc lại tham số `scope`. Thiếu / thừa / quyền thuộc khả năng khác (Instagram) in ra ngay — lỗi
  * «Invalid Scopes» 07/10/2026 đã nằm trong danh sách này mà không màn hình nào cho thấy.
  */
+/**
+ * Gói webhook Messenger bị từ chối (sổ `platform_webhook_rejections`, M4): `null` = CHƯA ĐO được (bảng chưa có / đọc hỏng) — in
+ * «chưa đo», không in 0. Chữ ký sai là dấu hiệu app secret lệch: mọi tin của mọi cửa hàng đang bị bỏ.
+ */
+async function MessengerRejections() {
+  const rows = await webhookRejectionSummary("MESSENGER");
+  if (rows === null) return <>Chưa đo được (sổ chưa có hoặc đọc hỏng).</>;
+  if (!rows.length) return <>Không gói nào bị từ chối trong 7 ngày.</>;
+  return (
+    <span className="space-y-0.5">
+      {rows.map((r) => (
+        <span key={r.reason} className={`block ${r.reason === "SIGNATURE" || r.reason === "ORG_LOOKUP_FAILED" ? "font-semibold text-destructive" : ""}`}>
+          {r.reason}: {r.count24h} · {r.count7d} (lần cuối {r.lastAt.slice(0, 16).replace("T", " ")} UTC)
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function MessengerScopeAudit() {
   const app = messengerApp();
   if (!app) return <>Chưa khai app nào — chưa dựng được hộp thoại.</>;

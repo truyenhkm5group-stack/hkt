@@ -88,6 +88,15 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/payroll-recon-center.test.ts",
   },
+  {
+    tag: "0251_platform_webhook_rejections",
+    why:
+      "Chỉ TẠO một bảng mới ở CSDL nhà (platform_webhook_rejections) — không thêm / đổi / xoá cột của bảng nào mã đang đọc. Đường " +
+      "GHI (`noteWebhookRejection`) bắt mọi lỗi kể cả bảng chưa có và trả false — webhook không bao giờ trả lỗi vì sổ đếm; đường ĐỌC " +
+      "(`webhookRejectionSummary`) trả null = CHƯA ĐO được, /platform in «chưa đo» chứ không in 0.",
+    addedColumns: {},
+    proof: "tests/messenger-webhook-rejections.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */
