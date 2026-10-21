@@ -1,0 +1,8 @@
+{
+  "pr": 952,
+  "sha": "076aa468e4b9c940c76a3beb059dc6a5e3e48cf6",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T12:07:11.956Z",
+  "note": "review lead (P0 chủ shop 21/10, case Mai Le): gốc = tự chốt khi ward trống ⇒ validity.pending=ADDRESS ⇒ (a) câu cố định ORDER_PENDING_ADDRESS «nhân viên sẽ xác nhận lại địa chỉ» (b) postConfirmOfferWindow đóng ORDER_PROBLEM ⇒ không mời. Sau CỜ upsellAfterContact theo tổ chức (mặc định TẮT, công tắc ở màn hình Câu mẫu — ops không ghi CSDL tổ chức khách): câu đổi thành «Dạ em đã ghi nhận đơn của mìn"
+}
