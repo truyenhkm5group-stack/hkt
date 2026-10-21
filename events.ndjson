@@ -1,4 +1,3 @@
-{"at":"2026-10-15T18:22:19.654Z","actor":"vm:hkt","kind":"OVERLAP_ACCEPTED","mission":"ai-verify-actions","detail":"OVERLAP_ACCEPTED với sync-runner-lock: điểm nóng SERIAL .github/ — cách tích hợp: đã vào main c52e5c57"}
 {"at":"2026-10-16T02:10:07.162Z","actor":"vm:hkt","kind":"LEASE_RESUMED","detail":"tech-lead bằng mã đã lưu cạnh cây"}
 {"at":"2026-10-16T02:15:23.078Z","actor":"vm:hkt","kind":"CLAIM","mission":"qa-0245-index","detail":"PLANNING · 7 mẫu phạm vi · HIGH"}
 {"at":"2026-10-16T02:15:23.078Z","actor":"vm:hkt","kind":"OVERLAP_ACCEPTED","mission":"qa-0245-index","detail":"OVERLAP_ACCEPTED với address-ward-explicit: phạm vi .github/workflows/ops-vps.yml ↔ .github/workflows/ · điểm nóng SERIAL .github/ — cách tích hợp: mọi sứ mệnh khai drizzle/ .github/ db/schema.ts trong sổ đều đã vào main; không PR mở nào"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-21T16:37:47.820Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"ai-usage-cache-write","detail":"OVERLAP_ACCEPTED với sales-short-qty-round: phạm vi lib/sales-chatbot/engine.ts — cách tích hợp: dựng trên main d456ca20 sau #948/#954"}
 {"at":"2026-10-21T16:37:47.820Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"ai-usage-cache-write","detail":"OVERLAP_ACCEPTED với upsell-after-confirm: phạm vi lib/sales-chatbot/engine.ts — cách tích hợp: dựng trên main d456ca20 sau #948/#954"}
 {"at":"2026-10-21T16:38:22.994Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"ai-usage-cache-write","detail":"claude/ai-usage-cache-write @ 1f3692b2ab70 · 1 lệnh kiểm thử"}
+{"at":"2026-10-21T16:39:31.385Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"ai-usage-cache-write","detail":"#956 cho claude/ai-usage-cache-write @ 1f3692b2ab70"}
