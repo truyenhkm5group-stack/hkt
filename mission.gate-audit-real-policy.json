@@ -19,10 +19,12 @@
     "payroll-residual-pool-r2"
   ],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    961
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-21T20:22:44.872Z",
-  "updated_at": "2026-10-21T20:23:16.272Z",
+  "updated_at": "2026-10-21T20:24:39.911Z",
   "last_heartbeat": "2026-10-21T20:23:16.272Z",
   "definition_of_done": [],
   "handoff": {
