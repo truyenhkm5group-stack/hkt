@@ -62,7 +62,8 @@ import { customer360Prompt, loadCustomer360, preferReturning, reuseIntentOf } fr
 import { CUSTOMER_PHASE_LABEL, customerComplaintSignal, loadCustomerPhase, postSalePrompt } from "@/lib/sales-chatbot/lifecycle";
 import { guardReply, menuOfferStep, needsOfferFacts, OFFER_BLOCK_LABEL, offerDeclinedBy, offerWindow, QUICK_SIZE_YIELDS_MAX, quickReplySizeConflict, withOfferDrops, type OfferBlock, type OfferFacts } from "@/lib/sales-chatbot/next-best-action";
 import { loadOfferFacts } from "@/lib/sales-chatbot/offer-facts";
-import { findReturningCustomer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
+import { findReturningCustomer, returningCustomerPrompt, type ReturningCustomer } from "@/lib/sales-chatbot/returning";
+import { knownPhoneOf, knownPhonePrompt, knownPhoneStateOf, phonesInText, phoneTail, addressSummaryOf, previousAddressPrompt, previousAddressQuestion, usableKnownPhone, type KnownPhone } from "@/lib/sales-chatbot/known-contact";
 import { freeShipPolicyText } from "@/lib/sales-chatbot/shipping";
 import { knowledgePrompt } from "@/lib/sales-chatbot/knowledge";
 import { volumeDiscountPolicyText } from "@/lib/sales-chatbot/volume-discount";
@@ -73,13 +74,13 @@ import { recoveryPrompt, serverCancelStep } from "@/lib/sales-chatbot/cancel-flo
 import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, returningPendingOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
 import { purchaseRoundStart } from "@/lib/sales-chatbot/purchase-round";
 import { addressQuestion, looksLikeDeliveryAddress, looksLikeStreetFragment, parseCustomerAddress } from "@/lib/address/customer-address";
-import { askedQuantityChoice, choiceAmountText, DELIVERY_ASK_NEEDS_ADDRESS, quantityOnlyAnswer, quantityWithDeliveryAsk, roundCheckAnswer, roundCheckHandoffReason, roundCheckStep } from "@/lib/sales-chatbot/round-check";
+import { askedQuantityChoice, choiceAmountText, DELIVERY_ASK_NEEDS_ADDRESS, quantityOnlyAnswer, quantityWithDeliveryAsk, roundCheckAnswer, roundCheckHandoffReason, roundCheckStep, roundCheckOrderOf } from "@/lib/sales-chatbot/round-check";
 import { amountText, amountsIn, applyCustomerCartMessage, botProposedDenial, buyingText, customerTextsSince, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, invitedProductOf, itemObjectionCue, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
 import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
 import { customerHandoffVerdict, nextObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
-import { ADDRESS_KNOWN_TEXT, ADDRESS_STAFF_TEXT, SCHEDULE_NOTED_TEXT, addressKnowledge, addressReaskVerdict, continuesSameOrder, isScheduleOnly, knownContactPrompt } from "@/lib/sales-chatbot/address-memory";
+import { ADDRESS_KNOWN_TEXT, ADDRESS_STAFF_TEXT, CONTACT_KNOWN_TEXT, SCHEDULE_NOTED_TEXT, addressKnowledge, addressReaskVerdict, continuesSameOrder, isScheduleOnly, knownContactPrompt, knownDeliveryAddressOf, latestCustomerAddress } from "@/lib/sales-chatbot/address-memory";
 import { classifyDeliveryQuestion, DELIVERY_HANDOFF_TEXT, deliveryPreferenceOf, deliveryPromiseIn, deliveryReplyViolation, turnDeliverySay } from "@/lib/sales-chatbot/delivery-intent";
 import { asksOrderStatus, asksQuestion, orderStatusSayOf, postSaleFallbackText, postSaleReplyGuard, turnOrderStatusSay } from "@/lib/sales-chatbot/post-sale-guard";
 import { openChatDelayCase } from "@/lib/cs/chat-delay-case";
@@ -270,11 +271,16 @@ export function priceDisputePrompt(pd: PriceDisputeState | undefined): string {
  * Khối «ĐƠN HIỆN TẠI» của lượt (giỏ có thẩm quyền — cart-commitment.ts): mức sẵn sàng của đơn nháp đọc ĐÚNG `autoConfirmBlocker` (P0-A),
  * chưa có đơn nháp thì theo giỏ + SĐT + địa chỉ. Rỗng khi giỏ chưa có món khách nói tường minh. HÀM THUẦN.
  */
-export function cartPromptOf(st: ChatState, lastUserText: string, turn: number, autoConfirm: boolean, prevTurn?: number): string {
+/** Điều máy chủ đã biết về liên hệ của khách cho lượt (P0 21/10/2026): SĐT đã biết (known-contact.ts) + tin khách của LƯỢT MUA (địa chỉ). */
+export type TurnContact = { phone?: KnownPhone; roundTexts?: readonly string[]; previousAddress?: string | null };
+
+export function cartPromptOf(st: ChatState, lastUserText: string, turn: number, autoConfirm: boolean, prevTurn?: number, contact: TurnContact = {}): string {
   if (!st.cart?.selectedItems.some((x) => x.customerExplicit)) return "";
   const justInvited = prevTurn !== undefined && (st.upsellTurn === prevTurn || st.draft?.shownTurn === prevTurn);
-  const r = orderReadiness({ ...st, blocker: st.draft ? autoConfirmBlocker(st, { lastUserText, turn, prevTurn }) : null, lastUserText, hesitating: customerHesitates(lastUserText, { justInvited }) });
-  return cartCommitmentPrompt(st, r, { autoConfirm, turn });
+  const knownPhone = usableKnownPhone(contact.phone);
+  const knownAddress = contact.roundTexts ? knownDeliveryAddressOf(st, contact.roundTexts) : null;
+  const r = orderReadiness({ ...st, blocker: st.draft ? autoConfirmBlocker(st, { lastUserText, turn, prevTurn }) : null, lastUserText, hesitating: customerHesitates(lastUserText, { justInvited }), knownPhone, knownAddress });
+  return cartCommitmentPrompt(st, r, { autoConfirm, turn, knownPhone });
 }
 
 /**
@@ -283,13 +289,19 @@ export function cartPromptOf(st: ChatState, lastUserText: string, turn: number, 
  * đủ mà có đơn nháp ⇒ đọc lại tổng MÁY CHỦ và xin xác nhận; đủ mà chưa có nháp ⇒ xin xác nhận đúng món + số lượng khách đã nói. Chỉ khi
  * chưa có gì để bám (đang xem hàng, đã chốt, đang hoãn) mới dùng câu chung. HÀM THUẦN.
  */
-export function silenceFallbackText(st: ChatState, lastUserText: string, turn: number, autoConfirm: boolean, prevTurn?: number): string {
+export function silenceFallbackText(st: ChatState, lastUserText: string, turn: number, autoConfirm: boolean, prevTurn?: number, contact: TurnContact = {}): string {
   if (!st.cart?.selectedItems.some((x) => x.customerExplicit) && !st.draft) return EMPTY_REPLY_TEXT;
   const justInvited = prevTurn !== undefined && (st.upsellTurn === prevTurn || st.draft?.shownTurn === prevTurn);
-  const r = orderReadiness({ ...st, blocker: st.draft ? autoConfirmBlocker(st, { lastUserText, turn, prevTurn }) : null, lastUserText, hesitating: customerHesitates(lastUserText, { justInvited }) });
+  const known = contact.phone;
+  const knownAddress = contact.roundTexts ? knownDeliveryAddressOf(st, contact.roundTexts) : null;
+  const r = orderReadiness({ ...st, blocker: st.draft ? autoConfirmBlocker(st, { lastUserText, turn, prevTurn }) : null, lastUserText, hesitating: customerHesitates(lastUserText, { justInvited }), knownPhone: usableKnownPhone(known), knownAddress });
+  // Hội thoại có NHIỀU số khác nhau (known-contact.ts) ⇒ một câu chọn số, không xin số mới.
+  if (r.level === "NEED_PHONE" && known?.kind === "MANY") return `Dạ mình nhận hàng số đuôi ${known.phones.map(phoneTail).join(" hay ")} ạ?`;
   if (r.level === "NEED_PHONE") return "Dạ mình cho em xin số điện thoại nhận hàng nhé.";
   // Đã có dòng địa chỉ mà chỉ thiếu tỉnh / thành ⇒ hỏi ĐÚNG phần đó, không xin lại cả địa chỉ (P0 15/10/2026).
   if (r.level === "NEED_ADDRESS") {
+    // Khách cũ, lượt mua mới chưa có địa chỉ, hội thoại có địa chỉ lần trước ⇒ MỘT câu xác nhận, không xin lại cả địa chỉ (P0 21/10/2026).
+    if (contact.previousAddress !== undefined && contact.previousAddress !== null && !(st.draft?.recipient.address ?? st.customer?.address ?? "").trim()) return previousAddressQuestion(contact.previousAddress);
     if ((st.draft?.recipient.address ?? st.customer?.address ?? "").trim()) return "Dạ mình cho em xin tỉnh / thành phố của địa chỉ nhận hàng nhé.";
     // Khách VỪA gửi một mảnh địa chỉ (đường / khu / mốc địa danh «KCN …, cổng công ty …») mà chưa đọc ra tỉnh / xã ⇒ hỏi ĐÚNG phần còn thiếu,
     // không xin lại cả địa chỉ khách vừa gõ (P0 21/10/2026). Không bao giờ tự chọn xã: câu hỏi đọc từ danh mục (`addressQuestion`).
@@ -1248,6 +1260,8 @@ async function chatTurnCore(
     // người. Đơn cũ đã rời kho / đã giao ⇒ lượt mua mới ngay. Nhân viên đang tiếp quản ⇒ không đụng.
     if (opts.channel !== "TEST" && readConversationControl(st0)?.mode !== "HUMAN") {
       const rc = st0.roundCheck;
+      // Đơn bot chốt, hoặc đơn NHÂN VIÊN lên từ chính hội thoại (round-check.ts `roundCheckOrderOf`).
+      const rcOrder = roundCheckOrderOf(st0);
       const startNewRound = (sinceTurn: number, startAt: Date) => {
         const said = (st0.cart?.selectedItems ?? []).filter((x) => x.customerExplicit && (x.sourceMessageId ?? -1) >= sinceTurn);
         const fresh = freshPurchaseRound(st0, conv.turns, now, startAt);
@@ -1257,10 +1271,11 @@ async function chatTurnCore(
         const st: ChatState = { ...fresh, ...(said.length && st0.cart ? { cart: { ...st0.cart, selectedItems: said } } : {}), roundCheck: { orderId: st0.confirmed?.orderId ?? rc?.orderId ?? "", askedTurn: rc?.askedTurn ?? turnSeq, at: rc?.at ?? now.toISOString(), answer: "NEW" } };
         return st;
       };
-      if (rc && !rc.answer && rc.askedTurn === prevTurn && st0.confirmed?.orderId === rc.orderId) {
+      if (rc && !rc.answer && rc.askedTurn === prevTurn && rcOrder?.orderId === rc.orderId) {
         const ans = roundCheckAnswer(text);
-        if (ans === null) {
-          const reason = roundCheckHandoffReason(rc.orderId, st0.confirmed.at);
+        // «Vẫn đơn đó» trên đơn NHÂN VIÊN lên ⇒ người xử lý: bot không sửa đơn người lên (không đơn trùng, không sửa nhầm).
+        if (ans === null || (ans === "SAME" && rcOrder.staff)) {
+          const reason = ans === null ? roundCheckHandoffReason(rc.orderId, rcOrder.at) : `Cần người xử lý — khách muốn thêm vào đơn #${manualOrderShortCode(rc.orderId)} nhân viên đã lên (bot không sửa đơn người lên)`;
           const st: ChatState = { ...st0, handoff: { reason, at: now.toISOString() } };
           if (!isMessagingChannel(opts.channel)) await reply(conv, seq, cfg.handoff.message);
           await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1, nextFollowupAt: null });
@@ -1273,7 +1288,7 @@ async function chatTurnCore(
         st0 = st;
       } else {
         const said = (st0.cart?.selectedItems ?? []).filter((x) => x.customerExplicit && x.sourceMessageId === turnSeq).map((x) => `${amountText(x.quantity, x.unit, x.pieces)}${x.label ? ` ${x.label}` : ""}`);
-        const step = roundCheckStep({ confirmed: st0.confirmed, phase: phase?.phase ?? null, text, turn: turnSeq, now, prior: rc, answersOffer: prevTurn !== undefined && st0.upsellTurn === prevTurn, saidLine: said.length ? said.join(" + ") : null, money: formatVND });
+        const step = roundCheckStep({ confirmed: rcOrder ?? undefined, phase: phase?.phase ?? null, text, turn: turnSeq, now, prior: rc, answersOffer: prevTurn !== undefined && st0.upsellTurn === prevTurn, saidLine: said.length ? said.join(" + ") : null, money: formatVND });
         if (step?.kind === "ASK" && (await guardOutgoing(step.text, () => claimFacts(st0))).ok) {
           const st: ChatState = { ...st0, roundCheck: step.check };
           await reply(conv, seq, step.text);
@@ -1300,6 +1315,13 @@ async function chatTurnCore(
     // lại, không lượt AI. Đã đủ SĐT + địa chỉ ⇒ để luồng lên đơn (cần công cụ). Đơn nháp / đã chốt / hậu mãi / trả lời lời mời ⇒ luồng cũ.
     // Chỉ khi tin ngay trước là câu HỎI chọn số lượng của bot / page, và KHÔNG có câu mời mua thêm đang tới lượt (shop có câu upsell mà lượt
     // mua chưa gửi ⇒ để model chạy luồng #868 — mời đúng lúc khách vừa chọn món).
+    // SĐT ĐÃ BIẾT (known-contact.ts — MỘT nguồn cho mức sẵn sàng · câu khi lượt im · hàng rào hỏi lại · lời nhắc · create_customer):
+    // tin khách của CHÍNH hội thoại (kể cả tin cũ chép từ Pancake); sau khi đọc Customer 360 thì thêm SĐT đơn nối chắc (THREAD / FB_ID).
+    const ownCustomerTexts = [...customerTextsSince(customerMsgsOf(msgs), null), text];
+    let knownPhone = knownPhoneOf({ customerPhone: st0.customer?.phone, customerTexts: ownCustomerTexts });
+    const roundTextsNow = [...customerTextsSince(customerMsgsOf(msgs), purchaseRoundStart(st0)), text];
+    // Tin khách của các LƯỢT MUA TRƯỚC trong chính hội thoại (địa chỉ lần trước — chỉ để HỎI xác nhận, không tự điền).
+    const earlierRoundTexts = ownCustomerTexts.slice(0, Math.max(0, ownCustomerTexts.length - roundTextsNow.length));
     const upsellDue = Boolean(qrSettings.upsellReplyId) && !st0.upsellSent;
     if (!postSale && !upsellDue && askedQuantityChoice(shopSince[shopSince.length - 1] ?? null) && !st0.confirmed && !st0.draft && !st0.handoff && readConversationControl(st0)?.mode !== "HUMAN" && !(prevTurn !== undefined && st0.upsellTurn === prevTurn)) {
       const said = (st0.cart?.selectedItems ?? []).filter((x) => x.customerExplicit && x.sourceMessageId === turnSeq);
@@ -1307,7 +1329,7 @@ async function chatTurnCore(
       // Tin HAI Ý «Cho chị 2kg. Mấy ngày nhận được hàng?» (ca «Xuân Đoàn»): ghi nhận số lượng VÀ đáp phần hỏi giao — chưa có địa chỉ ⇒ xin
       // địa chỉ để báo thời gian dự kiến, KHÔNG nêu mốc / số ngày (máy chủ chưa có căn cứ). Câu thứ hai là chuyện khác ⇒ để model đọc.
       if (one && (twoIntents || quantityOnlyAnswer(cartInput, [one.label]))) {
-        const ask = silenceFallbackText(st0, text, turnSeq, false, prevTurn);
+        const ask = silenceFallbackText(st0, text, turnSeq, false, prevTurn, { phone: knownPhone, roundTexts: roundTextsNow });
         if (/số điện thoại|địa chỉ|phường|tỉnh/.test(ask)) {
           const askTail = ask.replace(/^Dạ,?\s*/, "").replace(/^\p{Ll}/u, (ch) => ch.toUpperCase());
           const qtyAck = `Dạ em ghi nhận mình lấy ${amountText(one.quantity, one.unit, one.pieces)} ${one.label} ạ. ${twoIntents ? `${DELIVERY_ASK_NEEDS_ADDRESS} ` : ""}${askTail}`;
@@ -1462,7 +1484,7 @@ async function chatTurnCore(
     // #871: câu mẫu theo TỪ KHOÁ / AI chọn mã đi nguyên văn — cùng hàng rào hỏi lại như chữ model. Câu mẫu xin SĐT / địa chỉ khách đã
     // cho («…xin SĐT + địa chỉ chính xác để em check tuyến giao» khớp chữ «giao» của «Giao sáng mai khoảng 9h») ⇒ không gửi, AI trả lời.
     // Cùng cửa sổ với `customerTexts` của đường AI — hai đường phán cùng một tin như nhau.
-    const quickReasks = (pick: QuickReplyPick) => addressReaskVerdict(pick.text, addressKnowledge(st0, customerTexts), turnSeq, { botTexts: recentSaid }) !== null;
+    const quickReasks = (pick: QuickReplyPick) => addressReaskVerdict(pick.text, addressKnowledge(st0, roundCustomerTexts, { phoneKnown: usableKnownPhone(knownPhone) !== null }), turnSeq, { botTexts: recentSaid }) !== null;
     // #868 TRÊN ĐƯỜNG CÂU MẪU (production 19/10/2026, HSLC): «1kg chả cá thu» ⇒ câu mẫu «… mình muốn mua 1kg hay 2kg ạ?» đi nguyên văn
     // vì câu mẫu không qua guardReply. Câu mẫu không được cắt (lời của shop) ⇒ câu mẫu hỏi lại quy cách / mời gói lớn cho món khách đã
     // chọn khối lượng thì KHÔNG gửi, AI trả lời (qua guardReply). Mỗi lần nhường ghi một mốc (có trần) — ops đếm số lời gọi AI thêm.
@@ -1543,7 +1565,22 @@ async function chatTurnCore(
     // (hỏi xác nhận ⇒ use_saved_address + lời xác nhận nguyên văn), và create_customer chặn gõ lại địa chỉ đơn cũ (AGENTS 3.12). Giai
     // đoạn hậu mãi (`postSale`, #821) KHÔNG có khối TRA LỊCH SỬ: sửa thông tin nhận hàng của đơn đã chốt là việc của nhân viên.
     const c360 = await loadCustomer360({ conversationId: conv.id, pageId: conv.pageId, threadId: conv.threadId, state: known }).catch(() => null);
-    const returning = preferReturning(baseReturning, c360);
+    knownPhone = knownPhoneOf({ customerPhone: known.customer?.phone, customerTexts: ownCustomerTexts, orders: c360?.certainPhones ?? [] });
+    // ĐỊA CHỈ LẦN TRƯỚC (P0 21/10/2026): địa chỉ cũ ĐÃ XÁC MINH của đơn nối chắc (Customer 360, không che) — không có thì địa chỉ khách TỰ GÕ ở
+    // lượt mua trước của CHÍNH hội thoại. Chỉ khi lượt này chưa có địa chỉ; chỉ để hỏi MỘT câu (đã hỏi mà khách chưa trả lời ⇒ xin địa chỉ như
+    // thường, không hỏi lặp), ghi vào đơn qua use_saved_address.
+    const roundAddressKnown = Boolean(known.customer?.address?.trim() || known.draft?.recipient.address.trim() || knownDeliveryAddressOf(known, roundTextsNow));
+    const verifiedPrev = c360 && c360.suggestion === "ONE" && !c360.masked ? c360.addresses[0] : null;
+    const typedPrev = !verifiedPrev && earlierRoundTexts.length ? latestCustomerAddress(earlierRoundTexts) : null;
+    const prevPhone = usableKnownPhone(knownPhone);
+    const previousAddress = roundAddressKnown || !prevPhone || recentSaid.some((t) => t.includes("như lần trước được không ạ?")) ? null : verifiedPrev ? addressSummaryOf(verifiedPrev.address, verifiedPrev.ward, verifiedPrev.province) : typedPrev ? addressSummaryOf(typedPrev.raw) : null;
+    const typedPrevReturning: ReturningCustomer | null =
+      previousAddress !== null && typedPrev && prevPhone
+        ? { trust: "THREAD", fromHistory: true, customerId: null, name: known.customer?.name || opts.customerName || "Khách", phone: prevPhone, address: typedPrev.raw, province: typedPrev.province ?? "", orders: null, lastOrderAt: null, lastItems: [], repeat: c360?.buyer === "REPEAT" || Boolean(known.pastOrders?.length) }
+        : null;
+    const returning = preferReturning(baseReturning, c360) ?? typedPrevReturning;
+    // Lời nhắc chỉ nói «SĐT đã có» khi số đó KHÔNG nằm ngay trong tin khách vừa gửi (số vừa gửi là việc bình thường của lượt này).
+    const promptPhone: KnownPhone = knownPhone.kind === "ONE" && phonesInText(text).includes(knownPhone.phone) ? { kind: "NONE" } : knownPhone;
     const reuse = reuseIntentOf([
       ...msgs
         .filter((m) => m.role === "user")
@@ -1555,7 +1592,7 @@ async function chatTurnCore(
     const bookingOn = cfg.booking.enabled && (await canUseModule("appointments"));
     // TỰ CHỐT KHI ĐỦ ĐƠN (P0-A, chủ shop 11/10/2026): theo công tắc «đơn đủ thông tin = đã xác nhận» của tổ chức. Lỗi đọc ⇒ TẮT (luồng xin xác nhận cũ).
     const autoConfirm = await loadAutoConfirmComplete().catch(() => false);
-    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }), postSale ? "" : customer360Prompt(c360, reuse), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), confirmedOrderPrompt(known), cartPromptOf(known, text, turnSeq, autoConfirm, prevTurn), postSale ? "" : knownContactPrompt(known, customerTexts), postSale ? postSalePrompt(phase!, phase!.shortCode) : "", recoveryPrompt(known), opts.context ?? ""].filter(Boolean).join("\n");
+    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }), postSale ? "" : customer360Prompt(c360, reuse), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), confirmedOrderPrompt(known), cartPromptOf(known, text, turnSeq, autoConfirm, prevTurn, { phone: promptPhone, roundTexts: roundCustomerTexts, previousAddress }), postSale ? "" : knownContactPrompt(known, roundCustomerTexts, { phoneKnown: usableKnownPhone(knownPhone) !== null }), postSale ? "" : knownPhonePrompt(promptPhone), postSale || reuse.address !== null ? "" : previousAddressPrompt(previousAddress), postSale ? postSalePrompt(phase!, phase!.shortCode) : "", recoveryPrompt(known), opts.context ?? ""].filter(Boolean).join("\n");
     // Chỉ CHỮ MUA (bỏ câu hỏi giá / câu từ chối / giả định — `buyingText`): gọi tên món trong «nem tôm bao nhiêu?» không phải căn cứ.
     // (`customerTexts` — tin KHÁCH thô — và `roundCustomerTexts` dựng ở trên, trước bước câu mẫu: câu mẫu cũng chịu hàng rào thông tin
     // nhận hàng, #871, và hàng rào món khách đang hỏi.)
@@ -1757,14 +1794,18 @@ async function chatTurnCore(
             // #855: `botTexts` = câu shop đã gửi ở lượt trước ⇒ cùng một trường không hỏi lần 2. `handoff` ⇒ chuyển người THẬT (như
             // claim-guard): ghi `state.handoff` (lượt kết thúc HANDOFF, lượt sau AI không chen), báo nhân viên một lần mỗi lượt; fanpage /
             // Zalo ⇒ bot không gửi câu nhân viên (nhân viên tiếp quản), chỉ gửi phần còn lại nếu có.
-            const addrHold = verdict.ok ? addressReaskVerdict(out, addressKnowledge(state, customerTexts), turnSeq, { botTexts: recentSaid }) : null;
+            const addrHold = verdict.ok ? addressReaskVerdict(out, addressKnowledge(state, roundCustomerTexts, { phoneKnown: usableKnownPhone(knownPhone) !== null }), turnSeq, { botTexts: recentSaid }) : null;
             if (addrHold) {
               lastError = lastError ?? addrHold.note;
               if (addrHold.handoff && !state.handoff) {
                 state = { ...state, handoff: { reason: addrHold.handoff, at: now.toISOString() } };
                 if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, addrHold.handoff, state.customer, now, { dedupeKey: `sales-chat:address-guard:${conv.id}:${turnSeq}` }).catch(() => undefined);
               }
-              const restText = addrHold.handoff && isMessagingChannel(opts.channel) ? addrHold.rest.replace(ADDRESS_STAFF_TEXT, "").trim() : addrHold.rest;
+              const restRaw = addrHold.handoff && isMessagingChannel(opts.channel) ? addrHold.rest.replace(ADDRESS_STAFF_TEXT, "").trim() : addrHold.rest;
+              // Câu hỏi bị bỏ là câu xin SĐT ĐÃ BIẾT mà lượt chưa có địa chỉ (P0 21/10/2026): «Dạ em ghi nhận thông tin…» trơn làm lượt dừng
+              // không hỏi gì ⇒ hỏi ĐÚNG bước kế tiếp của mức sẵn sàng (địa chỉ — hoặc MỘT câu «như lần trước» với khách cũ).
+              const nextAsk = !addrHold.handoff && restRaw === CONTACT_KNOWN_TEXT ? silenceFallbackText(state, text, turnSeq, autoConfirm, prevTurn, { phone: knownPhone, roundTexts: roundCustomerTexts, previousAddress }) : null;
+              const restText = nextAsk && nextAsk !== EMPTY_REPLY_TEXT && /địa chỉ|như lần trước|tỉnh|phường/.test(nextAsk) ? nextAsk : restRaw;
               // #868: phần chữ model còn lại qua hàng rào lời mời trước. Lượt khách HẸN GIỜ GIAO (#871 / #872): ghi nhận lời dặn, không hỏi
               // lại, không hứa giờ. Sau bán hàng là việc của đường lịch giao.
               const restKept = restText ? await offerGuard(restText) : restText;
@@ -1815,7 +1856,7 @@ async function chatTurnCore(
         for (const u of uses) {
           const confirmedBefore = Boolean(state.confirmed);
           const draftBefore = draftFingerprint(state.draft);
-          const r = await executeTool(u.name, u.input, { autoConfirm, prevTurn, conversationId: conv.id, customerSaid, customerTexts, roundCustomerTexts, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, recentSaid, quickReplyFocus: qrFocus, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
+          const r = await executeTool(u.name, u.input, { autoConfirm, prevTurn, conversationId: conv.id, customerSaid, customerTexts, roundCustomerTexts, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, knownPhone, recentSaid, quickReplyFocus: qrFocus, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
           // Tổng máy chủ vừa tính vào sổ `seenTotals` — hàng rào chặn nói lại tổng của giỏ CŨ (review vòng 3).
           state = r.state;
           state = noteSeenTotals(state);
@@ -2003,7 +2044,7 @@ async function chatTurnCore(
     if (!spoke && postSaleEmptied && status === "OK" && !orderWriteFailed && !replayNoop && !state.handoff) {
       let statusSay = asksOrderStatus(text) ? turnOrderStatusSay(history) : null;
       if (asksOrderStatus(text) && !statusSay) {
-        const r = await executeTool("get_order_status", {}, { autoConfirm, prevTurn, conversationId: conv.id, customerSaid, customerTexts, roundCustomerTexts, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: prov.provider.model } });
+        const r = await executeTool("get_order_status", {}, { autoConfirm, prevTurn, conversationId: conv.id, customerSaid, customerTexts, roundCustomerTexts, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, knownPhone, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: prov.provider.model } });
         state = r.state;
         if (r.requireHuman) {
           state = { ...state, handoff: { reason: `Cần người xử lý — ${r.requireHuman}`, at: now.toISOString() } };
@@ -2025,7 +2066,7 @@ async function chatTurnCore(
       } else {
         // Thiếu gì hỏi đúng cái đó (giỏ có thẩm quyền) — câu chung «nói rõ hơn» chỉ khi chưa có gì để bám.
         // Câu hỏi lại có thể mang tổng đơn nháp ⇒ cùng hàng rào; không qua ⇒ câu chung.
-        const ask = postSaleSay ?? silenceFallbackText(state, text, turnSeq, autoConfirm, prevTurn);
+        const ask = postSaleSay ?? silenceFallbackText(state, text, turnSeq, autoConfirm, prevTurn, { phone: knownPhone, roundTexts: roundCustomerTexts, previousAddress });
         const fallback = ask === EMPTY_REPLY_TEXT || (await guardOutgoing(ask, () => claimFacts(state))).ok ? ask : EMPTY_REPLY_TEXT;
         if (repeatedDrop || (fallback === EMPTY_REPLY_TEXT && repeatOfAnswered)) {
           // Không gửi câu thừa, nhưng KHÔNG im lặng lẳng lặng (review 14/10): gắn cờ cần người, nhân viên xem tin lặp này. Model chỉ còn
@@ -2050,6 +2091,10 @@ async function chatTurnCore(
       seg = newSegment();
     }
     await recordSegment({ ...seg, name: prov.provider.name, source: prov.source }, status);
+    // SĐT đã biết đi vào state (không thuộc lượt mua — lượt mua mới KHÔNG xoá): hộp thư đọc CÙNG một số (inbox `phoneOfConversation`).
+    const knownState = knownPhoneStateOf(knownPhone, now);
+    if (knownState) state = { ...state, knownPhone: knownState };
+    else if (state.knownPhone) state = { ...state, knownPhone: undefined };
     await bump({
       state: state as Record<string, unknown>,
       turns: conv.turns + 1,

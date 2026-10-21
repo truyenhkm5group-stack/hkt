@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { inboxPhoneOf } from "@/lib/sales-chatbot/known-contact";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { chayKhongJit, getDb, schema, type Db } from "@/db";
@@ -133,7 +134,8 @@ export function inboxSourceOf(r: { channel: string; pageId: string | null; trans
 }
 
 /** Có SĐT: SĐT hội thoại (job level đọc từ tin khách / Pancake) · hồ sơ khách · sổ trạng thái bot. */
-const HAS_PHONE = sql<boolean>`(coalesce("${sql.raw(C)}"."customer_phone", '') <> '' or coalesce("customers"."phone", '') <> '' or coalesce("${sql.raw(C)}"."state"->'customer'->>'phone', '') <> '')`;
+// Cùng bốn nguồn của `inboxPhoneOf` (known-contact.ts) — bộ lọc «có / chưa có SĐT» không được nói khác ô SĐT của hàng.
+const HAS_PHONE = sql<boolean>`(coalesce("${sql.raw(C)}"."customer_phone", '') <> '' or coalesce("customers"."phone", '') <> '' or coalesce("${sql.raw(C)}"."state"->'customer'->>'phone', '') <> '' or coalesce("${sql.raw(C)}"."state"->'knownPhone'->>'phone', '') <> '')`;
 
 const dayZ = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().catch(null);
 const listZ = z.object({
@@ -268,14 +270,14 @@ export function inboxOrderBy(filter: InboxFilter, unread: SQL<boolean>, exactFir
  * nhắc `"state"` 26 lần mỗi dòng, câu lấy hàng 11 lần (đo bằng chữ câu) — và Postgres GIẢI NÉN TOÀN BỘ giá trị TOAST cho MỖI lần `->`
  * (không giữ bản đã giải nén giữa các biểu thức). `state` lớn (hồ sơ khách cũ, giỏ, báo giá, đồng bộ đơn…) ⇒ chi phí nhân lên theo cỡ
  * của nó: PGlite 4.000 hội thoại, state ~60 KB sau nén ⇒ listInbox 6,3 giây; state rỗng ⇒ 0,1 giây.
- * Sửa: (1) các câu quét cả hộp thư đọc từ một bảng dẫn xuất CÙNG TÊN `sales_chat_conversations` mà cột `state` chỉ còn ba nhánh SQL
+ * Sửa: (1) các câu quét cả hộp thư đọc từ một bảng dẫn xuất CÙNG TÊN `sales_chat_conversations` mà cột `state` chỉ còn các nhánh SQL
  * thật sự đọc (`INBOX_STATE_SQL_KEYS` — bài kiểm quét chữ câu, nhánh mới mà quên khai ⇒ đỏ), dựng từ state giải nén MỘT lần mỗi dòng;
  * mọi mảnh SQL dùng chung (inbox-states · handoff-routing) giữ nguyên chữ. (2) Câu lấy hàng tách HAI pha: pha 1 chỉ xếp + cắt trang (mã
  * hội thoại, cờ chưa đọc — không cột nào cần `state` trừ khi bộ lọc cần), pha 2 đọc chi tiết + `state` ĐẦY ĐỦ (`state_full`) cho đúng
  * các dòng của trang. Trước đây mọi biểu thức «rẻ» của danh sách cột (tên / SĐT trong state, AI im…) được Postgres tính cho CẢ hộp thư
  * trước phép xếp.
  */
-export const INBOX_STATE_SQL_KEYS = ["control", "handoff", "customer"] as const;
+export const INBOX_STATE_SQL_KEYS = ["control", "handoff", "customer", "knownPhone"] as const;
 
 /** Cột của hội thoại đọc qua bảng dẫn xuất cùng tên (drizzle chỉ nhận cột của bảng có trong FROM ⇒ bọc `sql`, giữ phép đổi kiểu của cột). */
 function viaSource<T extends AnyPgColumn>(col: T): SQL<T["_"]["data"]> {
@@ -411,6 +413,7 @@ export async function listInbox(
       customerId: viaSource(c.customerId),
       stateName: sql<string | null>`${c.state}->'customer'->>'name'`,
       statePhone: sql<string | null>`${c.state}->'customer'->>'phone'`,
+      knownPhone: sql<string | null>`${c.state}->'knownPhone'->>'phone'`,
       inboundName: INBOUND_NAME,
       lastCustomerAt: viaSource(c.lastCustomerAt),
       lastBotAt: viaSource(c.lastBotAt),
@@ -546,7 +549,7 @@ export async function listInbox(
         status: r.status,
         handoffReason: r.handoffReason,
         customerName: r.customerName || r.stateName || r.inboundName || "Khách",
-        customerPhone: r.customerPhone || r.statePhone || r.convPhone || null,
+        customerPhone: inboxPhoneOf({ customerPhone: r.customerPhone, statePhone: r.statePhone, knownPhone: r.knownPhone, convPhone: r.convPhone }),
         customerId: r.customerId ?? null,
         preview: (pv?.text ?? "").slice(0, 140),
         previewSide: pv?.side ?? null,
@@ -800,7 +803,8 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
   // đọc). Nạp khung chat chỉ ĐỌC; trình duyệt hiện xong mới gửi `readThrough` về `markInboxReadCore` (inbox-read.ts).
   // Customer 360 (11/10/2026, ca «Nga Ho Thien»): khung khách in «Chưa có SĐT» trong khi Pancake ĐÃ ghi nhận SĐT của hội thoại
   // (`state.returning.phones` — bot vẫn đọc được). Màn của NHÂN VIÊN ⇒ dùng SĐT đó làm phương án cuối để đối chiếu lịch sử.
-  const phoneForHistory = cust?.phone ?? st.customer?.phone ?? conv.customerPhone ?? st.returning?.phones?.[0] ?? null;
+  const shownPhone = inboxPhoneOf({ customerPhone: cust?.phone, statePhone: st.customer?.phone, knownPhone: st.knownPhone?.phone, convPhone: conv.customerPhone });
+  const phoneForHistory = shownPhone ?? st.returning?.phones?.[0] ?? null;
   const [labelMap, allLabels, notes, history, feedback] = await Promise.all([labelsFor([conv.id]), listLabels(), notesFor(user, conv.id), customerHistory(cust?.id ?? null, phoneForHistory).catch(() => null), feedbackFor(conv.id).catch(() => [])]);
   return {
     ok: true,
@@ -819,8 +823,8 @@ export async function loadInboxThread(user: SessionUser, conversationId: unknown
       aiBlocks: await conversationAiBlocks(conv),
       control: readConversationControl(conv.state),
       customer: cust
-        ? { id: cust.id, name: cust.name, phone: cust.phone, address: cust.address, province: cust.province }
-        : { id: null, name: st.customer?.name || channelName || "Khách", phone: st.customer?.phone ?? null, address: st.customer?.address ?? null, province: null },
+        ? { id: cust.id, name: cust.name, phone: shownPhone, address: cust.address, province: cust.province }
+        : { id: null, name: st.customer?.name || channelName || "Khách", phone: shownPhone, address: st.customer?.address ?? null, province: null },
       assigneeUserId: conv.assigneeUserId,
       assigneeName,
       handoffQueue,

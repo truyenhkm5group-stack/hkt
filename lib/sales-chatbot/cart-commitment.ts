@@ -1428,6 +1428,10 @@ type ReadinessInput = {
   lastUserText: string;
   /** Câu cuối của khách đang hoãn / từ chối (cùng biểu thức với P0-A). */
   hesitating: boolean;
+  /** SĐT ĐÃ BIẾT của khách (known-contact.ts `usableKnownPhone` — đúng MỘT số, nhận diện chắc). Vắng ⇒ như cũ. */
+  knownPhone?: string | null;
+  /** Địa chỉ giao ĐÃ BIẾT của lượt mua (address-memory.ts `knownDeliveryAddressOf`). Vắng ⇒ như cũ (chỉ hồ sơ + câu cuối). */
+  knownAddress?: { address: string; province: string } | null;
 };
 
 /**
@@ -1449,9 +1453,9 @@ export function orderReadiness(s: ReadinessInput): { level: OrderReadiness; miss
   if (s.hesitating) return { level: "ON_HOLD", missing: "Khách chưa quyết mua (đang hoãn / cân nhắc)" };
   // Còn MỘT món không tên (dù món khác đã rõ — review #855) ⇒ vẫn kèm chỉ dẫn xác định món, không ORDER_READY trần.
   if (explicit.some((x) => !x.match && !x.productId)) return { level: "NEED_ITEMS", missing: "Câu khách nêu số lượng mà không nêu tên món — xác định món theo lịch sử hội thoại (chỉ hỏi lại khi thật sự chưa rõ), KHÔNG hỏi lại số lượng" };
-  const phone = s.customer?.phone ?? (s.lastUserText.match(PHONE_IN_TEXT_RE)?.[0] ?? "");
-  const address = s.customer?.address ?? s.lastUserText;
-  const province = s.customer?.province || resolveRecipientPlace({ address, province: "", ward: "" }).province;
+  const phone = s.customer?.phone ?? (s.lastUserText.match(PHONE_IN_TEXT_RE)?.[0] ?? s.knownPhone ?? "");
+  const address = s.customer?.address ?? s.knownAddress?.address ?? s.lastUserText;
+  const province = s.customer?.province || (s.customer ? "" : s.knownAddress?.province) || resolveRecipientPlace({ address, province: "", ward: "" }).province;
   const gaps = manualOrderGaps({ phone, address, province }, explicit.length);
   if (gaps.includes("SĐT")) return { level: "NEED_PHONE", missing: "Chưa có SĐT hợp lệ" };
   if (gaps.includes("địa chỉ") || gaps.includes("tỉnh / thành")) return { level: "NEED_ADDRESS", missing: "Chưa có địa chỉ giao đọc được tỉnh / thành" };
@@ -1472,13 +1476,13 @@ const quoted = (s: string) => `«${s.replace(/[«»"`<>{}[\]\\]/g, "").replace(/
 export function cartCommitmentPrompt(
   s: { cart?: CartCommitment; customer?: { phone: string; address: string; province: string }; draft?: { lines: readonly { variantId: string; quantity: number }[]; quote?: { subtotal: number; total: number | null } }; confirmed?: unknown },
   r: { level: OrderReadiness; missing: string | null },
-  opts: { autoConfirm?: boolean; turn?: number | null } = {},
+  opts: { autoConfirm?: boolean; turn?: number | null; knownPhone?: string | null } = {},
 ): string {
   const explicit = s.cart?.selectedItems.filter((x) => x.customerExplicit) ?? [];
   if (!s.cart || !explicit.length) return "";
   const items = s.cart.selectedItems.map((x) => `${amountText(x.quantity, x.unit, x.pieces)} ${x.label ? quoted(x.label) : "(chưa rõ món)"}${x.customerExplicit ? ` — khách nói TƯỜNG MINH${x.sourceMessageId !== null ? ` ở tin #${x.sourceMessageId}` : ""}, CỐ ĐỊNH` : " — bot đề xuất / khách chỉ hỏi, chưa chốt số"}`);
   const money = s.draft?.quote ? `đơn nháp ${s.draft.lines.length} dòng · tiền hàng ${formatVND(s.draft.quote.subtotal)} (giá MÁY CHỦ — đọc đúng số này)` : "chưa có đơn nháp / báo giá máy chủ";
-  const phone = s.customer?.phone ? `đã có (${maskPhone(s.customer.phone)})` : "chưa lưu";
+  const phone = s.customer?.phone ? `đã có (${maskPhone(s.customer.phone)})` : opts.knownPhone ? `đã có trong hội thoại (${maskPhone(opts.knownPhone)}) — KHÔNG xin lại, create_customer bỏ trống phone` : "chưa lưu";
   const addr = s.customer?.address ? `đã có${s.customer.province || resolveRecipientPlace({ address: s.customer.address, province: "", ward: "" }).province ? " — đọc được tỉnh / thành" : " — CHƯA đọc được tỉnh / thành"}` : "chưa lưu";
   const act: Record<OrderReadiness, string> = {
     ORDER_READY: s.draft

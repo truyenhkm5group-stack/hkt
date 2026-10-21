@@ -50,7 +50,13 @@ deploy dừng, không phải cảnh báo.
 9. Marketer report: tổng đơn/doanh số của các marketer + "Chưa gán marketer" phải **bằng** số đơn xác nhận Pancake trong kỳ.
 10. **SỔ KHO** (`lib/queries/stock.ts`): `Tồn thực tế = tổng phiếu kho − đã xuất qua ĐVVC`; `Khả dụng bán = Tồn thực tế − đã chốt đơn chưa xuất`. Phiếu kho quy ước DƯƠNG = vào kho (RECEIPT nhập mới, RETURN tái nhập hàng hoàn, ADJUSTMENT tăng), ÂM = ra kho (ISSUE xuất tay, ADJUSTMENT giảm). "Đã xuất" đếm theo `SHIPMENT_LEFT_WAREHOUSE` (mốc lấy hàng / trạng thái vận đơn dựng từ sự kiện Viettel Post) — **không** dùng `ORDER_OUTCOME` (đó là định nghĩa theo tiền) và **không** dùng trạng thái Pancake. Hàng hoàn CHỈ quay lại tồn khi kho lập phiếu RETURN với số đếm thực tế; ĐVVC báo "đã hoàn" là chưa đủ. Hàng tặng (`is_bonus`) vẫn trừ tồn như hàng bán. Mẫu mã chưa có phiếu RECEIPT nào ⇒ `stockKnown = false`, hiện "Chưa có phiếu nhập", không hiện số. Đơn tạo tay rời kho bằng **phiếu giao có ký nhận** (`ORDER_LEFT_WAREHOUSE`, một vị ngữ cho cả "đã xuất" lẫn "thôi giữ"), KHÔNG bằng phiếu XUẤT TAY — làm cả hai là trừ hai lần (`ORDER_OUTCOME.md` mục 11).
 11. Landing: 1 sản phẩm không ghi giá = 499K + 25K ship; gói ≥ 2 = giá gói, free ship; không đoán mẫu mã khi thiếu cả size lẫn màu; không ghi ngược vào Pancake (API không có update-order).
-12. Khách cũ mua lại: chỉ **gợi ý** SĐT/địa chỉ cũ, không tự điền vào đơn.
+12. Khách cũ mua lại (chủ shop chốt 21/10/2026: «nhận diện chắc chắn khách cũ ⇒ tự nạp SĐT đã lưu, không xin lại; địa chỉ đã xác
+    minh dùng lại theo chính sách shop, cần xác nhận thì chỉ hỏi "giao địa chỉ lần trước không ạ?", không bắt gõ lại»):
+    **SĐT** — nhận diện CHẮC (cùng tổ chức + cùng page + cùng luồng/PSID: SĐT khách tự gõ trong chính luồng · đơn đã chốt của chính
+    hội thoại, kể cả đơn nhân viên lên «nối khoá bot» · hồ sơ khớp mã Facebook của chính tổ chức) ⇒ máy chủ tự nạp, không xin lại;
+    MỘT nguồn: `lib/sales-chatbot/known-contact.ts`. Nhiều số khác nhau ⇒ một câu chọn số. Khớp qua SĐT người khác gõ, tên Facebook
+    ⇒ KHÔNG BAO GIỜ (chỉ gợi ý đã che như cũ). **Địa chỉ** — lượt mua mới không tự mang địa chỉ cũ vào đơn: hỏi ĐÚNG MỘT câu «giao
+    về <phường/quận> như lần trước không ạ?» (không đọc số nhà), khách đồng ý mới ghi qua `use_saved_address`.
 13. Giá vốn tính "sống": **GIÁ BÁO MKT ĐANG HIỆU LỰC HÔM NAY** của mã (chủ shop chốt 13/10/2026 —
     áp cho MỌI đơn ở MỌI báo cáo, kể cả đơn cũ; giá báo 0 ₫ = chưa định giá) → phiếu nhập ERP gần nhất →
     giá vốn Pancake → giá nhập mẫu mã. Một khối SQL duy nhất: `lib/queries/current-marketer-cost.ts`. Đơn có

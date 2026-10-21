@@ -298,6 +298,18 @@ export function deliveryAddressDecision(state: Pick<ChatState, "draft" | "custom
   return { status: "NONE", use: null, previous: null, reason: "" };
 }
 
+/**
+ * Địa chỉ giao ĐÃ BIẾT của lượt mua — ĐÚNG phán quyết của `deliveryAddressDecision` (khách vừa gõ · đơn nháp / hồ sơ của lượt · địa chỉ
+ * cũ đã xác minh khách vừa chọn dùng lại). Đang đổi nơi giao chưa xong / khác đơn nháp / cần người ⇒ `null`. Mức sẵn sàng của giỏ đọc
+ * đây để không nói «chưa có địa chỉ» khi hàng rào hỏi lại đã coi địa chỉ là đã biết (P0 21/10/2026 — hai luật, một câu trả lời).
+ * `customerTexts` = tin khách của LƯỢT MUA này: lượt mua mới không tự mang địa chỉ của lần mua trước. HÀM THUẦN.
+ */
+export function knownDeliveryAddressOf(state: Pick<ChatState, "draft" | "customer">, customerTexts: readonly string[]): { address: string; province: string } | null {
+  const d = deliveryAddressDecision(state, customerTexts);
+  if (!d.use || (d.status !== "NEW_EXPLICIT" && d.status !== "REUSE_VERIFIED" && d.status !== "DRAFT")) return null;
+  return { address: d.use.raw, province: d.use.province ?? "" };
+}
+
 // ─────────────────────────── ĐỊA CHỈ ĐÃ BIẾT + HÀNG RÀO CÂU HỎI LẠI ───────────────────────────
 
 /**
@@ -559,13 +571,14 @@ const PHONE_CHANGE = /(?:^| )(?:so|sdt|so dien thoai|so dt) (?:khac|moi)(?: |$)|
  * khi model CHƯA gọi công cụ lưu khách — model hay hỏi lại ngay ở lượt khách vừa gửi địa chỉ). #855: địa chỉ khách vừa gõ KHÁC đơn nháp
  * thì ĐỊA CHỈ MỚI là điều đã biết (`deliveryAddressDecision`), không phải đơn nháp cũ. HÀM THUẦN.
  */
-export function addressKnowledge(state: Pick<ChatState, "draft" | "customer" | "addressAsk">, customerTexts: readonly string[]): AddressKnowledge {
+export function addressKnowledge(state: Pick<ChatState, "draft" | "customer" | "addressAsk">, customerTexts: readonly string[], opts: { phoneKnown?: boolean } = {}): AddressKnowledge {
   const last = customerTexts[customerTexts.length - 1] ?? "";
   const lastF = foldVnText(last);
   // #871: «Giao cho chị sáng mai khoảng 9h» là lịch giao của CHÍNH khách, không phải đổi người nhận.
   const recipientChange = PHONE_CHANGE.test(lastF) && !isScheduleOnly(last);
   const contact = {
-    phoneKnown: Boolean(state.customer?.phone?.trim() || state.draft?.recipient.phone?.trim() || customerTexts.some(hasPhone)) && !recipientChange,
+    // `opts.phoneKnown` = SĐT đã biết CHẮC của known-contact.ts (đơn nối chắc / mã Facebook) — cùng nguồn với mức sẵn sàng của giỏ.
+    phoneKnown: Boolean(state.customer?.phone?.trim() || state.draft?.recipient.phone?.trim() || customerTexts.some(hasPhone) || opts.phoneKnown) && !recipientChange,
     nameKnown: Boolean(state.customer?.name?.trim() || state.draft?.recipient.name?.trim()) && !recipientChange,
     complained: isComplaint(last),
     deferred: DEFER_RE.test(lastF),
@@ -619,8 +632,8 @@ export function addressKnowledge(state: Pick<ChatState, "draft" | "customer" | "
  * hàng rào — `addressKnowledge`), có nguồn, KHÔNG chép SĐT / số nhà. Chỉ in khi chắc: có SĐT, có địa chỉ (phường đã ghép · địa giới cũ chờ
  * nhân viên · đủ tỉnh + phần đường), tin mới nhất không đổi nơi giao / người nhận, không có lời sửa đang chờ xác minh. HÀM THUẦN.
  */
-export function knownContactPrompt(state: Pick<ChatState, "draft" | "customer" | "addressAsk">, customerTexts: readonly string[]): string {
-  const k = addressKnowledge(state, customerTexts);
+export function knownContactPrompt(state: Pick<ChatState, "draft" | "customer" | "addressAsk">, customerTexts: readonly string[], opts: { phoneKnown?: boolean } = {}): string {
+  const k = addressKnowledge(state, customerTexts, opts);
   const addressHeld = k.ward !== null || Boolean(k.legacyUnmapped) || (k.province && k.street);
   if (!k.phoneKnown || !addressHeld || !k.lastSettlesAddress || k.corrected || k.changeRequested || k.reuseUnresolved || k.draftMismatch) return "";
   const source = state.draft ? "đơn nháp của hội thoại" : state.customer ? "hồ sơ khách đã lưu trong hội thoại" : "tin khách đã gửi trong hội thoại";

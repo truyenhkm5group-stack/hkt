@@ -184,7 +184,9 @@ async function testChatTurn() {
         assert.match(neu.addr, /KCN Bắc Thăng Long/, "đơn mới giao về điểm khách vừa gửi");
         assert.deepEqual(await lines(neu.id), [[true, 1]], "đơn mới đúng 1 × chả mực");
         const askAddr = t.turns[2].shown.join(" ");
-        assert.match(askAddr, /địa chỉ nhận hàng/, `đặt thêm ⇒ xin địa chỉ: ${askAddr}`);
+        // Luật khách cũ 21/10/2026 (AGENTS 3.12, sau #945): lượt mua mới ⇒ MỘT câu «như lần trước» (phường / tỉnh, không số nhà) thay cho câu xin
+        // cả địa chỉ — vẫn KHÔNG tự lấy địa chỉ đơn cũ; khách gửi điểm giao khác thì điểm mới thắng (lượt sau).
+        assert.match(askAddr, /^Dạ em giao về Phường Hoàn Kiếm, Thành phố Hà Nội như lần trước được không ạ\?$/, `đặt thêm ⇒ một câu «như lần trước»: ${askAddr}`);
         assert.doesNotMatch(askAddr, /Hai Bà Trưng|xác nhận giúp em/, "không tự lấy địa chỉ đơn cũ, không xin chốt với địa chỉ cũ");
         assert.equal(t.turns[3].status, "OPEN", "lượt sau câu trả lời vẫn là BÁN, không chuyển người");
         assert.match(t.turns[3].shown.join(" "), /địa chỉ nhận hàng/, `model im ⇒ xin địa chỉ: ${t.turns[3].shown.join(" | ")}`);
