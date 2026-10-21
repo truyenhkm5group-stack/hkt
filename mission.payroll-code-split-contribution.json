@@ -3,7 +3,7 @@
   "mission_id": "payroll-code-split-contribution",
   "title": "Thưởng theo mã chia theo người làm ra lợi nhuận: X% tổng cho mã, SUPPORT Y% trên phần mình, OWNER X−Y% trên phần SUPPORT (chủ shop 21/10)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -28,7 +28,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-21T01:53:52.358Z",
-  "updated_at": "2026-10-21T04:07:50.931Z",
-  "last_heartbeat": "2026-10-21T04:07:50.931Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-21T04:26:54.385Z",
+  "last_heartbeat": "2026-10-21T04:26:54.385Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/payroll-code-split-contribution",
+    "sha": "ebe5bcbf0ae3dd026851bcd8430a6f885d5d5184",
+    "at": "2026-10-21T04:26:54.385Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "Thưởng theo mã chia theo người làm ra lợi nhuận: X% là TỔNG phần MKT của mã, không cộng thêm Y%",
+    "summary": "Chủ shop 21/10: X% = TỔNG phần MKT của mã; SUPPORT nhận Y% trên phần lợi nhuận CHÍNH HỌ làm ra (tỷ trọng đo cùng cách đã duyệt: QC đối soát / doanh thu quy kết / đặt tay), OWNER = X% − Σ SUPPORT. Ví dụ 10tr · X25 · Y20 · SUPPORT làm 80% ⇒ SUPPORT 1,6tr, OWNER 0,9tr, tổng 2,5tr. Trước: tổng X + Y. Chặn: Y > X, thiếu Y, trọng số thiếu căn cứ ⇒ CẢ đoạn chờ (OWNER số tạm null). Dựng TRÊN payroll-shipping-vtp-actual — gộp sau nó. Production 21/10: 0 phân công · 0 điều khoản ⇒ không đổi đồng lương nào hôm nay.",
+    "tests": [
+      "typecheck: OK (cây gộp ebe5bcbf0)",
+      "lint: OK",
+      "build: OK (87f463557)",
+      "npm test shard 3/4 ĐẠT + shard 1/2/4 tới điểm dừng (87f463557)",
+      "các khối còn lại K10 K18 K19 K20 K23 K24 ĐẠT trên cây gộp ebe5bcbf0 (lượt đầu dừng vì PGlite failed to initialize / onboarding lúc máy quá tải — chạy lại ĐẠT)",
+      "đột biến công thức 5/5 đỏ"
+    ]
+  }
 }
