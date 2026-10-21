@@ -136,7 +136,17 @@ function testPure() {
   assert.equal(sup.reduce((t, c) => t + (c.demand ?? 0), 0), 600_000, "6. Σ SUPPORT = đúng quỹ Y% = 10tr × 6%");
   assert.equal(sup.find((c) => c.employeeId === "m1")?.demand, 150_000, "6. trọng số theo chi phí QC đối soát được 1:3");
   assert.equal(sup.find((c) => c.employeeId === "m3")?.demand, 450_000);
-  assert.equal(cB.claims.find((c) => c.role === "OWNER")?.demand, 1 * TR, "OWNER và SUPPORT đều tính trên CÙNG lợi nhuận mã, một lần");
+  // Chủ shop 21/10: X là TỔNG phần MKT của mã. OWNER không chạy QC trong đoạn ⇒ toàn bộ lợi nhuận do SUPPORT làm ra ⇒
+  // SUPPORT nhận Y% (6%) trên đó, OWNER giữ (X − Y)% = 4% ⇒ 400K. Tổng vẫn đúng X% = 1tr.
+  assert.equal(cB.claims.find((c) => c.role === "OWNER")?.demand, 400_000, "OWNER nhận (X − Y)% trên phần lợi nhuận do người đẩy cùng làm ra");
+  assert.equal(cB.claims.reduce((t, c) => t + (c.demand ?? 0), 0), 1 * TR, "OWNER + SUPPORT = đúng X% lợi nhuận mã — không cộng thêm Y% lên trên");
+  // OWNER cũng chạy QC (1 phần trên 5) ⇒ phần đó OWNER giữ trọn X%; 4 phần của SUPPORT: SUPPORT Y%, OWNER X − Y.
+  const coChu = codeBonusClaims({ productId: "B", code: "B", eligible: 10 * TR, allocated: 10 * TR, segments: [seg(1, { o: 1, x: 4 })], assignments: [owner("B", "o", 25), support("B", "x", "AD_SPEND")], terms: [terms("B", 20)] });
+  assert.deepEqual(
+    coChu.claims.map((c) => [c.role, c.demand]),
+    [["OWNER", 900_000], ["SUPPORT", 1_600_000]],
+    "ví dụ chủ shop: X 25% · Y 20% · SUPPORT làm 80% lợi nhuận ⇒ SUPPORT 10tr×80%×20% = 1,6tr; OWNER 10tr×25% − 1,6tr = 0,9tr",
+  );
   // Trọng số tay đã duyệt.
   const tay = codeBonusClaims({ productId: "B", code: "B", eligible: 10 * TR, allocated: 10 * TR, segments: [seg()], assignments: [support("B", "x", "MANUAL", 70), support("B", "y", "MANUAL", 30)], terms: [terms("B", 10)] });
   assert.deepEqual(tay.claims.map((c) => c.demand), [700_000, 300_000]);
@@ -194,9 +204,9 @@ function testPure() {
   assert.ok(thieuQc.pending.every((p) => p.reason.includes("PENDING_RECONCILIATION") && p.provisional === 1 * TR), "11. lý do + số đang treo");
   const thieuY = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg()], assignments: [owner("A", "o", 10), support("A", "x", "MANUAL", 100)], terms: [] });
   assert.deepEqual(
-    [thieuY.claims.map((c) => c.role), thieuY.pending.length],
-    [["OWNER"], 1],
-    "11. SUPPORT chưa có điều khoản Y% ⇒ chờ; OWNER vẫn tính",
+    [thieuY.claims.length, thieuY.pending.map((p) => p.employeeId)],
+    [0, ["o", "x"]],
+    "11. SUPPORT chưa có điều khoản Y% ⇒ CẢ đoạn chờ — phần của OWNER là X% TRỪ phần SUPPORT, chưa biết Y thì chưa biết phần OWNER",
   );
   const tayLech = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg()], assignments: [support("A", "x", "MANUAL", 60), support("A", "y", "MANUAL", 30)], terms: [terms(null, 10)] });
   assert.equal(tayLech.claims.length, 0, "11. trọng số tay Σ 90% ⇒ chờ, không tự chuẩn hoá");
@@ -213,14 +223,14 @@ function testPure() {
     "12. Σ thưởng của mã không vượt trần theo mã",
   );
   assert.ok(tran.claims.reduce((t, c) => t + c.provisional, 0) <= 5 * TR);
-  const vuot = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg()], assignments: [owner("A", "o", 95), support("A", "x", "MANUAL", 100)], terms: [terms(null, 10)] });
-  assert.equal(vuot.claims.length, 0, "12. X% + Y% > 100% ⇒ chờ, không trả quá lợi nhuận mã");
+  const vuot = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg()], assignments: [owner("A", "o", 10), support("A", "x", "MANUAL", 100)], terms: [terms(null, 20)] });
+  assert.equal(vuot.claims.length, 0, "12. Y% > X% ⇒ chờ — phần của người đẩy cùng không vượt được tổng phần MKT của mã (OWNER sẽ âm)");
   const haiChu = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg()], assignments: [owner("A", "o", 10), owner("A", "p", 10)], terms: [] });
   assert.deepEqual([haiChu.claims.length, haiChu.pending.map((p) => p.employeeId)], [0, ["o", "p"]], "12. hai OWNER cùng lúc ⇒ chờ, gắn vào CẢ HAI người (khoản chờ không tên không chặn được thực nhận của ai)");
   assert.deepEqual(
     vuot.pending.map((p) => p.employeeId),
     ["o", "x"],
-    "12. X + Y > 100% ⇒ chờ cho mọi người có phân công trong đoạn",
+    "12. Y > X ⇒ chờ cho mọi người có phân công trong đoạn",
   );
   const haiDk = codeBonusClaims({ productId: "A", code: "A", eligible: 10 * TR, allocated: 10 * TR, segments: [seg()], assignments: [owner("A", "o", 10)], terms: [terms("A", 5), terms("A", 6)] });
   assert.equal(haiDk.pending.length, 1, "12. hai điều khoản cùng hiệu lực ⇒ ERP không chọn hộ");
@@ -536,13 +546,11 @@ async function testFlow(db: Db) {
 
   /* ══ 5 · 6 · 7 trên dữ liệu thật ══ */
   const kh = (emp: string, code: string, role: string) => L1.claims.find((c) => c.employeeId === emp && c.productId === code && c.role === role);
-  assert.equal(kh(M1.id, "cl-prod-a", "OWNER")?.demand, Math.floor((allocA * 1000) / 10_000), "OwnerBonus = phân bổ × X%");
+  // Tháng 1 mã A: QC đối soát được M1 (OWNER) 2tr · M2 1tr · M4 3tr ⇒ SUPPORT làm ra 4/6 lợi nhuận mã.
   const supA = L1.claims.filter((c) => c.productId === "cl-prod-a" && c.role === "SUPPORT");
-  assert.equal(
-    supA.reduce((s, c) => s + (c.demand ?? 0), 0),
-    Math.floor((allocA * 500) / 10_000),
-    "6. Σ SupportBonus = phân bổ × Y%",
-  );
+  const phanSupA = Math.floor((allocA * 500 * 4) / (10_000 * 6));
+  assert.equal(supA.reduce((s, c) => s + (c.demand ?? 0), 0), phanSupA, "6. Σ SupportBonus = phân bổ × Y% × phần SUPPORT làm ra");
+  assert.equal(kh(M1.id, "cl-prod-a", "OWNER")?.demand, Math.floor((allocA * 1000) / 10_000) - phanSupA, "OwnerBonus = phân bổ × X% − Σ SupportBonus");
   const m2a = kh(M2.id, "cl-prod-a", "SUPPORT")?.demand ?? 0;
   const m4a = kh(M4.id, "cl-prod-a", "SUPPORT")?.demand ?? 0;
   assert.ok(Math.abs(m4a - 3 * m2a) <= 1, "6. trọng số theo chi phí QC đối soát được (1tr : 3tr)");
@@ -602,8 +610,13 @@ async function testFlow(db: Db) {
   clearMemo();
   const rCho = await getPayrollReport(T1, "profit1");
   const choA = rCho.profitGate.codeLedger.pending.filter((p) => p.productId === "cl-prod-a" && p.kind === "WEIGHT_PARTIAL");
-  assert.equal(choA.length, 2, "chuẩn bị: QC chưa gán trên A ⇒ cả hai SUPPORT chờ, mang dấu vân tay");
-  assert.ok(!rCho.profitGate.codeLedger.claims.some((c) => c.productId === "cl-prod-a" && c.role === "SUPPORT"));
+  assert.deepEqual(
+    choA.map((p) => p.employeeId).sort(),
+    [M1.id, M2.id, M4.id].sort(),
+    "chuẩn bị: QC chưa gán trên A ⇒ hai SUPPORT VÀ OWNER chờ (phần OWNER = X% trừ phần SUPPORT), mang dấu vân tay",
+  );
+  assert.equal(choA.find((p) => p.employeeId === M1.id)?.provisional, null, "phần OWNER chưa tính được ⇒ không in một số tạm");
+  assert.ok(!rCho.profitGate.codeLedger.claims.some((c) => c.productId === "cl-prod-a"));
   const vtA = [...new Set(choA.map((p) => p.fingerprint as string))];
   await setSettingJson(PAYROLL_CODE_WEIGHT_CONFIRM_KEY, [
     { id: "cl-xn-1", contentId: "cl-xn", monthKey: "2029-01", productId: "cl-prod-a", fingerprints: vtA, reason: "kiểm thử: QC chưa gán là chiến dịch thử, không thuộc SUPPORT nào", requestedById: null, requestedByEmail: "kiem-thu@erp", approvedById: null, approvedByEmail: "duyet@erp", confirmedAt: "2029-02-01T00:00:00.000Z", revokedAt: null },
@@ -613,6 +626,7 @@ async function testFlow(db: Db) {
   assert.equal(rXn.profitGate.codeLedger.confirmations.length, 1, "lời xác nhận ĐỌC LẠI được từ settings (mảng không bị gộp thành object)");
   assert.ok(!rXn.profitGate.codeLedger.pending.some((p) => p.productId === "cl-prod-a" && p.kind === "WEIGHT_PARTIAL"), "đã xác nhận đúng số đo ⇒ hết chờ");
   assert.equal(rXn.profitGate.codeLedger.claims.filter((c) => c.productId === "cl-prod-a" && c.role === "SUPPORT").length, 2, "hai khoản SUPPORT có lại");
+  assert.ok(rXn.profitGate.codeLedger.claims.some((c) => c.productId === "cl-prod-a" && c.role === "OWNER"), "khoản OWNER có lại cùng lời xác nhận");
   // Số đo đổi SAU khi xác nhận (thêm 1 ₫ chưa gán) ⇒ quay lại chờ, nói rõ.
   await db.insert(schema.adSpends).values({ id: "cl-ad-chuagan-2", platform: "facebook", campaign: "CL chưa gán 2", spend: 1, spendDate: d("2029-01-13"), productId: "cl-prod-a", marketerId: null, excluded: false });
   clearMemo();
