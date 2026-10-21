@@ -51,6 +51,8 @@ export const WORK_SOURCES = [
   // Company OS · Agent C — sản xuất nửa đầu (shared-contracts.md mục 3).
   "PRODUCTION_TOPIC",
   "SAMPLE_REVIEW",
+  // Payroll V2 21/10/2026 — phép chiếu DANH SÁCH PHÊ DUYỆT của Trung tâm đối soát lương (lib/payroll/recon-center.ts).
+  "PAYROLL_RECON",
   "MANUAL_TASK",
   "RECURRING_TASK",
   // Phase 3 · W9 — việc do LUẬT TỰ ĐỘNG tạo (hành động `create_task`).
@@ -439,6 +441,20 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     assigneeAuthority: "WORK",
     department: TEAM_DEPARTMENT.PRODUCTION,
     businessEntity: "SAMPLE",
+    slaHours: null,
+    outcomeAttributable: true,
+    actions: ["OPEN_SOURCE"],
+  },
+  PAYROLL_RECON: {
+    key: "PAYROLL_RECON",
+    label: "Dữ liệu lương chờ bổ sung / quyết định",
+    why: "Thiếu ngày vào làm, thiếu người phụ trách mã, thiếu giá vốn, thiếu bảng kê COD thì kỳ lương không đối soát được — thưởng % lợi nhuận đứng ở «chưa đủ điều kiện» cho tới khi đúng phòng bổ sung.",
+    statusAuthority: "SOURCE",
+    assigneeAuthority: "WORK",
+    // Suy theo TỪNG mục: `APPROVAL_ITEM_OWNER` (một bảng, trang Trung tâm đối soát cùng đọc).
+    department: null,
+    businessEntity: "NONE",
+    // Không có hằng số đang chạy nào cho hạn này (luật 22: không gõ số mới) — chủ shop đặt ở `work.sla`.
     slaHours: null,
     outcomeAttributable: true,
     actions: ["OPEN_SOURCE"],

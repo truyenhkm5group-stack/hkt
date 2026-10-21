@@ -6,6 +6,7 @@ import {
   FULFILLMENT_BLOCK_REASONS,
 } from "@/lib/constants/fulfillment-bottleneck";
 import type { DepartmentCode } from "@/lib/constants/departments";
+import { APPROVAL_ITEM_KEYS, APPROVAL_ITEM_LABEL, APPROVAL_ITEM_OWNER } from "@/lib/payroll/recon-center";
 import {
   ALERT_KINDS_OWNED_ELSEWHERE,
   departmentOfAlert,
@@ -300,6 +301,18 @@ const SOURCE_RULES: SlaRule[] = [
     department: WORK_SOURCE_SPEC.SAMPLE_REVIEW.department,
     alsoShownOn: "Sản xuất · Topic",
   },
+
+  /* ───── Dữ liệu lương (Trung tâm đối soát) ───── */
+  ...APPROVAL_ITEM_KEYS.map((k) => ({
+    key: `PAYROLL_RECON:${k}`,
+    label: APPROVAL_ITEM_LABEL[k],
+    hours: WORK_SOURCE_SPEC.PAYROLL_RECON.slaHours,
+    why:
+      "CỐ Ý bỏ trống: không có hằng số đang chạy nào cho hạn bổ sung dữ liệu lương, và gõ một con số mới ở " +
+      "đây là bịa một ngưỡng nghiệp vụ (luật 22). Chủ shop đặt được ngay trên màn hình cấu hình, không cần deploy.",
+    department: APPROVAL_ITEM_OWNER[k] as DepartmentCode,
+    alsoShownOn: "Lương · Trung tâm đối soát",
+  })),
 
   /* ───── Việc tay & định kỳ ───── */
   {

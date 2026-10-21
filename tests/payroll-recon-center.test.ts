@@ -18,7 +18,12 @@ import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { setSettingJson, getSettingJson } from "@/lib/settings";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
-import { buildApprovalList, buildOpeningProposal, codGapCause, historicalSalary, issueOwner, type ApprovalInput, type OpeningMonthInput } from "@/lib/payroll/recon-center";
+import { APPROVAL_ITEM_KEYS, APPROVAL_ITEM_OWNER, buildApprovalList, buildOpeningProposal, codGapCause, historicalSalary, issueOwner, reconCenterDefaultRange, type ApprovalInput, type OpeningMonthInput } from "@/lib/payroll/recon-center";
+import { adaptPayrollRecon, collectWorkItems, payrollReconWorkItems } from "@/lib/queries/work-adapters";
+import { departmentFor, SOURCES_WITHOUT_OWNER } from "@/lib/constants/work-ownership";
+import { slaHoursFor, SOURCES_WITHOUT_SLA } from "@/lib/constants/work-sla";
+import { MONEY_UNKNOWN } from "@/lib/constants/work";
+import { getReconCenter } from "@/lib/queries/payroll-recon-center";
 import { DEPARTMENT_CODES } from "@/lib/constants/departments";
 import { getRecognizedPayrollCost, PAYROLL_RECOGNITION_KEY } from "@/lib/queries/payroll-cost";
 import { getRecognizedCosts, returnCostByProduct } from "@/lib/queries/cost-engine";
@@ -94,6 +99,32 @@ function testPure() {
   const sach = buildApprovalList({ ...goc, gatePolicyDeclared: true, undatedEmployees: [], pendingAssignments: 0, pendingTerms: 0, codesWithoutOwner: 0, monthsNeedingSignoff: [], cogsGaps: { variants: 0, lines: 0, revenue: 0 }, codReceivable: { orders: 0, revenue: 0, over30Orders: 0 }, duplicateSourceWarnings: 0 });
   assert.equal(sach.length, 0, "dữ liệu đủ thì danh sách RỖNG — không bịa việc");
 
+  /* ── Phép chiếu lên /work (chủ shop 21/10): mỗi mục một việc của ĐÚNG phòng, không tiền, không câu nguyên nhân ── */
+  const ky = new Date("2026-10-01T00:00:00+07:00");
+  const viec = payrollReconWorkItems(ds, ky, new Date("2026-10-21T00:00:00+07:00"));
+  assert.deepEqual(viec.map((v) => [v.key, v.department]), ds.map((x) => [`PAYROLL_RECON:${x.key}`, APPROVAL_ITEM_OWNER[x.key]]), "một mục ⇒ một việc, giao PHÒNG của mục (một bảng APPROVAL_ITEM_OWNER)");
+  for (const v of viec) {
+    assert.equal(v.statusAuthority, "SOURCE", `${v.sourceKey}: phép chiếu — trạng thái thuộc miền lương (luật 19)`);
+    assert.equal(v.assignee, null, `${v.sourceKey}: giao phòng, không giao người`);
+    assert.deepEqual(v.money, MONEY_UNKNOWN, `${v.sourceKey}: không mang tiền — COD phải thu đã nằm trong việc COD quá hạn theo vận đơn`);
+    assert.ok(v.sourceUrl.startsWith("/") && v.summary.length > 10, `${v.sourceKey}: có việc cần làm và link màn hình nhập`);
+    assert.ok(!v.actions.includes("WORK_STATUS"), `${v.sourceKey}: không có nút «đánh dấu xong» — dữ liệu đủ thì việc tự rời hàng đợi`);
+    assert.equal(v.createdAt.getTime(), ky.getTime(), "mốc là kỳ lương đang xét, không phải giờ đọc");
+  }
+  const hr = viec.find((v) => v.sourceKey === "undated-employees")!;
+  assert.ok(!/\/tháng|8\.000\.000/.test(`${hr.title} ${hr.summary} ${hr.recommendedAction} ${hr.evidence.detail}`), "việc HR không in lương cứng từng người — hàng đợi phòng mở cho người không có quyền xem lương");
+  assert.ok(!viec.some((v) => v.summary.includes("lũy kế đo được")), "không mang lũy kế lợi nhuận sang hàng đợi");
+  assert.deepEqual(payrollReconWorkItems([], ky, ky), [], "danh sách rỗng ⇒ không việc nào");
+  for (const k of APPROVAL_ITEM_KEYS) {
+    const khac = DEPARTMENT_CODES.find((x) => x !== APPROVAL_ITEM_OWNER[k])!;
+    assert.equal(departmentFor("PAYROLL_RECON", k, khac, null), APPROVAL_ITEM_OWNER[k], `${k}: luật sở hữu mặc định = phòng của mục (không rơi về phòng adapter đoán)`);
+    assert.equal(slaHoursFor("PAYROLL_RECON", k, null), null, `${k}: CỐ Ý không đặt hạn — không bịa ngưỡng`);
+  }
+  assert.equal(departmentFor("PAYROLL_RECON", "cogs-gaps", "FINANCE", { "PAYROLL_RECON:cogs-gaps": "PRODUCTION" }), "PRODUCTION", "chủ shop chuyển phòng bằng ghi đè work.ownership, không deploy");
+  assert.equal(slaHoursFor("PAYROLL_RECON", "cod-receivable", { "PAYROLL_RECON:cod-receivable": 48 }), 48, "và đặt hạn bằng work.sla");
+  assert.ok(!SOURCES_WITHOUT_SLA.includes("PAYROLL_RECON") && !SOURCES_WITHOUT_OWNER.includes("PAYROLL_RECON"), "nguồn mới có đủ luật hạn và luật sở hữu");
+  assert.deepEqual(reconCenterDefaultRange("2026-02"), { fromMonth: "2025-10", toMonth: "2026-02" }, "khoảng mặc định qua năm");
+
   /* ── Nguyên nhân phải thu COD · phòng của từng khoản ── */
   assert.equal(codGapCause(null, false), "NO_STATEMENT");
   assert.equal(codGapCause("PENDING", true), "STATEMENT_NO_CASH");
@@ -122,6 +153,10 @@ function testSourceFences() {
   assert.ok(!/\b(INSERT|UPDATE|DELETE)\b/i.test(mig.replace(/^--.*$/gm, "")), "migration 0250 không đổi dòng nào");
   const center = readFileSync("lib/queries/payroll-recon-center.ts", "utf8");
   assert.ok(!/\.(insert|update|delete)\(/.test(center), "Trung tâm CHỈ ĐỌC");
+  const work = readFileSync("lib/queries/work-adapters.ts", "utf8");
+  const chieu = work.slice(work.indexOf("export function payrollReconWorkItems"), work.indexOf("export async function adaptPayrollRecon"));
+  assert.ok(chieu.length > 100 && !/a\.cause/.test(chieu), "phép chiếu /work không đọc câu nguyên nhân (có lương cứng · lũy kế)");
+  assert.ok(!/APPROVAL_ITEM_OWNER|"(HR|FINANCE|WAREHOUSE|MARKETING|MANAGEMENT)"/.test(chieu), "phép chiếu không khai lại phòng — đọc a.owner");
   const page = readFileSync("app/(dashboard)/payroll/reconciliation/center/page.tsx", "utf8");
   assert.ok(!/@\/lib\/actions/.test(page), "trang Trung tâm không có nút ghi số nào");
   const pr = readFileSync("lib/queries/payroll.ts", "utf8");
@@ -240,6 +275,27 @@ async function testFlow(db: Db) {
     assert.equal(cod.codHeldByCarrier, 300_000, "ĐVVC đã thu, chưa ghi đã trả về ngân hàng ⇒ chưa phải tiền thực nhận");
     assert.equal(cod.cashReceived, 0);
 
+    /* ── /work: việc theo phòng ĐỌC ĐÚNG danh sách của Trung tâm, tự rời hàng đợi khi dữ liệu đủ ── */
+    const luc = d("2031-03-25");
+    clearMemo();
+    assert.deepEqual(await adaptPayrollRecon(luc), [], "tổ chức chưa khai bảng lương ⇒ không việc nào (không ồn)");
+    await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [nv("rc-e1")] });
+    clearMemo();
+    const khoang = reconCenterDefaultRange("2031-03");
+    const goc = (await getReconCenter(khoang.fromMonth, khoang.toMonth)).approvals;
+    const tren = await adaptPayrollRecon(luc);
+    assert.deepEqual(tren.map((v) => v.sourceKey), goc.map((x) => x.key), "đúng các mục của Trung tâm đối soát, cùng khoảng tháng mặc định");
+    assert.ok(tren.some((v) => v.sourceKey === "undated-employees" && v.department === "HR"), "nhân sự chưa khai ngày vào làm ⇒ việc của phòng Nhân sự");
+    assert.ok(tren.some((v) => v.sourceKey === "cogs-gaps" && v.department === "WAREHOUSE" && v.sourceUrl === "/inventory/cost-center"), "dòng thiếu giá vốn ⇒ việc của Kho, link màn hình nhập giá");
+    const hang = await collectWorkItems({ sources: ["PAYROLL_RECON"], now: luc });
+    assert.deepEqual(hang.failed, [], "nguồn chạy trong hạn giờ");
+    assert.deepEqual(hang.items.map((v) => v.key).sort(), tren.map((v) => v.key).sort(), "hàng đợi /work có đủ, không trùng");
+    await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [nv("rc-e1", { startedOn: "2025-01-01" })] });
+    clearMemo();
+    assert.ok(!(await adaptPayrollRecon(luc)).some((v) => v.sourceKey === "undated-employees"), "khai ngày vào làm xong ⇒ việc tự rời hàng đợi, không ai bấm «xong»");
+    await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [] });
+    clearMemo();
+
     /* ── Phân công CHỜ DUYỆT: bảng lương không đọc, sổ vẫn hiện ── */
     await db.insert(schema.productMarketerAssignments).values({ id: "rc-asg-1", productId: "rc-prod-a", employeeId: "rc-e1", role: "OWNER", ownerRateBp: 1000, effectiveFrom: d("2031-03-01"), policyRef: "QC-RC", status: "PENDING" });
     const book = await loadCodeBook(ky.from, ky.to);
@@ -265,6 +321,6 @@ export async function testPayrollReconCenter(db: Db) {
   testSourceFences();
   await testFlow(db);
   console.log(
-    "✓ Trung tâm đối soát lương: đề xuất mở sổ chỉ từ số đo (thiếu căn cứ ⇒ nói ra, không tự 'đủ') · MỘT danh sách phê duyệt, mỗi mục một PHÒNG + lối sửa · phí chiều hoàn vào cơ sở (gắn mã qua đơn gốc · phần còn lại vào chi phí chung · tổng = máy chi phí) · phân công CHỜ DUYỆT không vào lương · lương người chưa khai ngày vào làm tách riêng, lá chắn chốt lương giữ nguyên · truy giá vốn không tự điền · COD tách kế toán / phải thu / tiền thực nhận",
+    "✓ Trung tâm đối soát lương: đề xuất mở sổ chỉ từ số đo (thiếu căn cứ ⇒ nói ra, không tự 'đủ') · MỘT danh sách phê duyệt, mỗi mục một PHÒNG + lối sửa · phí chiều hoàn vào cơ sở (gắn mã qua đơn gốc · phần còn lại vào chi phí chung · tổng = máy chi phí) · phân công CHỜ DUYỆT không vào lương · lương người chưa khai ngày vào làm tách riêng, lá chắn chốt lương giữ nguyên · truy giá vốn không tự điền · COD tách kế toán / phải thu / tiền thực nhận · mỗi mục thành việc /work của ĐÚNG phòng (phép chiếu, không tiền, không lương cứng, tự rời khi dữ liệu đủ)",
   );
 }
