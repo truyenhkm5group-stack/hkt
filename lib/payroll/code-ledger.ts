@@ -19,13 +19,18 @@
  *     TY (`lib/payroll/profit-gate.ts`). Vượt thì phân bổ theo tỷ trọng phần đủ điều kiện của mã.
  *     Lãi của mã không bao giờ vượt qua lỗ của công ty.
  *
- *  3. CHIA THƯỞNG CỦA MỘT MÃ:
- *        OwnerBonus     = Allocated × X%
- *        SupportPool    = Allocated × Y%
- *        SupportBonus_i = SupportPool × Weight_i     (Σ Weight của SUPPORT hợp lệ = 100%)
- *     Trọng số lấy theo cách đã duyệt: tay (`MANUAL`), chi phí quảng cáo đối soát được (`AD_SPEND`),
- *     doanh thu quy kết (`ATTRIBUTED_REVENUE`). Thiếu căn cứ ⇒ `PENDING_RECONCILIATION` — KHÔNG BAO
- *     GIỜ tự chia đều.
+ *  3. CHIA THƯỞNG CỦA MỘT MÃ — THEO NGƯỜI LÀM RA LỢI NHUẬN (chủ shop 21/10/2026):
+ *     "X% = 25% cho người chịu trách nhiệm mã và xử lý tồn kho của mã và Y% = 20% cho người đẩy cùng mã …
+ *     người chịu trách nhiệm mã sẽ được 5% từ lợi nhuận của người đẩy cùng. Tổng vẫn là 25% trên mỗi đồng
+ *     lợi nhuận." X là TỔNG phần MKT của mã; Y là phần của SUPPORT trên lợi nhuận CHÍNH HỌ làm ra.
+ *        Share_p        = Weight_p / Σ Weight          (p = OWNER + mọi SUPPORT, cùng một cách đo)
+ *        SupportBonus_i = Allocated × Y% × Share_i
+ *        OwnerBonus     = Allocated × X% − Σ SupportBonus   (= X% trên phần mình + (X−Y)% trên phần SUPPORT)
+ *     Không SUPPORT ⇒ OwnerBonus = Allocated × X% (như cũ). Không OWNER ⇒ SUPPORT chia Y% theo tỷ trọng
+ *     giữa họ. Y > X ⇒ chặn (SUPPORT không được nhận hơn tổng phần MKT của mã). Trọng số lấy theo cách đã
+ *     duyệt: tay (`MANUAL` — phần lợi nhuận mã do SUPPORT ấy làm ra, OWNER lấy phần còn lại), chi phí quảng
+ *     cáo đối soát được (`AD_SPEND`), doanh thu quy kết (`ATTRIBUTED_REVENUE`). Thiếu căn cứ ⇒
+ *     `PENDING_RECONCILIATION` cho CẢ đoạn (phần của OWNER phụ thuộc trọng số) — KHÔNG BAO GIỜ tự chia đều.
  *
  * HWM của mã tiến lên cả khi công ty chưa đủ điều kiện: phần lãi ấy đã đi bù lỗ công ty, nên nó
  * KHÔNG trở thành quyền thưởng treo (chủ shop: "không mặc định chuyển thưởng chưa đủ điều kiện thành
@@ -315,44 +320,51 @@ export function codeBonusClaims(input: {
     const owner = owners[0] ?? null;
     const x = owner?.ownerRateBp ?? 0;
     const y = supports.length ? (term?.supportPoolBp ?? null) : 0;
-    if (y !== null && x + y > 10_000) {
-      nghiCaDoan(`Mã ${input.code}: X% (${x / 100}%) + Y% (${y / 100}%) vượt 100% lợi nhuận đủ điều kiện của mã.`);
+    if (y !== null && owner && y > x) {
+      nghiCaDoan(`Mã ${input.code}: Y% (${y / 100}%) lớn hơn X% (${x / 100}%) — X là TỔNG phần MKT của mã, phần của SUPPORT không vượt được nó.`);
       return;
     }
-
-    if (owner) {
+    if (y !== null && y > 10_000) {
+      nghiCaDoan(`Mã ${input.code}: Y% (${y / 100}%) vượt 100% lợi nhuận đủ điều kiện của mã.`);
+      return;
+    }
+    const ownerClaim = (provisional: number, demand: number | null, rateBp: number) =>
       segClaims.push({
-        key: `${owner.employeeId}${CODE_CLAIM_MARKER}${input.productId}:OWNER:${si}`,
-        employeeId: owner.employeeId,
+        key: `${owner!.employeeId}${CODE_CLAIM_MARKER}${input.productId}:OWNER:${si}`,
+        employeeId: owner!.employeeId,
         productId: input.productId,
         code: input.code,
         role: "OWNER",
         segment: span,
-        ratePercent: x / 100,
-        ...coSo(owner.employeeId),
-        provisional: pct(eligS, x),
-        demand: allocS === null ? null : pct(allocS, x),
-        policyRef: owner.policyRef,
-        label: `${ten(owner.employeeId)} · OWNER mã ${input.code} (${x / 100}%)`,
+        ratePercent: rateBp / 100,
+        ...coSo(owner!.employeeId),
+        provisional,
+        demand,
+        policyRef: owner!.policyRef,
+        label: `${ten(owner!.employeeId)} · OWNER mã ${input.code} (${(rateBp / 100).toFixed(2).replace(/\.?0+$/, "")}%)`,
       });
+
+    if (owner && !supports.length) {
+      ownerClaim(pct(eligS, x), allocS === null ? null : pct(allocS, x), x);
     }
 
     if (supports.length) {
       if (y === null) {
-        for (const s of supports) nghi(s.employeeId, `Mã ${input.code}: có SUPPORT nhưng chưa có điều khoản Y% (quỹ hỗ trợ) hiệu lực trong đoạn.`, null);
+        nghiCaDoan(`Mã ${input.code}: có SUPPORT nhưng chưa có điều khoản Y% (phần của người đẩy cùng) hiệu lực trong đoạn.`);
       } else {
         const methods = new Set(supports.map((s) => s.weightMethod));
         const poolProv = pct(eligS, y);
         if (methods.size > 1) {
-          for (const s of supports) nghi(s.employeeId, `Mã ${input.code}: các SUPPORT dùng ${methods.size} cách tính trọng số khác nhau trong cùng đoạn — phải cùng một cách.`, null);
+          nghiCaDoan(`Mã ${input.code}: các SUPPORT dùng ${methods.size} cách tính trọng số khác nhau trong cùng đoạn — phải cùng một cách.`);
         } else {
           const method = [...methods][0] as WeightMethod;
-          const raw = supports.map((s) => ({
-            s,
-            w: method === "MANUAL" ? (s.weightBp ?? 0) : method === "AD_SPEND" ? Math.max(0, seg.adSpendByEmployee.get(s.employeeId) ?? 0) : Math.max(0, seg.revenueByEmployee.get(s.employeeId) ?? 0),
-          }));
-          const tong = raw.reduce((t, r) => t + r.w, 0);
-          const hongTay = method === "MANUAL" && tong !== 10_000;
+          const doCua = (employeeId: string) => (method === "AD_SPEND" ? Math.max(0, seg.adSpendByEmployee.get(employeeId) ?? 0) : Math.max(0, seg.revenueByEmployee.get(employeeId) ?? 0));
+          const raw = supports.map((s) => ({ s, w: method === "MANUAL" ? (s.weightBp ?? 0) : doCua(s.employeeId) }));
+          const tongSup = raw.reduce((t, r) => t + r.w, 0);
+          // Phần của OWNER trong CÙNG cách đo: tay ⇒ phần còn lại của 100%; đo được ⇒ số đo của chính OWNER.
+          const wOwner = !owner ? 0 : method === "MANUAL" ? Math.max(0, 10_000 - tongSup) : doCua(owner.employeeId);
+          const tong = tongSup + wOwner;
+          const hongTay = method === "MANUAL" && (tongSup <= 0 || tongSup > 10_000 || (!owner && tongSup !== 10_000));
           /*
             THIẾU MỘT PHẦN cũng là thiếu: một SUPPORT không có số đo (chiến dịch chưa ghép) hoặc mã còn
             chi phí / doanh thu CHƯA GÁN cho ai ⇒ chia trên phần đã biết là dồn cả quỹ cho người được
@@ -363,7 +375,7 @@ export function codeBonusClaims(input: {
             from: seg.from,
             to: seg.to,
             method,
-            weights: raw.map((r) => [r.s.employeeId, r.w] as const),
+            weights: [...raw.map((r) => [r.s.employeeId, r.w] as const), ...(owner ? [[owner.employeeId, wOwner] as const] : [])],
             unattributedAdSpend: seg.unattributedAdSpend,
             unattributedRevenue: seg.unattributedRevenue,
           });
@@ -372,33 +384,44 @@ export function codeBonusClaims(input: {
           const xacNhan = input.confirmedFingerprints?.has(vanTay) === true;
           const thieuNguoi = method === "MANUAL" || xacNhan ? [] : raw.filter((r) => r.w <= 0);
           const chuaGan = xacNhan ? 0 : method === "AD_SPEND" ? seg.unattributedAdSpend : method === "ATTRIBUTED_REVENUE" ? seg.unattributedRevenue : 0;
-          if (tong <= 0 || hongTay || thieuNguoi.length || chuaGan > 0) {
+          if (tongSup <= 0 || tong <= 0 || hongTay || thieuNguoi.length || chuaGan > 0) {
             const moTPhan = tong > 0 && !hongTay;
             const doLuong = method === "AD_SPEND" ? "chi phí quảng cáo đối soát được" : "doanh thu quy kết";
             const why =
               method === "MANUAL"
-                ? `tổng trọng số tay của SUPPORT là ${tong / 100}% — phải đúng 100%`
-                : tong <= 0
+                ? owner
+                  ? `phần lợi nhuận mã do SUPPORT làm ra (đặt tay) cộng lại ${tongSup / 100}% — phải lớn hơn 0% và không quá 100% (OWNER lấy phần còn lại)`
+                  : `tổng trọng số tay của SUPPORT là ${tongSup / 100}% — không có OWNER thì phải đúng 100%`
+                : tongSup <= 0
                   ? `không SUPPORT nào có ${doLuong} trên mã trong đoạn`
                   : thieuNguoi.length
                     ? `${thieuNguoi.map((r) => ten(r.s.employeeId)).join(", ")} không có ${doLuong} trên mã trong đoạn — chưa biết là 0 thật hay chiến dịch chưa ghép`
                     : `mã còn ${Math.round(chuaGan).toLocaleString("vi-VN")} ₫ ${doLuong.replace(" đối soát được", "")} CHƯA GÁN cho MKTer nào trong đoạn — trọng số chưa đủ căn cứ`;
-            for (const r of raw) {
+            // Phần của OWNER phụ thuộc trọng số của SUPPORT ⇒ OWNER cũng chờ cùng đoạn (không trả tạm phần chưa biết).
+            const nguoiCho = [...raw.map((r) => r.s.employeeId), ...(owner ? [owner.employeeId] : [])];
+            for (const employeeId of nguoiCho) {
               pending.push({
                 ...(moTPhan ? { kind: "WEIGHT_PARTIAL" as const, fingerprint: vanTay } : {}),
                 productId: input.productId,
                 code: input.code,
-                employeeId: r.s.employeeId,
+                employeeId,
                 segment: span,
                 reason: `Mã ${input.code}: PENDING_RECONCILIATION — ${why}. ERP không tự chia đều.${moTPhan ? (coXacNhan ? " Đã có lời xác nhận cho mã này nhưng SỐ ĐO ĐÃ ĐỔI kể từ lúc xác nhận — phải xem và xác nhận lại." : " Nếu số đo hiện có là đủ, người có quyền xác nhận trọng số của mã cho tháng này.") : ""}`,
-                provisional: poolProv,
+                provisional: owner && employeeId === owner.employeeId ? null : poolProv,
               });
             }
           } else {
-            const poolDemand = allocS === null ? null : pct(allocS, y);
+            // Phần SUPPORT = Allocated × Y% × (Σ trọng số SUPPORT / Σ trọng số mọi người); OWNER = X% − phần ấy.
+            const phanSup = (base: number) => Math.floor((base * y * tongSup) / (10_000 * tong));
+            const poolSupProv = phanSup(eligS);
+            const poolSupDemand = allocS === null ? null : phanSup(allocS);
             const items = raw.map((r) => ({ key: r.s.id, weight: r.w }));
-            const prov = splitByWeights(poolProv, items);
-            const dem = poolDemand === null ? null : splitByWeights(poolDemand, items);
+            const prov = splitByWeights(poolSupProv, items);
+            const dem = poolSupDemand === null ? null : splitByWeights(poolSupDemand, items);
+            if (owner) {
+              const ownerRateBp = x - (y * tongSup) / tong;
+              ownerClaim(pct(eligS, x) - poolSupProv, allocS === null || poolSupDemand === null ? null : pct(allocS, x) - poolSupDemand, ownerRateBp);
+            }
             for (const r of raw) {
               segClaims.push({
                 key: `${r.s.employeeId}${CODE_CLAIM_MARKER}${input.productId}:SUPPORT:${si}`,

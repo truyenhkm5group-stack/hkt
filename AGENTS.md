@@ -672,10 +672,11 @@ deploy dừng, không phải cảnh báo.
     `docs/payroll-code-ledger.md`): lợi nhuận mã là `getMarketerReport().products[].profit` — tính MỘT
     lần, không viết công thức thứ hai. Mỗi mã có lũy kế + HWM RIÊNG, bắt đầu ở 0 tại tháng mở sổ của
     quy chế cổng; đổi OWNER không reset sổ. Σ phần đủ điều kiện của các mã bị chặn bởi lợi nhuận đủ
-    điều kiện của CÔNG TY (phân bổ theo tỷ trọng), rồi OWNER = phân bổ × X%, SUPPORT = phân bổ × Y% ×
-    trọng số; mọi khoản theo mã đi vào CÙNG cổng (trần quỹ chung). Thiếu căn cứ chia (chưa có Y%,
+    điều kiện của CÔNG TY (phân bổ theo tỷ trọng), rồi X% là TỔNG phần MKT của mã: SUPPORT = phân bổ ×
+    Y% × phần lợi nhuận họ làm ra, OWNER = phân bổ × X% − Σ SUPPORT (chủ shop 21/10/2026, §10.8 — tổng
+    KHÔNG BAO GIỜ là X + Y); mọi khoản theo mã đi vào CÙNG cổng (trần quỹ chung). Thiếu căn cứ chia (chưa có Y%,
     trọng số tay Σ ≠ 100%, không SUPPORT nào có chi phí QC / doanh thu quy kết, hai OWNER, hai điều
-    khoản, X + Y > 100%, sổ mã chưa dựng được, MỘT SUPPORT thiếu số đo, mã còn chi phí / doanh thu
+    khoản, Y > X, sổ mã chưa dựng được, MỘT SUPPORT thiếu số đo, mã còn chi phí / doanh thu
     CHƯA GÁN cho ai, kỳ không phải trọn tháng lịch) ⇒ `PENDING_RECONCILIATION` gắn vào MỌI người có
     phân công trong đoạn, CHẶN duyệt kỳ, thực nhận của họ là CHƯA KẾT LUẬN — **không bao giờ chia
     đều**. Lối ra DUY NHẤT cho loại "thiếu một phần trọng số" là lời XÁC NHẬN trọng số mã × tháng có

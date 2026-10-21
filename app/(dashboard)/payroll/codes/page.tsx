@@ -95,7 +95,7 @@ export default async function PayrollCodesPage({ searchParams }: { searchParams:
     <div className="space-y-5">
       <PageHeader
         title="Lợi nhuận theo mã"
-        description="Sổ lũy kế và mốc cao nhất (HWM) RIÊNG từng mã, phân bổ lợi nhuận đủ điều kiện của công ty xuống mã, rồi chia OWNER X% / SUPPORT Y% × trọng số. Lãi của một mã không bao giờ vượt qua lỗ của công ty."
+        description="Sổ lũy kế và mốc cao nhất (HWM) RIÊNG từng mã, phân bổ lợi nhuận đủ điều kiện của công ty xuống mã, rồi chia X% (tổng phần MKT của mã): người đẩy cùng Y% trên phần họ làm ra, OWNER phần còn lại. Lãi của một mã không bao giờ vượt qua lỗ của công ty."
       />
       <PayrollTabs canManage />
       <DataTableToolbar facets={facets} period={{ defaultKey: "month" }} />
