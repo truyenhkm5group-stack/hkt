@@ -290,6 +290,13 @@ export const DWELL_BASIS_HINT: Record<DwellBasis, string> = {
 export const DWELL_SLA_SETTING_KEY = "logistics.dwell-sla";
 
 /**
+ * CỬA SỔ XÉT ĐƠN ĐÃ CHỐT CHƯA ĐI (21/10/2026): ops `org-order-audit --waiting` và cổng bộ nhắc tự động (`followup-shared`) cùng đọc một
+ * số. GIẢ ĐỊNH, không phải số đo: tổ chức tạo vận đơn NGOÀI ERP (HSLC) thì gần như mọi đơn «chưa kết cục» mãi trong ERP — không có cửa
+ * sổ, khách đã mua một lần sẽ không bao giờ nhận tin nhắc nào nữa. Quá cửa sổ ⇒ đơn không còn là lý do chặn / đưa vào hàng đợi.
+ */
+export const CONFIRMED_ORDER_WATCH_DAYS = 30;
+
+/**
  * Ghi đè từng chặng. `null` cho cả chặng = tắt hạn cho chặng đó (một quyết định có người ký), còn
  * bỏ trống một mức thì mức đó lấy mặc định.
  */

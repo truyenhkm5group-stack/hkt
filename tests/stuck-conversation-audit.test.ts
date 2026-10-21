@@ -35,6 +35,10 @@ import {
   collectOwnership,
   collectSilent,
   emptyCounts,
+  handoffReplyClass,
+  handoffReplySplit,
+  replySplitSummary,
+  type HandoffReplyFact,
   parseStuckArgs,
   RECEIPT_CLAIM_RE,
   RECEIPT_CLAIM_SQL_RE,
@@ -98,6 +102,34 @@ function testPure() {
   const lines = silentSummary("demo", c);
   assert.match(lines[0], /AI im 3 hội thoại: chờ người 1 · lỗi kỹ thuật 1 · tạm dừng có chủ đích 1 · khách đang chờ trả lời 1 · mốc ước tính 1 · lâu nhất 1520 phút \(POST_ORDER\)/);
 
+  // A2 — tin khách cuối đã có ai trả lời chưa (chủ shop 21/10/2026: «chưa ai cầm» mà đã trả lời thì không phải lỗi).
+  const H = 3_600_000;
+  const f0: HandoffReplyFact = { lastCustomerAt: ago(30 * 60), lastBotAt: null, lastStaffAt: null, pageHumanAt: null, pageVerifiedAt: null, pageAiAt: null, handoffAt: ago(31 * 60) };
+  assert.equal(handoffReplyClass(f0, now, 4 * H), "UNANSWERED_OVER_SLA", "khách nhắn sau lúc chuyển, 30 giờ không ai trả lời");
+  assert.equal(handoffReplyClass(f0, now, 48 * H), "UNANSWERED_WITHIN_SLA");
+  assert.equal(handoffReplyClass(f0, now, null), "UNANSWERED_NO_SLA", "không có hạn ⇒ không kết luận quá hạn");
+  assert.equal(handoffReplyClass({ ...f0, pageHumanAt: ago(29 * 60) }, now, 4 * H), "ANSWERED_HUMAN", "nhân viên trả lời trên Pancake (dòng PAGE_REPLY) = đã trả lời");
+  assert.equal(handoffReplyClass({ ...f0, lastStaffAt: ago(29 * 60) }, now, 4 * H), "ANSWERED_HUMAN", "trả lời từ hộp thư ERP");
+  assert.equal(handoffReplyClass({ ...f0, pageHumanAt: ago(31 * 60) }, now, 4 * H), "UNANSWERED_OVER_SLA", "trả lời TRƯỚC tin khách cuối không tính");
+  assert.equal(handoffReplyClass({ ...f0, pageHumanAt: f0.lastCustomerAt }, now, 4 * H), "UNANSWERED_OVER_SLA", "cùng mốc không phải sau");
+  assert.equal(handoffReplyClass({ ...f0, pageAiAt: ago(29 * 60) }, now, 4 * H), "ANSWERED_BOT", "tiếng vọng của bot không phải người");
+  assert.equal(handoffReplyClass({ ...f0, lastCustomerAt: null }, now, 4 * H), "NO_CUSTOMER_MESSAGE");
+  // Tin GÂY RA lượt chuyển (khách nhắn rồi mới chuyển) chưa ai trả lời ⇒ vẫn là lỗi, dù khách không nhắn gì sau lúc chuyển.
+  const trigger: HandoffReplyFact = { ...f0, lastCustomerAt: ago(31 * 60), handoffAt: ago(30 * 60) };
+  const sp = handoffReplySplit(
+    [f0, trigger, { ...f0, pageHumanAt: ago(29 * 60) }, { ...f0, pageHumanAt: ago(29 * 60), pageVerifiedAt: ago(29 * 60) }, { ...trigger, lastBotAt: ago(31 * 60 - 1) }, { ...f0, lastCustomerAt: ago(80 * 60), handoffAt: null }, { ...f0, lastCustomerAt: ago(60) }],
+    now,
+    4 * H,
+  );
+  assert.equal(sp.total, 7);
+  assert.deepEqual([sp.byClass.ANSWERED_HUMAN, sp.answeredUnverified, sp.byClass.ANSWERED_BOT, sp.byClass.UNANSWERED_OVER_SLA, sp.byClass.UNANSWERED_WITHIN_SLA], [2, 1, 1, 3, 1]);
+  assert.deepEqual([sp.overSla24h, sp.overSla72h], [3, 1]);
+  assert.deepEqual([sp.quietTotal, sp.quietAfterHandoff.UNANSWERED_OVER_SLA, sp.quietAfterHandoff.ANSWERED_BOT, sp.handoffUnknown], [2, 1, 1, 1], "(c) cắt ngang: tin gây ra lượt chuyển chưa ai trả lời vẫn đếm vào (b)");
+  const sl = replySplitSummary("demo", sp, 4 * H);
+  assert.match(sl[0], /\(a\) ĐÃ có người\/page trả lời sau tin khách cuối 2 \(trong đó chỉ dòng page chưa rõ người gửi 1\) .* \(b\) HANDOFF_UNANSWERED \(không ai trả lời, quá SLA 4 giờ \(work\.sla\)\) 3 \(> 24 giờ 3 · > 72 giờ 1\)/);
+  assert.match(sl[1], /\(c\) khách KHÔNG nhắn gì sau lúc chuyển 2\/6 \(mốc chuyển không rõ 1\)/);
+  assert.match(replySplitSummary("demo", handoffReplySplit([f0], now, null), null)[0], /quá SLA KHÔNG đọc được \/ không đặt hạn\) 0 .* không có hạn 1/);
+
   for (const yes of ["Tôi nhận hàng rồi nhưng chưa thử chất lượng", "em đã nhận được hàng", "hàng về rồi shop ơi", "mình vừa nhận hàng"]) assert.ok(RECEIPT_CLAIM_RE.test(yes), yes);
   for (const no of ["khi nào nhận hàng", "không nhận hàng đâu", "nhận hàng ở đâu"]) assert.ok(!RECEIPT_CLAIM_RE.test(no), no);
   console.log("  ✓ đối số · nhóm lý do (AI hỏng: đồng hồ bị đẩy ≠ đang chờ thử lại) · mốc im lặng (ước tính khi chỉ có updated_at) · tóm tắt · câu «đã nhận hàng»");
@@ -149,7 +181,16 @@ async function testDb() {
       const [k4] = await db.insert(c).values({ channel: "FANPAGE", status: "OPEN", visitorKey: `${PAGE}:k4`, pageId: PAGE, threadId: "k4" }).returning({ id: c.id });
       await db.insert(c).values({ channel: "TEST", status: "HANDOFF", handoffReason: "Khách cần nhân viên", visitorKey: "ket-test" });
 
-      const a = await collectSilent(db, now);
+      // A2: nhân viên trả lời k1 thẳng trên page 2 phút trước (sau tin khách cuối 3 phút trước) · tin tự động của page không tính.
+      await db.insert(schema.salesChatInbound).values({ pageId: PAGE, threadId: "k1", messageId: "k1-auto", text: "Cảm ơn bạn đã nhắn tin", status: "DONE", note: "PAGE_REPLY", senderKind: "PANCAKE_AUTOMATION", createdAt: ago(1) });
+
+      let a = await collectSilent(db, now);
+      assert.deepEqual(a.waitingHuman.map((f) => f.id), [k1.id], "A2 chỉ xét nhóm chờ người (tiếp quản / AI hỏng không vào)");
+      assert.equal(handoffReplyClass(a.waitingHuman[0], now, 24 * 3_600_000), "UNANSWERED_WITHIN_SLA", "chỉ có tin tự động sau tin khách ⇒ CHƯA được trả lời");
+      await db.insert(schema.salesChatInbound).values({ pageId: PAGE, threadId: "k1", messageId: "k1-staff", text: "Dạ em xem lại đơn cho chị", status: "DONE", note: "PAGE_REPLY", senderKind: "VERIFIED_HUMAN", createdAt: ago(2) });
+      a = await collectSilent(db, now);
+      assert.equal(handoffReplyClass(a.waitingHuman[0], now, 24 * 3_600_000), "ANSWERED_HUMAN", "nhân viên trả lời trên page ⇒ đã trả lời dù ERP không ai cầm");
+      assert.deepEqual(a.waitingHuman[0].handoffAt, ago(1520), "mốc chuyển = dấu vào hàng đợi");
       assert.equal(a.counts.silent, 3, "TEST loại; AI đang trả lời không tính");
       assert.equal(a.counts.byClass.POST_ORDER.total, 1);
       assert.deepEqual(a.counts.byClass.POST_ORDER.over, [1, 1, 1], "1.520 phút > 1.440");
@@ -170,6 +211,7 @@ async function testDb() {
         assert.equal(b.person + b.department + b.shared + b.unowned, b.silent);
         assert.ok(b.unqueued >= 1, "k3 chưa vào hàng đợi");
         assert.ok(b.viewers >= 1, "chủ shop xem được hộp thư");
+        assert.ok(b.slaMs === null || b.slaMs > 0, "độ dài hạn đọc từ work.sla");
       }
 
       // Đơn: o1 của k1 đã chốt 5 ngày, không vận đơn (ERP in «Chưa gửi») · o2 của k4 «Mới» thiếu xã · nhắn lại sau đơn chốt.
@@ -178,9 +220,13 @@ async function testDb() {
       await db.insert(o).values({ id: "erp-0000aaaa-0000-4000-8000-000000000002", status: 0, stage: "NEW", insertedAt: ago(60), salesConversationId: k4.id, shipProvince: "Hà Nội", shipCommune: "" });
       await db.insert(schema.salesConversationEvents).values({ conversationId: k1.id, type: "followup.sent", actorKind: "AI", channel: "FANPAGE", occurredAt: ago(1440), dedupeKey: `ket-fu-${k1.id}` });
       await db.insert(schema.salesChatInbound).values({ pageId: PAGE, threadId: "k1", messageId: "k1-c", text: "Tôi nhận hàng rồi nhưng chưa thử chất lượng", status: "SKIPPED", createdAt: ago(3) });
+      // Cổng nhắc mới (P0 21/10/2026): một lượt bị chặn vì đơn đã chốt chưa kết cục.
+      await db.insert(schema.salesConversationEvents).values({ conversationId: k1.id, type: "followup.decided", actorKind: "SYSTEM", channel: "FANPAGE", reasonCode: "PENDING_PRIOR_ORDER", occurredAt: ago(60), dedupeKey: `ket-fu-blk-${k1.id}` });
       const d = await collectOrders(db, 7, now);
       assert.equal(d.m.followupsSent, 1);
       assert.equal(d.m.followupsAfterOrder, 1, "nhắn lại SAU khi đơn đã chốt");
+      assert.equal(d.m.followupsAfterPending, 1, "baseline: tin nhắc tới khách đang có đơn đã chốt CHƯA kết cục (o1 không vận đơn)");
+      assert.deepEqual([d.m.followupsBlockedPending, d.m.followupsBlockedPendingStale], [1, 0], "cổng chặn theo mã");
       assert.equal(d.m.orders, 2);
       assert.equal(d.m.byOutcome.NOT_SHIPPED, 2, "ORDER_OUTCOME: không vận đơn ⇒ NOT_SHIPPED (hộp thư in «Chưa gửi»)");
       assert.equal(d.m.confirmedNoShipmentAged, 1, "đã chốt > 3 ngày mà ERP không có vận đơn");

@@ -10,6 +10,8 @@
       công cụ xin người · AI hỏng · nhân viên tiếp quản …). Riêng «AI hỏng»: đồng hồ thử lại của hộp thư đọc `updated_at + 30 phút`
       — mọi lượt ghi vào hội thoại (đóng dấu hàng đợi, mở hội thoại, nhật ký ghi đơn…) đẩy `updated_at` về «bây giờ» ⇒ đếm riêng số
       hội thoại AI HỎNG ĐÃ QUÁ 30 PHÚT tính từ mốc hỏng thật mà vẫn bị coi là đang trong khoảng chờ (`AI_DOWN_CLOCK_PUSHED`).
+   A2 TRONG nhóm chờ người: tin khách cuối đã có người / page / bot trả lời chưa (đọc cả dòng PAGE_REPLY — nhân viên trả lời thẳng
+      trên Pancake) ⇒ HANDOFF_UNANSWERED = không ai trả lời VÀ quá SLA; «khách không nhắn gì sau lúc chuyển» cắt ngang (21/10/2026).
    B  CẦN NGƯỜI MÀ KHÔNG CHỦ — câu đếm `countUnownedHandoffs` của #800 (chưa vào hàng đợi · phòng không ai xem được hộp thư) + số
       người xem được hộp thư của CẢ tổ chức (≥ 1 ⇒ hội thoại «không chủ» vẫn có người nhận được nếu có hàng đợi chung).
    C  SLA QUÁ HẠN — hạn theo `work.sla` (`handoffDueAt` của #800) tính từ mốc vào hàng đợi; quá hạn · quá hạn > 24 giờ mà chưa ai
@@ -38,6 +40,9 @@ import { getDbForInspection, type Db } from "@/db";
 import { withOrganization } from "@/lib/platform/context";
 import { findOrganization, listOrganizations } from "@/lib/platform/organizations";
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { handoffReplyClass, handoffReplySplit, type HandoffReplyFact, type HandoffReplySplit } from "@/lib/constants/handoff-reply";
+import { CONFIRMED_ORDER_WATCH_DAYS } from "@/lib/constants/shipment-status-age";
+import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { rowsOf } from "@/lib/sql-rows";
 
 const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s.slice(0, 300)}`);
@@ -265,6 +270,20 @@ export function silentSummary(org: string, c: StuckCounts): string[] {
   return lines;
 }
 
+// A2 — luật HANDOFF_UNANSWERED sống ở lib/constants/handoff-reply.ts (dùng chung với Quality Supervisor); ở đây chỉ đọc mốc + in.
+export { HANDOFF_REPLY_CLASSES, handoffReplyClass, handoffReplySplit, type HandoffReplyClass, type HandoffReplyFact, type HandoffReplySplit } from "@/lib/constants/handoff-reply";
+
+/** Dòng tóm tắt A2 (chỉ số đếm). HÀM THUẦN. */
+export function replySplitSummary(org: string, s: HandoffReplySplit, slaMs: number | null): string[] {
+  const b = s.byClass;
+  const q = s.quietAfterHandoff;
+  const sla = slaMs === null ? "KHÔNG đọc được / không đặt hạn" : `${Math.round(slaMs / 3_600_000)} giờ (work.sla)`;
+  return [
+    `${org} A2 · trong ${s.total} hội thoại chờ người — (a) ĐÃ có người/page trả lời sau tin khách cuối ${b.ANSWERED_HUMAN} (trong đó chỉ dòng page chưa rõ người gửi ${s.answeredUnverified}) · bot đã trả lời tin khách cuối ${b.ANSWERED_BOT} · (b) HANDOFF_UNANSWERED (không ai trả lời, quá SLA ${sla}) ${b.UNANSWERED_OVER_SLA} (> 24 giờ ${s.overSla24h} · > 72 giờ ${s.overSla72h}) · chưa ai trả lời, còn trong hạn ${b.UNANSWERED_WITHIN_SLA} · chưa ai trả lời, không có hạn ${b.UNANSWERED_NO_SLA} · không có tin khách ${b.NO_CUSTOMER_MESSAGE}`,
+    `${org} A2 · (c) khách KHÔNG nhắn gì sau lúc chuyển ${s.quietTotal}/${s.total - s.handoffUnknown} (mốc chuyển không rõ ${s.handoffUnknown}) — cắt ngang: đã có người trả lời ${q.ANSWERED_HUMAN} · bot đã trả lời ${q.ANSWERED_BOT} · tin GÂY RA lượt chuyển chưa ai trả lời, quá hạn ${q.UNANSWERED_OVER_SLA} · còn hạn ${q.UNANSWERED_WITHIN_SLA + q.UNANSWERED_NO_SLA} · không có tin khách ${q.NO_CUSTOMER_MESSAGE}`,
+  ];
+}
+
 // ─────────────────────────── PHẦN CSDL ───────────────────────────
 
 type DbHolder = { __erpDb?: { orgs?: Map<string, { db?: Db }> } };
@@ -287,9 +306,14 @@ const toDate = (v: unknown): Date | null => {
 };
 
 /** A — hội thoại AI im ngay lúc đo. Trả cả mã hội thoại theo nhóm (phần MÃ HOÁ). */
-export async function collectSilent(db: Db, now: Date): Promise<{ counts: StuckCounts; samples: Partial<Record<StuckClass, string[]>>; reasons: Map<string, number> }> {
+export async function collectSilent(db: Db, now: Date): Promise<{ counts: StuckCounts; samples: Partial<Record<StuckClass, string[]>>; reasons: Map<string, number>; waitingHuman: (HandoffReplyFact & { id: string })[] }> {
   const res = await db.execute(sql`select c.id, c.status, c.handoff_reason, c.state->'control'->>'mode' as mode,
       c.state->'handoff'->>'at' as handoff_at, c.state->'handoff'->>'reason' as handoff_state_reason, c.updated_at, c.human_cooldown_until, c.handoff_queued_at, c.last_customer_at,
+      c.last_bot_at, c.last_staff_at,
+      (select max(i.created_at) from "sales_chat_inbound" i where i.page_id = c.page_id and i.thread_id = c.thread_id and i.note = 'PAGE_REPLY'
+        and coalesce(i.sender_kind, '') not in ('PANCAKE_AUTOMATION', 'META_SYSTEM', 'AI_AGENT')) as page_human_at,
+      (select max(i.created_at) from "sales_chat_inbound" i where i.page_id = c.page_id and i.thread_id = c.thread_id and i.note = 'PAGE_REPLY' and i.sender_kind = 'VERIFIED_HUMAN') as page_verified_at,
+      (select max(i.created_at) from "sales_chat_inbound" i where i.page_id = c.page_id and i.thread_id = c.thread_id and i.note = 'PAGE_REPLY' and i.sender_kind = 'AI_AGENT') as page_ai_at,
       exists (select 1 from "sales_chat_inbound" i where i.page_id = c.page_id and i.thread_id = c.thread_id and i.status = 'DEAD' and i.note = ${DEAD_AI_DOWN_NOTE_TEXT}
         and i.created_at > coalesce(greatest(c.last_bot_at, c.last_staff_at), 'epoch'::timestamptz)) as dead_unanswered,
       (c.last_customer_at is not null and c.last_customer_at > coalesce(c.last_bot_at, 'epoch'::timestamptz) and c.last_customer_at > coalesce(c.last_staff_at, 'epoch'::timestamptz)) as waiting
@@ -299,6 +323,7 @@ export async function collectSilent(db: Db, now: Date): Promise<{ counts: StuckC
   const counts = emptyCounts();
   const samples: Partial<Record<StuckClass, string[]>> = {};
   const reasons = new Map<string, number>();
+  const waitingHuman: (HandoffReplyFact & { id: string })[] = [];
   for (const r of rowsOf<Record<string, unknown>>(res)) {
     const row: SilentRow = {
       status: String(r.status ?? ""),
@@ -315,11 +340,22 @@ export async function collectSilent(db: Db, now: Date): Promise<{ counts: StuckC
     if (list.length < 30) list.push(String(r.id));
     const key = (row.reason ?? "(trống)").replace(/#[0-9A-F]{8}\b/g, "#…").slice(0, 90);
     reasons.set(key, (reasons.get(key) ?? 0) + 1);
+    if (STUCK_CLASS_GROUP[cls] === "WAITING_HUMAN")
+      waitingHuman.push({
+        id: String(r.id),
+        lastCustomerAt: toDate(r.last_customer_at),
+        lastBotAt: toDate(r.last_bot_at),
+        lastStaffAt: toDate(r.last_staff_at),
+        pageHumanAt: toDate(r.page_human_at),
+        pageVerifiedAt: toDate(r.page_verified_at),
+        pageAiAt: toDate(r.page_ai_at),
+        handoffAt: valid(row.queuedAt) ?? valid(row.handoffAt),
+      });
   }
-  return { counts, samples, reasons };
+  return { counts, samples, reasons, waitingHuman };
 }
 
-export type OwnershipMeasure = { ok: true; silent: number; person: number; department: number; shared: number; unowned: number; byReason: Record<string, number>; responders: number; viewers: number; departmentCode: string; overdue: number; stale: number; queued: number; unqueued: number } | { ok: false; why: string };
+export type OwnershipMeasure = { ok: true; silent: number; person: number; department: number; shared: number; unowned: number; byReason: Record<string, number>; responders: number; viewers: number; departmentCode: string; overdue: number; stale: number; queued: number; unqueued: number; slaMs: number | null } | { ok: false; why: string };
 
 /** B + C — đọc bằng lib #800 trong ngữ cảnh tổ chức (handle chỉ đọc). Thiếu hàm trên image ⇒ CHƯA ĐO ĐƯỢC. */
 export async function collectOwnership(org: { code: string; isHome: boolean }, now: Date): Promise<OwnershipMeasure> {
@@ -345,7 +381,9 @@ export async function collectOwnership(org: { code: string; isHome: boolean }, n
         overdue += 1;
         if (!it.assignee && now.getTime() - due.getTime() > 24 * 3_600_000) stale += 1;
       }
-      return { ok: true as const, silent: u.silent, person: u.person, department: u.department, shared: u.shared ?? 0, unowned: u.unowned, byReason: u.byReason, responders: u.responders, viewers: viewers.length, departmentCode: u.departmentCode, overdue, stale, queued, unqueued: list.length - queued };
+      // Độ dài hạn (giờ tuyến tính — `slaDueAt` cộng thẳng số giờ) để chấm tuổi tin khách cuối ở A2.
+      const slaMs = dueOf(new Date(0), ctx.cfg)?.getTime() ?? null;
+      return { ok: true as const, silent: u.silent, person: u.person, department: u.department, shared: u.shared ?? 0, unowned: u.unowned, byReason: u.byReason, responders: u.responders, viewers: viewers.length, departmentCode: u.departmentCode, overdue, stale, queued, unqueued: list.length - queued, slaMs };
     });
   } catch (e) {
     return { ok: false, why: e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160) };
@@ -358,6 +396,11 @@ const LINKED_ORDER = sql.raw(`("orders"."sales_conversation_id" = c.id or "order
 export type OrderMeasure = {
   followupsSent: number;
   followupsAfterOrder: number;
+  /** Tin nhắc ĐÃ GỬI tới hội thoại đang có đơn đã chốt CHƯA kết cục (≤ CONFIRMED_ORDER_WATCH_DAYS ngày trước lúc gửi) — baseline lãng phí. */
+  followupsAfterPending: number;
+  /** Lượt cổng nhắc bị chặn vì đơn chưa kết cục (P0 21/10/2026): PENDING_PRIOR_ORDER · PENDING_PRIOR_ORDER_STALE. */
+  followupsBlockedPending: number;
+  followupsBlockedPendingStale: number;
   orders: number;
   byOutcome: Record<string, number>;
   confirmedNoShipmentAged: number;
@@ -374,8 +417,18 @@ export async function collectOrders(db: Db, days: number, now: Date): Promise<{ 
   const [f] = rowsOf<Record<string, unknown>>(
     await db.execute(sql`select count(*)::int as sent,
         count(*) filter (where exists (select 1 from "sales_chat_conversations" c join "orders" on ${LINKED_ORDER}
-          where c.id = e.conversation_id and "orders"."stage" not in ('NEW', 'CANCELLED', 'DELETED') and "orders"."inserted_at" < e.occurred_at))::int as after_order
+          where c.id = e.conversation_id and "orders"."stage" not in ('NEW', 'CANCELLED', 'DELETED') and "orders"."inserted_at" < e.occurred_at))::int as after_order,
+        count(*) filter (where exists (select 1 from "sales_chat_conversations" c join "orders" on ${LINKED_ORDER}
+          left join "shipments" on "shipments"."order_id" = "orders"."id" and ${PRIMARY_ATTEMPT}
+          where c.id = e.conversation_id and "orders"."stage" in ('WAITING', 'CONFIRMED', 'PACKING', 'READY_TO_SHIP', 'SHIPPED') and "orders"."inserted_at" < e.occurred_at
+            and "orders"."inserted_at" >= e.occurred_at - ${CONFIRMED_ORDER_WATCH_DAYS} * interval '1 day'
+            and ${ORDER_OUTCOME}::text in (${sql.raw(OPEN_OUTCOMES_SQL)})))::int as after_pending
       from "sales_conversation_events" e where e.type = 'followup.sent' and e.occurred_at >= ${since}`),
+  );
+  const [fb] = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`select count(*) filter (where e.reason_code = 'PENDING_PRIOR_ORDER')::int as pending,
+        count(*) filter (where e.reason_code = 'PENDING_PRIOR_ORDER_STALE')::int as stale
+      from "sales_conversation_events" e where e.type = 'followup.decided' and e.occurred_at >= ${since}`),
   );
   const outcomeRows = rowsOf<Record<string, unknown>>(
     await db.execute(sql`select ${ORDER_OUTCOME}::text as outcome, count(distinct "orders"."id")::int as n,
@@ -420,6 +473,9 @@ export async function collectOrders(db: Db, days: number, now: Date): Promise<{ 
     m: {
       followupsSent: Number(f?.sent ?? 0),
       followupsAfterOrder: Number(f?.after_order ?? 0),
+      followupsAfterPending: Number(f?.after_pending ?? 0),
+      followupsBlockedPending: Number(fb?.pending ?? 0),
+      followupsBlockedPendingStale: Number(fb?.stale ?? 0),
       orders,
       byOutcome,
       confirmedNoShipmentAged,
@@ -505,9 +561,15 @@ async function oneOrg(org: { code: string; isHome: boolean }, args: StuckArgs, n
     } else {
       tomTat(`${org.code} B/C · CHƯA ĐO ĐƯỢC — ${b.why}`);
     }
+    const slaMs = b.ok ? b.slaMs : null;
+    const split = handoffReplySplit(a.waitingHuman, now, slaMs);
+    for (const line of replySplitSummary(org.code, split, slaMs)) tomTat(line);
+    const unanswered = a.waitingHuman.filter((f) => handoffReplyClass(f, now, slaMs) === "UNANSWERED_OVER_SLA").map((f) => f.id);
+    console.log(`${org.code} A2 · mã hội thoại HANDOFF_UNANSWERED (≤ 30): ${JSON.stringify(unanswered.slice(0, 30))}`);
 
     const d = await collectOrders(db, args.days, now);
     tomTat(`${org.code} D · nhắn lại ${args.days} ngày: ${d.m.followupsSent} tin · sau khi đã có đơn sống (không phải nháp) ${d.m.followupsAfterOrder}`);
+    tomTat(`${org.code} D · tin nhắc tới khách đang có đơn đã chốt CHƯA kết cục (≤ ${CONFIRMED_ORDER_WATCH_DAYS} ngày): ${d.m.followupsAfterPending} (ESTIMATED — đơn nối hội thoại, mọi lượt mua) · cổng chặn PENDING_PRIOR_ORDER ${d.m.followupsBlockedPending} · PENDING_PRIOR_ORDER_STALE ${d.m.followupsBlockedPendingStale} (MEASURED)`);
     tomTat(`${org.code} E · đơn nối hội thoại ${args.days} ngày còn sống ${d.m.orders}: ${Object.entries(d.m.byOutcome).map(([k, v]) => `${k} ${v}`).join(" · ") || "—"}`);
     tomTat(`${org.code} E · đã chốt > ${NO_SHIPMENT_AFTER_DAYS} ngày mà ERP KHÔNG có vận đơn ${d.m.confirmedNoShipmentAged} · đơn ERP + đơn Pancake cùng hội thoại ±${NO_SHIPMENT_AFTER_DAYS} ngày ${d.m.erpAndPancakeSameThread} · đơn ERP thiếu xã/phường ${d.m.missingWard}`);
     tomTat(`${org.code} E · khách NÓI đã nhận hàng ${d.m.receiptClaims} hội thoại · trong đó đơn chưa có chứng từ giao (ORDER_OUTCOME ≠ DELIVERED) ${d.m.receiptClaimsNotDelivered} — lời khách không đổi trạng thái đơn`);

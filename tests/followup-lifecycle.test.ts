@@ -36,7 +36,7 @@ import { openConversation, setSalesChatProviderForTests, SHOP_SAID } from "@/lib
 import { claimConversationEvent, linkAgentOrder } from "@/lib/sales-chatbot/events";
 import { fanpageVisitorKey, markWaitingForCustomer, PAGE_REPLY } from "@/lib/sales-chatbot/fanpage";
 import { runSalesFollowups } from "@/lib/sales-chatbot/followup";
-import { decideFollowup, FOLLOWUP_REASON_LABEL, followupScriptOf, followupSlotKey, type FollowupConvSnap, type FollowupGateInput } from "@/lib/sales-chatbot/followup-shared";
+import { decideFollowup, FOLLOWUP_REASON_LABEL, pendingPriorOrderReason, followupScriptOf, followupSlotKey, type FollowupConvSnap, type FollowupGateInput } from "@/lib/sales-chatbot/followup-shared";
 import { deriveLifecycle, LIFECYCLE_SHOP_SAID_PREFIX, optOutInCustomerText, orderStateOf, type LifecycleFacts, type LinkedOrderFact } from "@/lib/sales-chatbot/lifecycle";
 import { executeTool, type ChatState } from "@/lib/sales-chatbot/tools";
 import { confirmedStaleness, repairStaleConfirmed, staleRepairSummaryLines } from "@/lib/sales-chatbot/confirmed-settle";
@@ -108,6 +108,19 @@ export function testLifecyclePure() {
   const okLc = deriveLifecycle(facts({ state: { customer } }));
   const gate = (p: Partial<FollowupGateInput> = {}) => decideFollowup({ now: new Date(t0), hasAddress: true, claimed: snap(), fresh: snap(), lifecycle: okLc, pageReplyAfter: false, customerInboundAfter: false, otherBotSendAfter: false, sameScriptRecently: false, ...p }).reason;
   assert.equal(gate(), "OK", "chưa có đơn, khách đã cho thông tin ⇒ gửi được");
+  // Đơn đã chốt chưa kết cục của LƯỢT MUA TRƯỚC (P0 21/10/2026, #BD31267C) — thuần + thứ tự (ngay SAU ORDER_EXISTS).
+  const hAgo = (h: number) => new Date(t0 - h * 3_600_000);
+  const po = (stage: string, h: number, outcome: string | null = "NOT_SHIPPED") => ({ stage, insertedAt: hAgo(h), outcome });
+  const pp = (orders: Parameters<typeof pendingPriorOrderReason>[0]) => pendingPriorOrderReason(orders, new Date(t0), 30, 96);
+  assert.equal(pp([po("CONFIRMED", 24)]), "PENDING_PRIOR_ORDER");
+  assert.equal(pp([po("CONFIRMED", 24, null)]), "PENDING_PRIOR_ORDER", "không đọc được kết cục = chưa kết cục (phía hẹp)");
+  assert.equal(pp([po("CONFIRMED", 120)]), "PENDING_PRIOR_ORDER_STALE", "quá 96 giờ ⇒ người kiểm");
+  assert.equal(pp([po("CONFIRMED", 31 * 24)]), null, "chốt quá cửa sổ 30 ngày ⇒ không chặn (giả định của CONFIRMED_ORDER_WATCH_DAYS)");
+  for (const o of ["DELIVERED", "RETURNED", "RETURNED_BY_RULE", "CANCELLED"]) assert.equal(pp([po("CONFIRMED", 24, o)]), null, `kết cục ${o} ⇒ không chặn`);
+  for (const st of ["NEW", "CANCELLED", "DELETED", "DELIVERED"]) assert.equal(pp([po(st, 24)]), null, `đơn ${st} ⇒ không chặn`);
+  assert.equal(pp([po("CONFIRMED", 24, "DELIVERED"), po("SHIPPED", 2, "IN_TRANSIT")]), "PENDING_PRIOR_ORDER", "một đơn đã giao + một đơn đang đi ⇒ còn chờ");
+  assert.equal(gate({ pendingOrder: "PENDING_PRIOR_ORDER" }), "PENDING_PRIOR_ORDER");
+  assert.equal(gate({ pendingOrder: "PENDING_PRIOR_ORDER", lifecycle: kim }), "ORDER_EXISTS", "đơn của lượt HIỆN TẠI giữ mã cũ — luật mới chỉ bắt đơn lượt hiện tại không thấy");
   assert.equal(gate({ lifecycle: kim }), "ORDER_EXISTS", "ca KimThu ⇒ ORDER_EXISTS");
   assert.equal(gate({ lifecycle: deriveLifecycle(facts({ orders: [ord({ payment: "PAID" })] })) }), "PAYMENT_RECORDED", "có chứng từ thu ⇒ chặn (trước ORDER_EXISTS)");
   assert.equal(gate({ lifecycle: deriveLifecycle(facts({ orders: [ord({ stage: "CANCELLED" })] })) }), "ORDER_CANCELLED");
@@ -238,6 +251,19 @@ export async function testFollowupLifecycleDb() {
       assert.ok(lcA.version && lcA.sources && pa.checks && pa.model === "claude-sonnet-5" && typeof pa.promptHash === "string" && pa.promptVersion && pa.v === 1, "vết: ảnh chụp vòng đời + kết quả kiểm + model + phiên bản / dấu băm lời nhắc");
       const rawA = JSON.stringify(da.payload);
       assert.ok(!rawA.includes(PHONE) && !rawA.includes(NAME) && !rawA.includes(aiText) && !rawA.includes(ADDRESS), "vết KHÔNG chứa SĐT / tên / địa chỉ / chữ câu nhắc");
+
+      // ①b P0 21/10/2026 (ca HSLC #BD31267C): đơn đã chốt của LƯỢT MUA TRƯỚC (đã sang `pastOrders`, lượt mua mới không thấy) còn chưa kết
+      // cục ⇒ KHÔNG nhắc bán; quá DWELL_SLA.PENDING.exception ⇒ mã STALE (người kiểm); chốt quá CONFIRMED_ORDER_WATCH_DAYS ⇒ không chặn nữa.
+      for (const [thread, ageH, want] of [["th-past-1", 1, "PENDING_PRIOR_ORDER"], ["th-past-5", 5 * 24, "PENDING_PRIOR_ORDER_STALE"], ["th-past-31", 31 * 24, "OK"]] as const) {
+        const oid = await newOrder("CONFIRMED", `fu-past-${thread}`);
+        await db.update(schema.orders).set({ insertedAt: new Date(Date.now() - ageH * 3_600_000) }).where(eq(schema.orders.id, oid));
+        const id = await conv(thread, { ...state0, pastOrders: [{ orderId: oid, simulated: false, total: 570_000, at: new Date(Date.now() - ageH * 3_600_000).toISOString() }] });
+        await linkTo(oid, id);
+        const before = pancake.sentTo(thread).length;
+        await run();
+        assert.deepEqual(await onlyReason(id), [want], `${thread}: đơn lượt trước ${ageH} giờ ⇒ ${want}`);
+        assert.equal(pancake.sentTo(thread).length - before, want === "OK" ? 1 : 0, `${thread}: ${want === "OK" ? "quá cửa sổ ⇒ nhắc lại bình thường" : "không gửi tin bán hàng cho khách đang chờ đơn"}`);
+      }
       assert.equal((await db.select({ id: e.id }).from(e).where(and(eq(e.conversationId, a), eq(e.type, "followup.sent")))).length, 1, "sự kiện followup.sent cũ vẫn ghi (báo cáo đọc nó)");
 
       // ② Cron chạy lại CÙNG lượt nhắc (mốc bị đặt lại) ⇒ không tin thứ hai.
