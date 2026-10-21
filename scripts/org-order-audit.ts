@@ -30,7 +30,7 @@ if (CHAY_THANG) process.env.ERP_READ_ONLY = "1";
 import "dotenv/config";
 import { and, eq, gte, lt, sql } from "drizzle-orm";
 import { getDbForInspection, schema, type Db } from "@/db";
-import { DWELL_SLA } from "@/lib/constants/shipment-status-age";
+import { CONFIRMED_ORDER_WATCH_DAYS, DWELL_SLA } from "@/lib/constants/shipment-status-age";
 import { findOrganization } from "@/lib/platform/organizations";
 import { SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 import { normalizeVnPhone } from "@/lib/sales-chatbot/returning";
@@ -171,7 +171,7 @@ export function replyGaps(rows: readonly ReplyRow[], from: Date, to: Date, now: 
 
 /* ═══ `--waiting`: ĐƠN ĐÃ CHỐT MÀ CHƯA ĐI ═══ */
 export const WAITING_STAGES = ["WAITING", "CONFIRMED", "PACKING", "READY_TO_SHIP"] as const;
-export const WAITING_LOOKBACK_DAYS = 30;
+export const WAITING_LOOKBACK_DAYS = CONFIRMED_ORDER_WATCH_DAYS;
 export type WaitingPriority = "P1_KHACH_THAN" | "P2_QUA_NGUONG_HONG" | "P3_QUA_NGUONG_CANH_BAO";
 export type WaitingInput = { ageHours: number; hasShipment: boolean; leftWarehouse: boolean; complained: boolean; convStatus: string | null };
 

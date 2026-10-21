@@ -47,6 +47,7 @@ import { pageRuntimeMode } from "@/lib/sales-chatbot/page-runtime";
 import {
   BOT_ECHO_GRACE_MS,
   decideFollowup,
+  pendingPriorOrderReason,
   FOLLOWUP_PROMPT_VERSION,
   FOLLOWUP_REASON_LABEL,
   FOLLOWUP_SAME_SCRIPT_WINDOW_MS,
@@ -62,7 +63,8 @@ import {
   type FollowupScript,
 } from "@/lib/sales-chatbot/followup-shared";
 import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
-import { loadLifecycle, UNKNOWN_LIFECYCLE, type LifecycleConvRow, type LifecycleSnapshot } from "@/lib/sales-chatbot/lifecycle";
+import { CONFIRMED_ORDER_WATCH_DAYS, DWELL_SLA } from "@/lib/constants/shipment-status-age";
+import { linkedOrdersFor, loadLifecycle, UNKNOWN_LIFECYCLE, type LifecycleConvRow, type LifecycleSnapshot } from "@/lib/sales-chatbot/lifecycle";
 import { publishedPlaybookText } from "@/lib/sales-chatbot/playbook";
 import { promptStampOf } from "@/lib/sales-chatbot/prompt-stamp";
 import { findReturningCustomer, isRepeatBuyer, returningCustomerPrompt } from "@/lib/sales-chatbot/returning";
@@ -159,7 +161,12 @@ async function followupGate(row: DueRow, claimed: FollowupConvSnap, now: Date): 
   const threadId = loaded.conv.threadId ?? row.threadId;
   const signals = await gateSignals(row.id, pageId, threadId, claimed.lastBotAt ?? claimed.waitingSince, fresh.lastCustomerAt, script, now).catch(() => null);
   if (!signals) return { decision: { send: false, reason: "LIFECYCLE_UNKNOWN" }, lifecycle, script, checks: null, conv: loaded.conv };
-  const decision = decideFollowup({ now, hasAddress: Boolean(pageId && threadId), claimed, fresh, lifecycle, ...signals });
+  // Đơn đã chốt chưa kết cục của CẢ lượt mua trước (lượt mua đã cắt ⇒ `lifecycle` không thấy) — cùng bộ đọc với luồng hậu mãi. Đọc lỗi ⇒
+  // không nhắc (phía hẹp).
+  const prior = await linkedOrdersFor(loaded.conv, now, { includePast: true }).catch(() => null);
+  if (!prior) return { decision: { send: false, reason: "LIFECYCLE_UNKNOWN" }, lifecycle, script, checks: null, conv: loaded.conv };
+  const pendingOrder = pendingPriorOrderReason(prior, now, CONFIRMED_ORDER_WATCH_DAYS, DWELL_SLA.PENDING?.exception ?? null);
+  const decision = decideFollowup({ now, hasAddress: Boolean(pageId && threadId), claimed, fresh, lifecycle, ...signals, pendingOrder });
   const checks: GateChecks = { status: fresh.status, ...signals, withinWindow: withinMessagingWindow(fresh.lastCustomerAt, now), staffCooldown: Boolean(fresh.humanCooldownUntil && fresh.humanCooldownUntil.getTime() > now.getTime()) };
   return { decision, lifecycle, script, checks, conv: loaded.conv };
 }

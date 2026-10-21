@@ -38,6 +38,7 @@ import { getDbForInspection, type Db } from "@/db";
 import { withOrganization } from "@/lib/platform/context";
 import { findOrganization, listOrganizations } from "@/lib/platform/organizations";
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { CONFIRMED_ORDER_WATCH_DAYS } from "@/lib/constants/shipment-status-age";
 import { rowsOf } from "@/lib/sql-rows";
 
 const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s.slice(0, 300)}`);
@@ -358,6 +359,11 @@ const LINKED_ORDER = sql.raw(`("orders"."sales_conversation_id" = c.id or "order
 export type OrderMeasure = {
   followupsSent: number;
   followupsAfterOrder: number;
+  /** Tin nhắc ĐÃ GỬI tới hội thoại đang có đơn đã chốt CHƯA kết cục (≤ CONFIRMED_ORDER_WATCH_DAYS ngày trước lúc gửi) — baseline lãng phí. */
+  followupsAfterPending: number;
+  /** Lượt cổng nhắc bị chặn vì đơn chưa kết cục (P0 21/10/2026): PENDING_PRIOR_ORDER · PENDING_PRIOR_ORDER_STALE. */
+  followupsBlockedPending: number;
+  followupsBlockedPendingStale: number;
   orders: number;
   byOutcome: Record<string, number>;
   confirmedNoShipmentAged: number;
@@ -374,8 +380,18 @@ export async function collectOrders(db: Db, days: number, now: Date): Promise<{ 
   const [f] = rowsOf<Record<string, unknown>>(
     await db.execute(sql`select count(*)::int as sent,
         count(*) filter (where exists (select 1 from "sales_chat_conversations" c join "orders" on ${LINKED_ORDER}
-          where c.id = e.conversation_id and "orders"."stage" not in ('NEW', 'CANCELLED', 'DELETED') and "orders"."inserted_at" < e.occurred_at))::int as after_order
+          where c.id = e.conversation_id and "orders"."stage" not in ('NEW', 'CANCELLED', 'DELETED') and "orders"."inserted_at" < e.occurred_at))::int as after_order,
+        count(*) filter (where exists (select 1 from "sales_chat_conversations" c join "orders" on ${LINKED_ORDER}
+          left join "shipments" on "shipments"."order_id" = "orders"."id" and ${PRIMARY_ATTEMPT}
+          where c.id = e.conversation_id and "orders"."stage" in ('WAITING', 'CONFIRMED', 'PACKING', 'READY_TO_SHIP', 'SHIPPED') and "orders"."inserted_at" < e.occurred_at
+            and "orders"."inserted_at" >= e.occurred_at - ${CONFIRMED_ORDER_WATCH_DAYS} * interval '1 day'
+            and ${ORDER_OUTCOME}::text not in ('DELIVERED', 'RETURNED', 'RETURNED_BY_RULE', 'CANCELLED')))::int as after_pending
       from "sales_conversation_events" e where e.type = 'followup.sent' and e.occurred_at >= ${since}`),
+  );
+  const [fb] = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`select count(*) filter (where e.reason_code = 'PENDING_PRIOR_ORDER')::int as pending,
+        count(*) filter (where e.reason_code = 'PENDING_PRIOR_ORDER_STALE')::int as stale
+      from "sales_conversation_events" e where e.type = 'followup.decided' and e.occurred_at >= ${since}`),
   );
   const outcomeRows = rowsOf<Record<string, unknown>>(
     await db.execute(sql`select ${ORDER_OUTCOME}::text as outcome, count(distinct "orders"."id")::int as n,
@@ -420,6 +436,9 @@ export async function collectOrders(db: Db, days: number, now: Date): Promise<{ 
     m: {
       followupsSent: Number(f?.sent ?? 0),
       followupsAfterOrder: Number(f?.after_order ?? 0),
+      followupsAfterPending: Number(f?.after_pending ?? 0),
+      followupsBlockedPending: Number(fb?.pending ?? 0),
+      followupsBlockedPendingStale: Number(fb?.stale ?? 0),
       orders,
       byOutcome,
       confirmedNoShipmentAged,
@@ -508,6 +527,7 @@ async function oneOrg(org: { code: string; isHome: boolean }, args: StuckArgs, n
 
     const d = await collectOrders(db, args.days, now);
     tomTat(`${org.code} D · nhắn lại ${args.days} ngày: ${d.m.followupsSent} tin · sau khi đã có đơn sống (không phải nháp) ${d.m.followupsAfterOrder}`);
+    tomTat(`${org.code} D · tin nhắc tới khách đang có đơn đã chốt CHƯA kết cục (≤ ${CONFIRMED_ORDER_WATCH_DAYS} ngày): ${d.m.followupsAfterPending} (ESTIMATED — đơn nối hội thoại, mọi lượt mua) · cổng chặn PENDING_PRIOR_ORDER ${d.m.followupsBlockedPending} · PENDING_PRIOR_ORDER_STALE ${d.m.followupsBlockedPendingStale} (MEASURED)`);
     tomTat(`${org.code} E · đơn nối hội thoại ${args.days} ngày còn sống ${d.m.orders}: ${Object.entries(d.m.byOutcome).map(([k, v]) => `${k} ${v}`).join(" · ") || "—"}`);
     tomTat(`${org.code} E · đã chốt > ${NO_SHIPMENT_AFTER_DAYS} ngày mà ERP KHÔNG có vận đơn ${d.m.confirmedNoShipmentAged} · đơn ERP + đơn Pancake cùng hội thoại ±${NO_SHIPMENT_AFTER_DAYS} ngày ${d.m.erpAndPancakeSameThread} · đơn ERP thiếu xã/phường ${d.m.missingWard}`);
     tomTat(`${org.code} E · khách NÓI đã nhận hàng ${d.m.receiptClaims} hội thoại · trong đó đơn chưa có chứng từ giao (ORDER_OUTCOME ≠ DELIVERED) ${d.m.receiptClaimsNotDelivered} — lời khách không đổi trạng thái đơn`);

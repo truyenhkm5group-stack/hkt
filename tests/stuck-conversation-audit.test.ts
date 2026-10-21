@@ -178,9 +178,13 @@ async function testDb() {
       await db.insert(o).values({ id: "erp-0000aaaa-0000-4000-8000-000000000002", status: 0, stage: "NEW", insertedAt: ago(60), salesConversationId: k4.id, shipProvince: "Hà Nội", shipCommune: "" });
       await db.insert(schema.salesConversationEvents).values({ conversationId: k1.id, type: "followup.sent", actorKind: "AI", channel: "FANPAGE", occurredAt: ago(1440), dedupeKey: `ket-fu-${k1.id}` });
       await db.insert(schema.salesChatInbound).values({ pageId: PAGE, threadId: "k1", messageId: "k1-c", text: "Tôi nhận hàng rồi nhưng chưa thử chất lượng", status: "SKIPPED", createdAt: ago(3) });
+      // Cổng nhắc mới (P0 21/10/2026): một lượt bị chặn vì đơn đã chốt chưa kết cục.
+      await db.insert(schema.salesConversationEvents).values({ conversationId: k1.id, type: "followup.decided", actorKind: "SYSTEM", channel: "FANPAGE", reasonCode: "PENDING_PRIOR_ORDER", occurredAt: ago(60), dedupeKey: `ket-fu-blk-${k1.id}` });
       const d = await collectOrders(db, 7, now);
       assert.equal(d.m.followupsSent, 1);
       assert.equal(d.m.followupsAfterOrder, 1, "nhắn lại SAU khi đơn đã chốt");
+      assert.equal(d.m.followupsAfterPending, 1, "baseline: tin nhắc tới khách đang có đơn đã chốt CHƯA kết cục (o1 không vận đơn)");
+      assert.deepEqual([d.m.followupsBlockedPending, d.m.followupsBlockedPendingStale], [1, 0], "cổng chặn theo mã");
       assert.equal(d.m.orders, 2);
       assert.equal(d.m.byOutcome.NOT_SHIPPED, 2, "ORDER_OUTCOME: không vận đơn ⇒ NOT_SHIPPED (hộp thư in «Chưa gửi»)");
       assert.equal(d.m.confirmedNoShipmentAged, 1, "đã chốt > 3 ngày mà ERP không có vận đơn");

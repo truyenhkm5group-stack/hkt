@@ -100,6 +100,8 @@ export const FOLLOWUP_REASONS = [
   "ORDER_RETURNED",
   "PAYMENT_RECORDED",
   "ORDER_EXISTS",
+  "PENDING_PRIOR_ORDER",
+  "PENDING_PRIOR_ORDER_STALE",
   "LIFECYCLE_UNKNOWN",
   "CUSTOMER_DECLINED",
   "HUMAN_TAKEOVER",
@@ -128,6 +130,8 @@ export const FOLLOWUP_REASON_LABEL: Record<FollowupReason, string> = {
   ORDER_RETURNED: "đơn đã hoàn — lịch nhắc cũ vô hiệu",
   PAYMENT_RECORDED: "đã có chứng từ thu — không nhắc chốt đơn",
   ORDER_EXISTS: "đã chốt đơn / đã có đơn ERP — không gửi kịch bản chốt đơn (chưa có kịch bản CSKH sau mua)",
+  PENDING_PRIOR_ORDER: "khách còn đơn đã chốt CHƯA kết cục (kể cả đơn của lượt mua trước) — không nhắc bán",
+  PENDING_PRIOR_ORDER_STALE: "khách còn đơn đã chốt chưa kết cục QUÁ hạn chờ lấy hàng — không nhắc bán, để người kiểm (hàng đợi đơn chờ)",
   LIFECYCLE_UNKNOWN: "không đọc được đơn của hội thoại — không nhắc (phía hẹp)",
   CUSTOMER_DECLINED: "khách từ chối rõ",
   HUMAN_TAKEOVER: "cần người xử lý",
@@ -170,7 +174,29 @@ export type FollowupGateInput = {
   otherBotSendAfter: boolean;
   /** Cùng kịch bản đã gửi trong `FOLLOWUP_SAME_SCRIPT_WINDOW_MS` và sau tin cuối của khách. */
   sameScriptRecently: boolean;
+  /** Đơn đã chốt chưa kết cục của hội thoại, CẢ lượt mua trước (`pendingPriorOrderReason`). Bỏ trống = không xét (đường cũ). */
+  pendingOrder?: Extract<FollowupReason, "PENDING_PRIOR_ORDER" | "PENDING_PRIOR_ORDER_STALE"> | null;
 };
+
+/** Đơn đã chốt còn sống (chưa giao / huỷ / xoá theo `orders.stage`). */
+const PRIOR_LIVE_STAGES = new Set(["WAITING", "CONFIRMED", "PACKING", "READY_TO_SHIP", "SHIPPED"]);
+/** Kết cục CUỐI theo `ORDER_OUTCOME` — còn lại (chưa gửi · chưa biết · chờ lấy · đang giao · không đọc được) là CHƯA kết cục. */
+const FINAL_OUTCOMES = new Set(["DELIVERED", "RETURNED", "RETURNED_BY_RULE", "CANCELLED"]);
+
+/**
+ * KHÁCH CÒN ĐƠN ĐÃ CHỐT CHƯA KẾT CỤC (P0 21/10/2026, ca HSLC #BD31267C: tin nhắc bán hàng 00:04 tới khách đang chờ đơn 5 ngày — lượt mua
+ * đã cắt sau POST_ORDER_HANDOFF_MS nên `lifecycle` của lượt mới không thấy đơn đó). Xét MỌI đơn nối với hội thoại (cả lượt trước) chốt
+ * trong `CONFIRMED_ORDER_WATCH_DAYS` ngày: còn đơn sống chưa kết cục ⇒ không nhắc bán. Quá `DWELL_SLA.PENDING.exception` giờ ⇒ mã STALE
+ * (người kiểm — HSLC tạo vận đơn ngoài ERP nên «chưa thấy vận đơn» là CHƯA BIẾT, không phải «chưa gửi»). Chốt quá cửa sổ ⇒ không chặn
+ * (giả định — xem hằng số). HÀM THUẦN.
+ */
+export function pendingPriorOrderReason(orders: readonly { stage: string; insertedAt: Date | null; outcome: string | null }[], now: Date, watchDays: number, staleHours: number | null): "PENDING_PRIOR_ORDER" | "PENDING_PRIOR_ORDER_STALE" | null {
+  const since = now.getTime() - watchDays * 86_400_000;
+  const live = orders.filter((o) => PRIOR_LIVE_STAGES.has(o.stage) && !FINAL_OUTCOMES.has(o.outcome ?? "") && o.insertedAt !== null && o.insertedAt.getTime() >= since);
+  if (!live.length) return null;
+  const oldest = Math.min(...live.map((o) => o.insertedAt!.getTime()));
+  return staleHours !== null && (now.getTime() - oldest) / 3_600_000 >= staleHours ? "PENDING_PRIOR_ORDER_STALE" : "PENDING_PRIOR_ORDER";
+}
 
 export type FollowupGateDecision = { send: true; reason: "OK" } | { send: false; reason: FollowupReason };
 
@@ -203,6 +229,8 @@ export function decideFollowup(g: FollowupGateInput): FollowupGateDecision {
   if (lc.order === "RETURNED") return no("ORDER_RETURNED");
   if (lc.payment === "PAID" || lc.payment === "PENDING") return no("PAYMENT_RECORDED");
   if (lc.order === "CREATED" || lc.order === "CONFIRMED" || lc.fulfillment === "SHIPPING" || lc.fulfillment === "DELIVERED") return no("ORDER_EXISTS");
+  // SAU ORDER_EXISTS: đơn của lượt mua HIỆN TẠI vẫn mang mã cũ; luật này bắt đơn mà lượt hiện tại KHÔNG thấy (lượt mua trước, đã cắt).
+  if (g.pendingOrder) return no(g.pendingOrder);
   if (lc.order === "UNKNOWN") return no("LIFECYCLE_UNKNOWN");
   if (lc.salesStage === "CUSTOMER_DECLINED") return no("CUSTOMER_DECLINED");
   if (lc.contact === "HUMAN_TAKEOVER") return no("HUMAN_TAKEOVER");
