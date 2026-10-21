@@ -260,6 +260,8 @@ export const OPERATING_FUNNEL: StageSpec[] = [
 export const NGOAI_PHEU: Partial<Record<CaseType, string>> = {
   DATA_ERROR: "Dữ liệu sai làm lệch MỌI khâu, không riêng khâu nào. Xếp nó vào một khâu là nói dối về phạm vi ảnh hưởng.",
   PROFITABILITY_ALERT: "Cảnh báo mức kinh doanh (mẫu mã / kênh đang lỗ), không phải một chỗ tắc trong dòng chảy hàng.",
+  SALES_QUALITY:
+    "Việc tổng hợp MỘT ngày về CẤU HÌNH bot (câu mẫu · lời dặn · kiến thức shop), không phải một khách / một đơn đang tắc ở khâu nào — xếp vào khâu «Khách nhắn» là đếm số việc tổng hợp như số khách tắc. Khách đang chờ người vẫn nằm ở khâu đó qua SALES_CHAT_HANDOFF.",
   OTHER: "Loại rơi vãi, không mang nghĩa vận hành nào.",
 };
 

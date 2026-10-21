@@ -627,6 +627,7 @@ import { testConversationTrace } from "./conversation-trace.test";
 import { testMessengerHealth } from "./messenger-health.test";
 import { testMessengerWebhookRejections } from "./messenger-webhook-rejections.test";
 import { testMessengerWebhookAlerts } from "./messenger-webhook-alerts.test";
+import { testSalesQualityDaily } from "./sales-quality-daily.test";
 import { testMessengerConfigReport } from "./messenger-config-report.test";
 import { testConnectorsLegacy } from "./connectors-legacy.test";
 import { testNativeOrderSync } from "./native-order-sync.test";
@@ -3290,6 +3291,8 @@ async function main() {
     // M4: sổ gói webhook bị từ chối (0251) · check-integrations --messenger khai CÓ / KHÔNG, không in giá trị.
     await testMessengerWebhookRejections();
     await testMessengerWebhookAlerts();
+    // 2B: giám sát chất lượng AI bán hàng hằng ngày — một việc / mã / ngày, bộ dò lib = conv-money-trace, 0 lời gọi AI.
+    await testSalesQualityDaily();
     testMessengerConfigReport();
     testConnectorsLegacy();
     // Shop CHỈ nối Facebook trực tiếp: ghi đơn từ hội thoại đọc sổ tin ERP (không Pancake) + trọn đường nhận → bot → nhân viên →

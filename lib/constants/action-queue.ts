@@ -80,6 +80,11 @@ export type CaseType =
    * người đọc đi đòi một khoản tiền đã nhận.
    */
   | "COD_STATEMENT_MISSING"
+  /**
+   * Giám sát chất lượng AI bán hàng hằng ngày (2B · lib/sales-quality/daily.ts): MỘT việc / mã lỗi / ngày, gom mọi hội thoại cùng lỗi —
+   * không phải một việc cho mỗi hội thoại. Mã ở lib/constants/sales-quality.ts.
+   */
+  | "SALES_QUALITY"
   | "OTHER";
 
 /** Ánh xạ từ `notifications.kind` sang loại việc. Một chỗ duy nhất. */
@@ -110,6 +115,7 @@ export const KIND_TO_CASE: Record<string, CaseType> = {
   // Hai dấu hiệu, một việc: cả hai đều nói "ERP đang thiếu bảng kê", cùng người làm, cùng chỗ sửa.
   COD_STATEMENT_MISSING: "COD_STATEMENT_MISSING",
   STATEMENT_MAIL_SILENT: "COD_STATEMENT_MISSING",
+  SALES_QUALITY: "SALES_QUALITY",
 };
 
 export function caseTypeOf(kind: string): CaseType {
@@ -141,6 +147,7 @@ export const CASE_TYPE_LABEL: Record<CaseType, string> = {
   ORPHAN_SHIPMENT: "Vận đơn chưa ghép được đơn",
   VTP_ORDER_LIST_DUE: "Đến hạn nhập Danh sách vận đơn VTP",
   COD_STATEMENT_MISSING: "Tiền COD đã về · thiếu bảng kê",
+  SALES_QUALITY: "Chất lượng AI bán hàng · lỗi trong ngày",
   OTHER: "Khác",
 };
 
@@ -197,6 +204,8 @@ export const RECOVERABILITY: Record<CaseType, number> = {
   VTP_ORDER_LIST_DUE: 0.8,
   // Tải đúng tệp là số COD đúng lại ngay — nhưng tiền thì đã về rồi, không thay đổi kết quả nào.
   COD_STATEMENT_MISSING: 0.5,
+  // Sửa câu mẫu / lời dặn hôm nay là ngày mai lỗi ấy không lặp lại với khách mới — nhưng khách hôm qua thì đã nhận câu sai rồi.
+  SALES_QUALITY: 0.6,
   OTHER: 0.5,
 };
 
@@ -225,6 +234,8 @@ export const CASE_ACTION: Record<CaseType, string> = {
     "Mở đơn trên Pancake, chọn TAY tỉnh/xã cho địa chỉ khách rồi lưu. KHÔNG đoán hộ khách: sai địa chỉ là mất cả hàng lẫn hai chiều cước. Địa chỉ chỉ có tỉnh + xã là ĐÚNG chuẩn hai cấp mới, không phải lỗi.",
   RISKY_ORDER: "Xin cọc hoặc xác nhận lại với khách trước khi gửi.",
   ADS_BILLING: "Nạp tiền / kiểm tra ngưỡng thanh toán tài khoản quảng cáo.",
+  SALES_QUALITY:
+    "Đọc mã lỗi và việc cần làm trong nội dung (sửa câu mẫu · lời dặn · kiến thức shop). Mã hội thoại là mã BĂM — ops tra bằng conv-money-trace. Việc tổng hợp của một ngày: đóng khi đã sửa nguyên nhân, không cần mở từng hội thoại.",
   OTHER: "Xem chi tiết rồi xử lý.",
   AMBIGUOUS_ORDER_SHIPMENT_MAPPING:
     "Mở Chất lượng dữ liệu, đối chiếu vận đơn với đơn theo mã tham chiếu. CHỈ xử lý khi các cách ghép cho ra kết quả khác nhau — mọi cách ghép cùng kết quả thì tổng hợp đã đúng.",
@@ -293,6 +304,8 @@ export const CASE_TEAM: Record<CaseType, CaseTeam> = {
   // Nguồn dữ liệu tay: người xuất tệp Viettel Post là giao vận; người giữ hộp thư bảng kê là kế toán.
   VTP_ORDER_LIST_DUE: "LOGISTICS",
   COD_STATEMENT_MISSING: "FINANCE",
+  // Người bán hàng giữ câu mẫu / lời dặn của bot và đọc hộp thư — họ sửa được nguyên nhân. Ghi đè `ALERT:SALES_QUALITY` ở work.ownership.
+  SALES_QUALITY: "CS",
   OTHER: "DATA",
 };
 
@@ -354,6 +367,8 @@ const CUSTOMER_WAITING: Record<CaseType, number> = {
   // Không ai chờ trực tiếp — nhưng kiện lấy hỏng mà chưa ai thấy thì khách đang chờ hàng không tới.
   VTP_ORDER_LIST_DUE: 0.4,
   COD_STATEMENT_MISSING: 0,
+  // Khách đang chờ người đã có việc RIÊNG từng hội thoại ở nguồn SALES_CHAT_HANDOFF — đếm lại ở đây là cộng hai lần.
+  SALES_QUALITY: 0,
   OTHER: 0,
 };
 
@@ -538,6 +553,7 @@ export const CASE_SLA_HOURS: Record<CaseType, number | null> = {
   VTP_ORDER_LIST_DUE: 8,
   // Hai ngày: đủ để tìm lại thư / tải trên viettelpost.vn, chưa đủ để đợt sau chồng lên đợt này.
   COD_STATEMENT_MISSING: 48,
+  SALES_QUALITY: null,
   OTHER: null,
 };
 
