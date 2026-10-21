@@ -1,0 +1,8 @@
+{
+  "pr": 939,
+  "sha": "b27dbb2314b8e55961f0b7c29e0646e54c777f5f",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T05:37:50.057Z",
+  "note": "review lead (P0 an toàn, Phần H chủ shop): lượt tự học / Học ngay / góp ý hộp thư ghi bài học thành ĐỀ XUẤT pending, bot vẫn đọc bản ACTIVE; duyệt ⇒ bản mới + bản cũ vào lịch sử 5 bản; đề xuất cũ hơn bản đang dùng không duyệt được; audit PROPOSE (kể cả job) / APPROVE / REJECT. Từ khoá câu mẫu: sổ đề xuất riêng, duyệt/bỏ/gỡ từng cụm có audit, câu mẫu không đổi tới khi duyệt. autoActivate: câu máy s"
+}
