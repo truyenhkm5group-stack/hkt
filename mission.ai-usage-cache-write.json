@@ -3,7 +3,7 @@
   "mission_id": "ai-usage-cache-write",
   "title": "Sổ chi phí AI tách token ghi bộ nhớ đệm (cache_write_tokens, migration 0253) với đường ghi tương thích lược đồ cũ",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -37,11 +37,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-21T16:37:47.642Z",
-  "updated_at": "2026-10-21T18:13:32.586Z",
+  "updated_at": "2026-10-21T18:47:23.937Z",
   "last_heartbeat": "2026-10-21T16:38:22.952Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#956 → 0288397f341fc8978338a18e5112c2bc80302caa"
+    "merged": "#956 → 0288397f341fc8978338a18e5112c2bc80302caa",
+    "verify": "PASS 0288397f341fc8978338a18e5112c2bc80302caa 2026-10-21T18:46:56.453Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39653284907"
   },
   "handoff": {
     "branch": "claude/ai-usage-cache-write",
