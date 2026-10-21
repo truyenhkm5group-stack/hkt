@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "sales-short-qty-round",
+  "title": "AI Sales: câu chốt ngắn sau báo giá khi khách còn đơn cũ chưa giao — không «nói rõ hơn», không sửa nhầm đơn cũ, không đơn trùng",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-short-qty",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/sales-short-qty-round",
+  "base_sha": "7a0b95ea36d983744d768e07eb4f2ae6c7431fc3",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/engine.ts",
+    "lib/sales-chatbot/round-check.ts",
+    "tests/p0-short-qty-round.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-21T02:36:08.455Z",
+  "updated_at": "2026-10-21T02:36:08.455Z",
+  "last_heartbeat": "2026-10-21T02:36:08.455Z",
+  "definition_of_done": []
+}
