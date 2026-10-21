@@ -148,7 +148,9 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
     const b = scan.bases;
     const slaHours = ho.slaMs === null ? null : Math.round(ho.slaMs / 3_600_000);
     const baseOf: Record<SalesQualityCode, string> = {
-      HANDOFF_UNANSWERED: `Mẫu số: ${ho.waiting} hội thoại đang chờ người · hạn ${slaHours === null ? "không đặt" : `${slaHours} giờ`} (work.sla)`,
+      // Tập «chờ người» = ĐÚNG hàng đợi /work (aiSilentSql) — rộng hơn nhóm WAITING_HUMAN của ops stuck-conversation-audit (gồm cả hội
+      // thoại nhân viên đang tiếp quản), nên số ngày đầu có thể lệch số của script; nói ra để người đọc không đi tìm lỗi.
+      HANDOFF_UNANSWERED: `Mẫu số: ${ho.waiting} hội thoại đang chờ người · tập = hàng đợi chờ người của /work (khác nhóm «chờ người» của ops stuck-conversation-audit) · hạn ${slaHours === null ? "không đặt" : `${slaHours} giờ`} (work.sla)`,
       QTY_REASKED: `Mẫu số: ${b.quantityAnswers} tin khách chỉ là câu trả lời số lượng`,
       SECONDARY_INTENT_UNANSWERED: `Mẫu số: ${b.deliverySecondAsks} tin khách hỏi số lượng + thời gian giao`,
       WRONG_PRODUCT_TEMPLATE: `Mẫu số: ${b.botMessages} tin bot`,

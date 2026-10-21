@@ -171,6 +171,7 @@ async function testDaily() {
       assert.ok(n.kind === "SALES_QUALITY" && n.dedupeKey === salesQualityDedupeKey(code, "2031-03-01") && n.resolvedAt === null, JSON.stringify(n));
     }
     assert.equal(rows.filter((n) => n.entityId === "CLARIFY_FALLBACK").length, 1, "hai hội thoại cùng mã ⇒ MỘT việc, không hai");
+    assert.match(byCode.get("HANDOFF_UNANSWERED")!.body, /tập = hàng đợi chờ người của \/work/, "việc nói rõ tập đang đếm");
     const clarify = byCode.get("CLARIFY_FALLBACK")!;
     assert.match(clarify.title, /2 tin \/ 2 hội thoại \(ngày 01\/03\)/, clarify.title);
     assert.ok(clarify.body.includes(conversationHash(fall)) && clarify.body.includes(conversationHash(fall2)), "mã hội thoại BĂM để ops đối chiếu");
