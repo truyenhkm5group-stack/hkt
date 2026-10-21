@@ -72,6 +72,32 @@ export function foldVnText(s: string): string {
 
 const TYPE_WORDS = ["thanh pho", "tinh", "phuong", "xa", "thi tran", "dac khu", "quan", "huyen", "thi xa"] as const;
 
+const ADMIN_NAME_PREFIX_RE = /^(?:phường|xã|thị trấn|quận|huyện|thị xã|thành phố|tỉnh|đặc khu)\s+/iu;
+let placeNamesCache: readonly string[] | null = null;
+
+/**
+ * MỌI TÊN địa danh của danh mục — xã / phường MỚI, tỉnh, và các tên CŨ đã gộp (quận / huyện / xã cũ) — gập dấu, bỏ tiền tố cấp
+ * («Phường Hoàng Mai» ⇒ «hoang mai»). Dùng để phân biệt TÊN NƠI với chữ thường cùng mặt chữ (P0 21/10/2026: «Hoàng Mai», «Mai Dịch»
+ * bị đọc thành «ngày mai»). Đọc một lần, giữ trong bộ nhớ. HÀM THUẦN theo danh mục.
+ */
+export function adminPlaceNamesFolded(): readonly string[] {
+  if (placeNamesCache) return placeNamesCache;
+  const out = new Set<string>();
+  const walk = (v: unknown): void => {
+    if (typeof v === "string") {
+      const n = v.normalize("NFC").trim();
+      if (ADMIN_NAME_PREFIX_RE.test(n)) {
+        const core = foldVnText(n.replace(ADMIN_NAME_PREFIX_RE, ""));
+        if (core) out.add(core);
+      }
+    } else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === "object") Object.values(v).forEach(walk);
+  };
+  walk(data);
+  placeNamesCache = [...out];
+  return placeNamesCache;
+}
+
 /** «Phường Bàn Cờ» ⇒ { type: "phuong", core: "ban co" }; «Quận 3» ⇒ { type: "quan", core: "3" }. */
 function splitType(name: string): { type: string; core: string } {
   const f = foldVnText(name);
