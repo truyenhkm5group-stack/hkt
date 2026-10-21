@@ -343,8 +343,12 @@ export async function testEvidenceOnDb(db: Db) {
     assert.equal(moi.taxonomy, "EVIDENCE");
 
     const nhom = (bc: typeof cu, key: string) => bc.groups.find((g) => g.group === key);
-    assert.equal(nhom(cu, "SLOW")?.details.find((d) => d.reason === "CUSTOMER_UNREACHABLE")?.count, 3, "cờ TẮT: số cũ y nguyên — không liên lạc vẫn ở nhóm giao lâu");
-    assert.equal(nhom(moi, "KHONG_LIEN_LAC")?.count, 3, "cờ BẬT: không liên lạc (s1 · s3 · s6) đứng riêng, KHÔNG ở giao chậm");
+    // 21/10/2026: chữ ĐVVC «khách hàng nghỉ, không có nhà» (s1) là KHÁCH VẮNG NHÀ, không phải không liên lạc được. Cách xếp cũ vẫn để cả
+    // hai trong nhóm giao lâu ⇒ con số NHÓM của cờ TẮT y nguyên; chỉ dòng lý do chi tiết tách ra.
+    assert.equal(nhom(cu, "SLOW")?.count, 3, "cờ TẮT: số cũ của nhóm giao lâu y nguyên");
+    assert.deepEqual(["CUSTOMER_UNREACHABLE", "CUSTOMER_AWAY"].map((r) => nhom(cu, "SLOW")?.details.find((d) => d.reason === r)?.count ?? 0), [2, 1], "cờ TẮT: không liên lạc (s3 · s6) + vắng nhà (s1)");
+    assert.equal(nhom(moi, "KHONG_LIEN_LAC")?.count, 2, "cờ BẬT: không liên lạc (s3 · s6) đứng riêng, KHÔNG ở giao chậm");
+    assert.equal(nhom(moi, "KHACH_VANG_NHA")?.count, 1, "cờ BẬT: s1 «khách hàng nghỉ, không có nhà» ⇒ khách vắng nhà");
     assert.equal(nhom(moi, "GIAO_CHAM_XAC_NHAN")?.count ?? 0, 0, "không ca nào có chứng cứ giao chậm");
     assert.equal(nhom(moi, "CHAT_LUONG")?.count, 1, "s2: chất lượng do nhân viên ghi nhận");
     assert.equal(nhom(moi, "CHAT_LUONG")?.tiers.CARE_REPORTED, 1);
@@ -403,7 +407,7 @@ export async function testVtpBeatsPancakeRelayOnDb(db: Db) {
   }
   const ev = (id: string, shipmentId: string, source: string, statusName: string, ngay: number) => ({ id, shipmentId, source, status: "506", statusName, normalizedStage: "RETURNED" as const, occurredAt: t(ngay) });
   await db.insert(schema.shipmentEvents).values([
-    // s1: quan sát VTP "không liên lạc" + sự kiện PANCAKE MỚI HƠN "từ chối".
+    // s1: quan sát VTP "không có nhà" (khách vắng nhà — 21/10/2026) + sự kiện PANCAKE MỚI HƠN "từ chối".
     ev(`${Q}e1`, `${Q}s1`, "PANCAKE", "Tồn - Khách từ chối nhận", 22),
     // s2: sự kiện VTP "không có nhà" + sự kiện PANCAKE MỚI HƠN "không có nhu cầu" (không có quan sát).
     ev(`${Q}e2a`, `${Q}s2`, "VTP_WEBHOOK", "Tồn - Khách hàng nghỉ, không có nhà", 20),
@@ -416,8 +420,8 @@ export async function testVtpBeatsPancakeRelayOnDb(db: Db) {
   await db.insert(schema.returnReasonObservations).values({ shipmentId: `${Q}s1`, orderId: `${Q}o1`, source: "CARRIER_TEXT", rawText: "Tồn - Khách hàng nghỉ, không có nhà", reasonAtWrite: "UNKNOWN", occurredAt: t(20), dedupeKey: `${Q}s1|CARRIER_TEXT|20` });
   try {
     const ra = await reasonsForShipments(KIEN);
-    assert.equal(ra.get(`${Q}s1`)?.reason, "CUSTOMER_UNREACHABLE", "quan sát VTP thắng sự kiện Pancake mới hơn");
-    assert.equal(ra.get(`${Q}s2`)?.reason, "CUSTOMER_UNREACHABLE", "sự kiện VTP thắng sự kiện Pancake mới hơn — kể cả khi không có quan sát nào");
+    assert.equal(ra.get(`${Q}s1`)?.reason, "CUSTOMER_AWAY", "quan sát VTP thắng sự kiện Pancake mới hơn");
+    assert.equal(ra.get(`${Q}s2`)?.reason, "CUSTOMER_AWAY", "sự kiện VTP thắng sự kiện Pancake mới hơn — kể cả khi không có quan sát nào");
     assert.ok(ra.get(`${Q}s2`)?.rawReason.includes("không có nhà"), "chữ đi kèm là chữ VTP, không phải chữ Pancake");
     assert.equal(ra.get(`${Q}s3`)?.reason, "CUSTOMER_REFUSED", "chỉ có Pancake ⇒ dùng Pancake");
     assert.equal(ra.get(`${Q}s3`)?.source, "CARRIER_TEXT_VIA_PANCAKE", "nguồn phải nói rõ là qua Pancake");
@@ -428,7 +432,7 @@ export async function testVtpBeatsPancakeRelayOnDb(db: Db) {
       const bc = await getReturnReasonReport({ ...loc, taxonomy });
       const dem = new Map<string, number>();
       for (const g of bc.groups) for (const d of g.details) if (d.count) dem.set(d.reason, (dem.get(d.reason) ?? 0) + d.count);
-      assert.equal(dem.get("CUSTOMER_UNREACHABLE"), 2, `${taxonomy}: hai ca VTP nói "không liên lạc" phải ở lại đó`);
+      assert.equal(dem.get("CUSTOMER_AWAY"), 2, `${taxonomy}: hai ca VTP nói "không có nhà" phải ở lại đó`);
       assert.equal(dem.get("CUSTOMER_REFUSED"), 1, `${taxonomy}: chỉ ca không có lời VTP mới theo Pancake`);
       assert.equal(dem.get("CUSTOMER_CHANGED_MIND") ?? 0, 0, `${taxonomy}: lời Pancake mới hơn không kéo ca sang "đổi ý"`);
       assert.equal(bc.evidenceTiers.CONFLICTED, 0, `${taxonomy}: VTP và Pancake chuyển tiếp không phải mâu thuẫn`);
