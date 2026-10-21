@@ -705,6 +705,13 @@ deploy dừng, không phải cảnh báo.
     đưa sang `APPROVED`. Trung tâm đối soát CHỈ ĐỌC và chỉ ĐỀ XUẤT số dư mở sổ — không tự khai, không tự đặt
     giá vốn, không tự phân công; mỗi việc còn lại có một PHÒNG chịu trách nhiệm.
 
+80. **CƯỚC CỦA LƯƠNG / P&L LÀ SỐ VIETTEL POST GHI NHẬN, ƯỚC TÍNH CÓ NHÃN VÀ THEO THỜI GIAN**
+    (`lib/queries/shipping-cost.ts`, `docs/payroll-code-ledger.md` §10.7): cơ sở lương, bảng đối soát và máy
+    chi phí đọc cước qua `shipmentCostSql()` — một biểu thức. Có `shipments.shipping_fee` (webhook · bảng kê ·
+    tệp) ⇒ đúng số ấy; thiếu ⇒ lịch cước ước tính (`profit.assumptions.shipFeeSchedule`) tại ngày lên đơn, đếm
+    riêng là ƯỚC TÍNH; đơn không qua ĐVVC ⇒ 0. `orders.partner_fee` của Pancake KHÔNG phải ghi nhận của Viettel
+    Post — chỉ được dùng làm dấu hiệu "có gửi". Cước chỉ "đã đối soát" khi vận đơn đã nằm trong bảng kê COD.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng
   `npm run db:generate`**: ảnh chụp `drizzle/meta/*_snapshot.json` chỉ tới `0032`, nên nó sinh migration

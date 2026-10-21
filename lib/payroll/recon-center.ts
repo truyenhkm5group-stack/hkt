@@ -227,11 +227,11 @@ export function buildApprovalList(x: ApprovalInput): ApprovalItem[] {
       kind: "SUPPLY",
       title: `${x.codReceivable.orders} đơn đã giao chưa có chứng từ tiền`,
       cause: `${vnd(x.codReceivable.revenue)} là doanh thu KẾ TOÁN (đã giao) nhưng chưa phải tiền thực nhận — ${x.codReceivable.over30Orders} đơn đã giao quá 30 ngày.`,
-      action: "Nhập bảng kê COD / đối soát Viettel Post cho các kỳ thiếu; đơn quá 30 ngày đối chiếu thẳng với ĐVVC.",
+      action: "Tải «Chi tiết bảng kê COD» của các kỳ thiếu từ viettelpost.vn (.xlsx / .csv) rồi nạp ở Nhập Viettel Post — bảng kê đối soát CẢ tiền thu hộ lẫn cước đã tính tiền. Đơn quá 30 ngày đối chiếu thẳng với ĐVVC.",
       owner: "FINANCE",
       amount: x.codReceivable.revenue,
       count: x.codReceivable.orders,
-      href: "/cod",
+      href: "/import-vtp",
     });
   }
   if (x.duplicateSourceWarnings > 0) {

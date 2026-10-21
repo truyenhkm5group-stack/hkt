@@ -23,6 +23,15 @@ export type ProfitAssumptions = {
    * sẽ biến 0 "tự tính" của mọi dòng cũ thành 0 ₫.
    */
   shipFeeExplicitZero?: boolean;
+  /**
+   * ═══ CƯỚC ƯỚC TÍNH THEO KHOẢNG THỜI GIAN (chủ shop 21/10/2026) ═══
+   *
+   * "Chi phí vận chuyển ước tính có thể thay đổi theo khoảng thời gian khác nhau (sản lượng tăng thì deal
+   * được giá cước thấp hơn, hoặc chính sách đổi) — không cố định xuyên suốt." Mỗi mốc có hiệu lực TỪ ngày
+   * của nó tới TRƯỚC mốc kế tiếp; trước mốc đầu tiên dùng hai ô chung ở trên. Chỉ là ƯỚC TÍNH: cước THẬT của
+   * một vận đơn luôn là số Viettel Post ghi nhận (`lib/queries/shipping-cost.ts`).
+   */
+  shipFeeSchedule?: ShipFeePeriod[];
   /** Chi phí đóng hàng (túi, thùng, in bill…) cho mỗi đơn gửi đi (đ) */
   packingFeePerOrder: number;
   /** Chi phí nhân viên vận đơn cho mỗi đơn xử lý (đ) */
@@ -122,6 +131,69 @@ export type ProfitAssumptions = {
 };
 
 export const PROFIT_ASSUMPTIONS_KEY = "profit.assumptions";
+
+/** Một mốc của lịch cước ước tính. `shipFeeReturned = null` ⇒ tính như ô chung (cước gửi + phí hoàn về). */
+export type ShipFeePeriod = { from: string; shipFeeDelivered: number; shipFeeReturned: number | null; note: string };
+
+const NGAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Lịch cước đã lọc hợp lệ, xếp tăng theo ngày; mốc hỏng / trùng ngày bị bỏ (mốc đến sau thắng). HÀM THUẦN. */
+export function shipFeeScheduleOf(saved: Pick<ProfitAssumptions, "shipFeeSchedule">): ShipFeePeriod[] {
+  const raw = Array.isArray(saved.shipFeeSchedule) ? saved.shipFeeSchedule : [];
+  const theoNgay = new Map<string, ShipFeePeriod>();
+  for (const x of raw) {
+    if (!x || typeof x.from !== "string" || !NGAY.test(x.from)) continue;
+    const d = Number(x.shipFeeDelivered);
+    if (!Number.isFinite(d) || d < 0) continue;
+    const r = x.shipFeeReturned === null || x.shipFeeReturned === undefined ? null : Number(x.shipFeeReturned);
+    theoNgay.set(x.from, { from: x.from, shipFeeDelivered: Math.round(d), shipFeeReturned: r !== null && Number.isFinite(r) && r >= 0 ? Math.round(r) : null, note: String(x.note ?? "") });
+  }
+  return [...theoNgay.values()].sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
+}
+
+export type ShipFeePair = { delivered: number; returned: number };
+
+/**
+ * Cước ước tính áp cho ngày `dateKey` (YYYY-MM-DD, giờ VN): mốc có `from ≤ dateKey` gần nhất; trước mọi
+ * mốc ⇒ `base` (hai ô chung đã giải). Cước đơn hoàn để trống ⇒ cước gửi của mốc + phí hoàn về bình quân
+ * (`returnFeeFromData`), không có dữ liệu thì gấp đôi — cùng luật với ô chung. HÀM THUẦN.
+ */
+export function shipFeesAt(base: ShipFeePair, schedule: readonly ShipFeePeriod[], dateKey: string, returnFeeFromData = 0): ShipFeePair & { from: string | null } {
+  let pick: ShipFeePeriod | null = null;
+  for (const x of schedule) if (x.from <= dateKey) pick = x;
+  if (!pick) return { ...base, from: null };
+  const returned = pick.shipFeeReturned ?? pick.shipFeeDelivered + (returnFeeFromData > 0 ? returnFeeFromData : pick.shipFeeDelivered);
+  return { delivered: pick.shipFeeDelivered, returned, from: pick.from };
+}
+
+/**
+ * Cước ước tính cho cả một kỳ `[fromKey, toKey]`: bình quân theo SỐ NGÀY chồng lấn với từng mốc (không theo
+ * số đơn — số đơn của kỳ chưa đóng còn đổi). Kỳ mở hai đầu (toàn bộ) ⇒ mốc đang hiệu lực hôm `toKey` hoặc
+ * `base`. HÀM THUẦN.
+ */
+export function shipFeesForPeriod(base: ShipFeePair, schedule: readonly ShipFeePeriod[], fromKey: string | null, toKey: string | null, returnFeeFromData = 0): ShipFeePair {
+  if (!schedule.length) return base;
+  if (!fromKey || !toKey || fromKey > toKey) {
+    const p = shipFeesAt(base, schedule, toKey ?? "9999-12-31", returnFeeFromData);
+    return { delivered: p.delivered, returned: p.returned };
+  }
+  const ngay = (k: string) => Date.UTC(Number(k.slice(0, 4)), Number(k.slice(5, 7)) - 1, Number(k.slice(8, 10))) / 86_400_000;
+  const a = ngay(fromKey);
+  const b = ngay(toKey);
+  const moc = [fromKey, ...schedule.map((x) => x.from).filter((k) => k > fromKey && k <= toKey)];
+  let d = 0;
+  let r = 0;
+  for (let i = 0; i < moc.length; i++) {
+    const dau = ngay(moc[i]);
+    const cuoi = i + 1 < moc.length ? ngay(moc[i + 1]) - 1 : b;
+    const soNgay = Math.max(0, cuoi - Math.max(dau, a) + 1);
+    const p = shipFeesAt(base, schedule, moc[i], returnFeeFromData);
+    d += p.delivered * soNgay;
+    r += p.returned * soNgay;
+  }
+  const tong = b - a + 1;
+  return { delivered: Math.round(d / tong), returned: Math.round(r / tong) };
+}
 
 export const DEFAULT_PROFIT_ASSUMPTIONS: ProfitAssumptions = {
   shipFeeDelivered: 17_000,

@@ -22,6 +22,7 @@ import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
 import { FINISHED_OUTCOMES_SQL, OUTCOME_GROUP, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import type { OrderOutcome } from "@/lib/constants/returns";
 import { getRecognizedCosts } from "@/lib/queries/cost-engine";
+import { ON_COD_STATEMENT_SQL, shipmentCostSql, VTP_SHIPPING_FEE_SQL } from "@/lib/queries/shipping-cost";
 import { getPayrollReport, monthReportPeriod, type PayrollReport } from "@/lib/queries/payroll";
 import { loadCodeBook } from "@/lib/queries/payroll-code-ledger";
 import { buildMonthReconciliation, type MonthReconciliation, type MonthReconInput } from "@/lib/payroll/profit-reconciliation";
@@ -54,7 +55,10 @@ export async function orderFacts(from: Date, to: Date): Promise<{ total: MonthRe
   const giao = DELIVERED_RECOGNIZED_SQL;
   const productKey = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
   const coMa = sql`${productKey} <> ''`;
-  const cuoc = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)::bigint`;
+  // Cùng biểu thức cước với cơ sở lương + máy chi phí (`shipping-cost.ts`): ghi nhận VTP, thiếu ⇒ ước tính có nhãn.
+  const cuocVanDon = await shipmentCostSql();
+  const cuoc = cuocVanDon.fee;
+  const guiDi = sql`${ORDER_OUTCOME_FAST} in (${sql.raw(ELIGIBLE_SENT_SQL)})`;
   return chayKhongJit(db, async (tx) => {
     const [dong] = await tx
       .select({
@@ -82,6 +86,14 @@ export async function orderFacts(from: Date, to: Date): Promise<{ total: MonthRe
         sentOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(ELIGIBLE_SENT_SQL)}))`,
         sentNoFeeOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(ELIGIBLE_SENT_SQL)}) and ${cuoc} = 0)`,
         inTransitShipping: sql<number>`coalesce(sum(${cuoc}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(ELIGIBLE_SENT_SQL)}) and ${ORDER_OUTCOME_FAST} not in (${sql.raw(FINISHED_OUTCOMES_SQL)})), 0)`,
+        // ĐỐI SOÁT CƯỚC CÙNG COD (chủ shop 21/10/2026): cước đã nằm trong bảng kê ⇒ số ĐÃ TÍNH TIỀN; cước VTP
+        // chưa có bảng kê ⇒ ghi nhận nhưng CHƯA đối soát; còn lại là ƯỚC TÍNH.
+        shipOnStatementOrders: sql<number>`count(*) filter (where ${guiDi} and ${VTP_SHIPPING_FEE_SQL} is not null and ${ON_COD_STATEMENT_SQL})`,
+        shipOnStatement: sql<number>`coalesce(sum(${VTP_SHIPPING_FEE_SQL}) filter (where ${guiDi} and ${ON_COD_STATEMENT_SQL}), 0)`,
+        shipVtpOnlyOrders: sql<number>`count(*) filter (where ${guiDi} and ${VTP_SHIPPING_FEE_SQL} is not null and not ${ON_COD_STATEMENT_SQL})`,
+        shipVtpOnly: sql<number>`coalesce(sum(${VTP_SHIPPING_FEE_SQL}) filter (where ${guiDi} and not ${ON_COD_STATEMENT_SQL}), 0)`,
+        shipEstimatedOrders: sql<number>`count(*) filter (where ${guiDi} and ${cuocVanDon.estimated} > 0)`,
+        shipEstimated: sql<number>`coalesce(sum(${cuocVanDon.estimated}) filter (where ${guiDi}), 0)`,
       })
       .from(o)
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
@@ -111,6 +123,12 @@ export async function orderFacts(from: Date, to: Date): Promise<{ total: MonthRe
         unknownCostRevenue: n(dong?.unknownCostRevenue),
         cogsNoProduct: n(dong?.cogsNoProduct),
         inTransitShipping: n(don?.inTransitShipping),
+        shipOnStatementOrders: n(don?.shipOnStatementOrders),
+        shipOnStatement: n(don?.shipOnStatement),
+        shipVtpOnlyOrders: n(don?.shipVtpOnlyOrders),
+        shipVtpOnly: n(don?.shipVtpOnly),
+        shipEstimatedOrders: n(don?.shipEstimatedOrders),
+        shipEstimated: n(don?.shipEstimated),
         sentOrders: n(don?.sentOrders),
         sentNoFeeOrders: n(don?.sentNoFeeOrders),
       },

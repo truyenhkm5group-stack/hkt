@@ -51,6 +51,22 @@ const schema = z.object({
   taxPercent: z.number().min(0).max(50).default(1.5),
   otherCostPercentOfAds: z.number().min(0).max(50).default(1.1),
   failedToReturnPercent: z.number().min(0).max(100).default(0),
+  /*
+    LỊCH CƯỚC ƯỚC TÍNH THEO KHOẢNG THỜI GIAN (chủ shop 21/10/2026). PHẢI có trong lược đồ: zod bỏ trường
+    nó không nhận và lượt lưu ghi `parsed.data` ⇒ thiếu dòng này là mỗi lần bấm Lưu XOÁ SẠCH lịch cước.
+  */
+  shipFeeSchedule: z
+    .array(
+      z.object({
+        from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Ngày hiệu lực phải dạng YYYY-MM-DD"),
+        shipFeeDelivered: z.number().int().min(0).max(1_000_000),
+        shipFeeReturned: z.number().int().min(0).max(1_000_000).nullable(),
+        note: z.string().trim().min(3, "Ghi lý do của mốc cước (vd «VTP giảm giá theo sản lượng»)").max(200),
+      }),
+    )
+    .max(60)
+    .default([])
+    .refine((xs) => new Set(xs.map((x) => x.from)).size === xs.length, "Hai mốc cước trùng ngày hiệu lực"),
 });
 
 export async function saveProfitAssumptions(input: unknown): Promise<{ ok: true } | { error: string }> {

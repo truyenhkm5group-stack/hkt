@@ -38,6 +38,7 @@ import { COST_SOURCE_LABEL } from "@/lib/constants/cost-sources";
 import { allocatedExpenseSum, expenseInRange, logisticsDuplicateCond, spreadExpenseByDay, vnDaysOfRange } from "@/lib/queries/cost-allocation";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { getRecognizedPayrollCost, type PayrollRecognition } from "@/lib/queries/payroll-cost";
+import { shipmentCostSql } from "@/lib/queries/shipping-cost";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import type { Period } from "@/lib/search-params";
@@ -108,6 +109,8 @@ export type RecognizedCosts = {
    * người đọc biết bao nhiêu tiền lương có chứng từ; không thành phần nào cộng nó thêm lần nữa.
    */
   salaryExpenseDocs: number;
+  /** Phần của `components.SHIPPING` là cước ƯỚC TÍNH (đơn chưa có cước Viettel Post ghi nhận). */
+  shippingEstimate: { amount: number; orders: number };
 };
 
 /** Khối "chi phí vận hành theo kỳ" — phần engine là nguồn DUY NHẤT */
@@ -247,6 +250,9 @@ async function build(period: Period): Promise<RecognizedCosts> {
   */
   const chieuHoanAt = sql`coalesce(${s.deliveredAt}, ${s.returnedAt}, ${s.pickedUpAt}, ${s.createdAt})`;
 
+  // Cước theo GHI NHẬN VIETTEL POST, thiếu thì ước tính theo lịch cước (`shipping-cost.ts`). Dựng trước Promise.all:
+  // nó đọc cấu hình, mà một lượt getDb() trong giao dịch tắt JIT tự khoá trên PGlite.
+  const cuocVanDon = await shipmentCostSql();
   const [rent, software, otherOperating, salaryLegacy, shipAdjust, returnAdjust, logisticsDup, adSpend, returnLeg, [cogsRow, shipRow]] = await Promise.all([
     categorySum(expenseCategoriesOf("RENT")),
     categorySum(expenseCategoriesOf("SOFTWARE")),
@@ -286,7 +292,9 @@ async function build(period: Period): Promise<RecognizedCosts> {
         .where(and(...periodConds(o.insertedAt, period.from, period.to)));
       const [ship] = await tx
         .select({
-          shipping: sql<number>`coalesce(sum(coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(FINISHED_OUTCOMES_SQL)})), 0)`,
+          shipping: sql<number>`coalesce(sum(${cuocVanDon.fee}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(FINISHED_OUTCOMES_SQL)})), 0)`,
+          shippingEstimated: sql<number>`coalesce(sum(${cuocVanDon.estimated}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(FINISHED_OUTCOMES_SQL)})), 0)`,
+          shippingEstimatedOrders: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(FINISHED_OUTCOMES_SQL)}) and ${cuocVanDon.estimated} > 0)`,
           returnFee: sql<number>`coalesce(sum(${o.returnFee}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)`,
         })
         .from(o)
@@ -452,7 +460,7 @@ async function build(period: Period): Promise<RecognizedCosts> {
     COGS: mk("COGS", Number(cogsRow?.amount ?? 0), { note: "Giá vốn đơn GIAO THÀNH CÔNG theo chứng từ. Báo cáo danh nghĩa dùng bản ƯỚC TÍNH theo tỷ lệ giao thành công — khác cơ sở, không phải trừ hai lần." }),
     ADS: mk("ADS", Number(adSpend[0]?.amount ?? 0)),
     SHIPPING: mk("SHIPPING", Number(shipRow?.shipping ?? 0) + shipAdjust.amount, {
-      note: `Cước theo vận đơn${shipAdjust.amount ? ` + ${shipAdjust.amount.toLocaleString("vi-VN")} ₫ điều chỉnh có lý do (${shipAdjust.n} khoản)` : ""}. Khoản gõ tay không khai điều chỉnh bị loại.`,
+      note: `Cước theo GHI NHẬN VIETTEL POST${Number(shipRow?.shippingEstimatedOrders ?? 0) ? ` — ${Number(shipRow?.shippingEstimatedOrders ?? 0)} đơn chưa có cước VTP tính theo lịch cước ƯỚC TÍNH (${Number(shipRow?.shippingEstimated ?? 0).toLocaleString("vi-VN")} ₫)` : ""}${shipAdjust.amount ? ` + ${shipAdjust.amount.toLocaleString("vi-VN")} ₫ điều chỉnh có lý do (${shipAdjust.n} khoản)` : ""}. Khoản gõ tay không khai điều chỉnh bị loại.`,
     }),
     RETURN_COST: mk("RETURN_COST", Number(shipRow?.returnFee ?? 0) + returnLegFee.amount + returnAdjust.amount, {
       note: `Cước trên VẬN ĐƠN CHIỀU HOÀN theo chứng từ ĐVVC${returnLegFee.n ? ` (${returnLegFee.n} vận đơn)` : ""}${Number(shipRow?.returnFee ?? 0) ? ` + phí hoàn ghi trên đơn` : ""}${returnAdjust.amount ? ` + ${returnAdjust.amount.toLocaleString("vi-VN")} ₫ điều chỉnh có lý do (${returnAdjust.n} khoản)` : ""}. Vận đơn chiều về là dòng riêng (order_id NULL) nên nó không nằm trong phép nối vận đơn chính của các truy vấn khác.`,
@@ -500,7 +508,7 @@ async function build(period: Period): Promise<RecognizedCosts> {
     amount: shipAdjust.amount + returnAdjust.amount,
     count: shipAdjust.n + returnAdjust.n,
   };
-  return { period, components, operatingTotal, operatingCount, total, warnings, payroll, logisticsAdjustment, salaryExpenseDocs: salaryLegacy.amount };
+  return { period, components, operatingTotal, operatingCount, total, warnings, payroll, logisticsAdjustment, salaryExpenseDocs: salaryLegacy.amount, shippingEstimate: { amount: Number(shipRow?.shippingEstimated ?? 0), orders: Number(shipRow?.shippingEstimatedOrders ?? 0) } };
 }
 
 /**

@@ -454,6 +454,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ensureMigrated } from "@/db/migrate";
 import { taoCongShard } from "./test-shards";
+import { testShippingCost } from "./shipping-cost.test";
 import { testPgliteTestDirs } from "./pglite-test-dirs.test";
 import { testTestShardsPlan } from "./test-shards-plan.test";
 import { recordInspection } from "@/lib/returns/inspection";
@@ -3412,6 +3413,7 @@ async function main() {
     testErrorBoundary();
   }
   if (khoi.chay("K24")) {
+    await testShippingCost(db);
     testPgliteTestDirs();
     // ERP a11y + bố cục hẹp (Commercial Sweep PR G): h1 màn không tìm thấy, công tắc / ô số có tên, /payroll không tràn 390 px.
     testErpA11y();

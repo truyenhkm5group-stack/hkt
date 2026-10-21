@@ -343,3 +343,26 @@ tay, định mức theo đơn, lương người chưa khai ngày). Tháng thiế
 ⇒ chi phí vận hành CHƯA BIẾT; giá vốn 0; đơn chưa kết quả; doanh thu chưa chứng từ tiền; lương chưa biết)
 nói rõ thiếu gì, và còn một tháng thiếu thì đề xuất là "CHƯA ĐỦ CĂN CỨ". ERP không bao giờ tự khai số này vào
 quy chế cổng.
+
+### 10.7 Cước theo ghi nhận Viettel Post + lịch cước ước tính (chủ shop 21/10/2026)
+
+"Chi phí vận chuyển thực tế khi tính lương cần tính đúng theo ghi nhận của VTP (lấy từ dữ liệu VTP về hoặc từ
+file tôi up lên), đối soát COD cùng với chi phí vận chuyển. Còn chi phí vận chuyển ước tính ở cấu hình BCLN có
+thể thay đổi theo khoảng thời gian khác nhau."
+
+- `lib/queries/shipping-cost.ts::shipmentCostSql()` là MỘT biểu thức cước chiều đi, dùng chung bởi cơ sở lương,
+  bảng đối soát và máy chi phí: `shipments.shipping_fee > 0` (webhook · bảng kê COD · tệp danh sách vận đơn) ⇒
+  đúng số ấy; thiếu ⇒ cước ƯỚC TÍNH theo lịch cước tại ngày lên đơn, chỉ khi đơn có vận đơn hoặc Pancake ghi cước
+  đối tác (dấu hiệu "có gửi ĐVVC"); không vận đơn ⇒ 0. KHÔNG còn lùi về `orders.partner_fee` của Pancake làm số
+  tiền. Cước bình quân 90 ngày (ô để trống) cũng chỉ đọc cước Viettel Post.
+- Lịch cước: `profit.assumptions.shipFeeSchedule` — mỗi mốc (từ ngày · cước gửi · cước 1 đơn hoàn · lý do) có
+  hiệu lực tới trước mốc kế tiếp; trước mốc đầu dùng hai ô chung. Báo cáo một kỳ lấy bình quân theo số NGÀY chồng
+  lấn (`shipFeesForPeriod`). Biểu mẫu "Sửa giả định" của Báo cáo lợi nhuận có bảng soạn; lược đồ lưu PHẢI nhận
+  trường này (zod bỏ trường lạ ⇒ thiếu là xoá sạch lịch mỗi lần Lưu).
+- Bảng đối soát tháng: dòng `shipping` là ƯỚC TÍNH khi có kiện tính theo lịch cước; dòng mới `shipping-billing`
+  tách cước đã nằm trong bảng kê COD (đã đối soát cùng tiền thu hộ) · VTP ghi nhận chưa có bảng kê (CHƯA đối
+  soát) · ước tính. Máy chi phí nêu riêng `shippingEstimate`.
+- Ngoài phạm vi (giữ nguyên, việc sau): luật kết quả đơn "cước < 10K" (`return-rate.ts`) và các báo cáo quảng
+  cáo / dòng tiền còn tự viết `coalesce(shipping_fee, partner_fee)` — đổi chúng là đổi số của báo cáo khác, cần
+  đo trước/sau riêng.
+
