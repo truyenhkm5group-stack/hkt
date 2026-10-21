@@ -54,7 +54,10 @@ export async function POST(request: NextRequest) {
         outcomes.push({ pageId: ev.pageId, outcome: "UNKNOWN_PAGE" });
         continue;
       }
-      throw e;
+      // Không tra được page ⇒ KHÔNG trả 200 (200 = Meta coi như đã nhận, tin mất hẳn). 503 ⇒ Meta gửi lại cả gói; sự kiện đã
+      // ghi ở vòng trước bị chống trùng theo `mid`.
+      messengerWebhookLog("messenger_webhook_rejected", { reason: "ORG_LOOKUP_FAILED", pageId: ev.pageId });
+      return NextResponse.json({ ok: false, error: "Tạm thời không tra được page — Meta sẽ gửi lại" }, { status: 503 });
     }
     await withOrganization(orgCode, async () => {
       const r = await receiveMessengerEvent(ev);

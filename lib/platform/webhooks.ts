@@ -126,16 +126,28 @@ export async function resolveUrlSecretOrganization(provider: WebhookProvider, to
 
 // ─── PAGE_INDEX: mã page ⇒ tổ chức ───
 
-/** Mã page Messenger ⇒ mã tổ chức đang hoạt động, hoặc `null`. Bảng chưa có (máy chưa migrate) ⇒ `null`. */
+function isMissingTable(error: unknown): boolean {
+  const e = error as { code?: string; cause?: { code?: string } } | null;
+  return (e?.code ?? e?.cause?.code) === "42P01";
+}
+
+/**
+ * Mã page Messenger ⇒ mã tổ chức đang hoạt động, hoặc `null` (page chưa nối / tổ chức không hoạt động / bảng chưa có vì máy chưa
+ * migrate). LỖI CSDL KHÁC ⇒ NÉM: trước 21/10/2026 mọi lỗi đều thành `null` ⇒ route coi như page lạ ⇒ trả 200 ⇒ Meta KHÔNG gửi
+ * lại ⇒ tin của khách mất hẳn. Ném để route trả 5xx — Meta tự gửi lại, và đường nhận chống trùng theo `mid` nên không nhân đôi.
+ */
 export async function resolvePageOrganization(pageId: string): Promise<string | null> {
   if (!/^\d{5,30}$/.test(pageId)) return null;
+  let orgCode: string;
   try {
     const pdb = await getPlatformDb();
     const [row] = await pdb.select({ orgCode: schema.platformMessengerPages.orgCode }).from(schema.platformMessengerPages).where(eq(schema.platformMessengerPages.pageId, pageId)).limit(1);
     if (!row) return null;
-    const org = await findOrganization(row.orgCode);
-    return org && isOperationalOrganization(org) ? org.code : null;
-  } catch {
-    return null;
+    orgCode = row.orgCode;
+  } catch (error) {
+    if (isMissingTable(error)) return null;
+    throw error;
   }
+  const org = await findOrganization(orgCode);
+  return org && isOperationalOrganization(org) ? org.code : null;
 }
