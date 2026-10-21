@@ -117,6 +117,7 @@ const PAYROLL_RECON_WHY: Record<ApprovalItemKey, string> = {
   "cogs-gaps": "Giá vốn đi theo phiếu nhập kho — người lập phiếu nhập là Kho.",
   "cod-receivable": "Bảng kê COD / đối soát Viettel Post là chứng từ tiền — kế toán tải và nạp.",
   "duplicate-source": "Khoản chi gõ tay trùng nguồn nằm ở bảng Chi phí — kế toán kiểm và khai lý do.",
+  "personal-share-no-code": "Giữ hay bỏ % lợi nhuận cá nhân của một người khi quy chế có người nhận phần còn lại là QUYẾT ĐỊNH của chủ shop.",
 };
 const PAYROLL_RECON_RULES: OwnershipRule[] = APPROVAL_ITEM_KEYS.map((k) => ({
   key: `PAYROLL_RECON:${k}`,

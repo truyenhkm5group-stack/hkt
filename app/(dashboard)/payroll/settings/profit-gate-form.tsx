@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SectionCard } from "@/components/ui-bits";
 import { saveProfitGateAdjustment, saveProfitGatePolicy } from "@/lib/actions/payroll-policy";
-import type { ProfitGateConfig } from "@/lib/constants/payroll-profit-gate";
+import { poolCapLabel, type ProfitGateConfig } from "@/lib/constants/payroll-profit-gate";
 import { formatDateTime, formatVND } from "@/lib/format";
 
 /**
@@ -18,15 +18,19 @@ import { formatDateTime, formatVND } from "@/lib/format";
  * và mốc thời gian. Không có giá trị điền sẵn: số dư lũy kế là con số kế toán đã đối soát, quỹ thưởng
  * là quyết định của quy chế — ERP không đoán hộ cả hai.
  */
-export function ProfitGateForm({ config, canApprove }: { config: ProfitGateConfig; canApprove: boolean }) {
+export function ProfitGateForm({ config, canApprove, employees }: { config: ProfitGateConfig; canApprove: boolean; employees: { id: string; name: string }[] }) {
   const [pending, start] = useTransition();
   const a = config.active;
+  const tenNv = (id: string) => employees.find((e) => e.id === id)?.name ?? id;
+  // Lịch trần theo tháng (chủ shop 21/10/2026: 35% tới 10/2026, 40% từ 11/2026) — mỗi dòng một mốc.
+  const [lich, setLich] = useState<{ fromMonth: string; percent: string }[]>((a?.poolCapSchedule ?? []).map((m) => ({ fromMonth: m.fromMonth, percent: String(m.percent) })));
+  const [nguoiNhan, setNguoiNhan] = useState(a?.residualClaimant?.employeeId ?? "");
   const [f, setF] = useState({
     openingMonth: a?.openingMonth ?? "",
     openingCumulative: a ? String(a.openingCumulative) : "",
     openingHighWater: a ? String(a.openingHighWater) : "",
     openingPaidBonus: a ? String(a.openingPaidBonus) : "0",
-    poolCapPercent: a ? String(a.poolCapPercent) : "",
+    poolCapPercent: a && a.poolCapPercent !== null ? String(a.poolCapPercent) : "",
     regulationRef: a?.regulationRef ?? "",
     reason: "",
   });
@@ -45,7 +49,7 @@ export function ProfitGateForm({ config, canApprove }: { config: ProfitGateConfi
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF((s) => ({ ...s, [k]: e.target.value }));
   const luu = () =>
     start(async () => {
-      const r = await saveProfitGatePolicy(f);
+      const r = await saveProfitGatePolicy({ ...f, poolCapSchedule: lich.filter((m) => m.fromMonth.trim() || m.percent.trim()), residualClaimantId: nguoiNhan });
       if ("error" in r) {
         toast.error(r.error, { duration: 12000 });
         return;
@@ -64,7 +68,13 @@ export function ProfitGateForm({ config, canApprove }: { config: ProfitGateConfi
             <p>
               <b>Đang hiệu lực: v{a.version}</b> · {a.regulationRef} · mở sổ tháng <b>{a.openingMonth}</b> · lũy kế đầu{" "}
               <b className={a.openingCumulative < 0 ? "text-destructive" : ""}>{formatVND(a.openingCumulative)}</b> · mốc cao nhất đã chia {formatVND(a.openingHighWater)} · quỹ tối đa{" "}
-              <b>{a.poolCapPercent}%</b> lợi nhuận đủ điều kiện
+              <b>{poolCapLabel(a)}</b> lợi nhuận đủ điều kiện
+              {a.residualClaimant ? (
+                <>
+                  {" "}
+                  · phần còn lại của quỹ cho <b>{tenNv(a.residualClaimant.employeeId)}</b>
+                </>
+              ) : null}
             </p>
             <p className="text-[11px] text-muted-foreground">
               Duyệt bởi {a.approvedByEmail} lúc {formatDateTime(new Date(a.approvedAt))}. Căn cứ: {a.reason}
@@ -94,13 +104,43 @@ export function ProfitGateForm({ config, canApprove }: { config: ProfitGateConfi
             <Input id="pg-paid" inputMode="numeric" value={f.openingPaidBonus} onChange={set("openingPaidBonus")} />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="pg-cap">Quỹ thưởng tối đa (% lợi nhuận đủ điều kiện)</Label>
-            <Input id="pg-cap" inputMode="decimal" value={f.poolCapPercent} onChange={set("poolCapPercent")} placeholder="40" />
+            <Label htmlFor="pg-cap">Quỹ thưởng tối đa chung (% LN đủ điều kiện) — trống nếu khai lịch theo tháng</Label>
+            <Input id="pg-cap" inputMode="decimal" value={f.poolCapPercent} onChange={set("poolCapPercent")} placeholder="35" />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="pg-residual">Người nhận phần còn lại của quỹ</Label>
+            <select id="pg-residual" className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={nguoiNhan} onChange={(e) => setNguoiNhan(e.target.value)}>
+              <option value="">— không ai (mỗi người nhận đúng phần của mình) —</option>
+              {employees.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="space-y-1">
             <Label htmlFor="pg-ref">Số hiệu / tên quy chế thưởng</Label>
             <Input id="pg-ref" value={f.regulationRef} onChange={set("regulationRef")} placeholder="Quy chế thưởng 01/2026" />
           </div>
+        </div>
+        <div className="space-y-1 rounded-md border p-2">
+          <p className="font-medium">Trần quỹ theo tháng</p>
+          <p className="text-[11px] text-muted-foreground">
+            Mỗi mốc có hiệu lực từ tháng ghi tới trước mốc kế tiếp. Tháng trước mốc đầu dùng trần chung ở trên; trống cả hai thì tháng ấy CHƯA XÁC LẬP trần — ERP không lấy mốc đầu áp ngược.
+          </p>
+          {lich.map((m, i) => (
+            <div key={i} className="flex flex-wrap items-center gap-2">
+              <Input aria-label={`Mốc ${i + 1} — từ tháng`} className="w-32" value={m.fromMonth} onChange={(e) => setLich((s) => s.map((x, j) => (j === i ? { ...x, fromMonth: e.target.value } : x)))} placeholder="2026-11" />
+              <Input aria-label={`Mốc ${i + 1} — trần %`} className="w-24" inputMode="decimal" value={m.percent} onChange={(e) => setLich((s) => s.map((x, j) => (j === i ? { ...x, percent: e.target.value } : x)))} placeholder="40" />
+              <span className="text-[11px] text-muted-foreground">% LN đủ điều kiện</span>
+              <Button size="sm" variant="ghost" onClick={() => setLich((s) => s.filter((_, j) => j !== i))}>
+                Bỏ
+              </Button>
+            </div>
+          ))}
+          <Button size="sm" variant="outline" onClick={() => setLich((s) => [...s, { fromMonth: "", percent: "" }])}>
+            + Thêm mốc trần
+          </Button>
         </div>
         <div className="space-y-1">
           <Label htmlFor="pg-reason">Căn cứ của số dư (biên bản đối soát, báo cáo tài chính…)</Label>
@@ -169,7 +209,7 @@ export function ProfitGateForm({ config, canApprove }: { config: ProfitGateConfi
                     <td className="py-1 pr-2">v{h.version}</td>
                     <td className="py-1 pr-2">{h.openingMonth}</td>
                     <td className="py-1 pr-2 text-right tabular-nums">{formatVND(h.openingCumulative)}</td>
-                    <td className="py-1 pr-2 text-right">{h.poolCapPercent}%</td>
+                    <td className="py-1 pr-2 text-right">{poolCapLabel(h)}</td>
                     <td className="py-1 pr-2">{h.regulationRef}</td>
                     <td className="py-1 text-muted-foreground">
                       {h.approvedByEmail} · {formatDateTime(new Date(h.approvedAt))}

@@ -178,3 +178,29 @@ còn được phân bổ — và câu *"Chưa đủ điều kiện thưởng l�
 còn lỗ. Bảng lương: LN đóng góp cá nhân · thưởng % LN tạm tính · thưởng LN đủ điều kiện (+ chưa đủ điều
 kiện và lý do) · thực nhận được duyệt (+ tạm tính). Kỳ không phải tháng / cơ sở khác: `NOT_APPLICABLE`,
 chỉ tạm tính. Phiếu lương, CSV, chuyển khoản (`snapshotNetPay`) đọc số được duyệt.
+
+## 9. Trần theo tháng + người nhận phần còn lại (chủ shop 21/10/2026)
+
+Chủ shop: «Quân ăn 35% lợi nhuận tổng, và từ tháng 11 ăn 40% lợi nhuận tổng trừ các chi phí và lợi nhuận đã phân
+chia cho các MKTer và nhân viên khác … 35% và 40% lợi nhuận là con số tổng lợi nhuận phân chia, … tự làm thì ăn cả,
+còn dùng MKTer hoặc nhân viên khác thì cần chia phần cho các nhân viên đó, và chỉ nhận được phần còn lại để tổng LN
+phân chia không vượt quá 35% (trước tháng 11/2026) và không vượt quá 40% (từ tháng 11/2026).» Bảng hỏi cùng ngày:
+lợi nhuận tổng = LN ĐỦ ĐIỀU KIỆN (sau cổng); lương cứng KHÔNG trừ (đã là chi phí).
+
+```
+cap(m)      = mốc cuối của poolCapSchedule có fromMonth ≤ m; không có ⇒ poolCapPercent; không có ⇒ CHƯA XÁC LẬP
+Q(m)        = ⌊E(m) × cap(m)⌋
+R (người nhận phần còn lại) = max(0, Q − Σ đề nghị của MỌI người khác)
+Σ người khác > Q ⇒ R = 0, người khác chia tỷ lệ (allocatePool), số vượt in ra (PROFIT_GATE residual.overdrawnBy)
+```
+
+- Khai ở Lương → Cấu hình → Quy chế chia thưởng lợi nhuận: bảng «Trần quỹ theo tháng» + ô «Người nhận phần còn lại».
+  Lưu là phiên bản mới (quyền Duyệt lương · người thứ hai `PAYROLL_EDIT` · nhật ký).
+- Khoản riêng của người nhận (35% toàn shop, thưởng theo mã…) HIỆN trên phiếu với số tạm và lý do «gộp trong phần
+  còn lại», được duyệt 0; dòng «Phần còn lại của quỹ thưởng» mang số thật. Thực nhận vẫn theo công thức cũ
+  `tạm tính − Σ tạm tính thưởng LN + Σ đủ điều kiện`.
+- Hồ sơ % cũ của người khác (vd % LN cá nhân song song thưởng theo mã) KHÔNG bị sửa ngầm — lá chắn «trả hai lần»
+  giữ chờ tới khi chủ shop đưa về 0 trên giao diện.
+- Ảnh chụp kỳ (`ProfitGateSnapshot.poolCapPercent` · `.residual`) ghi trần đã dùng, người nhận, Σ người khác và số
+  vượt — kỳ đã khoá đọc ảnh chụp, không tính lại.
+

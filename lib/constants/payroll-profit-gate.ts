@@ -72,9 +72,24 @@ export type ProfitGatePolicy = {
   openingPaidBonus: number;
   /**
    * QUỸ THƯỞNG TỐI ĐA, % của lợi nhuận đủ điều kiện chia. Do quy chế quyết, không có mặc định
-   * (AGENTS.md mục 38 — ngưỡng là quyết định kinh doanh). `(0, 100]`.
+   * (AGENTS.md mục 38 — ngưỡng là quyết định kinh doanh). `(0, 100]`. `null` chỉ hợp lệ khi có
+   * `poolCapSchedule` — khi ấy tháng đứng TRƯỚC mốc đầu của lịch là CHƯA XÁC LẬP trần.
    */
-  poolCapPercent: number;
+  poolCapPercent: number | null;
+  /**
+   * TRẦN QUỸ THEO THÁNG (chủ shop 21/10/2026: 35% tới 10/2026, 40% từ 11/2026). Mốc cuối có
+   * `fromMonth ≤ tháng` thắng; trước mốc đầu dùng `poolCapPercent`; cả hai trống ⇒ CHƯA XÁC LẬP —
+   * KHÔNG lấy mốc đầu áp ngược. Thiếu trường (phiên bản cũ) = không có lịch.
+   */
+  poolCapSchedule?: ProfitGateCapStep[];
+  /**
+   * NGƯỜI NHẬN PHẦN CÒN LẠI CỦA QUỸ (chủ shop 21/10/2026): «35% và 40% lợi nhuận là con số tổng lợi nhuận
+   * phân chia … dùng MKTer hoặc nhân viên khác thì cần chia phần cho các nhân viên đó, và chỉ nhận được phần
+   * còn lại để tổng LN phân chia không vượt quá». Người này KHÔNG đòi riêng: mọi khoản thưởng % lợi nhuận
+   * của họ gộp thành MỘT khoản = quỹ − Σ đề nghị của mọi người khác, không bao giờ âm
+   * (`lib/payroll/profit-gate.ts`). Thiếu / `null` = không có ai.
+   */
+  residualClaimant?: { employeeId: string } | null;
   /** Số hiệu / tên quy chế thưởng đang áp dụng, để đối chiếu với hợp đồng. */
   regulationRef: string;
   /** Căn cứ của số dư đầu (biên bản đối soát, báo cáo tài chính…) và lý do khai. */
@@ -122,6 +137,31 @@ export type ProfitGateConfig = {
 };
 
 export const DEFAULT_PROFIT_GATE_CONFIG: ProfitGateConfig = { active: null, history: [], adjustments: [] };
+
+/** Một mốc của lịch trần quỹ: từ tháng `fromMonth` (YYYY-MM) trần là `percent`% LN đủ điều kiện. */
+export type ProfitGateCapStep = { fromMonth: string; percent: number };
+
+/**
+ * Trần quỹ của MỘT tháng. `null` = chưa xác lập (tháng trước mốc đầu của lịch mà không có trần chung) —
+ * cổng đứng ở CHƯA XÁC LẬP, không đoán. `monthKey` `null` (kỳ không trọn tháng) ⇒ trần chung.
+ */
+export function poolCapPercentFor(policy: { poolCapPercent: number | null; poolCapSchedule?: readonly ProfitGateCapStep[] }, monthKey: string | null): number | null {
+  const lich = [...(policy.poolCapSchedule ?? [])].sort((x, y) => x.fromMonth.localeCompare(y.fromMonth));
+  if (monthKey) {
+    let chon: number | null = null;
+    for (const m of lich) if (m.fromMonth <= monthKey) chon = m.percent;
+    if (chon !== null) return chon;
+  }
+  return policy.poolCapPercent ?? null;
+}
+
+/** Nhãn ngắn của trần quỹ để in: «35% từ 2026-06 · 40% từ 2026-11». */
+export function poolCapLabel(policy: { poolCapPercent: number | null; poolCapSchedule?: readonly ProfitGateCapStep[] }): string {
+  const lich = [...(policy.poolCapSchedule ?? [])].sort((x, y) => x.fromMonth.localeCompare(y.fromMonth));
+  const phan = lich.map((m) => `${m.percent}% từ ${m.fromMonth}`);
+  if (policy.poolCapPercent !== null && policy.poolCapPercent !== undefined) phan.unshift(lich.length ? `${policy.poolCapPercent}% trước mốc đầu` : `${policy.poolCapPercent}%`);
+  return phan.join(" · ") || "chưa khai";
+}
 
 /**
  * ═══ KHOẢN NÀO LÀ "THƯỞNG % LỢI NHUẬN" — ĐI QUA CỔNG ═══

@@ -12,6 +12,7 @@ import { COST_COMPONENTS } from "@/lib/constants/cost-authority";
 import { DEFAULT_STATUTORY, STATUTORY_DEDUCTION_KEY, type StatutoryConfig } from "@/lib/constants/payroll-statutory";
 import { getCarryoverConfig } from "@/lib/queries/payroll-carryover";
 import { getProfitGateConfig } from "@/lib/queries/payroll-profit-gate";
+import { listEmployees } from "@/lib/queries/payroll";
 import { getRecognizedPayrollCost } from "@/lib/queries/payroll-cost";
 import { resolvePeriod, type SearchParams } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
@@ -36,11 +37,12 @@ export default async function PayrollSettingsPage({ searchParams }: { searchPara
   */
   if (!canAdministerPayroll(user, can(user, "payroll:manage"))) redirect("/payroll?forbidden=1");
   const period = resolvePeriod(raw, "month");
-  const [carryover, recognition, statutory, profitGate] = await Promise.all([
+  const [carryover, recognition, statutory, profitGate, nhanSu] = await Promise.all([
     getCarryoverConfig(),
     getRecognizedPayrollCost(period),
     getSettingJson<StatutoryConfig>(STATUTORY_DEDUCTION_KEY, DEFAULT_STATUTORY),
     getProfitGateConfig(),
+    listEmployees(),
   ]);
 
   return (
@@ -51,7 +53,7 @@ export default async function PayrollSettingsPage({ searchParams }: { searchPara
       />
       <PayrollTabs canManage />
 
-      <ProfitGateForm config={profitGate} canApprove={can(user, "payroll:approve")} />
+      <ProfitGateForm config={profitGate} canApprove={can(user, "payroll:approve")} employees={nhanSu.filter((e) => e.active).map((e) => ({ id: e.id, name: e.shortName || e.name }))} />
 
       <PayrollSettingsForm
         carryover={carryover}
