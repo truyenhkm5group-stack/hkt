@@ -10,6 +10,8 @@
       công cụ xin người · AI hỏng · nhân viên tiếp quản …). Riêng «AI hỏng»: đồng hồ thử lại của hộp thư đọc `updated_at + 30 phút`
       — mọi lượt ghi vào hội thoại (đóng dấu hàng đợi, mở hội thoại, nhật ký ghi đơn…) đẩy `updated_at` về «bây giờ» ⇒ đếm riêng số
       hội thoại AI HỎNG ĐÃ QUÁ 30 PHÚT tính từ mốc hỏng thật mà vẫn bị coi là đang trong khoảng chờ (`AI_DOWN_CLOCK_PUSHED`).
+   A2 TRONG nhóm chờ người: tin khách cuối đã có người / page / bot trả lời chưa (đọc cả dòng PAGE_REPLY — nhân viên trả lời thẳng
+      trên Pancake) ⇒ HANDOFF_UNANSWERED = không ai trả lời VÀ quá SLA; «khách không nhắn gì sau lúc chuyển» cắt ngang (21/10/2026).
    B  CẦN NGƯỜI MÀ KHÔNG CHỦ — câu đếm `countUnownedHandoffs` của #800 (chưa vào hàng đợi · phòng không ai xem được hộp thư) + số
       người xem được hộp thư của CẢ tổ chức (≥ 1 ⇒ hội thoại «không chủ» vẫn có người nhận được nếu có hàng đợi chung).
    C  SLA QUÁ HẠN — hạn theo `work.sla` (`handoffDueAt` của #800) tính từ mốc vào hàng đợi; quá hạn · quá hạn > 24 giờ mà chưa ai
@@ -267,6 +269,94 @@ export function silentSummary(org: string, c: StuckCounts): string[] {
   return lines;
 }
 
+/**
+ * A2 — TRONG nhóm «chờ người»: tin khách cuối ĐÃ có ai trả lời chưa (chủ shop 21/10/2026: «Chưa có người nhận trực nhưng hội thoại được
+ * trả lời rồi thì thôi» ⇒ «chưa ai cầm» KHÔNG phải lỗi). Nhân viên thường trả lời thẳng trên Pancake / page ⇒ ERP chỉ thấy dòng
+ * `PAGE_REPLY` ở `sales_chat_inbound`, KHÔNG thấy ở `last_staff_at` (cột ấy chỉ ghi tin gửi từ hộp thư ERP) — nên «khách đang chờ trả lời»
+ * của dòng A đếm THỪA. Tin tự động của page và chữ hệ thống KHÔNG phải câu trả lời (đúng tập của `PAGE_REPLY_AFTER_CUSTOMER_SQL`); tiếng vọng
+ * của chính bot (`AI_AGENT`) tách riêng — đó là bot, không phải người. HANDOFF_UNANSWERED = không câu trả lời nào (người · page · bot) sau
+ * tin khách cuối VÀ tin ấy đã quá SLA (`work.sla`). Trục «khách không nhắn gì sau lúc chuyển» CẮT NGANG các nhóm: tin GÂY RA lượt chuyển
+ * vẫn có thể chưa ai trả lời, nên nó không được trừ khỏi số lỗi.
+ */
+export const HANDOFF_REPLY_CLASSES = ["ANSWERED_HUMAN", "ANSWERED_BOT", "UNANSWERED_OVER_SLA", "UNANSWERED_WITHIN_SLA", "UNANSWERED_NO_SLA", "NO_CUSTOMER_MESSAGE"] as const;
+export type HandoffReplyClass = (typeof HANDOFF_REPLY_CLASSES)[number];
+
+export type HandoffReplyFact = {
+  lastCustomerAt: Date | null;
+  lastBotAt: Date | null;
+  /** Tin nhân viên gửi TỪ HỘP THƯ ERP. */
+  lastStaffAt: Date | null;
+  /** Dòng phía page mới nhất không phải tự động / hệ thống / bot (người trên Pancake · page chưa rõ người · ứng dụng khác). */
+  pageHumanAt: Date | null;
+  /** …trong đó dòng đã XÁC MINH là người (`VERIFIED_HUMAN`). */
+  pageVerifiedAt: Date | null;
+  /** Tiếng vọng của bot phía page (`AI_AGENT`). */
+  pageAiAt: Date | null;
+  /** Mốc chuyển người: dấu vào hàng đợi → `state.handoff.at`; không có ⇒ `null` (không đoán bằng `updated_at`). */
+  handoffAt: Date | null;
+};
+
+const after = (d: Date | null, ref: Date) => d !== null && d.getTime() > ref.getTime();
+
+/** HÀM THUẦN. `slaMs = null` ⇒ không đọc được hạn hoặc chủ shop cố ý không đặt hạn — KHÔNG kết luận quá hạn. */
+export function handoffReplyClass(f: HandoffReplyFact, now: Date, slaMs: number | null): HandoffReplyClass {
+  const cust = f.lastCustomerAt;
+  if (!cust) return "NO_CUSTOMER_MESSAGE";
+  if (after(f.lastStaffAt, cust) || after(f.pageHumanAt, cust)) return "ANSWERED_HUMAN";
+  if (after(f.lastBotAt, cust) || after(f.pageAiAt, cust)) return "ANSWERED_BOT";
+  if (slaMs === null) return "UNANSWERED_NO_SLA";
+  return now.getTime() - cust.getTime() > slaMs ? "UNANSWERED_OVER_SLA" : "UNANSWERED_WITHIN_SLA";
+}
+
+export type HandoffReplySplit = {
+  total: number;
+  byClass: Record<HandoffReplyClass, number>;
+  /** Người trả lời CHỈ bằng dòng page chưa rõ người gửi (không phải tin ERP, không phải `VERIFIED_HUMAN`). */
+  answeredUnverified: number;
+  /** (c) khách KHÔNG nhắn gì sau mốc chuyển, theo nhóm. */
+  quietAfterHandoff: Record<HandoffReplyClass, number>;
+  quietTotal: number;
+  /** Không có mốc chuyển ⇒ không xếp được vào (c). */
+  handoffUnknown: number;
+  /** HANDOFF_UNANSWERED theo tuổi tin khách cuối: > 24 giờ · > 72 giờ. */
+  overSla24h: number;
+  overSla72h: number;
+};
+
+/** HÀM THUẦN. */
+export function handoffReplySplit(facts: readonly HandoffReplyFact[], now: Date, slaMs: number | null): HandoffReplySplit {
+  const zero = () => Object.fromEntries(HANDOFF_REPLY_CLASSES.map((k) => [k, 0])) as Record<HandoffReplyClass, number>;
+  const s: HandoffReplySplit = { total: 0, byClass: zero(), answeredUnverified: 0, quietAfterHandoff: zero(), quietTotal: 0, handoffUnknown: 0, overSla24h: 0, overSla72h: 0 };
+  for (const f of facts) {
+    const k = handoffReplyClass(f, now, slaMs);
+    s.total += 1;
+    s.byClass[k] += 1;
+    if (k === "ANSWERED_HUMAN" && f.lastCustomerAt && !after(f.lastStaffAt, f.lastCustomerAt) && !after(f.pageVerifiedAt, f.lastCustomerAt)) s.answeredUnverified += 1;
+    if (k === "UNANSWERED_OVER_SLA" && f.lastCustomerAt) {
+      const h = (now.getTime() - f.lastCustomerAt.getTime()) / 3_600_000;
+      if (h > 24) s.overSla24h += 1;
+      if (h > 72) s.overSla72h += 1;
+    }
+    if (!f.handoffAt) s.handoffUnknown += 1;
+    else if (!after(f.lastCustomerAt, f.handoffAt)) {
+      s.quietTotal += 1;
+      s.quietAfterHandoff[k] += 1;
+    }
+  }
+  return s;
+}
+
+/** Dòng tóm tắt A2 (chỉ số đếm). HÀM THUẦN. */
+export function replySplitSummary(org: string, s: HandoffReplySplit, slaMs: number | null): string[] {
+  const b = s.byClass;
+  const q = s.quietAfterHandoff;
+  const sla = slaMs === null ? "KHÔNG đọc được / không đặt hạn" : `${Math.round(slaMs / 3_600_000)} giờ (work.sla)`;
+  return [
+    `${org} A2 · trong ${s.total} hội thoại chờ người — (a) ĐÃ có người/page trả lời sau tin khách cuối ${b.ANSWERED_HUMAN} (trong đó chỉ dòng page chưa rõ người gửi ${s.answeredUnverified}) · bot đã trả lời tin khách cuối ${b.ANSWERED_BOT} · (b) HANDOFF_UNANSWERED (không ai trả lời, quá SLA ${sla}) ${b.UNANSWERED_OVER_SLA} (> 24 giờ ${s.overSla24h} · > 72 giờ ${s.overSla72h}) · chưa ai trả lời, còn trong hạn ${b.UNANSWERED_WITHIN_SLA} · chưa ai trả lời, không có hạn ${b.UNANSWERED_NO_SLA} · không có tin khách ${b.NO_CUSTOMER_MESSAGE}`,
+    `${org} A2 · (c) khách KHÔNG nhắn gì sau lúc chuyển ${s.quietTotal}/${s.total - s.handoffUnknown} (mốc chuyển không rõ ${s.handoffUnknown}) — cắt ngang: đã có người trả lời ${q.ANSWERED_HUMAN} · bot đã trả lời ${q.ANSWERED_BOT} · tin GÂY RA lượt chuyển chưa ai trả lời, quá hạn ${q.UNANSWERED_OVER_SLA} · còn hạn ${q.UNANSWERED_WITHIN_SLA + q.UNANSWERED_NO_SLA} · không có tin khách ${q.NO_CUSTOMER_MESSAGE}`,
+  ];
+}
+
 // ─────────────────────────── PHẦN CSDL ───────────────────────────
 
 type DbHolder = { __erpDb?: { orgs?: Map<string, { db?: Db }> } };
@@ -289,9 +379,14 @@ const toDate = (v: unknown): Date | null => {
 };
 
 /** A — hội thoại AI im ngay lúc đo. Trả cả mã hội thoại theo nhóm (phần MÃ HOÁ). */
-export async function collectSilent(db: Db, now: Date): Promise<{ counts: StuckCounts; samples: Partial<Record<StuckClass, string[]>>; reasons: Map<string, number> }> {
+export async function collectSilent(db: Db, now: Date): Promise<{ counts: StuckCounts; samples: Partial<Record<StuckClass, string[]>>; reasons: Map<string, number>; waitingHuman: (HandoffReplyFact & { id: string })[] }> {
   const res = await db.execute(sql`select c.id, c.status, c.handoff_reason, c.state->'control'->>'mode' as mode,
       c.state->'handoff'->>'at' as handoff_at, c.state->'handoff'->>'reason' as handoff_state_reason, c.updated_at, c.human_cooldown_until, c.handoff_queued_at, c.last_customer_at,
+      c.last_bot_at, c.last_staff_at,
+      (select max(i.created_at) from "sales_chat_inbound" i where i.page_id = c.page_id and i.thread_id = c.thread_id and i.note = 'PAGE_REPLY'
+        and coalesce(i.sender_kind, '') not in ('PANCAKE_AUTOMATION', 'META_SYSTEM', 'AI_AGENT')) as page_human_at,
+      (select max(i.created_at) from "sales_chat_inbound" i where i.page_id = c.page_id and i.thread_id = c.thread_id and i.note = 'PAGE_REPLY' and i.sender_kind = 'VERIFIED_HUMAN') as page_verified_at,
+      (select max(i.created_at) from "sales_chat_inbound" i where i.page_id = c.page_id and i.thread_id = c.thread_id and i.note = 'PAGE_REPLY' and i.sender_kind = 'AI_AGENT') as page_ai_at,
       exists (select 1 from "sales_chat_inbound" i where i.page_id = c.page_id and i.thread_id = c.thread_id and i.status = 'DEAD' and i.note = ${DEAD_AI_DOWN_NOTE_TEXT}
         and i.created_at > coalesce(greatest(c.last_bot_at, c.last_staff_at), 'epoch'::timestamptz)) as dead_unanswered,
       (c.last_customer_at is not null and c.last_customer_at > coalesce(c.last_bot_at, 'epoch'::timestamptz) and c.last_customer_at > coalesce(c.last_staff_at, 'epoch'::timestamptz)) as waiting
@@ -301,6 +396,7 @@ export async function collectSilent(db: Db, now: Date): Promise<{ counts: StuckC
   const counts = emptyCounts();
   const samples: Partial<Record<StuckClass, string[]>> = {};
   const reasons = new Map<string, number>();
+  const waitingHuman: (HandoffReplyFact & { id: string })[] = [];
   for (const r of rowsOf<Record<string, unknown>>(res)) {
     const row: SilentRow = {
       status: String(r.status ?? ""),
@@ -317,11 +413,22 @@ export async function collectSilent(db: Db, now: Date): Promise<{ counts: StuckC
     if (list.length < 30) list.push(String(r.id));
     const key = (row.reason ?? "(trống)").replace(/#[0-9A-F]{8}\b/g, "#…").slice(0, 90);
     reasons.set(key, (reasons.get(key) ?? 0) + 1);
+    if (STUCK_CLASS_GROUP[cls] === "WAITING_HUMAN")
+      waitingHuman.push({
+        id: String(r.id),
+        lastCustomerAt: toDate(r.last_customer_at),
+        lastBotAt: toDate(r.last_bot_at),
+        lastStaffAt: toDate(r.last_staff_at),
+        pageHumanAt: toDate(r.page_human_at),
+        pageVerifiedAt: toDate(r.page_verified_at),
+        pageAiAt: toDate(r.page_ai_at),
+        handoffAt: valid(row.queuedAt) ?? valid(row.handoffAt),
+      });
   }
-  return { counts, samples, reasons };
+  return { counts, samples, reasons, waitingHuman };
 }
 
-export type OwnershipMeasure = { ok: true; silent: number; person: number; department: number; shared: number; unowned: number; byReason: Record<string, number>; responders: number; viewers: number; departmentCode: string; overdue: number; stale: number; queued: number; unqueued: number } | { ok: false; why: string };
+export type OwnershipMeasure = { ok: true; silent: number; person: number; department: number; shared: number; unowned: number; byReason: Record<string, number>; responders: number; viewers: number; departmentCode: string; overdue: number; stale: number; queued: number; unqueued: number; slaMs: number | null } | { ok: false; why: string };
 
 /** B + C — đọc bằng lib #800 trong ngữ cảnh tổ chức (handle chỉ đọc). Thiếu hàm trên image ⇒ CHƯA ĐO ĐƯỢC. */
 export async function collectOwnership(org: { code: string; isHome: boolean }, now: Date): Promise<OwnershipMeasure> {
@@ -347,7 +454,9 @@ export async function collectOwnership(org: { code: string; isHome: boolean }, n
         overdue += 1;
         if (!it.assignee && now.getTime() - due.getTime() > 24 * 3_600_000) stale += 1;
       }
-      return { ok: true as const, silent: u.silent, person: u.person, department: u.department, shared: u.shared ?? 0, unowned: u.unowned, byReason: u.byReason, responders: u.responders, viewers: viewers.length, departmentCode: u.departmentCode, overdue, stale, queued, unqueued: list.length - queued };
+      // Độ dài hạn (giờ tuyến tính — `slaDueAt` cộng thẳng số giờ) để chấm tuổi tin khách cuối ở A2.
+      const slaMs = dueOf(new Date(0), ctx.cfg)?.getTime() ?? null;
+      return { ok: true as const, silent: u.silent, person: u.person, department: u.department, shared: u.shared ?? 0, unowned: u.unowned, byReason: u.byReason, responders: u.responders, viewers: viewers.length, departmentCode: u.departmentCode, overdue, stale, queued, unqueued: list.length - queued, slaMs };
     });
   } catch (e) {
     return { ok: false, why: e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160) };
@@ -525,6 +634,11 @@ async function oneOrg(org: { code: string; isHome: boolean }, args: StuckArgs, n
     } else {
       tomTat(`${org.code} B/C · CHƯA ĐO ĐƯỢC — ${b.why}`);
     }
+    const slaMs = b.ok ? b.slaMs : null;
+    const split = handoffReplySplit(a.waitingHuman, now, slaMs);
+    for (const line of replySplitSummary(org.code, split, slaMs)) tomTat(line);
+    const unanswered = a.waitingHuman.filter((f) => handoffReplyClass(f, now, slaMs) === "UNANSWERED_OVER_SLA").map((f) => f.id);
+    console.log(`${org.code} A2 · mã hội thoại HANDOFF_UNANSWERED (≤ 30): ${JSON.stringify(unanswered.slice(0, 30))}`);
 
     const d = await collectOrders(db, args.days, now);
     tomTat(`${org.code} D · nhắn lại ${args.days} ngày: ${d.m.followupsSent} tin · sau khi đã có đơn sống (không phải nháp) ${d.m.followupsAfterOrder}`);
