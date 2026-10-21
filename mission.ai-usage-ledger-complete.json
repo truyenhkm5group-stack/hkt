@@ -3,7 +3,7 @@
   "mission_id": "ai-usage-ledger-complete",
   "title": "Sổ chi phí AI ghi đủ: mọi đường gọi khai workload (danh sách đóng) + conversation_id + khoá lời gọi đếm được retry/trùng",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -50,9 +50,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-21T09:35:32.968Z",
-  "updated_at": "2026-10-21T12:54:51.239Z",
+  "updated_at": "2026-10-21T14:33:35.823Z",
   "last_heartbeat": "2026-10-21T12:54:51.239Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#948 → 594ccf4c63933aab54a30035e60273551de51916"
+  },
   "handoff": {
     "branch": "claude/ai-usage-ledger-complete",
     "sha": "03c90e1de83797ea37d3fd3c7fa03ac99e5117d1",
