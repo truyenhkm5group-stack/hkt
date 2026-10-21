@@ -36,18 +36,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-21T03:13:04.652Z",
-  "updated_at": "2026-10-21T05:53:45.625Z",
-  "last_heartbeat": "2026-10-21T05:53:45.625Z",
+  "updated_at": "2026-10-21T07:04:27.925Z",
+  "last_heartbeat": "2026-10-21T07:04:27.925Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/messenger-webhook-observability",
-    "sha": "1d5c93e6ada42c21b19b7c0fbb113ef51902ee2a",
-    "at": "2026-10-21T05:53:45.625Z",
+    "sha": "fab098776033cae0c568e27db003f4cba6a26a54",
+    "at": "2026-10-21T07:04:27.925Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Sổ gói webhook Messenger bị từ chối (24 giờ · 7 ngày) trên /platform + check-integrations báo cấu hình Messenger không in secret",
     "summary": "",
     "tests": [
-      "vòng 2: rebase lên main 4c4d612e (#935) — xung đột chỉ dòng import platform/page.tsx, giữ cả hai khối; thêm DOC_MOI_TRUONG_DA_KHAI cho messenger-config-report.test.ts; tsc + testTestHygiene + testMessengerConfigReport ĐẠT"
+      "vòng 3: rebase lên main 91c9de9a; xung đột duy nhất tests/test-hygiene.test.ts (cả hai cùng thêm dòng DOC_MOI_TRUONG_DA_KHAI) — giữ cả hai; migration 0251 giữ số (main không có migration mới). testTestHygiene · testMigrationJournal · testRepoIntegrity ĐẠT"
     ]
   }
 }
