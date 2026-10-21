@@ -1,0 +1,8 @@
+{
+  "pr": 961,
+  "sha": "331f6029bc834e72904eeee81d77e636cba9c0de",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T20:24:43.979Z",
+  "note": "review lead: CHỈ-SCRIPT, chỉ đọc. Khối THẬT = r.profitGate.result của getPayrollReport theo quy chế đã khai (trần tháng · phần còn lại). Tên + tiền từng người chỉ ở console (bản mã hoá); kênh [ops:tom-tat] công khai chỉ in tổng công ty (cùng mức các dòng tóm tắt sẵn có), không in phần còn lại của một người. Không đổi lib/."
+}
