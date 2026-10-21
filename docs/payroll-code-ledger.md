@@ -383,3 +383,20 @@ chịu trách nhiệm mã, khi đó, người chịu trách nhiệm mã sẽ đ�
 - Trọng số chưa đủ căn cứ ⇒ OWNER CŨNG chờ (số tạm `null`): phần của OWNER là phần còn lại sau SUPPORT.
 - Production 21/10/2026: 0 phân công · 0 điều khoản ⇒ đổi công thức không đổi một đồng lương nào hôm nay.
 
+### 10.9 Danh sách phê duyệt thành việc của từng phòng trên `/work` (chủ shop 21/10/2026)
+
+Chủ shop: bốn mục nhập liệu (2 nhân sự thiếu ngày vào làm · 7 mã chưa có người phụ trách đã duyệt · giá phiếu
+nhập Q006 · bảng kê COD + khoản chi gõ tay trùng) phải thành VIỆC cho từng PHÒNG, kèm link màn hình cần nhập,
+giao phòng không giao người.
+
+- Nguồn việc `PAYROLL_RECON` (`lib/constants/work-sources.ts`) là PHÉP CHIẾU của `buildApprovalList` — mỗi mục
+  một việc, phòng lấy từ MỘT bảng `APPROVAL_ITEM_OWNER` (trang Trung tâm đối soát cùng đọc). Không có dòng
+  `work_items` nào được ghi; dữ liệu đủ thì mục biến mất khỏi danh sách và việc tự rời hàng đợi (luật 19).
+- Việc chỉ mang tiêu đề + việc phải làm + link: câu nguyên nhân có lương cứng từng người và lũy kế lợi nhuận,
+  mà hàng đợi phòng mở cho người không có quyền xem lương. Không mang tiền: số phải thu COD đã nằm trong việc
+  COD quá hạn theo từng vận đơn.
+- Hạn để TRỐNG có lý do (không có hằng số đang chạy — luật 22); chủ shop đặt ở cấu hình `/work`
+  (`work.sla`, khoá `PAYROLL_RECON:<mục>`) và chuyển phòng ở `work.ownership`, không cần deploy.
+- Đọc qua đệm 15 phút trên `getReconCenter` (khoảng tháng mặc định của trang); tổ chức chưa khai bảng lương
+  không sinh việc nào.
+

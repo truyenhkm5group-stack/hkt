@@ -30,6 +30,12 @@ import { approvalFailureTimes, listApprovalRequests } from "@/lib/queries/approv
 import { approvalExecutionNote } from "@/lib/approvals/execution-note";
 import { formatDateTime, formatVND } from "@/lib/format";
 import { SAMPLE_STATUS_TO_WORK, TOPIC_OPEN_STATUSES, TOPIC_STATUS_LABEL, TOPIC_STATUS_TO_WORK, type SampleStatus, type TopicStatus } from "@/lib/constants/production-os";
+import { PAYROLL_EMPLOYEES_KEY } from "@/lib/constants/payroll";
+import { monthKeyOf } from "@/lib/constants/payroll-carryover";
+import { reconCenterDefaultRange, type ApprovalItem } from "@/lib/payroll/recon-center";
+import { memo } from "@/lib/cache";
+import { getSettingJson } from "@/lib/settings";
+import { vnStartOfDay } from "@/lib/format";
 
 /**
  * ═══════════════ PHÉP CHIẾU: SÁU HÀNG ĐỢI THÀNH MỘT DANH SÁCH ═══════════════
@@ -1050,6 +1056,77 @@ export async function adaptSampleReviews(now: Date): Promise<WorkItem[]> {
   });
 }
 
+/* ═══════════════════ 7b · DỮ LIỆU LƯƠNG CHỜ BỔ SUNG (Trung tâm đối soát) ═══════════════════ */
+
+/**
+ * PHÉP CHIẾU danh sách phê duyệt của Trung tâm đối soát lương lên `/work` — HÀM THUẦN.
+ *
+ * Chủ shop 21/10/2026: bốn mục nhập liệu (ngày vào làm · người phụ trách mã · giá phiếu nhập · bảng kê COD /
+ * khoản chi trùng) phải thành việc của từng PHÒNG, kèm link màn hình cần nhập. Mỗi mục đã có phòng ở
+ * `APPROVAL_ITEM_OWNER`; ở đây không khai lại phòng, không viết lại điều kiện nào — mục biến mất khỏi danh
+ * sách (dữ liệu đã đủ) thì việc rời hàng đợi, không có nút «đánh dấu xong» (luật 19).
+ *
+ * KHÔNG mang câu nguyên nhân sang: câu ấy có lương cứng từng người và lũy kế lợi nhuận, mà hàng đợi của
+ * một phòng được người KHÔNG có quyền xem lương mở. Chỉ tiêu đề (đếm) + việc phải làm + link.
+ * KHÔNG mang tiền (`MONEY_UNKNOWN`): số phải thu COD đã nằm trong việc COD quá hạn theo từng vận đơn,
+ * cộng lại ở đây là đếm hai lần trong mọi tổng hợp tiền của hàng đợi.
+ */
+export function payrollReconWorkItems(approvals: readonly ApprovalItem[], periodStart: Date, now: Date): WorkItem[] {
+  const ms = now.getTime();
+  return approvals.map((a) => ({
+    key: workKey("PAYROLL_RECON", a.key),
+    sourceType: "PAYROLL_RECON",
+    sourceKey: a.key,
+    kind: a.key,
+    title: a.title,
+    summary: a.action,
+    department: a.owner,
+    assignee: null,
+    status: "NEW" as WorkStatus,
+    statusAuthority: "SOURCE" as const,
+    priority: a.kind === "DECIDE" ? "HIGH" : "NORMAL",
+    score: caseScore({ severity: a.kind === "DECIDE" ? "warning" : "info", ageHours: hoursSince(periodStart, ms), amount: 0, type: "OTHER" }),
+    // Mốc của KỲ LƯƠNG đang xét (đầu tháng hiện tại) — mục đo lại mỗi lần đọc nên không có mốc «xuất hiện» thật.
+    createdAt: periodStart,
+    startedAt: null,
+    dueAt: null,
+    slaAt: slaAtOf("PAYROLL_RECON", periodStart),
+    completedAt: null,
+    snoozedUntil: null,
+    businessEntity: "NONE",
+    businessEntityId: a.key,
+    sourceUrl: a.href,
+    money: MONEY_UNKNOWN,
+    tags: [a.kind === "DECIDE" ? "cần quyết" : "cần bổ sung"],
+    evidence: { source: "Lương · Trung tâm đối soát", detail: a.count === null ? a.title : `${a.count} mục` },
+    blockedReason: "",
+    creationSource: "AUTO" as WorkItem["creationSource"],
+    actions: actionsOf("PAYROLL_RECON"),
+    recommendedAction: a.action,
+  }));
+}
+
+/**
+ * Đệm RIÊNG 15 phút trên kết quả Trung tâm đối soát (bản thân nó đệm 120 giây): bộ máy ấy dựng bảng lương
+ * của 5 tháng, quá nặng để chạy lại mỗi lần một người mở `/work`. Dữ liệu này đổi khi có người NHẬP — trễ
+ * tối đa 15 phút là chấp nhận được; lượt đọc khi đệm nguội quá hạn 2,5 giây thì nguồn được NÊU TÊN ở
+ * «Danh sách đang thiếu một phần» và vẫn chạy tiếp để làm nóng đệm (`collectWorkItems`).
+ */
+const PAYROLL_RECON_WORK_TTL_MS = 15 * 60_000;
+
+export async function adaptPayrollRecon(now: Date): Promise<WorkItem[]> {
+  // Tổ chức chưa khai bảng lương thì danh sách này chỉ là tiếng ồn (mọi mục đều «thiếu»).
+  const nhanSu = await getSettingJson<{ list?: unknown[] }>(PAYROLL_EMPLOYEES_KEY, { list: [] });
+  if (!Array.isArray(nhanSu?.list) || nhanSu.list.length === 0) return [];
+  const { fromMonth, toMonth } = reconCenterDefaultRange(monthKeyOf(now));
+  const approvals = await memo(`work:payroll-recon:${fromMonth}:${toMonth}`, PAYROLL_RECON_WORK_TTL_MS, async () => {
+    // Nạp lười: bộ máy lương không vào đường nạp của `/work` cho tới khi nguồn này thật sự chạy.
+    const { getReconCenter } = await import("@/lib/queries/payroll-recon-center");
+    return (await getReconCenter(fromMonth, toMonth)).approvals;
+  });
+  return payrollReconWorkItems(approvals, vnStartOfDay(`${toMonth}-01`), now);
+}
+
 /* ═══════════════════ 8 · VIỆC TAY & VIỆC ĐỊNH KỲ ═══════════════════ */
 
 /** Nguồn duy nhất giữ trạng thái trong `work_items`. Ở đây không có phép chiếu nào. */
@@ -1251,6 +1328,7 @@ export async function collectWorkItems(opts: CollectOptions = {}): Promise<{ ite
     want("APPROVAL") ? guard("APPROVAL", () => adaptApprovals(now, opts.includeClosed ?? false, closedSince)) : [],
     want("PRODUCTION_TOPIC") ? guard("PRODUCTION_TOPIC", () => adaptProductionTopics(now)) : [],
     want("SAMPLE_REVIEW") ? guard("SAMPLE_REVIEW", () => adaptSampleReviews(now)) : [],
+    want("PAYROLL_RECON") ? guard("PAYROLL_RECON", () => adaptPayrollRecon(now)) : [],
     want("MANUAL_TASK") || want("RECURRING_TASK") || want("WORKFLOW_TASK") ? guard("MANUAL_TASK", () => adaptOwnedWork(now, opts.includeClosed ?? false, closedSince)) : [],
   ]);
 

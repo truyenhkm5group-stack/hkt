@@ -1,6 +1,7 @@
 import { CASE_TYPES, CASE_TYPE_LABEL, type CaseType } from "@/lib/constants/action-queue";
 import { departmentOfTeam, DEPARTMENT_CODES, type DepartmentCode } from "@/lib/constants/departments";
 import { BOTTLENECK_REASON_LABEL, BOTTLENECK_TEAM, FULFILLMENT_BLOCK_REASONS } from "@/lib/constants/fulfillment-bottleneck";
+import { APPROVAL_ITEM_KEYS, APPROVAL_ITEM_LABEL, APPROVAL_ITEM_OWNER, type ApprovalItemKey } from "@/lib/payroll/recon-center";
 import {
   ALERT_KINDS_OWNED_ELSEWHERE,
   departmentOfAlert,
@@ -63,6 +64,7 @@ const SOURCE_OWNERSHIP_WHY: Record<WorkSource, string> = {
   APPROVAL: "Người duyệt được là quản trị viên / quản lý (quyền approvals:decide) — việc chờ chủ shop quyết, cùng tiền lệ với việc Tech và nhóm việc DATA.",
   PRODUCTION_TOPIC: "Bàn giá và phương án với xưởng là việc của nhóm Sản xuất — hôm nay nhóm đó route về Kho (TEAM_DEPARTMENT_DIVERGENCE) vì phòng Sản xuất chưa có thành viên; chuyển bằng ghi đè work.ownership.",
   SAMPLE_REVIEW: "Duyệt mẫu xưởng gửi là việc của nhóm Sản xuất — cùng lý do route về Kho như topic sản xuất cho tới khi phòng Sản xuất có người.",
+  PAYROLL_RECON: "Mỗi mục thiếu của kỳ lương đi về phòng GIỮ chứng từ ấy — xem bảng theo từng mục bên dưới, không phải một phòng cố định.",
   MANUAL_TASK: "Việc giao tay đi theo phòng mà người giao chọn; không có phòng mặc định nào đúng cho mọi việc.",
   RECURRING_TASK: "Việc định kỳ khai phòng ngay trong định nghĩa của nó.",
   WORKFLOW_TASK: "Việc do luật tự động tạo đi theo phòng người khai luật chọn trong hành động — không có phòng mặc định nào đúng cho mọi luật.",
@@ -105,6 +107,24 @@ const FULFILLMENT_RULES: OwnershipRule[] = FULFILLMENT_BLOCK_REASONS.map((reason
       : "Hàng còn nguyên trong kho, chỉ thiếu thao tác đóng gói / giục ĐVVC.",
 }));
 
+/** Vì sao từng mục của danh sách phê duyệt lương thuộc phòng ấy. Phòng lấy từ `APPROVAL_ITEM_OWNER` — không khai lại. */
+const PAYROLL_RECON_WHY: Record<ApprovalItemKey, string> = {
+  "opening-balance": "Số dư lũy kế mở sổ là một QUYẾT ĐỊNH của người duyệt lương (quy chế cổng), không phải dữ liệu nhập.",
+  "undated-employees": "Ngày vào làm nằm trên hợp đồng lao động — hồ sơ ở phòng Nhân sự.",
+  "pending-code-rows": "Duyệt phân công / điều khoản thưởng là lượt của người thứ hai có quyền duyệt — Ban điều hành.",
+  "codes-without-owner": "Ai chịu trách nhiệm mã và tồn kho của mã là phân công trong phòng Marketing.",
+  "months-signoff": "Ký bảng đối soát tháng là việc kế toán trước khi kỳ lương được duyệt.",
+  "cogs-gaps": "Giá vốn đi theo phiếu nhập kho — người lập phiếu nhập là Kho.",
+  "cod-receivable": "Bảng kê COD / đối soát Viettel Post là chứng từ tiền — kế toán tải và nạp.",
+  "duplicate-source": "Khoản chi gõ tay trùng nguồn nằm ở bảng Chi phí — kế toán kiểm và khai lý do.",
+};
+const PAYROLL_RECON_RULES: OwnershipRule[] = APPROVAL_ITEM_KEYS.map((k) => ({
+  key: `PAYROLL_RECON:${k}`,
+  label: APPROVAL_ITEM_LABEL[k],
+  department: APPROVAL_ITEM_OWNER[k],
+  why: PAYROLL_RECON_WHY[k],
+}));
+
 /** Luật cho từng loại cảnh báo còn thuộc nguồn `ALERT`. Khoá giống bảng hạn: `ALERT:<CaseType>`. */
 const ALERT_RULES: OwnershipRule[] = CASE_TYPES.filter((t) => !ALERT_KINDS_OWNED_ELSEWHERE.includes(t) && sourceOfAlert(t) === "ALERT").map((t) => ({
   key: `ALERT:${t}`,
@@ -121,7 +141,7 @@ const INVENTORY_RULES: OwnershipRule[] = (["LOW_STOCK_RISK", "STOCKOUT_RISK"] as
   why: SOURCE_OWNERSHIP_WHY.INVENTORY_EXCEPTION,
 }));
 
-export const DEFAULT_OWNERSHIP_RULES: OwnershipRule[] = [...SOURCE_RULES, ...FULFILLMENT_RULES, ...INVENTORY_RULES, ...ALERT_RULES];
+export const DEFAULT_OWNERSHIP_RULES: OwnershipRule[] = [...SOURCE_RULES, ...FULFILLMENT_RULES, ...INVENTORY_RULES, ...PAYROLL_RECON_RULES, ...ALERT_RULES];
 
 export const DEFAULT_OWNERSHIP_MAP: Record<string, OwnershipRule> = Object.fromEntries(DEFAULT_OWNERSHIP_RULES.map((r) => [r.key, r]));
 

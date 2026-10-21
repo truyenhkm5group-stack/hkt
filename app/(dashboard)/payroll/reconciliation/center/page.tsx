@@ -9,7 +9,7 @@ import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import { DEPARTMENT_LABEL } from "@/lib/constants/departments";
 import { monthKeyOf } from "@/lib/constants/payroll-carryover";
 import { formatVND } from "@/lib/format";
-import { COD_GAP_CAUSE_LABEL, issueOwner, type CodGapCause } from "@/lib/payroll/recon-center";
+import { COD_GAP_CAUSE_LABEL, issueOwner, reconCenterDefaultRange, type CodGapCause } from "@/lib/payroll/recon-center";
 import { COGS_GAP_CAUSE_LABEL, getReconCenter } from "@/lib/queries/payroll-recon-center";
 import { monthPeriod } from "@/lib/constants/payroll-autopilot";
 import type { SearchParams } from "@/lib/search-params";
@@ -44,7 +44,7 @@ export default async function PayrollReconCenterPage({ searchParams }: { searchP
   if (!canAdministerPayroll(user, can(user, "payroll:manage"))) redirect("/payroll?forbidden=1");
   const nay = monthKeyOf(new Date());
   const toMonth = typeof raw.to === "string" && THANG.test(raw.to) && raw.to <= nay ? raw.to : nay;
-  const fromRaw = typeof raw.from === "string" && THANG.test(raw.from) ? raw.from : lui(toMonth, 4);
+  const fromRaw = typeof raw.from === "string" && THANG.test(raw.from) ? raw.from : reconCenterDefaultRange(toMonth).fromMonth;
   const fromMonth = fromRaw > toMonth ? toMonth : fromRaw < lui(toMonth, 11) ? lui(toMonth, 11) : fromRaw;
   const c = await getReconCenter(fromMonth, toMonth);
 
