@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "stuck-audit-a2-silent",
+  "title": "stuck-audit A2 in tập /work (= tập 2B) cạnh tập cũ + tách dòng A2 cho lọt kênh tóm tắt",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-a2-silent",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/stuck-audit-a2-silent",
+  "base_sha": "67a7f74bc6b0cd07cb2c57ffc0e696fb3e00beaa",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-quality/",
+    "scripts/stuck-conversation-audit.ts",
+    "tests/sales-quality-daily.test.ts",
+    "tests/stuck-conversation-audit.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-21T22:34:12.881Z",
+  "updated_at": "2026-10-21T22:34:12.881Z",
+  "last_heartbeat": "2026-10-21T22:34:12.881Z",
+  "definition_of_done": []
+}
