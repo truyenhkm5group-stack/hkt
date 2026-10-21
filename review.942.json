@@ -1,0 +1,8 @@
+{
+  "pr": 942,
+  "sha": "e38e17b587ac521ff87a7c03e2597954d377aa12",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T06:40:46.396Z",
+  "note": "review lead: dựng lại #941 (đã review PASS) trên main sau squash #940 — cherry-pick riêng commit split, 7 tệp giống hệt bản đã qua cổng. Chủ shop 21/10: X% tổng phần MKT; SUPPORT Y% trên phần họ làm ra; OWNER 5% trên phần SUPPORT. Production 0 phân công ⇒ không đổi đồng nào hôm nay."
+}
