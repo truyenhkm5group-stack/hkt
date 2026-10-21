@@ -92,7 +92,7 @@ async function scanDay(from: Date, to: Date): Promise<{ byCode: Map<SalesQuality
   const templates = (await listQuickReplies().catch(() => [])).map((r) => ({ title: r.title, answer: r.answer, head: templateHead(r.answer) }));
   const products = await loadFocusProducts().catch(() => []);
   const byCode = new Map<SalesQualityCode, { hits: number; convs: Set<string> }>();
-  const bases: QualityBases = { customerMessages: 0, botMessages: 0, quantityAnswers: 0, deliverySecondAsks: 0, complaints: 0 };
+  const bases: QualityBases = { customerMessages: 0, botMessages: 0, quantityAnswers: 0, deliverySecondAsks: 0, complaints: 0, offerAccepts: 0 };
   for (let i = 0; i < ids.length; i += 200) {
     const rows = await db.select({ conv: m.conversationId, seq: m.seq, role: m.role, content: m.content, at: m.createdAt }).from(m).where(and(inArray(m.conversationId, ids.slice(i, i + 200)), lt(m.createdAt, to))).orderBy(asc(m.conversationId), asc(m.seq));
     const threads = new Map<string, typeof rows>();
@@ -158,6 +158,8 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
       COMPLAINT_WHILE_SELLING: `Mẫu số: ${b.complaints} tin khách phàn nàn`,
       CLARIFY_FALLBACK: `Mẫu số: ${b.botMessages} tin bot`,
       CLAIM_GUARD_BLOCK: `Mẫu số: ${b.botMessages} tin bot`,
+      UPSELL_ACCEPTED_BUT_REASKED: `Mẫu số: ${b.offerAccepts} lần khách đồng ý ngắn («Ok», 👍) ngay sau lời mời một món`,
+      UPSELL_ACCEPTED_NOT_ATTACHED: `Mẫu số: ${b.offerAccepts} lần khách đồng ý ngắn ngay sau lời mời một món`,
     };
     const db = await getDb();
     let created = 0;

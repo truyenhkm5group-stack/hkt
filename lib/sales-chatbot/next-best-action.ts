@@ -346,8 +346,23 @@ export function confirmedAddIssue(
   offer: PostConfirmOfferRef | undefined,
   customerText: string,
   /** `prevTurn` = seq tin khách NGAY TRƯỚC tin này (engine) — bằng `askedTurn` nghĩa là khách đang trả lời câu hỏi xác nhận. */
-  opts: { prevTurn?: number; catalogNames?: readonly string[]; staffBetween?: boolean; chosen?: readonly { productId: string | null; match: string }[] } = {},
+  opts: {
+    prevTurn?: number;
+    catalogNames?: readonly string[];
+    staffBetween?: boolean;
+    chosen?: readonly { productId: string | null; match: string }[];
+    /**
+     * ĐỒNG Ý NGẮN với lời mời MỘT món (P0 21/10/2026, short-accept.ts — engine quyết một lần): khách trả lời TRỰC TIẾP lời mời có đúng một
+     * mẫu mã + giá bằng «Ok» / «vâng» / 👍 ⇒ món được mời là căn cứ, không bắt gọi tên lại.
+     */
+    accepted?: { productId: string; variantId: string } | null;
+  } = {},
 ): { kind: "UNNAMED" | "WRONG_VARIANT"; names: string[]; ask: string | null } | null {
+  const acc = opts.accepted;
+  if (acc && added.length > 0 && added.every((a) => a.productId === acc.productId)) {
+    const wrong = added.filter((a) => a.variantId !== acc.variantId);
+    return wrong.length ? { kind: "WRONG_VARIANT", names: wrong.map((a) => a.name), ask: null } : null;
+  }
   const buy = buyingText([customerText]);
   const fb = foldVi(buy);
   const otherNamed = (opts.catalogNames ?? []).some((n) => n !== offer?.name && (mentionsProduct(n, buy) || calledByName(n, buy)));
@@ -385,9 +400,8 @@ export function confirmedAddIssue(
 export function postConfirmOfferText(o: CrossSellOffer, money: (n: number) => string): string {
   const label = offerVariantLabel(o.variant);
   const what = label && label !== o.name ? `${o.name} (${label})` : o.name;
-  // Câu gợi ý mang cả quy cách đã mời (review NB1) — khách nhắn đúng câu thì máy thêm đúng mẫu mã, đúng giá đã báo.
-  const reply = label && label !== o.name ? `${o.name.toLowerCase()} ${label}` : o.name.toLowerCase();
-  return `Bên em có thêm ${what} giá ${money(o.price)} ăn kèm rất hợp — mình muốn thêm vào đơn thì nhắn em «thêm ${reply}» nhé ạ.`;
+  // KHÔNG bắt khách nhắn lại cú pháp (P0 21/10/2026): lời mời có ĐÚNG một mẫu mã + giá ⇒ khách «Ok» / 👍 là đồng ý (short-accept.ts).
+  return `Bên em có thêm ${what} giá ${money(o.price)} ăn kèm rất hợp — mình lấy thêm 1 phần không ạ?`;
 }
 
 /* ═══════════ BỘ ĐIỀU PHỐI LỜI MỜI SAU CHỐT — CÂU CỦA SHOP CÓ THẨM QUYỀN (P0 20/10/2026) ═══════════

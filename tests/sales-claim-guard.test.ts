@@ -278,7 +278,7 @@ function testSourceScan() {
   assert.ok(heldLoop.indexOf("guardOutgoing(out") > 0 && heldLoop.indexOf("guardOutgoing(out") < heldLoop.indexOf('text: out }]'), "chữ có số tiền giữ lại qua guardOutgoing TRƯỚC khi ghi");
   // (f) Mọi chữ hằng gửi qua `reply()` không mang khẳng định; đối số không phải hằng thì nằm trong danh sách đã biết.
   // `draftUnsaid` (tóm tắt đơn theo kết quả công cụ) và `fallback` (câu hỏi đúng phần còn thiếu) đều qua guardOutgoing ngay trước reply.
-  const knownExpr = new Set(["cfg.handoff.message", "cfg.businessHours.outsideMessage", "EMPTY_REPLY_TEXT", "aiDownReply(cfg)", "pick.text", "safeText", "b.safe", "CLAIM_SAFE_TEXT.PRICE_DISPUTE", "CLAIM_SAFE_TEXT.REFUND", "CLAIM_SAFE_TEXT.DELIVERY_DELAY", "draftUnsaid", "fallback", "step.text", "pco.text", "menuStep.text", "qtyAck"]);
+  const knownExpr = new Set(["acceptSay", "CLAIM_SAFE_TEXT.ORDER_EDIT", "cfg.handoff.message", "cfg.businessHours.outsideMessage", "EMPTY_REPLY_TEXT", "aiDownReply(cfg)", "pick.text", "safeText", "b.safe", "CLAIM_SAFE_TEXT.PRICE_DISPUTE", "CLAIM_SAFE_TEXT.REFUND", "CLAIM_SAFE_TEXT.DELIVERY_DELAY", "draftUnsaid", "fallback", "step.text", "pco.text", "menuStep.text", "qtyAck"]);
   // P0 #863: câu máy chủ dựng khi khách huỷ (xin lỗi + đơn đã sửa · «đã huỷ» sau khi lõi ghi) qua guardOutgoing ngay trước reply.
   assert.match(core, /guardOutgoing\(step\.text, [^\n]*\n(?:[^\n]*\n){0,2}\s*await reply\(conv, seq, step\.text\)/, "câu huỷ của máy chủ qua guardOutgoing trước reply");
   // P0 20/10/2026: câu upsell của SHOP gửi sau chốt (`pco.text` — chữ câu mẫu đã điền số ERP) qua guardOutgoing ngay trước reply.
@@ -289,6 +289,11 @@ function testSourceScan() {
   // của máy chủ qua guardOutgoing ngay trước reply.
   assert.match(core, /guardOutgoing\(qtyAck, [^\n]*\n\s*await reply\(conv, seq, qtyAck\)/, "câu ghi nhận số lượng của máy chủ qua guardOutgoing trước reply");
   assert.match(core, /step\?\.kind === "ASK" && \(await guardOutgoing\(step\.text, [^\n]*\n(?:[^\n]*\n){0,1}\s*await reply\(conv, seq, step\.text\)/, "câu hỏi đơn cũ / đơn mới của máy chủ qua guardOutgoing trước reply");
+  // P0 21/10/2026 (ca «Vit Xiem»): câu báo đã thêm món khách vừa đồng ý («Ok» / 👍 lời mời một món — `acceptSay`, chữ say_to_customer của
+  // công cụ SAU khi ghi đơn thành công) qua guardOutgoing ngay trước reply; bị chặn ⇒ câu an toàn.
+  assert.match(core, /guardOutgoing\(say, [^\n]*\n\s*const acceptSay = v\.ok \? say : v\.safeText;\n(?:[^\n]*\n){0,1}\s*await reply\(conv, seq, acceptSay\)/, "câu đã thêm món qua guardOutgoing trước reply");
+  // Khách đồng ý mà máy chủ không thêm được (giá đổi / đơn khoá) ⇒ câu an toàn «chuyển nhân viên cập nhật đơn», không nói đã thêm.
+  assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.ORDER_EDIT), [], "câu an toàn khi không thêm được món không mang khẳng định");
   assert.match(core, /guardOutgoing\(draftUnsaid, [^\n]*\n\s*await reply\(conv, seq\+\+, draftUnsaid\)/, "tóm tắt đơn qua guardOutgoing trước reply");
   assert.match(core, /guardOutgoing\(ask, [^\n]*\n(?:[^\n]*\n){0,12}\s*await reply\(conv, seq\+\+, fallback\)/, "câu hỏi lại qua guardOutgoing trước reply");
   assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.PRICE_DISPUTE), [], "câu an toàn khi khách phản đối giá không mang khẳng định");
