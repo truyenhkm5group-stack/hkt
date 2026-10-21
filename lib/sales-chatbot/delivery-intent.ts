@@ -17,7 +17,7 @@
  *
  * Không đọc / ghi CSDL. Không kết luận kết quả đơn (`ORDER_OUTCOME` vẫn là nguồn duy nhất); không suy «đã giao» từ tiền / COD.
  */
-import { adminPlaceNamesFolded, foldVnText } from "@/lib/address/vn-address";
+import { adminPlaceNames, adminPlaceNamesFolded, foldVnText } from "@/lib/address/vn-address";
 import { NO_SHIPMENT_PHRASE } from "@/lib/sales-chatbot/order-status-shared";
 import { looksLikeDeliveryAddress, looksLikeStreetFragment, parseCustomerAddress, withoutPhones } from "@/lib/address/customer-address";
 import { foldVi } from "@/lib/sales-chatbot/text";
@@ -46,6 +46,21 @@ export const DELIVERY_SHOP_SAID_PREFIX = "[Shop đã nhắn]";
   từ / tiền tố nơi chốn («về Mai …», «phường Mai …») mà theo sau là một chữ tên (không phải tiểu từ / động từ giao) cũng là tên nơi.
 */
 const MAI_TIME_BEFORE = new Set(["gio", "sang", "chieu", "toi", "buoitoi", "trua", "ngay", "hom"]);
+/*
+  Gập dấu làm một số tên nơi TRÙNG chữ chat thường: «Đa Mai» = «dạ / đã mai», «Trà Mai» = «trả mai», «Vạn Mai» = «vẫn mai», «Đông /
+  Đồng Mai» = «đóng mai», «Mai Lâm» = «mai làm», «Mai Động» = «mai đóng hàng». Các tên đó chỉ nhận khi khách gõ CÓ DẤU (khớp trên chữ có
+  dấu, trước khi gập) — «Dạ mai giao chị nhé» là ngày mai (bài #855).
+*/
+const MAI_FOLD_AMBIGUOUS = new Set(["da mai", "tra mai", "van mai", "dong mai", "mai lam", "mai dong"]);
+let placeMaiAccentCache: RegExp | null = null;
+/** Tên nơi có chữ «mai» trên chữ CÓ DẤU, chữ thường — khớp đúng mặt chữ, không lẫn «dạ mai». Không dùng nhìn-ngược (Safari < 16.4). */
+function placeMaiAccentRe(): RegExp {
+  if (placeMaiAccentCache) return placeMaiAccentCache;
+  const names = adminPlaceNames().filter((n) => n.split(" ").includes("mai") && n.split(" ").length >= 2);
+  const alts = [...new Set(names)].sort((a, b) => b.length - a.length).map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+"));
+  placeMaiAccentCache = alts.length ? new RegExp(String.raw`(^|[^\p{L}])(?:${alts.join("|")})(?=[^\p{L}]|$)`, "gu") : /$^/g;
+  return placeMaiAccentCache;
+}
 const MAI_TIME_AFTER = new Set(["ha", "a", "nhe", "nha", "nhi", "em", "e", "chi", "c", "anh", "duoc", "dc", "khong", "ko", "k", "sao", "nay", "co", "giao", "ship", "gui", "nhan", "toi", "den", "ve", "phat", "sang", "chieu", "trua", "buoitoi", "nhe"]);
 let placeMaiCache: RegExp | null = null;
 function placeMaiRe(): RegExp {
@@ -55,7 +70,7 @@ function placeMaiRe(): RegExp {
     const w = n.split(" ");
     const i = w.indexOf("mai");
     if (i < 0 || w.length < 2) continue;
-    if ((i > 0 && MAI_TIME_BEFORE.has(w[i - 1])) || (i < w.length - 1 && MAI_TIME_AFTER.has(w[i + 1]))) continue;
+    if ((i > 0 && MAI_TIME_BEFORE.has(w[i - 1])) || (i < w.length - 1 && MAI_TIME_AFTER.has(w[i + 1])) || MAI_FOLD_AMBIGUOUS.has(n)) continue;
     names.add(n);
   }
   const alts = [...names].sort((a, b) => b.length - a.length).map((n) => n.replace(/\s+/g, "\\s+"));
@@ -68,6 +83,7 @@ function normalizeAsk(text: string): string {
   const raw = text
     .normalize("NFC")
     .toLowerCase()
+    .replace(placeMaiAccentRe(), "$1 diadanh ")
     .replace(/khuyến (?:mãi|mại)/g, " khuyenmai ")
     .replace(/mãi/g, " maimai ")
     .replace(/xác nhận/g, " xacnhan ")

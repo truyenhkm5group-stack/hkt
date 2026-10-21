@@ -32,9 +32,11 @@ export const PLACE_NOT_SCHEDULE = [
   "giao về khu Mai Hắc Đế",
   "Gửi về Tương Mai giúp chị",
   "về Bạch Mai nhé em",
+  "giao về Đa Mai nhé",
+  "giao về Trà Mai",
 ];
-/** Lịch giao THẬT — vẫn là ngày mai, kể cả khi đi cùng một tên nơi có chữ «Mai». */
-export const REAL_SCHEDULE = ["Mai giao 1kg về Hoàng Mai", "Sáng mai 9h giao giúp chị", "chiều mai nhận", "giao cho chị chiều mai nhé", "8 giờ mai giao nhé", "về Tân Mai mai giao nhé"];
+/** Lịch giao THẬT — vẫn là ngày mai, kể cả khi đi cùng một tên nơi có chữ «Mai», hoặc gập dấu TRÙNG một tên nơi («Dạ mai» = «Đa Mai»). */
+export const REAL_SCHEDULE = ["Mai giao 1kg về Hoàng Mai", "Sáng mai 9h giao giúp chị", "chiều mai nhận", "giao cho chị chiều mai nhé", "8 giờ mai giao nhé", "về Tân Mai mai giao nhé", "Dạ mai giao chị nhé", "da mai giao nhe", "mai làm xong giao nhé"];
 
 function testThuan() {
   assert.ok(adminPlaceNamesFolded().includes("hoang mai") && adminPlaceNamesFolded().includes("mai dich"), "tên nơi đọc từ danh mục (cả tên cũ), không gõ tay");
