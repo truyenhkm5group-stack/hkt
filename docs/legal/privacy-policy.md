@@ -5,6 +5,10 @@
 
 **Phiên bản:** nháp-01 · **Ngày soạn:** 03/10/2026
 
+> **17/10/2026 — trang công bố phiên bản 1.2** thêm mục 3a «Kết nối Facebook Page để nhắn tin (Messenger)» (dữ liệu nhận từ
+> Facebook, mục đích, cách lưu, khung 24 giờ, gỡ kết nối, xoá) và dòng «Meta Platforms (Messenger API)» ở bảng bên thứ ba. Câu chữ
+> nguồn duy nhất: `components/legal/privacy-content.tsx`; bản nháp này chưa chép lại mục đó.
+
 ## 1. Phạm vi — hai nhóm dữ liệu, hai vai trò
 
 | Nhóm dữ liệu | Ví dụ | Vai trò của Nền tảng |

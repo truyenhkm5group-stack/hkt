@@ -31,6 +31,8 @@ import { env } from "@/lib/env";
 import { MESSENGER_FIELDS, auditRequestedScopes, messengerApp, messengerConnectUrl, messengerVerifyToken, messengerWebhookSecrets, scopesOfConnectUrl } from "@/lib/integrations/messenger/graph";
 import { loginConfigMode, loginModeText } from "@/lib/integrations/messenger/permission-guide";
 import { messengerRedirectUris } from "@/lib/integrations/messenger/connect";
+import { directConnectFlagState } from "@/lib/platform/direct-connect-flag";
+import { DirectConnectControl } from "@/components/platform/direct-connect-control";
 import { PILOT_STAGE_LABEL } from "@/lib/constants/pilot";
 import { listOrgSupportSummaries } from "@/lib/platform/support";
 import { getPlatformHealth, type OrgHealth } from "@/lib/queries/platform-health";
@@ -89,6 +91,8 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
   const editor = selected ? await getOrganizationModuleView(selected.code) : null;
   const withProblems = health.organizations.filter((o) => o.problems.length > 0);
   const [onboarding, invites, plans, registry, signup, aiSummary, billing] = await Promise.all([listOnboardingStates(), listInvites(30), listPlans(), listOrganizations(), signupModeState(), loadPlatformAiSummary(user), loadPlatformBilling(user)]);
+  // Cờ «Nối thẳng Facebook» (meta.direct-connect.open) — khung Webhook Messenger cuối trang.
+  const directConnectFlag = await directConnectFlagState();
   const [otpSetting, otpSummary, otpZalo] = await Promise.all([readPhoneOtpSetting({ fresh: true }), phoneOtpSummary(), homeZaloConnected().catch(() => false)]);
   // Tóm tắt vận hành khách (giai đoạn pilot, luật tạm dừng, người dùng, đăng nhập cuối) — chỉ số đếm + mốc, không ghi vết
   // (vết SUPPORT_VIEW ghi khi mở trang của MỘT tổ chức).
@@ -494,6 +498,10 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
           <dt className="text-muted-foreground">Quyền hộp thoại «Kết nối Facebook Page» xin</dt>
           <dd className="text-xs" data-testid="platform-messenger-scopes">
             <MessengerScopeAudit />
+          </dd>
+          <dt className="text-muted-foreground">Nút «Kết nối Facebook Page» cho khách</dt>
+          <dd>
+            <DirectConnectControl {...directConnectFlag} />
           </dd>
           <dt className="text-muted-foreground">URI chuyển hướng OAuth hợp lệ</dt>
           <dd className="space-y-1">

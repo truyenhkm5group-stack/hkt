@@ -1,7 +1,11 @@
 # Meta App Review — Messenger trực tiếp (đợt đầu)
 
-Bộ tài liệu để chủ nền tảng nộp App Review cho app Facebook của nền tảng (cùng app «Đăng nhập bằng Facebook», khai ở VPS bằng
-`FACEBOOK_LOGIN_APP_ID` / `FACEBOOK_LOGIN_APP_SECRET`). Không ghi app id, app secret, token hay mật khẩu nào vào kho — kho PUBLIC.
+Bộ tài liệu để chủ nền tảng nộp App Review cho app Meta **«ChotDonTuDong Messenger»** (App ID `1794152675112502`, khai ở VPS
+bằng `FACEBOOK_MESSENGER_APP_ID` / `FACEBOOK_MESSENGER_APP_SECRET`) — KHÔNG phải app «Đăng nhập bằng Facebook» như bản đầu ghi.
+Không ghi app secret, token hay mật khẩu nào vào kho — kho PUBLIC (App ID không phải bí mật).
+
+**Meta DUYỆT cả 5 quyền ngày 20/10/2026** — phần quay video / nộp lại ở 03–05 nay chỉ để tra; việc còn lại: [06 §5](06-kiem-thu-thuc-te-va-checklist.md#5-sau-khi-meta-duyệt-2010--từ-duyệt-tới-bán). Hồ sơ nộp 07/10/2026. Kiểm toán 17/10 và bộ video thay thế: [05-kiem-toan-ho-so-17-10.md](05-kiem-toan-ho-so-17-10.md)
+— đọc trước mọi mục khác.
 
 ## Vì sao cần (đo production 06/10/2026)
 
@@ -33,6 +37,10 @@ bản này ERP tự tách được bằng vai trò của người bấm trong ap
 3. [03-screencast-va-bang-chung.md](03-screencast-va-bang-chung.md) — kịch bản quay màn hình theo từng quyền, bằng chứng / log
    cần giữ.
 4. [04-reviewer-instructions-en.md](04-reviewer-instructions-en.md) — đoạn tiếng Anh dán thẳng vào các ô của Meta.
+5. [05-kiem-toan-ho-so-17-10.md](05-kiem-toan-ho-so-17-10.md) — kiểm toán hồ sơ nộp 07/10, bốn video theo từng quyền, việc
+   kỹ thuật chặn trước khi quay (K3 · K4 · K8), việc chủ tài khoản Meta làm (O1–O10).
+6. [06-kiem-thu-thuc-te-va-checklist.md](06-kiem-thu-thuc-te-va-checklist.md) — rà soát ảnh hưởng + bảo mật của K3/K8, kiểm thử
+   thực tế cô lập bằng cửa hàng demo (kèm cách hoàn tác), checklist thao tác Meta của chủ shop.
 
 ## Thứ tự làm
 

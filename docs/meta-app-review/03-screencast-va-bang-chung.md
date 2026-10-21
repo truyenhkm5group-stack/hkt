@@ -1,5 +1,8 @@
 # 03 — Kịch bản quay màn hình và bằng chứng
 
+> **Từ 17/10/2026 quay theo [05 §2](05-kiem-toan-ho-so-17-10.md#2-bộ-video-thay-thế--mỗi-quyền-một-video)** — bốn video, mỗi quyền
+> một video, kèm điều kiện trước khi quay. Bảng cảnh dưới đây giữ làm tham chiếu; phần §2 (bằng chứng / log) vẫn dùng.
+
 Meta xem video để thấy từng quyền được DÙNG ở đâu trong app. Giao diện ERP là tiếng Việt ⇒ **thêm phụ đề / chú thích tiếng Anh**
 cho từng cảnh (hoặc lời đọc tiếng Anh). Quay liền một mạch, độ phân giải ≥ 720p, MP4, không cắt giữa thao tác; con trỏ chuột
 thấy rõ. Che mọi mật khẩu, token, verify token trên màn hình (khối «Người vận hành nền tảng» KHÔNG được xuất hiện).

@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { disableOrgConnection, setOrganizationSuspended, setWorkflowsPaused, type KillSwitchResult } from "@/lib/platform/kill-switches";
 import { setOrganizationBrand } from "@/lib/platform/org-brand";
 import { setOrganizationPlan } from "@/lib/platform/org-plan";
+import { setDirectConnectOpen, type SetDirectConnectResult } from "@/lib/platform/direct-connect-flag";
 import { confirmPilotUat, setPilotStage, type PilotWriteResult } from "@/lib/platform/pilot";
 
 /**
@@ -66,5 +67,19 @@ export async function setOrgBrandAction(input: { orgCode: string; brand: string;
   const user = await requirePermission("platform:operate");
   const r = await setOrganizationBrand(user, input);
   if ("ok" in r && r.changed) refresh(input?.orgCode);
+  return r;
+}
+
+/**
+ * Cờ «Nối thẳng Facebook» (`meta.direct-connect.open`) — mở cho đúng cửa hàng dựng cho người duyệt Meta App Review. Lõi kiểm lại
+ * người vận hành, lý do, mã cửa hàng và ghi nhật ký nền tảng; các trang đọc cờ ở lượt dựng kế tiếp.
+ */
+export async function setDirectConnectOpenAction(input: { mode: string; orgCodes: string; reason: string }): Promise<SetDirectConnectResult> {
+  const user = await requirePermission("platform:operate");
+  const r = await setDirectConnectOpen(user, input);
+  if ("ok" in r && r.changed) {
+    revalidatePath("/platform");
+    for (const p of ["/ai/sales-chatbot/messenger", "/ai/sales-chatbot", "/ai/channels"]) revalidatePath(p);
+  }
   return r;
 }

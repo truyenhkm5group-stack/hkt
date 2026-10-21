@@ -14,6 +14,7 @@
  * Client-safe: hằng số thuần + một hàm lọc thuần (không đọc CSDL).
  */
 import type { Permission } from "@/lib/auth/permissions";
+import { DIRECT_CONNECT_OPEN_COPY } from "@/lib/channels/direct-connect-shared";
 import { SERVICE_COMMITMENTS } from "@/lib/constants/company";
 import { SALES_AGENT_NAV, salesAgentPathAllowed } from "@/lib/constants/saas-nav";
 import { hrefVisible, type ModuleViewer } from "@/lib/platform-ui/module-visibility";
@@ -56,7 +57,15 @@ export type HelpStep = {
    */
   shellText?: string;
   href?: string;
+  /** Bước nhắc nối thẳng Facebook: câu ở `text` là bản «sắp mở»; cổng mở ⇒ `helpGuideForDirectConnect` thay bằng câu chỉ đường thật. */
+  directConnect?: true;
 };
+
+/** Cổng nối thẳng Facebook mở cho người đọc (`directConnectFor`) ⇒ bước đánh dấu `directConnect` đọc câu chỉ đường thật. */
+export function helpGuideForDirectConnect(guide: HelpGuide, open: boolean): HelpGuide {
+  if (!open || !guide.steps.some((s) => s.directConnect)) return guide;
+  return { ...guide, steps: guide.steps.map((s) => (s.directConnect ? { ...s, text: DIRECT_CONNECT_OPEN_COPY.helpStep, shellText: undefined } : s)) };
+}
 
 /** Câu người đọc THẤY ở bước này: trong vỏ ⇒ `shellText` nếu có, còn lại `text`. */
 export function helpStepText(step: HelpStep, shell: boolean): string {
@@ -109,7 +118,7 @@ export const HELP_GUIDES: readonly HelpGuide[] = [
       { text: "Fanpage qua Pancake: mở trang Kết nối, mục «Fanpage qua Pancake», nhập mã trang và mã truy cập của page (lấy trong Pancake → Cài đặt page → Công cụ), rồi Lưu → Kiểm tra → Bật.", href: "/settings/connections" },
       { text: "Trong Pancake: dán địa chỉ nhận tin của shop vào phần cài đặt nhận tin của page — làm theo từng bước trên thẻ «Fanpage (qua Pancake)» ở AI Sales.", href: "/ai/sales-chatbot" },
       { text: "Không dùng Pancake: nối Zalo OA ở trang Kết nối, hoặc gắn ô chat lên website (thẻ «Trang chat công khai» trên AI Sales)." },
-      { text: "Nối thẳng Facebook (không qua Pancake) đang chờ Facebook duyệt quyền — sắp mở.", href: "/ai/channels" },
+      { text: "Nối thẳng Facebook (không qua Pancake) đang chờ Facebook duyệt quyền — sắp mở.", href: "/ai/channels", directConnect: true },
     ],
   },
   {
