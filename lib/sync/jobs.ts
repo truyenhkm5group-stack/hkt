@@ -78,6 +78,7 @@ import { backfillMessengerProfiles, PROFILE_BACKFILL_LIMITS, sweepStaleMessenger
 import { runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { resumeInboxHistory } from "@/lib/sales-chatbot/history";
 import { sendReorderDigest } from "@/lib/reorder/digest";
+import { runSalesQualityDaily, salesQualitySummary } from "@/lib/sales-quality/daily";
 import { learnLessons } from "@/lib/sales-chatbot/lessons";
 import { autoLearnQuickReplies } from "@/lib/sales-chatbot/quick-replies-learn";
 import { refreshConversationLevels } from "@/lib/sales-chatbot/levels";
@@ -934,7 +935,10 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         const usage = await runAiCustomerUsageAlerts();
         // Số dư AI thấp / hết (docs/saas/AI_BALANCE_V1.md) — cùng lịch, một chuông mỗi mức mỗi ngày.
         const balance = await runAiBalanceAlerts();
-        ctx.summary.detail = `${r.status} · ${r.alerted} · ${r.health.headline} · ${mirror}${owText}${hoText}${usage.sent ? ` · báo ngưỡng khách AI ${usage.sent}` : ""}${balance.sent ? ` · báo số dư AI ${balance.sent}` : ""}`.slice(0, 900);
+        // Giám sát CHẤT LƯỢNG hằng ngày (2B · lib/sales-quality/daily.ts) — ké đúng lịch này: một lượt / tổ chức / ngày từ 7 giờ, các
+        // lượt 5 phút khác chỉ đọc một khoá settings rồi thoát. Không ném.
+        const quality = salesQualitySummary(await runSalesQualityDaily());
+        ctx.summary.detail = `${r.status} · ${r.alerted} · ${r.health.headline} · ${mirror}${owText}${hoText}${usage.sent ? ` · báo ngưỡng khách AI ${usage.sent}` : ""}${balance.sent ? ` · báo số dư AI ${balance.sent}` : ""}${quality}`.slice(0, 900);
         if (r.status === "RED") ctx.summary.warning = r.health.headline.slice(0, 500);
         return { status: r.status, alerted: r.alerted, health: r.health, mirror };
       }),
