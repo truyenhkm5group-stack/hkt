@@ -53,6 +53,19 @@ export function parseOrgCodeList(text: string): { codes: string[]; invalid: stri
   return { codes: parts.filter(ok), invalid: parts.filter((c) => !ok(c)) };
 }
 
+/**
+ * CÂU CHỮ KHI CỔNG MỞ — một chỗ cho mọi nơi khách đọc về nối thẳng Facebook (trang giới thiệu công khai, Hướng dẫn, Kênh kết nối).
+ * Cổng đóng ⇒ mỗi nơi giữ nguyên câu «sắp mở» của mình (bài kiểm câu chữ đọc thẳng câu đó); cổng mở ⇒ đọc câu ở đây. Ai được
+ * xem câu «mở» do `directConnectAllowed` quyết (đăng nhập: `directConnectFor`; trang công khai: `directConnectPublic` — cùng luật,
+ * không có nhánh thứ hai). Pancake vẫn là MỘT lựa chọn, không bị gạch đi: shop đang chạy qua Pancake không phải đổi gì.
+ */
+export const DIRECT_CONNECT_OPEN_COPY = {
+  channelsHint: " Hoặc nối thẳng Facebook (không qua Pancake): bấm «Kết nối Facebook Page» ngay bên dưới.",
+  helpStep: "Nối thẳng Facebook (không qua Pancake): mở Kênh kết nối, bấm «Kết nối Facebook Page», đăng nhập tài khoản quản trị page, giữ BẬT mọi quyền và chọn page.",
+  siteStep: "Fanpage nối thẳng Facebook bằng một nút «Kết nối Facebook Page», hoặc qua Pancake (dán mã trang và mã truy cập ở trang Kết nối). Không dùng fanpage thì gắn ô chat lên website hoặc nối Zalo OA.",
+  siteFaq: "Một fanpage Facebook — nối thẳng bằng một nút hoặc qua Pancake — hoặc ô chat trên website / Zalo OA. Mỗi gói có sẵn hạn mức AI hằng tháng — không phải tự mua tài khoản AI.",
+} as const;
+
 /** Người này có được thấy nút nối thẳng Facebook THẬT không. */
 export function directConnectAllowed(input: { operator: boolean; open: DirectConnectOpen; orgCode: string | null | undefined }): boolean {
   if (input.operator) return true;

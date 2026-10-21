@@ -33,7 +33,7 @@ import type { CustomerIssue } from "@/lib/integrations/messenger/permission-guid
 import { CUSTOMER_WEBHOOK_TEXT } from "@/lib/integrations/messenger/permission-guide";
 import type { WebhookState } from "@/lib/integrations/messenger/graph";
 import { vnShortStamp } from "@/lib/format";
-import { DIRECT_CONNECT_SOON_LABEL } from "@/lib/channels/direct-connect-shared";
+import { DIRECT_CONNECT_OPEN_COPY, DIRECT_CONNECT_SOON_LABEL } from "@/lib/channels/direct-connect-shared";
 import { cn } from "@/lib/utils";
 import { recheckMessengerWebhooksAction } from "../sales-chatbot/messenger/actions";
 
@@ -372,7 +372,7 @@ export function ChannelsPanel({ rows, appReady, botEnabled, manage, operator, di
                   <Link href="/settings/connections" className="font-medium text-primary hover:underline">
                     nối ở trang Kết nối
                   </Link>
-                  . Nối thẳng Facebook (không qua Pancake) sắp mở.
+                  .{directConnect ? DIRECT_CONNECT_OPEN_COPY.channelsHint : " Nối thẳng Facebook (không qua Pancake) sắp mở."}
                 </>
               ) : (
                 "Cần quản trị cửa hàng kết nối Page."

@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { directConnectPublic } from "@/lib/channels/direct-connect";
+import { DIRECT_CONNECT_OPEN_COPY } from "@/lib/channels/direct-connect-shared";
 import localFont from "next/font/local";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -294,6 +296,16 @@ const START_STEPS = [
   { title: "Kết nối kênh bán hàng", text: "Fanpage nối qua Pancake: dán mã trang và mã truy cập Pancake ở trang Kết nối. Không dùng Pancake thì gắn ô chat lên website hoặc nối Zalo OA. Nối thẳng Facebook (không qua Pancake) sắp mở." },
   { title: "Bật trợ lý", text: "Một nút. AI có sẵn trong gói — không phải tự mua tài khoản AI." },
 ];
+
+/** Bước «Kết nối kênh bán hàng»: câu ở START_STEPS là bản «sắp mở»; cổng mở cho mọi cửa hàng ⇒ câu chỉ đường thật. */
+function startSteps(directOpen: boolean) {
+  return directOpen ? START_STEPS.map((s) => (s.title === "Kết nối kênh bán hàng" ? { ...s, text: DIRECT_CONNECT_OPEN_COPY.siteStep } : s)) : START_STEPS;
+}
+
+/** FAQ «Cần những gì để chạy?»: câu trong `faqs` là bản «sắp mở»; cổng mở cho mọi cửa hàng ⇒ câu chỉ đường thật. */
+function siteFaqs(chotdon: boolean, directOpen: boolean): { q: string; a: string }[] {
+  return faqs(chotdon).map((f) => (directOpen && f.q === "Cần những gì để chạy?" ? { ...f, a: DIRECT_CONNECT_OPEN_COPY.siteFaq } : f));
+}
 
 function faqs(chotdon = false): { q: string; a: string }[] {
   const extra = chotdon
@@ -791,6 +803,8 @@ export default async function SitePage({ searchParams }: PageProps) {
   const brand = await pageBrand(searchParams);
   const chotdon = brand === "chotdon";
   const base = await getPublicSiteData();
+  // Nối thẳng Facebook: chỉ đổi chữ khi cờ mở cho MỌI cửa hàng (lib/channels/direct-connect.ts::directConnectPublic).
+  const directOpen = await directConnectPublic();
   /*
     Bản Chốt Đơn dẫn vào PHẦN MỀM của chính nó (`app.chotdontudong.com`) — đăng ký ở đó tự chọn sẵn «Chỉ cần AI bán hàng»
     (lib/onboarding/quick-shared.ts `initialQuickBusinessType`). Không xác định được gốc ⇒ giữ lối vào gốc, không đoán.
@@ -1246,7 +1260,7 @@ export default async function SitePage({ searchParams }: PageProps) {
               text="Tự làm được, không cần chờ đội triển khai."
             />
             <ol className="mx-auto mt-14 grid max-w-6xl gap-5 md:grid-cols-3">
-              {START_STEPS.map((s, i) => (
+              {startSteps(directOpen).map((s, i) => (
                 <li key={s.title} className="relative rounded-3xl border border-border/70 bg-card p-7">
                   <span className={`${SERIF} text-5xl font-bold text-brand/25 tabular-nums`}>{String(i + 1).padStart(2, "0")}</span>
                   <h3 className={`${SERIF} mt-2 text-2xl font-bold`}>{s.title}</h3>
@@ -1288,7 +1302,7 @@ export default async function SitePage({ searchParams }: PageProps) {
           <div className="relative mx-auto w-full max-w-3xl px-4 sm:px-6">
             <SectionHead eyebrow="Hỏi đáp" title="Câu hỏi thường gặp" />
             <div className="mt-10 space-y-3">
-              {faqs(chotdon).map((f) => (
+              {siteFaqs(chotdon, directOpen).map((f) => (
                 <details key={f.q} className="group rounded-2xl border border-border/70 bg-card p-5 [&_summary::-webkit-details-marker]:hidden">
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-semibold">
                     {f.q}

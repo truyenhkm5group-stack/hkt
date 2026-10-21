@@ -4,7 +4,8 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { can, requireUser } from "@/lib/auth/session";
 import { COMPANY } from "@/lib/constants/company";
-import { HELP_FAQ, HELP_GUIDES, HELP_TOPIC_ORDER, helpAudienceMatches, helpGuideVisible, helpStepText, helpTopicLabel } from "@/lib/constants/help-guides";
+import { directConnectFor } from "@/lib/channels/direct-connect";
+import { HELP_FAQ, HELP_GUIDES, HELP_TOPIC_ORDER, helpAudienceMatches, helpGuideForDirectConnect, helpGuideVisible, helpStepText, helpTopicLabel } from "@/lib/constants/help-guides";
 import { isSalesAgentUser } from "@/lib/constants/saas-nav";
 
 export const metadata = { title: "Hướng dẫn sử dụng" };
@@ -19,7 +20,9 @@ export default async function HelpPage() {
   // Vỏ Chốt Đơn: chỉ bài viết cho vỏ (gọi đúng tên menu của vỏ, mọi link mở được); ngoài vỏ: bài của ERP như cũ.
   const shell = isSalesAgentUser(user);
   const viewer = { modules: user.modules, isHome: user.organization?.isHome ?? true, shell };
-  const guides = HELP_GUIDES.filter((g) => helpGuideVisible(g, viewer, (p) => can(user, p)));
+  // Nối thẳng Facebook: câu «sắp mở» hay câu chỉ đường thật — cùng cổng với nút (lib/channels/direct-connect.ts).
+  const directConnect = await directConnectFor(user);
+  const guides = HELP_GUIDES.filter((g) => helpGuideVisible(g, viewer, (p) => can(user, p))).map((g) => helpGuideForDirectConnect(g, directConnect));
   const faq = HELP_FAQ.filter((f) => helpAudienceMatches(f.audience, shell));
   const topics = HELP_TOPIC_ORDER.map((t) => ({ topic: t, items: guides.filter((g) => g.topic === t) })).filter((x) => x.items.length > 0);
 

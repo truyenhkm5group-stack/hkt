@@ -12,6 +12,8 @@
  *  4. ĐƯỜNG GHI cờ (`setDirectConnectOpen`, đóng MM-FU-712 — cửa hàng cho người duyệt Meta App Review): chỉ người vận hành, bắt
  *     buộc lý do, mã cửa hàng phải có thật + đang hoạt động + không phải nhà, có nhật ký `FLAG_SET`; mở cho cửa hàng A KHÔNG mở
  *     cho cửa hàng B.
+ *  5. CÂU CHỮ theo cổng (M1, 21/10/2026): ba chỗ từng ghi cứng «sắp mở» (trang giới thiệu, Hướng dẫn, Kênh kết nối) đọc cổng.
+ *     Cổng đóng ⇒ câu cũ còn nguyên; chỉ cờ = mọi cửa hàng mới đổi chữ ở trang CÔNG KHAI (cờ danh sách không đổi).
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -21,7 +23,9 @@ import { getPlatformDb, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { getHomeOrganization } from "@/lib/platform/organizations";
 import { readDirectConnectOpen, setDirectConnectOpen } from "@/lib/platform/direct-connect-flag";
-import { DIRECT_CONNECT_MAX_ORGS, DIRECT_CONNECT_OPEN_KEY, DIRECT_CONNECT_SOON_LABEL, directConnectAllowed, directConnectModeOf, parseDirectConnectOpen, parseOrgCodeList } from "@/lib/channels/direct-connect-shared";
+import { directConnectPublic } from "@/lib/channels/direct-connect";
+import { HELP_GUIDES, helpGuideForDirectConnect, helpStepText } from "@/lib/constants/help-guides";
+import { DIRECT_CONNECT_MAX_ORGS, DIRECT_CONNECT_OPEN_COPY, DIRECT_CONNECT_OPEN_KEY, DIRECT_CONNECT_SOON_LABEL, directConnectAllowed, directConnectModeOf, parseDirectConnectOpen, parseOrgCodeList } from "@/lib/channels/direct-connect-shared";
 
 const stripComments = (src: string) => src.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
@@ -157,6 +161,7 @@ export async function testDirectConnectWrite() {
     // Mở cho ĐÚNG cửa hàng duyệt: cờ dạng danh sách + một dòng nhật ký có trước / sau / lý do / người.
     const ok = await setDirectConnectOpen(operator, { mode: "ORGS", orgCodes: "dc-review-demo", reason: "Cửa hàng cho người duyệt Meta App Review" });
     assert.deepEqual(ok, { ok: true, changed: true, open: ["dc-review-demo"] });
+    assert.equal(await directConnectPublic(), false, "cờ danh sách KHÔNG đổi chữ trên trang công khai");
     assert.deepEqual(await readDirectConnectOpen(), ["dc-review-demo"]);
     const log = (await audits()).slice(n0);
     assert.equal(log.length, 1, "một lượt đổi = một dòng nhật ký");
@@ -180,13 +185,51 @@ export async function testDirectConnectWrite() {
     // Đóng ⇒ cửa hàng duyệt cũng «sắp mở»; ALL ⇒ mọi khách thấy nút.
     const closed = await setDirectConnectOpen(operator, { mode: "CLOSED", orgCodes: "", reason: "Meta trả hồ sơ, đóng lại" });
     assert.deepEqual(closed, { ok: true, changed: true, open: false });
+    assert.equal(await directConnectPublic(), false, "cờ đóng ⇒ trang công khai vẫn «sắp mở»");
     assert.equal(directConnectAllowed({ operator: false, open: await readDirectConnectOpen(), orgCode: "dc-review-demo" }), false, "đóng ⇒ cửa hàng duyệt cũng thấy «sắp mở»");
     const all = await setDirectConnectOpen(operator, { mode: "ALL", orgCodes: "dc-bo-qua", reason: "Meta đã duyệt Advanced Access" });
     assert.deepEqual(all, { ok: true, changed: true, open: true }, "ALL bỏ qua ô mã cửa hàng");
+    assert.equal(await directConnectPublic(), true, "cờ mọi cửa hàng ⇒ trang công khai đổi sang câu chỉ đường thật");
   } finally {
     await pdb.delete(schema.platformSettings).where(eq(schema.platformSettings.key, DIRECT_CONNECT_OPEN_KEY));
     if (truoc) await pdb.insert(schema.platformSettings).values({ key: truoc.key, value: truoc.value, updatedBy: truoc.updatedBy, updatedByEmail: truoc.updatedByEmail });
     await dropOrgs();
   }
   console.log("  ✓ đường ghi cờ nối thẳng Facebook: chỉ người vận hành · lý do bắt buộc · mã cửa hàng có thật / hoạt động / không phải nhà · nhật ký FLAG_SET · mở cho cửa hàng duyệt không mở cho khách khác");
+}
+
+/** 5. Câu chữ khách đọc đi theo cổng — không còn chỗ nào ghi cứng «sắp mở» ngoài bản của trạng thái đóng. */
+export function testDirectConnectCopy() {
+  for (const [k, t] of Object.entries(DIRECT_CONNECT_OPEN_COPY)) {
+    assert.doesNotMatch(t, /sắp mở|chờ (Meta|Facebook) duyệt/i, `${k}: câu của cổng MỞ không được còn «sắp mở»`);
+  }
+  assert.match(DIRECT_CONNECT_OPEN_COPY.siteStep, /Pancake/, "trang giới thiệu: Pancake vẫn là một lựa chọn");
+  assert.match(DIRECT_CONNECT_OPEN_COPY.siteFaq, /Pancake/, "FAQ: Pancake vẫn là một lựa chọn");
+
+  // Hướng dẫn: cổng đóng ⇒ bài giữ NGUYÊN đối tượng (câu «sắp mở»); mở ⇒ đúng bước đánh dấu đổi câu.
+  const marked = HELP_GUIDES.filter((g) => g.steps.some((st) => st.directConnect));
+  assert.ok(marked.length >= 1, "có bài Hướng dẫn nhắc nối thẳng Facebook được đánh dấu");
+  for (const g of marked) {
+    assert.equal(helpGuideForDirectConnect(g, false), g, `${g.key}: cổng đóng ⇒ không đổi gì`);
+    const open = helpGuideForDirectConnect(g, true);
+    const st = open.steps.find((x) => x.directConnect)!;
+    assert.equal(helpStepText(st, true), DIRECT_CONNECT_OPEN_COPY.helpStep, `${g.key}: cổng mở ⇒ câu chỉ đường thật (cả trong vỏ)`);
+    assert.ok(g.steps.find((x) => x.directConnect)!.text.includes("sắp mở"), `${g.key}: bản gốc vẫn là câu «sắp mở»`);
+  }
+  for (const g of HELP_GUIDES) {
+    for (const st of g.steps) if (!st.directConnect) assert.doesNotMatch(st.text, /thẳng Facebook[^.]*sắp mở/, `${g.key}: câu «sắp mở» về nối thẳng phải mang cờ directConnect`);
+  }
+
+  // Ba nơi dựng đọc cổng ở máy chủ, không tự suy.
+  const help = stripComments(readFileSync("app/(dashboard)/help/page.tsx", "utf8"));
+  assert.match(help, /directConnectFor\(user\)/, "/help: cổng đọc qua directConnectFor(user)");
+  assert.match(help, /helpGuideForDirectConnect\(g, directConnect\)/, "/help: bài Hướng dẫn đi qua helpGuideForDirectConnect");
+  const site = stripComments(readFileSync("app/gioi-thieu/page.tsx", "utf8"));
+  assert.match(site, /await directConnectPublic\(\)/, "trang giới thiệu: cổng đọc qua directConnectPublic()");
+  assert.match(site, /startSteps\(directOpen\)/, "trang giới thiệu: bước kết nối đi theo cổng");
+  assert.match(site, /siteFaqs\(chotdon, directOpen\)/, "trang giới thiệu: FAQ đi theo cổng");
+  assert.doesNotMatch(site, /\{START_STEPS\.map\(/, "trang giới thiệu: không vẽ thẳng START_STEPS nữa");
+  const panel = stripComments(readFileSync("app/(dashboard)/ai/channels/channels-panel.tsx", "utf8"));
+  assert.match(panel, /directConnect \? DIRECT_CONNECT_OPEN_COPY\.channelsHint : " Nối thẳng Facebook \(không qua Pancake\) sắp mở\."/, "Kênh kết nối: câu đi theo cổng");
+  console.log("  ✓ câu chữ nối thẳng Facebook đi theo cổng: đóng ⇒ «sắp mở» như cũ · cờ danh sách không đổi trang công khai · mở cho mọi cửa hàng ⇒ chỉ đường thật, Pancake vẫn là lựa chọn");
 }
