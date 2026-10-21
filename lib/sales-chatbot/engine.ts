@@ -737,8 +737,8 @@ export type FailoverUsage = {
 };
 
 /** Phần QUAN SÁT của một lời gọi cho sổ AI (0231) — không đổi token / tiền tính phí. */
-export function usageDetail(res: { usage: AiUsage; latencyMs: number }): { cachedTokens: number; thinkingTokens: number | null; latencyMs: number } {
-  return { cachedTokens: res.usage.cacheReadTokens, thinkingTokens: res.usage.thoughtTokens ?? null, latencyMs: res.latencyMs };
+export function usageDetail(res: { usage: AiUsage; latencyMs: number }): { cachedTokens: number; cacheWriteTokens: number; thinkingTokens: number | null; latencyMs: number } {
+  return { cachedTokens: res.usage.cacheReadTokens, cacheWriteTokens: res.usage.cacheWriteTokens, thinkingTokens: res.usage.thoughtTokens ?? null, latencyMs: res.latencyMs };
 }
 
 /** MỘT khoá AI (chính hoặc dự phòng) ⇒ provider. Bài kiểm thay được qua `providerOverride` (nhận cấu hình mang khoá đó). */
@@ -1658,11 +1658,11 @@ async function chatTurnCore(
     // ⇒ mỗi đoạn liền một nhà cung cấp là MỘT dòng, để tiền không ghi nhầm nguồn trả (BYOK ≠ credit gói). Không đổi khoá ⇒
     // đúng một dòng như trước.
     // `think` / `cached` / `lat` chỉ để QUAN SÁT (0231): token suy nghĩ ⊂ token ra; `null` khi nhà cung cấp không tách.
-    type Segment = { idx: number; name: string; source: AiBillingSource; model: string; calls: number; inTok: number; outTok: number; cost: number | null; think: number | null; cached: number; lat: number };
+    type Segment = { idx: number; name: string; source: AiBillingSource; model: string; calls: number; inTok: number; outTok: number; cost: number | null; think: number | null; cached: number; cacheWrite: number; lat: number };
     let segCount = 0;
-    const newSegment = (): Segment => ({ idx: segCount++, name: prov.provider.name, source: prov.source, model: prov.provider.model, calls: 0, inTok: 0, outTok: 0, cost: 0, think: 0, cached: 0, lat: 0 });
+    const newSegment = (): Segment => ({ idx: segCount++, name: prov.provider.name, source: prov.source, model: prov.provider.model, calls: 0, inTok: 0, outTok: 0, cost: 0, think: 0, cached: 0, cacheWrite: 0, lat: 0 });
     let seg = newSegment();
-    const recordSegment = (s: Segment, st: "OK" | "ERROR") => recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: s.source, provider: s.name, model: s.model, requests: s.calls, inputTokens: s.inTok, outputTokens: s.outTok, costUsd: s.calls ? s.cost : null, status: st, ...(st === "ERROR" ? { errorClass } : {}), actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id, workload: "sales_chatbot", eventKey: aiCallKey({ workload: "sales_chatbot", scope: conv.id, turn: turnSeq, round: s.idx }), cachedTokens: s.calls ? s.cached : null, thinkingTokens: s.calls ? s.think : null, latencyMs: s.calls ? s.lat : null }).catch(() => undefined);
+    const recordSegment = (s: Segment, st: "OK" | "ERROR") => recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: s.source, provider: s.name, model: s.model, requests: s.calls, inputTokens: s.inTok, outputTokens: s.outTok, costUsd: s.calls ? s.cost : null, status: st, ...(st === "ERROR" ? { errorClass } : {}), actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id, workload: "sales_chatbot", eventKey: aiCallKey({ workload: "sales_chatbot", scope: conv.id, turn: turnSeq, round: s.idx }), cachedTokens: s.calls ? s.cached : null, cacheWriteTokens: s.calls ? s.cacheWrite : null, thinkingTokens: s.calls ? s.think : null, latencyMs: s.calls ? s.lat : null }).catch(() => undefined);
     try {
       for (let round = 0; round < SALES_CHATBOT_LIMITS.toolRounds; round++) {
         // Mức suy nghĩ theo cấu hình (Kỹ = suy luận vừa, Nhanh = thấp) — ngân sách đủ rộng để phần suy luận không ăn hết câu
@@ -1689,6 +1689,7 @@ async function chatTurnCore(
         seg.cost = seg.cost === null || c === null ? null : seg.cost + c;
         seg.think = seg.think === null || res.usage.thoughtTokens === undefined ? null : seg.think + res.usage.thoughtTokens;
         seg.cached += res.usage.cacheReadTokens;
+        seg.cacheWrite += res.usage.cacheWriteTokens;
         seg.lat += res.latencyMs;
         // Model trả RỖNG (P0 14/10/2026, ca «Viet Nguyen Thi»): trước đây chèn «nói rõ hơn» ở MỌI vòng — kể cả vòng sau câu upsell /
         // đơn nháp đã gửi. Nay vòng rỗng KẾT THÚC lượt; câu cho khách (nếu lượt chưa nói gì) do khối «KHÔNG ĐỂ KHÁCH IM» quyết.

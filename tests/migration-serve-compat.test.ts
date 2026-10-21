@@ -90,7 +90,8 @@ function testSource() {
   const keys = Object.entries(schema)
     .filter(([, t]) => is(t, Table) && serveCompatAvoidColumns(getTableName(t as Table)).size > 0)
     .map(([k]) => k);
-  assert.deepEqual(keys, ["salesChatConversations"], "bảng bị thêm cột bởi mục tương thích");
+  // 0253 thêm platform_ai_usage.cache_write_tokens — đường ghi duy nhất là câu chèn liệt kê cột (lib/ai-usage/ledger.ts).
+  assert.deepEqual([...keys].sort(), ["platformAiUsage", "salesChatConversations"], "bảng bị thêm cột bởi mục tương thích");
   const pham: string[] = [];
   for (const f of files) {
     const src = readFileSync(f, "utf8");

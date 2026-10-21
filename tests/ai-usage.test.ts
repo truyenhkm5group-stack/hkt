@@ -121,7 +121,8 @@ function testSourceScan() {
     for (const e of readdirSync(path.join(process.cwd(), dir), { withFileTypes: true })) {
       const p = `${dir}/${e.name}`;
       if (e.isDirectory()) walk(p);
-      else if (/\.tsx?$/.test(e.name) && /insert\(\s*schema\.platformAiUsage\b/.test(src(p))) writers.push(p);
+      // Đường ghi: drizzle `insert(schema.platformAiUsage)` HOẶC câu SQL chèn liệt kê cột (0253 — serve-compat); cả hai chỉ ở ledger.ts.
+      else if (/\.tsx?$/.test(e.name) && (/insert\(\s*schema\.platformAiUsage\b/.test(src(p)) || /insert\s+into\s+"?platform_ai_usage"?/i.test(src(p)))) writers.push(p);
     }
   };
   walk("lib");
