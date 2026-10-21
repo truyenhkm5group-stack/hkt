@@ -1,0 +1,8 @@
+{
+  "pr": 962,
+  "sha": "a1ca081da8668301ddfbd21dc1e7c3dd77310fa6",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T22:36:51.514Z",
+  "note": "review lead: lib chỉ tách collectHandoffFacts(db, now) khỏi collectHandoffUnanswered — cùng câu SQL aiSilentSql, cùng handoffReplyClass, hành vi 2B không đổi. Script A2 đọc ĐÚNG hàm đó bằng handle chỉ đọc của tổ chức (không chép điều kiện), in ba dòng (a)/(b)/(c) ≤ 300 ký tự cho A2[cũ] và A2[/work] + phần giao/lệch; mã hội thoại chỉ ở console (mã hoá); image thiếu hàm ⇒ CHƯA ĐO ĐƯỢC. Chỉ dùng được"
+}
