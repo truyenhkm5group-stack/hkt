@@ -1,0 +1,8 @@
+{
+  "pr": 944,
+  "sha": "8b8e9ccd82dbb23844d9b0679e976e583fef0a59",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T07:44:18.635Z",
+  "note": "review lead: ngưỡng chủ shop duyệt 21/10 khai MỘT chỗ (lib/constants/messenger-webhook-alerts.ts): ORG_LOOKUP_FAILED ≥1/24h, SIGNATURE ≥21 (=>20)/24h; hàm thuần messengerWebhookAlertsDue; kiểm ngay sau lượt ghi sổ, trần 1 lượt/phút mỗi (nguồn, lý do), lỗi kiểm không làm hỏng lượt ghi, webhook không đợi. Giao: notifications SYSTEM critical dedupe theo ngày giờ VN ở tổ chức nhà + hộp thư người có pl"
+}
