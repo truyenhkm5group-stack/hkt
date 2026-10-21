@@ -1,0 +1,8 @@
+{
+  "pr": 959,
+  "sha": "48cd27f63ff92005f9b30b028bb489d85ce37a5a",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T19:57:10.582Z",
+  "note": "review lead: r2 = 2c1b940c (đã duyệt PASS trên #958) + gộp main 0288397f do tác giả làm. engine.ts so với 2c1b940c chỉ khác đúng các dòng cache_write của #956 (usageDetail, Segment, newSegment, recordSegment); khối máy chủ thêm món nguyên vẹn; 8 lần cacheWriteTokens bằng main. Gộp sạch với main 67a7f74 (sau #957). tsc 0, TEST_KHOI K21/K23 ĐẠT theo tác giả; CI gates chạy lại trên PR."
+}
