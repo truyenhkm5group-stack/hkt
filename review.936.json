@@ -1,8 +1,8 @@
 {
   "pr": 936,
-  "sha": "b5aee2dc7a8f093d9bd2c9be0580daba139e7e76",
+  "sha": "562c567a7417665977963dee4f5be7a2689cd09b",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-21T02:48:03.052Z",
-  "note": "review lead: (1) resolvePageOrganization chỉ 42P01 ⇒ null, lỗi CSDL khác ném ⇒ route 503 + log ORG_LOOKUP_FAILED ⇒ Meta gửi lại (idempotent theo mid) — hết mất tin khi CSDL nền tảng chập chờn; page lạ thật vẫn 200. (2) last_error loại TOKEN (190/102) ⇒ bỏ lượt AI (tin vẫn ở Hộp thư, nối lại chạy tiếp); PERMISSION cố ý không chặn (page #10 tự hồi). (3) upsert chỉ mục page đọc returning, 0 dòng ⇒ ho"
+  "at": "2026-10-21T05:53:52.393Z",
+  "note": "vòng 2: chỉ khai bài kiểm đọc env vào DOC_MOI_TRUONG_DA_KHAI (đặt app FB giả + gỡ cặp FACEBOOK_MESSENGER_APP_* làm đầu vào, trả nguyên trong finally — cùng lý do messenger-multipage); logic giữ nguyên như vòng 1 đã PASS."
 }
