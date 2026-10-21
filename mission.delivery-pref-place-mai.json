@@ -3,7 +3,7 @@
   "mission_id": "delivery-pref-place-mai",
   "title": "Địa danh có chữ «Mai» (Hoàng Mai, Mai Dịch) không còn bị đọc thành giao ngày mai",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-addr-mai",
@@ -23,7 +23,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-21T02:50:13.401Z",
-  "updated_at": "2026-10-21T02:50:13.401Z",
-  "last_heartbeat": "2026-10-21T02:50:13.401Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-21T06:42:24.503Z",
+  "last_heartbeat": "2026-10-21T06:42:24.503Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/delivery-pref-place-mai",
+    "sha": "7bd17098730afa605d5b6ceda2cd23d2bbd2d02c",
+    "at": "2026-10-21T06:42:24.503Z",
+    "actor": "DESKTOP-56TH98Y:wt-addr-mai",
+    "title": "Địa danh có chữ «Mai» (Hoàng Mai, Mai Dịch) không còn bị đọc thành giao ngày mai",
+    "summary": "«Hoàng Mai / Mai Dịch / Mai Động…» (tên nơi từ danh mục, có dấu trước, gập dấu trừ 6 tên trùng chữ chat) không còn là giao ngày mai; ghi chú hẹn giờ bỏ vế địa chỉ / SĐT",
+    "tests": [
+      "cổng cây sạch @ffbb13551: tsc 0 · lint 0 · npm test TẤT CẢ KIỂM THỬ ĐẠT · build 0",
+      "sau rebase lên main 91c9de9ab: tsc 0 · TEST_KHOI=K22 ĐẠT",
+      "đột biến 10/10 đỏ",
+      "đối chứng: bỏ bản sửa ⇒ ca hội thoại đỏ"
+    ]
+  }
 }
