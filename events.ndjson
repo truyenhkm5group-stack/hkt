@@ -1,4 +1,3 @@
-{"at":"2026-10-15T11:29:10.511Z","actor":"vm:hkt","kind":"OVERLAP_ACCEPTED","mission":"address-ward-explicit","detail":"OVERLAP_ACCEPTED với sticky-cart-intent: phạm vi lib/sales-chatbot/ ↔ lib/sales-chatbot/cart-commitment.ts — cách tích hợp: chỉ nâng ưu tiên, phạm vi không đổi"}
 {"at":"2026-10-15T11:29:10.511Z","actor":"vm:hkt","kind":"OVERLAP_ACCEPTED","mission":"address-ward-explicit","detail":"OVERLAP_ACCEPTED với sync-runner-lock: phạm vi .github/workflows/ ↔ .github/workflows/deploy-vps.yml, .github/workflows/ ↔ .github/workflows/agent-run.yml · điểm nóng SERIAL .github/ — cách tích hợp: chỉ nâng ưu tiên, phạm vi không đổi"}
 {"at":"2026-10-15T11:30:16.656Z","actor":"vm:hkt","kind":"MERGED","mission":"address-ward-explicit","detail":"#848 @ 01ad085152b4 → 48651de28ba0 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-15T12:31:53.529Z","actor":"vm:hkt","kind":"MERGED","mission":"test-timing-table","detail":"#849 @ 1db60af8c9b2 → f0cf923e4879 (MERGE_NOW · LOW · gates success)"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-21T14:50:42.626Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"594ccf4c6393 · run 39620343257 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39620343257"}
 {"at":"2026-10-21T15:07:23.415Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"ai-usage-ledger-complete","detail":"PASS 594ccf4c63933aab54a30035e60273551de51916 2026-10-21T15:06:56.730Z"}
 {"at":"2026-10-21T15:27:55.976Z","actor":"DESKTOP-56TH98Y:wt-known-cust","kind":"HANDOFF","mission":"known-customer-contact","detail":"claude/known-customer-contact @ 277788304e38 · 1 lệnh kiểm thử"}
+{"at":"2026-10-21T15:30:01.394Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"known-customer-contact","detail":"#955 cho claude/known-customer-contact @ 277788304e38"}

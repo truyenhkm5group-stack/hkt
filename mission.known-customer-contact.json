@@ -24,10 +24,12 @@
     "upsell-after-contact"
   ],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    955
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-21T10:04:53.584Z",
-  "updated_at": "2026-10-21T15:27:55.931Z",
+  "updated_at": "2026-10-21T15:30:01.356Z",
   "last_heartbeat": "2026-10-21T15:27:55.931Z",
   "definition_of_done": [],
   "handoff": {
