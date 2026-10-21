@@ -20,6 +20,7 @@ import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import { guardSecondApproval } from "@/lib/actions/approvals";
+import { listEmployees } from "@/lib/queries/payroll";
 import { withApprovalExecution } from "@/lib/approvals/execution";
 import { componentBasisKey, payrollInput, type PayrollCalcParams } from "@/lib/constants/payroll-components";
 import { policyActivationBlockers } from "@/lib/payroll/policy-validation";
@@ -28,7 +29,7 @@ import { DEFAULT_PAYROLL_CARRYOVER, PAYROLL_CARRYOVER_KEY, type PayrollCarryover
 import { DEFAULT_STATUTORY, STATUTORY_DEDUCTION_KEY, STATUTORY_STATES, type StatutoryConfig } from "@/lib/constants/payroll-statutory";
 import { DEFAULT_PAYROLL_RECOGNITION, PAYROLL_RECOGNITION_KEY, type PayrollRecognitionConfig } from "@/lib/queries/payroll-cost";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
-import { DEFAULT_PROFIT_GATE_CONFIG, PAYROLL_PROFIT_GATE_KEY, type ProfitGateConfig, type ProfitGateLedgerAdjustment, type ProfitGatePolicy } from "@/lib/constants/payroll-profit-gate";
+import { DEFAULT_PROFIT_GATE_CONFIG, PAYROLL_PROFIT_GATE_KEY, poolCapLabel, type ProfitGateConfig, type ProfitGateLedgerAdjustment, type ProfitGatePolicy } from "@/lib/constants/payroll-profit-gate";
 import { monthPeriodKey } from "@/lib/queries/payroll-profit-gate";
 import { randomUUID } from "node:crypto";
 import { getPolicyVersion, nextVersionNumber, overlappingActiveVersions, userNamesByIds } from "@/lib/queries/payroll-policies";
@@ -934,10 +935,27 @@ const profitGateSchema = z
     openingCumulative: z.coerce.number().int("Số dư lũy kế là số nguyên VND").min(-1e13).max(1e13),
     openingHighWater: z.coerce.number().int("Mốc cao nhất đã chia là số nguyên VND").min(0, "Mốc cao nhất đã chia không âm"),
     openingPaidBonus: z.coerce.number().int().min(0, "Thưởng đã chi không âm").default(0),
-    poolCapPercent: z.coerce.number().gt(0, "Quỹ thưởng tối đa phải lớn hơn 0%").max(100, "Quỹ thưởng tối đa không vượt 100% lợi nhuận đủ điều kiện"),
+    // Trống = không có trần chung (chỉ hợp lệ khi có lịch trần theo tháng) — KHÔNG phải 0%.
+    poolCapPercent: z.preprocess(
+      (v) => (v === "" || v === null || v === undefined ? null : v),
+      z.coerce.number().gt(0, "Quỹ thưởng tối đa phải lớn hơn 0%").max(100, "Quỹ thưởng tối đa không vượt 100% lợi nhuận đủ điều kiện").nullable(),
+    ),
+    poolCapSchedule: z
+      .array(
+        z.object({
+          fromMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Mốc trần phải dạng YYYY-MM"),
+          percent: z.coerce.number().gt(0, "Trần theo tháng phải lớn hơn 0%").max(100, "Trần theo tháng không vượt 100%"),
+        }),
+      )
+      .max(36)
+      .default([]),
+    residualClaimantId: z.preprocess((v) => (v === "" || v === null ? undefined : v), z.string().min(1).optional()),
     regulationRef: z.string().trim().min(3, "Ghi số hiệu / tên quy chế thưởng đang áp dụng").max(200),
     reason: z.string().trim().min(10, "Ghi căn cứ của số dư (biên bản đối soát, báo cáo tài chính…) — tối thiểu 10 ký tự").max(1000),
   })
+  .refine((v) => v.poolCapPercent !== null || v.poolCapSchedule.length > 0, { message: "Khai quỹ thưởng tối đa (một con số) hoặc lịch trần theo tháng", path: ["poolCapPercent"] })
+  .refine((v) => new Set(v.poolCapSchedule.map((m) => m.fromMonth)).size === v.poolCapSchedule.length, { message: "Lịch trần có hai mốc trùng tháng", path: ["poolCapSchedule"] })
+  .refine((v) => v.poolCapSchedule.every((m) => m.fromMonth >= v.openingMonth), { message: "Mốc trần không được trước tháng mở sổ", path: ["poolCapSchedule"] })
   .refine((v) => v.openingHighWater >= Math.max(0, v.openingCumulative), {
     message:
       "Mốc cao nhất đã chia phải ≥ max(0, lợi nhuận lũy kế). Khai mốc thấp hơn lũy kế là cho phép chia lại phần lãi trước mốc mở sổ — đúng thứ quy chế này sinh ra để chặn.",
@@ -952,6 +970,9 @@ export async function saveProfitGatePolicy(input: unknown): Promise<PolicyAction
     const parsed = profitGateSchema.safeParse(input);
     if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
     const d = parsed.data;
+    if (d.residualClaimantId && !(await listEmployees()).some((e) => e.id === d.residualClaimantId)) {
+      return { error: "Người nhận phần còn lại không có trong danh sách nhân sự của bảng lương" };
+    }
     const truoc = await getSettingJson<ProfitGateConfig>(PAYROLL_PROFIT_GATE_KEY, DEFAULT_PROFIT_GATE_CONFIG);
     const history = Array.isArray(truoc.history) ? truoc.history : [];
     const ban: ProfitGatePolicy = {
@@ -961,6 +982,8 @@ export async function saveProfitGatePolicy(input: unknown): Promise<PolicyAction
       openingHighWater: d.openingHighWater,
       openingPaidBonus: d.openingPaidBonus,
       poolCapPercent: d.poolCapPercent,
+      poolCapSchedule: [...d.poolCapSchedule].sort((x, y) => x.fromMonth.localeCompare(y.fromMonth)),
+      residualClaimant: d.residualClaimantId ? { employeeId: d.residualClaimantId } : null,
       regulationRef: d.regulationRef,
       reason: d.reason,
       approvedById: guard.id,
@@ -973,7 +996,7 @@ export async function saveProfitGatePolicy(input: unknown): Promise<PolicyAction
       action: "payroll.profit-gate.policy",
       entity: "SETTINGS",
       entityId: PAYROLL_PROFIT_GATE_KEY,
-      summary: `Quy chế chia thưởng lợi nhuận v${ban.version}: mở sổ ${ban.openingMonth}, lũy kế ${ban.openingCumulative.toLocaleString("vi-VN")} ₫, quỹ tối đa ${ban.poolCapPercent}% LN đủ điều kiện`,
+      summary: `Quy chế chia thưởng lợi nhuận v${ban.version}: mở sổ ${ban.openingMonth}, lũy kế ${ban.openingCumulative.toLocaleString("vi-VN")} ₫, quỹ tối đa ${poolCapLabel(ban)} LN đủ điều kiện${ban.residualClaimant ? ` · phần còn lại cho ${ban.residualClaimant.employeeId}` : ""}`,
       amount: null,
       payload: d,
     });

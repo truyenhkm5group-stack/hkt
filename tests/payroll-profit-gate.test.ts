@@ -23,7 +23,7 @@ import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
-import { DEFAULT_PROFIT_GATE_CONFIG, PAYROLL_PROFIT_GATE_KEY, PROFIT_GATE_LOSS_MESSAGE, isProfitLinked, isRegularVariable, type ProfitGatePolicy } from "@/lib/constants/payroll-profit-gate";
+import { DEFAULT_PROFIT_GATE_CONFIG, PAYROLL_PROFIT_GATE_KEY, PROFIT_GATE_LOSS_MESSAGE, isProfitLinked, isRegularVariable, poolCapLabel, poolCapPercentFor, type ProfitGatePolicy } from "@/lib/constants/payroll-profit-gate";
 import { payrollFinalizeBlockers } from "@/lib/constants/payroll-readiness";
 import {
   allocatePool,
@@ -218,6 +218,10 @@ function testPure() {
 
 /* ═══════════════════════ HÀNG RÀO MÃ NGUỒN ═══════════════════════ */
 function testSourceFences() {
+  const pol = readFileSync("lib/actions/payroll-policy.ts", "utf8");
+  for (const m of ["Lịch trần có hai mốc trùng tháng", "Mốc trần không được trước tháng mở sổ", "Khai quỹ thưởng tối đa (một con số) hoặc lịch trần theo tháng", "Người nhận phần còn lại không có trong danh sách nhân sự"]) {
+    assert.ok(pol.includes(m), `khai quy chế phải chặn: ${m}`);
+  }
   const doc = (p: string) => readFileSync(p, "utf8");
   // P&L của khách SaaS là pháp nhân khác: cổng chỉ đọc CSDL của tổ chức đang xem qua `getDb()`.
   for (const f of ["lib/payroll/profit-gate.ts", "lib/queries/payroll-profit-gate.ts", "lib/constants/payroll-profit-gate.ts"]) {
@@ -413,6 +417,24 @@ async function testFlow(db: Db) {
   assert.equal(tong, g2.allocatedTotal);
   for (const l of r2.lines) assert.equal(l.salary, (l.provisionalSalary ?? 0) - (l.profitShare.provisional ?? 0) + (l.profitShare.eligible ?? 0), "thực nhận được duyệt = tạm tính − thưởng LN tạm tính + phần đủ điều kiện");
 
+  /* ══ PHẦN CÒN LẠI (chủ shop 21/10/2026) trên luồng thật: A nhận phần còn lại, trần tháng 2 = 30% ══ */
+  const quyCheConLai: ProfitGatePolicy = { ...quyChe, version: 2, poolCapSchedule: [{ fromMonth: "2028-02", percent: 30 }], residualClaimant: { employeeId: A.id } };
+  await setSettingJson(PAYROLL_PROFIT_GATE_KEY, { active: quyCheConLai, history: [quyChe, quyCheConLai], adjustments: [dc1] });
+  clearMemo();
+  const rCl = await getPayrollReport(T2, "profit1");
+  const gCl = rCl.profitGate.result;
+  assert.deepEqual([gCl.poolCapPercent, gCl.poolCap], [30, Math.floor(E2 * 0.3)], "tháng 2 dùng trần CỦA THÁNG 2 trong lịch");
+  const khac = rCl.lines.filter((l) => l.employee.id !== A.id).reduce((t, l) => t + (l.profitShare.demand ?? 0), 0);
+  assert.ok(khac <= (gCl.poolCap ?? 0), "chuẩn bị: phần người khác dưới quỹ");
+  assert.equal(dong(rCl, A.id).profitShare.eligible, (gCl.poolCap ?? 0) - khac, "A nhận ĐÚNG quỹ − phần người khác");
+  assert.equal(gCl.allocatedTotal, gCl.poolCap, "tổng chia = đúng quỹ");
+  assert.ok(dong(rCl, A.id).profitShare.claims.some((c) => c.key === `${A.id}:SHOP` && c.eligible === 0), "35% riêng của A hiện, không trả riêng");
+  for (const l of rCl.lines) assert.equal(l.salary, (l.provisionalSalary ?? 0) - (l.profitShare.provisional ?? 0) + (l.profitShare.eligible ?? 0), "công thức thực nhận không đổi — phần còn lại đi qua đúng đường cũ");
+  const anhCl = buildPayrollSnapshot(rCl, T2, monthPeriodKey("2028-02"));
+  assert.deepEqual([anhCl.profitGate?.poolCapPercent, anhCl.profitGate?.residual?.employeeId, anhCl.profitGate?.residual?.othersDemand], [30, A.id, khac], "ảnh chụp kỳ ghi trần của tháng + người nhận + phần người khác ⇒ kỳ đã khoá tự giải thích");
+  await setSettingJson(PAYROLL_PROFIT_GATE_KEY, { active: quyChe, history: [quyChe], adjustments: [dc1] });
+  clearMemo();
+
   /* ══ 7 (nối) · THIẾU DỮ LIỆU CHI PHÍ ⇒ CHẶN ══
    * Khai lương cứng cho A mà bảng Chi phí không có khoản lương nào ⇒ máy chi phí bật cảnh báo mức
    * `high` ⇒ cổng không kết luận.
@@ -494,9 +516,59 @@ async function testFlow(db: Db) {
   await setSettingJson(PAYROLL_RECOGNITION_KEY, ghiNhanTruoc ?? { mode: "LEGACY_EXPENSES" });
 }
 
+/**
+ * CHỦ SHOP 21/10/2026: quỹ = 35% LN đủ điều kiện (tới 10/2026) · 40% (từ 11/2026); một người nhận PHẦN CÒN LẠI
+ * sau khi trừ phần của mọi người khác — tổng chia không vượt quỹ, phần còn lại không âm.
+ */
+function testResidualPure() {
+  const lich = { poolCapPercent: null, poolCapSchedule: [{ fromMonth: "2026-11", percent: 40 }, { fromMonth: "2026-06", percent: 35 }] };
+  assert.deepEqual(["2026-05", "2026-06", "2026-10", "2026-11", "2027-03"].map((m) => poolCapPercentFor(lich, m)), [null, 35, 35, 40, 40], "trần theo tháng; trước mốc đầu không có trần chung ⇒ CHƯA XÁC LẬP, không áp ngược");
+  assert.equal(poolCapPercentFor({ poolCapPercent: 25, poolCapSchedule: [{ fromMonth: "2026-11", percent: 40 }] }, "2026-10"), 25, "trước mốc đầu dùng trần chung");
+  assert.equal(poolCapPercentFor({ poolCapPercent: 25 }, "2026-10"), 25, "phiên bản cũ không có lịch: như trước");
+  assert.equal(poolCapLabel(lich), "35% từ 2026-06 · 40% từ 2026-11");
+
+  const nguoiNhan = { residualClaimant: { employeeId: "q" } };
+  const cl = [claim("q:SHOP", 35 * TR), claim("q:code:X001", 2 * TR), claim("t:code:Q004", 5 * TR), claim("t:SHOP", 5 * TR), claim("h:code:Q006", 6 * TR)];
+  const t10 = run({ monthKey: "2026-10", policy: { ...lich, ...nguoiNhan }, periodBase: 100 * TR, claims: cl });
+  const nhan = (r: typeof t10, emp: string) => r.allocations.filter((a) => a.employeeId === emp).reduce((x, a) => x + (a.eligible ?? 0), 0);
+  assert.deepEqual([t10.poolCapPercent, t10.poolCap], [35, 35 * TR], "tháng 10: quỹ 35% của 100tr");
+  assert.deepEqual([nhan(t10, "t"), nhan(t10, "h"), nhan(t10, "q")], [10 * TR, 6 * TR, 19 * TR], "người khác nhận đủ phần mình; người nhận phần còn lại = 35tr − 16tr");
+  assert.equal(t10.allocatedTotal, 35 * TR, "tổng chia đúng bằng quỹ");
+  assert.deepEqual(t10.residual, { employeeId: "q", poolCap: 35 * TR, othersDemand: 16 * TR, amount: 19 * TR, overdrawnBy: 0, mergedKeys: ["q:SHOP", "q:code:X001"] });
+  for (const k of ["q:SHOP", "q:code:X001"]) {
+    const a = t10.allocations.find((x) => x.key === k)!;
+    assert.ok(a.eligible === 0 && a.provisional! > 0 && /Gộp trong PHẦN CÒN LẠI/.test(a.reason ?? ""), `${k}: khoản riêng HIỆN với số tạm, không trả riêng, nói rõ vì sao`);
+  }
+  // Bảng lương cộng theo người: tạm tính − Σ tạm tính của các khoản + Σ đủ điều kiện ⇒ đúng phần còn lại.
+  const q = t10.allocations.filter((a) => a.employeeId === "q");
+  assert.equal(q.reduce((x, a) => x + (a.provisional ?? 0), 0), 37 * TR, "tạm tính theo công thức cũ vẫn để đối chiếu");
+  const t11 = run({ monthKey: "2026-11", policy: { ...lich, ...nguoiNhan }, periodBase: 100 * TR, claims: cl });
+  assert.deepEqual([t11.poolCap, nhan(t11, "q")], [40 * TR, 24 * TR], "từ tháng 11: quỹ 40% ⇒ phần còn lại 24tr");
+
+  // Người khác đòi VƯỢT quỹ ⇒ phần còn lại 0 (không âm), người khác chia tỷ lệ cho vừa quỹ, nói rõ số vượt.
+  const vuot = run({ monthKey: "2026-10", policy: { ...lich, ...nguoiNhan }, periodBase: 100 * TR, claims: [claim("q:SHOP", 35 * TR), claim("t:SHOP", 30 * TR), claim("h:code:Q006", 20 * TR)] });
+  assert.equal(nhan(vuot, "q"), 0, "phần còn lại không bao giờ âm");
+  assert.equal(vuot.allocations.find((a) => a.key === "q:RESIDUAL")?.demand, 0, "cả con số ĐỀ NGHỊ in trên phiếu cũng không âm (không chỉ tiền được chia)");
+  assert.equal(vuot.allocatedTotal, 35 * TR, "người khác chia tỷ lệ cho vừa quỹ");
+  assert.equal(vuot.residual?.overdrawnBy, 15 * TR);
+  assert.match(vuot.allocations.find((a) => a.key === "q:RESIDUAL")?.reason ?? "", /vượt quỹ/, "nêu số vượt trên dòng phần còn lại");
+
+  // Tháng trước mốc đầu, không trần chung ⇒ CẦN QUYẾT ĐỊNH, không chia.
+  const truoc = run({ monthKey: "2026-05", policy: { ...lich, ...nguoiNhan }, periodBase: 100 * TR, claims: cl });
+  assert.equal(truoc.status, "NOT_ESTABLISHED");
+  assert.match(truoc.message, /CẦN QUYẾT ĐỊNH/);
+  assert.ok(truoc.allocations.every((a) => a.eligible === null), "chưa có trần ⇒ đủ điều kiện CHƯA BIẾT");
+
+  // Không có người nhận phần còn lại ⇒ y như trước.
+  const khong = run({ monthKey: "2026-10", policy: lich, periodBase: 100 * TR, claims: cl });
+  assert.equal(khong.residual, null);
+  assert.equal(khong.allocations.length, cl.length, "không đẻ dòng phần còn lại");
+}
+
 export async function testPayrollProfitGate(db: Db) {
   testPure();
+  testResidualPure();
   testSourceFences();
   await testFlow(db);
-  console.log("  ✓ Cổng lỗ lũy kế toàn công ty: lỗ ⇒ 0 thưởng LN · chỉ chia phần vượt mốc cao nhất · không chia trùng · chứng từ muộn vào kỳ sau một lần · tổng ≤ quỹ · thiếu chi phí ⇒ chặn · kỳ khoá bất biến");
+  console.log("  ✓ Cổng lỗ lũy kế toàn công ty: lỗ ⇒ 0 thưởng LN · chỉ chia phần vượt mốc cao nhất · không chia trùng · chứng từ muộn vào kỳ sau một lần · tổng ≤ quỹ · thiếu chi phí ⇒ chặn · kỳ khoá bất biến · trần theo tháng (35% → 40%, không áp ngược) · người nhận PHẦN CÒN LẠI = quỹ − người khác, không âm, ghi vào ảnh chụp");
 }

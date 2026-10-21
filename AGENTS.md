@@ -666,6 +666,12 @@ deploy dừng, không phải cảnh báo.
     đo lại tháng đã khoá** (bản tính sống dùng giá vốn / giả định / hồ sơ HÔM NAY — trộn đổi giá với
     chứng từ muộn); chứng từ muộn đi vào lũy kế bằng ĐIỀU CHỈNH LŨY KẾ tường minh có người duyệt, ghi
     vào tháng còn mở, đúng một lần; mở khoá đi từ tháng khoá mới nhất trở về.
+    **Trần quỹ có thể ĐỔI THEO THÁNG** (`poolCapSchedule`, chủ shop 21/10/2026: 35% tới 10/2026, 40% từ
+    11/2026): tháng nào dùng trần của tháng ấy; tháng trước mốc đầu mà không có trần chung ⇒ CHƯA XÁC LẬP,
+    không áp ngược mốc đầu. **Người nhận PHẦN CÒN LẠI** (`residualClaimant`, MỘT người khai trong quy chế):
+    khoản riêng của họ HIỆN nhưng không trả riêng, họ nhận `max(0, quỹ − Σ đề nghị của người khác)` — tổng
+    chia không bao giờ vượt quỹ, phần còn lại không bao giờ âm; người khác vượt quỹ ⇒ phần còn lại 0, người
+    khác chia tỷ lệ, số vượt được nêu. Ảnh chụp kỳ ghi trần đã dùng + người nhận + Σ người khác + số vượt.
     Khoản KHẤU TRỪ / TẠM ỨNG trên đại lượng lợi nhuận không phải thưởng và không đi qua cổng.
 
 77. **THƯỞNG THEO MÃ: SỔ ĐI THEO MÃ, CỔNG ĐI THEO CÔNG TY, NGƯỜI CHỈ CHIA** (`lib/payroll/code-ledger.ts`,
