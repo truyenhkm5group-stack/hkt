@@ -20,7 +20,7 @@ import { TEAM_DEPARTMENT } from "@/lib/constants/departments";
 import { SALES_QUALITY_CODES, SALES_QUALITY_SPEC, SALES_QUALITY_STATE_KEY, salesQualityDedupeKey, salesQualityDue, salesQualityWindow, type SalesQualityCode } from "@/lib/constants/sales-quality";
 import { CLAIM_SAFE_TEXT } from "@/lib/sales-chatbot/claim-guard";
 import { EMPTY_REPLY_TEXT } from "@/lib/sales-chatbot/engine";
-import { collectHandoffUnanswered, runSalesQualityDaily } from "@/lib/sales-quality/daily";
+import { collectHandoffFacts, collectHandoffUnanswered, runSalesQualityDaily } from "@/lib/sales-quality/daily";
 import { conversationHash, scanThreadQuality, templateHead, wrongTemplateOf, type QualityMsg } from "@/lib/sales-quality/detectors";
 import { setSettingJson } from "@/lib/settings";
 import { quickReplyHead, scanPatterns, wrongProductTemplate } from "../scripts/conv-money-trace";
@@ -156,6 +156,10 @@ async function testDaily() {
 
     const ho = await collectHandoffUnanswered(NOW);
     assert.ok(ho.slaMs !== null && ho.ids.includes(waiting), `hội thoại chờ người quá hạn, chưa ai trả lời ⇒ HANDOFF_UNANSWERED (hàm của handoff-reply.ts): ${JSON.stringify({ sla: ho.slaMs, n: ho.ids.length })}`);
+    // Mẫu số in cạnh mã = ĐÚNG tập mà ops stuck-conversation-audit đọc ở A2[/work] (`collectHandoffFacts`) — một câu SQL, hai nơi đọc.
+    const facts = await collectHandoffFacts(db, NOW);
+    assert.equal(ho.waiting, facts.length, "mẫu số «đang chờ người» = số hội thoại của tập /work");
+    assert.ok(ho.ids.every((x) => facts.some((f) => f.id === x)), "HANDOFF_UNANSWERED là tập con của tập /work");
 
     assert.deepEqual(await runSalesQualityDaily(new Date("2031-03-01T23:30:00Z")), { ran: false, reason: "chưa tới giờ chạy" }, "06:30 giờ VN ⇒ không chạy");
     const r = await runSalesQualityDaily(NOW);
