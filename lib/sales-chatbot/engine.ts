@@ -72,13 +72,15 @@ import { FOOD_PACK, salesPackFor, type SalesPack } from "@/lib/sales-chatbot/pac
 import { recoveryPrompt, serverCancelStep } from "@/lib/sales-chatbot/cancel-flow";
 import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, returningPendingOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
 import { purchaseRoundStart } from "@/lib/sales-chatbot/purchase-round";
-import { amountText, applyCustomerCartMessage, botProposedDenial, buyingText, customerTextsSince, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, invitedProductOf, itemObjectionCue, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
+import { addressQuestion, looksLikeDeliveryAddress, looksLikeStreetFragment, parseCustomerAddress } from "@/lib/address/customer-address";
+import { askedQuantityChoice, choiceAmountText, DELIVERY_ASK_NEEDS_ADDRESS, quantityOnlyAnswer, quantityWithDeliveryAsk, roundCheckAnswer, roundCheckHandoffReason, roundCheckStep } from "@/lib/sales-chatbot/round-check";
+import { amountText, amountsIn, applyCustomerCartMessage, botProposedDenial, buyingText, customerTextsSince, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, invitedProductOf, itemObjectionCue, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
 import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
 import { customerHandoffVerdict, nextObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
 import { ADDRESS_KNOWN_TEXT, ADDRESS_STAFF_TEXT, SCHEDULE_NOTED_TEXT, addressKnowledge, addressReaskVerdict, continuesSameOrder, isScheduleOnly, knownContactPrompt } from "@/lib/sales-chatbot/address-memory";
-import { DELIVERY_HANDOFF_TEXT, deliveryPreferenceOf, deliveryPromiseIn, deliveryReplyViolation, turnDeliverySay } from "@/lib/sales-chatbot/delivery-intent";
+import { classifyDeliveryQuestion, DELIVERY_HANDOFF_TEXT, deliveryPreferenceOf, deliveryPromiseIn, deliveryReplyViolation, turnDeliverySay } from "@/lib/sales-chatbot/delivery-intent";
 import { asksOrderStatus, asksQuestion, orderStatusSayOf, postSaleFallbackText, postSaleReplyGuard, turnOrderStatusSay } from "@/lib/sales-chatbot/post-sale-guard";
 import { openChatDelayCase } from "@/lib/cs/chat-delay-case";
 import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, noteSeenTotals, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
@@ -287,7 +289,17 @@ export function silenceFallbackText(st: ChatState, lastUserText: string, turn: n
   const r = orderReadiness({ ...st, blocker: st.draft ? autoConfirmBlocker(st, { lastUserText, turn, prevTurn }) : null, lastUserText, hesitating: customerHesitates(lastUserText, { justInvited }) });
   if (r.level === "NEED_PHONE") return "Dạ mình cho em xin số điện thoại nhận hàng nhé.";
   // Đã có dòng địa chỉ mà chỉ thiếu tỉnh / thành ⇒ hỏi ĐÚNG phần đó, không xin lại cả địa chỉ (P0 15/10/2026).
-  if (r.level === "NEED_ADDRESS") return (st.draft?.recipient.address ?? st.customer?.address ?? "").trim() ? "Dạ mình cho em xin tỉnh / thành phố của địa chỉ nhận hàng nhé." : "Dạ mình cho em xin địa chỉ nhận hàng đầy đủ (số nhà, đường, phường / xã, quận / huyện, tỉnh / thành) nhé.";
+  if (r.level === "NEED_ADDRESS") {
+    if ((st.draft?.recipient.address ?? st.customer?.address ?? "").trim()) return "Dạ mình cho em xin tỉnh / thành phố của địa chỉ nhận hàng nhé.";
+    // Khách VỪA gửi một mảnh địa chỉ (đường / khu / mốc địa danh «KCN …, cổng công ty …») mà chưa đọc ra tỉnh / xã ⇒ hỏi ĐÚNG phần còn thiếu,
+    // không xin lại cả địa chỉ khách vừa gõ (P0 21/10/2026). Không bao giờ tự chọn xã: câu hỏi đọc từ danh mục (`addressQuestion`).
+    const typed = lastUserText.trim();
+    if (looksLikeStreetFragment(typed) || looksLikeDeliveryAddress(typed)) {
+      const q = addressQuestion(parseCustomerAddress(typed));
+      if (q) return q;
+    }
+    return "Dạ mình cho em xin địa chỉ nhận hàng đầy đủ (số nhà, đường, phường / xã, quận / huyện, tỉnh / thành) nhé.";
+  }
   if (r.level === "NEED_ITEMS") return "Dạ mình muốn lấy món nào, số lượng bao nhiêu ạ?";
   if (r.level !== "ORDER_READY") return EMPTY_REPLY_TEXT;
   const total = st.draft?.quote ? (st.draft.quote.total ?? null) : null;
@@ -1093,15 +1105,24 @@ async function chatTurnCore(
     // Giỏ TRƯỚC tin này (P0 #863): câu huỷ xoá giỏ ở bước dưới, nhưng «đơn đúng như khách đặt» là giỏ ngay trước câu huỷ.
     const cartBefore = st0.cart;
     let cartNext: ChatState["cart"];
+    // Tin bot / page kể từ tin khách trước — căn cứ «món vừa được mời» và «câu hỏi lựa chọn vừa hỏi».
+    const shopSince = recentShopTexts(msgs.filter((m) => m.seq > (prevTurn ?? 0)), 6).map((t) => (t.startsWith(SHOP_SAID) ? t.slice(SHOP_SAID.length).trim() : t));
+    // Tin HAI Ý «Cho chị 2kg. Mấy ngày nhận được hàng?» (ca «Xuân Đoàn»): cả tin có «?» thì bộ đọc giỏ xếp nó là CÂU HỎI và bỏ số lượng ⇒
+    // tách vế số lượng TRƯỚC, giỏ đọc đúng vế đó (round-check.ts `quantityWithDeliveryAsk`).
+    const twoIntents = quantityWithDeliveryAsk(text, [], (p) => classifyDeliveryQuestion(p)?.intent === "DELIVERY_TIME");
+    const qtyText = twoIntents?.quantity ?? text;
+    // «lấy 2» ngay sau câu hỏi lựa chọn «1kg hay 2kg?» ⇒ đọc như «2kg» (round-check.ts `choiceAmountText` — chỉ khi khớp đúng một lựa chọn).
+    const choiceText = choiceAmountText(qtyText, shopSince[shopSince.length - 1] ?? null);
+    const cartInput = choiceText ?? qtyText;
     try {
-      const catalog = await cartCatalogNames(text);
+      const catalog = await cartCatalogNames(cartInput);
       // Món VỪA ĐƯỢC MỜI (bot / page gọi tên đúng một món kể từ tin khách trước) — «ừ cho chị 1 hộp» là số của món đó (review 14/10). Danh mục
       // đầy đủ chỉ đọc khi giỏ đã có món khách nói (lời mời THÊM món / câu huỷ gọi tên món ngoài giỏ).
-      const full = st0.cart?.selectedItems.some((x) => x.customerExplicit) ? await cartProducts() : undefined;
-      const lastCustSeq = prevTurn ?? 0;
-      const inv0 = invitedProductOf(recentShopTexts(msgs.filter((m) => m.seq > lastCustSeq), 6).map((t) => (t.startsWith(SHOP_SAID) ? t.slice(SHOP_SAID.length).trim() : t)), full?.names ?? catalog, st0.cart);
+      // Số lượng TRẦN («1kg thôi») khi giỏ còn trống cũng cần đơn vị của món vừa được mời (P0 21/10/2026) ⇒ nạp đủ danh mục.
+      const full = st0.cart?.selectedItems.some((x) => x.customerExplicit) || amountsIn(cartInput).some((a) => !a.label) ? await cartProducts() : undefined;
+      const inv0 = invitedProductOf(shopSince, full?.names ?? catalog, st0.cart);
       const invited = inv0 && full ? { ...inv0, unit: full.unitOf(inv0.display) } : inv0;
-      cartNext = applyCustomerCartMessage(st0.cart, text, turnSeq, now, { catalog, invited, ...(full ? { products: full.names } : {}) });
+      cartNext = applyCustomerCartMessage(st0.cart, cartInput, turnSeq, now, { catalog, invited, ...(full ? { products: full.names } : {}) });
     } catch {
       cartNext = st0.cart ? { ...st0.cart, relaxedTurn: turnSeq } : undefined;
     }
@@ -1121,8 +1142,8 @@ async function chatTurnCore(
     }
     // GIAI ĐOẠN KHÁCH sau khi có đơn (đọc đơn THẬT + chứng từ ĐVVC; lời khách «đã nhận» / «khiếu nại» chỉ đổi cách nói). `null` = chưa
     // từng có đơn / đọc lỗi ⇒ lời nhắc bán hàng thường. Khung THỬ không đọc (không có đơn thật).
-    const phase = opts.channel === "TEST" ? null : await loadCustomerPhase({ ...conv, state: st0 }, text, now);
-    const postSale = phase !== null && phase.phase !== "PRE_SALE" && phase.phase !== "CLOSING";
+    let phase = opts.channel === "TEST" ? null : await loadCustomerPhase({ ...conv, state: st0 }, text, now);
+    let postSale = phase !== null && phase.phase !== "PRE_SALE" && phase.phase !== "CLOSING";
     // KHÁCH BÁO ĐÃ TRẢ TIỀN (P0 10/10/2026 — claim-guard.ts): ảnh chuyển khoản / «ck rồi» là LỜI KHÁCH, không phải chứng từ.
     // MÁY CHỦ chuyển người ngay — không câu mẫu, không lượt AI. Trước đây chỉ có một câu trong lời nhắc dặn model gọi handoff,
     // và câu «đã nhận được tiền» đã tới khách. Kênh nhắn tin chuyển người thì bot IM (luật kênh); kênh khác nhận câu an toàn.
@@ -1217,6 +1238,82 @@ async function chatTurnCore(
     // «ĐÃ XÁC NHẬN»). Máy chủ tra số khách nói trong tập số máy chủ báo được (`quote.ts`): CÓ (vd đúng giá gói 2kg) ⇒ AI báo lại đúng số
     // máy chủ + xin xác nhận, chốt bị chặn tới lượt sau; KHÔNG / không chắc ⇒ chuyển nhân viên ngay. Đơn nháp đang có ⇒ cờ «khách phản
     // đối giá» (khung đơn thôi hiện «ĐÃ XÁC NHẬN»). Không bao giờ tự đổi giá đơn.
+    // ĐƠN CŨ HAY ĐƠN MỚI (P0 21/10/2026, HSLC «Ngọc Bích» — round-check.ts): lời mua ngày hôm sau trên nền một đơn đã chốt chưa rời kho ⇒
+    // MÁY CHỦ hỏi một câu (không lượt AI); trả lời «đặt thêm» ⇒ lượt mua mới (giỏ vừa nói đi theo), «vẫn đơn đó» ⇒ giữ đơn cũ, không rõ ⇒
+    // người. Đơn cũ đã rời kho / đã giao ⇒ lượt mua mới ngay. Nhân viên đang tiếp quản ⇒ không đụng.
+    if (opts.channel !== "TEST" && readConversationControl(st0)?.mode !== "HUMAN") {
+      const rc = st0.roundCheck;
+      const startNewRound = (sinceTurn: number, startAt: Date) => {
+        const said = (st0.cart?.selectedItems ?? []).filter((x) => x.customerExplicit && (x.sourceMessageId ?? -1) >= sinceTurn);
+        const fresh = freshPurchaseRound(st0, conv.turns, now, startAt);
+        // Khách cũ mua lại (AGENTS 3.12): tên + SĐT là danh tính, giữ; ĐỊA CHỈ của đơn cũ thì KHÔNG mang sang — khách nói lại hoặc chọn
+        // «như cũ» qua `use_saved_address`. Ca «Ngọc Bích» đổi điểm giao sang KCN: mang địa chỉ cũ là lên đơn mới về chỗ cũ.
+        if (fresh.customer) fresh.customer = { ...fresh.customer, address: "", province: "", savedAddress: undefined };
+        const st: ChatState = { ...fresh, ...(said.length && st0.cart ? { cart: { ...st0.cart, selectedItems: said } } : {}), roundCheck: { orderId: st0.confirmed?.orderId ?? rc?.orderId ?? "", askedTurn: rc?.askedTurn ?? turnSeq, at: rc?.at ?? now.toISOString(), answer: "NEW" } };
+        return st;
+      };
+      if (rc && !rc.answer && rc.askedTurn === prevTurn && st0.confirmed?.orderId === rc.orderId) {
+        const ans = roundCheckAnswer(text);
+        if (ans === null) {
+          const reason = roundCheckHandoffReason(rc.orderId, st0.confirmed.at);
+          const st: ChatState = { ...st0, handoff: { reason, at: now.toISOString() } };
+          if (!isMessagingChannel(opts.channel)) await reply(conv, seq, cfg.handoff.message);
+          await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1, nextFollowupAt: null });
+          if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey: `sales-chat:round-check:${conv.id}:${rc.orderId}` }).catch(() => undefined);
+          return { ok: true, view: (await conversationView(conv.id))! };
+        }
+        const st: ChatState = ans === "NEW" ? startNewRound(rc.askedTurn, new Date(rc.at)) : { ...st0, roundCheck: { ...rc, answer: "SAME" } };
+        await bump({ state: st as Record<string, unknown> });
+        conv.state = st as Record<string, unknown>;
+        st0 = st;
+      } else {
+        const said = (st0.cart?.selectedItems ?? []).filter((x) => x.customerExplicit && x.sourceMessageId === turnSeq).map((x) => `${amountText(x.quantity, x.unit, x.pieces)}${x.label ? ` ${x.label}` : ""}`);
+        const step = roundCheckStep({ confirmed: st0.confirmed, phase: phase?.phase ?? null, text, turn: turnSeq, now, prior: rc, answersOffer: prevTurn !== undefined && st0.upsellTurn === prevTurn, saidLine: said.length ? said.join(" + ") : null, money: formatVND });
+        if (step?.kind === "ASK" && (await guardOutgoing(step.text, () => claimFacts(st0))).ok) {
+          const st: ChatState = { ...st0, roundCheck: step.check };
+          await reply(conv, seq, step.text);
+          await bump({ state: st as Record<string, unknown>, turns: conv.turns + 1 });
+          return { ok: true, view: (await conversationView(conv.id))! };
+        }
+        if (step?.kind === "NEW_ROUND") {
+          const st = startNewRound(turnSeq, now);
+          await bump({ state: st as Record<string, unknown> });
+          conv.state = st as Record<string, unknown>;
+          st0 = st;
+        }
+      }
+      // Lượt mua MỚI khách đã chọn trên nền một đơn cũ ⇒ đơn cũ chỉ là bối cảnh: lượt này (và mọi lượt sau tới khi chốt) là BÁN, không phải
+      // hậu mãi — nếu không, đơn cũ chưa giao (đọc qua `pastOrders`) kéo mọi tin của lượt mới về lời nhắc «đơn đã chốt». Khiếu nại vẫn là
+      // khiếu nại (nhánh khiếu nại chạy TRƯỚC khối này). Chạy mỗi lượt, trước mọi chỗ đọc `postSale`.
+      if (st0.roundCheck?.answer === "NEW" && !st0.confirmed && phase) {
+        phase = null;
+        postSale = false;
+      }
+    }
+    // TRẢ LỜI SỐ LƯỢNG NGẮN (P0 21/10/2026, HSLC «Lan Nguyen» — round-check.ts `quantityOnlyAnswer`): «2kg» sau «1kg hay 2kg?» đã nằm trong
+    // giỏ có thẩm quyền, gắn đúng món vừa báo giá ⇒ MÁY CHỦ ghi nhận và hỏi đúng phần còn thiếu (SĐT / địa chỉ) — không câu mẫu báo giá gửi
+    // lại, không lượt AI. Đã đủ SĐT + địa chỉ ⇒ để luồng lên đơn (cần công cụ). Đơn nháp / đã chốt / hậu mãi / trả lời lời mời ⇒ luồng cũ.
+    // Chỉ khi tin ngay trước là câu HỎI chọn số lượng của bot / page, và KHÔNG có câu mời mua thêm đang tới lượt (shop có câu upsell mà lượt
+    // mua chưa gửi ⇒ để model chạy luồng #868 — mời đúng lúc khách vừa chọn món).
+    const upsellDue = Boolean(qrSettings.upsellReplyId) && !st0.upsellSent;
+    if (!postSale && !upsellDue && askedQuantityChoice(shopSince[shopSince.length - 1] ?? null) && !st0.confirmed && !st0.draft && !st0.handoff && readConversationControl(st0)?.mode !== "HUMAN" && !(prevTurn !== undefined && st0.upsellTurn === prevTurn)) {
+      const said = (st0.cart?.selectedItems ?? []).filter((x) => x.customerExplicit && x.sourceMessageId === turnSeq);
+      const one = said.length === 1 && said[0].label && (said[0].productId || said[0].match) ? said[0] : null;
+      // Tin HAI Ý «Cho chị 2kg. Mấy ngày nhận được hàng?» (ca «Xuân Đoàn»): ghi nhận số lượng VÀ đáp phần hỏi giao — chưa có địa chỉ ⇒ xin
+      // địa chỉ để báo thời gian dự kiến, KHÔNG nêu mốc / số ngày (máy chủ chưa có căn cứ). Câu thứ hai là chuyện khác ⇒ để model đọc.
+      if (one && (twoIntents || quantityOnlyAnswer(cartInput, [one.label]))) {
+        const ask = silenceFallbackText(st0, text, turnSeq, false, prevTurn);
+        if (/số điện thoại|địa chỉ|phường|tỉnh/.test(ask)) {
+          const askTail = ask.replace(/^Dạ,?\s*/, "").replace(/^\p{Ll}/u, (ch) => ch.toUpperCase());
+          const qtyAck = `Dạ em ghi nhận mình lấy ${amountText(one.quantity, one.unit, one.pieces)} ${one.label} ạ. ${twoIntents ? `${DELIVERY_ASK_NEEDS_ADDRESS} ` : ""}${askTail}`;
+          if ((await guardOutgoing(qtyAck, () => claimFacts(st0))).ok) {
+            await reply(conv, seq, qtyAck);
+            await bump({ turns: conv.turns + 1 });
+            return { ok: true, view: (await conversationView(conv.id))! };
+          }
+        }
+      }
+    }
     const dispute = st0.quote && !st0.confirmed ? detectPriceDispute(text, st0.quote) : null;
     if (dispute) {
       const ref = await catalogReferenceAmounts(cfg).catch((): ReadonlySet<number> => new Set<number>());
@@ -1348,7 +1445,9 @@ async function chatTurnCore(
       }
       await reply(conv, seq, pick.text);
       await markQuickReplyUsed(pick.entry.id, now).catch(() => undefined);
+      const sentSt: ChatState = { ...st0, quickSentIds: [...new Set([...(st0.quickSentIds ?? []), pick.entry.id])].slice(-40) };
       await bump({
+        state: sentSt as Record<string, unknown>,
         turns: conv.turns + 1,
         quickReplies: conv.quickReplies + 1,
         ...(ai ? { aiCalls: conv.aiCalls + ai.calls, inputTokens: conv.inputTokens + ai.inTok, outputTokens: conv.outputTokens + ai.outTok } : {}),
@@ -1372,7 +1471,16 @@ async function chatTurnCore(
       st0 = st;
       return true;
     };
-    if (quick.kind === "ANSWER" && !quickReasks(quick.pick) && !(await quickSizeReask(quick.pick))) return sendQuick(quick.pick, null);
+    /*
+      MỘT HÀNG RÀO CHO MỌI ĐƯỜNG GỬI CÂU MẪU (P0 21/10/2026, ca «Lan Nguyen» + «Xuân Đoàn» — chủ shop: «lỗi lặp báo giá tái diễn»): câu mẫu
+      theo TỪ KHOÁ và câu mẫu AI chọn mã đi qua ĐÚNG hàm này. Bốn luật: câu vừa nói (`repeatsRecent`) · hỏi lại thông tin khách đã cho
+      (#871) · hỏi lại quy cách / mời gói khác cho món khách ĐÃ chọn khối lượng (#868 — cùng phán xét `guardReply` với chữ AI) · câu mẫu đã
+      gửi trong LƯỢT MUA này (theo MÃ — cùng câu mẫu ra hai bản chữ khác nhau: 384 / 376 ký tự ở ca thật) mà khách không hỏi gì mới.
+      Trước đây đường từ khoá thiếu luật thứ nhất và thứ tư ⇒ «2kg» nhận lại nguyên câu báo giá.
+    */
+    const quickBlocked = async (pick: QuickReplyPick): Promise<boolean> =>
+      repeatsRecent(pick.text, recentSaid) || quickReasks(pick) || ((st0.quickSentIds ?? []).includes(pick.entry.id) && !asksQuestion(text)) || (await quickSizeReask(pick));
+    if (quick.kind === "ANSWER" && !(await quickBlocked(quick.pick))) return sendQuick(quick.pick, null);
     const org = await currentOrganization();
     // Trang công khai: khách KHÔNG BAO GIỜ đọc lý do nội bộ (công tắc, hạn mức gói, khoá) — chuyển người, báo chủ shop.
     // Khung THỬ của chủ shop giữ nguyên câu lỗi để họ sửa được.
@@ -1411,7 +1519,7 @@ async function chatTurnCore(
         const inT = res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens;
         await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: quickProv.source, provider: quickProv.provider.name, model: res.model || quickProv.provider.model, requests: 1, inputTokens: inT, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || quickProv.provider.model, res.usage), status: "OK", actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id, workload: "quick_extract", ...usageDetail(res) }).catch(() => undefined);
         Object.assign(pre, { calls: 1, inTok: inT, outTok: res.usage.outputTokens });
-        if (pick && !repeatsRecent(pick.text, recentSaid) && !quickReasks(pick) && (!qrFocus || qrFocus.answers(pick.entry)) && !(await quickSizeReask(pick))) return sendQuick(pick, pre);
+        if (pick && (!qrFocus || qrFocus.answers(pick.entry)) && !(await quickBlocked(pick))) return sendQuick(pick, pre);
       } catch (error) {
         if (error instanceof SeqConflict) throw error;
       }
@@ -2011,7 +2119,7 @@ export const COMMENT_BATCH_WINDOW_MS = 30 * 60_000;
 export const NEW_ROUND_GAP_MS = 7 * 24 * 3_600_000;
 
 /** Khoá trạng thái thuộc về MỘT lượt mua — lượt mua mới xoá hết (#855: báo giá / sổ tổng bị từ chối; #868: sổ lời mời). */
-const ROUND_STATE_KEYS = ["confirmed", "draft", "stage", "upsellSent", "upsellUnavailable", "upsellDeclinedTurn", "offerDrops", "postConfirmOffer", "declined", "handoff", "cart", "quote", "rejectedTotals", "proposedItems", "deliveryPref"] as const;
+const ROUND_STATE_KEYS = ["confirmed", "draft", "stage", "upsellSent", "upsellUnavailable", "upsellDeclinedTurn", "offerDrops", "postConfirmOffer", "declined", "handoff", "cart", "quote", "rejectedTotals", "proposedItems", "deliveryPref", "roundCheck", "quickSentIds"] as const;
 
 /**
  * Trạng thái của một LƯỢT MUA MỚI: đơn đã chốt (nếu có) sang `pastOrders`, mọi khoá của lượt mua cũ bị xoá, `startAt` (nếu có) thành mốc

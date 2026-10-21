@@ -223,6 +223,26 @@ export function latestCustomerAddress(customerTexts: readonly string[]): Address
   return null;
 }
 
+/** Địa chỉ `raw` là bản ghép từ CHÍNH các tin khách kể từ mảnh địa chỉ cuối cùng (xem `deliveryAddressDecision`). HÀM THUẦN. */
+function heldComposedFromCustomer(raw: string, customerTexts: readonly string[]): boolean {
+  let fragAt = -1;
+  let fragLine = "";
+  customerTexts.forEach((m, i) => {
+    for (const l of m.split(/\n+/)) {
+      if (looksLikeStreetFragment(l)) {
+        fragAt = i;
+        fragLine = l;
+      }
+    }
+  });
+  if (fragAt < 0) return false;
+  const p = parseCustomerAddress(raw);
+  if (!p.ward || !p.province || !canAutoFill(p)) return false;
+  const core = (s: string) => foldVnText(s).replace(/^(?:thanh pho|tinh|phuong|xa|thi tran|dac khu)\s+/, "").trim();
+  const since = foldVnText(customerTexts.slice(fragAt).join(" "));
+  return foldVnText(raw).includes(foldVnText(fragLine)) && since.includes(core(p.ward)) && since.includes(core(p.province));
+}
+
 /** Chỉ số tin khách CUỐI CÙNG nói «dùng lại địa chỉ cũ» (sau mọi lời từ chối); không có ⇒ -1. HÀM THUẦN. */
 function lastReuseIndex(customerTexts: readonly string[]): number {
   let at = -1;
@@ -252,6 +272,11 @@ export function deliveryAddressDecision(state: Pick<ChatState, "draft" | "custom
     if (m.split(/\n+/).some((l) => hasChangeCue(l) || looksLikeStreetFragment(l))) lastChange = i;
   });
   if ((typed || held) && lastChange > Math.max(typed?.messageIndex ?? -1, reuseAt)) {
+    // NƠI GIAO MỚI GÕ LÀM NHIỀU TIN (P0 21/10/2026, ca «Ngọc Bích»: «KCN Bắc Thăng Long, cổng công ty SANTOMAS» rồi «Phường …, Hà Nội»):
+    // địa chỉ đang giữ là bản GHÉP từ đúng các tin đó — chứa NGUYÊN mảnh khách gõ, đọc ra đủ xã + tỉnh từ danh mục, và tên xã + tỉnh nằm
+    // trong chính các tin khách từ mảnh đó trở đi ⇒ đó là địa chỉ khách vừa gõ, không phải «đang đổi mà chưa xong». Bản cũ không chứa mảnh
+    // mới ⇒ vẫn CHANGE_INCOMPLETE như trước.
+    if (held && heldComposedFromCustomer(held.raw, customerTexts)) return { status: "NEW_EXPLICIT", use: { ...held, messageIndex: customerTexts.length - 1 }, previous: typed, reason: "Địa chỉ ghép từ đúng các tin khách vừa gõ (nơi giao mới)" };
     return { status: "CHANGE_INCOMPLETE", use: null, previous: typed ?? held, reason: "Khách đang đổi nơi giao nhưng chưa gửi đủ một địa chỉ đọc được — không dùng địa chỉ cũ, không tự ghi; cần người" };
   }
   // Địa chỉ khách tự gõ MỚI HƠN lời «như cũ» (hoặc khách không nói «như cũ») ⇒ chữ khách thắng.

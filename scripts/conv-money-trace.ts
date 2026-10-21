@@ -47,9 +47,11 @@ import { getDbForInspection, getPlatformDb, schema, type Db } from "@/db";
 import { withOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { CLAIM_SAFE_TEXT, extractVndAmounts, paymentSignalInCustomerText } from "@/lib/sales-chatbot/claim-guard";
-import { applyCustomerCartMessage, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
+import { amountsIn, applyCustomerCartMessage, type CartCommitment } from "@/lib/sales-chatbot/cart-commitment";
+import { classifyDeliveryQuestion } from "@/lib/sales-chatbot/delivery-intent";
 import { EMPTY_REPLY_TEXT, loadSalesChatbotConfig, SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import type { OfferFacts } from "@/lib/sales-chatbot/next-best-action";
+import { choiceAmountText, quantityOnlyAnswer } from "@/lib/sales-chatbot/round-check";
 import { loadOfferFacts } from "@/lib/sales-chatbot/offer-facts";
 import { catalogReferenceAmounts } from "@/lib/sales-chatbot/quote";
 import { listQuickReplies, loadFocusProducts, loadQuickReplySettings } from "@/lib/sales-chatbot/quick-replies";
@@ -514,6 +516,14 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   const A = { total: 0, noNew: 0, convs: new Set<string>() };
   const B = { msgs: 0, convs: new Set<string>(), noQuote: 0 };
   const D = { msgs: 0, convs: new Set<string>(), images: 0, byTitle: new Map<string, number>() };
+  // F (P0 21/10/2026, HSLC «Lan Nguyen»): tin khách CHỈ là câu trả lời số lượng («2kg», «lấy 2» sau «1kg hay 2kg?») mà tin bot NGAY SAU lại
+  // hỏi lại số lượng hoặc gửi lại một câu đã gửi trong hội thoại. Cùng định nghĩa với engine (`quantityOnlyAnswer` · `choiceAmountText`).
+  // Câu mẫu = 0 token; lượt AI = một lời gọi model thừa. Mẫu số = số tin khách chỉ là câu trả lời số lượng.
+  const F = { base: 0, msgs: 0, quick: 0, model: 0, convs: new Set<string>() };
+  // G · UNANSWERED_SECONDARY_INTENT (P0 21/10/2026, ca «Xuân Đoàn»): tin khách có SỐ LƯỢNG + câu hỏi THỜI GIAN GIAO («Cho chị 2kg. Mấy ngày
+  // nhận được hàng?») mà tin bot NGAY SAU không đụng tới chuyện giao (giao / nhận / ngày / địa chỉ / ship). Mẫu số = số tin hai ý như thế.
+  const G = { base: 0, miss: 0, convs: new Set<string>() };
+  const hashConv = (id: string) => createHash("sha256")["update"](id).digest("hex").slice(0, 8);
   const rowsQr = await listQuickReplies().catch(() => []);
   const tpls = rowsQr.map((r) => ({ title: r.title, answer: r.answer, head: quickReplyHead(r.answer), images: r.images.length }));
   const products = await loadFocusProducts().catch(() => [] as FocusProduct[]);
@@ -547,10 +557,19 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
     let userSince = false;
     let quoteTotal: number | null = null;
     let lines: FocusLine[] = [];
+    let qtyAnswer = false;
+    let prevBot = "";
+    let sentHeads = new Set<string>();
+    let secondAsk = false;
     for (const r of rows) {
-      if (r.conv !== cur) [cur, userSince, quoteTotal, lines] = [r.conv, false, null, []];
+      if (r.conv !== cur) [cur, userSince, quoteTotal, lines, qtyAnswer, prevBot, sentHeads, secondAsk] = [r.conv, false, null, [], false, "", new Set<string>(), false];
       if (r.role === "user") {
         if (textOf(r.content)) {
+          const said = textOf(r.content);
+          qtyAnswer = quantityOnlyAnswer(said, []) || choiceAmountText(said, prevBot) !== null;
+          if (qtyAnswer) F.base += 1;
+          secondAsk = amountsIn(said).length > 0 && classifyDeliveryQuestion(said)?.intent === "DELIVERY_TIME";
+          if (secondAsk) G.base += 1;
           userSince = true;
           lines.push({ who: "CUSTOMER", text: textOf(r.content) });
           countDecision(lines);
@@ -572,8 +591,24 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
       if (!t) continue;
       if (t.startsWith(SHOP_SAID)) {
         lines.push({ who: "SHOP", text: t });
+        prevBot = t.slice(SHOP_SAID.length).trim();
         continue;
       }
+      const headF = foldVi(t).replace(/\s+/g, " ").trim().slice(0, 60);
+      if (qtyAnswer && userSince && (/\d+(?:[.,]\d+)?\s?kg\s+hay\s+\d+(?:[.,]\d+)?\s?kg|muốn (?:mua|lấy) \d/iu.test(t) || sentHeads.has(headF))) {
+        F.msgs += 1;
+        F.convs.add(r.conv);
+        if (tpls.some((x) => x.head.length >= 12 && headF.startsWith(x.head))) F.quick += 1;
+        else F.model += 1;
+      }
+      if (secondAsk && userSince && !/(?:^| )(?:giao|nhan|ngay|dia chi|ship|van chuyen)(?= |$)/.test(foldVi(t))) {
+        G.miss += 1;
+        G.convs.add(r.conv);
+      }
+      secondAsk = false;
+      sentHeads.add(headF);
+      prevBot = t;
+      qtyAnswer = false;
       checkD(r.conv, t, lines);
       lines.push({ who: "SHOP", text: t });
       if (t === EMPTY_REPLY_TEXT) {
@@ -596,8 +631,14 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   console.log(`  mẫu A (≤ 20): ${[...A.convs].slice(0, 20).join(" ") || "—"}`);
   console.log(`  mẫu B (≤ 20): ${[...B.convs].slice(0, 20).join(" ") || "—"}`);
   console.log(`  mẫu D (≤ 20): ${[...D.convs].slice(0, 20).join(" ") || "—"}`);
+  console.log(`  mẫu F (≤ 20): ${[...F.convs].slice(0, 20).join(" ") || "—"}`);
+  console.log(`  mẫu F băm (≤ 20): ${[...F.convs].slice(0, 20).map(hashConv).join(" ") || "—"}`);
+  console.log(`  mẫu G (≤ 20): ${[...G.convs].slice(0, 20).join(" ") || "—"}`);
+  console.log(`  mẫu G băm (≤ 20): ${[...G.convs].slice(0, 20).map(hashConv).join(" ") || "—"}`);
   for (const [title, n] of [...D.byTitle.entries()].sort((a, b) => b[1] - a[1])) console.log(`  D câu mẫu «${title}»: ${n} tin`);
   tomTat(`conv-money-trace quét ${span}: ${ids.length}${convs.length > TRACE_MAX_SCAN_CONVERSATIONS ? "+" : ""} hội thoại`);
+  tomTat(`F CUSTOMER_SELECTED_QUANTITY_BUT_BOT_REASKED — trả lời số lượng ngắn mà bot hỏi lại / gửi lại câu đã gửi: ${F.msgs} tin / ${F.convs.size} hội thoại · câu mẫu ${F.quick} (0 token) · AI ${F.model} (lời gọi model thừa) · mẫu số ${F.base} tin khách chỉ là câu trả lời số lượng (MEASURED)`);
+  tomTat(`G UNANSWERED_SECONDARY_INTENT — tin khách có số lượng + hỏi thời gian giao mà tin bot ngay sau không đụng tới chuyện giao: ${G.miss} tin / ${G.convs.size} hội thoại · mẫu số ${G.base} tin hai ý (MEASURED)`);
   tomTat(`A câu «nói rõ hơn» của engine: ${A.total} tin · KHÔNG có tin khách mới kể từ tin bot trước ${A.noNew} tin / ${A.convs.size} hội thoại`);
   tomTat(`B tin bot có số TỔNG ≠ tổng giỏ / nháp máy chủ ngay trước: ${B.msgs} tin / ${B.convs.size} hội thoại · số TỔNG khi chưa có giỏ / nháp nào ${B.noQuote} tin`);
   tomTat(`D câu mẫu nói về món KHÁC món khách đang hỏi: ${D.msgs} tin / ${D.convs.size} hội thoại · kèm ảnh ${D.images} tin · ${D.byTitle.size} câu mẫu khác nhau · ${tpls.length} câu mẫu · ${products.length} sản phẩm`);

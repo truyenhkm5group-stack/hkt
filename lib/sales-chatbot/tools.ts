@@ -72,6 +72,7 @@ export type CartLine = { variantId: string; quantity: number };
 export { onlyAddOns, type Priced } from "@/lib/sales-chatbot/quote";
 /** `ward` = xã / phường MỚI khách đã XÁC NHẬN (`acceptCustomerWard`) — trống ⇒ lõi đơn tự đọc từ dòng địa chỉ. */
 export type Recipient = { name: string; phone: string; address: string; province: string; ward?: string };
+import type { RoundCheckState } from "@/lib/sales-chatbot/round-check";
 import { SALES_STAGE_LABEL, type SalesStage } from "@/lib/sales-chatbot/stages";
 
 export { SALES_STAGE_LABEL, SALES_STAGES, type SalesStage } from "@/lib/sales-chatbot/stages";
@@ -81,6 +82,8 @@ export type ChatState = {
   quickGuardClosed?: { at: string; turn: number };
   /** Mốc mỗi lần câu mẫu NHƯỜNG AI vì khách đã chọn khối lượng (`quickReplySizeConflict`, có trần) — ops conv-money-trace đếm giá token. */
   quickSizeYields?: string[];
+  /** Mã câu mẫu đã gửi trong LƯỢT MUA này (P0 21/10/2026, ca «Lan Nguyen» / «Xuân Đoàn») — khoá của lượt mua, xoá cùng lượt mua. */
+  quickSentIds?: string[];
   /** `at` = lần ĐẦU khách để lại SĐT này (02/10/2026 — báo cáo chi phí AI / SĐT theo ngày); dòng cũ không có mốc. */
   /** `savedAddress` = địa chỉ do MÁY CHỦ điền từ đơn cũ khớp qua SĐT (`use_saved_address`) — bot chỉ thấy bản đã che. */
   /**
@@ -142,6 +145,8 @@ export type ChatState = {
   priceFacts?: number[];
   /** Đơn đã chốt của các lượt mua TRƯỚC trong cùng hội thoại (khách mua lại sau `POST_ORDER_HANDOFF_MS`) — báo cáo vẫn đếm. */
   pastOrders?: { orderId: string | null; simulated: boolean; total: number; at: string }[];
+  /** Câu hỏi «đặt thêm hay vẫn đơn đó» của máy chủ (round-check.ts) — khoá của LƯỢT MUA: xoá cùng lượt mua. */
+  roundCheck?: RoundCheckState;
   handoff?: { reason: string; at: string };
   stage?: SalesStage;
   /** Đã có MỘT lời mời mua thêm trong lượt mua này (câu mẫu UPSELL hoặc câu bot máy chủ nhận ra — #868); xoá khi sang lượt mua mới. */
@@ -1099,7 +1104,17 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (typeof fields.address === "string" && fields.address.trim()) {
         const d = deliveryAddressDecision({ customer: { id: null, name: "", phone: "", address: fields.address, province: typeof fields.province === "string" ? fields.province : "", simulated: false, ...(input.use_saved_address === true ? { savedAddress: true } : {}) } }, ctx.customerTexts ?? []);
         if (d.status === "CHANGE_PENDING_VERIFICATION" && d.use) return err("Lưu khách: khác địa chỉ khách vừa gõ", `Địa chỉ này KHÁC địa chỉ khách vừa gõ ở tin mới hơn: «${d.use.raw}». Địa chỉ khách nói MỚI NHẤT luôn thắng địa chỉ cũ / đã lưu — gọi lại create_customer với address = đúng dòng khách đã gõ (giữ nguyên chữ khách), KHÔNG dùng địa chỉ đơn cũ, KHÔNG hỏi lại phần khách đã nói.`, state);
-        if (d.status === "CHANGE_INCOMPLETE") return { ...err("Lưu khách: khách đang đổi địa chỉ", "Khách đang đổi nơi giao mà chưa gửi đủ địa chỉ mới — KHÔNG lưu địa chỉ cũ, KHÔNG nói đã cập nhật; máy chủ đã chuyển nhân viên.", state), requireHuman: d.reason };
+        if (d.status === "CHANGE_INCOMPLETE") {
+          // Địa chỉ model định lưu CHÍNH LÀ mảnh nơi giao mới khách vừa gõ (P0 21/10/2026, ca «Ngọc Bích»: «KCN Bắc Thăng Long, cổng công ty
+          // SANTOMAS») — không phải bản cũ. Thiếu tỉnh / xã thì HỎI đúng phần đó một câu (đọc từ danh mục, không đoán xã), không chuyển người.
+          // Model chép một địa chỉ KHÁC chữ khách ⇒ vẫn chuyển người như cũ.
+          const typedNow = foldVi(ctx.lastUserText.normalize("NFC"));
+          const savedNow = foldVi(fields.address.normalize("NFC")).trim();
+          const isTyped = sameDeliveryPlace(fields.address, ctx.lastUserText) || (savedNow.length > 0 && typedNow.includes(savedNow));
+          const ask = isTyped ? addressQuestion(parseCustomerAddress(fields.address, typeof fields.province === "string" ? fields.province : "")) : null;
+          if (ask) return err("Lưu khách: địa chỉ mới chưa đủ", `Khách vừa gửi nơi giao MỚI «${fields.address.slice(0, 120)}» nhưng chưa đọc ra phần còn thiếu. KHÔNG dùng địa chỉ cũ, KHÔNG tự đoán phường / xã, KHÔNG nói đã lên đơn. Hỏi khách đúng MỘT câu: «${ask}»`, state);
+          return { ...err("Lưu khách: khách đang đổi địa chỉ", "Khách đang đổi nơi giao mà chưa gửi đủ địa chỉ mới — KHÔNG lưu địa chỉ cũ, KHÔNG nói đã cập nhật; máy chủ đã chuyển nhân viên.", state), requireHuman: d.reason };
+        }
       }
       // Địa chỉ ĐƠN CŨ (Customer 360) chỉ là gợi ý (AGENTS 3.12): gõ lại nó mà không qua use_saved_address ⇒ bỏ qua kiểm lời xác nhận.
       if (!saved && ctx.returning?.fromHistory && input.use_saved_address !== true && (await import("@/lib/sales-chatbot/customer-360")).historyAddressWithoutConsent(ctx.returning, input.address, ctx.lastUserText))

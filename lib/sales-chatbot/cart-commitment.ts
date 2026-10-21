@@ -804,11 +804,15 @@ function applyCart(cart: CartCommitment | undefined, text: string, turn: number 
   // nhiêu?» → «cho chị 2 gói») và chỉ cho câu đặt / thêm; câu sửa / bớt vẫn đi đường cũ.
   // Đơn vị phải HỢP món được mời (FAIL-2 review vòng 2): «cho chị 2kg» khi món chính tính theo khối lượng vẫn là của món chính — chỉ số
   // GÓI / HỘP / CÁI không tên mới về món được mời. Tên mơ hồ («2 hộp nem» khi có hai loại nem) mà khớp đúng món vừa mời ⇒ món đó.
-  const inv = cart?.selectedItems.some((x) => x.customerExplicit) ? opts.invited : null;
+  // GIỎ CÒN TRỐNG (P0 21/10/2026, HSLC «Ngọc Bích»): câu mẫu báo giá ĐÚNG MỘT món «Chả cá thu 280k/kg — 1kg hay 2kg?» rồi khách «1kg thôi»
+  // ⇒ đó là 1kg món vừa báo giá; để model tự đoán thì lượt im ⇒ «mình muốn lấy món nào» / «nói rõ hơn». Chỉ khi ĐƠN VỊ của món được mời
+  // đọc được từ danh mục (`invited.unit`) và hợp số khách nói — không đoán đơn vị. «1kg thôi» (SET) khi giỏ trống là câu đặt.
+  const hasExplicit = Boolean(cart?.selectedItems.some((x) => x.customerExplicit));
+  const inv = hasExplicit || opts.invited?.unit !== undefined ? opts.invited : null;
   const a0 = parsed.amounts.length === 1 ? parsed.amounts[0] : null;
   // Review vòng 3: đơn vị HỢP CẢ món chính lẫn món được mời («ừ lấy 1kg» sau lời mời chả mực khi chả cá cũng bán theo kg; «thêm 1 hộp nữa»
   // khi nem và ruốc cùng bán theo hộp) ⇒ không gán — hỏi lại. Chỉ hợp món được mời ⇒ món được mời; chỉ hợp món chính ⇒ món chính.
-  const unnamedA0 = Boolean(inv && a0 && !a0.label && !a0.ambiguous && (parsed.kind === "ORDER" || parsed.kind === "ADD"));
+  const unnamedA0 = Boolean(inv && a0 && !a0.label && !a0.ambiguous && (parsed.kind === "ORDER" || parsed.kind === "ADD" || (!hasExplicit && parsed.kind === "SET")));
   const invUnit: CartUnit = inv?.unit ?? "pack";
   const mainUnits = new Set((cart?.selectedItems ?? []).filter((x) => x.customerExplicit).map((x) => x.unit));
   const bothFit = unnamedA0 && a0!.unit === invUnit && mainUnits.has(a0!.unit);
