@@ -25,6 +25,7 @@ import {
 } from "@/lib/queries/profit-nominal";
 import { fixedCostForPeriod, opsCosts, periodMonths, rescuedFromRate } from "@/lib/constants/profit";
 import { returnCostByProduct, type CostEngineWarning } from "@/lib/queries/cost-engine";
+import { shipmentCostSql } from "@/lib/queries/shipping-cost";
 import { accountingProfitAfterCompensation, getOperatingCostForCompensationBasis, type BasisExclusion } from "@/lib/queries/compensation-basis";
 import { distributeProportionally, inclusiveDays, prorateMonthlyAmount } from "@/lib/constants/cost-allocation";
 import { wholeMonthKey } from "@/lib/constants/payroll-carryover";
@@ -352,8 +353,10 @@ async function productEconomics(period: Period) {
   const p = schema.products;
   const productKey = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
   const orderTotal = sql`nullif(${o.totalPriceAfterDiscount}, 0)`;
+  // Cước chiều đi THEO GHI NHẬN VIETTEL POST, thiếu thì ước tính theo lịch cước tại ngày lên đơn — cùng một
+  // biểu thức với máy chi phí và bảng đối soát (`lib/queries/shipping-cost.ts`). Dựng TRƯỚC giao dịch tắt JIT.
   // cast bigint: cước (int4) × tiền hàng (int4) dễ vượt 2,1 tỷ → "integer out of range"
-  const shipFee = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)::bigint`;
+  const { fee: shipFee } = await shipmentCostSql();
   /*
     JIT TẮT TRONG ĐÚNG GIAO DỊCH NÀY.
 

@@ -50,6 +50,12 @@ const goc = (): MonthReconInput => ({
     inTransitShipping: 0,
     sentOrders: 230,
     sentNoFeeOrders: 0,
+    shipOnStatementOrders: 230,
+    shipOnStatement: 5 * TR,
+    shipVtpOnlyOrders: 0,
+    shipVtpOnly: 0,
+    shipEstimatedOrders: 0,
+    shipEstimated: 0,
   },
   costWarnings: [],
   codes: [

@@ -204,7 +204,9 @@ async function testFlow(db: Db) {
     assert.equal(t.returnLeg.shared, 12_000, "phần không nối được vào chi phí chung");
     assert.equal(t.returnLeg.toCodes + t.returnLeg.shared, tongMay, "không ghi trùng");
     const a = r.marketers.products.find((p) => p.productId === "rc-prod-a");
-    assert.equal(a?.shipping, 45_000, "phần gắn mã nằm trong cột vận chuyển của mã");
+    // Hai vận đơn chiều đi chưa có cước Viettel Post (0) ⇒ cước ƯỚC TÍNH theo lịch cước (AGENTS.md mục 80), cùng cột.
+    assert.equal(engine.shippingEstimate.orders, 2, "hai vận đơn chiều đi thiếu cước VTP ⇒ ước tính, đếm riêng");
+    assert.equal(a?.shipping, 45_000 + engine.shippingEstimate.amount, "phần chiều hoàn gắn mã (45K) nằm trong cột vận chuyển của mã, cạnh cước chiều đi ước tính");
     const recon = await getMonthReconciliation("2031-03", { report: r });
     assert.equal(recon.lines.find((l) => l.key === "return-cost")?.status, "MATCHED", "bảng đối soát: cơ sở lương = máy chi phí");
     assert.equal(recon.classes.NOT_IN_BASIS, 0, "phí chiều hoàn không còn là 'chưa vào cơ sở'");

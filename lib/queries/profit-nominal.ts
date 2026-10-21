@@ -3,7 +3,7 @@ import { chayKhongJit, getDb, schema } from "@/db";
 import { adsRatio, adsRatios, type AdsRatios } from "@/lib/constants/profit";
 import { CONFIRMED_STAGES } from "@/lib/queries/expenses";
 import { memo, periodKey } from "@/lib/cache";
-import { DEFAULT_PROFIT_ASSUMPTIONS, fixedCostForPeriod, manualShipFee, opsCosts, periodMonths, PROFIT_ASSUMPTIONS_KEY, rescuedFromRate, resolveShipFees, type ProfitAssumptions, type ShipFeeSource } from "@/lib/constants/profit";
+import { DEFAULT_PROFIT_ASSUMPTIONS, shipFeesForPeriod, fixedCostForPeriod, opsCosts, periodMonths, PROFIT_ASSUMPTIONS_KEY, rescuedFromRate, type ProfitAssumptions, type ShipFeeSource } from "@/lib/constants/profit";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import { VARIANT_CURRENT_MARKETER_COST } from "@/lib/queries/current-marketer-cost";
@@ -11,6 +11,7 @@ import { LINE_MARKETER_PRICE } from "@/lib/queries/marketer-price";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 import { getOperatingCost } from "@/lib/queries/cost-engine";
+import { resolveShipFeeBase } from "@/lib/queries/shipping-cost";
 import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { distributeProportionally, inventoryRiskExposure, inventoryRiskOnSold } from "@/lib/constants/cost-allocation";
 import { parseDeliveryRateOverride, resolveDeliveryRate, type DeliveryRateOverride } from "@/lib/constants/delivery-rate";
@@ -81,62 +82,12 @@ export type ResolvedAssumptions = ProfitAssumptions & {
   returnFeeSample: number;
 };
 
-/**
- * CƯỚC BÌNH QUÂN 90 NGÀY TỪ DỮ LIỆU — phần ĐẮT của `resolveAssumptions`, tách ra để nhớ đệm.
- *
- * Đo production 29/09/2026 (EXPLAIN ANALYZE): **5.339 ms, trong đó biên dịch JIT 5.203 ms** (393
- * hàm) — câu mang `ORDER_OUTCOME` trên cả 90 ngày đơn, phép tính thật chỉ ~140 ms. Và nó KHÔNG có
- * đệm, trong khi `/ads` gọi nó từ ba khối song song (bảng quyết định · trong ngày · hiệu quả
- * marketer), cộng Lương, Báo cáo LN danh nghĩa, tỷ lệ GTC theo mã: mỗi khối trả lại đủ 5 giây.
- *
- * Nên: tắt JIT (`chayKhongJit`, giao dịch RIÊNG của chính câu này — hàm gọi nó có thể đang ở trong
- * `Promise.all`, không ôm vào giao dịch của ai) và nhớ 120 giây. Chỉ nhớ phần DỮ LIỆU: giả định chủ
- * shop gõ trong `settings` vẫn đọc mới mỗi lần, nên sửa giả định có hiệu lực ngay. Bình quân 90 ngày
- * đổi chậm tới mức 2 phút không làm lệch một đồng nào đáng kể.
- */
-function shipFeeFromData() {
-  return memo("profit-assumptions:ship-fee-90d", 120_000, async () => {
-    const db = await getDb();
-    const since = new Date(Date.now() - 90 * 86_400_000);
-    const [row] = await chayKhongJit(db, (tx) =>
-      tx
-        .select({
-          delivered: sql<number>`avg(nullif(coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}), 0)) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
-          returnFee: sql<number>`avg(nullif(${o.returnFee}, 0)) filter (where ${IS_RETURNED})`,
-          returnFeeSample: sql<number>`count(*) filter (where ${IS_RETURNED} and ${o.returnFee} > 0)`,
-        })
-        .from(o)
-        .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-        .where(gte(o.insertedAt, since)),
-    );
-    return row;
-  });
-}
-
-/**
- * Đọc giả định + tự tính cước từ dữ liệu 90 ngày cho ô để trống:
- *  - cước gửi/đơn: bình quân cước ĐVVC của đơn đã giao (Pancake partner_fee / shipments.shipping_fee), không có thì 17.000đ;
- *  - cước đơn hoàn: cước gửi + phí hoàn về bình quân của các đơn hoàn CÓ ghi phí hoàn; Pancake/Viettel Post webhook không đẩy phí hoàn nên
- *    thường bằng 0 → giả định phí hoàn về = cước gửi (đơn hoàn tốn gấp đôi). Nhập tay ở "Sửa giả định" nếu hợp đồng VTP khác.
- */
-export async function resolveAssumptions(): Promise<ResolvedAssumptions> {
+export async function resolveAssumptions(period?: { fromKey?: string | null; toKey?: string | null }): Promise<ResolvedAssumptions> {
   const saved = await getSettingJson<ProfitAssumptions>(PROFIT_ASSUMPTIONS_KEY, DEFAULT_PROFIT_ASSUMPTIONS);
-  const manual = { delivered: manualShipFee(saved, "shipFeeDelivered"), returned: manualShipFee(saved, "shipFeeReturned") };
-  let returnFeeFromData = 0;
-  let returnFeeSample = 0;
-  let deliveredFromData = 0;
-  // Hai ô đều đặt tay thì không cần câu 90 ngày (5 giây khi đệm nguội).
-  if (manual.delivered === null || manual.returned === null) {
-    const row = await shipFeeFromData();
-    deliveredFromData = Math.round(Number(row?.delivered ?? 0));
-    returnFeeFromData = Math.round(Number(row?.returnFee ?? 0));
-    returnFeeSample = Number(row?.returnFeeSample ?? 0);
-  }
-  const fees = resolveShipFees(manual, { delivered: deliveredFromData, returnFee: returnFeeFromData });
-  const shipFeeDeliveredUsed = fees.delivered;
-  const shipFeeReturnedUsed = fees.returned;
-  const shipFeeSource = fees.source;
-  return { ...saved, shipFeeDeliveredUsed, shipFeeReturnedUsed, shipFeeSource, returnFeeFromData, returnFeeSample };
+  // Ô chung + lịch cước theo khoảng thời gian (chủ shop 21/10/2026) — MỘT chỗ giải, dùng chung với cơ sở lương.
+  const base = await resolveShipFeeBase(saved);
+  const fees = shipFeesForPeriod(base, base.schedule, period?.fromKey ?? null, period?.toKey ?? null, base.returnFeeFromData);
+  return { ...saved, shipFeeDeliveredUsed: fees.delivered, shipFeeReturnedUsed: fees.returned, shipFeeSource: base.source, returnFeeFromData: base.returnFeeFromData, returnFeeSample: base.returnFeeSample };
 }
 
 /** Trạng thái hành trình cho biết đã từng phát không thành (Pancake: "Tồn - …", "Phát tiếp"; Viettel Post: 505/506/507/508) */
@@ -751,7 +702,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
   const locGiaTri = orderValueWhereSql(value);
   const dangLoc = orderValueActive(value);
   const db = await getDb();
-  const assumptions = await resolveAssumptions();
+  const assumptions = await resolveAssumptions(period);
   // Chỉ đọc khi được hỏi: mọi đường gọi khác (lương, marketer, AI) giữ nguyên giá vốn 0 ₫ = chưa biết.
   // Giá báo MKT hiệu lực vào CUỐI KỲ (luật 5) — kỳ "Toàn bộ" không có mốc cuối thì lấy hôm nay.
   const giaDuTinh: EstimatedCostMap = withEstimatedCost ? await getEstimatedCosts(period.to ?? new Date()) : {};

@@ -102,6 +102,13 @@ export type MonthReconInput = {
     sentOrders: number;
     /** Kiện đã gửi mà cước rơi về 0 (không phí vận đơn, không phí đối tác). */
     sentNoFeeOrders: number;
+    /** Cước theo nguồn (đơn đã gửi): đã nằm trong bảng kê COD · VTP ghi nhận chưa có bảng kê · ước tính. */
+    shipOnStatementOrders: number;
+    shipOnStatement: number;
+    shipVtpOnlyOrders: number;
+    shipVtpOnly: number;
+    shipEstimatedOrders: number;
+    shipEstimated: number;
   };
   /** Cảnh báo `high` của máy chi phí. */
   costWarnings: readonly { rule: string; title: string; amount: number }[];
@@ -277,12 +284,42 @@ export function buildMonthReconciliation(x: MonthReconInput, periodQuery: string
     label: "Cước chiều đi theo vận đơn",
     basis: r(b.shippingPerShipment),
     source: r(e.shipping),
-    status: o.sentNoFeeOrders > 0 ? "UNRECONCILED" : r(b.shippingPerShipment) === r(e.shipping) ? "MATCHED" : Math.abs(duShip) <= tolShip ? "EXPLAINED" : "UNRECONCILED",
+    // Hai vế dùng CÙNG biểu thức cước (`shipping-cost.ts`), nên khớp không chứng minh được cước THẬT: phần
+    // ước tính theo lịch cước ⇒ ƯỚC TÍNH, không đếm là khớp.
+    status:
+      o.sentNoFeeOrders > 0
+        ? "UNRECONCILED"
+        : r(b.shippingPerShipment) === r(e.shipping) || Math.abs(duShip) <= tolShip
+          ? o.shipEstimatedOrders > 0
+            ? "ESTIMATED"
+            : r(b.shippingPerShipment) === r(e.shipping)
+              ? "MATCHED"
+              : "EXPLAINED"
+          : "UNRECONCILED",
     cls: "BY_CODE",
     note:
       (o.sentNoFeeOrders > 0 ? `${o.sentNoFeeOrders.toLocaleString("vi-VN")} kiện đã gửi KHÔNG có cước (tính 0 ₫). ` : "") +
+      (o.shipEstimatedOrders > 0 ? `${o.shipEstimatedOrders.toLocaleString("vi-VN")} kiện chưa có cước Viettel Post ghi nhận ⇒ tính theo lịch cước ƯỚC TÍNH (${vnd(o.shipEstimated)}). ` : "") +
       `Chênh ${vnd(b.shippingPerShipment - e.shipping)} = cước kiện đang đi ${vnd(o.inTransitShipping)} + phần dư ${vnd(duShip)}${Math.abs(duShip) <= tolShip ? " (làm tròn khi chia cước theo dòng hàng)" : " — chưa giải thích (cước chia theo dòng hàng lệch tổng đơn, hoặc đơn tổng tiền 0)"}.`,
     href: `/shipments?${periodQuery}`,
+  });
+  // ĐỐI SOÁT CƯỚC CÙNG COD (chủ shop 21/10/2026): bảng kê COD của Viettel Post ghi CẢ tiền thu hộ lẫn cước đã
+  // tính tiền — cước chỉ "đã đối soát" khi vận đơn đã nằm trong một bảng kê. Webhook là ghi nhận của VTP nhưng
+  // chưa phải số đã tính tiền; ước tính là chưa có gì của VTP.
+  const cuocChuaDoiSoat = o.shipVtpOnly + o.shipEstimated;
+  add({
+    key: "shipping-billing",
+    label: "Cước đối soát cùng bảng kê COD",
+    basis: r(o.shipOnStatement + o.shipVtpOnly + o.shipEstimated),
+    source: r(o.shipOnStatement),
+    status: o.shipVtpOnlyOrders > 0 ? "UNRECONCILED" : o.shipEstimatedOrders > 0 ? "ESTIMATED" : "MATCHED",
+    cls: "BY_CODE",
+    note:
+      `${o.shipOnStatementOrders.toLocaleString("vi-VN")} kiện có bảng kê (${vnd(o.shipOnStatement)}) · ` +
+      `${o.shipVtpOnlyOrders.toLocaleString("vi-VN")} kiện VTP ghi nhận CHƯA có bảng kê (${vnd(o.shipVtpOnly)}) · ` +
+      `${o.shipEstimatedOrders.toLocaleString("vi-VN")} kiện ước tính (${vnd(o.shipEstimated)}). ` +
+      (cuocChuaDoiSoat > 0 ? "Nhập «Chi tiết bảng kê COD» của kỳ ở Nhập Viettel Post để đối soát cước cùng tiền thu hộ." : "Mọi cước của kỳ đã đối soát cùng bảng kê."),
+    href: "/import-vtp",
   });
   add({ key: "logistics-adj", label: "Điều chỉnh cước / phí hoàn có lý do (gõ tay)", basis: r(b.logisticsAdjustment), source: r(b.logisticsAdjustment), status: "MATCHED", cls: "BY_CODE", note: "Cùng một con số của máy chi phí (không phải đối chiếu độc lập).", href: "/expenses" });
   // Phí chiều hoàn VÀO cơ sở lương (chủ shop 20/10/2026): phần nối được về đơn gốc gắn mã, phần còn lại
@@ -365,12 +402,13 @@ export function buildMonthReconciliation(x: MonthReconInput, periodQuery: string
     withProfit: x.codes.filter((c) => c.revenue > 0 || c.profit !== 0).length,
   };
 
-  const COUNT: Record<string, number> = { "open-orders": o.openOrders, cogs: o.unknownCostLines, shipping: o.sentNoFeeOrders };
+  const COUNT: Record<string, number> = { "open-orders": o.openOrders, cogs: o.unknownCostLines, shipping: o.sentNoFeeOrders, "shipping-billing": o.shipVtpOnlyOrders + o.shipEstimatedOrders };
   // Số tiền của khoản: đúng thứ đang treo — không phải "chênh 0 ₫" khi lý do là chứng từ / giá vốn thiếu.
   const SOTIEN: Record<string, number> = {
     revenue: r(b.revenue) !== r(o.deliveredRevenue) ? r(b.revenue - o.deliveredRevenue) : r(thieuTien),
     cogs: o.unknownCostLines > 0 ? r(o.unknownCostRevenue) : r(duCogs),
     shipping: r(duShip),
+    "shipping-billing": r(o.shipVtpOnly + o.shipEstimated),
   };
   const issues: ReconIssue[] = lines
     .filter((l) => l.status === "UNRECONCILED")

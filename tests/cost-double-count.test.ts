@@ -71,7 +71,10 @@ export async function testCostDoubleCount(db: Db) {
   });
   clearMemo();
   let costs = await getRecognizedCosts(KY);
-  assert.equal(costs.components.SHIPPING.amount, 20_000, "1. cước = 20.000đ theo vận đơn, KHÔNG cộng thêm khoản gõ tay trùng");
+  // Đơn hoàn có vận đơn mà Viettel Post chưa ghi cước (0) ⇒ cước ƯỚC TÍNH, đếm riêng (AGENTS.md mục 80) —
+  // chưa biết không phải 0. Phần có chứng từ vẫn đúng 20.000đ.
+  assert.equal(costs.shippingEstimate.orders, 1, "1. đúng 1 đơn (đơn hoàn chưa có cước VTP) tính cước ước tính");
+  assert.equal(costs.components.SHIPPING.amount - costs.shippingEstimate.amount, 20_000, "1. cước = 20.000đ theo vận đơn, KHÔNG cộng thêm khoản gõ tay trùng");
   const dupWarn = costs.warnings.find((w) => w.rule === "DUPLICATE_LOGISTICS_COST_SOURCE");
   assert.ok(dupWarn, "1. phải nêu rõ có khoản cước gõ tay bị loại, không loại im lặng");
   assert.equal(dupWarn?.amount, 20_000, "1. cảnh báo nói đúng số tiền bị loại");
@@ -83,7 +86,7 @@ export async function testCostDoubleCount(db: Db) {
   });
   clearMemo();
   costs = await getRecognizedCosts(KY);
-  assert.equal(costs.components.SHIPPING.amount, 170_000, "1. khoản ĐIỀU CHỈNH có lý do vẫn được cộng (20.000 + 150.000)");
+  assert.equal(costs.components.SHIPPING.amount - costs.shippingEstimate.amount, 170_000, "1. khoản ĐIỀU CHỈNH có lý do vẫn được cộng (20.000 + 150.000)");
 
   // ══ TEST 2 — PHÍ HOÀN ══
   await db.insert(schema.expenses).values({

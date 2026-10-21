@@ -9,7 +9,9 @@ import { Label } from "@/components/ui/label";
 import { clearDeliveryRateOverride, setDeliveryRateOverride } from "@/lib/actions/delivery-rate-override";
 import { saveProfitAssumptions } from "@/lib/actions/report-settings";
 import { parseDeliveryRateOverride, OVERRIDE_MODE_LABEL } from "@/lib/constants/delivery-rate";
-import { manualShipFee, type ProfitAssumptions } from "@/lib/constants/profit";
+import { manualShipFee, shipFeeScheduleOf, type ProfitAssumptions } from "@/lib/constants/profit";
+
+type MocCuoc = { from: string; shipFeeDelivered: string; shipFeeReturned: string; note: string };
 
 type Props = {
   assumptions: ProfitAssumptions & {
@@ -42,6 +44,11 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
     taxPercent: String(assumptions.taxPercent ?? 1.5),
     otherCostPercentOfAds: String(assumptions.otherCostPercentOfAds ?? 1.1),
   });
+  // Lịch cước ước tính theo khoảng thời gian: mỗi mốc có hiệu lực TỪ ngày của nó tới trước mốc kế tiếp.
+  const [lich, setLich] = useState<MocCuoc[]>(() =>
+    shipFeeScheduleOf(assumptions).map((x) => ({ from: x.from, shipFeeDelivered: String(x.shipFeeDelivered), shipFeeReturned: x.shipFeeReturned === null ? "" : String(x.shipFeeReturned), note: x.note })),
+  );
+  const suaMoc = (i: number, k: keyof MocCuoc, v: string) => setLich((xs) => xs.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
   const [pending, startTransition] = useTransition();
   /** Ô cước: trống ⇒ `null` (tự tính), còn lại là số đặt tay — 0 là 0 ₫. */
   const shipFee = (v: string) => (v.trim() === "" ? null : Math.round(Number(v)));
@@ -72,6 +79,11 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
       toast.error(`Ô ${trong.map(([, nhan]) => `«${nhan}»`).join(", ")} đang trống — điền số (gõ 0 nếu không tính).`);
       return;
     }
+    const mocHong = lich.findIndex((x) => !/^\d{4}-\d{2}-\d{2}$/.test(x.from) || x.shipFeeDelivered.trim() === "" || !Number.isFinite(Number(x.shipFeeDelivered)) || x.note.trim().length < 3);
+    if (mocHong >= 0) {
+      toast.error(`Mốc cước thứ ${mocHong + 1}: cần ngày hiệu lực, cước gửi và lý do (ít nhất 3 ký tự).`);
+      return;
+    }
     startTransition(async () => {
       const result = await saveProfitAssumptions({
         shipFeeDelivered: shipFee(form.shipFeeDelivered),
@@ -91,6 +103,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
         otherCostPercentOfAds: num(form.otherCostPercentOfAds),
         // Không có phép tính nào đọc ô này (mô hình tự học — xem dòng tóm tắt): gửi lại nguyên giá trị đã lưu.
         failedToReturnPercent: assumptions.failedToReturnPercent ?? 0,
+        shipFeeSchedule: lich.map((x) => ({ from: x.from, shipFeeDelivered: Math.round(Number(x.shipFeeDelivered)), shipFeeReturned: x.shipFeeReturned.trim() === "" ? null : Math.round(Number(x.shipFeeReturned)), note: x.note.trim() })),
       });
       if ("error" in result) toast.error(result.error);
       else {
@@ -129,6 +142,12 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
             )
           </span>
         </span>
+        {shipFeeScheduleOf(assumptions).length ? (
+          <span title={shipFeeScheduleOf(assumptions).map((x) => `từ ${x.from}: ${x.shipFeeDelivered.toLocaleString("vi-VN")} ₫ — ${x.note}`).join("\n")}>
+            Lịch cước <b>{shipFeeScheduleOf(assumptions).length} mốc</b>
+            <span className="text-muted-foreground"> (cước trên là bình quân của kỳ đang xem)</span>
+          </span>
+        ) : null}
         <span>
           Đóng hàng <b className="numeric">{(assumptions.packingFeePerOrder ?? 5000).toLocaleString("vi-VN")} ₫</b>
           <span className="text-muted-foreground">/đơn gửi</span>
@@ -209,6 +228,26 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
                 setForm({ ...form, shipFeeReturned: e.target.value })
               }
             />
+          </div>
+          <div className="space-y-2 sm:col-span-6">
+            <Label title="Cước ƯỚC TÍNH thay đổi theo thời gian (sản lượng tăng thì deal được giá thấp hơn, hoặc chính sách đổi). Mỗi mốc có hiệu lực TỪ ngày của nó tới trước mốc kế tiếp; trước mốc đầu tiên dùng hai ô cước ở trên. Báo cáo một kỳ lấy bình quân theo số ngày. Cước THẬT của một vận đơn luôn là số Viettel Post ghi nhận — lịch này chỉ dùng cho đơn chưa có số ấy và cho lợi nhuận danh nghĩa.">
+              Lịch cước ước tính theo khoảng thời gian
+            </Label>
+            {lich.length === 0 ? <p className="text-xs text-muted-foreground">Chưa có mốc nào — mọi kỳ dùng hai ô cước ở trên.</p> : null}
+            {lich.map((x, i) => (
+              <div key={i} className="grid gap-2 sm:grid-cols-[150px_140px_160px_1fr_auto]">
+                <Input type="date" aria-label={`Mốc ${i + 1}: từ ngày`} value={x.from} onChange={(e) => suaMoc(i, "from", e.target.value)} />
+                <Input type="number" inputMode="numeric" min={0} step={500} aria-label={`Mốc ${i + 1}: cước gửi`} placeholder="Cước gửi (₫)" value={x.shipFeeDelivered} onChange={(e) => suaMoc(i, "shipFeeDelivered", e.target.value)} />
+                <Input type="number" inputMode="numeric" min={0} step={500} aria-label={`Mốc ${i + 1}: cước 1 đơn hoàn`} placeholder="Đơn hoàn (trống = tự tính)" value={x.shipFeeReturned} onChange={(e) => suaMoc(i, "shipFeeReturned", e.target.value)} />
+                <Input aria-label={`Mốc ${i + 1}: lý do`} placeholder="Lý do (vd VTP giảm giá theo sản lượng)" value={x.note} onChange={(e) => suaMoc(i, "note", e.target.value)} />
+                <Button type="button" variant="ghost" size="sm" onClick={() => setLich((xs) => xs.filter((_, j) => j !== i))}>
+                  Bỏ
+                </Button>
+              </div>
+            ))}
+            <Button type="button" variant="outline" size="sm" onClick={() => setLich((xs) => [...xs, { from: "", shipFeeDelivered: "", shipFeeReturned: "", note: "" }])}>
+              + Thêm mốc cước
+            </Button>
           </div>
           <div className="space-y-1">
             <Label>Đóng hàng / đơn gửi (₫)</Label>
