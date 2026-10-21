@@ -48,7 +48,8 @@ import { loadFollowupSettings } from "@/lib/sales-chatbot/followup-settings";
 import { confirmedStaleness, settleConfirmedConversation } from "@/lib/sales-chatbot/confirmed-settle";
 import { loadLifecycle } from "@/lib/sales-chatbot/lifecycle";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
-import { imagesAlreadyDescribed, pancakeImageUrls, pancakeStickerUrls } from "@/lib/sales-chatbot/vision";
+import { imagesAlreadyDescribed, pancakeImageUrls, pancakeLikeSticker, pancakeStickerUrls } from "@/lib/sales-chatbot/vision";
+import { LIKE_TEXT } from "@/lib/sales-chatbot/short-accept";
 import { adReferralFromPancake, isPancakePageSide, type AdReferral } from "@/lib/sales-chatbot/ad-referral-shared";
 import { recordConversationAd } from "@/lib/sales-chatbot/ad-referral";
 import { botSendAllowed, inboundPageGate, pageRuntimeMode } from "@/lib/sales-chatbot/page-runtime";
@@ -302,6 +303,8 @@ export type FanpageEvent = {
   imageUrls: string[];
   /** Nhãn dán (👍, sticker) khách gửi (`pancakeStickerUrls`) — chỉ để hộp thư HIỆN; bot không trả lời, không đọc. */
   stickerUrls?: string[];
+  /** Tin là nhãn LIKE của Messenger (`pancakeLikeSticker`) — chỉ có nghĩa ĐỒNG Ý khi hội thoại đang có lời mời một món chờ trả lời. */
+  likeSticker?: boolean;
   /** 0225: quảng cáo dẫn KHÁCH vào hội thoại (`adReferralFromPancake`) — tin phía page / thiếu trường ⇒ không có. */
   adReferral?: AdReferral | null;
   /**
@@ -368,6 +371,7 @@ export function parsePancakeWebhook(payload: unknown): FanpageEvent | null {
   const comment = !inbox && type === "COMMENT" ? { postId, fromId: str(from.id) } : null;
   const imageUrls = pancakeImageUrls(msg);
   const stickerUrls = pancakeStickerUrls(msg);
+  const likeSticker = !fromPage && pancakeLikeSticker(msg);
   const automated = fromPage && Boolean(from.ai_generated || from.is_automated);
   const adReferral = fromPage ? null : adReferralFromPancake(payload);
   const senderId = fromPage ? "" : str(conv?.from_psid) || str(from.id);
@@ -375,10 +379,19 @@ export function parsePancakeWebhook(payload: unknown): FanpageEvent | null {
   const sourceMs = pancakeMs(msg?.inserted_at ?? msg?.created_at);
   const sourceAt = sourceMs === null ? null : new Date(sourceMs);
   const senderApp = fromPage ? str(from.uid) || str(from.admin_id) || (automated ? "pancake-automation" : "") || null : null;
-  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, automated, inbox, comment, imageUrls, stickerUrls, adReferral, senderId, avatar, sourceAt, senderApp };
+  return { pageId, threadId, messageId, text, customerName: fromPage ? "" : customerName, fromPage, humanStaff, automated, inbox, comment, imageUrls, stickerUrls, ...(likeSticker ? { likeSticker: true } : {}), adReferral, senderId, avatar, sourceAt, senderApp };
 }
 
 /** Khoá hội thoại fanpage (cột `visitor_key`, UNIQUE cho kênh FANPAGE): băm (page, hội thoại Pancake). */
+/** Hội thoại fanpage đang có lời mời một món chờ trả lời (`state.directOffer`, không mơ hồ). */
+async function directOfferPending(pageId: string, threadId: string): Promise<boolean> {
+  const db = await getDb();
+  const c = schema.salesChatConversations;
+  const [row] = await db.select({ state: c.state }).from(c).where(and(eq(c.channel, "FANPAGE"), eq(c.visitorKey, fanpageVisitorKey(pageId, threadId)))).limit(1);
+  const o = (row?.state as { directOffer?: { ambiguous?: boolean } } | null | undefined)?.directOffer;
+  return Boolean(o && !o.ambiguous);
+}
+
 export function fanpageVisitorKey(pageId: string, threadId: string): string {
   return createHash("sha256").update(`fanpage:${pageId}:${threadId}`).digest("hex");
 }
@@ -587,6 +600,10 @@ export async function receiveFanpageEvent(ev: FanpageEvent, now: Date = new Date
   // ẢNH (0195): tin nhắn có ảnh ⇒ vào hàng chờ như tin chữ, bot đọc ảnh lúc trả lời (`describeCustomerImages`). Bình luận
   // kèm ảnh: chỉ dùng chữ (tin riêng trả lời bình luận đã đủ ngữ cảnh từ bài viết).
   const images = ev.inbox ? ev.imageUrls : [];
+  // 👍 TRẢ LỜI LỜI MỜI MỘT MÓN (P0 21/10/2026, ca «Vit Xiem» — short-accept.ts): nhãn like Messenger ngay sau lời mời có đúng một mẫu mã +
+  // giá là ĐỒNG Ý ⇒ vào hàng chờ của bot như chữ «👍» (engine quyết có đúng là trả lời trực tiếp không). Không có lời mời đang chờ ⇒ như cũ
+  // (nhãn dán chỉ để người xem — bot không trả lời mọi cái 👍).
+  if (!ev.text && !images.length && ev.inbox && ev.likeSticker && (await directOfferPending(ev.pageId, ev.threadId).catch(() => false))) ev = { ...ev, text: LIKE_TEXT };
   if (!ev.text && !images.length) {
     // 👍 / nhãn dán / video / ghi âm: bot không trả lời, nhưng khách ĐÃ phản hồi ⇒ không còn «im lặng» để nhắc.
     if (ev.inbox) {

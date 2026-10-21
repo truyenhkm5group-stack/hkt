@@ -88,6 +88,20 @@ function testPure() {
     assert.equal(wrongTemplateOf(sent, c(said), tpls, products)?.title ?? null, wrongProductTemplate(sent, c(said), tpls, products)?.title ?? null, `D trùng bản script: «${said}»`);
   assert.equal(wrongTemplateOf(answers[0].replace("{{giá:NEM-1}}", "120.000 ₫"), c("xin giá chả cá"), tpls, products)?.title, "T0", "câu mẫu nem cho «xin giá chả cá» ⇒ sai món");
 
+  // P0 21/10/2026 (ca «Vit Xiem»): khách đồng ý ngắn lời mời MỘT món mà bot bắt nhắn tên món / món không vào đơn.
+  const scan = (parts: [string, unknown][]) => scanThreadQuality(thread(parts), { from: WINDOW.from, to: WINDOW.to, templates: [], products });
+  const invite = "Dạ nem hải sản tôm bề bề nhà em đóng hộp 10 cái giá 120.000 ₫, mình lấy 1 hộp luôn nha?";
+  const reasked = scan([["assistant", txt(invite)], ["assistant", txt("[Shop đã nhắn] CHẢ CÁ THU NGUYÊN CHẤT")], ["user", txt("Ok")], ["assistant", txt('Dạ, anh/chị nhắn giúp em "lấy 1 hộp nem hải sản tôm bề bề" để em thêm vào đơn luôn nhé ạ!')]]);
+  assert.deepEqual(reasked.hits.map((h) => h.code).sort(), ["UPSELL_ACCEPTED_BUT_REASKED", "UPSELL_ACCEPTED_NOT_ATTACHED"], "ca thật: hỏi lại + món không vào đơn (tin tự động của page chen giữa không xoá lời mời)");
+  assert.equal(reasked.bases.offerAccepts, 1, "mẫu số: một lần đồng ý ngắn sau lời mời một món");
+  const added = scan([["assistant", txt(invite)], ["user", txt("👍")], ["assistant", txt("Dạ em lên đơn 1 × Nem hải sản tôm bề bề cho mình rồi ạ. Tổng đơn mới 400.000 ₫ ạ.")]]);
+  assert.deepEqual(added.hits, [], "máy chủ thêm + báo tổng mới ⇒ không đếm");
+  const viaTool = scan([["assistant", txt(invite)], ["user", txt("vâng")], ["user", [{ type: "tool_result", content: JSON.stringify({ lines: ["Nem hải sản tôm bề bề × 1"] }) }]], ["assistant", txt("Dạ vâng ạ.")]]);
+  assert.deepEqual(viaTool.hits, [], "kết quả công cụ mang món ⇒ đã vào đơn");
+  const multi = scan([["assistant", txt("Dạ bên em có nem hải sản tôm bề bề 120.000 ₫ và chả cá thu 280.000 ₫, mình lấy món nào ạ?")], ["user", txt("Ok")], ["assistant", txt("Dạ mình muốn lấy món nào ạ?")]]);
+  assert.deepEqual([multi.hits, multi.bases.offerAccepts], [[], 0], "câu nhiều món ⇒ «Ok» không phải đồng ý một món");
+  assert.deepEqual(scan([["assistant", txt(invite)], ["user", txt("thôi em không lấy")], ["assistant", txt("Dạ vâng ạ.")]]).bases.offerAccepts, 0, "từ chối ⇒ không phải đồng ý");
+
   // 0 lời gọi AI · HANDOFF_UNANSWERED dùng đúng hàm của handoff-reply.ts (không viết bản thứ hai).
   for (const f of ["lib/sales-quality/detectors.ts", "lib/sales-quality/daily.ts"]) {
     const src = readFileSync(f, "utf8");
@@ -187,7 +201,7 @@ async function testDaily() {
     await setSettingJson(SALES_QUALITY_STATE_KEY, { day: "2031-03-01", error: "giả", attempts: 1 });
     const again = await runSalesQualityDaily(NOW);
     assert.ok(again.ran && again.created === 0, `lỗi 1 lần ⇒ chạy lại; việc đã có không nhân đôi: ${JSON.stringify(again).slice(0, 200)}`);
-    console.log("✓ Giám sát chất lượng AI bán hàng hằng ngày (2B): 8 mã có ca dương / âm · bộ dò lib = conv-money-trace trên cùng kỳ · một việc / mã / ngày ở phòng nhóm CS · không chạy lại trong ngày, lỗi thử lại có trần · không chữ tin / SĐT / mã thô · 0 lời gọi AI");
+    console.log("✓ Giám sát chất lượng AI bán hàng hằng ngày (2B): 10 mã có ca dương / âm (gồm «Ok» lời mời một món) · bộ dò lib = conv-money-trace trên cùng kỳ · một việc / mã / ngày ở phòng nhóm CS · không chạy lại trong ngày, lỗi thử lại có trần · không chữ tin / SĐT / mã thô · 0 lời gọi AI");
   } finally {
     await wipe();
   }

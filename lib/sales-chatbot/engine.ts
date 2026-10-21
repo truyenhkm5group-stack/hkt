@@ -16,7 +16,7 @@
  * "đang trả lời câu trước", không chen tin vào giữa.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { compatTableColumns } from "@/lib/db/serve-compat-columns";
 import { AI_DOWN_HANDOFF_REASON as AI_DOWN_REASON_TEXT } from "@/lib/sales-chatbot/ai-hold-shared";
@@ -64,6 +64,7 @@ import { guardReply, menuOfferStep, needsOfferFacts, OFFER_BLOCK_LABEL, offerDec
 import { loadOfferFacts } from "@/lib/sales-chatbot/offer-facts";
 import { findReturningCustomer, returningCustomerPrompt, type ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import { knownPhoneOf, knownPhonePrompt, knownPhoneStateOf, phonesInText, phoneTail, addressSummaryOf, previousAddressPrompt, previousAddressQuestion, usableKnownPhone, type KnownPhone } from "@/lib/sales-chatbot/known-contact";
+import { acceptedOfferPrompt, acceptsOffer, proposalOf, type DirectOffer } from "@/lib/sales-chatbot/short-accept";
 import { freeShipPolicyText } from "@/lib/sales-chatbot/shipping";
 import { knowledgePrompt } from "@/lib/sales-chatbot/knowledge";
 import { volumeDiscountPolicyText } from "@/lib/sales-chatbot/volume-discount";
@@ -71,7 +72,7 @@ import { formatVND } from "@/lib/format";
 import { withTurnEvents } from "@/lib/sales-chatbot/events";
 import { FOOD_PACK, salesPackFor, type SalesPack } from "@/lib/sales-chatbot/packs";
 import { recoveryPrompt, serverCancelStep } from "@/lib/sales-chatbot/cancel-flow";
-import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, returningPendingOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
+import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, returningPendingOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState, offerCatalogFor } from "@/lib/sales-chatbot/tools";
 import { purchaseRoundStart } from "@/lib/sales-chatbot/purchase-round";
 import { addressQuestion, looksLikeDeliveryAddress, looksLikeStreetFragment, parseCustomerAddress } from "@/lib/address/customer-address";
 import { askedQuantityChoice, choiceAmountText, DELIVERY_ASK_NEEDS_ADDRESS, quantityOnlyAnswer, quantityWithDeliveryAsk, roundCheckAnswer, roundCheckHandoffReason, roundCheckStep, roundCheckOrderOf } from "@/lib/sales-chatbot/round-check";
@@ -1581,6 +1582,14 @@ async function chatTurnCore(
     const returning = preferReturning(baseReturning, c360) ?? typedPrevReturning;
     // Lời nhắc chỉ nói «SĐT đã có» khi số đó KHÔNG nằm ngay trong tin khách vừa gửi (số vừa gửi là việc bình thường của lượt này).
     const promptPhone: KnownPhone = knownPhone.kind === "ONE" && phonesInText(text).includes(knownPhone.phone) ? { kind: "NONE" } : knownPhone;
+    /*
+      ĐỒNG Ý NGẮN VỚI LỜI MỜI MỘT MÓN (P0 21/10/2026, ca HSLC «Vit Xiem» — short-accept.ts): lời mời bot gửi ở lượt khách NGAY TRƯỚC có đúng
+      một mẫu mã + giá, khách trả lời «Ok» / «vâng» / 👍 ⇒ ĐỒNG Ý. Quyết MỘT lần ở đây: bước máy chủ bên dưới thêm món, và công cụ (đường
+      model) nhận cùng quyết định qua `acceptedOffer`. Người / page (không phải tin tự động) nhắn xen giữa ⇒ «Ok» có thể là trả lời người ⇒ không.
+    */
+    const dOffer: DirectOffer | undefined = st0.directOffer;
+    const humanBetween = dOffer && prevTurn === dOffer.turn ? await humanReplyAfter(conv, new Date(dOffer.at)).catch(() => true) : false;
+    const accepted = acceptsOffer({ offer: dOffer, prevTurn, text, humanBetween, declined: st0.upsellDeclinedTurn !== undefined && dOffer !== undefined && st0.upsellDeclinedTurn >= dOffer.turn });
     const reuse = reuseIntentOf([
       ...msgs
         .filter((m) => m.role === "user")
@@ -1592,7 +1601,7 @@ async function chatTurnCore(
     const bookingOn = cfg.booking.enabled && (await canUseModule("appointments"));
     // TỰ CHỐT KHI ĐỦ ĐƠN (P0-A, chủ shop 11/10/2026): theo công tắc «đơn đủ thông tin = đã xác nhận» của tổ chức. Lỗi đọc ⇒ TẮT (luồng xin xác nhận cũ).
     const autoConfirm = await loadAutoConfirmComplete().catch(() => false);
-    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }), postSale ? "" : customer360Prompt(c360, reuse), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), confirmedOrderPrompt(known), cartPromptOf(known, text, turnSeq, autoConfirm, prevTurn, { phone: promptPhone, roundTexts: roundCustomerTexts, previousAddress }), postSale ? "" : knownContactPrompt(known, roundCustomerTexts, { phoneKnown: usableKnownPhone(knownPhone) !== null }), postSale ? "" : knownPhonePrompt(promptPhone), postSale || reuse.address !== null ? "" : previousAddressPrompt(previousAddress), postSale ? postSalePrompt(phase!, phase!.shortCode) : "", recoveryPrompt(known), opts.context ?? ""].filter(Boolean).join("\n");
+    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }), postSale ? "" : customer360Prompt(c360, reuse), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), confirmedOrderPrompt(known), cartPromptOf(known, text, turnSeq, autoConfirm, prevTurn, { phone: promptPhone, roundTexts: roundCustomerTexts, previousAddress }), postSale ? "" : knownContactPrompt(known, roundCustomerTexts, { phoneKnown: usableKnownPhone(knownPhone) !== null }), postSale ? "" : knownPhonePrompt(promptPhone), postSale || reuse.address !== null ? "" : previousAddressPrompt(previousAddress), accepted ? acceptedOfferPrompt(accepted) : "", postSale ? postSalePrompt(phase!, phase!.shortCode) : "", recoveryPrompt(known), opts.context ?? ""].filter(Boolean).join("\n");
     // Chỉ CHỮ MUA (bỏ câu hỏi giá / câu từ chối / giả định — `buyingText`): gọi tên món trong «nem tôm bao nhiêu?» không phải căn cứ.
     // (`customerTexts` — tin KHÁCH thô — và `roundCustomerTexts` dựng ở trên, trước bước câu mẫu: câu mẫu cũng chịu hàng rào thông tin
     // nhận hàng, #871, và hàng rào món khách đang hỏi.)
@@ -1663,6 +1672,46 @@ async function chatTurnCore(
     const newSegment = (): Segment => ({ idx: segCount++, name: prov.provider.name, source: prov.source, model: prov.provider.model, calls: 0, inTok: 0, outTok: 0, cost: 0, think: 0, cached: 0, lat: 0 });
     let seg = newSegment();
     const recordSegment = (s: Segment, st: "OK" | "ERROR") => recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: s.source, provider: s.name, model: s.model, requests: s.calls, inputTokens: s.inTok, outputTokens: s.outTok, costUsd: s.calls ? s.cost : null, status: st, ...(st === "ERROR" ? { errorClass } : {}), actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id, workload: "sales_chatbot", eventKey: aiCallKey({ workload: "sales_chatbot", scope: conv.id, turn: turnSeq, round: s.idx }), cachedTokens: s.calls ? s.cached : null, thinkingTokens: s.calls ? s.think : null, latencyMs: s.calls ? s.lat : null }).catch(() => undefined);
+    /*
+      MÁY CHỦ THÊM MÓN KHÁCH VỪA ĐỒNG Ý (P0 21/10/2026): có đơn của lượt (nháp hoặc đã tự chốt) ⇒ `update_draft_order` với đúng mẫu mã đã mời,
+      1 phần, tổng tính lại từ ERP; CHỈ báo đã thêm sau khi công cụ ghi THÀNH CÔNG (câu qua hàng rào khẳng định). Giá đã đổi so với lời mời /
+      đơn khoá / vận đơn đã chạy / công cụ từ chối ⇒ ghi nhận yêu cầu + chuyển người, KHÔNG đơn thứ hai, KHÔNG nói đã thêm. Chưa có đơn ⇒ để
+      model lên đơn (công cụ đã nhận `acceptedOffer`).
+    */
+    if (accepted && state.draft?.orderId && !state.handoff && readConversationControl(state)?.mode !== "HUMAN" && !state.draft.lines.some((l) => l.variantId === accepted.variantId)) {
+      const nowPrice = (await offerCatalogFor(cfg, state).catch(() => [])).find((c) => c.variantId === accepted.variantId)?.price ?? null;
+      const items = [...state.draft.lines.map((l) => ({ variant_id: l.variantId, quantity: l.quantity })), { variant_id: accepted.variantId, quantity: 1 }];
+      const r =
+        nowPrice === accepted.price
+          ? await executeTool("update_draft_order", { items }, { autoConfirm, prevTurn, conversationId: conv.id, customerSaid, customerTexts, roundCustomerTexts, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, knownPhone, acceptedOffer: accepted, recentSaid, quickReplyFocus: qrFocus, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: prov.provider.model } })
+          : null;
+      const say = (() => {
+        if (!r || r.isError || r.requireHuman) return null;
+        try {
+          const c = JSON.parse(r.content) as { say_to_customer?: unknown };
+          return typeof c.say_to_customer === "string" && c.say_to_customer.trim() ? c.say_to_customer.trim() : null;
+        } catch {
+          return null;
+        }
+      })();
+      if (r && say) {
+        state = { ...noteSeenTotals(r.state), directOffer: undefined };
+        wroteThisTurn = true;
+        const v = await guardOutgoing(say, () => claimFacts(state));
+        const acceptSay = v.ok ? say : v.safeText;
+        if (!v.ok) state = (await claimBlock(v, state)).state;
+        await reply(conv, seq, acceptSay);
+        await bump({ state: state as Record<string, unknown>, turns: conv.turns + 1, ...(state.handoff ? { status: "HANDOFF" as const, handoffReason: state.handoff.reason } : {}), ...(v.ok ? {} : { lastError: v.note }) });
+        return { ok: true, view: (await conversationView(conv.id))! };
+      }
+      const why = nowPrice !== accepted.price ? `giá hiện tại ${nowPrice === null ? "chưa có" : formatVND(nowPrice)} khác giá đã mời ${formatVND(accepted.price)}` : r?.requireHuman ?? r?.summary ?? "máy chủ chưa thêm được";
+      const reason = `Cần người xử lý — khách đồng ý thêm ${accepted.name} (${formatVND(accepted.price)}) nhưng ${why} — nhân viên cập nhật đơn`;
+      const stH: ChatState = { ...state, directOffer: undefined, handoff: { reason, at: now.toISOString() } };
+      if (!isMessagingChannel(opts.channel)) await reply(conv, seq, CLAIM_SAFE_TEXT.ORDER_EDIT);
+      await bump({ status: "HANDOFF", handoffReason: reason, state: stH as Record<string, unknown>, turns: conv.turns + 1 });
+      if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, stH.customer, now, { dedupeKey: `sales-chat:offer-accept:${conv.id}:${turnSeq}` }).catch(() => undefined);
+      return { ok: true, view: (await conversationView(conv.id))! };
+    }
     try {
       for (let round = 0; round < SALES_CHATBOT_LIMITS.toolRounds; round++) {
         // Mức suy nghĩ theo cấu hình (Kỹ = suy luận vừa, Nhanh = thấp) — ngân sách đủ rộng để phần suy luận không ăn hết câu
@@ -1856,7 +1905,7 @@ async function chatTurnCore(
         for (const u of uses) {
           const confirmedBefore = Boolean(state.confirmed);
           const draftBefore = draftFingerprint(state.draft);
-          const r = await executeTool(u.name, u.input, { autoConfirm, prevTurn, conversationId: conv.id, customerSaid, customerTexts, roundCustomerTexts, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, knownPhone, recentSaid, quickReplyFocus: qrFocus, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
+          const r = await executeTool(u.name, u.input, { autoConfirm, prevTurn, conversationId: conv.id, customerSaid, customerTexts, roundCustomerTexts, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, knownPhone, acceptedOffer: accepted, recentSaid, quickReplyFocus: qrFocus, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: res.model || prov.provider.model } });
           // Tổng máy chủ vừa tính vào sổ `seenTotals` — hàng rào chặn nói lại tổng của giỏ CŨ (review vòng 3).
           state = r.state;
           state = noteSeenTotals(state);
@@ -2044,7 +2093,7 @@ async function chatTurnCore(
     if (!spoke && postSaleEmptied && status === "OK" && !orderWriteFailed && !replayNoop && !state.handoff) {
       let statusSay = asksOrderStatus(text) ? turnOrderStatusSay(history) : null;
       if (asksOrderStatus(text) && !statusSay) {
-        const r = await executeTool("get_order_status", {}, { autoConfirm, prevTurn, conversationId: conv.id, customerSaid, customerTexts, roundCustomerTexts, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, knownPhone, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: prov.provider.model } });
+        const r = await executeTool("get_order_status", {}, { autoConfirm, prevTurn, conversationId: conv.id, customerSaid, customerTexts, roundCustomerTexts, channel: opts.channel, config: cfg, state, lastUserText: text, agent: SALES_AGENT, customerName: opts.customerName ?? null, quickReplies: quickCatalog, returning, customer360: c360, knownPhone, acceptedOffer: accepted, recentSaid, turn: turnSeq, bookingOn, now, commentTurn: opts.aiCustomer?.threadKind === "COMMENT", promptStamp: { ...stampBase, model: prov.provider.model } });
         state = r.state;
         if (r.requireHuman) {
           state = { ...state, handoff: { reason: `Cần người xử lý — ${r.requireHuman}`, at: now.toISOString() } };
@@ -2095,6 +2144,8 @@ async function chatTurnCore(
     const knownState = knownPhoneStateOf(knownPhone, now);
     if (knownState) state = { ...state, knownPhone: knownState };
     else if (state.knownPhone) state = { ...state, knownPhone: undefined };
+    // LỜI MỜI MỘT MÓN của lượt này (short-accept.ts) — khách trả lời trực tiếp ở tin kế tiếp ⇒ đồng ý. Lượt có câu hỏi khác ⇒ mơ hồ.
+    state = { ...state, directOffer: (await directOfferOfTurn(state, aiTexts, turnSeq, now, cfg).catch(() => null)) ?? undefined };
     await bump({
       state: state as Record<string, unknown>,
       turns: conv.turns + 1,
@@ -2169,8 +2220,41 @@ export const COMMENT_BATCH_WINDOW_MS = 30 * 60_000;
  * lượt mua: khách hỏi giá hôm nay, chốt vài hôm sau là chuyện thường. */
 export const NEW_ROUND_GAP_MS = 7 * 24 * 3_600_000;
 
+/**
+ * Người / page (KHÔNG phải tin tự động, chữ hệ thống, tiếng vọng của bot) đã nhắn khách SAU `since` — «Ok» lúc đó có thể là trả lời người.
+ * Kênh nhắn tin đọc dòng `PAGE_REPLY` (bỏ dòng trùng chữ một câu bot đã gửi — tiếng vọng đời cũ chưa gắn nguồn); mọi kênh đọc `last_staff_at`.
+ */
+async function humanReplyAfter(conv: ConvRow, since: Date): Promise<boolean> {
+  if (conv.lastStaffAt && conv.lastStaffAt.getTime() > since.getTime()) return true;
+  if (!conv.pageId || !conv.threadId) return false;
+  const db = await getDb();
+  const t = schema.salesChatInbound;
+  const rows = await db
+    .select({ text: t.text, note: t.note, kind: t.senderKind })
+    .from(t)
+    .where(and(eq(t.pageId, conv.pageId), eq(t.threadId, conv.threadId), gt(t.createdAt, since), inArray(t.note, ["PAGE_REPLY", "BOT_SENT"])))
+    .limit(200);
+  const bot = new Set(rows.filter((r) => r.note === "BOT_SENT").map((r) => r.text.replace(/\s+/g, " ").trim()));
+  return rows.some((r) => r.note === "PAGE_REPLY" && !["PANCAKE_AUTOMATION", "META_SYSTEM", "AI_AGENT"].includes(r.kind ?? "") && !bot.has(r.text.replace(/\s+/g, " ").trim()));
+}
+
+/** Lời mời MỘT món của lượt vừa xong — lời mời sau chốt có món đích, hoặc câu bot cuối lượt (`proposalOf`). `null` = không có. */
+async function directOfferOfTurn(state: ChatState, aiTexts: readonly string[], turn: number, now: Date, cfg: SalesChatbotConfig): Promise<DirectOffer | null> {
+  const pco = state.postConfirmOffer;
+  const others = (offerText: string | null) => aiTexts.some((t) => t !== offerText && /[?？]/.test(t));
+  if (pco?.outcome === "OFFERED" && pco.sent && pco.turn === turn && pco.productId && pco.variantId && typeof pco.price === "number" && pco.name)
+    return { productId: pco.productId, variantId: pco.variantId, name: pco.name, price: pco.price, turn, at: now.toISOString(), source: "POST_CONFIRM", ...(others(null) ? { ambiguous: true } : {}) };
+  const last = aiTexts[aiTexts.length - 1] ?? "";
+  if (!last || !extractVndAmounts(last).length) return null;
+  const catalog = await offerCatalogFor(cfg, state);
+  const productOf = new Map(catalog.map((c) => [c.variantId, c.productId]));
+  const held = new Set<string>([...(state.draft?.lines ?? []).map((l) => productOf.get(l.variantId) ?? ""), ...(state.cart?.selectedItems ?? []).map((x) => x.productId ?? "")].filter(Boolean));
+  const p = proposalOf(last, catalog, held);
+  return p ? { ...p, turn, at: now.toISOString(), ...(others(last) ? { ambiguous: true } : {}) } : null;
+}
+
 /** Khoá trạng thái thuộc về MỘT lượt mua — lượt mua mới xoá hết (#855: báo giá / sổ tổng bị từ chối; #868: sổ lời mời). */
-const ROUND_STATE_KEYS = ["confirmed", "draft", "stage", "upsellSent", "upsellUnavailable", "upsellDeclinedTurn", "offerDrops", "postConfirmOffer", "declined", "handoff", "cart", "quote", "rejectedTotals", "proposedItems", "deliveryPref", "roundCheck", "quickSentIds"] as const;
+const ROUND_STATE_KEYS = ["directOffer", "confirmed", "draft", "stage", "upsellSent", "upsellUnavailable", "upsellDeclinedTurn", "offerDrops", "postConfirmOffer", "declined", "handoff", "cart", "quote", "rejectedTotals", "proposedItems", "deliveryPref", "roundCheck", "quickSentIds"] as const;
 
 /**
  * Trạng thái của một LƯỢT MUA MỚI: đơn đã chốt (nếu có) sang `pastOrders`, mọi khoá của lượt mua cũ bị xoá, `startAt` (nếu có) thành mốc

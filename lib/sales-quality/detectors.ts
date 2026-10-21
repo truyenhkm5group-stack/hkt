@@ -25,6 +25,9 @@ import { classifySentence, splitSentences } from "@/lib/sales-chatbot/next-best-
 import { fitsFocus, productFocusOf, quickReplyCovers, type FocusLine, type FocusProduct } from "@/lib/sales-chatbot/quick-reply-focus";
 import { parsePlaceholders } from "@/lib/sales-chatbot/quick-replies-shared";
 import { choiceAmountText, quantityOnlyAnswer } from "@/lib/sales-chatbot/round-check";
+import { calledByName, mentionsProduct } from "@/lib/sales-chatbot/cart-commitment";
+import { extractVndAmounts } from "@/lib/sales-chatbot/claim-guard";
+import { isShortAccept } from "@/lib/sales-chatbot/short-accept";
 import { foldVi } from "@/lib/sales-chatbot/text";
 
 export type QualityMsg = { seq: number; role: string; at: Date; content: unknown };
@@ -32,7 +35,7 @@ export type QualityTemplate = { title: string; answer: string; head: string };
 export type QualityContext = { from: Date; to: Date; templates: readonly QualityTemplate[]; products: readonly FocusProduct[] };
 export type QualityHit = { code: SalesQualityCode; at: Date };
 /** Mẫu số trong kỳ: tin khách · tin bot · tin khách chỉ là câu trả lời số lượng (F) · tin hai ý số lượng + giao (G) · tin phàn nàn. */
-export type QualityBases = { customerMessages: number; botMessages: number; quantityAnswers: number; deliverySecondAsks: number; complaints: number };
+export type QualityBases = { customerMessages: number; botMessages: number; quantityAnswers: number; deliverySecondAsks: number; complaints: number; offerAccepts: number };
 export type ThreadQuality = { hits: QualityHit[]; bases: QualityBases };
 
 /** Băm ngắn mã hội thoại — cùng phép băm `hashConv` của scripts/conv-money-trace.ts. HÀM THUẦN. */
@@ -78,11 +81,27 @@ export function wrongTemplateOf<T extends QualityTemplate>(sent: string, lines: 
 const QTY_REASK_RE = /\d+(?:[.,]\d+)?\s?kg\s+hay\s+\d+(?:[.,]\d+)?\s?kg|muốn (?:mua|lấy) \d/iu;
 const DELIVERY_WORDS_RE = /(?:^| )(?:giao|nhan|ngay|dia chi|ship|van chuyen)(?= |$)/;
 const CLAIM_SAFE = new Set<string>(Object.values(CLAIM_SAFE_TEXT));
+/** Câu bot hỏi lại / bắt khách nhắn tên món sau lời đồng ý. */
+const REASK_AFTER_ACCEPT_RE = /nhắn (?:giúp |lại )?(?:em|shop)|đúng không ạ\?|món nào|muốn thêm .* không ạ\?/iu;
+/** Câu bot báo đã thêm / tổng mới — dấu vết món đã vào đơn khi bước máy chủ thêm (không có kết quả công cụ trong lịch sử). */
+const ATTACHED_SAY_RE = /tổng đơn mới|đã thêm|thêm .* vào đơn (?:rồi|cho mình)/iu;
+
+/**
+ * Lời mời MỘT món trong câu bot, đọc trên LỊCH SỬ (không có bảng giá từng lượt): câu mời («?» hoặc lấy / thêm / nha / nhé) gọi tên ĐÚNG MỘT
+ * sản phẩm của danh mục và có số tiền — cùng hình dạng `proposalOf` (short-accept.ts) dùng trong lượt sống. `null` = không phải. HÀM THUẦN.
+ */
+export function oneProductInvite(text: string, products: readonly FocusProduct[]): string | null {
+  const f = ` ${foldVi(text).replace(/[^a-z0-9]+/g, " ")} `;
+  if (!/[?？]/.test(text) && !/ (?:lay|them|nha|nhe) /.test(f)) return null;
+  if (!extractVndAmounts(text).length) return null;
+  const named = products.filter((p) => mentionsProduct(p.name, text) || calledByName(p.name, text));
+  return named.length === 1 ? named[0].name : null;
+}
 
 /** Đi một hội thoại. Chỉ ĐẾM tin có mốc trong [from, to); tin trước `from` vẫn được đọc làm ngữ cảnh. HÀM THUẦN. */
 export function scanThreadQuality(msgs: readonly QualityMsg[], ctx: QualityContext): ThreadQuality {
   const hits: QualityHit[] = [];
-  const bases: QualityBases = { customerMessages: 0, botMessages: 0, quantityAnswers: 0, deliverySecondAsks: 0, complaints: 0 };
+  const bases: QualityBases = { customerMessages: 0, botMessages: 0, quantityAnswers: 0, deliverySecondAsks: 0, complaints: 0, offerAccepts: 0 };
   const inWindow = (at: Date) => at.getTime() >= ctx.from.getTime() && at.getTime() < ctx.to.getTime();
   const hit = (code: SalesQualityCode, at: Date) => hits.push({ code, at });
   const lines: FocusLine[] = [];
@@ -95,6 +114,13 @@ export function scanThreadQuality(msgs: readonly QualityMsg[], ctx: QualityConte
   let complaint = false;
   let prevBot = "";
   let turn = 0;
+  // Lời mời một món đang chờ trả lời (tên món) · lời đồng ý đang chờ dấu vết món vào đơn.
+  let offer: string | null = null;
+  let accept: { name: string; at: Date; counted: boolean; attached: boolean; botSeen: boolean } | null = null;
+  const closeAccept = () => {
+    if (accept && accept.counted && !accept.attached) hit("UPSELL_ACCEPTED_NOT_ATTACHED", accept.at);
+    accept = null;
+  };
   const checkD = (sent: string, at: Date) => {
     if (inWindow(at) && wrongTemplateOf(sent, lines, ctx.templates, ctx.products)) hit("WRONG_PRODUCT_TEMPLATE", at);
   };
@@ -117,9 +143,16 @@ export function scanThreadQuality(msgs: readonly QualityMsg[], ctx: QualityConte
         userSince = true;
         lines.push({ who: "CUSTOMER", text: said });
         customerTexts.push(said);
+        closeAccept();
+        if (offer && isShortAccept(said)) {
+          accept = { name: offer, at: m.at, counted, attached: false, botSeen: false };
+          if (counted) bases.offerAccepts += 1;
+        }
+        offer = null;
       }
       for (const b of blocksOf(m.content)) {
         if (b.type !== "tool_result" || b.isError) continue;
+        if (accept && foldVi(String(b.content)).includes(foldVi(accept.name))) accept.attached = true;
         const sent = deliverOf(b.content);
         if (!sent) continue;
         userSince = false;
@@ -137,6 +170,12 @@ export function scanThreadQuality(msgs: readonly QualityMsg[], ctx: QualityConte
       botTexts.push(t);
       continue;
     }
+    if (accept && !accept.botSeen) {
+      accept.botSeen = true;
+      if (ATTACHED_SAY_RE.test(t)) accept.attached = true;
+      else if (accept.counted && REASK_AFTER_ACCEPT_RE.test(t)) hit("UPSELL_ACCEPTED_BUT_REASKED", m.at);
+    }
+    offer = oneProductInvite(t, ctx.products);
     if (counted) {
       bases.botMessages += 1;
       const headF = foldVi(t).replace(/\s+/g, " ").trim().slice(0, 60);
@@ -157,5 +196,6 @@ export function scanThreadQuality(msgs: readonly QualityMsg[], ctx: QualityConte
     botTexts.push(t);
     userSince = false;
   }
+  closeAccept();
   return { hits, bases };
 }

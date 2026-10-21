@@ -21,6 +21,8 @@ export const SALES_QUALITY_CODES = [
   "COMPLAINT_WHILE_SELLING",
   "CLARIFY_FALLBACK",
   "CLAIM_GUARD_BLOCK",
+  "UPSELL_ACCEPTED_BUT_REASKED",
+  "UPSELL_ACCEPTED_NOT_ATTACHED",
 ] as const;
 export type SalesQualityCode = (typeof SALES_QUALITY_CODES)[number];
 
@@ -83,6 +85,18 @@ export const SALES_QUALITY_SPEC: Record<SalesQualityCode, SalesQualitySpec> = {
     unit: "MESSAGE",
     source: "lib/sales-chatbot/claim-guard.ts",
     action: "Bot định khẳng định điều chưa có chứng từ (đã nhận tiền · đã chốt · giá) — xem hội thoại chuyển người và lời dặn liên quan.",
+  },
+  UPSELL_ACCEPTED_BUT_REASKED: {
+    label: "Khách đồng ý lời mời một món («Ok», 👍) mà bot hỏi lại / bắt nhắn tên món",
+    unit: "MESSAGE",
+    source: "lib/sales-chatbot/short-accept.ts",
+    action: "Xem hội thoại: lời mời có đúng một món + giá thì «Ok» là đồng ý — bot phải thêm món, không hỏi lại (P0 21/10/2026).",
+  },
+  UPSELL_ACCEPTED_NOT_ATTACHED: {
+    label: "Khách đồng ý lời mời một món mà món không vào đơn",
+    unit: "MESSAGE",
+    source: "lib/sales-chatbot/short-accept.ts",
+    action: "Mở đơn của hội thoại: khách đã đồng ý mua thêm mà đơn chưa có món — thêm món / gọi lại khách xác nhận.",
   },
 };
 

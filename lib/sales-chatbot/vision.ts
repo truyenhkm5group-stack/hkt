@@ -79,6 +79,23 @@ export function pancakeImageUrls(message: unknown): string[] {
  * icon / nhãn dán như Pancake, chỉ có câu «mở trên kênh để xem»). KHÔNG gộp vào `pancakeImageUrls`: nhãn dán không phải ảnh
  * để bot trả tiền đọc. HÀM THUẦN.
  */
+/** Nhãn LIKE của Messenger (Pancake gửi `sticker_id`) — ba cỡ. Nhãn dán khác KHÔNG phải đồng ý (cảm xúc không đọc được). */
+export const MESSENGER_LIKE_STICKER_IDS: ReadonlySet<string> = new Set(["369239263222822", "369239343222814", "369239383222810"]);
+
+/** Tin có nhãn like (👍) của Messenger không — đọc `sticker_id` của tệp đính kèm, KHÔNG đoán theo ảnh. HÀM THUẦN. */
+export function pancakeLikeSticker(message: unknown): boolean {
+  const m = (message && typeof message === "object" ? message : {}) as { attachments?: unknown };
+  const list = Array.isArray(m.attachments) ? m.attachments : [];
+  return list.some((raw) => {
+    if (!raw || typeof raw !== "object") return false;
+    const a = raw as Record<string, unknown>;
+    const payload = (a.payload && typeof a.payload === "object" ? a.payload : {}) as Record<string, unknown>;
+    // `sticker_id` tới dạng chuỗi HOẶC số tuỳ phiên bản Pancake.
+    const id = [a.sticker_id, payload.sticker_id].map((v) => (typeof v === "number" ? String(v) : str(v))).find(Boolean) ?? "";
+    return MESSENGER_LIKE_STICKER_IDS.has(id);
+  });
+}
+
 export function pancakeStickerUrls(message: unknown): string[] {
   const m = (message && typeof message === "object" ? message : {}) as { attachments?: unknown };
   const list = Array.isArray(m.attachments) ? m.attachments : [];

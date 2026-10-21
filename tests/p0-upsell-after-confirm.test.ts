@@ -51,7 +51,8 @@ function testThuan() {
   assert.equal(pickPostConfirmOffer(["p1", "p2"], offers), null, "hết món bổ trợ ⇒ không mời");
   assert.equal(pickPostConfirmOffer(["p9"], []), null, "không có món kèm đủ điều kiện (hết hàng / giá chưa xác thực đã bị lọc ở offer-facts) ⇒ không mời");
   const line = postConfirmOfferText(offers[1], formatVND);
-  assert.match(line, /^Bên em có thêm Chả mực giã tay \(0,5kg\) giá 200\.000 ₫ .*nhắn em «thêm chả mực giã tay 0,5kg»/, "câu gợi ý mang quy cách đã mời (NB1)");
+  assert.match(line, /^Bên em có thêm Chả mực giã tay \(0,5kg\) giá 200\.000 ₫ ăn kèm rất hợp — mình lấy thêm 1 phần không ạ\?$/, "câu mời mang quy cách đã mời (NB1)");
+  assert.doesNotMatch(line, /nhắn em/, "không bắt khách nhắn lại cú pháp (P0 21/10)");
   // NB3: không mời món CÙNG HỌ với món khách vừa mua.
   const fam = [{ name: "Chả cá hấp", productId: "p3", variantId: "v3", variant: "1kg", price: 300_000 }, ...offers];
   assert.equal(pickPostConfirmOffer(["p1"], fam, ["Chả cá thu (Size: 1kg)"])?.name, "Chả mực giã tay", "mua chả cá thu ⇒ không mời chả cá hấp");
@@ -249,18 +250,20 @@ const mediaOf = new Map<string, { quickReplyId: string; imageIds: string[]; afte
 const keepMedia = (key: string) => ({ after: ({ media }: { media: { quickReplyId: string; imageIds: string[]; afterText?: string } | null }) => void mediaOf.set(key, media) });
 
 const CASES: GoldenCase[] = [
-  { key: "pco-chot-nhanh-ok", title: "Chốt nhanh, shop có câu upsell + ảnh ⇒ gửi ĐÚNG câu + ảnh shop thành tin riêng sau tin xác nhận; «ok» không phải đồng ý mua thêm", shop: "food", channel: "WEB", turns: [
+  // Luật 21/10/2026 (chủ shop, ca «Vit Xiem» — short-accept.ts): câu upsell có ĐÚNG MỘT món đích ⇒ «ok em» trả lời TRỰC TIẾP là ĐỒNG Ý, máy chủ
+  // thêm món (thay luật «ok không thêm» của #927 / #930 cho trường hợp một món). Câu nhiều món vẫn hỏi «món nào» (ca pco-menu-*).
+  { key: "pco-chot-nhanh-ok", title: "Chốt nhanh, shop có câu upsell một món + ảnh ⇒ gửi ĐÚNG câu + ảnh shop thành tin riêng sau tin xác nhận; «ok em» trả lời trực tiếp ⇒ máy chủ thêm món (luật 21/10)", shop: "food", channel: "WEB", turns: [
     { say: INFO("0961003201"), ai: orderInfo("0961003201"), ...keepMedia("pco-chot-nhanh-ok") },
-    { say: "ok em", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ vâng ạ.")]] },
+    { say: "ok em", ai: [] },
   ] },
   { key: "pco-nhan-loi-moi", title: "Khách gọi tên đúng món câu upsell mời ⇒ đơn đã tự chốt được sửa thêm món, đo được tiền thêm", shop: "food", channel: "WEB", turns: [
     { say: INFO("0961003202"), ai: orderInfo("0961003202") },
     { say: "thêm 1kg chả mực giã tay nữa nhé em", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em thêm chả mực vào đơn rồi ạ.")]] },
   ] },
-  { key: "pco-gio-khong-ten-ok", title: "(review B1) Giỏ KHÔNG gọi tên món nào, khách «ok em» sau lời mời ⇒ KHÔNG thêm món vào đơn đã chốt", shop: "food", channel: "WEB", turns: [
+  { key: "pco-gio-khong-ten-ok", title: "(review B1 → luật 21/10) Giỏ không gọi tên món nào, khách «ok em» trả lời trực tiếp câu upsell một món ⇒ máy chủ thêm đúng món đã mời", shop: "food", channel: "WEB", turns: [
     { say: "chị lấy cái này nhé", ai: [() => [say("Dạ chị lấy 1 hộp ruốc bông tôm nhé, cho em xin SĐT + địa chỉ ạ.")]] },
     { say: `Lan 0961003208, ${ADDR}`, ai: orderInfo("0961003208") },
-    { say: "ok em", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ vâng ạ.")]] },
+    { say: "ok em", ai: [] },
   ] },
   { key: "pco-tao-don-moi", title: "(review B2) Khách nhận lời mời, model gọi create_draft_order ⇒ được chỉ sang update_draft_order (không nói đã chuyển người) ⇒ thêm đúng món, báo tổng mới", shop: "food", channel: "WEB", turns: [
     { say: INFO("0961003209"), ai: orderInfo("0961003209") },
@@ -273,22 +276,26 @@ const CASES: GoldenCase[] = [
   ] },
   { key: "pco-hoi-xac-nhan-dong-y", title: "(review vòng 3) «ok thêm giúp chị» ⇒ hỏi MỘT câu xác nhận ⇒ «đúng rồi em» ⇒ thêm đúng mẫu mã câu upsell báo giá + tổng mới", shop: "food", channel: "WEB", turns: [
     { say: INFO("0961003212"), ai: orderInfo("0961003212") },
+    { say: "cảm ơn em", ai: [() => [say("Dạ vâng ạ.")]] },
     { say: "ok thêm giúp chị", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Mình muốn thêm Chả mực giã tay (1kg) vào đơn đúng không ạ?")]] },
     { say: "đúng rồi em", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ em thêm vào đơn rồi ạ.")]] },
   ] },
   { key: "pco-hoi-xac-nhan-tu-choi", title: "(review vòng 3) Đã hỏi xác nhận, khách «thôi em» ⇒ không thêm; «ok» sau đó ⇒ không thêm, KHÔNG hỏi lại", shop: "food", channel: "WEB", turns: [
     { say: INFO("0961003213"), ai: orderInfo("0961003213") },
+    { say: "cảm ơn em", ai: [() => [say("Dạ vâng ạ.")]] },
     { say: "ok thêm giúp chị", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Mình muốn thêm Chả mực giã tay (1kg) vào đơn đúng không ạ?")]] },
     { say: "thôi em", ai: [() => [say("Dạ vâng ạ.")]] },
     { say: "ok", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ vâng ạ.")]] },
   ] },
   { key: "pco-hoi-xac-nhan-dung-them", title: "(review vòng 4) Hỏi xác nhận ⇒ «đừng thêm nhé em» (bỏ dấu = «dung them») ⇒ KHÔNG thêm", shop: "food", channel: "WEB", turns: [
     { say: INFO("0961003214"), ai: orderInfo("0961003214") },
+    { say: "cảm ơn em", ai: [() => [say("Dạ vâng ạ.")]] },
     { say: "ok thêm giúp chị", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Mình muốn thêm Chả mực giã tay (1kg) vào đơn đúng không ạ?")]] },
     { say: "đừng thêm nhé em", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Dạ vâng ạ.")]] },
   ] },
   { key: "pco-hoi-xac-nhan-nv-xen", title: "(review vòng 4) Hỏi xác nhận ⇒ nhân viên nhắn xen giữa ⇒ «đúng rồi em» KHÔNG tính là trả lời câu hỏi của bot", shop: "food", channel: "WEB", turns: [
     { say: INFO("0961003215"), ai: orderInfo("0961003215") },
+    { say: "cảm ơn em", ai: [() => [say("Dạ vâng ạ.")]] },
     { say: "ok thêm giúp chị", ai: [({ v }) => [tool("update_draft_order", { items: [{ variant_id: v("RUOC-TOM"), quantity: 1 }, { variant_id: v("CHA-MUC"), quantity: 1 }] })], () => [say("Mình muốn thêm Chả mực giã tay (1kg) vào đơn đúng không ạ?")]] },
     {
       say: "đúng rồi em",
@@ -434,8 +441,10 @@ async function testChatTurn() {
         assert.equal(media?.quickReplyId, menuId, "ảnh menu của ĐÚNG câu upsell được giao cho kênh gửi");
         assert.equal(media?.imageIds.length, 1);
         assert.equal(media?.afterText, TPL, "ảnh đi ngay sau chính tin câu upsell");
-        assert.deepEqual(lines, ["RUOC-TOM×1"], `«ok» KHÔNG thêm món được mời: ${lines.join(", ")} · ${results}`);
-        assert.equal(pco?.accepted, undefined);
+        assert.deepEqual(lines, ["CHA-MUC×1", "RUOC-TOM×1"], `«ok em» trả lời trực tiếp câu một món ⇒ thêm đúng món (luật 21/10): ${lines.join(", ")} · ${results}`);
+        assert.equal(pco?.accepted?.amount, 400_000, "đo được tiền khách nhận lời mời");
+        assert.equal(t.turns[1].rounds.length, 0, "máy chủ thêm, không gọi model");
+        assert.match(t.turns[1].shown.join(" "), /Tổng đơn mới 750\.000 ₫/, `báo tổng ERP sau khi ghi: ${t.turns[1].shown.join(" | ")}`);
         assert.ok(!t.turns[1].shown.includes(TPL), "không nhắc lại lời mời");
       }
       if (c.key === "pco-nhan-loi-moi") {
@@ -448,15 +457,16 @@ async function testChatTurn() {
         assert.equal(pco?.accepted, undefined);
       }
       if (c.key === "pco-hoi-xac-nhan-dong-y") {
-        const r1 = JSON.stringify(t.turns[1].rounds.map((r) => r.results));
+        // Lượt «cảm ơn em» chen giữa ⇒ «ok thêm giúp chị» KHÔNG còn là trả lời trực tiếp lời mời ⇒ luồng hỏi xác nhận một lần (#930) vẫn đúng.
+        const r1 = JSON.stringify(t.turns[2].rounds.map((r) => r.results));
         assert.match(r1, /Hỏi khách ĐÚNG MỘT câu: «Mình muốn thêm Chả mực giã tay \(1kg\) vào đơn đúng không ạ\?»/, r1);
         assert.deepEqual(lines, ["CHA-MUC×1", "RUOC-TOM×1"], `«đúng rồi em» sau câu hỏi xác nhận ⇒ thêm: ${results}`);
         assert.equal(pco?.accepted?.amount, 400_000);
-        assert.match(JSON.stringify(t.turns[2].rounds.map((r) => r.results)), /Tổng đơn mới/);
+        assert.match(JSON.stringify(t.turns[3].rounds.map((r) => r.results)), /Tổng đơn mới/);
       }
       if (c.key === "pco-hoi-xac-nhan-tu-choi") {
         assert.deepEqual(lines, ["RUOC-TOM×1"], results);
-        const r3 = JSON.stringify(t.turns[3].rounds.map((r) => r.results));
+        const r3 = JSON.stringify(t.turns[4].rounds.map((r) => r.results));
         assert.match(r3, /khách chưa gọi tên món/, r3);
         assert.doesNotMatch(r3, /Hỏi khách ĐÚNG MỘT câu/, "đã hỏi một lần ⇒ không hỏi lại");
         assert.equal(pco?.accepted, undefined);
@@ -471,9 +481,8 @@ async function testChatTurn() {
       }
       if (c.key === "pco-gio-khong-ten-ok") {
         assert.ok([...t.turns[0].shown, ...t.turns[1].shown].includes(TPL), "đơn chốt có câu upsell của shop");
-        assert.deepEqual(lines, ["RUOC-TOM×1"], `«ok» với giỏ không tên món KHÔNG thêm món: ${lines.join(", ")} · ${results}`);
-        assert.equal(pco?.accepted, undefined);
-        assert.match(results, /khách chưa gọi tên món/);
+        assert.deepEqual(lines, ["CHA-MUC×1", "RUOC-TOM×1"], `«ok em» trả lời trực tiếp câu một món ⇒ thêm (luật 21/10): ${lines.join(", ")} · ${results}`);
+        assert.equal(pco?.accepted?.amount, 400_000);
       }
       if (c.key === "pco-tao-don-moi") {
         assert.match(results, /Đơn đã tự chốt/, results);
@@ -583,5 +592,5 @@ export async function testP0UpsellAfterConfirm(): Promise<void> {
   testThuan();
   await testChatTurn();
   await testOtherTenant();
-  console.log("✓ P0 lời mời sau chốt: câu upsell + ảnh SHOP cài thắng (tin riêng sau tin xác nhận) · không câu mẫu / tắt ⇒ không tự sáng tác · tự soạn chỉ khi shop bật · không gửi trùng page · «ok» không thêm món · gọi tên món ⇒ thêm · nhiều tổ chức không lẫn câu");
+  console.log("✓ P0 lời mời sau chốt: câu upsell + ảnh SHOP cài thắng (tin riêng sau tin xác nhận) · không câu mẫu / tắt ⇒ không tự sáng tác · tự soạn chỉ khi shop bật · không gửi trùng page · «ok» trả lời trực tiếp câu một món ⇒ thêm (21/10), câu nhiều món hỏi món nào · gọi tên món ⇒ thêm · nhiều tổ chức không lẫn câu");
 }

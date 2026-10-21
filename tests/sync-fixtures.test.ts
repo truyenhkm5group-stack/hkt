@@ -600,6 +600,7 @@ import { testP0QuickReplyFocus } from "./p0-quick-reply-focus.test";
 import { testP0UpsellAfterConfirm } from "./p0-upsell-after-confirm.test";
 import { testP0UpsellAfterContact } from "./p0-upsell-after-contact.test";
 import { testP0KnownCustomerContact } from "./p0-known-customer-contact.test";
+import { testP0UpsellShortAccept } from "./p0-upsell-short-accept.test";
 import { testP0ComplaintDeliveryDelay } from "./p0-complaint-delivery-delay.test";
 import { testP0ShortQtyRound } from "./p0-short-qty-round.test";
 import { testP0RepeatBuyer } from "./p0-repeat-buyer.test";
@@ -3217,6 +3218,9 @@ async function main() {
     // lượt mua mới MỘT câu «như lần trước»; đơn nhân viên lên vào bước hỏi đơn mới / vẫn đơn đó; hộp thư một thứ tự SĐT; bảo mật luồng /
     // người lạ / tổ chức — thuần + chatTurn thật (`gd-food-kcc`, `gd-food-kcs`, `gd-food-kcs2`).
     await testP0KnownCustomerContact();
+    // P0 21/10/2026 (ca HSLC «Vit Xiem») — «Ok» / 👍 trả lời trực tiếp lời mời MỘT món ⇒ máy chủ thêm + tổng ERP; từ chối · câu hỏi khác ·
+    // nhiều món · nhân viên xen giữa · giá đổi / đơn khoá ⇒ người · «Ok» chốt đơn chính không thêm — thuần + chatTurn thật (`gd-food-sa`).
+    await testP0UpsellShortAccept();
     // P0 21/10/2026 (ca HSLC #BD31267C) — khách than GIAO CHẬM: chuyển người trước + một câu xin lỗi không mốc, ca CSKH URGE_DELIVERY một
     // ca mỗi đơn, «đơn đâu rồi» chỉ khi quá 48 giờ, «Ok» không đóng việc, câu hỏi thường không bị nhận nhầm — thuần + chatTurn thật (`gd-food-dly`).
     await testP0ComplaintDeliveryDelay();

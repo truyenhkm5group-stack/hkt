@@ -132,6 +132,11 @@ export type ChatState = {
    * (hộp thư, lời nhắc); số đi vào đơn vẫn qua `create_customer`.
    */
   knownPhone?: import("@/lib/sales-chatbot/known-contact").KnownPhoneState;
+  /**
+   * LỜI MỜI MỘT MÓN bot vừa gửi (short-accept.ts — engine ghi cuối lượt): khách trả lời TRỰC TIẾP bằng «Ok» / 👍 ⇒ đồng ý, máy chủ thêm món.
+   * Thuộc lượt mua (lượt mua mới xoá).
+   */
+  directOffer?: import("@/lib/sales-chatbot/short-accept").DirectOffer;
   /** Kết quả đưa lời mua của bình luận sang hộp thư (`recordCommentCarry` — engine.ts), chỉ trên hội thoại BÌNH LUẬN. */
   commentCarry?: { outcome: string; copied: number; at: string };
   /** Mọi TỔNG / tiền hàng máy chủ đã tính cho các giỏ / đơn nháp trong hội thoại (`noteSeenTotals`) — hàng rào chặn nói lại tổng của giỏ CŨ. */
@@ -295,6 +300,8 @@ export type ToolContext = {
   customer360?: Customer360 | null;
   /** SĐT đã biết của khách (known-contact.ts) — `create_customer` bỏ trống phone ⇒ máy chủ điền số này khi đúng MỘT số. */
   knownPhone?: import("@/lib/sales-chatbot/known-contact").KnownPhone;
+  /** Khách ĐỒNG Ý lời mời một món ở tin này (engine quyết bằng `acceptsOffer`) — món đó là căn cứ của khách, không bắt gọi tên lại. */
+  acceptedOffer?: { productId: string; variantId: string } | null;
   /** Câu shop vừa nói (`recentShopTexts`) — câu mẫu trùng một câu trong đó không gửi lại. */
   recentSaid?: readonly string[];
   /** Shop bật đặt lịch qua chat VÀ module Lịch hẹn đang bật — engine tính, công cụ đặt lịch chỉ chạy khi `true`. */
@@ -547,6 +554,11 @@ export function maskAddress(address: string): string {
 const givenName = (name: string) => name.trim().split(/\s+/).pop() ?? "";
 
 /** Hồ sơ của hội thoại đã XÁC MINH là người đang nhắn ⇒ mã hồ sơ cho dữ liệu riêng (bảng giá riêng · lịch sử); không ⇒ `null`. */
+/** Mẫu mã của tổ chức theo bảng giá của khách (đọc lời mời một món trong câu bot — short-accept.ts `proposalOf`). */
+export async function offerCatalogFor(cfg: SalesChatbotConfig, state: ChatState): Promise<CatalogItem[]> {
+  return [...(await pricingContextFor(cfg, verifiedCustomerId(state))).byId.values()];
+}
+
 function verifiedCustomerId(state: ChatState): string | null {
   return state.customer && state.customer.verifiedIdentity === true ? state.customer.id : null;
 }
@@ -1281,16 +1293,17 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
             : false;
         // Món khách nói TƯỜNG MINH trong CHÍNH tin này theo bộ đọc giỏ (sản phẩm đã gắn hoặc nhãn khách nói).
         const chosen = (state.cart?.selectedItems ?? []).filter((x) => x.customerExplicit && ctx.turn !== undefined && x.sourceMessageId === ctx.turn && (x.productId || x.match)).map((x) => ({ productId: x.productId, match: x.match }));
-        const issue = confirmedAddIssue(added, state.postConfirmOffer, ctx.lastUserText, { prevTurn: ctx.prevTurn, catalogNames, staffBetween, chosen });
+        const issue = confirmedAddIssue(added, state.postConfirmOffer, ctx.lastUserText, { prevTurn: ctx.prevTurn, catalogNames, staffBetween, chosen, accepted: ctx.acceptedOffer ?? null });
         // Câu hỏi xác nhận chỉ MỘT lần (review vòng 3) — ghi lượt đã hỏi; lượt khách KẾ TIẾP trả lời đồng ý = chọn đúng mẫu mã đã mời.
         if (issue?.ask && state.postConfirmOffer && ctx.turn !== undefined) state.postConfirmOffer = { ...state.postConfirmOffer, askedTurn: ctx.turn };
         const pcoNow = state.postConfirmOffer;
         const ask = issue?.ask
           ? ` Hỏi khách ĐÚNG MỘT câu: «${issue.ask}» — không im lặng, không nói đã thêm. Khách đồng ý ở tin kế tiếp ⇒ update_draft_order thêm variant_id ${pcoNow?.variantId} (đúng mẫu mã đã mời).`
           : " KHÔNG nhắc lại lời mời, KHÔNG hỏi lại.";
-        if (issue?.kind === "UNNAMED") return err("Sửa đơn đã chốt: khách chưa gọi tên món", `Khách CHƯA gọi tên ${issue.names.join(", ")} như một lời MUA trong tin này — «ok», «dạ», câu hỏi giá, câu từ chối không phải đồng ý mua thêm. KHÔNG thêm món; đơn giữ nguyên.${ask}`, state);
+        if (issue?.kind === "UNNAMED") return err("Sửa đơn đã chốt: khách chưa gọi tên món", `Khách CHƯA gọi tên ${issue.names.join(", ")} như một lời MUA trong tin này — «ok», «dạ», câu hỏi giá, câu từ chối không phải đồng ý mua thêm. KHÔNG thêm món; đơn giữ nguyên. TUYỆT ĐỐI KHÔNG bắt khách nhắn lại tên món / một câu mẫu («nhắn giúp em "lấy …"»).${ask}`, state);
         const pcoYes = state.postConfirmOffer;
         if (!issue && pcoYes?.askedTurn !== undefined && ctx.prevTurn === pcoYes.askedTurn && pcoYes.productId && added.some((a) => a.productId === pcoYes.productId)) offerYesProduct = pcoYes.productId;
+        if (!issue && ctx.acceptedOffer && added.some((a) => a.productId === ctx.acceptedOffer!.productId)) offerYesProduct = ctx.acceptedOffer.productId;
         if (issue?.kind === "WRONG_VARIANT") {
           const pco = state.postConfirmOffer;
           return err("Sửa đơn đã chốt: sai mẫu mã được mời", `Mẫu mã chọn không khớp mẫu mã đã mời / khối lượng khách nói — món vừa mời là variant_id ${pco?.variantId} (${pco?.name}, ${formatVND(pco?.price ?? 0)}). KHÔNG thêm mẫu mã khác.${ask}`, state);
@@ -1308,6 +1321,8 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // Sản phẩm ĐÃ nằm trong đơn nháp hiện có đã qua kiểm này lúc được ghi ⇒ chỉ kiểm sản phẩm MỚI (review 14/10: không bắt bỏ món chính).
       const grounded = v.data.items && existing ? new Set((await priceLines(existing.lines, ctx.config, verifiedCustomerId(state))).asked.map((l) => l.productId ?? l.variantId)) : new Set<string>();
       if (offerYesProduct) grounded.add(offerYesProduct);
+      // Đơn NHÁP (chưa chốt) + khách đồng ý lời mời một món ⇒ món đó cũng là căn cứ của khách.
+      if (ctx.acceptedOffer && priced.asked.some((a) => a.productId === ctx.acceptedOffer!.productId)) grounded.add(ctx.acceptedOffer.productId);
       const noBasis = v.data.items ? lineBasisViolation(state.cart, priced.asked, ctx.turn ?? null, ctx.customerSaid ?? "", grounded) : null;
       if (noBasis) return err("Đơn nháp: dòng hàng không có căn cứ từ khách", noBasis, state);
       // Giá chưa xác thực ⇒ KHÔNG tạo / sửa đơn tự động, người xác minh (yêu cầu 5 của chủ shop).
