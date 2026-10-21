@@ -1,0 +1,8 @@
+{
+  "pr": 956,
+  "sha": "1f3692b2ab7004726866f019e5ae8cb223f09a46",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T16:39:36.434Z",
+  "note": "review lead (Giai đoạn 2A phần 2): cột cache_write_tokens (0253, chỉ cộng thêm, CHECK ≥ 0, MIGRATION_SERVE_COMPAT); recordAiUsage chuyển câu chèn liệt kê cột, chỉ thêm cột khi information_schema báo có (đệm 60 s, lỗi dò ⇒ coi chưa có) ⇒ không mất dòng tiền trên lược đồ cũ; nguồn ghi: engine/followup/quick-replies-learn/inbox-feedback/lessons/playbook; lessons/playbook nay cộng đủ input. Bộ quét «m"
+}
