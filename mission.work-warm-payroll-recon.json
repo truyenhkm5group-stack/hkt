@@ -3,7 +3,7 @@
   "mission_id": "work-warm-payroll-recon",
   "title": "/work hết «thiếu một phần: PAYROLL_RECON» khi đệm nguội: job dashboard-warm làm ấm nguồn việc Trung tâm đối soát lương",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-21T13:14:11.553Z",
-  "updated_at": "2026-10-21T13:15:38.222Z",
+  "updated_at": "2026-10-21T14:11:23.404Z",
   "last_heartbeat": "2026-10-21T13:14:41.547Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#953 → 83256da01e9fcfdcce2ef0cc0bbc02250688b144"
+  },
   "handoff": {
     "branch": "claude/work-warm-payroll-recon",
     "sha": "e64617261f34948e33256d659fc4078b1ba68554",
