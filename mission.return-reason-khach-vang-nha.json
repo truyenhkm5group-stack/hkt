@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "return-reason-khach-vang-nha",
+  "title": "Tách «Khách vắng nhà» khỏi «Không liên lạc được»: chữ ĐVVC «khách hàng nghỉ, không có nhà» ⇒ CUSTOMER_AWAY",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-vang-nha",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/return-reason-khach-vang-nha",
+  "base_sha": "4c4d612e08f24834bf1a1070eed2db1e42b6f898",
+  "domains": [],
+  "owned_paths": [
+    "lib/constants/return-reason.ts",
+    "tests/return-reason-vang-nha.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-21T04:17:34.789Z",
+  "updated_at": "2026-10-21T04:17:34.789Z",
+  "last_heartbeat": "2026-10-21T04:17:34.789Z",
+  "definition_of_done": []
+}
