@@ -3,7 +3,7 @@
   "mission_id": "gate-audit-real-policy",
   "title": "Kiểm toán cổng in kết quả THẬT theo quy chế đã khai (trần theo tháng · phần còn lại)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -22,7 +22,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-21T20:22:44.872Z",
-  "updated_at": "2026-10-21T20:22:44.872Z",
-  "last_heartbeat": "2026-10-21T20:22:44.872Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-21T20:23:16.272Z",
+  "last_heartbeat": "2026-10-21T20:23:16.272Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/gate-audit-real-policy",
+    "sha": "331f6029bc834e72904eeee81d77e636cba9c0de",
+    "at": "2026-10-21T20:23:16.272Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "Kiểm toán cổng in kết quả THẬT theo quy chế đã khai (trần theo tháng · phần còn lại)",
+    "summary": "Thêm khối THẬT mỗi tháng trong payroll-profit-gate-audit: đọc thẳng getPayrollReport theo quy chế đã khai (trạng thái · trần tháng · LN đủ ĐK · quỹ · đã chia · phần còn lại · người khác · số vượt; từng người tạm tính / đủ ĐK / thực nhận được duyệt / lý do). Phần mô phỏng cũ (--cap/--opening) giữ nguyên. Tên + tiền từng người chỉ ở phần mã hoá; kênh tóm tắt công khai chỉ số tổng, KHÔNG in phần còn lại (tiền của một người). Dùng để đo trước/sau lượt chủ shop khai quy chế 35%→40% + người nhận phần còn lại.",
+    "tests": [
+      "typecheck: OK",
+      "eslint scripts/payroll-profit-gate-audit.ts: OK",
+      "ops-log-leak (toàn bộ test* xuất): ĐẠT",
+      "chỉ đổi script — ops lấy từ main, không cần deploy"
+    ]
+  }
 }
