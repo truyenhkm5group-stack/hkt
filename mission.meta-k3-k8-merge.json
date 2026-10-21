@@ -3,7 +3,7 @@
   "mission_id": "meta-k3-k8-merge",
   "title": "Meta Messenger K3/K8: chính sách quyền riêng tư 1.2 có mục Messenger + điều khiển cờ nối thẳng trên /platform + chữ «sắp mở» theo cờ",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -44,9 +44,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-21T02:39:47.012Z",
-  "updated_at": "2026-10-21T02:42:41.285Z",
+  "updated_at": "2026-10-21T03:43:02.220Z",
   "last_heartbeat": "2026-10-21T02:41:31.197Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#935 → 4c4d612e08f24834bf1a1070eed2db1e42b6f898"
+  },
   "handoff": {
     "branch": "claude/meta-app-review-audit-r2",
     "sha": "94784a6d7b4ed22095c7d8eba12d4f91f1e0a417",
