@@ -3,7 +3,7 @@
   "mission_id": "gate-audit-real-policy",
   "title": "Kiểm toán cổng in kết quả THẬT theo quy chế đã khai (trần theo tháng · phần còn lại)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -24,9 +24,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-21T20:22:44.872Z",
-  "updated_at": "2026-10-21T20:24:39.911Z",
+  "updated_at": "2026-10-21T21:01:31.089Z",
   "last_heartbeat": "2026-10-21T20:23:16.272Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#961 → aed6b42a21dc8f215c7f57e704a86e8679c1765c"
+  },
   "handoff": {
     "branch": "claude/gate-audit-real-policy",
     "sha": "331f6029bc834e72904eeee81d77e636cba9c0de",
