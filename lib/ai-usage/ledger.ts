@@ -10,7 +10,7 @@
  *  · Mọi câu đọc lọc `org_code` (và `billing_source` khi tính hạn mức): tổ chức A không bao giờ trừ vào B, BYOK không bao
  *    giờ trừ vào credit nền tảng.
  */
-import { and, desc, eq, gte, inArray, lte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, ne, sql, type SQL } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
 import { dauNgayVN } from "@/lib/ai/budget";
 import {
@@ -31,6 +31,7 @@ import {
   type AiUsageWorkload,
 } from "@/lib/ai-usage/types";
 import { usageEventKey } from "@/lib/pricing/meter";
+import { rowsOf } from "@/lib/sql-rows";
 
 export type AiUsageEntry = {
   orgCode: string;
@@ -60,6 +61,11 @@ export type AiUsageEntry = {
   modality?: AiUsageModality | null;
   /** QUAN SÁT (0232): phần của `inputTokens` đọc từ bộ đệm · phần của `outputTokens` là suy nghĩ · thời gian gọi · loại việc. */
   cachedTokens?: number | null;
+  /**
+   * Phần của `inputTokens` là GHI VÀO bộ đệm (0253, khi nhà cung cấp trả) — tách để phân tích; tiền USD vốn đã tính phần này
+   * (`estimateCostUsd`). `null` = nhà cung cấp không trả / nơi gọi không khai.
+   */
+  cacheWriteTokens?: number | null;
   thinkingTokens?: number | null;
   latencyMs?: number | null;
   /**
@@ -83,6 +89,29 @@ const intOrNull = (v: number | null): number | null => (v === null || !Number.is
  */
 export function aiCallKey(p: { workload: AiUsageWorkload; scope: string | null | undefined; turn: string | number; round?: number; attempt?: number }): string | null {
   return usageEventKey([p.workload, p.scope || "-", p.turn, p.round ?? 0, p.attempt ?? 0]);
+}
+
+/** Cột 0253 có ở CSDL nhà chưa — dò `information_schema`, đệm 60 giây; lỗi dò ⇒ coi như CHƯA có (rơi về câu chèn không có cột). */
+const CACHE_WRITE_PROBE_MS = 60_000;
+let cacheWriteProbe: { at: number; value: boolean } | null = null;
+async function ledgerHasCacheWrite(pdb: Awaited<ReturnType<typeof getPlatformDb>>): Promise<boolean> {
+  if (cacheWriteProbe && Date.now() - cacheWriteProbe.at < CACHE_WRITE_PROBE_MS) return cacheWriteProbe.value;
+  let value = false;
+  try {
+    const [r] = rowsOf<{ n: number }>(
+      await pdb.execute(sql`select count(*)::int as n from information_schema.columns where table_schema = current_schema() and table_name = 'platform_ai_usage' and column_name = 'cache_write_tokens'`),
+    );
+    value = Number(r?.n) === 1;
+  } catch {
+    value = false;
+  }
+  cacheWriteProbe = { at: Date.now(), value };
+  return value;
+}
+
+/** Chỉ cho kiểm thử: quên kết quả dò cột 0253 (sau khi bài kiểm đổi lược đồ). */
+export function resetLedgerColumnProbeForTests(): void {
+  cacheWriteProbe = null;
 }
 
 let duplicateBlocked = 0;
@@ -125,36 +154,48 @@ export async function recordAiUsage(e: AiUsageEntry): Promise<{ recorded: boolea
   if (e.modality && !(AI_USAGE_MODALITIES as readonly string[]).includes(e.modality)) throw new Error(`Loại lượt AI lạ: ${e.modality}`);
   const eventKey = e.eventKey?.trim() ? e.eventKey.trim().slice(0, 200) : null;
   const pdb = await getPlatformDb();
-  const insertWith = (workload: AiUsageWorkload | null) => pdb.insert(schema.platformAiUsage).values({
-    orgCode: e.orgCode,
-    feature: e.feature,
-    billingSource: e.source,
-    provider: e.provider,
-    model: e.model,
-    requests: Math.max(0, Math.round(e.requests)),
-    inputTokens: intOrNull(e.inputTokens),
-    outputTokens: intOrNull(e.outputTokens),
-    costUsd: e.costUsd === null || !Number.isFinite(e.costUsd) ? null : e.costUsd,
-    status: e.status,
-    actorId: e.actorId,
-    ref: e.ref ?? null,
-    eventKey,
-    conversationId: e.conversationId ?? null,
-    modality: e.modality ?? null,
-    cachedTokens: intOrNull(e.cachedTokens ?? null),
-    thinkingTokens: intOrNull(e.thinkingTokens ?? null),
-    latencyMs: intOrNull(e.latencyMs ?? null),
-    workload,
-    errorClass: e.status !== "OK" && e.errorClass && (AI_USAGE_ERROR_CLASSES as readonly string[]).includes(e.errorClass) ? e.errorClass : null,
-    ...(e.at ? { at: e.at } : {}),
-  });
+  // CÂU CHÈN LIỆT KÊ CỘT (tiền lệ 0245 · lib/constants/migration-serve-compat.ts): drizzle `insert(bảng)` liệt kê MỌI cột của lược đồ ⇒ CSDL
+  // nhà chưa áp 0253 (migrate lúc khởi động hỏng chỉ ghi log, máy chủ VẪN phục vụ) báo «column does not exist» và MỌI lượt dùng AI mất
+  // dòng tiền. `cache_write_tokens` chỉ được ghi khi CSDL đã có cột (`ledgerHasCacheWrite`).
+  const withCacheWrite = await ledgerHasCacheWrite(pdb);
+  const insertSql = (workload: AiUsageWorkload | null, onConflict: boolean) => {
+    const cols: [string, SQL][] = [
+      ["id", sql`${crypto.randomUUID()}`],
+      ["org_code", sql`${e.orgCode}`],
+      ["feature", sql`${e.feature}`],
+      ["billing_source", sql`${e.source}`],
+      ["provider", sql`${e.provider}`],
+      ["model", sql`${e.model}`],
+      ["requests", sql`${Math.max(0, Math.round(e.requests))}`],
+      ["input_tokens", sql`${intOrNull(e.inputTokens)}`],
+      ["output_tokens", sql`${intOrNull(e.outputTokens)}`],
+      ["cost_usd", sql`${e.costUsd === null || !Number.isFinite(e.costUsd) ? null : e.costUsd}`],
+      ["status", sql`${e.status}`],
+      ["actor_id", sql`${e.actorId}`],
+      ["ref", sql`${e.ref ?? null}`],
+      ["event_key", sql`${eventKey}`],
+      ["conversation_id", sql`${e.conversationId ?? null}`],
+      ["modality", sql`${e.modality ?? null}`],
+      ["cached_tokens", sql`${intOrNull(e.cachedTokens ?? null)}`],
+      ["thinking_tokens", sql`${intOrNull(e.thinkingTokens ?? null)}`],
+      ["latency_ms", sql`${intOrNull(e.latencyMs ?? null)}`],
+      ["workload", sql`${workload}`],
+      ["error_class", sql`${e.status !== "OK" && e.errorClass && (AI_USAGE_ERROR_CLASSES as readonly string[]).includes(e.errorClass) ? e.errorClass : null}`],
+      ...(e.at ? ([["at", sql`${e.at.toISOString()}::timestamptz`]] as [string, SQL][]) : []),
+      ...(withCacheWrite ? ([["cache_write_tokens", sql`${intOrNull(e.cacheWriteTokens ?? null)}`]] as [string, SQL][]) : []),
+    ];
+    return sql`insert into "platform_ai_usage" (${sql.raw(cols.map(([k]) => `"${k}"`).join(", "))}) values (${sql.join(
+      cols.map(([, v]) => v),
+      sql`, `,
+    )})${onConflict ? sql` on conflict do nothing` : sql``} returning "id"`;
+  };
   const write = async (workload: AiUsageWorkload | null): Promise<{ recorded: boolean }> => {
     if (!eventKey) {
-      await insertWith(workload);
+      await pdb.execute(insertSql(workload, false));
       return { recorded: true };
     }
     // Chỉ mục duy nhất (org_code, event_key) là ràng buộc duy nhất có thể va (id là ngẫu nhiên) — va ⇒ BẢN SAO TUYỆT ĐỐI, bỏ qua + đếm.
-    const rows = await insertWith(workload).onConflictDoNothing().returning({ id: schema.platformAiUsage.id });
+    const rows = rowsOf<{ id: string }>(await pdb.execute(insertSql(workload, true)));
     if (!rows.length) {
       duplicateBlocked += 1;
       console.warn(JSON.stringify({ evt: "ai_usage_duplicate_blocked", feature: e.feature, workload, status: e.status }));

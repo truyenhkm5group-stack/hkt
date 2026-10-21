@@ -106,6 +106,15 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/ai-usage-ledger-complete.test.ts",
   },
+  {
+    tag: "0253_ai_usage_cache_write",
+    why:
+      "Chỉ THÊM một cột phân tích (platform_ai_usage.cache_write_tokens) + CHECK của nó. Đường ghi DUY NHẤT của bảng (`recordAiUsage`) là " +
+      "câu chèn LIỆT KÊ CỘT và chỉ thêm cột này khi information_schema báo đã có (đệm 60 giây) — CSDL nhà chưa áp 0253 vẫn ghi đủ mọi dòng " +
+      "tiền / hạn mức, chỉ thiếu phần tách. Mọi đường đọc của bảng liệt kê cột, không đọc cột này.",
+    addedColumns: { platform_ai_usage: ["cache_write_tokens"] },
+    proof: "tests/ai-usage-ledger-complete.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */

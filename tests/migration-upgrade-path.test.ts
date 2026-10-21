@@ -200,6 +200,7 @@ const MOI = [
   "0250_payroll_code_pending",
   "0251_platform_webhook_rejections",
   "0252_ai_usage_workloads",
+  "0253_ai_usage_cache_write",
 ] as const;
 
 /*
