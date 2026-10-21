@@ -260,7 +260,7 @@ export async function testObservationResolution(db: Db) {
   const m4 = ra.get("rro-4");
   assert.ok(m4);
   assert.equal(m4.coverage, "CLASSIFIED", "ghi chú hạng cao mà KHÔNG xếp được thì không được xoá kết luận đã có của chữ ĐVVC");
-  assert.equal(m4.reason, "CUSTOMER_UNREACHABLE", "lý do đã xếp được phải ở lại");
+  assert.equal(m4.reason, "CUSTOMER_AWAY", "lý do đã xếp được phải ở lại (chữ «không có nhà» = khách vắng nhà — 21/10/2026)");
   assert.equal(m4.source, "CARRIER_TEXT", "nguồn nói được điều gì mới là nguồn được ghi công");
 
   const m3 = ra.get("rro-3");
@@ -345,7 +345,7 @@ export async function testReasonTextLatestParity(db: Db) {
     if (cu) assert.equal(moi?.rawReason, cu.raw, `${id}: chữ gốc lệch bản duyệt mọi sự kiện`);
   }
   // Khoá cả giá trị, không chỉ sự khớp: bản tham chiếu sai theo cùng một cách thì bài vẫn phải đỏ.
-  assert.equal(ra.get("rrp-1")?.reason, "CUSTOMER_UNREACHABLE");
+  assert.equal(ra.get("rrp-1")?.reason, "CUSTOMER_AWAY");
   assert.equal(ra.get("rrp-2")?.reason, "CUSTOMER_RESCHEDULE_FAILED", "câu có lý do MUỘN hơn phải thắng");
   assert.equal(ra.get("rrp-3")?.reason, "CUSTOMER_RESCHEDULE_FAILED", "câu bước hoàn không được đè lý do");
   assert.equal(ra.get("rrp-4")?.reason, "UNKNOWN");

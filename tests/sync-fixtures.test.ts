@@ -3,6 +3,7 @@
  * Chạy: npm test  (dùng CSDL PGlite tạm trong ./data/pglite-test, không ảnh hưởng dữ liệu thật)
  */
 import "./setup-env";
+import { testReturnReasonKhachVangNha } from "./return-reason-vang-nha.test";
 import { testCodReconciliation } from "./cod-reconciliation.test";
 import { testCodStatementAudit } from "./cod-statement-audit.test";
 import { testIdeas } from "./ideas.test";
@@ -2294,6 +2295,8 @@ async function main() {
 
     // ═══ NHÓM LÝ DO THEO CHỨNG CỨ (20/10/2026) ═══
     testEvidenceTaxonomyContract();
+    // Chủ shop 21/10/2026: «khách hàng nghỉ, không có nhà» ⇒ Khách vắng nhà (Giao vận), tách khỏi Không liên lạc được (Bán hàng).
+    testReturnReasonKhachVangNha();
     testEvidenceResolution();
     testEvidenceOverrideTransition();
     testEvidenceObservationShapes();

@@ -623,15 +623,15 @@ export async function testReasonRegroupAndThreeLevelDrilldown(db: Db) {
     await saveReasonGroupOverrides({});
     clearMemo();
     const truoc = await getReturnReasonReport(loc);
-    assert.equal(nhomCuaLyDo(truoc, "CUSTOMER_UNREACHABLE"), "SLOW", "mặc định: “không liên lạc được” nằm ở nhóm giao lâu");
+    assert.equal(nhomCuaLyDo(truoc, "CUSTOMER_AWAY"), "SLOW", "mặc định: “khách vắng nhà” (chữ ĐVVC «khách hàng nghỉ, không có nhà» — 21/10/2026) nằm ở nhóm giao lâu của cách xếp cũ");
     const demTruoc = demTheoLyDo(truoc);
 
     /* ─── ĐỔI CÁCH XẾP: chỉ một dòng `settings` ─── */
-    await saveReasonGroupOverrides({ CUSTOMER_UNREACHABLE: "BOOM" });
+    await saveReasonGroupOverrides({ CUSTOMER_AWAY: "BOOM" });
     clearMemo();
     const sau = await getReturnReasonReport(loc);
 
-    assert.equal(nhomCuaLyDo(sau, "CUSTOMER_UNREACHABLE"), "BOOM", "sau khi đổi, ca cũ được xếp lại NGAY — kể cả ca ghi từ trước");
+    assert.equal(nhomCuaLyDo(sau, "CUSTOMER_AWAY"), "BOOM", "sau khi đổi, ca cũ được xếp lại NGAY — kể cả ca ghi từ trước");
     /*
       BẤT BIẾN QUAN TRỌNG NHẤT: quan sát không đổi.
 
@@ -653,7 +653,7 @@ export async function testReasonRegroupAndThreeLevelDrilldown(db: Db) {
     assert.equal((await listReasonShipments({ ...loc, group: "SLOW" })).length, 0, "nhóm cũ nay rỗng: bảng và drilldown đọc CÙNG một bảng tra");
 
     /* ─── CHỮ GỐC LUÔN ĐI KÈM ─── */
-    const caMayDoc = theoBoom.find((r) => r.reason === "CUSTOMER_UNREACHABLE");
+    const caMayDoc = theoBoom.find((r) => r.reason === "CUSTOMER_AWAY");
     assert.ok(caMayDoc, "phải thấy ca máy đọc được lý do");
     assert.ok(caMayDoc.rawReason.includes("không có nhà"), `chữ gốc của ĐVVC phải đi kèm nguyên văn, đang là “${caMayDoc.rawReason}”`);
     assert.notEqual(caMayDoc.rawReason, caMayDoc.reasonLabel, "chữ gốc và NHÃN DANH MỤC là hai lớp riêng — trộn chúng là mất đường kiểm chứng");

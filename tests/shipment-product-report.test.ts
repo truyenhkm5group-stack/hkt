@@ -129,13 +129,13 @@ export async function testShipmentProductReport(db: Db) {
   assert.deepEqual(codes.get(`${P}s3`)?.codes, ["SPRQ002", "SPRQ004"], "vận đơn hai mã hiện cả hai");
 
   /* ═══ 7 · LÝ DO HOÀN: CHỮ MANG LÝ DO vs CHỮ CHỈ LÀ BƯỚC ĐI ═══ */
-  assert.equal(reasonFromStatusText("Tồn - Khách hàng nghỉ, không có nhà"), "CUSTOMER_UNREACHABLE");
+  assert.equal(reasonFromStatusText("Tồn - Khách hàng nghỉ, không có nhà"), "CUSTOMER_AWAY", "khách vắng nhà ≠ không liên lạc được (21/10/2026)");
   assert.equal(reasonFromStatusText("Tồn - Thông báo chuyển hoàn bưu cục gốc"), null, "'thông báo chuyển hoàn' là BƯỚC ĐI, không phải lý do — nhận nhầm sẽ tạo một nhãn chiếm 18% báo cáo mà không hành động được");
   assert.equal(reasonFromStatusText("Chuyển hoàn bưu cục gốc"), null);
   assert.equal(reasonFromStatusText("Giao thành công"), null);
 
   const verdicts = await reasonsForShipments([`${P}s2`, `${P}s3`, `${P}s4`]);
-  assert.equal(verdicts.get(`${P}s2`)?.reason, "CUSTOMER_UNREACHABLE");
+  assert.equal(verdicts.get(`${P}s2`)?.reason, "CUSTOMER_AWAY");
   assert.equal(verdicts.get(`${P}s2`)?.confidence, "CARRIER_TEXT", "suy từ chữ ⇒ độ tin cậy phải nói rõ là suy, không phải xác nhận");
   assert.equal(verdicts.get(`${P}s3`)?.reason, "UNKNOWN", "chỉ có bước đi ⇒ CHƯA XÁC ĐỊNH, không bịa");
   assert.equal(verdicts.get(`${P}s4`)?.confidence, "NONE");

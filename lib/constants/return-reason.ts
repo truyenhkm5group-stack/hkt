@@ -357,8 +357,16 @@ export const VTP_REASON_TO_RETURN_REASON: Record<number, ReturnReason> = {
  * mẫu chung, để "khách hàng nghỉ, không có nhà" không bị nuốt bởi một mẫu "khách hàng" rộng hơn.
  */
 export const RETURN_REASON_TEXT_RULES: { match: string; reason: ReturnReason }[] = [
-  { match: "khach hang nghi, khong co nha", reason: "CUSTOMER_UNREACHABLE" },
-  { match: "khong co nha", reason: "CUSTOMER_UNREACHABLE" },
+  /*
+    «KHÔNG CÓ NHÀ» ≠ «KHÔNG LIÊN LẠC ĐƯỢC» (chủ shop chốt 21/10/2026): bưu tá tới nơi mà khách đi vắng là việc của khâu GIAO (hẹn khung
+    giờ trước khi đi phát — nhóm «Khách vắng nhà», phòng Giao vận); gọi không bắt máy là việc của khâu XÁC NHẬN SỐ lúc chốt đơn. Gộp hai
+    thứ làm 488/718 ca «không liên lạc» trên bảng nguyên nhân thực ra là khách vắng nhà, và giao việc nhầm phòng. Đo tập câu production
+    21/10 (db-query run 39543012056, câu có ở ≥ 3 vận đơn): ĐÚNG MỘT dạng «Tồn - Khách hàng nghỉ, không có nhà», không biến thể «vắng» nào.
+    Đứng TRƯỚC «không liên lạc»: câu mang cả hai thì việc bưu tá đã tới nơi là chứng cứ cụ thể hơn. Mã lý do VTP 36 / 47 / 2 đều nghĩa
+    «không liên lạc được» — giữ nguyên. Lý do NGƯỜI đã xác nhận (`shipment_return_reasons`) không đổi; lý do quan sát suy lại lúc đọc.
+  */
+  { match: "khach hang nghi, khong co nha", reason: "CUSTOMER_AWAY" },
+  { match: "khong co nha", reason: "CUSTOMER_AWAY" },
   { match: "khong lien lac", reason: "CUSTOMER_UNREACHABLE" },
   { match: "khach hang den buu cuc nhan", reason: "CUSTOMER_RESCHEDULE_FAILED" },
   { match: "hen phat lai", reason: "CUSTOMER_RESCHEDULE_FAILED" },
