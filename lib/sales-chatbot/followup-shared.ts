@@ -9,6 +9,7 @@
  * mốc nào quá 23 giờ, và mỗi lượt gửi kiểm lại khung (`withinMessagingWindow`). Tệp này không đọc CSDL — client import được.
  */
 import type { LifecycleSnapshot } from "@/lib/sales-chatbot/lifecycle";
+import { OPEN_OUTCOMES } from "@/lib/constants/truth";
 
 export const FOLLOWUP_SETTING_KEY = "ai.salesChatbot.followup";
 
@@ -180,8 +181,8 @@ export type FollowupGateInput = {
 
 /** Đơn đã chốt còn sống (chưa giao / huỷ / xoá theo `orders.stage`). */
 const PRIOR_LIVE_STAGES = new Set(["WAITING", "CONFIRMED", "PACKING", "READY_TO_SHIP", "SHIPPED"]);
-/** Kết cục CUỐI theo `ORDER_OUTCOME` — còn lại (chưa gửi · chưa biết · chờ lấy · đang giao · không đọc được) là CHƯA kết cục. */
-const FINAL_OUTCOMES = new Set(["DELIVERED", "RETURNED", "RETURNED_BY_RULE", "CANCELLED"]);
+/** CHƯA kết cục = nhóm OPEN của `OUTCOME_GROUP` (lời khai duy nhất — lib/constants/truth.ts), cộng «không đọc được» (`null`). */
+const OPEN_SET = new Set<string>(OPEN_OUTCOMES);
 
 /**
  * KHÁCH CÒN ĐƠN ĐÃ CHỐT CHƯA KẾT CỤC (P0 21/10/2026, ca HSLC #BD31267C: tin nhắc bán hàng 00:04 tới khách đang chờ đơn 5 ngày — lượt mua
@@ -192,7 +193,7 @@ const FINAL_OUTCOMES = new Set(["DELIVERED", "RETURNED", "RETURNED_BY_RULE", "CA
  */
 export function pendingPriorOrderReason(orders: readonly { stage: string; insertedAt: Date | null; outcome: string | null }[], now: Date, watchDays: number, staleHours: number | null): "PENDING_PRIOR_ORDER" | "PENDING_PRIOR_ORDER_STALE" | null {
   const since = now.getTime() - watchDays * 86_400_000;
-  const live = orders.filter((o) => PRIOR_LIVE_STAGES.has(o.stage) && !FINAL_OUTCOMES.has(o.outcome ?? "") && o.insertedAt !== null && o.insertedAt.getTime() >= since);
+  const live = orders.filter((o) => PRIOR_LIVE_STAGES.has(o.stage) && (o.outcome === null || OPEN_SET.has(o.outcome)) && o.insertedAt !== null && o.insertedAt.getTime() >= since);
   if (!live.length) return null;
   const oldest = Math.min(...live.map((o) => o.insertedAt!.getTime()));
   return staleHours !== null && (now.getTime() - oldest) / 3_600_000 >= staleHours ? "PENDING_PRIOR_ORDER_STALE" : "PENDING_PRIOR_ORDER";

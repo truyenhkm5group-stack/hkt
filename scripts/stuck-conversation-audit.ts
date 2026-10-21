@@ -39,6 +39,7 @@ import { withOrganization } from "@/lib/platform/context";
 import { findOrganization, listOrganizations } from "@/lib/platform/organizations";
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { CONFIRMED_ORDER_WATCH_DAYS } from "@/lib/constants/shipment-status-age";
+import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { rowsOf } from "@/lib/sql-rows";
 
 const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s.slice(0, 300)}`);
@@ -385,7 +386,7 @@ export async function collectOrders(db: Db, days: number, now: Date): Promise<{ 
           left join "shipments" on "shipments"."order_id" = "orders"."id" and ${PRIMARY_ATTEMPT}
           where c.id = e.conversation_id and "orders"."stage" in ('WAITING', 'CONFIRMED', 'PACKING', 'READY_TO_SHIP', 'SHIPPED') and "orders"."inserted_at" < e.occurred_at
             and "orders"."inserted_at" >= e.occurred_at - ${CONFIRMED_ORDER_WATCH_DAYS} * interval '1 day'
-            and ${ORDER_OUTCOME}::text not in ('DELIVERED', 'RETURNED', 'RETURNED_BY_RULE', 'CANCELLED')))::int as after_pending
+            and ${ORDER_OUTCOME}::text in (${sql.raw(OPEN_OUTCOMES_SQL)})))::int as after_pending
       from "sales_conversation_events" e where e.type = 'followup.sent' and e.occurred_at >= ${since}`),
   );
   const [fb] = rowsOf<Record<string, unknown>>(
