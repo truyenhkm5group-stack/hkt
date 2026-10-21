@@ -13,7 +13,7 @@ import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { clearHandoffQueue } from "@/lib/sales-chatbot/handoff-routing";
 import { cancelInboxHistory, driveInboxHistory, startInboxHistory } from "@/lib/sales-chatbot/history";
 import { runMessengerHistory, startMessengerHistory } from "@/lib/sales-chatbot/messenger-history";
-import { checkLearnNow, learnLessons, rollbackLessons, saveLessons, setLessonsEnabled } from "@/lib/sales-chatbot/lessons";
+import { approveLessonProposal, checkLearnNow, learnLessons, rejectLessonProposal, rollbackLessons, saveLessons, setLessonsEnabled } from "@/lib/sales-chatbot/lessons";
 import { publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
 import { saveSalesChatbotConfig, SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 import { saveOrderSyncConfig } from "@/lib/sales-chatbot/order-sync";
@@ -116,6 +116,21 @@ export async function saveLessonsAction(lessons: unknown): Promise<PlaybookResul
 export async function rollbackLessonsAction(): Promise<PlaybookResult> {
   const user = await requireUser();
   const r = await rollbackLessons(user);
+  if ("ok" in r) revalidatePath("/ai/sales-chatbot");
+  return r;
+}
+
+/** Duyệt / bỏ đề xuất bài học của máy (Phần H) — chỉ người có quyền cấu hình bot; lõi ghi nhật ký. */
+export async function approveLessonProposalAction(): Promise<PlaybookResult> {
+  const user = await requireUser();
+  const r = await approveLessonProposal(user);
+  if ("ok" in r) revalidatePath("/ai/sales-chatbot");
+  return r;
+}
+
+export async function rejectLessonProposalAction(): Promise<PlaybookResult> {
+  const user = await requireUser();
+  const r = await rejectLessonProposal(user);
   if ("ok" in r) revalidatePath("/ai/sales-chatbot");
   return r;
 }

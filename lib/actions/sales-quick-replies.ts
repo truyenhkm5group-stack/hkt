@@ -19,6 +19,7 @@ import {
   type BulkQuickReplyOp,
 } from "@/lib/sales-chatbot/quick-replies";
 import { autoLearnQuickReplies } from "@/lib/sales-chatbot/quick-replies-learn";
+import { decideTriggerProposal, removeApprovedTrigger } from "@/lib/sales-chatbot/trigger-proposals";
 import { QUICK_REPLY_LIMITS } from "@/lib/sales-chatbot/quick-replies-shared";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
 
@@ -147,3 +148,20 @@ export async function tryQuickReplyAction(text: string): Promise<{ ok: true; res
   if (step.kind === "SKIP") return { ok: true, result: `Không dùng câu mẫu: ${step.reason} — chatbot AI trả lời.` };
   return { ok: true, result: `Không khớp chữ — ${step.candidates.length > 1 ? `AI đọc hiểu sẽ chọn trong ${step.candidates.length} câu mẫu (nếu bật)` : "AI đọc hiểu sẽ xét (nếu bật)"}; không câu nào hợp thì chatbot AI trả lời.` };
 }
+
+/** Duyệt / bỏ MỘT cách hỏi máy đề xuất (Phần H) — lõi kiểm quyền + ghi nhật ký từng cụm. */
+export async function decideTriggerProposalAction(id: string, decision: "APPROVE" | "REJECT"): Promise<Result> {
+  const user = await requireUser();
+  const r = await decideTriggerProposal(user, String(id ?? ""), decision === "APPROVE" ? "APPROVE" : "REJECT");
+  if ("ok" in r) revalidatePath(PATH);
+  return r;
+}
+
+/** Gỡ MỘT cách hỏi đã duyệt khỏi câu mẫu (dòng sổ giữ làm lịch sử). */
+export async function removeApprovedTriggerAction(id: string): Promise<Result> {
+  const user = await requireUser();
+  const r = await removeApprovedTrigger(user, String(id ?? ""));
+  if ("ok" in r) revalidatePath(PATH);
+  return r;
+}
+

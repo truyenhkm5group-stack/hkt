@@ -6,6 +6,7 @@ import { formatNumber, pctOrNull } from "@/lib/format";
 import { listQuickReplies, loadQuickReplySettings, quickReplyStats } from "@/lib/sales-chatbot/quick-replies";
 import { loadAutoLearnRun } from "@/lib/sales-chatbot/quick-replies-learn";
 import { SALES_CHATBOT_MANAGE } from "@/lib/sales-chatbot/settings";
+import { loadTriggerProposals } from "@/lib/sales-chatbot/trigger-proposals";
 import { QuickRepliesManager } from "./quick-replies-manager";
 
 export const metadata = { title: "Câu trả lời mẫu" };
@@ -17,7 +18,7 @@ export const metadata = { title: "Câu trả lời mẫu" };
 export default async function QuickRepliesPage() {
   const user = await requirePermission("ai_sales:view");
   const manage = can(user, SALES_CHATBOT_MANAGE);
-  const [rows, settings, stats, autoLearnRun] = await Promise.all([listQuickReplies(), loadQuickReplySettings(), quickReplyStats(), loadAutoLearnRun()]);
+  const [rows, settings, stats, autoLearnRun, proposals] = await Promise.all([listQuickReplies(), loadQuickReplySettings(), quickReplyStats(), loadAutoLearnRun(), loadTriggerProposals()]);
   const share = pctOrNull(stats.quickTurns, stats.totalTurns);
   return (
     <div className="space-y-5">
@@ -35,6 +36,7 @@ export default async function QuickRepliesPage() {
         shell={isSalesAgentUser(user)}
         settings={settings}
         autoLearnRun={autoLearnRun}
+        triggerProposals={proposals.filter((p) => p.status === "PENDING" || p.status === "APPROVED")}
         rows={rows.map((r) => ({ ...r, lastUsedAt: r.lastUsedAt?.toISOString() ?? null, updatedAt: r.updatedAt.toISOString() }))}
       />
     </div>

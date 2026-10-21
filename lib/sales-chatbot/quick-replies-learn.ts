@@ -30,6 +30,7 @@ import { publishedPlaybookText } from "@/lib/sales-chatbot/playbook";
 import { stripPrices } from "@/lib/sales-chatbot/playbook-shared";
 import { insertLearned, loadFocusProducts, loadQuickReplySettings, NEEDS_EDIT, unknownSkus } from "@/lib/sales-chatbot/quick-replies";
 import { consistentTriggers } from "@/lib/sales-chatbot/quick-reply-focus";
+import { proposeTriggers } from "@/lib/sales-chatbot/trigger-proposals";
 import {
   mergeTriggers,
   mineUnansweredQuestions,
@@ -181,15 +182,19 @@ export async function autoLearnQuickReplies(opts: { now?: Date; force?: boolean;
     // Cách hỏi đề xuất gọi tên món mà câu mẫu không nói tới ⇒ BỎ (chủ shop 18/10/2026: «xin giá chả cá» từng được thêm thẳng vào câu
     // NEM, và sẽ được nạp lại sau khi người gỡ). Đọc danh mục lỗi ⇒ lượt này không thêm cách hỏi nào.
     const focusProducts = await loadFocusProducts().catch(() => null);
+    // PHẦN H (21/10/2026): cách hỏi máy tìm ra là ĐỀ XUẤT chờ duyệt (trigger-proposals.ts) — câu mẫu KHÔNG đổi tới khi người duyệt
+    // từng cụm. `mergeTriggers` chỉ còn dùng để lọc (câu đặt hàng / mua sỉ / trần), không ghi.
     let extended = 0;
+    const proposedTriggers: { entryId: string; trigger: string }[] = [];
     for (const ex of focusProducts === null ? [] : plan.extend) {
       const [row] = await db.select({ title: qr.title, answer: qr.answer, triggers: qr.triggers }).from(qr).where(eq(qr.id, ex.id)).limit(1);
       if (!row) continue;
       const current = row.triggers ?? [];
       const next = mergeTriggers(current, consistentTriggers({ title: row.title, answer: row.answer }, ex.triggers, focusProducts ?? []), QUICK_REPLY_AUTO_LEARN.maxExtendPerEntry);
       if (next.length === current.length) continue;
-      await db.update(qr).set({ triggers: next }).where(eq(qr.id, ex.id));
-      extended += next.length - current.length;
+      const fresh = await proposeTriggers(ex.id, next.slice(current.length), { by: actor.email ?? BOT_NAME, at: now });
+      extended += fresh.length;
+      proposedTriggers.push(...fresh.map((f) => ({ entryId: f.entryId, trigger: f.trigger })));
     }
 
     // 2. Câu mẫu mới — làm sạch như câu người nhập; giá gõ thẳng ⇒ «[giá lấy từ ERP]» (không tự bật); SKU lạ ⇒ bỏ.
@@ -202,11 +207,13 @@ export async function autoLearnQuickReplies(opts: { now?: Date; force?: boolean;
       if ((await unknownSkus(answer)).length) continue;
       clean.push({ ...v.value, answer });
     }
-    const added = clean.length ? await insertLearned(clean, { actorEmail: actor.email ?? BOT_NAME, active: settings.autoActivate }) : 0;
+    // PHẦN H: câu mẫu máy soạn LUÔN vào trạng thái tắt chờ duyệt — cờ `autoActivate` không còn bật thẳng (giá trị đã lưu giữ nguyên,
+    // để gate replay sau này móc vào; màn hình nói rõ cờ đang khoá).
+    const added = clean.length ? await insertLearned(clean, { actorEmail: actor.email ?? BOT_NAME, active: false }) : 0;
     if (added || extended) {
-      await audit({ userId: actor.id, userEmail: actor.email ?? BOT_NAME, action: "SALES_QUICK_REPLY_AUTO_LEARN", entity: "SALES_QUICK_REPLY", after: { questions, added, extended, autoActivate: settings.autoActivate } });
+      await audit({ userId: actor.id, userEmail: actor.email ?? BOT_NAME, action: "SALES_QUICK_REPLY_AUTO_LEARN", entity: "SALES_QUICK_REPLY", after: { questions, added, proposedTriggers, autoActivateRequested: settings.autoActivate, activated: 0 } });
     }
-    const note = `Đọc ${questions} câu khách hỏi chưa có câu mẫu: thêm ${extended} cách hỏi vào câu mẫu cũ · ${added} câu mẫu mới${added ? (settings.autoActivate ? " (đã bật — trừ câu còn «[giá lấy từ ERP]»)" : " (đang tắt, chờ duyệt)") : ""}`;
+    const note = `Đọc ${questions} câu khách hỏi chưa có câu mẫu: ĐỀ XUẤT ${extended} cách hỏi cho câu mẫu cũ · ${added} câu mẫu mới — tất cả CHỜ DUYỆT, chưa có hiệu lực`;
     return await save({ at: now.toISOString(), status: "OK", note, questions, added, extended });
   } catch (e) {
     const raw = (e instanceof Error ? e.message : String(e)).slice(0, 300);

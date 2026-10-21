@@ -24,6 +24,7 @@ import { homeRuntimeIdleReason } from "@/lib/sales-chatbot/page-runtime";
 import {
   droppedLessonsText,
   LESSON_LIMITS,
+  lessonProposalDiff,
   LESSONS_SETTING_KEY,
   LESSONS_SYSTEM,
   lessonTranscript,
@@ -222,20 +223,18 @@ export async function learnLessons(opts: { now?: Date; force?: boolean; actor?: 
     const before = new Set(state.lessons);
     const added = lessons.filter((l) => !before.has(l)).length;
     const dropped = state.lessons.filter((l) => !lessons.includes(l)).length;
-    const note = `Học từ ${threads} hội thoại: ${lessons.length} bài (mới / sửa ${added} · bỏ ${dropped})${screened.dropped ? ` · không áp ${screened.dropped} bài nhắc tới tiền / tài khoản / liên kết (chủ shop tự thêm nếu thật sự cần): ${droppedLessonsText(screened.droppedLessons)}` : ""}`;
-    await saveRun(
-      state,
-      { at: now.toISOString(), status: "OK", threads, note },
-      {
-        lessons,
-        version: state.version + 1,
-        updatedAt: now.toISOString(),
-        updatedBy: actor.name,
-        history: state.lessons.length ? [...state.history, { version: state.version, lessons: state.lessons, at: state.updatedAt ?? now.toISOString(), by: state.updatedBy ?? "" }].slice(-LESSON_LIMITS.history) : state.history,
-        learnedUntil: until.toISOString(),
-      },
-    );
-    return { status: "OK", note, threads, lessons: lessons.length };
+    const changed = added > 0 || dropped > 0;
+    const screenNote = screened.dropped ? ` · không áp ${screened.dropped} bài nhắc tới tiền / tài khoản / liên kết (chủ shop tự thêm nếu thật sự cần): ${droppedLessonsText(screened.droppedLessons)}` : "";
+    const note = changed
+      ? `Học từ ${threads} hội thoại: ĐỀ XUẤT ${lessons.length} bài (mới / sửa ${added} · bỏ ${dropped}) — CHỜ DUYỆT, bot vẫn dùng bản ${state.version}${screenNote}`
+      : `Học từ ${threads} hội thoại: không có bài nào đổi so với bản đang dùng${screenNote}`;
+    // PHẦN H (21/10/2026): máy KHÔNG ghi đè bản đang dùng — chỉ ghi ĐỀ XUẤT; người duyệt mới có hiệu lực (`approveLessonProposal`).
+    // Đề xuất mới thay đề xuất cũ chưa duyệt (cùng dựng từ bản đang dùng). Mốc `learnedUntil` vẫn tiến: hội thoại đã đọc không học lại.
+    await saveRun(state, { at: now.toISOString(), status: "OK", threads, note }, { ...(changed ? { pending: { lessons, basedOnVersion: state.version, at: now.toISOString(), by: actor.name, source: "AUTO_LEARN" as const, note } } : {}), learnedUntil: until.toISOString() });
+    if (changed) {
+      await audit({ userId: actor.id, userEmail: actor.id ? actor.name : "job:sales-lessons", action: "SALES_LESSONS_PROPOSE", entity: "SETTINGS", entityId: LESSONS_SETTING_KEY, before: { version: state.version, count: state.lessons.length }, after: { proposed: lessons.length, ...lessonProposalDiff(state.lessons, lessons) }, reason: "Máy đề xuất bài học mới — chờ người duyệt" }).catch(() => undefined);
+    }
+    return { status: "OK", note, threads, lessons: state.lessons.length };
   } catch (e) {
     const note = (e instanceof Error ? e.message : String(e)).slice(0, 300);
     state = await loadLessons();
@@ -293,6 +292,43 @@ export async function rollbackLessons(user: SessionUser): Promise<Result> {
   await setSettingJson(LESSONS_SETTING_KEY, { ...state, lessons: prev.lessons, version: state.version + 1, updatedAt: new Date().toISOString(), updatedBy: user.email, history: state.history.slice(0, -1) } satisfies LessonsState);
   await audit({ userId: user.id, userEmail: user.email, action: "SALES_LESSONS_ROLLBACK", entity: "SETTINGS", entityId: LESSONS_SETTING_KEY, before: { version: state.version, count: state.lessons.length }, after: { restored: prev.version, count: prev.lessons.length }, reason: "Quay lại bài học bản trước" });
   return { ok: true, message: `Bot dùng lại ${prev.lessons.length} bài học của bản trước.` };
+}
+
+/**
+ * DUYỆT đề xuất của máy (Phần H): đề xuất thành bản đang dùng MỚI, bản cũ vào lịch sử (quay lại được), nhật ký ghi phần thêm / bỏ.
+ * Đề xuất dựng từ bản cũ hơn bản đang dùng (người đã sửa tay sau đó) ⇒ KHÔNG duyệt được — duyệt là đè mất phần người vừa sửa.
+ */
+export async function approveLessonProposal(user: SessionUser): Promise<Result> {
+  const err = await gate(user);
+  if (err) return { error: err };
+  const state = await loadLessons();
+  const p = state.pending;
+  if (!p) return { error: "Không có đề xuất nào đang chờ duyệt." };
+  if (p.basedOnVersion !== state.version) return { error: `Đề xuất dựng từ bản ${p.basedOnVersion} nhưng bài học đã sửa thành bản ${state.version} — bỏ đề xuất này rồi bấm «Học ngay» để có đề xuất mới.` };
+  const now = new Date().toISOString();
+  await setSettingJson(LESSONS_SETTING_KEY, {
+    ...state,
+    lessons: p.lessons,
+    version: state.version + 1,
+    updatedAt: now,
+    updatedBy: `${user.email} (duyệt đề xuất của máy)`,
+    history: state.lessons.length ? [...state.history, { version: state.version, lessons: state.lessons, at: state.updatedAt ?? now, by: state.updatedBy ?? "" }].slice(-LESSON_LIMITS.history) : state.history,
+    pending: null,
+  } satisfies LessonsState);
+  await audit({ userId: user.id, userEmail: user.email, action: "SALES_LESSONS_APPROVE", entity: "SETTINGS", entityId: LESSONS_SETTING_KEY, before: { version: state.version, count: state.lessons.length }, after: { version: state.version + 1, count: p.lessons.length, source: p.source, proposedBy: p.by, ...lessonProposalDiff(state.lessons, p.lessons) }, reason: "Duyệt bài học máy đề xuất" });
+  return { ok: true, message: `Đã duyệt — bot dùng ${p.lessons.length} bài học từ lượt trả lời kế tiếp (quay lại bản trước được).` };
+}
+
+/** BỎ đề xuất của máy — bản đang dùng giữ nguyên; nhật ký ghi đề xuất bị bỏ. */
+export async function rejectLessonProposal(user: SessionUser): Promise<Result> {
+  const err = await gate(user);
+  if (err) return { error: err };
+  const state = await loadLessons();
+  const p = state.pending;
+  if (!p) return { error: "Không có đề xuất nào đang chờ duyệt." };
+  await setSettingJson(LESSONS_SETTING_KEY, { ...state, pending: null } satisfies LessonsState);
+  await audit({ userId: user.id, userEmail: user.email, action: "SALES_LESSONS_REJECT", entity: "SETTINGS", entityId: LESSONS_SETTING_KEY, before: { version: state.version, proposed: p.lessons.length, source: p.source, proposedBy: p.by, ...lessonProposalDiff(state.lessons, p.lessons) }, reason: "Bỏ bài học máy đề xuất" });
+  return { ok: true, message: "Đã bỏ đề xuất — bot vẫn dùng bài học hiện tại." };
 }
 
 /** «Học ngay» — kiểm quyền; việc nặng do server action chạy SAU phản hồi (`learnLessons({ force: true })`). */

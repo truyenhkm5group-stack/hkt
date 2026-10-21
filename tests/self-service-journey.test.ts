@@ -24,6 +24,8 @@ import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provid
 import { ByokOpenAiProvider } from "@/lib/ai-builder/providers";
 import { addQuickReplyImages, bulkQuickReplies, insertLearned, listQuickReplies, loadQuickReplySettings, saveLearnedQuickReplies, saveQuickReply, saveQuickReplySettings, setQuickReplyActive } from "@/lib/sales-chatbot/quick-replies";
 import { autoLearnQuickReplies, loadAutoLearnRun } from "@/lib/sales-chatbot/quick-replies-learn";
+import { decideTriggerProposal, loadTriggerProposals } from "@/lib/sales-chatbot/trigger-proposals";
+import { TRIGGER_PROPOSALS_KEY } from "@/lib/sales-chatbot/trigger-proposals-shared";
 import { executeTool, maskAddress, PROCESS_TOOLS, toolDefsFor, type ChatState } from "@/lib/sales-chatbot/tools";
 import { freeShipPolicyText, freeShipVerdict, inFreeShipArea, variantWeightGrams } from "@/lib/sales-chatbot/shipping";
 import { publicView } from "@/lib/sales-chatbot/public";
@@ -72,8 +74,8 @@ import { loadPollState, markPancakeWebhook, PANCAKE_POLL_SETTING_KEY, savePollSt
 import { EMPTY_POLL_STATE } from "@/lib/sales-chatbot/pancake-poll-shared";
 import { catchUpFanpage, fanpageInboundCounts, fanpageVisitorKey, normalizeThreadMessages, unansweredCustomerMessages, pancakeCreatedAfterVerdict, pageAnsweredVerdict, postContextPrompt, postTextFromPancake, FIRST_CONTACT_WAIT_MS, FOLLOWUP_WAIT_MS, parsePancakeWebhook, processFanpageThread, processFanpageThreadDebounced, receiveFanpageEvent, UNKNOWN_SENDER_REASON, PAGE_REPLIED_REASON as PAGE_REPLIED_REASON_856 } from "@/lib/sales-chatbot/fanpage";
 import { loadChatCostReport } from "@/lib/sales-chatbot/cost-report";
-import { learnLessons, loadLessons, rollbackLessons, saveLessons, setLessonsEnabled } from "@/lib/sales-chatbot/lessons";
-import { droppedLessonsText, lessonsPrompt, lessonTranscript, normalizeLessons, parseLessonsFromAi, parseLessonsState, riskyLesson, screenAiLessons } from "@/lib/sales-chatbot/lessons-shared";
+import { approveLessonProposal, learnLessons, loadLessons, rejectLessonProposal, rollbackLessons, saveLessons, setLessonsEnabled } from "@/lib/sales-chatbot/lessons";
+import { droppedLessonsText, lessonProposalDiff, LESSONS_SETTING_KEY, lessonsPrompt, lessonTranscript, normalizeLessons, parseLessonsFromAi, parseLessonsState, riskyLesson, screenAiLessons } from "@/lib/sales-chatbot/lessons-shared";
 import { loadPlaybook, publishPlaybook, rollbackPlaybook, runPlaybookLearning, savePlaybookDraft, startPlaybookLearning, unpublishPlaybook } from "@/lib/sales-chatbot/playbook";
 import { CLOSED_TAG, customerLeftPhone, OPEN_TAG, redactForLearning, stripPrices, transcriptFor } from "@/lib/sales-chatbot/playbook-shared";
 import { resolveUrlSecretOrganization, webhookUrlToken } from "@/lib/platform/webhooks";
@@ -514,6 +516,12 @@ function testPure() {
   assert.equal(lessonTranscript([{ who: "KHÁCH", text: "Chị Hoa đây, 0912 345 678" }, { who: "BOT", text: "Dạ" }, { who: "BOT", text: "Dạ" }], "[KẾT QUẢ: x]", ["Chị Hoa"]), "[KẾT QUẢ: x]\nKHÁCH: [khách] đây, [số]\nBOT: Dạ", "che tên + số, bỏ dòng trùng liền nhau");
   const lsParsed = parseLessonsState({ enabled: "có", lessons: ["Khi a ⇒ làm b nhé", 3], version: 2.5, history: [{ version: 1, lessons: ["x"], at: "t", by: "u" }, null], lastRun: { at: "t", status: "LẠ" } });
   assert.ok(lsParsed.enabled && lsParsed.lessons.length === 1 && lsParsed.version === 0 && lsParsed.history.length === 1 && lsParsed.lastRun?.status === "ERROR" && lsParsed.learnedUntil === null, JSON.stringify(lsParsed));
+  // Phần H: đề xuất chờ duyệt — thiếu / hỏng ⇒ null (không bao giờ «đoán» một đề xuất); có ⇒ đọc lại đúng, giá bị lọc như bài thật.
+  assert.equal(lsParsed.pending, null, "không có đề xuất ⇒ null");
+  assert.equal(parseLessonsState({ pending: { lessons: ["Khi a ⇒ làm b nhé"] } }).pending, null, "thiếu basedOnVersion ⇒ không nhận đề xuất");
+  const lsProp = parseLessonsState({ pending: { lessons: ["Khi khách hỏi giá ⇒ báo 280k ngay", "x"], basedOnVersion: 3, at: "t", by: "Bot", source: "LẠ" } }).pending;
+  assert.ok(lsProp && lsProp.lessons.length === 1 && !/280/.test(lsProp.lessons[0]) && lsProp.source === "AUTO_LEARN" && lsProp.basedOnVersion === 3, JSON.stringify(lsProp));
+  assert.deepEqual(lessonProposalDiff(["A1 dài đủ", "B1 dài đủ"], ["B1 dài đủ", "C1 dài đủ"]), { added: ["C1 dài đủ"], dropped: ["A1 dài đủ"] });
   assert.equal(plainForMessenger("Anh/chị cho em xin *Họ tên, SĐT và địa chỉ cụ thể* để em lên đơn ạ!"), "Anh/chị cho em xin Họ tên, SĐT và địa chỉ cụ thể để em lên đơn ạ!");
   assert.equal(plainForMessenger("**Chả cá thu** 1kg\n* Miễn ship"), "Chả cá thu 1kg\n- Miễn ship");
   assert.equal(plainForMessenger("Giá 2*140k ạ"), "Giá 2*140k ạ", "dấu sao giữa chữ số không phải định dạng");
@@ -1189,7 +1197,8 @@ async function testJourney() {
             return { content: [{ type: "text", text }], stopReason: "end_turn", usage: { inputTokens: 900, outputTokens: 300, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: "claude-sonnet-5", latencyMs: 1 };
           },
         }));
-        assert.ok("ok" in (await saveQuickReplySettings(admin, { autoLearn: true })));
+        // Phần H: BẬT cả «Bật ngay câu mẫu mới» — câu máy soạn vẫn phải vào trạng thái chờ duyệt (cờ đã khoá nghĩa).
+        assert.ok("ok" in (await saveQuickReplySettings(admin, { autoLearn: true, autoActivate: true })));
         const run = await autoLearnQuickReplies({ force: true, actor: { id: admin.id, email: ADMIN_EMAIL } });
         assert.equal(run.status, "OK", JSON.stringify(run));
         assert.equal(learnCalls.length, 1, "MỘT lời gọi AI cho cả lượt");
@@ -1198,10 +1207,17 @@ async function testJourney() {
         assert.ok(/CHA-MUC-GIA-TAY/.test(prompt), "AI nhận danh sách SKU để viết {{giá:SKU}}");
         const after = await listQuickReplies();
         const chaMucAfter = after.find((r) => r.id === savedQr.id)!;
-        assert.ok(chaMucAfter.triggers.includes("chả mực bên mình loại nào ngon") && !chaMucAfter.triggers.includes("lấy sỉ 20kg chả mực"), "thêm cách hỏi vào câu mẫu đã có — câu hỏi sỉ không bao giờ vào câu báo giá lẻ");
+        // PHẦN H (21/10/2026): cách hỏi máy tìm ra là ĐỀ XUẤT — câu mẫu KHÔNG đổi tới khi người duyệt (trước đó gắn thẳng; đặc tả đổi).
+        assert.ok(!chaMucAfter.triggers.includes("chả mực bên mình loại nào ngon"), "cách hỏi máy tìm ra CHƯA vào câu mẫu đang hoạt động");
+        const props = await loadTriggerProposals();
+        const prop = props.find((x) => x.entryId === savedQr.id && x.trigger === "chả mực bên mình loại nào ngon");
+        assert.ok(prop && prop.status === "PENDING" && !props.some((x) => /sỉ/.test(x.trigger)), `một đề xuất chờ duyệt — câu hỏi sỉ không bao giờ vào: ${JSON.stringify(props)} · run=${JSON.stringify(run)}`);
+        assert.ok("error" in (await decideTriggerProposal({ ...admin, role: "VIEWER", permissions: ["ai_sales:view"] } as typeof admin, prop.id, "APPROVE")), "không quyền cấu hình ⇒ không duyệt được");
+        assert.ok("ok" in (await decideTriggerProposal(admin, prop.id, "APPROVE")));
+        assert.ok((await listQuickReplies()).find((r) => r.id === savedQr.id)!.triggers.includes("chả mực bên mình loại nào ngon"), "duyệt ⇒ cách hỏi gắn vào câu mẫu");
         const auto = after.filter((r) => r.source === "LEARNED");
         assert.deepEqual(auto.map((r) => r.title).sort(), ["Hỏi giá chả cá", "Ship Hà Nội"], "SKU lạ ⇒ bỏ; trùng tên câu đang có ⇒ bỏ");
-        assert.ok(auto.every((r) => !r.active), "tự bật đang tắt ⇒ câu mới chờ duyệt");
+        assert.ok(auto.every((r) => !r.active), "Phần H: dù cờ «bật ngay» đang BẬT, câu mẫu máy soạn vẫn TẮT chờ duyệt");
         assert.ok(auto.find((r) => r.title === "Hỏi giá chả cá")!.needsEdit, "giá gõ thẳng ⇒ «[giá lấy từ ERP]»");
         assert.equal((await loadAutoLearnRun())?.added, 2);
         assert.equal((await autoLearnQuickReplies()).status, "NOT_DUE", "24 giờ một lượt");
@@ -1231,11 +1247,12 @@ async function testJourney() {
         await db.update(schema.salesChatQuickReplies).set({ triggers: chaMucQr.triggers }).where(eq(schema.salesChatQuickReplies.id, savedQr.id));
         await db.delete(schema.salesChatInbound).where(eq(schema.salesChatInbound.pageId, L));
         await db.delete(schema.settings).where(eq(schema.settings.key, "ai.salesChatbot.quickReplies.autoLearnRun"));
+        await db.delete(schema.settings).where(eq(schema.settings.key, TRIGGER_PROPOSALS_KEY));
         // Sổ dùng AI: lượt tự nạp ghi «sales_playbook» (cùng nhóm chi phí học của bot) — xoá để khối «Học từ hội thoại cũ» đếm đúng của nó.
         const qlUsage = await (await getPlatformDb()).select().from(schema.platformAiUsage).where(and(eq(schema.platformAiUsage.orgCode, ORG), eq(schema.platformAiUsage.ref, "quick-replies")));
         assert.equal(qlUsage.length, learnCalls.length, "mỗi lời gọi AI của lượt tự nạp một dòng sổ dùng AI (tính vào chi phí của shop)");
         await (await getPlatformDb()).delete(schema.platformAiUsage).where(and(eq(schema.platformAiUsage.orgCode, ORG), eq(schema.platformAiUsage.ref, "quick-replies")));
-        assert.ok("ok" in (await saveQuickReplySettings(admin, { autoLearn: false })));
+        assert.ok("ok" in (await saveQuickReplySettings(admin, { autoLearn: false, autoActivate: false })));
         setSalesChatProviderForTests(() => baseBot);
       }
       // ═══ ẢNH KHÁCH GỬI (0195 · lib/sales-chatbot/vision.ts): trước đây tin chỉ có ảnh bị bỏ qua «để nhân viên xem» ═══
@@ -2496,7 +2513,8 @@ async function testJourney() {
       assert.ok("error" in (await saveLessons(manager2, "Khi a ⇒ làm b nhé")), "thiếu ai_sales:manage ⇒ không sửa được bài học");
       const ls1 = await learnLessons({ now: lsLater, force: true, actor: { id: null, name: ADMIN_EMAIL } });
       assert.equal(ls1.status, "OK", JSON.stringify(ls1));
-      assert.ok(ls1.threads >= 1 && ls1.lessons === 2, JSON.stringify(ls1));
+      // PHẦN H (21/10/2026): lượt máy chỉ ĐỀ XUẤT — `lessons` của kết quả là số bài ĐANG DÙNG (chưa đổi), đề xuất nằm ở `pending`.
+      assert.ok(ls1.threads >= 1 && ls1.lessons === 0 && /CHỜ DUYỆT/.test(ls1.note), JSON.stringify(ls1));
       assert.match(ls1.note, /không áp 1 bài nhắc tới tiền/, "bài AI xin chuyển khoản trước không tự áp — nhật ký nói ra");
       assert.ok(ls1.note.includes("«Khi khách hỏi giá ⇒ xin khách chuyển khoản trước rồi mới lên đơn»"), `nhật ký in NGUYÊN VĂN bài bị bỏ (chặn nhầm thì chủ shop chép lại được): ${ls1.note}`);
       const lsIn = lsInputs.join("\n");
@@ -2504,12 +2522,23 @@ async function testJourney() {
       assert.ok(lsIn.includes("SHOP: Dạ chị gửi em địa chỉ, em giao tận nơi ạ") && !lsIn.includes("nhãn tự động"), "lời nhân viên là mẫu; ghi chú Pancake bị bỏ");
       assert.equal(lsIn.split("BOT: Dạ anh/chị cho em xin họ tên và SĐT ạ").length - 1, 1, "tin bot không lặp vì dòng mã tin Pancake");
       assert.ok(lsIn.includes("[NHÂN VIÊN PHẢI VÀO SAU BOT]"), "đánh dấu chỗ bot hỏng");
-      const lsState1 = await loadLessons();
-      assert.ok(lsState1.version === 1 && lsState1.lessons.length === 2 && !lsState1.lessons.some((l) => /280/.test(l)) && lsState1.learnedUntil !== null && lsState1.lastRun?.status === "OK", JSON.stringify(lsState1));
-      assert.ok(!lsState1.lessons.some((l) => /chuyển khoản/.test(l)), "bài xin chuyển khoản trước không vào bộ bài học");
-      assert.ok((await aiUsageByRef(ORG, ["sales_playbook"], new Date(Date.now() - 86_400_000))).some((r) => r.ref === "lessons" && r.turns >= 1), "lượt học ghi sổ dùng AI (chi phí học)");
-      // Bot dùng bài học NGAY ở lượt kế tiếp.
+      const lsPending = await loadLessons();
+      assert.ok(lsPending.version === 0 && lsPending.lessons.length === 0 && lsPending.pending?.lessons.length === 2 && lsPending.pending.basedOnVersion === 0 && lsPending.pending.source === "AUTO_LEARN" && lsPending.learnedUntil !== null && lsPending.lastRun?.status === "OK", `job học chạy ⇒ bản đang dùng KHÔNG đổi, đề xuất chờ duyệt: ${JSON.stringify(lsPending)}`);
+      assert.ok(!lsPending.pending.lessons.some((l) => /280/.test(l) || /chuyển khoản/.test(l)), "đề xuất không mang giá / bài xin chuyển khoản");
+      const lsAudit = async (action: string) => db.select().from(schema.auditLogs).where(eq(schema.auditLogs.action, action));
+      assert.equal((await lsAudit("SALES_LESSONS_PROPOSE")).length, 1, "lượt MÁY cũng ghi nhật ký (đề xuất)");
+      // Chưa duyệt ⇒ bot KHÔNG dùng bài học máy đề xuất.
       const lsConv = await openConversation("TEST");
+      await chatTurn(lsConv.id, "shop ơi", { channel: "TEST" });
+      assert.ok(!lsSystems.some((x) => x.includes("Khi khách đã cho SĐT ⇒ không hỏi lại, xin địa chỉ luôn")), "đề xuất chưa duyệt KHÔNG vào lời nhắc của bot");
+      assert.ok("error" in (await approveLessonProposal(manager2)), "thiếu ai_sales:manage ⇒ không duyệt được");
+      assert.ok("ok" in (await approveLessonProposal(admin)));
+      const lsState1 = await loadLessons();
+      assert.ok(lsState1.version === 1 && lsState1.lessons.length === 2 && lsState1.pending === null, JSON.stringify(lsState1));
+      assert.equal((await lsAudit("SALES_LESSONS_APPROVE")).length, 1, "duyệt ghi nhật ký");
+      assert.ok((await aiUsageByRef(ORG, ["sales_playbook"], new Date(Date.now() - 86_400_000))).some((r) => r.ref === "lessons" && r.turns >= 1), "lượt học ghi sổ dùng AI (chi phí học)");
+      // Duyệt ⇒ bot dùng bài học ở lượt kế tiếp.
+      lsSystems.length = 0;
       await chatTurn(lsConv.id, "shop ơi", { channel: "TEST" });
       assert.ok(lsSystems.some((x) => x.includes("BÀI HỌC TỪ HỘI THOẠI THẬT") && x.includes("- Khi khách đã cho SĐT ⇒ không hỏi lại, xin địa chỉ luôn")), "bài học vào lời nhắc của bot");
       // Nhịp: chưa đủ 6 giờ ⇒ không học; «Học ngay» khi không có hội thoại mới ⇒ bỏ qua, không gọi AI.
@@ -2533,6 +2562,15 @@ async function testJourney() {
       const lsState3 = await loadLessons();
       assert.ok(lsState3.lessons[0] === "Khi khách đã cho SĐT ⇒ không hỏi lại, xin địa chỉ luôn" && lsState3.history.length === 0, JSON.stringify(lsState3));
       assert.ok("error" in (await rollbackLessons(admin)), "hết bản trước");
+      // Đề xuất dựng từ bản CŨ (người sửa tay sau đó) ⇒ không duyệt được; bỏ ⇒ bản đang dùng giữ nguyên, có nhật ký.
+      const lsNow = await loadLessons();
+      await setSettingJson(LESSONS_SETTING_KEY, { ...lsNow, pending: { lessons: ["Khi khách hỏi màu ⇒ gửi ảnh màu luôn"], basedOnVersion: lsNow.version - 1, at: new Date().toISOString(), by: "Bot", source: "AUTO_LEARN", note: "" } });
+      const stale = await approveLessonProposal(admin);
+      assert.ok("error" in stale && /dựng từ bản/.test(stale.error), JSON.stringify(stale));
+      assert.ok("ok" in (await rejectLessonProposal(admin)));
+      const lsAfterReject = await loadLessons();
+      assert.ok(lsAfterReject.pending === null && JSON.stringify(lsAfterReject.lessons) === JSON.stringify(lsNow.lessons), "bỏ đề xuất ⇒ bản đang dùng y nguyên");
+      assert.equal((await lsAudit("SALES_LESSONS_REJECT")).length, 1, "bỏ ghi nhật ký");
       // Tắt ⇒ bot không đọc bài học, không học.
       assert.ok("ok" in (await setLessonsEnabled(admin, false)));
       lsSystems.length = 0;
