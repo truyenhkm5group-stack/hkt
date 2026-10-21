@@ -18,7 +18,7 @@ import { and, eq, gte, isNull, notInArray, or } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { estimateCostUsd, type AiBlock } from "@/lib/ai/provider";
-import { recordAiUsage } from "@/lib/ai-usage/ledger";
+import { aiCallKey, recordAiUsage } from "@/lib/ai-usage/ledger";
 import { checkAiQuota } from "@/lib/ai-usage/quota";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { currentOrganization } from "@/lib/platform/context";
@@ -170,9 +170,9 @@ export async function autoLearnQuickReplies(opts: { now?: Date; force?: boolean;
     try {
       const res = await prov.provider.complete({ system: AUTO_LEARN_SYSTEM(shop, Math.max(maxNew, 0)), messages: [{ role: "user", content: [{ type: "text", text: prompt }] }], tools: [], maxTokens: AUTO_LEARN_AI_TOKENS, reasoning: "low" });
       out = textOf(res.content);
-      await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: prov.source, provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status: "OK", actorId: actor.id, ref: "quick-replies" }).catch(() => undefined);
+      await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", workload: "quick_reply_learn", eventKey: aiCallKey({ workload: "quick_reply_learn", scope: org.code, turn: now.toISOString() }), source: prov.source, provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status: "OK", actorId: actor.id, ref: "quick-replies" }).catch(() => undefined);
     } catch (e) {
-      await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: prov.source, provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: actor.id, ref: "quick-replies" }).catch(() => undefined);
+      await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", workload: "quick_reply_learn", eventKey: aiCallKey({ workload: "quick_reply_learn", scope: org.code, turn: now.toISOString() }), source: prov.source, provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: actor.id, ref: "quick-replies" }).catch(() => undefined);
       throw e;
     }
     if (!out) throw new Error("AI không trả về nội dung — lượt sau thử lại");

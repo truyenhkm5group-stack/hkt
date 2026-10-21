@@ -237,7 +237,7 @@ async function armProfitLive(ids: { sold: string; humanIds: string[]; aiIds: str
   // ── Sổ AI: thay lượt của hội thoại bán thật ở trên bằng bộ dòng biết trước (USD là phân số nhị phân ⇒ cộng không sai số). ──
   await pdb.delete(schema.platformAiUsage).where(eq(schema.platformAiUsage.orgCode, ORG));
   const ledgerRow = (ref: string | null, at: number, costUsd: number | null, more: { status?: "OK" | "BLOCKED_QUOTA"; feature?: "sales_chatbot" | "sales_playbook"; org?: string } = {}) =>
-    recordAiUsage({ orgCode: more.org ?? ORG, feature: more.feature ?? "sales_chatbot", source: "BYOK", provider: "fake", model: "m", requests: more.status === "BLOCKED_QUOTA" ? 0 : 1, inputTokens: null, outputTokens: null, costUsd, status: more.status ?? "OK", actorId: null, ref, at: new Date(at) });
+    recordAiUsage({ orgCode: more.org ?? ORG, feature: more.feature ?? "sales_chatbot", workload: more.feature === "sales_playbook" ? "playbook" : "sales_chatbot", source: "BYOK", provider: "fake", model: "m", requests: more.status === "BLOCKED_QUOTA" ? 0 : 1, inputTokens: null, outputTokens: null, costUsd, status: more.status ?? "OK", actorId: null, ref, at: new Date(at) });
   await ledgerRow(ids.sold, today, 1 / 64); // nhánh AI
   await ledgerRow(A1, D0 - 2 * DAY + 9 * HOUR, 1 / 8); // TRƯỚC ngày A1 vào nhánh ⇒ không tính cho nhánh
   await ledgerRow(A0, D0 - 4 * DAY + 9 * HOUR, 1 / 256); // sau ngày A0 vào nhánh ⇒ tính

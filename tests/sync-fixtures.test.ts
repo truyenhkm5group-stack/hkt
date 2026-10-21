@@ -683,6 +683,7 @@ import { testPublicChatLimits } from "./public-chat-limits.test";
 import { testPageQueryBudget } from "./page-query-budget.test";
 import { testApprovalsCore } from "./approvals-core.test";
 import { testAiUsage } from "./ai-usage.test";
+import { testAiUsageLedgerComplete } from "./ai-usage-ledger-complete.test";
 import { testPlatformAiModel } from "./platform-ai-model.test";
 import { testOrgExport } from "./org-export.test";
 import { testRestoreDrillConfig } from "./restore-drill-config.test";
@@ -3359,6 +3360,8 @@ async function main() {
     // Sổ dùng AI + hạn mức AI theo gói + công tắc AI: hai tổ chức THẬT `au-a` / `au-b` (tự cấp, tự dọn), provider GIẢ —
     // một dòng / lượt đúng nguồn, BLOCKED_QUOTA không gọi model, A không trừ B, BYOK không trừ credit nền tảng, không rơi về khoá nhà.
     await testAiUsage();
+    // Giai đoạn 2A: sổ dùng AI khai đủ loại việc + khoá sự kiện + serve-compat 0252.
+    await testAiUsageLedgerComplete();
     // Platform AI Model Control (06/10/2026): model AI dùng chung đổi qua chính sách có cổng (kiểm khả dụng → chạy thử → áp dụng
     // → hoàn tác), model mới hỏng ⇒ cùng lượt đi model dự phòng, sổ AI ghi đúng model thật.
     await testPlatformAiModel();

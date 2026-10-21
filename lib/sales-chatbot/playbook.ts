@@ -278,7 +278,7 @@ export async function runPlaybookLearning(opts: { target: number; days: number }
           const cost = estimateCostUsd(res.model || prov.provider.model, res.usage);
           stats.aiCalls += 1;
           stats.costUsd = stats.costUsd === null || cost === null ? null : stats.costUsd + cost;
-          await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: prov.source, provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens, costUsd: cost, status, actorId: actor.id, ref: "playbook" }).catch(() => undefined);
+          await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", workload: "playbook", source: prov.source, provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens, costUsd: cost, status, actorId: actor.id, ref: "playbook" }).catch(() => undefined);
           out = textOf(res.content);
           stop = res.stopReason;
           if (out) break;
@@ -287,7 +287,7 @@ export async function runPlaybookLearning(opts: { target: number; days: number }
         return out;
       } catch (e) {
         status = "ERROR";
-        await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: prov.source, provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status, actorId: actor.id, ref: "playbook" }).catch(() => undefined);
+        await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", workload: "playbook", source: prov.source, provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status, actorId: actor.id, ref: "playbook" }).catch(() => undefined);
         throw e;
       }
     };

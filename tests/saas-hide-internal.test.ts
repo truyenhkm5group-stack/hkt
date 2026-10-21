@@ -796,7 +796,7 @@ export async function testHideInternalLive() {
     assert.ok("ok" in ctl, JSON.stringify(ctl));
     const at = new Date();
     for (const source of ["PLATFORM", "BYOK"] as const) {
-      await recordAiUsage({ orgCode: ORG, feature: "copilot", source, provider: source === "PLATFORM" ? "gemini-platform" : "gemini-byok", model: "gemini-3.5-flash", requests: 1, inputTokens: 10, outputTokens: 10, costUsd: 1.25, status: "OK", actorId: null, eventKey: `hi-soft-${source}-${at.getTime()}` });
+      await recordAiUsage({ orgCode: ORG, feature: "copilot", workload: "copilot", source, provider: source === "PLATFORM" ? "gemini-platform" : "gemini-byok", model: "gemini-3.5-flash", requests: 1, inputTokens: 10, outputTokens: 10, costUsd: 1.25, status: "OK", actorId: null, eventKey: `hi-soft-${source}-${at.getTime()}` });
       const q = await checkAiQuota(ORG, source, { now: at });
       assert.ok(q.ok && q.softExceeded && q.warning !== null, `${source}: vượt ngưỡng cảnh báo, vẫn cho chạy — ${JSON.stringify(q).slice(0, 200)}`);
     }

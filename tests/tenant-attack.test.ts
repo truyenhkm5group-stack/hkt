@@ -734,7 +734,7 @@ export async function testTenantAttack() {
       const don = await createManualOrderCore(qtB, { customerId: "ta-b-cus1", stage: "NEW", lines: [{ variantId: vB.id, quantity: 1, unitPrice: TIEN_DON_B }], note: `Ghi chú ${MARK}`, channel: "Zalo" });
       assert.ok(don.ok, `B tạo đơn tay: ${JSON.stringify(don)}`);
       idB.order = don.id;
-      await recordAiUsage({ orgCode: B, feature: "ai_builder", source: "BYOK", provider: "fake", model: "fake-model-b", requests: 3, inputTokens: TOKEN_AI_B.input, outputTokens: TOKEN_AI_B.output, costUsd: 0.4242, status: "OK", actorId: qtB.id, ref: idB.aiDraft });
+      await recordAiUsage({ orgCode: B, feature: "ai_builder", workload: "ai_builder", source: "BYOK", provider: "fake", model: "fake-model-b", requests: 3, inputTokens: TOKEN_AI_B.input, outputTokens: TOKEN_AI_B.output, costUsd: 0.4242, status: "OK", actorId: qtB.id, ref: idB.aiDraft });
 
       // Kế hoạch mẫu bán sỉ của B (đã cài ⇒ mọi mục UNCHANGED) — A sẽ thử cài bằng đúng planHash này.
       const pv = await previewTemplate(qtB, "wholesale");
@@ -765,7 +765,7 @@ export async function testTenantAttack() {
       assert.ok(spA.ok, `A tạo sản phẩm tay: ${JSON.stringify(spA)}`);
       idB.productA = spA.id;
       idB.variantA = (await db.select({ id: schema.productVariants.id }).from(schema.productVariants).where(eq(schema.productVariants.productId, spA.id)))[0].id;
-      await recordAiUsage({ orgCode: A, feature: "ai_builder", source: "BYOK", provider: "fake", model: "fake-model-a", requests: 1, inputTokens: TOKEN_AI_A.input, outputTokens: TOKEN_AI_A.output, costUsd: 0.01, status: "OK", actorId: qtA.id, ref: null });
+      await recordAiUsage({ orgCode: A, feature: "ai_builder", workload: "ai_builder", source: "BYOK", provider: "fake", model: "fake-model-a", requests: 1, inputTokens: TOKEN_AI_A.input, outputTokens: TOKEN_AI_A.output, costUsd: 0.01, status: "OK", actorId: qtA.id, ref: null });
       // Bản nháp form / danh sách THẬT của A — đòn thao túng metadata chỉ cài đúng một tham chiếu độc vào đó.
       const f = await loadFormEditor(qtA, "customer", "profile");
       const l = await loadListEditor(qtA, "customer", "default");

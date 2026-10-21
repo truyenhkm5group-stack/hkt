@@ -199,6 +199,7 @@ const MOI = [
   "0249_product_marketer_assignments",
   "0250_payroll_code_pending",
   "0251_platform_webhook_rejections",
+  "0252_ai_usage_workloads",
 ] as const;
 
 /*

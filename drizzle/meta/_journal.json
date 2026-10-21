@@ -1758,6 +1758,13 @@
       "when": 1792487047372,
       "tag": "0251_platform_webhook_rejections",
       "breakpoints": true
+    },
+    {
+      "idx": 252,
+      "version": "7",
+      "when": 1792487107372,
+      "tag": "0252_ai_usage_workloads",
+      "breakpoints": true
     }
   ]
 }

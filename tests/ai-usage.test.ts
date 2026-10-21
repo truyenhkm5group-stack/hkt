@@ -353,7 +353,7 @@ async function testPlatformBranch(operator: SessionUser, adminB: SessionUser) {
     assert.equal((await sourceUsage(B, "PLATFORM")).costUsdMonth, 1, "credit nền tảng chỉ trừ lượt PLATFORM");
 
     // Hết credit (5 USD) ⇒ nhánh PLATFORM đóng, không rơi về đâu cả.
-    await recordAiUsage({ orgCode: B, feature: "ai_builder", source: "PLATFORM", provider: "anthropic-platform", model: "claude-opus-5", requests: 1, inputTokens: 1, outputTokens: 1, costUsd: 4, status: "OK", actorId: null });
+    await recordAiUsage({ orgCode: B, feature: "ai_builder", workload: "ai_builder", source: "PLATFORM", provider: "anthropic-platform", model: "claude-opus-5", requests: 1, inputTokens: 1, outputTokens: 1, costUsd: 4, status: "OK", actorId: null });
     await withOrganization(B, async () => {
       const r = await getBuilderAi({ env: ready, fetch: fetchFake });
       assert.ok(!r.ok && /credit/.test(r.reason), "hết credit ⇒ không có AI");

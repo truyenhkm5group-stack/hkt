@@ -435,7 +435,7 @@ async function run() {
   const plat = await platformChatAi(P, { env: ready, policy: null });
   assert.ok(plat.ok && plat.provider.name === "gemini-platform", JSON.stringify(plat.ok ? plat.provider.name : plat.reason));
   assert.equal(salesBotBillingSource("platform", { home: false }), "PLATFORM", "bot chọn khoá `platform` ⇒ sổ AI ghi nguồn PLATFORM");
-  const spend = (code: string, usd: number) => recordAiUsage({ orgCode: code, feature: "sales_chatbot", source: "PLATFORM", provider: "gemini-platform", model: "gemini-test", requests: 1, inputTokens: 1_000, outputTokens: 100, costUsd: usd, status: "OK", actorId: null });
+  const spend = (code: string, usd: number) => recordAiUsage({ orgCode: code, feature: "sales_chatbot", workload: "sales_chatbot", source: "PLATFORM", provider: "gemini-platform", model: "gemini-test", requests: 1, inputTokens: 1_000, outputTokens: 100, costUsd: usd, status: "OK", actorId: null });
   for (const code of ORGS) await spend(code, 10);
   const q10 = await withOrganization(P, () => checkAiQuota(P, "PLATFORM"));
   assert.ok(q10.ok && q10.softExceeded, "trả trước: đã tiêu 10 USD > credit 5 vẫn chạy, kèm cảnh báo");

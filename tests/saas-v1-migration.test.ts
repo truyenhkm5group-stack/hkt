@@ -266,7 +266,7 @@ export async function testSaasV1Migration() {
     await pdb.insert(schema.platformOrgPricing).values({ orgCode: M2, grandfathered: true, reason: "có từ trước 0222" });
     invalidatePricing(M2);
     // M1: bot chạy bằng KHOÁ RIÊNG (BYOK) — vài lượt hôm nay.
-    for (let i = 0; i < 12; i++) await recordAiUsage({ orgCode: M1, feature: "sales_chatbot", source: "BYOK", provider: "gemini", model: "gemini-test", requests: 1, inputTokens: 100, outputTokens: 50, costUsd: 0.001, status: "OK", actorId: null, ref: `v1mig-a-conv-${i}`, conversationId: `v1mig-a-conv-${i}` });
+    for (let i = 0; i < 12; i++) await recordAiUsage({ orgCode: M1, feature: "sales_chatbot", workload: "sales_chatbot", source: "BYOK", provider: "gemini", model: "gemini-test", requests: 1, inputTokens: 100, outputTokens: 50, costUsd: 0.001, status: "OK", actorId: null, ref: `v1mig-a-conv-${i}`, conversationId: `v1mig-a-conv-${i}` });
 
     // ── 1. CHẠY THỬ: không ghi một dòng nào.
     const before = await footprint();

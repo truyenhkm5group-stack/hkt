@@ -37,6 +37,15 @@ export const PLATFORM_WORKLOADS = ["sales_chatbot", "order_sync", "quick_extract
 export type PlatformWorkload = (typeof PLATFORM_WORKLOADS)[number];
 export const PLATFORM_WORKLOAD_LABEL: Record<PlatformWorkload, string> = { sales_chatbot: "Sales Chat", order_sync: "Order Sync", quick_extract: "Quick Extract", vision: "Vision" };
 
+/**
+ * LOẠI VIỆC CỦA SỔ DÙNG AI (`platform_ai_usage.workload`, 0252 — giai đoạn 2 «AI Sales Self-Optimizing», 21/10/2026): danh sách ĐÓNG,
+ * MỌI đường ghi sổ phải khai một giá trị (trường BẮT BUỘC của `AiUsageEntry`). Gồm 4 loại việc của chính sách model ở trên (KHÔNG đổi
+ * danh sách chính sách — thêm vào đó là đổi màn hình / cấu hình chính sách) + các việc nền / ngoài bán hàng mà baseline 14 ngày HSLC
+ * thấy ghi sổ KHÔNG nhãn (7.848 lời gọi · 4,58 USD · 18%).
+ */
+export const AI_USAGE_WORKLOADS = [...PLATFORM_WORKLOADS, "followup", "lessons", "quick_reply_learn", "inbox_feedback", "playbook", "ai_builder", "copilot", "creative", "lead_hunter"] as const;
+export type AiUsageWorkload = (typeof AI_USAGE_WORKLOADS)[number];
+
 export const AI_USAGE_FEATURE_LABEL: Record<AiUsageFeature, string> = { ai_builder: "AI Builder", copilot: "AI Copilot", sales_chatbot: "Chatbot bán hàng", sales_playbook: "Học từ hội thoại cũ", lead_hunter: "Lời chào khách sỉ", creative_image: "Vẽ ảnh quảng cáo", creative_copy: "Câu chữ quảng cáo" };
 
 /** Loại lượt (0222): chữ · đọc ảnh khách gửi · vẽ ảnh. `NULL` trong sổ = nơi gọi chưa khai. */

@@ -13,7 +13,7 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { estimateCostUsd, type AiBlock } from "@/lib/ai/provider";
-import { recordAiUsage } from "@/lib/ai-usage/ledger";
+import { aiCallKey, recordAiUsage } from "@/lib/ai-usage/ledger";
 import { checkAiQuota } from "@/lib/ai-usage/quota";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { currentOrganization } from "@/lib/platform/context";
@@ -115,9 +115,9 @@ export async function submitConversationFeedbackCore(user: SessionUser, conversa
   try {
     const res = await prov.provider.complete({ system: FEEDBACK_SYSTEM, messages: [{ role: "user", content: [{ type: "text", text: prompt }] }], tools: [], maxTokens: FEEDBACK_AI_TOKENS, reasoning: "low" });
     out = textOf(res.content);
-    await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: prov.source, provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status: "OK", actorId: user.id, ref: `feedback:${id}` }).catch(() => undefined);
+    await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", workload: "inbox_feedback", conversationId: id, eventKey: aiCallKey({ workload: "inbox_feedback", scope: id, turn: now.toISOString() }), source: prov.source, provider: prov.provider.name, model: res.model || prov.provider.model, requests: 1, inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || prov.provider.model, res.usage), status: "OK", actorId: user.id, ref: `feedback:${id}` }).catch(() => undefined);
   } catch (e) {
-    await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", source: prov.source, provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: user.id, ref: `feedback:${id}` }).catch(() => undefined);
+    await recordAiUsage({ orgCode: org.code, feature: "sales_playbook", workload: "inbox_feedback", conversationId: id, eventKey: aiCallKey({ workload: "inbox_feedback", scope: id, turn: now.toISOString() }), source: prov.source, provider: prov.provider.name, model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: user.id, ref: `feedback:${id}` }).catch(() => undefined);
     return fail(e instanceof Error ? e.message : String(e));
   }
   const parsed = parseLessonsFromAi(out);

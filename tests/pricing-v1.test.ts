@@ -521,8 +521,8 @@ export async function testPricingV1() {
     const rowsNeeded = 2 * (starterOld.requestsPerDay ?? 30) + 1;
     const bigCost = 2 * Math.max(starterOld.costUsdPerMonth.hard ?? 60, starterOld.platformCreditUsdPerMonth, scaleLimits!.limits.platformCreditUsdPerMonth) + 1;
     const usageAi = async (org: string) => {
-      for (let i = 0; i < rowsNeeded; i++) await recordAiUsage({ orgCode: org, feature: "copilot", source: "PLATFORM", provider: "gemini", model: "gemini-3.1-flash-lite", requests: 1, inputTokens: 1, outputTokens: 1, costUsd: 0.001, status: "OK", actorId: null, eventKey: `pv1-ai-${org}-${i}` });
-      await recordAiUsage({ orgCode: org, feature: "copilot", source: "PLATFORM", provider: "gemini", model: "gemini-3.1-flash-lite", requests: 1, inputTokens: 1, outputTokens: 1, costUsd: bigCost, status: "OK", actorId: null, eventKey: `pv1-ai-${org}-big` });
+      for (let i = 0; i < rowsNeeded; i++) await recordAiUsage({ orgCode: org, feature: "copilot", workload: "copilot", source: "PLATFORM", provider: "gemini", model: "gemini-3.1-flash-lite", requests: 1, inputTokens: 1, outputTokens: 1, costUsd: 0.001, status: "OK", actorId: null, eventKey: `pv1-ai-${org}-${i}` });
+      await recordAiUsage({ orgCode: org, feature: "copilot", workload: "copilot", source: "PLATFORM", provider: "gemini", model: "gemini-3.1-flash-lite", requests: 1, inputTokens: 1, outputTokens: 1, costUsd: bigCost, status: "OK", actorId: null, eventKey: `pv1-ai-${org}-big` });
     };
     for (const org of [A, B]) {
       await usageAi(org);
