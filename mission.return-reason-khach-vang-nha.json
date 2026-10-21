@@ -3,7 +3,7 @@
   "mission_id": "return-reason-khach-vang-nha",
   "title": "Tách «Khách vắng nhà» khỏi «Không liên lạc được»: chữ ĐVVC «khách hàng nghỉ, không có nhà» ⇒ CUSTOMER_AWAY",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-vang-nha",
@@ -24,11 +24,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-21T04:17:34.789Z",
-  "updated_at": "2026-10-21T09:21:05.863Z",
+  "updated_at": "2026-10-21T09:49:20.242Z",
   "last_heartbeat": "2026-10-21T08:34:08.501Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#946 → 9efcee91eb09238c17a5170be25dae97637aa4f0"
+    "merged": "#946 → 9efcee91eb09238c17a5170be25dae97637aa4f0",
+    "verify": "PASS 9efcee91eb09238c17a5170be25dae97637aa4f0 2026-10-21T09:48:41.472Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39577918145"
   },
   "handoff": {
     "branch": "claude/return-reason-khach-vang-nha",
