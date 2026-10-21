@@ -714,8 +714,11 @@ async function main() {
       ["APPROVAL", ["APPROVAL"]],
       ["PRODUCTION_TOPIC", ["PRODUCTION_TOPIC"]],
       ["SAMPLE_REVIEW", ["SAMPLE_REVIEW"]],
+      // Dữ liệu lương còn thiếu của Trung tâm đối soát (#947) — đếm theo PHÒNG ở dưới, không in tiêu đề (có tên người).
+      ["PAYROLL_RECON", ["PAYROLL_RECON"]],
       ["MANUAL/RECURRING/WORKFLOW", ["MANUAL_TASK", "RECURRING_TASK", "WORKFLOW_TASK"]],
     ];
+    const theoPhong = new Map<string, number>();
     const tungNguon: { ten: string; ms: number; viec: number; quaHan: string }[] = [];
     for (const [ten, sources] of NGUON) {
       clearMemo();
@@ -723,6 +726,7 @@ async function main() {
       try {
         const r = await wa.collectWorkItems({ sources });
         tungNguon.push({ ten, ms: Date.now() - t0, viec: r.items.length, quaHan: r.failed.map((f) => `${f.source}: ${f.error}`).join(" · ") });
+        if (ten === "PAYROLL_RECON") for (const i of r.items) theoPhong.set(i.department, (theoPhong.get(i.department) ?? 0) + 1);
       } catch (e) {
         tungNguon.push({ ten, ms: Date.now() - t0, viec: 0, quaHan: `LỖI: ${e instanceof Error ? e.message : String(e)}` });
       }
@@ -730,6 +734,23 @@ async function main() {
     console.log("\n── /work: TỪNG NGUỒN QUA ĐÚNG ĐƯỜNG TRANG GỌI (đệm rỗng, hạn 2,5 s mỗi nguồn) ──");
     for (const r of [...tungNguon].sort((a, b) => b.ms - a.ms))
       console.log(`  ${String(r.ms).padStart(6)}ms  ${String(r.viec).padStart(5)} việc  ${r.ten.padEnd(28)} ${r.quaHan ? `QUÁ HẠN/LỖI — ${r.quaHan}` : ""}`);
+    console.log(`  PAYROLL_RECON theo phòng (lượt qua hàng đợi): ${[...theoPhong].map(([k, n]) => `${k} ${n}`).join(" · ") || "(0 việc)"}`);
+    /*
+      ĐỆM NGUỘI KHÔNG BỊ CẮT: collectWorkItems dừng mỗi nguồn ở 2,5 s, nên con số ở trên không nói được nguồn lương thật
+      sự mất bao lâu. Đo THẲNG adaptPayrollRecon hai lượt — nguội (sau clearMemo) rồi ấm — để biết có cần làm ấm đệm không.
+    */
+    for (const luot of ["nguội", "ấm"] as const) {
+      if (luot === "nguội") clearMemo();
+      const t0 = Date.now();
+      try {
+        const viec = await wa.adaptPayrollRecon(new Date());
+        const dem = new Map<string, number>();
+        for (const i of viec) dem.set(i.department, (dem.get(i.department) ?? 0) + 1);
+        console.log(`  adaptPayrollRecon ${luot}: ${Date.now() - t0}ms · ${viec.length} việc · ${[...dem].map(([k, n]) => `${k} ${n}`).join(" · ") || "—"}${Date.now() - t0 > 2500 ? " · VƯỢT hạn 2,5 s của /work" : ""}`);
+      } catch (e) {
+        console.log(`  adaptPayrollRecon ${luot}: LỖI sau ${Date.now() - t0}ms — ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
 
     // Toàn trang (phần dữ liệu): đúng lời gọi của app/(dashboard)/work/page.tsx, với một tài khoản quản trị thật.
     const { getDb: layDb } = await import("@/db");
