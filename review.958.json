@@ -1,0 +1,8 @@
+{
+  "pr": 958,
+  "sha": "2c1b940c4451cc2613c3570c8a1b9982525b7da3",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T18:28:26.414Z",
+  "note": "review lead (P0 chủ shop 21/10, case Vit Xiem; ĐỔI LUẬT «ok không thêm» của #927/#930 cho lời mời MỘT món): short-accept.ts — isShortAccept (ok · vâng · được · lấy luôn · thêm nhé · 👍/👌 qua isShortYes, phủ định/câu hỏi/chữ thừa ⇒ không), proposalOf (câu bot gọi tên ĐÚNG một sản phẩm + đúng giá một mẫu mã, chưa có trong đơn), acceptsOffer (đúng tin kế tiếp, không người/page thật xen giữa, lượt mờ"
+}
