@@ -719,6 +719,15 @@ deploy dừng, không phải cảnh báo.
     riêng là ƯỚC TÍNH; đơn không qua ĐVVC ⇒ 0. `orders.partner_fee` của Pancake KHÔNG phải ghi nhận của Viettel
     Post — chỉ được dùng làm dấu hiệu "có gửi". Cước chỉ "đã đối soát" khi vận đơn đã nằm trong bảng kê COD.
 
+81. **CHỦ SHOP TỰ LÀM BẢNG LƯƠNG THÌ KHÔNG CẦN NGƯỜI THỨ HAI — VÀ «CHỦ SHOP» LÀ MỘT LỜI KHAI, KHÔNG PHẢI MỘT
+    VAI TRÒ** (`lib/constants/org-owner.ts`, chủ shop 21/10/2026): «Nếu có kế toán thì kế toán làm bảng lương và
+    tôi duyệt, nếu không có kế toán hoặc nếu tôi làm bảng lương thì không cần duyệt nữa.» Chủ shop = MỘT `users.id`
+    ở `settings` khoá `org.owner`, CHỈ ops `set-setting` ghi (không đường ghi nào trong ứng dụng — bài kiểm quét).
+    Dùng thì khớp CẢ BA: id · tài khoản còn bật · vai trò `ADMIN`; thiếu một thứ ⇒ về luật hai người. Phạm vi miễn:
+    cổng người thứ hai nhóm `PAYROLL_EDIT`, «người nhập không tự duyệt» của số liệu lương, và «người duyệt khác
+    người ký» ở DUYỆT kỳ có thưởng — chữ ký cấp 1 VẪN bắt buộc. Mỗi lần miễn ghi nhật ký kèm câu quy định. Kế toán
+    hay ADMIN khác lập ⇒ vẫn chờ người duyệt như cũ. KHÔNG mở rộng sang nhóm khác khi chủ shop chưa nói.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng
   `npm run db:generate`**: ảnh chụp `drizzle/meta/*_snapshot.json` chỉ tới `0032`, nên nó sinh migration

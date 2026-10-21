@@ -36,6 +36,8 @@ import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { getPayrollReport, profitGateReadiness } from "@/lib/queries/payroll";
 import { getMonthReconciliation, parseSignoffs } from "@/lib/queries/payroll-reconciliation";
 import { profitApprovalProblem, reconFingerprintKey, signableFingerprint } from "@/lib/payroll/profit-reconciliation";
+import { isOrgOwner } from "@/lib/auth/org-owner";
+import { OWNER_SELF_APPROVAL_REASON } from "@/lib/constants/org-owner";
 import { PAYROLL_PROFIT_SIGNOFF_KEY } from "@/lib/constants/payroll-reconciliation";
 import { LEGACY_CARRY_COMPONENT, monthKeyOf, rateToBp, wholeMonthKey } from "@/lib/constants/payroll-carryover";
 import { getProfitGateConfig } from "@/lib/queries/payroll-profit-gate";
@@ -443,6 +445,7 @@ export async function transitionPayrollRunAs(actor: PayrollActor, input: Transit
       khoá giữ nguyên mốc duyệt cũ để tra lịch sử, nhưng trạng thái phải đi qua vòng soát lại —
       bảng chuyển trạng thái đã ép điều đó: `APPROVED` chỉ đi tiếp được khi có người bấm `LOCK`.
     */
+    let chuShopDuyet = false;
     /*
       DUYỆT HAI CẤP CHO THƯỞNG % LỢI NHUẬN (chủ shop 19/10/2026). Kỳ có thưởng đủ điều kiện > 0 thì:
         · DUYỆT đòi chữ ký cấp 1 CÒN HIỆU LỰC ký đúng ảnh chụp này, và người duyệt KHÁC người ký;
@@ -454,6 +457,7 @@ export async function transitionPayrollRunAs(actor: PayrollActor, input: Transit
       const [anh2] = await tx.select({ snapshot: p.snapshot }).from(p).where(and(eq(p.periodKey, periodKey), eq(p.basis, basis))).limit(1);
       const snap = anh2?.snapshot as PayrollSnapshot | null;
       const [soKy] = await tx.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, PAYROLL_PROFIT_SIGNOFF_KEY)).limit(1);
+      chuShopDuyet = action === "APPROVE" && (await isOrgOwner(tx, actor.id));
       const loi = profitApprovalProblem({
         allocatedTotal: snap?.profitGate?.allocatedTotal,
         monthKey: thangCong,
@@ -461,6 +465,7 @@ export async function transitionPayrollRunAs(actor: PayrollActor, input: Transit
         signoffs: parseSignoffs(soKy?.value ?? null),
         actorId: actor.id,
         requireDifferentPerson: action === "APPROVE",
+        actorIsOwner: chuShopDuyet,
       });
       if (loi) return { error: loi } as const;
     }
@@ -520,7 +525,7 @@ export async function transitionPayrollRunAs(actor: PayrollActor, input: Transit
         .set({ status: "DRAFT", finalizedAt: null, finalizedBy: null, updatedAt: luc })
         .where(and(eq(c.monthKey, thangCuaKy), eq(c.status, "FINAL")));
     }
-    return { ok: true, from: now } as const;
+    return { ok: true, from: now, chuShopDuyet } as const;
   });
   if ("error" in ketQua && ketQua.error) return { error: ketQua.error };
 
@@ -532,8 +537,8 @@ export async function transitionPayrollRunAs(actor: PayrollActor, input: Transit
     entityId: `${periodKey}:${basis}`,
     before: { status: current },
     after: { status: spec.to },
-    reason: reason || undefined,
-    detail: { periodKey, basis, action },
+    reason: ("chuShopDuyet" in ketQua && ketQua.chuShopDuyet ? [reason, OWNER_SELF_APPROVAL_REASON].filter(Boolean).join(" · ") : reason) || undefined,
+    detail: { periodKey, basis, action, ...("chuShopDuyet" in ketQua && ketQua.chuShopDuyet ? { ownerSelfApproval: true } : {}) },
   });
 
   const sideEffects: string[] = [];

@@ -15,6 +15,7 @@
  * Phần THUẦN không cần CSDL; phần NỐI chạy qua đúng `getPayrollReport` mà `/payroll` gọi, trên tháng
  * 01–02/2029 (tiền tố `cl-`) để không đụng fixture của bộ khác.
  */
+import { ORG_OWNER_KEY, OWNER_SELF_APPROVAL_REASON } from "@/lib/constants/org-owner";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { and, eq, sql } from "drizzle-orm";
@@ -683,6 +684,21 @@ async function testFlow(db: Db) {
   assert.ok("ok" in ky1 && ky1.created, `cấp 1 ký được trên ảnh chụp: ${"error" in ky1 ? ky1.error : ""}`);
   const tuDuyet = await duyetBoi("cl-ky");
   assert.ok("error" in tuDuyet && /MỘT NGƯỜI KHÁC/.test(tuDuyet.error), "người ký cấp 1 KHÔNG được duyệt cấp 2");
+  // Chủ shop 21/10/2026: chủ shop tự làm bảng lương ⇒ vừa ký vừa duyệt được — CHỈ người khai ở org.owner.
+  await setSettingJson(ORG_OWNER_KEY, { userId: "cl-duyet", decidedAt: "2026-10-21", note: "kiểm thử" });
+  const khongPhaiChu = await duyetBoi("cl-ky");
+  assert.ok("error" in khongPhaiChu && /MỘT NGƯỜI KHÁC/.test(khongPhaiChu.error), "chủ shop khai là NGƯỜI KHÁC ⇒ người ký (dù là ADMIN) vẫn không tự duyệt");
+  await setSettingJson(ORG_OWNER_KEY, { userId: "cl-ky", decidedAt: "2026-10-21", note: "kiểm thử" });
+  const chuDuyet = await duyetBoi("cl-ky");
+  assert.ok("ok" in chuDuyet, `chủ shop ký cấp 1 rồi tự duyệt kỳ có thưởng: ${"error" in chuDuyet ? chuDuyet.error : ""}`);
+  const nkChu = await db
+    .select({ reason: schema.auditLogs.reason })
+    .from(schema.auditLogs)
+    .where(and(eq(schema.auditLogs.action, "PAYROLL_RUN_APPROVE"), eq(schema.auditLogs.userId, "cl-ky")));
+  assert.ok(nkChu.some((r) => r.reason?.includes(OWNER_SELF_APPROVAL_REASON)), "nhật ký duyệt kỳ ghi rõ chủ shop tự duyệt theo quy định 21/10");
+  assert.ok("ok" in (await transitionPayrollRunAs(kyActor, { periodKey: monthPeriodKey("2029-01"), basis: "profit1", action: "REJECT", reason: "kiểm thử: trả lại để chạy tiếp luồng hai người" })));
+  await soat();
+  await db.delete(schema.settings).where(eq(schema.settings.key, ORG_OWNER_KEY));
   // Huỷ chữ ký ⇒ duyệt bị chặn (review vòng 1: huỷ từng không có tác dụng sau khi đã tính).
   assert.ok("ok" in (await revokeProfitReconAs(kyActor, { id: "ok" in ky1 ? ky1.id : "", reason: "kiểm thử: phát hiện sai, huỷ" })));
   const sauHuy = await duyetBoi("cl-duyet");
