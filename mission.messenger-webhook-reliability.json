@@ -26,18 +26,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-21T02:45:57.523Z",
-  "updated_at": "2026-10-21T02:47:56.345Z",
-  "last_heartbeat": "2026-10-21T02:46:36.051Z",
+  "updated_at": "2026-10-21T05:52:57.471Z",
+  "last_heartbeat": "2026-10-21T05:52:57.471Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/messenger-webhook-reliability",
-    "sha": "b5aee2dc7a8f093d9bd2c9be0580daba139e7e76",
-    "at": "2026-10-21T02:46:36.051Z",
+    "sha": "562c567a7417665977963dee4f5be7a2689cd09b",
+    "at": "2026-10-21T05:52:57.471Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "Messenger webhook không mất tin khi CSDL chập chờn; page hỏng token không đốt lượt AI; nối page không giẫm cửa hàng khác",
     "summary": "",
     "tests": [
-      "worker code-erp-02: tsc ĐẠT (heap 6 GB) · eslint tệp sửa · testMessengerWebhookReliability (mới, route + CSDL thật, cuộc đua bằng Graph giả) · 6 testMessenger* · testPlatformIsolationStatic ĐẠT · 4 đột biến ĐỎ · CHƯA ĐO cả bộ npm test + build (CI 8 shard đo)"
+      "vòng 2: thêm dòng DOC_MOI_TRUONG_DA_KHAI cho tests/messenger-webhook-reliability.test.ts (luật 65), không đổi bài kiểm; testTestHygiene ĐẠT; gộp sạch main 4c4d612e"
     ]
   }
 }
