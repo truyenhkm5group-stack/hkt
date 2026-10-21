@@ -3,7 +3,7 @@
   "mission_id": "messenger-webhook-observability",
   "title": "Sổ gói webhook Messenger bị từ chối (24 giờ · 7 ngày) trên /platform + check-integrations báo cấu hình Messenger không in secret",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -36,9 +36,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-21T03:13:04.652Z",
-  "updated_at": "2026-10-21T07:04:27.925Z",
+  "updated_at": "2026-10-21T07:30:35.516Z",
   "last_heartbeat": "2026-10-21T07:04:27.925Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#937 → 3969110f16560da1224fa79cf9ab63aea5a63fe8"
+  },
   "handoff": {
     "branch": "claude/messenger-webhook-observability",
     "sha": "fab098776033cae0c568e27db003f4cba6a26a54",
