@@ -6,7 +6,9 @@ import { clearMemo, memoKeys } from "@/lib/cache";
 import { getModelSignalsBatch } from "@/lib/queries/model-signal";
 import { getOwnerDecisionQueue } from "@/lib/queries/owner-decisions";
 import { cockpitWarmTasks, reportWarmTasks, runWarms, warmCockpit, warmDashboard, warmDetail, workWarmTasks, type WarmTask } from "@/lib/queries/warm";
-import { collectWorkItems } from "@/lib/queries/work-adapters";
+import { adaptPayrollRecon, collectWorkItems } from "@/lib/queries/work-adapters";
+import { PAYROLL_EMPLOYEES_KEY } from "@/lib/constants/payroll";
+import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { getStockShortage } from "@/lib/queries/stock-shortage";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import type { WorkSource } from "@/lib/constants/work-sources";
@@ -258,6 +260,28 @@ export async function testWorkWarmDb() {
   const anh = (items: typeof nguoi.items) =>
     items.map((i) => ({ key: i.key, sourceType: i.sourceType, status: i.status, money: i.money })).sort((a, b) => a.key.localeCompare(b.key));
   assert.deepEqual(anh(am2.items), anh(nguoi.items), "việc của ba nguồn khi đệm ấm phải y hệt khi đệm nguội");
+
+  // (4b) Nguồn PAYROLL_RECON (đo production 8,1 s nguội): khoá đệm nó đọc khi nguội phải do job để lại. Gọi THẲNG
+  // adaptPayrollRecon (không qua hạn 2,5 s của collectWorkItems) — so tập khoá, đúng cả khi chưa có bảng lương.
+  // Có bảng lương (một nhân sự tạm) để nguồn thật sự tính — không có thì nó trả rỗng ngay và phép so là rỗng.
+  const nvTruoc = await getSettingJson<unknown>(PAYROLL_EMPLOYEES_KEY, { list: [] });
+  await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [{ id: "warm-nv", name: "NV làm ấm", shortName: "NV", department: "", aliases: [], accountIds: [], fixed: 0, percentTotal: 0, percentPersonal: 0, percentRevenue: 0, active: true, note: "" }] });
+  try {
+    clearMemo();
+    await adaptPayrollRecon(new Date());
+    const khoaLuong = memoKeys();
+    assert.ok(khoaLuong.some((k) => k.startsWith("work:payroll-recon:")), "chuẩn bị: nguồn lương đọc qua đệm riêng của nó");
+    clearMemo();
+    // Bộ đếm nhịp MỚI: bước (3) vừa chạy job, mục nhịp 12 phút sẽ bị bỏ «chưa tới nhịp».
+    await runWarms(workWarmTasks(), { lastRun: new Map() });
+    const amLuong = new Set(memoKeys());
+    const thieuLuong = khoaLuong.filter((k) => !amLuong.has(k));
+    assert.deepEqual(thieuLuong, [], `khoá nguồn PAYROLL_RECON đọc mà job KHÔNG làm ấm: ${thieuLuong.join(", ")}`);
+  } finally {
+    await setSettingJson(PAYROLL_EMPLOYEES_KEY, nvTruoc);
+    clearMemo();
+  }
+  assert.equal(workWarmTasks().find((t) => t.key === "work:payroll-recon")?.everyMinutes, 12, "nhịp 12 phút < đệm 15 phút của nguồn lương");
 
   // (5) Job thật mang các mục /work.
   const tenMuc = (await warmDashboard()).timings.map((t) => t.key);
