@@ -1,8 +1,8 @@
 {
   "pr": 948,
-  "sha": "d699e351f201cd3924482a14365759df81611479",
+  "sha": "03c90e1de83797ea37d3fd3c7fa03ac99e5117d1",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-21T09:37:24.496Z",
-  "note": "review lead (Giai đoạn 2A, chủ shop duyệt 21/10): baseline 14 ngày HSLC có 18% chi phí (7.848 lời gọi) không khai workload + event_key NULL ⇒ không đo được retry. Sửa: AI_USAGE_WORKLOADS danh sách đóng (thêm followup/lessons/quick_reply_learn/inbox_feedback/playbook/ai_builder/copilot/creative/lead_hunter), workload BẮT BUỘC ở kiểu (tsc bắt đường quên); conversation_id cho order_sync/followup/inbo"
+  "at": "2026-10-21T12:54:55.607Z",
+  "note": "vòng 2: sửa đúng — sổ hệ thống AI (ai-systems.ts) khai chủ cho MỌI workload mới, bài legal-registers siết từ danh sách chính sách lên toàn bộ AI_USAGE_WORKLOADS (không nới). Logic sổ như vòng 1 đã PASS."
 }
