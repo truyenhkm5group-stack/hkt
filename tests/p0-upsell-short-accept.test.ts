@@ -11,7 +11,7 @@ import { getDb, schema } from "@/db";
 import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
 import type { CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { CLAIM_SAFE_TEXT } from "@/lib/sales-chatbot/claim-guard";
-import { confirmedAddIssue, postConfirmOfferText } from "@/lib/sales-chatbot/next-best-action";
+import { confirmedAddIssue, isShortYes, postConfirmOfferText } from "@/lib/sales-chatbot/next-best-action";
 import { QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
 import { acceptsOffer, isShortAccept, proposalOf, type DirectOffer } from "@/lib/sales-chatbot/short-accept";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -25,6 +25,12 @@ const PROPOSAL = "Dạ nem hải sản tôm bề bề nhà em đóng hộp 10 c�
 function testThuan() {
   for (const yes of ["Ok", "ok em", "Ok 👍", "👍", "👌", "vâng", "dạ vâng", "được", "lấy luôn", "thêm nhé", "ok thêm giúp chị", "Dạ"]) assert.ok(isShortAccept(yes), yes);
   for (const no of ["ok nhưng để chị hỏi chồng", "ok?", "thêm à", "không em", "thôi em", "😢", "ok thêm 2 hộp", "ship mấy ngày em", ""]) assert.ok(!isShortAccept(no), no);
+  // Biểu tượng buồn / khóc / giận / chê / nghi ngờ đi kèm chữ «có» ⇒ KHÔNG phải đồng ý (bộ đọc từng bỏ mọi biểu tượng trước khi so chữ).
+  for (const no of ["ok 😢", "Ok 😭", "vâng 😔", "được 😞", "ok 😡", "lấy luôn 👎", "ok 🤔", "ok :(", "dạ :'(", "ok T_T", "Ok T.T", "👍😢", "ok 🥺"]) {
+    assert.ok(!isShortAccept(no), `«${no}» không phải đồng ý`);
+    assert.ok(!isShortYes(no), `«${no}»: đường hỏi-sau-chốt (isShortYes) cùng một luật`);
+  }
+  for (const yes of ["ok 😍", "Ok 😊", "vâng 🥰", "ok 👍👍", "được ❤️"]) assert.ok(isShortAccept(yes), `«${yes}» vẫn là đồng ý — chỉ biểu tượng tiêu cực mới chặn`);
 
   const cat = (productId: string, variantId: string, name: string, price: number | null): CatalogItem => ({ productId, variantId, name, sku: variantId, variant: "", price, fields: {} });
   const catalog = [cat("p-nem", "v-nem10", "Nem hải sản tôm bề bề", 120_000), cat("p-nem", "v-nem20", "Nem hải sản tôm bề bề", 230_000), cat("p-cha", "v-cha1", "Chả cá thu", 280_000)];
