@@ -1,0 +1,8 @@
+{
+  "pr": 957,
+  "sha": "8c53940d3bf8f196f81855191a0f547f49978f9e",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T17:26:05.529Z",
+  "note": "review lead (chủ shop 21/10, đổi luật thưởng trực tiếp với code-erp-01; thay con số 25% sáng cùng ngày): poolCapSchedule [{fromMonth, percent}] tăng dần — mỗi tháng dùng trần CỦA THÁNG ẤY; tháng trước mốc đầu không trần chung ⇒ NEEDS_DECISION (không áp ngược). residualClaimant một người: claim riêng của người ấy gộp thành RESIDUAL = max(0, Q − Σ người khác), không bao giờ âm; Σ người khác > Q ⇒ ch"
+}
