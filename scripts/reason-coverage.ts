@@ -17,6 +17,8 @@ import { getDb, schema } from "@/db";
 import { getReturnReasonReport } from "@/lib/queries/return-reason-report";
 import { RETURN_REASON_LABEL, type ReturnReason } from "@/lib/constants/return-reason";
 import { resolvePeriod } from "@/lib/search-params";
+import { formatNumber } from "@/lib/format";
+import { buildCauseBoard } from "@/lib/returns/cause-board";
 
 const BASE = process.env.SMOKE_URL ?? "http://127.0.0.1:3000";
 const PERIOD = process.env.COVERAGE_PERIOD ?? "all";
@@ -112,6 +114,37 @@ async function main() {
     process.exit(1);
   }
   console.log(thieu.length ? `⚠ không tìm thấy trên trang: ${thieu.join(", ")}` : "✓ cả ba con số của máy tính đều có mặt trong HTML đã render");
+
+  /*
+    ═══ KHỐI «NGUYÊN NHÂN HOÀN VÀ GIẢI PHÁP» (21/10/2026 — cờ cách xếp theo chứng cứ bật trên production) ═══
+
+    Khối chỉ hiện ở cách xếp EVIDENCE. Dựng CÙNG bảng mà trang dựng (`buildCauseBoard` trên cùng báo cáo, cùng kỳ, cùng mốc) rồi kiểm TỪNG
+    hàng trên HTML đã render: nhãn nhóm có mặt TRONG khối (neo ở tiêu đề cột «Nguyên nhân · giải pháp» — chỉ khối này có), và chính hàng đó
+    mang đúng số ca. Đếm hàng của khối rồi so với số nhóm là chưa đủ: một hàng có thể hiện nhãn mà mang số của kỳ khác.
+  */
+  if (bc.taxonomy === "EVIDENCE") {
+    const board = buildCauseBoard(bc, null);
+    const dau = html.indexOf("Nguyên nhân · giải pháp");
+    const khoi = dau >= 0 ? html.slice(dau, html.indexOf("</table>", dau)) : "";
+    const lech: string[] = [];
+    for (const r of board.rows) {
+      const i = khoi.indexOf(`>${r.label}<`);
+      const hangHtml = i >= 0 ? khoi.slice(i, khoi.indexOf("</tr>", i)) : "";
+      if (!hangHtml.includes(`>${formatNumber(r.count)}<`)) lech.push(`${r.label} (${formatNumber(r.count)})`);
+    }
+    console.log("\n── KHỐI «NGUYÊN NHÂN HOÀN VÀ GIẢI PHÁP» ──");
+    for (const r of board.rows) console.log(`${r.label.padEnd(40)} | ${formatNumber(r.count).padStart(6)} ca`);
+    console.log(`chưa xếp nhóm: ${formatNumber(bc.ungrouped)} · nhóm + chưa xếp nhóm = ${formatNumber(board.rows.reduce((n, r) => n + r.count, 0) + bc.ungrouped)} / tổng hoàn ${formatNumber(bc.returned)}`);
+    if (!khoi) {
+      console.error("✗ Khối «Nguyên nhân hoàn và giải pháp» KHÔNG hiện trên trang dù cờ là EVIDENCE");
+      process.exit(1);
+    }
+    if (lech.length) {
+      console.error(`✗ Hàng trên trang KHÔNG khớp số nhóm của báo cáo: ${lech.join(", ")}`);
+      process.exit(1);
+    }
+    console.log(`✓ ${board.rows.length} hàng của khối đều hiện đúng nhãn + số ca của nhóm`);
+  } else console.log("\n(khối «Nguyên nhân hoàn và giải pháp» chỉ hiện ở cách xếp EVIDENCE — cờ đang LEGACY, bỏ qua)");
 
   /*
     ═══ VÀ MÀN HÌNH VẬN ĐƠN: Ô "LÝ DO HOÀN" CÓ HIỆN KHÔNG ═══
