@@ -18,7 +18,7 @@ import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { setSettingJson, getSettingJson } from "@/lib/settings";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
-import { APPROVAL_ITEM_KEYS, APPROVAL_ITEM_OWNER, buildApprovalList, buildOpeningProposal, codGapCause, historicalSalary, issueOwner, reconCenterDefaultRange, type ApprovalInput, type OpeningMonthInput } from "@/lib/payroll/recon-center";
+import { APPROVAL_ITEM_KEYS, APPROVAL_ITEM_OWNER, buildApprovalList, personalShareWithoutCode, buildOpeningProposal, codGapCause, historicalSalary, issueOwner, reconCenterDefaultRange, type ApprovalInput, type OpeningMonthInput } from "@/lib/payroll/recon-center";
 import { adaptPayrollRecon, collectWorkItems, payrollReconWorkItems } from "@/lib/queries/work-adapters";
 import { departmentFor, SOURCES_WITHOUT_OWNER } from "@/lib/constants/work-ownership";
 import { slaHoursFor, SOURCES_WITHOUT_SLA } from "@/lib/constants/work-sla";
@@ -86,9 +86,10 @@ function testPure() {
     cogsGaps: { variants: 5, lines: 26, revenue: 17.7 * TR },
     codReceivable: { orders: 100, revenue: 113 * TR, over30Orders: 7 },
     duplicateSourceWarnings: 1,
+    personalShareWithoutCode: [{ id: "e9", name: "Nhật", percentPersonal: 25 }],
   };
   const ds = buildApprovalList(goc);
-  assert.deepEqual(ds.map((x) => x.key), ["opening-balance", "undated-employees", "pending-code-rows", "codes-without-owner", "months-signoff", "cogs-gaps", "cod-receivable", "duplicate-source"]);
+  assert.deepEqual(ds.map((x) => x.key), ["opening-balance", "undated-employees", "pending-code-rows", "codes-without-owner", "months-signoff", "cogs-gaps", "cod-receivable", "duplicate-source", "personal-share-no-code"]);
   for (const x of ds) {
     assert.ok((DEPARTMENT_CODES as readonly string[]).includes(x.owner), `${x.key}: chủ của việc là một PHÒNG có thật`);
     assert.ok(x.href.startsWith("/"), `${x.key}: có lối sửa`);
@@ -96,8 +97,21 @@ function testPure() {
   }
   assert.ok(ds[0].cause.includes("CHƯA ĐỦ CĂN CỨ"), "đề xuất thiếu căn cứ phải nói ra, không trình như số đã duyệt");
   assert.ok(!buildApprovalList({ ...goc, gatePolicyDeclared: true }).some((x) => x.key === "opening-balance"), "quy chế đã có người khai ⇒ không đề xuất lại số dư");
-  const sach = buildApprovalList({ ...goc, gatePolicyDeclared: true, undatedEmployees: [], pendingAssignments: 0, pendingTerms: 0, codesWithoutOwner: 0, monthsNeedingSignoff: [], cogsGaps: { variants: 0, lines: 0, revenue: 0 }, codReceivable: { orders: 0, revenue: 0, over30Orders: 0 }, duplicateSourceWarnings: 0 });
+  const sach = buildApprovalList({ ...goc, gatePolicyDeclared: true, undatedEmployees: [], pendingAssignments: 0, pendingTerms: 0, codesWithoutOwner: 0, monthsNeedingSignoff: [], cogsGaps: { variants: 0, lines: 0, revenue: 0 }, codReceivable: { orders: 0, revenue: 0, over30Orders: 0 }, duplicateSourceWarnings: 0, personalShareWithoutCode: [] });
   assert.equal(sach.length, 0, "dữ liệu đủ thì danh sách RỖNG — không bịa việc");
+
+  /* ── % LN cá nhân mà không phụ trách mã — chỉ hỏi khi có người nhận phần còn lại (chủ shop 21/10/2026) ── */
+  const nv = [
+    { id: "q", name: "Quân", active: true, percentPersonal: 0 },
+    { id: "h", name: "Hiếu", active: true, percentPersonal: 30 },
+    { id: "n", name: "Nhật", active: true, percentPersonal: 25 },
+    { id: "x", name: "Nghỉ", active: false, percentPersonal: 10 },
+    { id: "r", name: "Nhận phần còn lại", active: true, percentPersonal: 5 },
+  ];
+  assert.deepEqual(personalShareWithoutCode(nv, new Set(["h"]), "r").map((e) => e.id), ["n"], "có % cá nhân · không mã · còn làm · không phải người nhận ⇒ hỏi chủ shop");
+  assert.deepEqual(personalShareWithoutCode(nv, new Set(["h"]), null), [], "quy chế không có người nhận phần còn lại ⇒ không hỏi (y như trước)");
+  const hoi = ds.find((x) => x.key === "personal-share-no-code")!;
+  assert.deepEqual([hoi.kind, hoi.owner, hoi.href], ["DECIDE", "MANAGEMENT", "/payroll"], "việc QUYẾT của chủ shop, link hồ sơ nhân sự");
 
   /* ── Phép chiếu lên /work (chủ shop 21/10): mỗi mục một việc của ĐÚNG phòng, không tiền, không câu nguyên nhân ── */
   const ky = new Date("2026-10-01T00:00:00+07:00");

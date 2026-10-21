@@ -24,9 +24,9 @@ import { getRecognizedCosts } from "@/lib/queries/cost-engine";
 import { monthReportPeriod } from "@/lib/queries/payroll";
 import { monthsBetween } from "@/lib/queries/payroll-profit-gate";
 import { DELIVERED_RECOGNIZED_SQL, MONEY_EVIDENCE_SQL, orderFacts } from "@/lib/queries/payroll-reconciliation";
-import { buildApprovalList, buildOpeningProposal, codGapCause, historicalSalary, type ApprovalItem, type CodGapCause, type OpeningMonthInput, type OpeningProposal } from "@/lib/payroll/recon-center";
+import { buildApprovalList, buildOpeningProposal, codGapCause, historicalSalary, personalShareWithoutCode, type ApprovalItem, type CodGapCause, type OpeningMonthInput, type OpeningProposal } from "@/lib/payroll/recon-center";
 import type { MonthReconciliation } from "@/lib/payroll/profit-reconciliation";
-import { getPayrollReport } from "@/lib/queries/payroll";
+import { getPayrollReport, listEmployees } from "@/lib/queries/payroll";
 import { getMonthReconciliation, loadProfitSignoffs } from "@/lib/queries/payroll-reconciliation";
 import { getProfitGateConfig } from "@/lib/queries/payroll-profit-gate";
 import { listCodeBook, loadCodeBook } from "@/lib/queries/payroll-code-ledger";
@@ -278,12 +278,13 @@ export async function getReconCenter(fromMonth: string, toMonth: string): Promis
     const months = await theoCap(thang, 2, motThang);
     const first = monthReportPeriod(thang[0] ?? fromMonth);
     const last = monthReportPeriod(thang[thang.length - 1] ?? toMonth);
-    const [gaps, cfg, book, sobo, start] = await Promise.all([
+    const [gaps, cfg, book, sobo, start, nhanSu] = await Promise.all([
       cogsGapsByVariant(first.from as Date, last.to as Date),
       getProfitGateConfig(),
       listCodeBook(),
       loadCodeBook(first.from, last.to),
       dataStartMonths(),
+      listEmployees(),
     ]);
     const openingMonthKey = cfg.active?.openingMonth ?? fromMonth;
     const series = await openingSeries(openingMonthKey);
@@ -304,6 +305,11 @@ export async function getReconCenter(fromMonth: string, toMonth: string): Promis
         over30Orders: months.reduce((t, x) => t + x.cod.receivable.age.over30.orders, 0),
       },
       duplicateSourceWarnings: trungNguon,
+      personalShareWithoutCode: personalShareWithoutCode(
+        nhanSu.map((e) => ({ id: e.id, name: e.shortName || e.name, active: e.active, percentPersonal: Number(e.percentPersonal) || 0 })),
+        new Set(sobo.assignments.map((a) => a.employeeId)),
+        cfg.active?.residualClaimant?.employeeId ?? null,
+      ),
     });
     return { fromMonth, toMonth, months, cogsGaps: gaps, opening, approvals, dataStart: start };
   });

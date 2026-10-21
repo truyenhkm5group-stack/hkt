@@ -42,14 +42,15 @@ import { compareMonthKey, monthKeyOf } from "@/lib/constants/payroll-carryover";
 import { eligibleProfitOf, evaluateProfitGate, nextOpening, type ProfitGateClaim, type ProfitGateOpening } from "@/lib/payroll/profit-gate";
 import { allocateCompanyToCodes, codeLedgerStep, type CodeState } from "@/lib/payroll/code-ledger";
 import { getCashProfitReport } from "@/lib/queries/profit-cash";
-import { getPayrollReport, monthReportPeriod } from "@/lib/queries/payroll";
+import { getPayrollReport, listEmployees, monthReportPeriod } from "@/lib/queries/payroll";
+import { poolCapLabel } from "@/lib/constants/payroll-profit-gate";
 import { monthsBetween } from "@/lib/queries/payroll-profit-gate";
 import { assertReadOnlySession } from "@/lib/queries/payroll-reconcile-source";
 import { getMonthReconciliation, loadProfitSignoffs } from "@/lib/queries/payroll-reconciliation";
 import { getProfitGateConfig } from "@/lib/queries/payroll-profit-gate";
 import { listCodeBook } from "@/lib/queries/payroll-code-ledger";
 import { COST_CLASS_LABEL, type CostClass } from "@/lib/payroll/profit-reconciliation";
-import { buildApprovalList, buildOpeningProposal, COD_GAP_CAUSE_LABEL, type CodGapCause } from "@/lib/payroll/recon-center";
+import { buildApprovalList, buildOpeningProposal, COD_GAP_CAUSE_LABEL, personalShareWithoutCode, type CodGapCause } from "@/lib/payroll/recon-center";
 import { COGS_GAP_CAUSE_LABEL, codSplit, cogsGapsByVariant, openingSeries, type CogsGapCause } from "@/lib/queries/payroll-recon-center";
 import { getRecognizedCosts } from "@/lib/queries/cost-engine";
 import { loadCodeBook } from "@/lib/queries/payroll-code-ledger";
@@ -85,7 +86,7 @@ async function main() {
   const somNhat = [d0.don, d0.qc, d0.chi].filter((x): x is string => Boolean(x)).sort()[0] ?? null;
   const cfg = await getProfitGateConfig();
   console.log(`ĐẦU KỲ DỮ LIỆU THỰC: đơn ${d0.don ?? "—"} · quảng cáo ${d0.qc ?? "—"} · chi phí ${d0.chi ?? "—"} ⇒ sớm nhất ${somNhat ?? "—"}`);
-  console.log(cfg.active ? `QUY CHẾ CỔNG ĐÃ KHAI v${cfg.active.version}: mở sổ ${cfg.active.openingMonth} · lũy kế ${tien(cfg.active.openingCumulative)} · mốc ${tien(cfg.active.openingHighWater)} · quỹ ${cfg.active.poolCapPercent}%` : "QUY CHẾ CỔNG CHƯA KHAI ⇒ lũy kế công ty trên production là CHƯA BIẾT; số dưới đây dùng số dư GIẢ ĐỊNH của phép đo.");
+  console.log(cfg.active ? `QUY CHẾ CỔNG ĐÃ KHAI v${cfg.active.version}: mở sổ ${cfg.active.openingMonth} · lũy kế ${tien(cfg.active.openingCumulative)} · mốc ${tien(cfg.active.openingHighWater)} · quỹ ${poolCapLabel(cfg.active)}${cfg.active.residualClaimant ? " · có người nhận phần còn lại" : ""}` : "QUY CHẾ CỔNG CHƯA KHAI ⇒ lũy kế công ty trên production là CHƯA BIẾT; số dưới đây dùng số dư GIẢ ĐỊNH của phép đo.");
   tomTat(`Đầu kỳ dữ liệu ${somNhat ?? "—"} · kỳ đo bắt đầu ${fromMonth}${somNhat && compareMonthKey(somNhat, fromMonth) < 0 ? " ⚠ SAU đầu kỳ dữ liệu — lỗ các tháng trước chưa vào lũy kế" : ""} · quy chế ${cfg.active ? `v${cfg.active.version} mở sổ ${cfg.active.openingMonth}` : "CHƯA KHAI"}`);
   const book = await listCodeBook();
   tomTat(`Sổ phân công: ${book.filter((x) => x.kind === "ASSIGNMENT" && x.status === "APPROVED").length} phân công · ${book.filter((x) => x.kind === "TERMS" && x.status === "APPROVED").length} điều khoản đang duyệt`);
@@ -245,6 +246,11 @@ async function main() {
     cogsGaps: { variants: gaps.length, lines: gaps.reduce((t, g) => t + g.lines, 0), revenue: gaps.reduce((t, g) => t + g.revenue, 0) },
     codReceivable: { orders: center.phaiThuDon, revenue: center.phaiThu, over30Orders: center.qua30 },
     duplicateSourceWarnings: center.trungNguon,
+    personalShareWithoutCode: personalShareWithoutCode(
+      (await listEmployees()).map((e) => ({ id: e.id, name: e.shortName || e.name, active: e.active, percentPersonal: Number(e.percentPersonal) || 0 })),
+      new Set(sobo.assignments.map((a) => a.employeeId)),
+      cfg.active?.residualClaimant?.employeeId ?? null,
+    ),
   });
   console.log(`\n═══ DANH SÁCH PHÊ DUYỆT (${duyet.length} mục) ═══`);
   for (const [i, x] of duyet.entries()) console.log(`   ${i + 1}. [${x.kind === "DECIDE" ? "QUYẾT" : "BỔ SUNG"} · ${x.owner}] ${x.title}${x.amount !== null ? ` · ${tien(x.amount)}` : ""}\n      nguyên nhân: ${x.cause}\n      việc: ${x.action} (${x.href})`);

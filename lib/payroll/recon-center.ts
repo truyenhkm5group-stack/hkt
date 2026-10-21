@@ -32,6 +32,7 @@ export const APPROVAL_ITEM_OWNER = {
   "cogs-gaps": "WAREHOUSE",
   "cod-receivable": "FINANCE",
   "duplicate-source": "FINANCE",
+  "personal-share-no-code": "MANAGEMENT",
 } as const satisfies Record<string, DepartmentCode>;
 export type ApprovalItemKey = keyof typeof APPROVAL_ITEM_OWNER;
 export const APPROVAL_ITEM_KEYS = Object.keys(APPROVAL_ITEM_OWNER) as ApprovalItemKey[];
@@ -46,7 +47,24 @@ export const APPROVAL_ITEM_LABEL: Record<ApprovalItemKey, string> = {
   "cogs-gaps": "Lương · dòng đã giao chưa có giá vốn",
   "cod-receivable": "Lương · đơn đã giao chưa có chứng từ tiền (bảng kê COD)",
   "duplicate-source": "Lương · khoản chi gõ tay trùng nguồn",
+  "personal-share-no-code": "Lương · % LN cá nhân mà không phụ trách mã (khi có người nhận phần còn lại)",
 };
+
+/**
+ * NHÂN SỰ CÓ % LỢI NHUẬN CÁ NHÂN MÀ KHÔNG PHỤ TRÁCH MÃ NÀO — chỉ hỏi khi quy chế cổng CÓ người nhận phần còn lại
+ * (chủ shop 21/10/2026). Phần % ấy vẫn tính theo hồ sơ (đó là dữ liệu đã khai, không phải đoán) và TRỪ vào phần
+ * còn lại; ERP không tự đưa về 0 và không tự giao mã — chủ shop quyết. Hàm thuần.
+ */
+export function personalShareWithoutCode(
+  employees: readonly { id: string; name: string; active: boolean; percentPersonal: number }[],
+  assignedEmployeeIds: ReadonlySet<string>,
+  residualClaimantId: string | null,
+): { id: string; name: string; percentPersonal: number }[] {
+  if (!residualClaimantId) return [];
+  return employees
+    .filter((e) => e.active && e.percentPersonal > 0 && e.id !== residualClaimantId && !assignedEmployeeIds.has(e.id))
+    .map((e) => ({ id: e.id, name: e.name, percentPersonal: e.percentPersonal }));
+}
 
 /** Khoảng tháng mặc định của Trung tâm đối soát: tháng hiện tại và 4 tháng trước. Trang và `/work` cùng dùng. */
 export const RECON_CENTER_DEFAULT_BACK_MONTHS = 4;
@@ -173,6 +191,8 @@ export type ApprovalInput = {
   codReceivable: { orders: number; revenue: number; over30Orders: number };
   /** Khoản bị loại vì trùng nguồn — người đối soát kiểm tay phần chênh. */
   duplicateSourceWarnings: number;
+  /** `personalShareWithoutCode` — rỗng khi quy chế không có người nhận phần còn lại. */
+  personalShareWithoutCode: readonly { id: string; name: string; percentPersonal: number }[];
 };
 
 /**
@@ -286,6 +306,19 @@ export function buildApprovalList(x: ApprovalInput): ApprovalItem[] {
       amount: null,
       count: x.duplicateSourceWarnings,
       href: "/expenses",
+    });
+  }
+  if (x.personalShareWithoutCode.length) {
+    out.push({
+      key: "personal-share-no-code",
+      kind: "DECIDE",
+      title: `${x.personalShareWithoutCode.length} nhân sự có % lợi nhuận cá nhân nhưng không phụ trách mã nào`,
+      cause: `${x.personalShareWithoutCode.map((e) => `${e.name} ${e.percentPersonal}% LN cá nhân`).join(", ")} — quy chế có người nhận phần còn lại, nên phần này đang tính theo hồ sơ và TRỪ vào phần còn lại. ERP không tự đưa về 0, không tự giao mã.`,
+      action: "Chủ shop quyết: giữ % lợi nhuận cá nhân trong hồ sơ, đưa về 0, hay giao mã cho người này (Lương → nhân sự · Phân công mã).",
+      owner: APPROVAL_ITEM_OWNER["personal-share-no-code"],
+      amount: null,
+      count: x.personalShareWithoutCode.length,
+      href: "/payroll",
     });
   }
   return out;
