@@ -1,6 +1,7 @@
 import { manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { classifyCartMessage, foldCart } from "@/lib/sales-chatbot/cart-commitment";
 import type { CustomerPhase } from "@/lib/sales-chatbot/lifecycle";
+import type { ChatState } from "@/lib/sales-chatbot/tools";
 
 /**
  * ĐƠN CŨ HAY ĐƠN MỚI (P0 21/10/2026, HSLC «Ngọc Bích», đã che tên / SĐT / địa chỉ).
@@ -103,6 +104,18 @@ export const DELIVERY_ASK_NEEDS_ADDRESS = "Thời gian nhận hàng tuỳ địa
 
 const LIVE_UNSHIPPED: readonly CustomerPhase[] = ["AWAITING_SHIPMENT"];
 const SHIPPED_OR_DONE: readonly CustomerPhase[] = ["IN_TRANSIT", "RECEIVED", "AFTER_SALES"];
+
+/**
+ * ĐƠN ĐỂ HỎI «ĐƠN MỚI HAY VẪN ĐƠN ĐÓ» (P0 21/10/2026, ca HSLC e68f2cfe…): đơn bot chốt (`state.confirmed`) — không có thì đơn NHÂN VIÊN
+ * lên từ chính hội thoại («ghi đơn từ hội thoại», `state.orderSync.orders`, mới nhất). Trước bản này chỉ đơn bot chốt được xét ⇒ khách
+ * nhắn «1kg nữa nhé» 17 ngày sau đơn nhân viên lên (HSLC vận đơn ngoài ERP ⇒ «chưa vận đơn» là CHƯA BIẾT) thì bot lập đơn mới không hỏi.
+ * `staff = true` ⇒ khách chọn «vẫn đơn đó» là việc của nhân viên (bot không sửa đơn người lên). HÀM THUẦN.
+ */
+export function roundCheckOrderOf(st: Pick<ChatState, "confirmed" | "orderSync">): { orderId: string; simulated: boolean; total: number; at: string; staff: boolean } | null {
+  if (st.confirmed?.orderId) return { orderId: st.confirmed.orderId, simulated: st.confirmed.simulated, total: st.confirmed.total, at: st.confirmed.at, staff: false };
+  const last = st.orderSync?.orders?.[st.orderSync.orders.length - 1];
+  return last?.orderId ? { orderId: last.orderId, simulated: false, total: last.total, at: last.at, staff: true } : null;
+}
 
 export function roundCheckStep(i: {
   confirmed: { orderId: string | null; simulated: boolean; total: number; at: string } | undefined;

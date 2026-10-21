@@ -717,7 +717,8 @@ export function postSalePrompt(v: CustomerPhaseView, shortCode: string | null): 
  */
 export async function loadCustomerPhase(conv: Pick<LifecycleConvRow, "id" | "orderId" | "draftOrderId" | "pageId" | "threadId" | "state" | "status" | "handoffReason" | "turns">, text: string, now: Date): Promise<(CustomerPhaseView & { shortCode: string | null }) | null> {
   const st = conv.state;
-  if (!st.confirmed && !st.pastOrders?.length && !conv.orderId && !st.draft) return null;
+  // Đơn NHÂN VIÊN lên từ chính hội thoại (`orderSync`) cũng là đơn của khách (P0 21/10/2026 — round-check hỏi đơn mới hay vẫn đơn đó).
+  if (!st.confirmed && !st.pastOrders?.length && !conv.orderId && !st.draft && !st.orderSync?.orders?.length) return null;
   try {
     const orders = await linkedOrdersFor(conv, now, { includePast: true });
     const snap = deriveLifecycle({ conversation: { status: conv.status, handoffReason: conv.handoffReason, control: controlOf(st), turns: conv.turns }, state: st, orders, customerTexts: [] });

@@ -127,13 +127,9 @@ export function customerPrior(profile: Pick<PancakeThreadProfile, "prior"> | und
 
 const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
 
-/** SĐT Việt Nam về dạng 0xxxxxxxxx (Pancake có thể trả «+84…» / «84…»); không phải SĐT ⇒ `null`. HÀM THUẦN. */
-export function normalizeVnPhone(raw: string): string | null {
-  let v = raw.replace(/[^\d+]/g, "");
-  if (v.startsWith("+84")) v = `0${v.slice(3)}`;
-  else if (/^84\d{9}$/.test(v)) v = `0${v.slice(2)}`;
-  return /^0\d{9,10}$/.test(v) ? v : null;
-}
+// Chuẩn hoá SĐT sống ở known-contact.ts (MỘT định nghĩa cho khối KHÁCH CŨ · Customer 360 · mức sẵn sàng của giỏ) — re-export cho nơi gọi cũ.
+import { normalizeVnPhone } from "@/lib/sales-chatbot/known-contact";
+export { normalizeVnPhone };
 
 /** Mốc Pancake: ISO KHÔNG múi giờ nhưng là UTC (AGENTS.md mục 4) ⇒ thêm «Z» khi thiếu. */
 function pancakeTime(v: unknown): Date | null {

@@ -45,6 +45,7 @@ import { foldVi } from "@/lib/sales-chatbot/text";
 import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packingIssues, packingRequestOf, verifiedUnitPrices, type AgentQuoteClaim, type Priced, type PricingContext } from "@/lib/sales-chatbot/quote";
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
 import { CLAIM_SAFE_TEXT, orderValidityOf, pendingAddressText } from "@/lib/sales-chatbot/claim-guard";
+import { usableKnownPhone } from "@/lib/sales-chatbot/known-contact";
 import type { ObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { bindCommitment, cartDraftDiff, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, mentionText, negatedCancel, unrequestedProducts, type CartCommitment, type CartDraftDiff } from "@/lib/sales-chatbot/cart-commitment";
 import { cartQuoteLines, type CatalogLite } from "@/lib/sales-chatbot/cancel-recovery";
@@ -126,6 +127,11 @@ export type ChatState = {
   cartRev?: string;
   /** Mốc bắt đầu lượt mua mới KHÔNG do bot chốt đơn mở ra (khách quay lại sau `NEW_ROUND_GAP_MS` · bình luận mua lại mang sang hộp thư) — `purchaseRoundStart`. */
   roundStartAt?: string;
+  /**
+   * SĐT ĐÃ BIẾT của khách (known-contact.ts, máy chủ ghi mỗi lượt AI) — KHÔNG thuộc lượt mua: lượt mua mới giữ nguyên. Chỉ để đọc
+   * (hộp thư, lời nhắc); số đi vào đơn vẫn qua `create_customer`.
+   */
+  knownPhone?: import("@/lib/sales-chatbot/known-contact").KnownPhoneState;
   /** Kết quả đưa lời mua của bình luận sang hộp thư (`recordCommentCarry` — engine.ts), chỉ trên hội thoại BÌNH LUẬN. */
   commentCarry?: { outcome: string; copied: number; at: string };
   /** Mọi TỔNG / tiền hàng máy chủ đã tính cho các giỏ / đơn nháp trong hội thoại (`noteSeenTotals`) — hàng rào chặn nói lại tổng của giỏ CŨ. */
@@ -287,6 +293,8 @@ export type ToolContext = {
   returning?: ReturningCustomer | null;
   /** Hồ sơ Customer 360 của lượt (`customer-360.ts`) — nguồn của `saved_address_choice` khi khách có nhiều địa chỉ cũ. */
   customer360?: Customer360 | null;
+  /** SĐT đã biết của khách (known-contact.ts) — `create_customer` bỏ trống phone ⇒ máy chủ điền số này khi đúng MỘT số. */
+  knownPhone?: import("@/lib/sales-chatbot/known-contact").KnownPhone;
   /** Câu shop vừa nói (`recentShopTexts`) — câu mẫu trùng một câu trong đó không gửi lại. */
   recentSaid?: readonly string[];
   /** Shop bật đặt lịch qua chat VÀ module Lịch hẹn đang bật — engine tính, công cụ đặt lịch chỉ chạy khi `true`. */
@@ -1121,7 +1129,11 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         return err("Lưu khách: địa chỉ đơn cũ chưa được khách xác nhận", "Địa chỉ này lấy từ ĐƠN CŨ — hỏi khách xác nhận dùng lại, rồi gọi create_customer với use_saved_address = true + customer_confirmation = nguyên văn lời xác nhận.", state);
       // Họ tên: AI ghi ⇒ dùng; trống / quá ngắn ⇒ tên Facebook của khách (kênh fanpage) — không bắt khách khai lại tên.
       const typedName = typeof fields.name === "string" && fields.name.trim().length >= 2 ? fields.name : "";
-      const v = z.object({ name: z.string().trim().min(2).max(200), phone: z.string().trim().min(8).max(30), address: z.string().trim().min(5).max(500), province: z.string().trim().max(100).optional() }).safeParse({ name: typedName || ctx.customerName || "", phone: fields.phone, address: fields.address, province: fields.province || undefined });
+      // SĐT ĐÃ BIẾT (known-contact.ts — P0 21/10/2026, chủ shop: «nhận diện chắc chắn khách cũ ⇒ tự nạp SĐT đã lưu, không xin lại»): model
+      // bỏ trống phone ⇒ máy chủ điền ĐÚNG MỘT số đã biết của chính hội thoại / mã Facebook. Nhiều số ⇒ không điền (hỏi khách chọn).
+      const typedPhone = typeof fields.phone === "string" ? fields.phone.trim() : "";
+      const knownPhoneFill = typedPhone ? null : usableKnownPhone(ctx.knownPhone);
+      const v = z.object({ name: z.string().trim().min(2).max(200), phone: z.string().trim().min(8).max(30), address: z.string().trim().min(5).max(500), province: z.string().trim().max(100).optional() }).safeParse({ name: typedName || ctx.customerName || "", phone: typedPhone || knownPhoneFill || fields.phone, address: fields.address, province: fields.province || undefined });
       if (!v.success) return err("Lưu khách: thiếu thông tin", "Cần họ tên, số điện thoại (8–15 số) và địa chỉ giao đầy đủ.", state, { reason: "MISSING_CONTACT", fields: v.error.issues.map((i) => i.path.map(String).join(".")) });
       // Giữ mốc lần đầu khi khách sửa tên / địa chỉ mà vẫn cùng SĐT — một SĐT chỉ «để lại» một lần.
       const firstAt = state.customer?.phone === v.data.phone && state.customer.at ? state.customer.at : new Date().toISOString();
@@ -1538,7 +1550,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (repeatsRecent(pick.text, ctx.recentSaid ?? [])) return err(`Câu mẫu ${entry.code}: vừa gửi`, "Câu mẫu này shop VỪA gửi — khách đang trả lời nó. Đọc câu khách và đi tiếp, không gửi lại.", state);
       // #871: câu mẫu đi NGUYÊN VĂN tới khách, không qua hàng rào chữ của engine ⇒ cùng một phán quyết ở đây. Câu mẫu xin SĐT / địa chỉ
       // khách đã cho («mình cho em xin SĐT + địa chỉ chính xác để em check tuyến giao») thì không gửi.
-      if (ctx.customerTexts && addressReaskVerdict(pick.text, addressKnowledge(state, ctx.customerTexts), ctx.turn ?? 0, { botTexts: ctx.recentSaid ?? [] })) {
+      if (ctx.customerTexts && addressReaskVerdict(pick.text, addressKnowledge(state, ctx.roundCustomerTexts ?? ctx.customerTexts, { phoneKnown: usableKnownPhone(ctx.knownPhone) !== null }), ctx.turn ?? 0, { botTexts: ctx.recentSaid ?? [] })) {
         return err(`Câu mẫu ${entry.code}: xin lại thông tin đã có`, "Câu mẫu này xin SĐT / địa chỉ mà khách ĐÃ cho — không gửi. Dùng thông tin đã có và đi tiếp (khách hẹn giờ giao ⇒ ghi nhận, không hứa giờ).", state);
       }
       // #868 TRÊN CÂU MẪU (production 19/10/2026): model gọi câu mẫu hỏi lại quy cách / mời gói lớn cho món khách ĐÃ chọn khối lượng ⇒ không
@@ -1829,7 +1841,7 @@ async function templateVerdict(
     const sent = await pageMediaSentInRound(ctx.conversationId, state, new Date()).catch(() => true);
     if (sent) return { ok: false, reason: "TEMPLATE_PAGE_SENT_MEDIA" };
   }
-  if (ctx.customerTexts && addressReaskVerdict(rendered.text, addressKnowledge(state, ctx.customerTexts), ctx.turn ?? 0, { botTexts: ctx.recentSaid ?? [] })) return { ok: false, reason: "TEMPLATE_ASKS_KNOWN_INFO" };
+  if (ctx.customerTexts && addressReaskVerdict(rendered.text, addressKnowledge(state, ctx.roundCustomerTexts ?? ctx.customerTexts, { phoneKnown: usableKnownPhone(ctx.knownPhone) !== null }), ctx.turn ?? 0, { botTexts: ctx.recentSaid ?? [] })) return { ok: false, reason: "TEMPLATE_ASKS_KNOWN_INFO" };
   if (quickReplySizeConflict(rendered.text, { cart: state.cart, lastUserText: ctx.lastUserText, facts })) return { ok: false, reason: "TEMPLATE_SIZE_CONFLICT" };
   const target = templateOfferTarget(rendered.text, facts, orderProductIds, orderNames, formatVND);
   if (!target) return { ok: false, reason: "TEMPLATE_NOTHING_TO_OFFER" };

@@ -46,6 +46,7 @@ import type { OrderOutcome } from "@/lib/constants/returns";
 import { formatDate } from "@/lib/format";
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { normalizeVnPhone, promptDataText, vouchedOrder, type PancakeRecentOrder, type ReturningCustomer } from "@/lib/sales-chatbot/returning";
+import { phonesInText } from "@/lib/sales-chatbot/known-contact";
 import { maskAddress, type ChatState } from "@/lib/sales-chatbot/tools";
 import { hasStreetDetail } from "@/lib/address/customer-address";
 import type { ReuseIntent } from "@/lib/sales-chatbot/address-memory";
@@ -119,6 +120,11 @@ export type Customer360 = {
   currentOrder: { orderId: string | null; paid: boolean; hasContact: boolean } | null;
   /** Lượt mua này ĐÃ có SĐT + địa chỉ nhận (`state.customer`) — khách nói «như cũ» lần nữa thì không hỏi xác nhận lại. */
   contactKnown: boolean;
+  /**
+   * SĐT của các đơn nối CHẮC với hội thoại (mức THREAD — kể cả đơn nhân viên lên «nối khoá bot» và đơn Pancake mang mã luồng — và FB_ID),
+   * MỌI lượt mua. Mức PHONE KHÔNG BAO GIỜ vào đây (ai cũng gõ được SĐT người khác). Đầu vào của `knownPhoneOf` (known-contact.ts).
+   */
+  certainPhones: { phone: string; link: "THREAD" | "FB_ID" }[];
 };
 
 export const C360_LIMITS = { orders: 20, addresses: 3, products: 3, phones: 5 } as const;
@@ -260,7 +266,19 @@ export function assembleCustomer360(input: AssembleInput): Customer360 {
     consent: { optedOut: state.declined ? true : null },
     currentOrder,
     contactKnown: Boolean(state.customer?.phone && state.customer.address),
+    certainPhones: certainPhonesOf(input.facts),
   };
+}
+
+/** SĐT của đơn mức THREAD / FB_ID (đã chuẩn hoá, gộp trùng). HÀM THUẦN. */
+export function certainPhonesOf(facts: readonly Pick<OrderFact, "phone" | "link">[]): { phone: string; link: "THREAD" | "FB_ID" }[] {
+  const out: { phone: string; link: "THREAD" | "FB_ID" }[] = [];
+  for (const f of facts) {
+    if (f.link === "PHONE") continue;
+    const p = normalizeVnPhone(f.phone);
+    if (p && !out.some((x) => x.phone === p)) out.push({ phone: p, link: f.link });
+  }
+  return out;
 }
 
 // ─────────────── Ý ĐỊNH «DÙNG LẠI THÔNG TIN CŨ» ───────────────
@@ -374,23 +392,8 @@ export function savedAddressChoice(c: Customer360 | null | undefined, n: unknown
   return returningOf(c, c.addresses[n - 1]);
 }
 
-/**
- * SĐT trong một câu của khách — tách theo CỤM (chữ số nối bằng một khoảng trắng / dấu chấm / gạch), mọi dãy cụm LIỀN NHAU, chuẩn
- * hoá bằng `normalizeVnPhone`. Không gộp các chữ số rời rạc thành một chuỗi: «2 hộp 500g, 0912345678» chỉ cho ra 0912345678, số
- * cắt ngang như 0091234567 không bao giờ khớp. HÀM THUẦN.
- */
-export function phonesInText(text: string): string[] {
-  const out = new Set<string>();
-  for (const m of text.match(/\+?\d+(?:[ .-]\d+)*/g) ?? []) {
-    const groups = m.split(/[ .-]/).slice(0, 12);
-    for (let i = 0; i < groups.length; i++)
-      for (let j = i; j < groups.length; j++) {
-        const p = normalizeVnPhone(groups.slice(i, j + 1).join(""));
-        if (p) out.add(p);
-      }
-  }
-  return [...out];
-}
+// Tách SĐT theo cụm sống ở known-contact.ts — re-export cho nơi gọi cũ.
+export { phonesInText };
 
 /**
  * SĐT ghi vào hồ sơ khi khách dùng lại địa chỉ cũ (`use_saved_address`). Không có `phone` hoặc trùng số cũ ⇒ số cũ. Số KHÁC số cũ ⇒

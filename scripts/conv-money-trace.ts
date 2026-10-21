@@ -53,6 +53,7 @@ import { EMPTY_REPLY_TEXT, loadSalesChatbotConfig, SHOP_SAID } from "@/lib/sales
 import type { OfferFacts } from "@/lib/sales-chatbot/next-best-action";
 import { choiceAmountText, quantityOnlyAnswer } from "@/lib/sales-chatbot/round-check";
 import { loadOfferFacts } from "@/lib/sales-chatbot/offer-facts";
+import { phonesInText } from "@/lib/sales-chatbot/customer-360";
 import { catalogReferenceAmounts } from "@/lib/sales-chatbot/quote";
 import { listQuickReplies, loadFocusProducts, loadQuickReplySettings } from "@/lib/sales-chatbot/quick-replies";
 import { fitsFocus, productFocusOf, quickReplyCovers, quickReplyFocusGuard, type FocusLine, type FocusProduct } from "@/lib/sales-chatbot/quick-reply-focus";
@@ -513,6 +514,24 @@ export const UPSELL_SKIP_VALID_NOT_SENT: ReadonlySet<string> = new Set(["NO_CONF
 /** Cửa sổ quanh lời mời ERP để tìm ảnh page gửi — CÙNG số với `PAGE_MEDIA_ROUND_FALLBACK_MS` (tools.ts; bài kiểm đối chiếu). */
 export const UPSELL_DUP_WINDOW_HOURS = 24;
 
+/** Câu bot XIN SĐT / XIN địa chỉ (câu nhắc lại số để xác nhận, câu «giao về … như lần trước» KHÔNG phải xin lại). HÀM THUẦN. */
+export const BOT_ASKS_PHONE_RE = /(?:xin|cho em|gửi|gui|để lại|de lai|cung cấp|cung cap)[^.?!\n]{0,40}(?:số điện thoại|so dien thoai|sđt|sdt|số đt)/i;
+export const BOT_ASKS_ADDRESS_RE = /(?:xin|cho em|gửi|gui|để lại|de lai|cung cấp|cung cap)[^.?!\n]{0,40}(?:địa chỉ|dia chi)/i;
+export const asksPhone = (t: string) => BOT_ASKS_PHONE_RE.test(t);
+export const asksAddressAgain = (t: string) => BOT_ASKS_ADDRESS_RE.test(t) && !/như lần trước|lần trước/i.test(t);
+
+/**
+ * SĐT hộp thư hiện cho hội thoại — CÙNG thứ tự với `inboxPhoneOf` (lib/sales-chatbot/known-contact.ts; ops lấy script từ main nhưng lib từ
+ * ảnh đang chạy, nên chép lại ở đây và bài kiểm đối chiếu). `null` ⇒ hộp thư in «Chưa có SĐT». HÀM THUẦN.
+ */
+export function shownPhoneOf(p: { customerPhone?: string | null; statePhone?: string | null; knownPhone?: string | null; convPhone?: string | null }): string | null {
+  for (const v of [p.customerPhone, p.statePhone, p.knownPhone, p.convPhone]) {
+    const t = (v ?? "").trim();
+    if (t) return t;
+  }
+  return null;
+}
+
 export type UpsellScanRow = { pco: Record<string, unknown> | null; confirmed: Record<string, unknown> | null; cancel: unknown; declined: unknown; dispute: Record<string, unknown> | null; pageMedia: boolean };
 
 /**
@@ -551,6 +570,31 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   // J · BANNED_REPLY_USED (P0 21/10/2026, chủ shop bỏ câu «nhân viên sẽ xác nhận lại địa chỉ»): tin bot mang đúng câu ấy. Mẫu số = số lượt
   // công cụ chốt đơn thành công (kết quả `"confirmed":true`) trong kỳ — mỗi lượt chốt là một chỗ câu ấy có thể xuất hiện.
   const J = { base: 0, msgs: 0, convs: new Set<string>() };
+  // K · KNOWN_CUSTOMER_PHONE_REASK / L · KNOWN_CUSTOMER_ADDRESS_REASK / M · CUSTOMER_PROFILE_SYNC_MISMATCH (P0 21/10/2026, chủ shop: khách cũ
+  // không bị xin lại SĐT / địa chỉ; hội thoại có SĐT thì hồ sơ không «Chưa có SĐT»). K: tin bot xin SĐT khi SĐT ĐÃ BIẾT CHẮC — khách tự gõ
+  // trước đó trong kỳ quét, hoặc hội thoại có đơn nối chắc mang SĐT (đơn tạo trước tin bot). Mẫu số = mọi tin bot xin SĐT. L: tin bot xin
+  // địa chỉ (không phải câu «như lần trước») trong hội thoại có đơn nối chắc mang địa chỉ tạo TRƯỚC tin đó hơn một ngày. Mẫu số = mọi tin
+  // bot xin địa chỉ trong hội thoại có đơn như thế. M: hội thoại có tin khách chứa SĐT mà hộp thư không có SĐT nào để hiện.
+  const K = { base: 0, msgs: 0, convs: new Set<string>() };
+  const L = { base: 0, msgs: 0, convs: new Set<string>() };
+  const typedPhoneConvs = new Set<string>();
+  const ordT = schema.orders;
+  const threadOrders = new Map<string, { phoneAt: number | null; addressAt: number | null }>();
+  for (let i = 0; i < ids.length; i += 500) {
+    const part = ids.slice(i, i + 500);
+    const rowsO = await db
+      .select({ conv: ordT.salesConversationId, at: ordT.insertedAt, phone: ordT.shipPhone, bill: ordT.billPhone, addr: ordT.shipAddress })
+      .from(ordT)
+      .where(and(inArray(ordT.salesConversationId, part), sql`${ordT.stage} not in ('DELETED', 'CANCELLED')`));
+    for (const o of rowsO) {
+      if (!o.conv || !o.at) continue;
+      const cur = threadOrders.get(o.conv) ?? { phoneAt: null, addressAt: null };
+      const t = o.at.getTime();
+      if ((o.phone ?? "").trim() || (o.bill ?? "").trim()) cur.phoneAt = cur.phoneAt === null ? t : Math.min(cur.phoneAt, t);
+      if ((o.addr ?? "").trim()) cur.addressAt = cur.addressAt === null ? t : Math.min(cur.addressAt, t);
+      threadOrders.set(o.conv, cur);
+    }
+  }
   const hashConv = (id: string) => createHash("sha256")["update"](id).digest("hex").slice(0, 8);
   const rowsQr = await listQuickReplies().catch(() => []);
   const tpls = rowsQr.map((r) => ({ title: r.title, answer: r.answer, head: quickReplyHead(r.answer), images: r.images.length }));
@@ -580,7 +624,7 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
     D.byTitle.set(w.title, (D.byTitle.get(w.title) ?? 0) + 1);
   };
   for (let i = 0; i < ids.length; i += 200) {
-    const rows = await db.select({ conv: m.conversationId, seq: m.seq, role: m.role, content: m.content }).from(m).where(and(inArray(m.conversationId, ids.slice(i, i + 200)), gte(m.createdAt, from), lte(m.createdAt, now))).orderBy(asc(m.conversationId), asc(m.seq));
+    const rows = await db.select({ conv: m.conversationId, seq: m.seq, role: m.role, content: m.content, at: m.createdAt }).from(m).where(and(inArray(m.conversationId, ids.slice(i, i + 200)), gte(m.createdAt, from), lte(m.createdAt, now))).orderBy(asc(m.conversationId), asc(m.seq));
     let cur = "";
     let userSince = false;
     let quoteTotal: number | null = null;
@@ -589,11 +633,16 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
     let prevBot = "";
     let sentHeads = new Set<string>();
     let secondAsk = false;
+    let phoneTyped = false;
     for (const r of rows) {
-      if (r.conv !== cur) [cur, userSince, quoteTotal, lines, qtyAnswer, prevBot, sentHeads, secondAsk] = [r.conv, false, null, [], false, "", new Set<string>(), false];
+      if (r.conv !== cur) [cur, userSince, quoteTotal, lines, qtyAnswer, prevBot, sentHeads, secondAsk, phoneTyped] = [r.conv, false, null, [], false, "", new Set<string>(), false, false];
       if (r.role === "user") {
         if (textOf(r.content)) {
           const said = textOf(r.content);
+          if (phonesInText(said).length) {
+            phoneTyped = true;
+            typedPhoneConvs.add(r.conv);
+          }
           qtyAnswer = quantityOnlyAnswer(said, []) || choiceAmountText(said, prevBot) !== null;
           if (qtyAnswer) F.base += 1;
           secondAsk = amountsIn(said).length > 0 && classifyDeliveryQuestion(said)?.intent === "DELIVERY_TIME";
@@ -622,6 +671,22 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
         lines.push({ who: "SHOP", text: t });
         prevBot = t.slice(SHOP_SAID.length).trim();
         continue;
+      }
+      const tord = threadOrders.get(r.conv);
+      const atMs = r.at ? r.at.getTime() : Number.NaN;
+      if (asksPhone(t)) {
+        K.base += 1;
+        if (phoneTyped || (tord?.phoneAt != null && tord.phoneAt < atMs)) {
+          K.msgs += 1;
+          K.convs.add(r.conv);
+        }
+      }
+      if (tord?.addressAt != null && tord.addressAt < atMs - 86_400_000 && BOT_ASKS_ADDRESS_RE.test(t)) {
+        L.base += 1;
+        if (asksAddressAgain(t)) {
+          L.msgs += 1;
+          L.convs.add(r.conv);
+        }
       }
       if (t.includes(CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS)) {
         J.msgs += 1;
@@ -669,10 +734,14 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   console.log(`  mẫu G (≤ 20): ${[...G.convs].slice(0, 20).join(" ") || "—"}`);
   console.log(`  mẫu G băm (≤ 20): ${[...G.convs].slice(0, 20).map(hashConv).join(" ") || "—"}`);
   console.log(`  mẫu J (≤ 20): ${[...J.convs].slice(0, 20).join(" ") || "—"}`);
+  console.log(`  mẫu K (≤ 20): ${[...K.convs].slice(0, 20).join(" ") || "—"}`);
+  console.log(`  mẫu L (≤ 20): ${[...L.convs].slice(0, 20).join(" ") || "—"}`);
   for (const [title, n] of [...D.byTitle.entries()].sort((a, b) => b[1] - a[1])) console.log(`  D câu mẫu «${title}»: ${n} tin`);
   tomTat(`conv-money-trace quét ${span}: ${ids.length}${convs.length > TRACE_MAX_SCAN_CONVERSATIONS ? "+" : ""} hội thoại`);
   tomTat(`F CUSTOMER_SELECTED_QUANTITY_BUT_BOT_REASKED — trả lời số lượng ngắn mà bot hỏi lại / gửi lại câu đã gửi: ${F.msgs} tin / ${F.convs.size} hội thoại · câu mẫu ${F.quick} (0 token) · AI ${F.model} (lời gọi model thừa) · mẫu số ${F.base} tin khách chỉ là câu trả lời số lượng (MEASURED)`);
   tomTat(`G UNANSWERED_SECONDARY_INTENT — tin khách có số lượng + hỏi thời gian giao mà tin bot ngay sau không đụng tới chuyện giao: ${G.miss} tin / ${G.convs.size} hội thoại · mẫu số ${G.base} tin hai ý (MEASURED)`);
+  tomTat(`K KNOWN_CUSTOMER_PHONE_REASK — tin bot xin SĐT khi SĐT đã biết chắc (khách tự gõ trước đó · đơn nối chắc mang SĐT): ${K.msgs} tin / ${K.convs.size} hội thoại · mẫu số ${K.base} tin bot xin SĐT (MEASURED — SĐT gõ TRƯỚC kỳ quét không thấy ⇒ số này là SÀN)`);
+  tomTat(`L KNOWN_CUSTOMER_ADDRESS_REASK — tin bot xin lại địa chỉ (không phải câu «như lần trước») khi hội thoại có đơn nối chắc mang địa chỉ từ hơn một ngày trước: ${L.msgs} tin / ${L.convs.size} hội thoại · mẫu số ${L.base} tin bot xin địa chỉ trong các hội thoại ấy (MEASURED)`);
   tomTat(`J BANNED_REPLY_USED — tin bot mang câu «nhân viên sẽ xác nhận lại địa chỉ»: ${J.msgs} tin / ${J.convs.size} hội thoại · mẫu số ${J.base} lượt chốt đơn thành công (MEASURED)`);
   tomTat(`A câu «nói rõ hơn» của engine: ${A.total} tin · KHÔNG có tin khách mới kể từ tin bot trước ${A.noNew} tin / ${A.convs.size} hội thoại`);
   tomTat(`B tin bot có số TỔNG ≠ tổng giỏ / nháp máy chủ ngay trước: ${B.msgs} tin / ${B.convs.size} hội thoại · số TỔNG khi chưa có giỏ / nháp nào ${B.noQuote} tin`);
@@ -729,6 +798,26 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
     .groupBy(sql`1`);
   const kqDem = (k: string) => Number(kq.find((r) => r.k === k)?.n ?? 0);
   const kqTin = kq.reduce((s, r) => s + Number(r.tin), 0);
+  // M — hội thoại có tin khách chứa SĐT mà hộp thư không có SĐT nào để hiện (cùng thứ tự `inboxPhoneOf`).
+  const cvm = schema.salesChatConversations;
+  const typedIds = [...typedPhoneConvs];
+  let mismatch = 0;
+  const mismatchIds: string[] = [];
+  for (let i = 0; i < typedIds.length; i += 500) {
+    const part = typedIds.slice(i, i + 500);
+    const rowsM = await db
+      .select({ id: cvm.id, conv: cvm.customerPhone, st: sql<string | null>`${cvm.state}->'customer'->>'phone'`, kp: sql<string | null>`${cvm.state}->'knownPhone'->>'phone'`, cu: schema.customers.phone })
+      .from(cvm)
+      .leftJoin(schema.customers, eq(schema.customers.id, cvm.customerId))
+      .where(inArray(cvm.id, part));
+    for (const r of rowsM) {
+      if (shownPhoneOf({ customerPhone: r.cu, statePhone: r.st, knownPhone: r.kp, convPhone: r.conv }) !== null) continue;
+      mismatch += 1;
+      if (mismatchIds.length < 20) mismatchIds.push(r.id);
+    }
+  }
+  console.log(`  mẫu M (≤ 20): ${mismatchIds.join(" ") || "—"}`);
+  tomTat(`M CUSTOMER_PROFILE_SYNC_MISMATCH — hội thoại có tin khách chứa SĐT mà hộp thư in «Chưa có SĐT»: ${mismatch} / ${typedIds.length} hội thoại khách đã gõ SĐT (MEASURED)`);
   // H · I — lời mời sau chốt (lượt chốt gần nhất của mỗi hội thoại có mốc lời mời trong kỳ). Câu upsell chưa cài ⇒ H không áp dụng.
   const upRows = rowsOf<Record<string, unknown>>(
     await db.execute(sql`select c.id, c.state->'postConfirmOffer' as pco, c.state->'confirmed' as confirmed, c.state->'cancelRequest' as cancel,
