@@ -10,6 +10,7 @@ import { getPurchasingReport } from "@/lib/queries/purchasing";
 import { loadReturnsPage, returnsPageParams } from "@/lib/queries/returns-report-page";
 import { getStockShortage } from "@/lib/queries/stock-shortage";
 import { getWorkConfig } from "@/lib/queries/work-config";
+import { adaptPayrollRecon } from "@/lib/queries/work-adapters";
 import { resolvePeriod } from "@/lib/search-params";
 
 /**
@@ -193,6 +194,13 @@ export function workWarmTasks(): WarmTask[] {
     // Cấu hình hạn / phòng (một dòng `settings`, rẻ) — `collectWorkItems` đọc nó TRƯỚC mọi nguồn; làm ấm để
     // lượt mở /work sau một lượt job không tự tính một khoá có đệm nào (bài kiểm so tập khoá, không ngoại lệ).
     { key: "work:config", run: () => getWorkConfig() },
+    /*
+      Nguồn PAYROLL_RECON (#947): dựng Trung tâm đối soát lương 5 tháng. Đo production 21/10/2026 (perf-probe run
+      39603827575): NGUỘI 8,1 s ⇒ /work cắt ở 2,5 s và in «thiếu một phần: PAYROLL_RECON». Đệm của nó 15 phút
+      (PAYROLL_RECON_WORK_TTL_MS) ⇒ nhịp 12 phút giữ nó không bao giờ nguội mà không tính lại mỗi 4 phút trên máy
+      2 nhân. Tổ chức chưa khai bảng lương thì hàm trả rỗng ngay, không tốn gì.
+    */
+    { key: "work:payroll-recon", run: () => adaptPayrollRecon(new Date()), everyMinutes: 12 },
   ];
 }
 
