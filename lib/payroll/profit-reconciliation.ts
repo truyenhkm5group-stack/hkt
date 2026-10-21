@@ -474,11 +474,13 @@ export function profitApprovalProblem(x: {
   actorId: string | null;
   /** `true` ở bước DUYỆT (người duyệt phải khác người ký); `false` ở bước KHOÁ (chỉ cần chữ ký còn hiệu lực). */
   requireDifferentPerson: boolean;
+  /** Người duyệt là CHỦ SHOP đã khai (`org.owner`) — chủ shop tự làm bảng lương thì vừa ký vừa duyệt được (21/10/2026). */
+  actorIsOwner?: boolean;
 }): string | null {
   if (!((x.allocatedTotal ?? 0) > 0)) return null;
   if (!x.snapshotFingerprint) return "Kỳ có thưởng % lợi nhuận đủ điều kiện nhưng ảnh chụp không mang bảng đối soát — bấm “Tính lại” để chụp lại.";
   const ky = x.signoffs.find((s) => !s.revokedAt && s.monthKey === x.monthKey && s.fingerprint === x.snapshotFingerprint) ?? null;
   if (!ky) return `Kỳ tháng ${x.monthKey} có thưởng % lợi nhuận đủ điều kiện nhưng CHƯA có chữ ký đối soát cấp 1 còn hiệu lực trên ĐÚNG ảnh chụp này. Mở Lương → Đối soát để ký (hoặc ký lại nếu chữ ký cũ đã huỷ / ảnh đã tính lại).`;
-  if (x.requireDifferentPerson && ky.signedById !== null && ky.signedById === x.actorId) return `Bạn đã ký đối soát cấp 1 cho tháng này (${ky.signedByEmail}). Duyệt cấp 2 phải do MỘT NGƯỜI KHÁC.`;
+  if (x.requireDifferentPerson && !x.actorIsOwner && ky.signedById !== null && ky.signedById === x.actorId) return `Bạn đã ký đối soát cấp 1 cho tháng này (${ky.signedByEmail}). Duyệt cấp 2 phải do MỘT NGƯỜI KHÁC.`;
   return null;
 }

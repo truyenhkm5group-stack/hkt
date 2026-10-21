@@ -20,6 +20,8 @@ import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import { guardSecondApproval } from "@/lib/actions/approvals";
+import { isOrgOwner } from "@/lib/auth/org-owner";
+import { OWNER_SELF_APPROVAL_REASON } from "@/lib/constants/org-owner";
 import { withApprovalExecution } from "@/lib/approvals/execution";
 import { componentBasisKey, payrollInput, type PayrollCalcParams } from "@/lib/constants/payroll-components";
 import { policyActivationBlockers } from "@/lib/payroll/policy-validation";
@@ -488,8 +490,10 @@ export async function approvePayrollInput(input: unknown): Promise<PolicyActionR
 
     Một chữ ký của chính người gõ không thêm một lượt soát nào — nó chỉ làm cột `status` nói dối.
   */
-  if (row.enteredBy && row.enteredBy === guard.id) {
-    return { error: "Người nhập không tự duyệt số của mình — cần một người thứ hai soát lại" };
+  // Ngoại lệ DUY NHẤT: chủ shop tự nhập thì tự duyệt (chủ shop 21/10/2026 — lib/constants/org-owner.ts).
+  const chuTuDuyet = Boolean(row.enteredBy && row.enteredBy === guard.id) && (await isOrgOwner(db, guard.id));
+  if (row.enteredBy && row.enteredBy === guard.id && !chuTuDuyet) {
+    return { error: "Người nhập không tự duyệt số của mình — cần một người thứ hai soát lại (chủ shop tự nhập thì được tự duyệt)" };
   }
   const ten = (await userNamesByIds([guard.id])).get(guard.id) ?? "";
   await db
@@ -503,6 +507,7 @@ export async function approvePayrollInput(input: unknown): Promise<PolicyActionR
     entity: "PAYROLL_INPUT",
     entityId: `${d.employeeId}:${d.periodKey}:${d.inputKey}`,
     after: { value: row.value, approvedBy: guard.id },
+    ...(chuTuDuyet ? { reason: OWNER_SELF_APPROVAL_REASON, detail: { ownerSelfApproval: true } } : {}),
   });
   revalidate();
   return { ok: true };
