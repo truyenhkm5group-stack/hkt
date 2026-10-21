@@ -9,7 +9,7 @@
   "owner": "DESKTOP-56TH98Y:wt-short-accept",
   "worker": null,
   "worktree": null,
-  "branch": "claude/upsell-short-accept",
+  "branch": "claude/upsell-short-accept-r2",
   "base_sha": "b166ff8ad5495a2d2431a2ff621fda0b10fe55cf",
   "domains": [],
   "owned_paths": [
@@ -29,18 +29,20 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-21T18:26:00.977Z",
-  "updated_at": "2026-10-21T18:28:21.942Z",
-  "last_heartbeat": "2026-10-21T18:26:32.690Z",
+  "updated_at": "2026-10-21T19:55:26.294Z",
+  "last_heartbeat": "2026-10-21T19:55:26.294Z",
   "definition_of_done": [],
   "handoff": {
-    "branch": "claude/upsell-short-accept",
-    "sha": "2c1b940c4451cc2613c3570c8a1b9982525b7da3",
-    "at": "2026-10-21T18:26:32.690Z",
+    "branch": "claude/upsell-short-accept-r2",
+    "sha": "48cd27f63ff92005f9b30b028bb489d85ce37a5a",
+    "at": "2026-10-21T19:55:26.294Z",
     "actor": "DESKTOP-56TH98Y:wt-short-accept",
     "title": "«Ok» / 👍 trả lời trực tiếp lời mời một món ⇒ máy chủ thêm món (ca Vit Xiem)",
-    "summary": "",
+    "summary": "Gộp origin/main 0288397f3 lên 2c1b940c4 (KHÔNG nhận a3e68e8dc). Xung đột duy nhất engine.ts recordSegment: lấy dòng của main, giữ khối máy chủ thêm món. cacheWriteTokens 8 = main. Nhánh mới -r2 vì nhánh cũ đã có PR #958 (không force push).",
     "tests": [
-      "cổng cây sạch @2c1b940c4 (trên main b166ff8ad gồm #955 + #949): typecheck · lint · npm test (TẤT CẢ KIỂM THỬ ĐẠT) · build — p0-upsell-short-accept: 9 ca chatTurn + thuần + mã nguồn; đột biến 9/9 + 1 hành vi + 3/3 bộ dò 2B đỏ; p0-upsell-after-confirm cập nhật theo luật 21/10; sales-quality-daily +2 mã; sales-claim-guard khai acceptSay"
+      "tsc 0 sau gộp main #956",
+      "TEST_KHOI=K21,K23 ĐẠT (chatbot «Ok/👍» + sổ AI cache_write)",
+      "cổng sạch đầy đủ @2c1b940c4: TYPECHECK/LINT/TEST/BUILD 0"
     ]
   }
 }
