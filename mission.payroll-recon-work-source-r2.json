@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "mission_id": "payroll-recon-work-source-r2",
+  "title": "Việc còn thiếu của Trung tâm đối soát lương chiếu lên /work của đúng phòng (SOURCE PAYROLL_RECON, phép chiếu, 0 ghi CSDL)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/payroll-recon-work-source-r2",
+  "base_sha": "26e2faf4f537fcfd7859356fab79cd17bc0b3e39",
+  "domains": [],
+  "owned_paths": [
+    "app/(dashboard)/payroll/reconciliation/center/page.tsx",
+    "docs/payroll-code-ledger.md",
+    "lib/constants/work-ownership.ts",
+    "lib/constants/work-sla.ts",
+    "lib/constants/work-sources.ts",
+    "lib/payroll/recon-center.ts",
+    "lib/queries/work-adapters.ts",
+    "tests/payroll-recon-center.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-21T07:45:16.848Z",
+  "updated_at": "2026-10-21T07:45:16.848Z",
+  "last_heartbeat": "2026-10-21T07:45:16.848Z",
+  "definition_of_done": []
+}
