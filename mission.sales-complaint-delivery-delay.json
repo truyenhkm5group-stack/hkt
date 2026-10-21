@@ -3,7 +3,7 @@
   "mission_id": "sales-complaint-delivery-delay",
   "title": "P0 khách khiếu nại giao chậm: nhận diện · chuyển care · không hứa sai · dừng nhắc tự động",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-upsell-tpl",
@@ -18,7 +18,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-21T01:41:24.300Z",
-  "updated_at": "2026-10-21T01:41:24.300Z",
-  "last_heartbeat": "2026-10-21T01:41:24.300Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-21T04:13:04.376Z",
+  "last_heartbeat": "2026-10-21T04:13:04.376Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/sales-complaint-delivery-delay",
+    "sha": "01e387907cb1592a6659df848fd4d5311060b2cb",
+    "at": "2026-10-21T04:13:04.376Z",
+    "actor": "DESKTOP-56TH98Y:wt-upsell-tpl",
+    "title": "P0 khách khiếu nại giao chậm: nhận diện · chuyển care · không hứa sai · dừng nhắc tự động",
+    "summary": "Khách than giao chậm: chuyển người trước, MỘT câu xin lỗi không mốc, ca CSKH URGE_DELIVERY một ca mỗi đơn, «đơn đâu rồi» chỉ khi quá 48 giờ, «Ok» không đóng việc; get_order_status «chưa có thông tin vận chuyển trên hệ thống»; ops org-order-audit --waiting",
+    "tests": [
+      "tsc --noEmit: 0",
+      "eslint: 0",
+      "npm test (cây sạch @01e387907): TẤT CẢ KIỂM THỬ ĐẠT",
+      "next build: 0",
+      "đột biến: 14/14 đỏ"
+    ]
+  }
 }
