@@ -3,7 +3,7 @@
   "mission_id": "sales-short-qty-round",
   "title": "AI Sales: câu chốt ngắn sau báo giá khi khách còn đơn cũ chưa giao — không «nói rõ hơn», không sửa nhầm đơn cũ, không đơn trùng",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-short-qty",
@@ -25,11 +25,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-21T02:36:08.455Z",
-  "updated_at": "2026-10-21T08:14:05.315Z",
+  "updated_at": "2026-10-21T08:42:45.091Z",
   "last_heartbeat": "2026-10-21T07:43:38.322Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#945 → 66c334a15b9fdbf1dc29ee559fc1a611aa2f631e"
+    "merged": "#945 → 66c334a15b9fdbf1dc29ee559fc1a611aa2f631e",
+    "verify": "PASS 66c334a15b9fdbf1dc29ee559fc1a611aa2f631e 2026-10-21T08:42:21.587Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39569549867"
   },
   "handoff": {
     "branch": "claude/sales-short-qty-round",
