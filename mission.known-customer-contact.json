@@ -3,7 +3,7 @@
   "mission_id": "known-customer-contact",
   "title": "Khách cũ nhận diện chắc chắn: tự nạp SĐT, hỏi một câu địa chỉ lần trước, panel một nguồn SĐT",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-known-cust",
@@ -29,9 +29,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-21T10:04:53.584Z",
-  "updated_at": "2026-10-21T15:30:01.356Z",
+  "updated_at": "2026-10-21T16:03:47.474Z",
   "last_heartbeat": "2026-10-21T15:27:55.931Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#955 → 0f6a135b50e2249b985e306ebe28fe3b7111cc01"
+  },
   "handoff": {
     "branch": "claude/known-customer-contact",
     "sha": "277788304e388885a29e37d612da264e0eb48c14",
