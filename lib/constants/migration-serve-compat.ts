@@ -97,6 +97,15 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/messenger-webhook-rejections.test.ts",
   },
+  {
+    tag: "0252_ai_usage_workloads",
+    why:
+      "Chỉ NỚI ràng buộc CHECK của platform_ai_usage.workload — không thêm / đổi / xoá cột. Mã ghi một loại việc MỚI lên lược đồ chưa áp " +
+      "mục này thì vi phạm ràng buộc cũ: `recordAiUsage` bắt ĐÚNG vi phạm của ràng buộc ấy (23514 + tên ràng buộc) và ghi lại dòng đó với " +
+      "workload NULL — dòng tiền / hạn mức không mất, chỉ thiếu nhãn như trước bản này. Đường đọc không đổi.",
+    addedColumns: {},
+    proof: "tests/ai-usage-ledger-complete.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */

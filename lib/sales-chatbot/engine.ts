@@ -29,7 +29,7 @@ import { platformChatAi } from "@/lib/ai-builder/provider";
 import { readConversationPlatformModels } from "@/lib/ai-usage/platform-ai-policy";
 import type { PlatformWorkload } from "@/lib/ai-usage/types";
 import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
-import { recordAiUsage } from "@/lib/ai-usage/ledger";
+import { aiCallKey, recordAiUsage } from "@/lib/ai-usage/ledger";
 import type { AiCustomerHint } from "@/lib/pricing/ai-customer";
 import { promptStampOf } from "@/lib/sales-chatbot/prompt-stamp";
 import { runningVersion } from "@/lib/version";
@@ -667,10 +667,12 @@ export async function describeCustomerImages(urls: readonly string[], opts: { co
     if (!images.length) return fallback;
     // Nguồn trả tiền + nhà cung cấp đọc SAU lời gọi (khoá dự phòng có thể vừa đỡ lượt này — provider-failover.ts).
     const base = () => ({ orgCode: org.code, feature: "sales_chatbot" as const, source: prov.source, provider: prov.provider.name, actorId: opts.actorId ?? null, ref: opts.conversationId ?? null, conversationId: opts.conversationId ?? null, workload: "vision" as const });
+    // Khoá CHỈ cho dòng thành công: lần thử lỗi là tiền / lượt thật ⇒ luôn có dòng riêng; chỉ bản sao tuyệt đối của MỘT lần đọc thành công bị chặn.
+    const visionKey = aiCallKey({ workload: "vision", scope: opts.conversationId, turn: createHash("sha256").update(urls.join("|")).digest("hex").slice(0, 16) });
     try {
       const { text, res } = await describeImages(prov.provider, images);
       const model = res.model || prov.provider.model;
-      await recordAiUsage({ ...base(), model, requests: 1, inputTokens: res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(model, res.usage), status: "OK", ...usageDetail(res) }).catch(() => undefined);
+      await recordAiUsage({ ...base(), eventKey: visionKey, model, requests: 1, inputTokens: res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(model, res.usage), status: "OK", ...usageDetail(res) }).catch(() => undefined);
       return imageLine(urls.length, text || null);
     } catch (error) {
       await recordAiUsage({ ...base(), model: prov.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", errorClass: aiErrorClassOf(error) }).catch(() => undefined);
@@ -1502,7 +1504,7 @@ async function chatTurnCore(
     // KHÁC còn hạn mức ⇒ lượt này đi thẳng khoá dự phòng (provider-failover.ts). Dòng BLOCKED_QUOTA của khoá chính vẫn ghi.
     const fbQuota = effectiveFallback(cfg);
     const fbSource = fbQuota ? salesBotBillingSource(fbQuota.connectorKey, { home: org.isHome }) : null;
-    if (!quota.ok) await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: billing, provider: null, model: null, requests: 0, inputTokens: null, outputTokens: null, costUsd: null, status: "BLOCKED_QUOTA", errorClass: quota.reason, actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id }).catch(() => undefined);
+    if (!quota.ok) await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: billing, provider: null, model: null, requests: 0, inputTokens: null, outputTokens: null, costUsd: null, status: "BLOCKED_QUOTA", errorClass: quota.reason, actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id, workload: "sales_chatbot" }).catch(() => undefined);
     if (!quota.ok && !(fbSource && fbSource !== billing && (await checkAiQuota(org.code, fbSource)).ok)) return blocked("QUOTA", "Tổ chức đã dùng hết hạn mức AI của gói dịch vụ — nâng gói hoặc chờ kỳ sau", quota.error);
     const prov = await providerFor(cfg, { feature: "sales_chatbot", actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id, workload: "sales_chatbot" }, quota.ok ? undefined : quota.error);
     if (!prov.ok) return blocked("CONNECTION", "Kết nối AI của shop chưa dùng được — mở Cài đặt → Kết nối, kiểm tra lại khoá AI", prov.error);
@@ -1517,7 +1519,7 @@ async function chatTurnCore(
         const quickProv = qp?.ok ? qp : prov;
         const { pick, res } = await quickReplyByAi(quickProv.provider, text, lastShop ? textOf(lastShop.content) : "", quick.candidates, cfg);
         const inT = res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens;
-        await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: quickProv.source, provider: quickProv.provider.name, model: res.model || quickProv.provider.model, requests: 1, inputTokens: inT, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || quickProv.provider.model, res.usage), status: "OK", actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id, workload: "quick_extract", ...usageDetail(res) }).catch(() => undefined);
+        await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: quickProv.source, provider: quickProv.provider.name, model: res.model || quickProv.provider.model, requests: 1, inputTokens: inT, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(res.model || quickProv.provider.model, res.usage), status: "OK", actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id, workload: "quick_extract", eventKey: aiCallKey({ workload: "quick_extract", scope: conv.id, turn: turnSeq }), ...usageDetail(res) }).catch(() => undefined);
         Object.assign(pre, { calls: 1, inTok: inT, outTok: res.usage.outputTokens });
         if (pick && (!qrFocus || qrFocus.answers(pick.entry)) && !(await quickBlocked(pick))) return sendQuick(pick, pre);
       } catch (error) {
@@ -1616,10 +1618,11 @@ async function chatTurnCore(
     // ⇒ mỗi đoạn liền một nhà cung cấp là MỘT dòng, để tiền không ghi nhầm nguồn trả (BYOK ≠ credit gói). Không đổi khoá ⇒
     // đúng một dòng như trước.
     // `think` / `cached` / `lat` chỉ để QUAN SÁT (0231): token suy nghĩ ⊂ token ra; `null` khi nhà cung cấp không tách.
-    type Segment = { name: string; source: AiBillingSource; model: string; calls: number; inTok: number; outTok: number; cost: number | null; think: number | null; cached: number; lat: number };
-    const newSegment = (): Segment => ({ name: prov.provider.name, source: prov.source, model: prov.provider.model, calls: 0, inTok: 0, outTok: 0, cost: 0, think: 0, cached: 0, lat: 0 });
+    type Segment = { idx: number; name: string; source: AiBillingSource; model: string; calls: number; inTok: number; outTok: number; cost: number | null; think: number | null; cached: number; lat: number };
+    let segCount = 0;
+    const newSegment = (): Segment => ({ idx: segCount++, name: prov.provider.name, source: prov.source, model: prov.provider.model, calls: 0, inTok: 0, outTok: 0, cost: 0, think: 0, cached: 0, lat: 0 });
     let seg = newSegment();
-    const recordSegment = (s: Segment, st: "OK" | "ERROR") => recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: s.source, provider: s.name, model: s.model, requests: s.calls, inputTokens: s.inTok, outputTokens: s.outTok, costUsd: s.calls ? s.cost : null, status: st, ...(st === "ERROR" ? { errorClass } : {}), actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id, workload: "sales_chatbot", cachedTokens: s.calls ? s.cached : null, thinkingTokens: s.calls ? s.think : null, latencyMs: s.calls ? s.lat : null }).catch(() => undefined);
+    const recordSegment = (s: Segment, st: "OK" | "ERROR") => recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: s.source, provider: s.name, model: s.model, requests: s.calls, inputTokens: s.inTok, outputTokens: s.outTok, costUsd: s.calls ? s.cost : null, status: st, ...(st === "ERROR" ? { errorClass } : {}), actorId: opts.actorId ?? null, ref: conv.id, conversationId: conv.id, workload: "sales_chatbot", eventKey: aiCallKey({ workload: "sales_chatbot", scope: conv.id, turn: turnSeq, round: s.idx }), cachedTokens: s.calls ? s.cached : null, thinkingTokens: s.calls ? s.think : null, latencyMs: s.calls ? s.lat : null }).catch(() => undefined);
     try {
       for (let round = 0; round < SALES_CHATBOT_LIMITS.toolRounds; round++) {
         // Mức suy nghĩ theo cấu hình (Kỹ = suy luận vừa, Nhanh = thấp) — ngân sách đủ rộng để phần suy luận không ăn hết câu

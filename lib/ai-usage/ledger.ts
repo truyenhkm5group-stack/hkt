@@ -27,9 +27,10 @@ import {
   type AiUsageFeature,
   type AiUsageModality,
   type AiUsageStatus,
-  PLATFORM_WORKLOADS,
-  type PlatformWorkload,
+  AI_USAGE_WORKLOADS,
+  type AiUsageWorkload,
 } from "@/lib/ai-usage/types";
+import { usageEventKey } from "@/lib/pricing/meter";
 
 export type AiUsageEntry = {
   orgCode: string;
@@ -61,7 +62,11 @@ export type AiUsageEntry = {
   cachedTokens?: number | null;
   thinkingTokens?: number | null;
   latencyMs?: number | null;
-  workload?: PlatformWorkload | null;
+  /**
+   * LOẠI VIỆC — BẮT BUỘC khai (giai đoạn 2, 21/10/2026: 18% chi phí AI 14 ngày HSLC ghi sổ không nhãn). Danh sách đóng
+   * `AI_USAGE_WORKLOADS`; `null` chỉ khi nơi gọi THẬT SỰ không biết (đường lỗi của khoá dự phòng chuyển tiếp nhãn của lượt gốc).
+   */
+  workload: AiUsageWorkload | null;
   /**
    * AI IM CÓ TÊN (0237): `ERROR` ⇒ lớp lỗi (`aiErrorClassOf`); `BLOCKED_QUOTA` ⇒ trần nào chạm (`AiQuotaBlockReason`). Bỏ trống ⇒
    * NULL = CHƯA PHÂN LOẠI. Giá trị ngoài danh sách đóng ⇒ NULL (dòng sổ tiền không được mất vì một nhãn sai). Dòng `OK` không mang lớp.
@@ -70,6 +75,29 @@ export type AiUsageEntry = {
 };
 
 const intOrNull = (v: number | null): number | null => (v === null || !Number.isFinite(v) ? null : Math.max(0, Math.round(v)));
+
+/**
+ * KHOÁ SỰ KIỆN của MỘT lần gọi model: `<loại việc>:<hội thoại | ref>:<mã lượt logic>:<vòng>:<lần thử>`. LẦN THỬ nằm TRONG khoá ⇒
+ * lượt thử lại là dòng RIÊNG (tiền thật không bao giờ bị khoá làm biến mất), đếm retry = số dòng cùng tiền tố có lần thử > 0. Khoá
+ * chỉ chặn BẢN SAO TUYỆT ĐỐI của cùng một lần thử (hai worker nhận cùng một lượt) — và mỗi lần chặn được đếm (`duplicateBlockedCount`).
+ */
+export function aiCallKey(p: { workload: AiUsageWorkload; scope: string | null | undefined; turn: string | number; round?: number; attempt?: number }): string | null {
+  return usageEventKey([p.workload, p.scope || "-", p.turn, p.round ?? 0, p.attempt ?? 0]);
+}
+
+let duplicateBlocked = 0;
+/** Số lần khoá sự kiện chặn một BẢN SAO TUYỆT ĐỐI trong tiến trình này (bộ đếm nhẹ — đủ để biết có xử lý trùng hay không). */
+export function duplicateBlockedCount(): number {
+  return duplicateBlocked;
+}
+
+/** Vi phạm ĐÚNG ràng buộc loại việc (lược đồ chưa áp 0252 không biết loại việc mới) — các lỗi khác vẫn ném. */
+function isWorkloadCheckViolation(error: unknown): boolean {
+  const e = error as { code?: string; constraint?: string; message?: string; cause?: { code?: string; constraint?: string; message?: string } } | null;
+  const code = e?.code ?? e?.cause?.code;
+  const name = e?.constraint ?? e?.cause?.constraint ?? `${e?.message ?? ""} ${e?.cause?.message ?? ""}`;
+  return code === "23514" && /platform_ai_usage_workload_check/.test(name);
+}
 
 /**
  * Ghi MỘT dòng. Ném khi dữ liệu sai hình hoặc CSDL hỏng — nơi gọi quyết (AI Builder: lỗi hiện ra; Copilot: nuốt).
@@ -97,7 +125,7 @@ export async function recordAiUsage(e: AiUsageEntry): Promise<{ recorded: boolea
   if (e.modality && !(AI_USAGE_MODALITIES as readonly string[]).includes(e.modality)) throw new Error(`Loại lượt AI lạ: ${e.modality}`);
   const eventKey = e.eventKey?.trim() ? e.eventKey.trim().slice(0, 200) : null;
   const pdb = await getPlatformDb();
-  const insert = pdb.insert(schema.platformAiUsage).values({
+  const insertWith = (workload: AiUsageWorkload | null) => pdb.insert(schema.platformAiUsage).values({
     orgCode: e.orgCode,
     feature: e.feature,
     billingSource: e.source,
@@ -116,17 +144,31 @@ export async function recordAiUsage(e: AiUsageEntry): Promise<{ recorded: boolea
     cachedTokens: intOrNull(e.cachedTokens ?? null),
     thinkingTokens: intOrNull(e.thinkingTokens ?? null),
     latencyMs: intOrNull(e.latencyMs ?? null),
-    workload: e.workload && (PLATFORM_WORKLOADS as readonly string[]).includes(e.workload) ? e.workload : null,
+    workload,
     errorClass: e.status !== "OK" && e.errorClass && (AI_USAGE_ERROR_CLASSES as readonly string[]).includes(e.errorClass) ? e.errorClass : null,
     ...(e.at ? { at: e.at } : {}),
   });
-  if (!eventKey) {
-    await insert;
-    return { recorded: true };
+  const write = async (workload: AiUsageWorkload | null): Promise<{ recorded: boolean }> => {
+    if (!eventKey) {
+      await insertWith(workload);
+      return { recorded: true };
+    }
+    // Chỉ mục duy nhất (org_code, event_key) là ràng buộc duy nhất có thể va (id là ngẫu nhiên) — va ⇒ BẢN SAO TUYỆT ĐỐI, bỏ qua + đếm.
+    const rows = await insertWith(workload).onConflictDoNothing().returning({ id: schema.platformAiUsage.id });
+    if (!rows.length) {
+      duplicateBlocked += 1;
+      console.warn(JSON.stringify({ evt: "ai_usage_duplicate_blocked", feature: e.feature, workload, status: e.status }));
+    }
+    return { recorded: rows.length > 0 };
+  };
+  const workload = e.workload && (AI_USAGE_WORKLOADS as readonly string[]).includes(e.workload) ? e.workload : null;
+  try {
+    return await write(workload);
+  } catch (error) {
+    // Lược đồ chưa áp 0252 (serve-compat) không biết loại việc mới ⇒ ghi lại KHÔNG nhãn: dòng tiền / hạn mức không được mất vì một nhãn.
+    if (workload !== null && isWorkloadCheckViolation(error)) return write(null);
+    throw error;
   }
-  // Chỉ mục duy nhất (org_code, event_key) là ràng buộc duy nhất có thể va (id là ngẫu nhiên) — va ⇒ lượt trùng, bỏ qua.
-  const rows = await insert.onConflictDoNothing().returning({ id: schema.platformAiUsage.id });
-  return { recorded: rows.length > 0 };
 }
 
 const t = schema.platformAiUsage;

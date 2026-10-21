@@ -256,6 +256,7 @@ export async function runCopilot(input: RunCopilotInput): Promise<CopilotResult>
     await recordAiUsage({
       orgCode: (await currentOrganization()).code,
       feature: "copilot",
+      workload: "copilot",
       source: "HOME",
       provider: provider.name,
       model,

@@ -173,7 +173,7 @@ async function gate(ai: OpenedAi, feature: AiUsageFeature, model: string, actorI
   if (killed) throw new Error(killed);
   const quota = await checkAiQuota(ai.owner, "BYOK");
   if (!quota.ok) {
-    await recordAiUsage({ orgCode: ai.owner, feature, source: "BYOK", provider: ai.connectorKey, model, requests: 0, inputTokens: null, outputTokens: null, costUsd: null, status: "BLOCKED_QUOTA", actorId, ref }).catch(() => undefined);
+    await recordAiUsage({ orgCode: ai.owner, feature, source: "BYOK", provider: ai.connectorKey, model, requests: 0, inputTokens: null, outputTokens: null, costUsd: null, status: "BLOCKED_QUOTA", actorId, ref, workload: "creative" }).catch(() => undefined);
     throw new Error(quota.error);
   }
 }
@@ -196,10 +196,10 @@ function byokImageClient(ai: OpenedAi, deps: ByokImageDeps & { actorId?: string 
     const key = { connectorKey: ai.connectorKey, owner: ai.owner, apiKey: ai.apiKey };
     try {
       const res = ai.connectorKey === "gemini-byok" ? await geminiByokImage({ ...input, model }, key, deps) : await openAiByokImage({ ...input, model }, key, deps);
-      await recordAiUsage({ orgCode: ai.owner, feature: "creative_image", source: "BYOK", provider: ai.connectorKey, model, requests: 1, inputTokens: res.usage?.inputTokens ?? null, outputTokens: res.usage?.outputTokens ?? null, costUsd: res.costUsd, status: "OK", actorId: deps.actorId ?? null, ref }).catch(() => undefined);
+      await recordAiUsage({ orgCode: ai.owner, feature: "creative_image", workload: "creative", source: "BYOK", provider: ai.connectorKey, model, requests: 1, inputTokens: res.usage?.inputTokens ?? null, outputTokens: res.usage?.outputTokens ?? null, costUsd: res.costUsd, status: "OK", actorId: deps.actorId ?? null, ref }).catch(() => undefined);
       return res;
     } catch (e) {
-      await recordAiUsage({ orgCode: ai.owner, feature: "creative_image", source: "BYOK", provider: ai.connectorKey, model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: deps.actorId ?? null, ref }).catch(() => undefined);
+      await recordAiUsage({ orgCode: ai.owner, feature: "creative_image", workload: "creative", source: "BYOK", provider: ai.connectorKey, model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: deps.actorId ?? null, ref }).catch(() => undefined);
       throw new Error(scrubKey(e instanceof Error ? e.message : String(e), ai.apiKey));
     }
   };
@@ -257,6 +257,7 @@ export async function creativeCaptioner(deps: { fetchImpl?: typeof fetch; actorI
       await recordAiUsage({
         orgCode: ai.owner,
         feature: "creative_copy",
+        workload: "creative",
         source: "BYOK",
         provider: ai.connectorKey,
         model: out.model,

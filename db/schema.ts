@@ -5118,7 +5118,8 @@ export const platformAiUsage = pgTable(
   (t) => [
     uniqueIndex("platform_ai_usage_org_event_key").on(t.orgCode, t.eventKey).where(sql`${t.eventKey} IS NOT NULL`),
     check("platform_ai_usage_modality_check", sql`${t.modality} IS NULL OR ${t.modality} IN ('TEXT','VISION','IMAGE')`),
-    check("platform_ai_usage_workload_check", sql`${t.workload} IS NULL OR ${t.workload} IN ('sales_chatbot','order_sync','quick_extract','vision')`),
+    // 0252: nới theo AI_USAGE_WORKLOADS (lib/ai-usage/types.ts) — giữ NULL được cho dòng cũ (không backfill) và lượt lùi trên lược đồ cũ.
+    check("platform_ai_usage_workload_check", sql`${t.workload} IS NULL OR ${t.workload} IN ('sales_chatbot','order_sync','quick_extract','vision','followup','lessons','quick_reply_learn','inbox_feedback','playbook','ai_builder','copilot','creative','lead_hunter')`),
     check(
       "platform_ai_usage_error_class_check",
       sql`${t.errorClass} IS NULL OR ${t.errorClass} IN ('CREDIT','AUTH','RATE_LIMIT','MODEL_UNAVAILABLE','SERVER_ERROR','TIMEOUT','INVALID_REQUEST','OTHER','REQUESTS_DAY','REQUESTS_MONTH','COST_HARD','NO_PLATFORM_CREDIT','PLATFORM_CREDIT_USED','PLAN_UNREADABLE')`,

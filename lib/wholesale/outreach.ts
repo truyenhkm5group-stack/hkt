@@ -118,7 +118,7 @@ async function aiOpener(cfg: LeadHunterConfig, facts: OpenerFacts, actorId: stri
   try {
     const res = await ai.provider.complete({ system: AI_SYSTEM, messages: [{ role: "user", content: [{ type: "text", text: `DỮ KIỆN:\n${factsText}\n\nMẪU THAM KHẢO (giữ ý, được diễn đạt lại):\n${fallback}` }] }], tools: [], maxTokens: 400, reasoning: "low" });
     const model = res.model || ai.provider.model;
-    await recordAiUsage({ orgCode: org.code, feature: "lead_hunter", source: ai.source, provider: ai.provider.name, model, requests: 1, inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(model, res.usage), status: "OK", actorId, ref: "opener" }).catch(() => undefined);
+    await recordAiUsage({ orgCode: org.code, feature: "lead_hunter", workload: "lead_hunter", source: ai.source, provider: ai.provider.name, model, requests: 1, inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(model, res.usage), status: "OK", actorId, ref: "opener" }).catch(() => undefined);
     const text = res.content
       .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
       .map((b) => b.text)
@@ -128,7 +128,7 @@ async function aiOpener(cfg: LeadHunterConfig, facts: OpenerFacts, actorId: stri
     if (invented) return { text: fallback, by: "TEMPLATE", model, note: `Câu AI bị loại (${invented}) — dùng mẫu.` };
     return { text, by: "AI", model, note: null };
   } catch (e) {
-    await recordAiUsage({ orgCode: org.code, feature: "lead_hunter", source: ai.source, provider: ai.provider.name, model: ai.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId, ref: "opener" }).catch(() => undefined);
+    await recordAiUsage({ orgCode: org.code, feature: "lead_hunter", workload: "lead_hunter", source: ai.source, provider: ai.provider.name, model: ai.provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId, ref: "opener" }).catch(() => undefined);
     return { text: fallback, by: "TEMPLATE", model: null, note: `AI lỗi (${e instanceof Error ? e.message.slice(0, 120) : "không rõ"}) — dùng mẫu.` };
   }
 }

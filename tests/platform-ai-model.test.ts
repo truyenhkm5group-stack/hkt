@@ -677,7 +677,7 @@ async function testStickyAndVerdict() {
   const captured: string[] = [];
   setAiUsageCaptureForBench((e) => captured.push(e.ref ?? ""));
   try {
-    assert.equal((await recordAiUsage({ orgCode: "pam-tel", feature: "sales_chatbot", source: "BYOK", provider: "x", model: M31, requests: 1, inputTokens: 1, outputTokens: 1, costUsd: 0, status: "OK", actorId: null, ref: "bench" })).recorded, false);
+    assert.equal((await recordAiUsage({ orgCode: "pam-tel", feature: "sales_chatbot", workload: "sales_chatbot", source: "BYOK", provider: "x", model: M31, requests: 1, inputTokens: 1, outputTokens: 1, costUsd: 0, status: "OK", actorId: null, ref: "bench" })).recorded, false);
   } finally {
     setAiUsageCaptureForBench(null);
   }

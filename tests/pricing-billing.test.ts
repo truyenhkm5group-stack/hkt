@@ -410,10 +410,10 @@ export async function testPricingBilling() {
     assert.equal((await checkUsageQuota("aiConversations", { orgCode: A })).blocked, false, "tắt công tắc ⇒ mở ngay");
 
     // ── Sự kiện đo: trùng / thử lại không tính hai lần; ghi đồng thời không mất, không nhân đôi; cô lập tổ chức.
-    const ev = (org: string, key: string, cost = 0.01) => recordUsageEvent({ orgCode: org, feature: "sales_chatbot", source: "PLATFORM", provider: "gemini", model: "gemini-3.1-flash-lite", requests: 1, inputTokens: 1000, outputTokens: 100, costUsd: cost, status: "OK", actorId: null, ref: "conv-1", conversationId: "conv-1", modality: "TEXT", eventKey: key });
+    const ev = (org: string, key: string, cost = 0.01) => recordUsageEvent({ orgCode: org, feature: "sales_chatbot", workload: "sales_chatbot", source: "PLATFORM", provider: "gemini", model: "gemini-3.1-flash-lite", requests: 1, inputTokens: 1000, outputTokens: 100, costUsd: cost, status: "OK", actorId: null, ref: "conv-1", conversationId: "conv-1", modality: "TEXT", eventKey: key });
     assert.deepEqual(await ev(A, `${KEY}:once`), { recorded: true });
     assert.deepEqual(await ev(A, `${KEY}:once`), { recorded: false }, "gói tin trùng ⇒ không dòng thứ hai");
-    await assert.rejects(() => recordUsageEvent({ orgCode: A, feature: "sales_chatbot", source: "PLATFORM", provider: null, model: null, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "OK", actorId: null, eventKey: "  " }), /khoá sự kiện/);
+    await assert.rejects(() => recordUsageEvent({ orgCode: A, feature: "sales_chatbot", workload: "sales_chatbot", source: "PLATFORM", provider: null, model: null, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "OK", actorId: null, eventKey: "  " }), /khoá sự kiện/);
     const usageBefore = await sourceUsage(A, "PLATFORM");
     const retries = await Promise.all([1, 2, 3].map(() => ev(A, `${KEY}:retry`, 0.05)));
     assert.equal(retries.filter((r) => r.recorded).length, 1, "AI thử lại 3 lần cùng khoá ⇒ ghi đúng 1");

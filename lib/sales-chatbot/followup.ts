@@ -30,7 +30,7 @@ import { getDb, schema } from "@/db";
 import { compatTableColumns } from "@/lib/db/serve-compat-columns";
 import { estimateCostUsd } from "@/lib/ai/provider";
 import { aiKillSwitchDenial } from "@/lib/ai-usage/control";
-import { recordAiUsage } from "@/lib/ai-usage/ledger";
+import { aiCallKey, recordAiUsage } from "@/lib/ai-usage/ledger";
 import { checkAiQuota } from "@/lib/ai-usage/quota";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { currentOrganization } from "@/lib/platform/context";
@@ -282,7 +282,7 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
       const model = res.model || prov.provider.model;
       const promptHash = promptStampOf({ system, tools: [], config: { steps: fs.stepsMinutes, version: FOLLOWUP_PROMPT_VERSION }, model, codeVersion }).promptHash;
       const inTok = res.usage.inputTokens + res.usage.cacheReadTokens + res.usage.cacheWriteTokens;
-      await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model, requests: 1, inputTokens: inTok, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(model, res.usage), status: "OK", actorId: null, ref: row.id, conversationId: row.id }).catch(() => undefined);
+      await recordAiUsage({ orgCode: org.code, feature: "sales_chatbot", source: prov.source, provider: prov.provider.name, model, requests: 1, inputTokens: inTok, outputTokens: res.usage.outputTokens, costUsd: estimateCostUsd(model, res.usage), status: "OK", actorId: null, ref: row.id, conversationId: row.id, workload: "followup", eventKey: aiCallKey({ workload: "followup", scope: row.id, turn: attempt, round: row.aiCalls }) }).catch(() => undefined);
       await db.update(c).set({ aiCalls: row.aiCalls + 1, inputTokens: row.inputTokens + inTok, outputTokens: row.outputTokens + res.usage.outputTokens }).where(eq(c.id, row.id));
       const text = res.content.map((b) => (b.type === "text" ? b.text : "")).join("\n").trim().slice(0, 1000);
       // Câu rỗng, hay lỡ nêu giá (giá chỉ được đọc từ ERP lúc chat) ⇒ BỎ lần nhắc này, sang mốc sau — không gửi câu sai.

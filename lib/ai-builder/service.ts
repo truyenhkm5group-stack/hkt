@@ -168,7 +168,7 @@ export async function createDraft(user: SessionUser, input: { mode?: unknown; pr
   const ai = await getBuilderAi();
   if (!ai.ok) return fail(ai.reason);
   const billing = billingSourceOf(ai.ai.source);
-  const usageBase = { orgCode: org.code, feature: "ai_builder" as const, source: billing, provider: ai.ai.provider.name, model: ai.ai.provider.model, actorId: user.id };
+  const usageBase = { orgCode: org.code, feature: "ai_builder" as const, workload: "ai_builder" as const, source: billing, provider: ai.ai.provider.name, model: ai.ai.provider.model, actorId: user.id };
   const quota = await checkAiQuota(org.code, billing);
   if (!quota.ok) {
     await recordAiUsage({ ...usageBase, requests: 0, inputTokens: 0, outputTokens: 0, costUsd: 0, status: "BLOCKED_QUOTA" });
