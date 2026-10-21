@@ -1,0 +1,8 @@
+{
+  "pr": 954,
+  "sha": "4ffadb3986d3505bc631ce37f896ef06ec66bb24",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T14:36:13.575Z",
+  "note": "review lead (Giai đoạn 2B, chủ shop duyệt 21/10): job hằng ngày chạy KÉ sales-health (không lịch mới), một lượt/tổ chức/ngày từ 7 giờ VN cho trọn ngày hôm qua, 0 lời gọi AI, 0 ghi hội thoại. 8 mã: HANDOFF_UNANSWERED (import handoffReplyClass + tập aiSilentSql = hàng đợi /work, ghi rõ khác nhóm của ops) · QTY_REASKED · SECONDARY_INTENT_UNANSWERED · WRONG_PRODUCT_TEMPLATE · ADDRESS_REASK · COMPLAINT"
+}
