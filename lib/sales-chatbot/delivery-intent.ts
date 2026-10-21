@@ -17,7 +17,7 @@
  *
  * Không đọc / ghi CSDL. Không kết luận kết quả đơn (`ORDER_OUTCOME` vẫn là nguồn duy nhất); không suy «đã giao» từ tiền / COD.
  */
-import { NO_SHIPMENT_YET } from "@/lib/sales-chatbot/order-status-shared";
+import { NO_SHIPMENT_PHRASE } from "@/lib/sales-chatbot/order-status-shared";
 import { withoutPhones } from "@/lib/address/customer-address";
 import { foldVi } from "@/lib/sales-chatbot/text";
 
@@ -27,7 +27,7 @@ export type DeliveryQuestion = { intent: "DELIVERY_TIME"; nuance: DeliveryNuance
 /** Câu nói với khách khi máy chủ KHÔNG có lịch giao đã xác minh. */
 export const DELIVERY_HANDOFF_TEXT = "Dạ em báo nhân viên xác nhận giờ giao cho mình ngay ạ.";
 /** Câu trạng thái chung của `customerOrderStatus` khi đơn không vận đơn — KHÔNG được dùng làm câu trả lời cho câu hỏi lịch giao. */
-export const GENERIC_STATUS_PHRASE = NO_SHIPMENT_YET.slice(NO_SHIPMENT_YET.indexOf("chưa có"));
+export const GENERIC_STATUS_PHRASE = NO_SHIPMENT_PHRASE;
 /** Tiền tố tin phía shop trong lịch sử (= `SHOP_SAID` của engine.ts; bài kiểm so hai giá trị). */
 export const DELIVERY_SHOP_SAID_PREFIX = "[Shop đã nhắn]";
 

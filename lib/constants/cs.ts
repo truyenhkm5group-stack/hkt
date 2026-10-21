@@ -173,6 +173,7 @@ export const CS_SOURCE_LABEL: Record<string, string> = {
   PANCAKE_RETURN: "Phiếu đổi/trả Pancake",
   PANCAKE_CHAT: "Thẻ hội thoại Pancake",
   AUTO_FAILED_DELIVERY: "Tự động · giao không thành",
+  AUTO_SALES_CHAT_DELAY: "Tự động · khách than giao chậm (bot bán hàng)",
   MANUAL: "Nhập tay",
 };
 

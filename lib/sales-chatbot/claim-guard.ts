@@ -63,6 +63,11 @@ export const CLAIM_SAFE_TEXT = {
   ORDER_EDIT: "Dạ em ghi nhận yêu cầu thay đổi của mình, em chuyển nhân viên cập nhật đơn giúp mình ngay ạ.",
   /** Bot định hứa hoàn tiền / đổi hàng / gửi bù / bồi thường — việc bot không có quyền làm. */
   REFUND: "Dạ em xin lỗi mình, em chuyển nhân viên kiểm tra và hỗ trợ mình ngay ạ.",
+  /**
+   * Khách than GIAO CHẬM / chưa nhận hàng (P0 21/10/2026, ca HSLC #BD31267C). Gửi SAU khi lượt chuyển người đã ghi — một câu xin lỗi + đã
+   * chuyển nhân viên. KHÔNG một mốc nào («gửi ngay», «chuẩn bị gửi», «hôm nay nhận»): máy chủ không có chứng từ cho mốc đó.
+   */
+  DELIVERY_DELAY: "Dạ em xin lỗi mình vì đã để mình chờ lâu ạ. Em đã chuyển nhân viên kiểm tra đơn và báo lại mình sớm nhất ạ.",
   /** Khách phản đối giá mà máy chủ không xác minh được số khách nói ⇒ nhân viên kiểm. */
   PRICE_DISPUTE: "Dạ em ghi nhận ý mình về giá, em chuyển nhân viên kiểm tra lại giá chính xác và báo mình ngay ạ.",
 } as const;

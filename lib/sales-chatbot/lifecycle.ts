@@ -46,6 +46,7 @@ import { ORDER_OUTCOME, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/q
 import type { AiBlock } from "@/lib/ai/provider";
 import { controlOf, type ConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
 import { foldVi } from "@/lib/sales-chatbot/text";
+import { DWELL_SLA } from "@/lib/constants/shipment-status-age";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 
 /** Phiên bản ĐỊNH NGHĨA ảnh chụp (luật 40) — đổi cách suy một chiều ⇒ tăng số; vết follow-up ghi số này. */
@@ -572,8 +573,68 @@ export function customerNotReceivedSignal(text: string): boolean {
   return NOT_RECEIVED_RE.test(foldVi(text.normalize("NFC")));
 }
 
+/* ═══════════ KHÁCH THAN GIAO CHẬM (P0 21/10/2026, ca HSLC #BD31267C) ═══════════
+ *
+ * «Đặt 1kg chả mực lâu rồi mà ko thấy giao hàng vậy shop» — đơn đã chốt 5 ngày, ERP chưa có vận đơn (vận đơn HSLC tạo NGOÀI ERP ⇒ «chưa
+ * biết», không phải «chưa gửi»). Không bộ nhận diện nào bắt câu này (`customerComplaintSignal` · `customerNotReceivedSignal` đều `false`),
+ * nên lượt đi tiếp vào AI: bot đọc trạng thái chung, tự hứa «gửi ngay / chuẩn bị gửi», hỏi khách còn băn khoăn gì, rồi bộ nhắc tự động
+ * gửi thêm hai tin chăm sóc chung.
+ *
+ * Hai loại câu, hai mức căn cứ:
+ *   · than CHẬM tường minh («lâu rồi chưa thấy giao», «sao chưa gửi», «mãi chưa nhận», «hứa giao mà chưa thấy», «chờ lâu quá») ⇒ khiếu
+ *     nại, không cần đồng hồ;
+ *   · hỏi «đơn đâu rồi» TRƠN ⇒ chỉ là khiếu nại khi đơn đã chốt quá `DWELL_SLA.PENDING.warning` giờ («kiện chưa rời kho: bất thường, cần
+ *     người nhìn trong ngày» — không đặt số mới) mà ERP chưa có thông tin vận chuyển. Hỏi trạng thái bình thường KHÔNG bị nhận nhầm.
+ * Chữ được GẬP DẤU (`foldVi`) nên không dấu / viết tắt («dat lau roi chua thay giao», «sao chua gui hang») cùng một luật; phủ định / hỏi
+ * khả năng («ko giao được tỉnh xa à», «chị chưa gửi địa chỉ») bị loại riêng.
+ */
+const DELAY_RULES: readonly RegExp[] = [
+  // «đặt / chờ / đợi … lâu RỒI / QUÁ / THẾ» — phải có dấu hiệu THAN sau «lâu»: «giao mất bao lâu», «ship lâu không em» là HỎI thời lượng.
+  /\b(?:dat|cho|doi|giao|gui|ship|order)\b(?:\s+\S+){0,6}?\s+lau\s+(?:roi|r|qua|the|vay|v|lam|ma|nay|ghe)\b/,
+  /\blau\s+(?:qua|roi|the|vay|v|r|lam)\b(?:\s+\S+){0,6}?\s+(?:chua|khong|ko|k)\b/,
+  // «chưa / không / sao chưa / mãi chưa (thấy · được · ai) giao / gửi / ship / nhận / tới / đến». Từ đệm là danh sách ĐÓNG: «đã gửi chưa,
+  // bao giờ nhận được?» là HỎI — để từ đệm tự do thì «chưa … bao giờ nhận» thành lời than.
+  /\b(?:chua|khong|ko|k|hong|mai chua|sao chua|ma chua|van chua)\s+(?:(?:thay|duoc|dc|ai|shop|em|ben em)\s+){0,2}(?:giao|gui|ship|nhan|toi|den)\b/,
+  // «hứa giao mà chưa…»
+  /\bhua\b(?:\s+\S+){0,5}?\s+(?:giao|gui)\b(?:\s+\S+){0,5}?\s+(?:chua|khong|ko)\b/,
+  // «chờ / đợi … lâu quá / cả tuần» (gập dấu). «mãi» đọc trên chữ CÓ DẤU — gập dấu thì «cho mai» cũng là «cho ngày mai».
+  /\b(?:cho|doi)\s+(?:\S+\s+){0,3}?(?:lau qua|ca tuan)\b/,
+];
+// «mãi chưa / không …» chỉ là than khi theo sau là việc GIAO («dùng mãi mãi không chán» không phải).
+const DELAY_RAW_RE = /(?:chờ|đợi)\s+(?:\S+\s+){0,3}?mãi|(?:^|\s)mãi\s+(?:chưa|không|ko|k)\s+(?:(?:thấy|được|đc)\s+)?(?:giao|gửi|nhận|ship|tới|đến|có\s+hàng)/iu;
+/** «bao lâu» là câu hỏi thời lượng, không phải lời than. */
+const DURATION_ASK_RE = /\bbao\s+lau\b/;
+/** Không phải than chậm: khách CHƯA GỬI thông tin của chính mình · hỏi KHẢ NĂNG giao («ko giao được … à»). */
+const DELAY_NOT_RE = /\b(?:chua|khong|ko|k)\s+gui\s+(?:dia chi|sdt|so|thong tin|anh|hinh|tin|lai|tien|ck)\b|\b(?:khong|ko|k)\s+giao\s+duoc\b|\bchua\s+nhan\s+(?:tin|duoc tin|tin nhan)\b/;
+/** «đơn (tôi / của chị) đâu rồi», «hàng đâu rồi» — HỎI trạng thái, chỉ thành khiếu nại khi quá hạn (`customerPhaseOf`). */
+const ORDER_WHERE_RE = /\b(?:don|hang|kien)(?:\s+(?:hang|cua))?(?:\s+(?:toi|minh|chi|em|anh|c|a|t|e))?\s+dau\s*(?:roi|r|vay|v|the|nhi)?\b/;
+
+/** «giao chậm» — chỉ tính khi `customerComplaintSignal` đã xác nhận là lời TRÁCH («giao chậm xíu cũng được» không phải). */
+const SLOW_RE = /\b(?:giao|ship|gui|di)\s+(?:\S+\s+)?(?:cham|lau)\b/;
+
+/** Khách THAN GIAO CHẬM / chưa nhận được hàng (tường minh). HÀM THUẦN. */
+export function customerDeliveryDelaySignal(text: string): boolean {
+  const f = foldVi(text.normalize("NFC"));
+  if (!f || DELAY_NOT_RE.test(f) || DURATION_ASK_RE.test(f)) return false;
+  return DELAY_RULES.some((re) => re.test(f)) || DELAY_RAW_RE.test(text.normalize("NFC")) || (SLOW_RE.test(f) && customerComplaintSignal(text));
+}
+
+/** Khách hỏi «đơn đâu rồi» (không kèm lời than). HÀM THUẦN. */
+export function customerOrderWhereSignal(text: string): boolean {
+  return ORDER_WHERE_RE.test(foldVi(text.normalize("NFC")));
+}
+
+/** Giờ kể từ lúc chốt đơn mà một câu «đơn đâu rồi» trơn đã là khiếu nại — lấy từ `DWELL_SLA.PENDING.warning`, không số mới. */
+export const ORDER_WHERE_COMPLAINT_HOURS = DWELL_SLA.PENDING?.warning ?? null;
+
 export type CustomerPhaseView = {
   phase: CustomerPhase;
+  /** Loại khiếu nại khi `phase = COMPLAINT`: `DELIVERY_DELAY` = khách than giao chậm / chưa nhận (luồng riêng ở engine). */
+  complaintKind?: "DELIVERY_DELAY" | "GENERAL";
+  /** Số ngày từ lúc lên đơn — để lý do chuyển người nói khách đã chờ bao lâu. */
+  orderAgeDays?: number | null;
+  /** Thông tin vận chuyển ERP đang có (`NONE` = ERP không có vận đơn — với tổ chức tạo vận đơn ngoài ERP là CHƯA BIẾT). */
+  fulfillment?: LifecycleFulfillment;
   /** Nguồn của «đã nhận»: chứng từ ĐVVC hay lời khách — `null` khi chưa nói tới nhận hàng. */
   receivedBy: "CARRIER" | "CUSTOMER_CLAIM" | null;
   orderId: string | null;
@@ -585,13 +646,31 @@ export type CustomerPhaseView = {
  * Giai đoạn của khách. HÀM THUẦN. Thứ tự: khiếu nại (lời khách, khi có đơn) → không có đơn sống ⇒ trước bán / đang chốt theo
  * `salesStage` → ĐVVC đã giao / khách nói đã nhận ⇒ đã nhận (đơn lên quá `AFTER_SALES_DAYS` ⇒ chăm sóc sau bán) → đang giao → chờ giao.
  */
-export function customerPhaseOf(snap: Pick<LifecycleSnapshot, "order" | "fulfillment" | "salesStage" | "orderId">, claims: { receipt: boolean; complaint: boolean; notReceived?: boolean }, orderAgeDays: number | null): CustomerPhaseView {
+export function customerPhaseOf(
+  snap: Pick<LifecycleSnapshot, "order" | "fulfillment" | "salesStage" | "orderId">,
+  claims: { receipt: boolean; complaint: boolean; notReceived?: boolean; delay?: boolean; whereAsk?: boolean },
+  orderAgeDays: number | null,
+): CustomerPhaseView {
   const orderId = snap.orderId;
   const hasLive = snap.order === "CREATED" || snap.order === "CONFIRMED";
-  if (claims.complaint && (hasLive || snap.order === "RETURNED")) return { phase: "COMPLAINT", receivedBy: null, orderId, source: "lời khách: khiếu nại / đổi trả / hoàn tiền" };
-  // ĐVVC báo đã giao mà khách nói chưa nhận ⇒ mâu thuẫn chứng từ ↔ lời khách = khiếu nại (review #821 F2: trước đây ra RECEIVED/CARRIER
-  // và lời nhắc CẢM ƠN khách đã nhận hàng).
-  if (hasLive && snap.fulfillment === "DELIVERED" && claims.notReceived) return { phase: "COMPLAINT", receivedBy: null, orderId, source: "lời khách «chưa nhận được hàng» — chứng từ ĐVVC báo ĐÃ GIAO (mâu thuẫn, cần kiểm với bưu cục)" };
+  /*
+    GIAO CHẬM: than tường minh, HOẶC hỏi «đơn đâu rồi» khi đơn đã quá ngưỡng mà ERP chưa có thông tin vận chuyển. Ba bối cảnh, một luồng
+    (chuyển người + một câu xin lỗi), khác nhau ở LÝ DO cho nhân viên:
+      · đơn còn sống, chưa có chứng từ giao ⇒ «ERP chưa có thông tin» / «đang giao» — kiểm POS / ĐVVC;
+      · ĐVVC báo ĐÃ GIAO mà khách nói chưa nhận ⇒ mâu thuẫn chứng từ ↔ lời khách, kiểm với bưu cục (review #821 F2: trước đây ra
+        RECEIVED/CARRIER và lời nhắc CẢM ƠN khách đã nhận hàng);
+      · đơn ĐÃ HOÀN (giao không thành công) mà khách hỏi sao chưa nhận ⇒ khách chưa biết đơn đã hoàn.
+  */
+  const noInfo = snap.fulfillment === "NONE" || snap.fulfillment === "UNKNOWN";
+  const overdue = ORDER_WHERE_COMPLAINT_HOURS !== null && orderAgeDays !== null && orderAgeDays * 24 >= ORDER_WHERE_COMPLAINT_HOURS;
+  const delayView = (source: string): CustomerPhaseView => ({ phase: "COMPLAINT", complaintKind: "DELIVERY_DELAY", orderAgeDays, fulfillment: snap.fulfillment, receivedBy: null, orderId, source });
+  if (hasLive && snap.fulfillment === "DELIVERED" && (claims.notReceived || claims.delay)) return delayView("lời khách «chưa nhận được hàng» — chứng từ ĐVVC báo ĐÃ GIAO (mâu thuẫn, cần kiểm với bưu cục)");
+  if (snap.order === "RETURNED" && (claims.notReceived || claims.delay)) return delayView("lời khách «chưa nhận được hàng» — đơn đã HOÀN (giao không thành công), khách chưa được báo");
+  if (hasLive && (claims.delay || (claims.whereAsk && noInfo && overdue))) {
+    return delayView(claims.delay ? "lời khách: giao chậm / chưa nhận được hàng" : `lời khách hỏi đơn đâu — đơn đã ${Math.floor((orderAgeDays ?? 0) * 24)} giờ, ERP chưa có thông tin vận chuyển`);
+  }
+  // Khiếu nại CHUNG (chất lượng / đổi trả / hoàn tiền) — xét SAU giao chậm: «sao giao chậm vậy» khớp cả hai, và giao chậm có luồng riêng.
+  if (claims.complaint && (hasLive || snap.order === "RETURNED")) return { phase: "COMPLAINT", complaintKind: "GENERAL", receivedBy: null, orderId, source: "lời khách: khiếu nại / đổi trả / hoàn tiền" };
   if (!hasLive) {
     const closing = snap.order === "CREATION_PENDING" || snap.salesStage === "AWAITING_CONFIRMATION" || snap.salesStage === "CUSTOMER_INFO_COLLECTED";
     return { phase: closing ? "CLOSING" : "PRE_SALE", receivedBy: null, orderId, source: `order=${snap.order} · salesStage=${snap.salesStage}` };
@@ -644,7 +723,7 @@ export async function loadCustomerPhase(conv: Pick<LifecycleConvRow, "id" | "ord
     const snap = deriveLifecycle({ conversation: { status: conv.status, handoffReason: conv.handoffReason, control: controlOf(st), turns: conv.turns }, state: st, orders, customerTexts: [] });
     const chosen = snap.orderId ? orders.find((o) => o.id === snap.orderId) : undefined;
     const age = chosen?.insertedAt ? (now.getTime() - chosen.insertedAt.getTime()) / 86_400_000 : null;
-    const v = customerPhaseOf(snap, { receipt: customerReceiptClaim(text), complaint: customerComplaintSignal(text), notReceived: customerNotReceivedSignal(text) }, age);
+    const v = customerPhaseOf(snap, { receipt: customerReceiptClaim(text), complaint: customerComplaintSignal(text), notReceived: customerNotReceivedSignal(text), delay: customerDeliveryDelaySignal(text), whereAsk: customerOrderWhereSignal(text) }, age);
     return { ...v, shortCode: snap.orderId ? manualOrderShortCode(snap.orderId) : null };
   } catch {
     return null;

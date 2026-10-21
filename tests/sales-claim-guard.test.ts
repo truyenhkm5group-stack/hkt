@@ -44,6 +44,7 @@ import {
 } from "@/lib/sales-chatbot/claim-guard";
 import { DEFAULT_SALES_CHATBOT_CONFIG, SALES_CHATBOT_SETTING_KEY } from "@/lib/sales-chatbot/config";
 import { chatTurn, TURN_BOT_OFF_ERROR, visitorKeyOf } from "@/lib/sales-chatbot/engine";
+import { foldVi } from "@/lib/sales-chatbot/text";
 import { classifyHandoffReason } from "@/lib/sales-chatbot/events-shared";
 import { quickReplyByKeyword } from "@/lib/sales-chatbot/quick-replies";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -277,7 +278,7 @@ function testSourceScan() {
   assert.ok(heldLoop.indexOf("guardOutgoing(out") > 0 && heldLoop.indexOf("guardOutgoing(out") < heldLoop.indexOf('text: out }]'), "chữ có số tiền giữ lại qua guardOutgoing TRƯỚC khi ghi");
   // (f) Mọi chữ hằng gửi qua `reply()` không mang khẳng định; đối số không phải hằng thì nằm trong danh sách đã biết.
   // `draftUnsaid` (tóm tắt đơn theo kết quả công cụ) và `fallback` (câu hỏi đúng phần còn thiếu) đều qua guardOutgoing ngay trước reply.
-  const knownExpr = new Set(["cfg.handoff.message", "cfg.businessHours.outsideMessage", "EMPTY_REPLY_TEXT", "aiDownReply(cfg)", "pick.text", "safeText", "b.safe", "CLAIM_SAFE_TEXT.PRICE_DISPUTE", "CLAIM_SAFE_TEXT.REFUND", "draftUnsaid", "fallback", "step.text", "pco.text", "menuStep.text"]);
+  const knownExpr = new Set(["cfg.handoff.message", "cfg.businessHours.outsideMessage", "EMPTY_REPLY_TEXT", "aiDownReply(cfg)", "pick.text", "safeText", "b.safe", "CLAIM_SAFE_TEXT.PRICE_DISPUTE", "CLAIM_SAFE_TEXT.REFUND", "CLAIM_SAFE_TEXT.DELIVERY_DELAY", "draftUnsaid", "fallback", "step.text", "pco.text", "menuStep.text"]);
   // P0 #863: câu máy chủ dựng khi khách huỷ (xin lỗi + đơn đã sửa · «đã huỷ» sau khi lõi ghi) qua guardOutgoing ngay trước reply.
   assert.match(core, /guardOutgoing\(step\.text, [^\n]*\n(?:[^\n]*\n){0,2}\s*await reply\(conv, seq, step\.text\)/, "câu huỷ của máy chủ qua guardOutgoing trước reply");
   // P0 20/10/2026: câu upsell của SHOP gửi sau chốt (`pco.text` — chữ câu mẫu đã điền số ERP) qua guardOutgoing ngay trước reply.
@@ -289,6 +290,8 @@ function testSourceScan() {
   assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.PRICE_DISPUTE), [], "câu an toàn khi khách phản đối giá không mang khẳng định");
   assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.REFUND), [], "câu an toàn khi khách khiếu nại (máy chủ chuyển người) không mang khẳng định / lời hứa");
   assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.ORDER_EDIT), [], "câu an toàn khi chặn «đã sửa đơn» không tự mang khẳng định");
+  assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.DELIVERY_DELAY), [], "câu an toàn khi khách than giao chậm không mang khẳng định / lời hứa");
+  assert.doesNotMatch(foldVi(CLAIM_SAFE_TEXT.DELIVERY_DELAY), /gui ngay|chuan bi gui|hom nay|ngay mai|da gui|dang giao/, "câu giao chậm không hứa mốc, không nói đã gửi");
   for (const arg of replyArgs(core)) {
     if (/^["'`]/.test(arg)) {
       const literal = arg.slice(1, -1).replace(/\$\{[^}]*\}/g, " ");

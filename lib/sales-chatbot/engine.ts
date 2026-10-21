@@ -80,6 +80,7 @@ import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE,
 import { ADDRESS_KNOWN_TEXT, ADDRESS_STAFF_TEXT, SCHEDULE_NOTED_TEXT, addressKnowledge, addressReaskVerdict, continuesSameOrder, isScheduleOnly, knownContactPrompt } from "@/lib/sales-chatbot/address-memory";
 import { DELIVERY_HANDOFF_TEXT, deliveryPreferenceOf, deliveryPromiseIn, deliveryReplyViolation, turnDeliverySay } from "@/lib/sales-chatbot/delivery-intent";
 import { asksOrderStatus, asksQuestion, orderStatusSayOf, postSaleFallbackText, postSaleReplyGuard, turnOrderStatusSay } from "@/lib/sales-chatbot/post-sale-guard";
+import { openChatDelayCase } from "@/lib/cs/chat-delay-case";
 import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, claimFactsLoader, detectPriceDispute, extractVndAmounts, guardOutgoing, noteSeenTotals, paymentSignalHandoff, paymentSignalInCustomerText, unverifiedAmounts, type ClaimVerdict } from "@/lib/sales-chatbot/claim-guard";
 import { flagOrderForReviewAsAgent, loadAutoConfirmComplete } from "@/lib/records/order-create";
 import type { PriceDisputeState } from "@/lib/sales-chatbot/quote-shared";
@@ -1138,11 +1139,29 @@ async function chatTurnCore(
     // giao mà khách nói chưa nhận ⇒ MÁY CHỦ chuyển người ngay như nhánh khách báo chuyển khoản — không lượt AI, không câu mẫu, không để
     // tuỳ lời nhắc (model có thể hứa hoàn tiền / đổi hàng). Kênh nhắn tin chuyển người thì bot IM; kênh khác nhận câu an toàn.
     if (phase?.phase === "COMPLAINT") {
-      const reason = `Khiếu nại — ${phase.source}${phase.shortCode ? ` (đơn #${phase.shortCode})` : ""}`.slice(0, 300);
+      /*
+        KHIẾU NẠI GIAO CHẬM (P0 21/10/2026, ca HSLC #BD31267C): lý do chuyển người mang đủ để nhân viên làm ngay — mã đơn, khách đã chờ
+        bao lâu, ERP biết gì về vận chuyển (tổ chức tạo vận đơn ngoài ERP ⇒ «chưa có thông tin», KHÔNG phải «chưa gửi»: phải kiểm POS / ĐVVC).
+        Lượt chuyển GHI TRƯỚC; ghi được rồi mới gửi MỘT câu xin lỗi + đã chuyển nhân viên, kể cả trên kênh nhắn tin — khách vừa than chờ lâu
+        mà bot im thì khách chờ thêm không biết vì sao. Không mốc nào được hứa. Báo nhân viên MỘT lần cho mỗi đơn (khoá theo đơn, không theo
+        lượt): khách nhắn thêm «sao chưa giao» không đẻ thêm việc trùng. Hội thoại về tay người ⇒ bộ nhắc tự động không gửi (`followup-shared`).
+      */
+      const delay = phase.complaintKind === "DELIVERY_DELAY";
+      const waited = delay && typeof phase.orderAgeDays === "number" ? ` · khách đã chờ ${Math.floor(phase.orderAgeDays)} ngày kể từ lúc lên đơn` : "";
+      const shipInfo = !delay || phase.fulfillment === "DELIVERED" || /HOÀN/.test(phase.source) ? "" : phase.fulfillment === "SHIPPING" ? " · ĐVVC: kiện đang trên đường, chưa giao xong" : " · ERP chưa có thông tin vận chuyển — kiểm POS / ĐVVC";
+      const reason = `${delay ? "Khiếu nại giao chậm" : "Khiếu nại"} — ${phase.source}${phase.shortCode ? ` (đơn #${phase.shortCode})` : ""}${waited}${shipInfo}`.slice(0, 300);
       const st = { ...st0, handoff: { reason, at: now.toISOString() } };
-      if (!isMessagingChannel(opts.channel)) await reply(conv, seq, CLAIM_SAFE_TEXT.REFUND);
-      await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1 });
-      if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey: `sales-chat:complaint:${conv.id}:${turnSeq}` }).catch(() => undefined);
+      if (delay) {
+        await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1, nextFollowupAt: null });
+        // Ca CSKH «khách giục giao» (cs_cases, khoá theo đơn) — đường phụ: lỗi ghi ca không chặn câu xin lỗi, lượt chuyển đã ghi ở trên.
+        if (isPublicChannel(opts.channel)) await openChatDelayCase({ conversationId: conv.id, orderId: phase.orderId, shortCode: phase.shortCode, waitedDays: phase.orderAgeDays ?? null, shipInfo: shipInfo.replace(/^ · /, ""), customer: st.customer }).catch(() => undefined);
+        await reply(conv, seq, CLAIM_SAFE_TEXT.DELIVERY_DELAY);
+      } else {
+        if (!isMessagingChannel(opts.channel)) await reply(conv, seq, CLAIM_SAFE_TEXT.REFUND);
+        await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1 });
+      }
+      const dedupeKey = delay ? `sales-chat:complaint-delay:${conv.id}:${phase.orderId ?? "-"}` : `sales-chat:complaint:${conv.id}:${turnSeq}`;
+      if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey }).catch(() => undefined);
       return { ok: true, view: (await conversationView(conv.id))! };
     }
     // KHÁCH ĐÒI NGƯỜI / PHẢN ĐỐI MÓN LẶP (P0 #855, ca «ThuyNgo»): «Robot hả», «gặp nhân viên» (khi chủ shop bật «chuyển khi khách muốn gặp

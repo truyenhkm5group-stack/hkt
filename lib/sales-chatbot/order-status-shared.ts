@@ -48,7 +48,12 @@ export const NO_CARRIER_INFO = "Chưa có thông tin từ đơn vị vận chuy�
  * Câu của đơn KHÔNG vận đơn. Là câu TRẠNG THÁI, không phải lịch giao: khách hỏi «hôm nào có hàng / bao giờ nhận» thì câu này KHÔNG
  * được dùng làm câu trả lời (P0 #855) — câu hỏi lịch giao đi đường riêng ở `delivery-intent.ts`.
  */
-export const NO_SHIPMENT_YET = "Shop đã nhận đơn — chưa có thông tin vận chuyển";
+export const NO_SHIPMENT_PHRASE = "chưa có thông tin vận chuyển";
+/**
+ * «trên hệ thống» (P0 21/10/2026, ca HSLC #BD31267C): tổ chức tạo vận đơn NGOÀI ERP thì ERP không có vận đơn không có nghĩa là hàng chưa
+ * gửi — câu phải nói đúng điều ERP biết, không để model đọc thành «chưa gửi» rồi tự hứa «gửi ngay».
+ */
+export const NO_SHIPMENT_YET = `Shop đã nhận đơn — ${NO_SHIPMENT_PHRASE} trên hệ thống`;
 
 export function customerOrderStatus(i: OrderStatusInput): CustomerOrderStatus {
   const plain = (text: string): CustomerOrderStatus => ({ text, carrierSaid: false, needsStaff: null });
