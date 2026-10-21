@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "mission_id": "payroll-code-split-r2",
+  "title": "Thưởng theo mã: X% là TỔNG phần MKT, SUPPORT Y% trên phần họ làm ra, OWNER 5% trên phần SUPPORT (dựng lại của #941 trên main sau squash #940)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/payroll-code-split-contribution-r2",
+  "base_sha": "91c9de9abf7f080e3abefb8cc0fdd272062c4eaa",
+  "domains": [],
+  "owned_paths": [
+    "AGENTS.md",
+    "app/(dashboard)/payroll/codes/assignments/code-book-manager.tsx",
+    "app/(dashboard)/payroll/codes/page.tsx",
+    "docs/payroll-code-ledger.md",
+    "lib/payroll/code-ledger.ts",
+    "lib/validation/payroll-code.ts",
+    "tests/payroll-code-ledger.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-21T06:38:21.724Z",
+  "updated_at": "2026-10-21T06:38:21.724Z",
+  "last_heartbeat": "2026-10-21T06:38:21.724Z",
+  "definition_of_done": []
+}
