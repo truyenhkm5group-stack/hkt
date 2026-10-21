@@ -1,4 +1,3 @@
-{"at":"2026-10-14T07:30:43.188Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"hslc-quote-640","detail":"#840 @ 6cfb83695083 → 849fa00cf137 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-14T07:47:47.986Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"849fa00cf137 · run 38530647572 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38530647572"}
 {"at":"2026-10-14T08:08:54.492Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"inbox-message-sync","detail":"fix/inbox-message-sync @ 57ae4dcb7623 · 3 lệnh kiểm thử"}
 {"at":"2026-10-14T08:09:12.135Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#839 @ 57ae4dcb7623 · thread-diff production: KHOÁ XẾP TỤT 6/109 xác nhận gốc H1; lọc source_at cửa sổ cho INGEST"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-21T08:45:06.945Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#947 @ 5f381a42c4dd · review lead: chủ shop 21/10 «tạo việc cho từng phòng trên /work» — làm đúng luật 19: SOURCE PAYROLL_RECON chiếu từng mục danh sách phê duyệt Trung tâm đối soát lên hàng đợi đúng PHÒNG, link màn hình nhập, tự rời hàng đợi khi điều kiện hết; 0 ghi production; SLA/phòng ở work-sla/work-ownership; kiểm ALERT_KINDS_OWNED_ELSEWHERE."}
 {"at":"2026-10-21T09:21:05.921Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"return-reason-khach-vang-nha","detail":"#946 @ f25de1238b60 → 9efcee91eb09 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-21T09:29:21.139Z","actor":"DESKTOP-56TH98Y:wt-upsell-contact","kind":"CLAIM","mission":"upsell-after-contact","detail":"PLANNING · 0 mẫu phạm vi · MEDIUM"}
+{"at":"2026-10-21T09:34:21.276Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"9efcee91eb09 · run 39577918145 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39577918145"}
