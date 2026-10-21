@@ -1,8 +1,8 @@
 {
   "pr": 937,
-  "sha": "b8a345e5b78d55dc5f4c8b5ca8a7eec1c6a9d59c",
+  "sha": "1d5c93e6ada42c21b19b7c0fbb113ef51902ee2a",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-21T03:15:44.705Z",
-  "note": "review lead: 0251 platform_webhook_rejections chỉ cộng thêm (provider·reason·bucket phút·count·last_at, CHECK lý do, không page_id/PSID/nội dung), khai đủ CONTROL_PLANE_TABLES · OFFBOARD · migrateOrganizationDb · MIGRATION_SERVE_COMPAT. noteWebhookRejection upsert cộng dồn theo phút, tự xoá > 30 ngày, KHÔNG ném, không trong giao dịch; đếm trong messengerWebhookLog nên route.ts không đổi. Summary n"
+  "at": "2026-10-21T05:54:37.869Z",
+  "note": "vòng 2: rebase lên #935, xung đột chỉ dòng import /platform, hai khối JSX còn đủ; thêm khai env cho messenger-config-report.test.ts; logic như vòng 1."
 }
