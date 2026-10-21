@@ -362,7 +362,8 @@ thể thay đổi theo khoảng thời gian khác nhau."
 - Bảng đối soát tháng: dòng `shipping` là ƯỚC TÍNH khi có kiện tính theo lịch cước; dòng mới `shipping-billing`
   tách cước đã nằm trong bảng kê COD (đã đối soát cùng tiền thu hộ) · VTP ghi nhận chưa có bảng kê (CHƯA đối
   soát) · ước tính. Máy chi phí nêu riêng `shippingEstimate`.
-- Ngoài phạm vi (giữ nguyên, việc sau): luật kết quả đơn "cước < 10K" (`return-rate.ts`) và các báo cáo quảng
+- Ngoài phạm vi (giữ nguyên, việc sau): Báo cáo lợi nhuận `pnl()` (`lib/queries/reports.ts::orderFacts`, dùng chung với
+  Hiệu quả marketing theo ngày) còn cộng `orders.partner_fee` của Pancake; luật kết quả đơn "cước < 10K" (`return-rate.ts`) và các báo cáo quảng
   cáo / dòng tiền còn tự viết `coalesce(shipping_fee, partner_fee)` — đổi chúng là đổi số của báo cáo khác, cần
   đo trước/sau riêng.
 

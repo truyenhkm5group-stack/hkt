@@ -494,7 +494,16 @@ async function testLogisticsAdjustmentOnePath(db: Db) {
   assert.equal(s2.pnl.returnFee - s1.pnl.returnFee, 60_000, "(2) pnl(): phí hoàn tăng đúng phần điều chỉnh");
   assert.equal(s1.pnl.netProfit - s2.pnl.netProfit, 520_000, "(2) pnl(): lợi nhuận ròng giảm ĐÚNG 520.000 — không hơn (hai lần), không kém (bỏ sót)");
   assert.equal(s2.pnl.logisticsAdjustment, 520_000);
-  assert.equal(s2.pnl.shipping, s2.engine.components.SHIPPING.amount, "(2) pnl() và engine: cùng một con số cước (fixture: mọi đơn đã gửi đều có kết cục)");
+  // Đơn hoàn có vận đơn mà Viettel Post CHƯA ghi cước (shipping_fee 0), Pancake ghi cước đối tác 25.000.
+  // Engine (cơ sở lương — AGENTS.md mục 80) KHÔNG lấy số Pancake: dùng cước ƯỚC TÍNH theo lịch cước và đếm riêng.
+  // pnl() còn cộng `orders.partner_fee` như trước — việc sau (docs/payroll-code-ledger.md §10.7, đo trước/sau riêng).
+  assert.equal(s2.engine.shippingEstimate.orders, 1, "(2) engine: đúng 1 đơn tính cước ước tính (đơn hoàn chưa có cước VTP)");
+  assert.ok(s2.engine.shippingEstimate.amount > 0, "(2) engine: đơn có vận đơn mà thiếu cước VTP ⇒ ước tính, không phải 0");
+  assert.equal(
+    s2.engine.components.SHIPPING.amount,
+    s2.pnl.shipping - 25_000 + s2.engine.shippingEstimate.amount,
+    "(2) engine = pnl() − cước Pancake của đơn thiếu cước VTP + cước ước tính của đơn ấy — lệch ĐÚNG một chỗ, không chỗ nào khác",
+  );
   assert.equal(s2.pnl.returnFee, s2.engine.components.RETURN_COST.amount, "(2) pnl() và engine: cùng một con số phí hoàn");
 
   // Báo cáo theo ngày: Σ các ngày = pnl() tới từng đồng, ở cả ba cột.
