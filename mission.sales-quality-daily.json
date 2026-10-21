@@ -3,7 +3,7 @@
   "mission_id": "sales-quality-daily",
   "title": "Giám sát chất lượng AI Sales hằng ngày: 8 bộ dò xác định, một việc/tổ chức/mã/ngày cho phòng Bán hàng, 0 lời gọi AI",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -30,9 +30,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-21T14:34:32.326Z",
-  "updated_at": "2026-10-21T14:36:09.473Z",
+  "updated_at": "2026-10-21T15:31:31.042Z",
   "last_heartbeat": "2026-10-21T14:35:07.000Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#954 → d456ca2073441bcffc23f7e4244f34dcb5492252"
+  },
   "handoff": {
     "branch": "claude/sales-quality-daily",
     "sha": "4ffadb3986d3505bc631ce37f896ef06ec66bb24",
