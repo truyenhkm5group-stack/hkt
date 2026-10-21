@@ -1,0 +1,8 @@
+{
+  "pr": 955,
+  "sha": "277788304e388885a29e37d612da264e0eb48c14",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T15:30:06.114Z",
+  "note": "review lead (P0 chủ shop 21/10, case Yen Hai Arch; ĐỔI LUẬT AGENTS 3.12 theo quyết định chủ shop, trích nguyên văn): gốc (A) định danh chỉ từ state.customer/orderSync — SĐT khách gõ khi nhân viên giữ luồng và đơn nhân viên lên không thành khách đã biết; orderReadiness NEED_PHONE ⇒ silenceFallbackText gửi lại câu xin SĐT; (B) panel và danh sách hộp thư đọc SĐT hai đường (danh sách đọc state rút gọn"
+}
