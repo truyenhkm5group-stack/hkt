@@ -1,0 +1,8 @@
+{
+  "pr": 949,
+  "sha": "516c840cf7903b809117dc64034d1ca52ad26ce9",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T10:32:29.542Z",
+  "note": "review lead: chủ shop 21/10 «nếu tôi làm bảng lương thì không cần duyệt nữa; kế toán làm thì tôi duyệt» + xác nhận tài khoản ADMIN duy nhất (tạo 04/09) là của chủ shop. Khoá org.owner {userId} CHỈ ghi qua ops set-setting, không đường ghi trong app (tests/org-owner.test.ts quét mã nguồn); dùng thì kiểm id + còn bật + ADMIN, thiếu ⇒ về luật hai người (lỗi rơi về phía hẹp). Miễn hai người cho đúng ng"
+}
