@@ -6,7 +6,7 @@ import { readConversationControl } from "@/lib/sales-chatbot/conversation-contro
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { HANDOFF_QUEUE_CLEAR } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { CUSTOMER_MESSAGE_ROW_SQL, customerInboundRowSql, STATE_HANDOFF_AT_SQL, WAITING_REPLY_SQL } from "@/lib/sales-chatbot/inbox-states";
-import { customerComplaintSignal, customerNotReceivedSignal } from "@/lib/sales-chatbot/lifecycle";
+import { customerComplaintSignal, customerDeliveryDelaySignal, customerNotReceivedSignal } from "@/lib/sales-chatbot/lifecycle";
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { rowsOf } from "@/lib/sql-rows";
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
@@ -46,7 +46,7 @@ export function customerRequestKinds(texts: readonly string[]): CustomerRequestK
   const out = new Set<CustomerRequestKind>();
   for (const t of texts) {
     const f = foldVi(t.normalize("NFC"));
-    if (customerComplaintSignal(t) || customerNotReceivedSignal(t)) out.add("COMPLAINT");
+    if (customerComplaintSignal(t) || customerNotReceivedSignal(t) || customerDeliveryDelaySignal(t)) out.add("COMPLAINT");
     if (CANCEL_RE.test(f)) out.add("CANCEL");
     if (EDIT_RE.test(f)) out.add("EDIT");
     if (paymentSignalInCustomerText(t)) out.add("PAYMENT");

@@ -19,6 +19,10 @@
   CHỈ ĐỌC do Postgres ép (`ERP_READ_ONLY=1` trước lần mở kết nối đầu tiên).
 
   arg: `<mã tổ chức> [--day=YYYY-MM-DD]` (ngày giờ Việt Nam; mặc định hôm nay).
+
+  `--waiting` (P0 21/10/2026, ca HSLC #BD31267C): ĐƠN ĐÃ CHỐT MÀ CHƯA ĐI — đơn chốt trong 30 ngày, chưa giao / huỷ / hoàn, chưa có vận
+  đơn rời kho; mức ưu tiên + nguyên nhân (`waitingOrderVerdict`). Tổ chức tạo vận đơn NGOÀI ERP ⇒ «ERP không có vận đơn» là CHƯA BIẾT,
+  phải kiểm POS — không phải «chưa gửi».
 */
 const CHAY_THANG = Boolean(process.argv[1] && process.argv[1].endsWith("org-order-audit.ts"));
 if (CHAY_THANG) process.env.ERP_READ_ONLY = "1";
@@ -26,7 +30,9 @@ if (CHAY_THANG) process.env.ERP_READ_ONLY = "1";
 import "dotenv/config";
 import { and, eq, gte, lt, sql } from "drizzle-orm";
 import { getDbForInspection, schema, type Db } from "@/db";
+import { DWELL_SLA } from "@/lib/constants/shipment-status-age";
 import { findOrganization } from "@/lib/platform/organizations";
+import { SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 import { normalizeVnPhone } from "@/lib/sales-chatbot/returning";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -163,6 +169,62 @@ export function replyGaps(rows: readonly ReplyRow[], from: Date, to: Date, now: 
 
 // ─────────────────────────── ĐỌC DỮ LIỆU ───────────────────────────
 
+/* ═══ `--waiting`: ĐƠN ĐÃ CHỐT MÀ CHƯA ĐI ═══ */
+export const WAITING_STAGES = ["WAITING", "CONFIRMED", "PACKING", "READY_TO_SHIP"] as const;
+export const WAITING_LOOKBACK_DAYS = 30;
+export type WaitingPriority = "P1_KHACH_THAN" | "P2_QUA_NGUONG_HONG" | "P3_QUA_NGUONG_CANH_BAO";
+export type WaitingInput = { ageHours: number; hasShipment: boolean; leftWarehouse: boolean; complained: boolean; convStatus: string | null };
+
+/**
+ * Mức ưu tiên + nguyên nhân của MỘT đơn đã chốt chưa đi. HÀM THUẦN. Ngưỡng là `DWELL_SLA.PENDING` (warning / exception) — không số mới.
+ * `null` = trong hạn (hoặc đã rời kho: việc của tháp giao vận, không phải hàng đợi này). Khách đã than ⇒ P1 bất kể tuổi; bot còn đang tự
+ * trả lời hội thoại ấy (không HANDOFF) thì nói ra — đó đúng là lỗi của ca #BD31267C.
+ */
+export function waitingOrderVerdict(i: WaitingInput): { priority: WaitingPriority; cause: string } | null {
+  if (i.leftWarehouse) return null;
+  const pending = DWELL_SLA.PENDING;
+  const cause = i.hasShipment ? "có vận đơn nhưng chưa rời kho" : "ERP không có vận đơn — kiểm POS / ĐVVC (chưa biết, không phải «chưa gửi»)";
+  const bot = i.convStatus && i.convStatus !== "HANDOFF" ? " · bot VẪN đang tự trả lời hội thoại" : "";
+  if (i.complained) return { priority: "P1_KHACH_THAN", cause: `khách đã than giao chậm · ${cause}${bot}` };
+  if (pending && i.ageHours >= pending.exception) return { priority: "P2_QUA_NGUONG_HONG", cause: `chốt quá ${pending.exception} giờ · ${cause}` };
+  if (pending && i.ageHours >= pending.warning) return { priority: "P3_QUA_NGUONG_CANH_BAO", cause: `chốt quá ${pending.warning} giờ · ${cause}` };
+  return null;
+}
+
+async function waitingReport(db: Db, now: Date) {
+  const since = new Date(now.getTime() - WAITING_LOOKBACK_DAYS * 86_400_000);
+  const rows = rowsOf<{ id: string; at: Date | string; stage: string; source: string | null; conv_status: string | null; handoff: string | null; has_ship: boolean; left: boolean; case_open: boolean }>(
+    await db.execute(sql`
+      select o.id, o.inserted_at as at, o.stage::text as stage, o.source, c.status::text as conv_status, c.handoff_reason as handoff,
+             exists (select 1 from shipments where shipments.order_id = o.id) as has_ship,
+             exists (select 1 from shipments where shipments.order_id = o.id and ${SHIPMENT_LEFT_WAREHOUSE}) as left,
+             exists (select 1 from cs_cases k where k.order_id = o.id and k.kind = 'URGE_DELIVERY' and k.status not in ('DONE','AUTO_RESOLVED','CANCELLED')) as case_open
+        from orders o
+        left join sales_chat_conversations c on c.id = o.sales_conversation_id
+       where o.stage::text in (${sql.join(WAITING_STAGES.map((s) => sql`${s}`), sql`, `)}) and o.inserted_at >= ${since}
+       order by o.inserted_at`),
+  );
+  const counts = new Map<string, number>();
+  let inSla = 0;
+  console.log(`\n══ ĐƠN ĐÃ CHỐT CHƯA ĐI (${WAITING_LOOKBACK_DAYS} ngày, ${rows.length} đơn ở ${WAITING_STAGES.join("/")}) ══`);
+  const lines: { p: string; line: string }[] = [];
+  for (const r of rows) {
+    const at = new Date(r.at);
+    const ageHours = (now.getTime() - at.getTime()) / 3_600_000;
+    const complained = Boolean(r.case_open) || /^Khiếu nại giao chậm/.test(r.handoff ?? "");
+    const v = waitingOrderVerdict({ ageHours, hasShipment: Boolean(r.has_ship), leftWarehouse: Boolean(r.left), complained, convStatus: r.conv_status });
+    if (!v) {
+      inSla += 1;
+      continue;
+    }
+    const k = `${v.priority} · ${r.has_ship ? "có vận đơn chưa rời kho" : "ERP không có vận đơn"}`;
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+    lines.push({ p: v.priority, line: `${v.priority} · ${r.id.slice(-8)} · chốt ${vnDateTime(at)} · ${Math.floor(ageHours / 24)} ngày · ${r.stage} · ${r.source ?? "—"} · hội thoại ${r.conv_status ?? "không có"} · ${v.cause}` });
+  }
+  for (const x of lines.sort((a, b) => a.p.localeCompare(b.p))) console.log(x.line);
+  tomTat(`Đơn đã chốt chưa đi (${WAITING_LOOKBACK_DAYS} ngày): ${rows.length} · trong hạn / đã rời kho ${inSla} · ${[...counts.entries()].sort().map(([k, n]) => `${k}: ${n}`).join(" · ") || "không đơn nào quá hạn"}`);
+}
+
 const vnTime = (d: Date | null | undefined) => (d ? new Date(d.getTime() + VN_OFFSET_MS).toISOString().slice(11, 16) : "—");
 const vnDateTime = (d: Date | null | undefined) => (d ? new Date(d.getTime() + VN_OFFSET_MS).toISOString().slice(0, 16).replace("T", " ") : "—");
 
@@ -187,6 +249,10 @@ async function main() {
   }
   const { day, from, to } = vnDayWindow(dayArg);
   console.log(`Tổ chức ${org.code} (${org.name}) · ngày ${day} (giờ VN) · ${from.toISOString()} → ${to.toISOString()}`);
+  if (args.includes("--waiting")) {
+    await waitingReport(db, new Date());
+    process.exit(0);
+  }
   if (args.includes("--replies")) {
     await repliesReport(db, org.code, day, from, to);
     process.exit(0);

@@ -594,6 +594,7 @@ import { testP0855Cart } from "./p0-855-cart.test";
 import { testP0855Delta } from "./p0-855-delta.test";
 import { testP0QuickReplyFocus } from "./p0-quick-reply-focus.test";
 import { testP0UpsellAfterConfirm } from "./p0-upsell-after-confirm.test";
+import { testP0ComplaintDeliveryDelay } from "./p0-complaint-delivery-delay.test";
 import { testP0RepeatBuyer } from "./p0-repeat-buyer.test";
 import { testP0863CancelFlow } from "./p0-863-cancel-flow.test";
 import { testConvMoneyTrace } from "./conv-money-trace.test";
@@ -3191,6 +3192,9 @@ async function main() {
     // P0 19/10/2026 (ca «Trung Dinh») — lời mời SAU CHỐT: một câu gộp vào tin xác nhận, «ok» không thêm món, gọi tên món ⇒ thêm vào đơn tự
     // chốt, đã mời / từ chối / hết hàng / vận đơn đã chạy / đơn đồng ý — thuần + chatTurn thật (`gd-food-pco`).
     await testP0UpsellAfterConfirm();
+    // P0 21/10/2026 (ca HSLC #BD31267C) — khách than GIAO CHẬM: chuyển người trước + một câu xin lỗi không mốc, ca CSKH URGE_DELIVERY một
+    // ca mỗi đơn, «đơn đâu rồi» chỉ khi quá 48 giờ, «Ok» không đóng việc, câu hỏi thường không bị nhận nhầm — thuần + chatTurn thật (`gd-food-dly`).
+    await testP0ComplaintDeliveryDelay();
     // P0 11/10/2026 — ops sales-integrity-audit: giá bot ≠ giá đơn · giá tự đổi · xác nhận giả · chuyển người không ai nhận ·
     // địa chỉ chưa ghép · nhắc sau đơn chốt — thuần + CSDL thật (mã `erp-ia-`, tự dọn), tóm tắt không lọt PII.
     await testSalesIntegrityAudit();
