@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "perf-probe-payroll-recon",
+  "title": "perf-probe đếm nguồn việc PAYROLL_RECON theo phòng + đo thời gian adaptPayrollRecon nguội/ấm (chỉ script)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/perf-probe-payroll-recon",
+  "base_sha": "c65c2e9e7e0e09bfd0c95a01602f18ec8f752d65",
+  "domains": [],
+  "owned_paths": [
+    "scripts/perf-probe.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-21T11:03:58.295Z",
+  "updated_at": "2026-10-21T11:03:58.295Z",
+  "last_heartbeat": "2026-10-21T11:03:58.295Z",
+  "definition_of_done": []
+}
