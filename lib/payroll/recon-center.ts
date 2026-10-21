@@ -18,6 +18,47 @@
  */
 import type { DepartmentCode } from "@/lib/constants/departments";
 
+/**
+ * KHOÁ + PHÒNG CHỊU TRÁCH NHIỆM của từng mục DANH SÁCH PHÊ DUYỆT — MỘT bảng. Trang Trung tâm đối soát và nguồn
+ * việc `PAYROLL_RECON` trên `/work` (luật sở hữu `PAYROLL_RECON:<khoá>`) cùng đọc bảng này: hai nơi khai phòng
+ * là hai nơi nói hai phòng khác nhau (AGENTS.md mục 22). Khoá đã nằm trong `work_key` của lớp ghi chú — KHÔNG đổi.
+ */
+export const APPROVAL_ITEM_OWNER = {
+  "opening-balance": "MANAGEMENT",
+  "undated-employees": "HR",
+  "pending-code-rows": "MANAGEMENT",
+  "codes-without-owner": "MARKETING",
+  "months-signoff": "FINANCE",
+  "cogs-gaps": "WAREHOUSE",
+  "cod-receivable": "FINANCE",
+  "duplicate-source": "FINANCE",
+} as const satisfies Record<string, DepartmentCode>;
+export type ApprovalItemKey = keyof typeof APPROVAL_ITEM_OWNER;
+export const APPROVAL_ITEM_KEYS = Object.keys(APPROVAL_ITEM_OWNER) as ApprovalItemKey[];
+
+/** Nhãn ngắn của từng loại mục — cho màn hình cấu hình hạn / phòng của `/work`. */
+export const APPROVAL_ITEM_LABEL: Record<ApprovalItemKey, string> = {
+  "opening-balance": "Lương · khai số dư lũy kế mở sổ (quy chế cổng)",
+  "undated-employees": "Lương · nhân sự chưa khai ngày vào làm",
+  "pending-code-rows": "Lương · phân công / điều khoản thưởng theo mã chờ duyệt",
+  "codes-without-owner": "Lương · mã có doanh thu chưa có người phụ trách đã duyệt",
+  "months-signoff": "Lương · tháng chờ ký đối soát cấp 1",
+  "cogs-gaps": "Lương · dòng đã giao chưa có giá vốn",
+  "cod-receivable": "Lương · đơn đã giao chưa có chứng từ tiền (bảng kê COD)",
+  "duplicate-source": "Lương · khoản chi gõ tay trùng nguồn",
+};
+
+/** Khoảng tháng mặc định của Trung tâm đối soát: tháng hiện tại và 4 tháng trước. Trang và `/work` cùng dùng. */
+export const RECON_CENTER_DEFAULT_BACK_MONTHS = 4;
+export function shiftMonthKey(monthKey: string, n: number): string {
+  const [y, m] = monthKey.split("-").map(Number);
+  const t = y * 12 + (m - 1) + n;
+  return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, "0")}`;
+}
+export function reconCenterDefaultRange(toMonth: string): { fromMonth: string; toMonth: string } {
+  return { fromMonth: shiftMonthKey(toMonth, -RECON_CENTER_DEFAULT_BACK_MONTHS), toMonth };
+}
+
 /** Một tháng của chuỗi số đo. `null` = CHƯA BIẾT (không phải 0). */
 export type OpeningMonthInput = {
   monthKey: string;
@@ -105,7 +146,7 @@ export function buildOpeningProposal(openingMonth: string, dataStart: string | n
 
 /** Một mục của DANH SÁCH PHÊ DUYỆT DUY NHẤT. */
 export type ApprovalItem = {
-  key: string;
+  key: ApprovalItemKey;
   /** `DECIDE` = chủ shop / người có quyền phải quyết · `SUPPLY` = phòng phải bổ sung chứng từ / dữ liệu. */
   kind: "DECIDE" | "SUPPLY";
   title: string;
@@ -150,7 +191,7 @@ export function buildApprovalList(x: ApprovalInput): ApprovalItem[] {
         ? `Chuỗi số đo từ ${x.opening.dataStart ?? "—"} đủ căn cứ: lũy kế đo được ${vnd(x.opening.measuredCumulative)} (đỉnh ${vnd(x.opening.measuredHighWater)}).`
         : `Đề xuất ${vnd(x.opening.measuredCumulative)} CHƯA ĐỦ CĂN CỨ — ${x.opening.incompleteMonths.length} tháng còn thiếu (${x.opening.incompleteMonths.join(", ")}). Không dùng số này như số đã duyệt.`,
       action: "Người có quyền duyệt lương đối chiếu đề xuất rồi KHAI quy chế cổng (số dư, mốc cao nhất, lý do). ERP không tự khai.",
-      owner: "MANAGEMENT",
+      owner: APPROVAL_ITEM_OWNER["opening-balance"],
       amount: x.opening.measuredCumulative,
       count: x.opening.months.length,
       href: "/payroll/settings",
@@ -163,7 +204,7 @@ export function buildApprovalList(x: ApprovalInput): ApprovalItem[] {
       title: `${x.undatedEmployees.length} nhân sự chưa khai ngày vào làm`,
       cause: `Lương cứng khai hôm nay (${x.undatedEmployees.map((e) => `${e.name} ${vnd(e.monthlyFixed)}/tháng`).join(", ")}) không chứng minh được người ấy đã làm ở các tháng trước — đề xuất số dư mở sổ KHÔNG nhân lương ấy cho mọi tháng, nên các tháng ấy còn thiếu căn cứ. (Kỳ đang trả lương vẫn trừ đủ lương cứng như cũ.)`,
       action: "Khai ngày vào làm theo hợp đồng lao động ở Lương → nhân sự. Khai xong, các tháng có căn cứ tự vào đề xuất mở sổ.",
-      owner: "HR",
+      owner: APPROVAL_ITEM_OWNER["undated-employees"],
       amount: x.undatedEmployees.reduce((t, e) => t + e.monthlyFixed, 0),
       count: x.undatedEmployees.length,
       href: "/payroll",
@@ -176,7 +217,7 @@ export function buildApprovalList(x: ApprovalInput): ApprovalItem[] {
       title: `${x.pendingAssignments} phân công MKTer ↔ mã và ${x.pendingTerms} điều khoản thưởng đang CHỜ DUYỆT`,
       cause: "Dòng chờ duyệt KHÔNG vào bảng lương — không có tỷ lệ mặc định nào được áp thay.",
       action: "Người duyệt (khác người khai, hoặc chủ shop) bấm Duyệt / Từ chối từng dòng.",
-      owner: "MANAGEMENT",
+      owner: APPROVAL_ITEM_OWNER["pending-code-rows"],
       amount: null,
       count: x.pendingAssignments + x.pendingTerms,
       href: "/payroll/codes/assignments",
@@ -189,7 +230,7 @@ export function buildApprovalList(x: ApprovalInput): ApprovalItem[] {
       title: `${x.codesWithoutOwner} mã có doanh thu chưa có OWNER đã duyệt`,
       cause: "Lợi nhuận của mã chưa phân công không chia cho ai — thưởng theo mã của mã ấy là 0 cho tới khi có phân công đã duyệt.",
       action: "Khai OWNER / SUPPORT kèm X% / Y% theo quy chế (gợi ý theo chi phí quảng cáo có sẵn ở trang phân công), rồi duyệt.",
-      owner: "MARKETING",
+      owner: APPROVAL_ITEM_OWNER["codes-without-owner"],
       amount: null,
       count: x.codesWithoutOwner,
       href: "/payroll/codes/assignments",
@@ -202,7 +243,7 @@ export function buildApprovalList(x: ApprovalInput): ApprovalItem[] {
       title: `${x.monthsNeedingSignoff.length} tháng có thưởng % lợi nhuận đủ điều kiện chờ ký đối soát cấp 1`,
       cause: `Tháng ${x.monthsNeedingSignoff.join(", ")}: kỳ lương không duyệt / khoá được khi chưa có chữ ký trên ảnh chụp kỳ.`,
       action: "Người quản trị lương ký bảng đối soát của tháng; một người KHÁC duyệt kỳ.",
-      owner: "FINANCE",
+      owner: APPROVAL_ITEM_OWNER["months-signoff"],
       amount: null,
       count: x.monthsNeedingSignoff.length,
       href: "/payroll/reconciliation",
@@ -215,7 +256,7 @@ export function buildApprovalList(x: ApprovalInput): ApprovalItem[] {
       title: `${x.cogsGaps.lines} dòng đã giao chưa có giá vốn (${x.cogsGaps.variants} mẫu mã)`,
       cause: `${vnd(x.cogsGaps.revenue)} doanh thu đang tính với giá vốn 0 — lợi nhuận ảo. ERP KHÔNG tự đặt giá vốn.`,
       action: "Nhập giá trên phiếu nhập kho của đúng mẫu mã (hoặc nối dòng đơn vào mẫu mã). Bảng truy từng mẫu mã ở dưới.",
-      owner: "WAREHOUSE",
+      owner: APPROVAL_ITEM_OWNER["cogs-gaps"],
       amount: x.cogsGaps.revenue,
       count: x.cogsGaps.lines,
       href: "/inventory/cost-center",
@@ -228,7 +269,7 @@ export function buildApprovalList(x: ApprovalInput): ApprovalItem[] {
       title: `${x.codReceivable.orders} đơn đã giao chưa có chứng từ tiền`,
       cause: `${vnd(x.codReceivable.revenue)} là doanh thu KẾ TOÁN (đã giao) nhưng chưa phải tiền thực nhận — ${x.codReceivable.over30Orders} đơn đã giao quá 30 ngày.`,
       action: "Tải «Chi tiết bảng kê COD» của các kỳ thiếu từ viettelpost.vn (.xlsx / .csv) rồi nạp ở Nhập Viettel Post — bảng kê đối soát CẢ tiền thu hộ lẫn cước đã tính tiền. Đơn quá 30 ngày đối chiếu thẳng với ĐVVC.",
-      owner: "FINANCE",
+      owner: APPROVAL_ITEM_OWNER["cod-receivable"],
       amount: x.codReceivable.revenue,
       count: x.codReceivable.orders,
       href: "/import-vtp",
@@ -241,7 +282,7 @@ export function buildApprovalList(x: ApprovalInput): ApprovalItem[] {
       title: `${x.duplicateSourceWarnings} khoản chi gõ tay trùng nguồn đang bị loại`,
       cause: "Đã có nguồn thẩm quyền (vận đơn / tài khoản QC) cho cùng khoản — cộng thêm là ghi trùng.",
       action: "Kiểm tay phần chênh; khoản thật sự là điều chỉnh thì khai lý do (`MANUAL_ADJUSTMENT`).",
-      owner: "FINANCE",
+      owner: APPROVAL_ITEM_OWNER["duplicate-source"],
       amount: null,
       count: x.duplicateSourceWarnings,
       href: "/expenses",
