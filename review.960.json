@@ -1,0 +1,8 @@
+{
+  "pr": 960,
+  "sha": "be04ec2f5a828152837ceed9cb0871c120b9bd67",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T20:03:04.714Z",
+  "note": "review lead (P0 lý do hoàn mục 2b): sáu bộ lọc lọc ở TS trên dòng baseRows (tỉnh qua findProvince — không bảng thứ hai; nguồn = ORDER_SOURCE; ĐVVC tách NONE vs UNNAMED; care = owner_id đợt mới nhất, NONE vs UNOWNED; trạng thái theo OUTCOME_GROUP của ORDER_OUTCOME, danh sách đóng). Mọi bộ lọc vào khoá memo. Không bật 2b ⇒ một báo cáo trùng khoá job giữ ấm; bật ⇒ E/E2 + kỳ trước của bảng nguyên nhân"
+}
