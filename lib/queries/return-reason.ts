@@ -28,12 +28,16 @@ import { classifyRaw } from "@/lib/returns/reason-classify";
 import {
   carrierCodeText,
   REASON_SOURCE_LABEL,
+  SOURCE_CAN_CONCLUDE_SHOP_FAULT,
   isReasonSource,
   vtpCodeOfObservation,
   type ReasonCoverageState,
   type ReasonSource,
 } from "@/lib/constants/return-reason-source";
 import { evidenceBeats, resolveEvidence, type ReasonEvidenceItem } from "@/lib/constants/return-reason-evidence";
+import { rowsOf } from "@/lib/sql-rows";
+import { CARRIER_HANDOFF_AT_SQL } from "@/lib/constants/carrier-handoff";
+import { DWELL_SLA } from "@/lib/constants/shipment-status-age";
 import {
   boDau,
   isReturnReason,
@@ -84,6 +88,12 @@ export type ReasonVerdict = {
    * truy vấn lại, và để thấy được kiện nào có các nguồn nói khác nhau.
    */
   items: ReasonEvidenceItem[];
+  /**
+   * CHỨNG CỨ THỜI GIAN cho lời «giao chậm» của nguồn KHÔNG có thẩm quyền (P0 21/10/2026): `true` = từ mốc ĐVVC cầm hàng
+   * (`carrier_handoff_at`) tới lần phát đầu quá `DWELL_SLA.IN_TRANSIT.exception` giờ · `false` = không quá · `null` = không đo được
+   * (thiếu một trong hai mốc). Chỉ đo cho đúng những kiện ấy — kiện khác không có trường này (không phải `false`).
+   */
+  slowByTime?: boolean | null;
 };
 
 const KHONG_BIET: ReasonVerdict = { reason: "UNKNOWN", confidence: "NONE", evidence: "Không có mã lý do, không có sự kiện nào nêu lý do.", rawReason: "", manual: false, actorEmail: "", coverage: "NO_EVIDENCE", source: null, items: [] };
@@ -289,6 +299,47 @@ export async function reasonsForShipments(shipmentIds: readonly string[]): Promi
         ? { reason: "UNKNOWN", confidence: CONFIDENCE_OF_SOURCE[t.source], evidence: t.evidence, rawReason: t.rawReason, manual: false, actorEmail: t.actorEmail, coverage: "RAW_ONLY", source: t.source, items: [] }
         : KHONG_BIET,
     );
+  }
+  /*
+    CHỨNG CỨ THỜI GIAN — chỉ cho kiện mà nguyên nhân chính là «giao chậm» từ nguồn không có thẩm quyền (Pancake ghi chú…). Hôm nay
+    không nguồn máy nào sinh lý do này nên tập rỗng và KHÔNG có truy vấn nào; ngày nó xuất hiện, kiện ấy có căn cứ để vào «giao chậm đã
+    xác nhận» (đo được) hay ở lại «chưa xác định» (không đo được / không chậm) thay vì bị đoán.
+  */
+  const canDo = ids.filter((id) => {
+    const v = out.get(id);
+    return v?.reason === "SLOW_DELIVERY" && v.source !== null && !SOURCE_CAN_CONCLUDE_SHOP_FAULT[v.source];
+  });
+  if (canDo.length) {
+    const doTre = await slowByTimeOf(db, canDo);
+    for (const id of canDo) out.set(id, { ...out.get(id)!, slowByTime: doTre.get(id) ?? null });
+  }
+  return out;
+}
+
+/** Chặng của lần PHÁT đầu tiên (bưu tá cầm kiện đi giao, giao hụt hay giao được) — mốc kết thúc của đồng hồ «giao chậm». */
+const FIRST_ATTEMPT_STAGES = ["OUT_FOR_DELIVERY", "DELIVERY_FAILED", "DELIVERED"] as const;
+
+/**
+ * Bàn giao ĐVVC → lần phát đầu có quá hạn không. Ngưỡng là `DWELL_SLA.IN_TRANSIT.exception` (giờ — «ba ngày không nhích khỏi đang
+ * trung chuyển» là ngoại lệ phải xử lý): không đặt con số mới. Thiếu mốc nào ⇒ không có dòng ⇒ nơi gọi ghi `null`, không phải `false`.
+ */
+export async function slowByTimeOf(db: Awaited<ReturnType<typeof getDb>>, ids: readonly string[]): Promise<Map<string, boolean>> {
+  const limitHours = DWELL_SLA.IN_TRANSIT?.exception;
+  const out = new Map<string, boolean>();
+  if (!ids.length || !limitHours) return out;
+  const list = rowsOf<{ id: string; handoff_at: Date | string | null; first_attempt: Date | string | null }>(
+    await db.execute(sql`
+    select "shipments"."id" as id,
+           ${sql.raw(CARRIER_HANDOFF_AT_SQL)} as handoff_at,
+           (select min(e.occurred_at) from shipment_events e
+             where e.shipment_id = "shipments"."id" and e.normalized_stage::text in (${sql.join(FIRST_ATTEMPT_STAGES.map((x) => sql`${x}`), sql`, `)})) as first_attempt
+      from "shipments"
+     where "shipments"."id" in (${sql.join(ids.map((x) => sql`${x}`), sql`, `)})`),
+  );
+  for (const r of list) {
+    if (!r.handoff_at || !r.first_attempt) continue;
+    const hours = (new Date(r.first_attempt).getTime() - new Date(r.handoff_at).getTime()) / 3_600_000;
+    out.set(r.id, hours > limitHours);
   }
   return out;
 }

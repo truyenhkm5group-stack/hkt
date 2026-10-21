@@ -46,7 +46,7 @@ function inBang(ten: string, bc: ReturnReasonReport) {
       `${g.label.padEnd(38)} | ${so(g.count).padStart(4)} | ${pct(g.count, bc.reasonCoverage.known).padStart(10)} | ${so(t.HUMAN_CONFIRMED).padStart(8)} | ${so(t.CARE_REPORTED).padStart(9)} | ${so(t.CARRIER_OBSERVED).padStart(8)} | ${so(t.CONFLICTED).padStart(8)}`,
     );
   }
-  console.log(`${"Chưa xác định (độ phủ, không phải nhóm)".padEnd(38)} | ${so(bc.reasonCoverage.unknown).padStart(4)} |`);
+  console.log(`${"Chưa xếp nhóm (không phải một nhóm)".padEnd(38)} | ${so(bc.ungrouped).padStart(4)} |`);
   console.log("* trên ca ĐÃ BIẾT lý do, như màn hình.");
 }
 
@@ -64,13 +64,14 @@ async function main() {
   console.log(`── CHẠY THỬ CÁCH XẾP NHÓM LÝ DO HOÀN · kỳ "${PERIOD}" · mốc SHIPPED · CHỈ ĐỌC ──`);
 
   /* ─── 1 · BẤT BIẾN ─── */
-  const tongNhom = (bc: ReturnReasonReport) => bc.groups.reduce((n, g) => n + g.count, 0) + bc.reasonCoverage.unknown;
+  // «Chưa xếp nhóm» ≠ «lý do UNKNOWN» ở cách xếp theo chứng cứ (giao chậm chưa xác minh) — bất biến đọc `ungrouped`.
+  const tongNhom = (bc: ReturnReasonReport) => bc.groups.reduce((n, g) => n + g.count, 0) + bc.ungrouped;
   const loi: string[] = [];
   if (truoc.returned !== sau.returned) loi.push(`tổng hoàn TRƯỚC ${truoc.returned} ≠ SAU ${sau.returned}`);
-  if (tongNhom(truoc) !== truoc.returned) loi.push(`TRƯỚC: nhóm + chưa xác định = ${tongNhom(truoc)} ≠ ${truoc.returned}`);
-  if (tongNhom(sau) !== sau.returned) loi.push(`SAU: nhóm + chưa xác định = ${tongNhom(sau)} ≠ ${sau.returned}`);
+  if (tongNhom(truoc) !== truoc.returned) loi.push(`TRƯỚC: nhóm + chưa xếp nhóm = ${tongNhom(truoc)} ≠ ${truoc.returned}`);
+  if (tongNhom(sau) !== sau.returned) loi.push(`SAU: nhóm + chưa xếp nhóm = ${tongNhom(sau)} ≠ ${sau.returned}`);
   if (ca.length !== sau.returned) loi.push(`tập ca của ma trận ${ca.length} ≠ tổng hoàn ${sau.returned}`);
-  console.log(loi.length ? `\n✗ BẤT BIẾN HỎNG: ${loi.join(" · ")}` : `\n✓ Bất biến: tổng hoàn trước = sau = ${so(sau.returned)} · mỗi cách xếp cộng nhóm + chưa xác định = tổng · ma trận đứng trên đúng ${so(ca.length)} ca`);
+  console.log(loi.length ? `\n✗ BẤT BIẾN HỎNG: ${loi.join(" · ")}` : `\n✓ Bất biến: tổng hoàn trước = sau = ${so(sau.returned)} · mỗi cách xếp cộng nhóm + chưa xếp nhóm = tổng · ma trận đứng trên đúng ${so(ca.length)} ca`);
 
   /* ─── 2 · TRƯỚC / SAU ─── */
   inBang("TRƯỚC — nhóm cũ (cờ LEGACY, đang chạy)", truoc);

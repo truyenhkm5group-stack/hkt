@@ -93,6 +93,8 @@ export type ReasonGroupRow = {
   share: number;
   incidence: number | null;
   lostRevenue: number;
+  /** Đơn hoàn của nhóm KHÔNG có giá trị đơn — `lostRevenue` không tính chúng (chưa biết ≠ 0). */
+  lostRevenueUnknown: number;
   details: ReasonDetailRow[];
 };
 
@@ -190,6 +192,13 @@ export type ReturnReasonReport = {
   eligibleSent: number;
   /** Đơn của tập này còn đang chạy — nằm trong `eligibleSent`, ngoài `finished`. */
   active: number;
+  /**
+   * Ca hoàn KHÔNG vào nhóm nào của cách xếp đang bật. Ở cách xếp cũ = ca lý do `UNKNOWN`; ở cách xếp theo chứng cứ còn gồm lời khai có
+   * lý do mà chưa đủ căn cứ cho nhóm nào (giao chậm chưa xác minh). Bất biến: tổng `groups[].count` + `ungrouped` = `returned`.
+   */
+  ungrouped: number;
+  /** Đơn hoàn KHÔNG có giá trị đơn — `lostRevenue` không tính chúng. */
+  lostRevenueUnknown: number;
 };
 
 export type ReasonFilter = {
@@ -285,7 +294,7 @@ async function baseRows(f: ReasonFilter) {
     marketer_evidence: MarketerEvidence | null;
     marketer_state: MarketerLinkState;
     marketer_conflict: boolean;
-    revenue: string | number;
+    revenue: string | number | null;
   }>(
     await chayKhongJit(db, (tx) => tx.execute(sql`
       select b.order_id, b.shipment_id, b.outcome, b.basis_at, b.marketer_id, b.marketer_evidence, b.marketer_state, b.marketer_conflict, b.revenue
@@ -294,7 +303,8 @@ async function baseRows(f: ReasonFilter) {
                  "shipments"."id" as shipment_id,
                  ${ORDER_OUTCOME_FAST} as outcome,
                  ${sql.raw(timeBasisColumnSql(basis))} as basis_at,
-                 coalesce("orders"."total_price_after_discount", 0) as revenue,
+                 -- KHÔNG coalesce về 0: đơn thiếu giá trị là CHƯA BIẾT, đếm riêng (AGENTS.md mục 42).
+                 "orders"."total_price_after_discount" as revenue,
                  ${OM_MARKETER_ID} as marketer_id,
                  ${OM_EVIDENCE} as marketer_evidence,
                  ${OM_STATE} as marketer_state,
@@ -325,7 +335,9 @@ async function baseRows(f: ReasonFilter) {
       marketerEvidence: r.marketer_evidence,
       marketerState: r.marketer_state,
       marketerConflict: Boolean(r.marketer_conflict),
+      // `?? 0` TẠI CHỖ GỌI, có chủ ý: mọi tổng giá trị cộng phần ĐÃ BIẾT; `revenueKnown` đếm riêng phần chưa biết (mục 42).
       revenue: Number(r.revenue ?? 0),
+      revenueKnown: r.revenue !== null && r.revenue !== undefined,
     })),
   };
 }
@@ -417,11 +429,12 @@ async function dungBaoCaoLyDo(f: ReasonFilter): Promise<ReturnReasonReport> {
     gộp theo lý do là trộn hai thứ ấy lại. Ở cách xếp cũ mỗi lý do đúng một nhóm nên hai cách gộp
     cho cùng con số.
   */
-  type Acc = { group: ReasonGroupKey | null; reason: ReturnReason; count: number; rescued: number; eligible: number; withIntervention: number; lostRevenue: number; confidence: Record<ReasonConfidence, number>; tiers: Record<EvidenceTier, number> };
-  const moi = (group: ReasonGroupKey | null, reason: ReturnReason): Acc => ({ group, reason, count: 0, rescued: 0, eligible: 0, withIntervention: 0, lostRevenue: 0, confidence: EMPTY_CONFIDENCE_COUNTS(), tiers: demBac() });
+  type Acc = { group: ReasonGroupKey | null; reason: ReturnReason; count: number; rescued: number; eligible: number; withIntervention: number; lostRevenue: number; lostUnknown: number; confidence: Record<ReasonConfidence, number>; tiers: Record<EvidenceTier, number> };
+  const moi = (group: ReasonGroupKey | null, reason: ReturnReason): Acc => ({ group, reason, count: 0, rescued: 0, eligible: 0, withIntervention: 0, lostRevenue: 0, lostUnknown: 0, confidence: EMPTY_CONFIDENCE_COUNTS(), tiers: demBac() });
   const theoLyDo = new Map<string, Acc>();
   const lyDoTheoDon = new Map<string, ReturnReason>();
   const evidenceTiers = demBac();
+  let ungrouped = 0;
   // Người đã động vào ca (xác nhận HOẶC ghi nhận) — mẫu của cột "đã cứu". Ghi chú chăm sóc là một
   // thao tác người thật; tách nhãn "Người xác nhận" ra khỏi nó không được làm cột cứu mất ca.
   const coNguoi = (c: ReasonConfidence | undefined) => c === "CONFIRMED" || c === "STAFF_REPORTED";
@@ -430,6 +443,7 @@ async function dungBaoCaoLyDo(f: ReasonFilter): Promise<ReturnReasonReport> {
     const v = r.shipmentId ? verdicts.get(r.shipmentId) : undefined;
     const reason: ReturnReason = v?.reason ?? "UNKNOWN";
     const group = v ? grouping.groupOf(v) : null;
+    if (r.outcome !== "DELIVERED" && group === null) ungrouped += 1;
     const k = `${group ?? "-"}|${reason}`;
     const cur = theoLyDo.get(k) ?? moi(group, reason);
     if (r.outcome === "DELIVERED") {
@@ -448,6 +462,7 @@ async function dungBaoCaoLyDo(f: ReasonFilter): Promise<ReturnReasonReport> {
       const tier = v ? grouping.tierOf(v) : "UNKNOWN";
       cur.count += 1;
       cur.lostRevenue += r.revenue;
+      if (!r.revenueKnown) cur.lostUnknown += 1;
       cur.confidence[v?.confidence ?? "NONE"] += 1;
       cur.tiers[tier] += 1;
       evidenceTiers[tier] += 1;
@@ -489,9 +504,11 @@ async function dungBaoCaoLyDo(f: ReasonFilter): Promise<ReturnReasonReport> {
 
   const details = new Map<ReasonGroupKey, ReasonDetailRow[]>();
   const bacTheoNhom = new Map<ReasonGroupKey, Record<EvidenceTier, number>>();
+  const chuaBietGiaTri = new Map<ReasonGroupKey, number>();
   for (const a of theoLyDo.values()) {
     const { reason, group: g } = a;
     if (reason === "UNKNOWN" || g === null) continue;
+    chuaBietGiaTri.set(g, (chuaBietGiaTri.get(g) ?? 0) + a.lostUnknown);
     const b = bacTheoNhom.get(g) ?? demBac();
     for (const t of EVIDENCE_TIERS) b[t] += a.tiers[t];
     bacTheoNhom.set(g, b);
@@ -561,6 +578,7 @@ async function dungBaoCaoLyDo(f: ReasonFilter): Promise<ReturnReasonReport> {
         share: mauTyTrong ? (count / mauTyTrong) * 100 : 0,
         incidence: eligibleSent ? Math.round((count / eligibleSent) * 1000) / 10 : null,
         lostRevenue: list.reduce((n, d) => n + d.lostRevenue, 0),
+        lostRevenueUnknown: chuaBietGiaTri.get(g) ?? 0,
         details: list,
       };
     });
@@ -598,6 +616,8 @@ async function dungBaoCaoLyDo(f: ReasonFilter): Promise<ReturnReasonReport> {
     lostRevenue: hoanRows.reduce((n, r) => n + r.revenue, 0),
     eligibleSent,
     active,
+    ungrouped,
+    lostRevenueUnknown: hoanRows.filter((r) => !r.revenueKnown).length,
   };
 }
 
