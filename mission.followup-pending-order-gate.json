@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "mission_id": "followup-pending-order-gate",
+  "title": "Bộ nhắc tự động không gửi tin bán hàng khi khách còn đơn đã chốt chưa kết cục (≤ 30 ngày)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-fu-gate",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/followup-pending-order-gate",
+  "base_sha": "26e2faf4f537fcfd7859356fab79cd17bc0b3e39",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/followup-shared.ts",
+    "lib/sales-chatbot/followup.ts",
+    "lib/constants/shipment-status-age.ts",
+    "scripts/org-order-audit.ts",
+    "scripts/stuck-conversation-audit.ts",
+    "tests/followup-pending-order.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-21T07:46:38.608Z",
+  "updated_at": "2026-10-21T07:46:38.608Z",
+  "last_heartbeat": "2026-10-21T07:46:38.608Z",
+  "definition_of_done": []
+}
