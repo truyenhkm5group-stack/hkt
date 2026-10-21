@@ -3,7 +3,7 @@
   "mission_id": "payroll-code-split-r2",
   "title": "Thưởng theo mã: X% là TỔNG phần MKT, SUPPORT Y% trên phần họ làm ra, OWNER 5% trên phần SUPPORT (dựng lại của #941 trên main sau squash #940)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -26,7 +26,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-21T06:38:21.724Z",
-  "updated_at": "2026-10-21T06:38:21.724Z",
-  "last_heartbeat": "2026-10-21T06:38:21.724Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-21T06:38:55.817Z",
+  "last_heartbeat": "2026-10-21T06:38:55.817Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/payroll-code-split-contribution-r2",
+    "sha": "e38e17b587ac521ff87a7c03e2597954d377aa12",
+    "at": "2026-10-21T06:38:55.817Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Thưởng theo mã: X% là TỔNG phần MKT, SUPPORT Y% trên phần họ làm ra, OWNER 5% trên phần SUPPORT (dựng lại của #941 trên main sau squash #940)",
+    "summary": "",
+    "tests": [
+      "worker code-erp-01: 7 tệp giống hệt bản đã qua cổng ở #941 (git diff ebe5bcbf0 e38e17b58 trên các tệp ấy rỗng); trên cây mới typecheck OK · payroll-code-ledger 13 ca ĐẠT; đột biến 5/5 đỏ (vòng #941)"
+    ]
+  }
 }
