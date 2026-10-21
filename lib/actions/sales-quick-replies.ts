@@ -76,9 +76,15 @@ export async function removeQuickReplyImageAction(imageId: string): Promise<Resu
   return { ok: true, message: "Đã gỡ ảnh" };
 }
 
-export async function saveQuickReplySettingsAction(input: { enabled: boolean; aiMatch: boolean; autoUpsellOffer: boolean }): Promise<Result> {
+export async function saveQuickReplySettingsAction(input: { enabled: boolean; aiMatch: boolean; autoUpsellOffer: boolean; upsellAfterContact?: boolean }): Promise<Result> {
   const user = await requireUser();
-  const r = await saveQuickReplySettings(user, { enabled: Boolean(input?.enabled), aiMatch: Boolean(input?.aiMatch), autoUpsellOffer: input?.autoUpsellOffer === true });
+  const r = await saveQuickReplySettings(user, {
+    enabled: Boolean(input?.enabled),
+    aiMatch: Boolean(input?.aiMatch),
+    autoUpsellOffer: input?.autoUpsellOffer === true,
+    // Màn hình cũ không gửi ô này ⇒ giữ nguyên giá trị đang lưu (không tắt ngầm).
+    ...(typeof input?.upsellAfterContact === "boolean" ? { upsellAfterContact: input.upsellAfterContact } : {}),
+  });
   if ("error" in r) return r;
   revalidatePath(PATH);
   return { ok: true, message: "Đã lưu cách trả lời" };

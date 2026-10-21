@@ -68,8 +68,14 @@ export const QUICK_REPLY_AUTO_LEARN_RUN_KEY = "ai.salesChatbot.quickReplies.auto
  * TẮT (P0 20/10/2026): lời mời là lời của shop — câu upsell shop cài là nguồn có thẩm quyền, và không có câu nào thì bot không tự
  * sáng tác trừ khi shop chủ động bật. Có câu upsell dùng được thì công tắc này KHÔNG có tác dụng: câu của shop luôn thắng.
  */
-export type QuickReplySettings = { enabled: boolean; aiMatch: boolean; upsellReplyId: string | null; autoLearn: boolean; autoActivate: boolean; autoUpsellOffer: boolean };
-export const DEFAULT_QUICK_REPLY_SETTINGS: QuickReplySettings = { enabled: true, aiMatch: true, upsellReplyId: null, autoLearn: false, autoActivate: false, autoUpsellOffer: false };
+/**
+ * `upsellAfterContact` (P0 21/10/2026, chủ shop — ca HSLC «Mai Le»): khách đã có món + số lượng + SĐT + địa chỉ mà máy chưa ghép được
+ * phường / xã ⇒ KHÔNG nhắn «nhân viên sẽ xác nhận lại địa chỉ» nữa: bot nói câu ghi nhận ngắn rồi sang bước mời mua thêm (đúng đường
+ * lời mời sau chốt); đơn VẪN mang cờ ADDRESS_UNRESOLVED, nằm ở hàng «Cần người kiểm» và tuyến ADDRESS_REVIEW — chưa xác minh thì không
+ * vận đơn. MẶC ĐỊNH TẮT, bật theo từng tổ chức.
+ */
+export type QuickReplySettings = { enabled: boolean; aiMatch: boolean; upsellReplyId: string | null; autoLearn: boolean; autoActivate: boolean; autoUpsellOffer: boolean; upsellAfterContact: boolean };
+export const DEFAULT_QUICK_REPLY_SETTINGS: QuickReplySettings = { enabled: true, aiMatch: true, upsellReplyId: null, autoLearn: false, autoActivate: false, autoUpsellOffer: false, upsellAfterContact: false };
 
 export function parseQuickReplySettings(v: unknown): QuickReplySettings {
   const o = (v && typeof v === "object" ? v : {}) as Partial<Record<keyof QuickReplySettings, unknown>>;
@@ -81,6 +87,7 @@ export function parseQuickReplySettings(v: unknown): QuickReplySettings {
     autoActivate: typeof o.autoActivate === "boolean" ? o.autoActivate : DEFAULT_QUICK_REPLY_SETTINGS.autoActivate,
     // Chỉ `true` tường minh mới bật — mọi giá trị khác (thiếu, chuỗi, số) là TẮT: nhánh lỗi rơi về phía không tự sáng tác.
     autoUpsellOffer: o.autoUpsellOffer === true,
+    upsellAfterContact: o.upsellAfterContact === true,
   };
 }
 

@@ -16,7 +16,7 @@
  * dòng nào vượt tồn KHẢ DỤNG đã biết, và `customer_confirmation` là nguyên văn một đoạn trong câu CUỐI của khách — model
  * không tự chốt thay khách được.
  */
-import { and, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { SHOP_SAID_PREFIX } from "@/lib/sales-chatbot/replay-shared";
@@ -44,7 +44,7 @@ import { notifySalesChatBooking, notifySalesChatHandoff } from "@/lib/sales-chat
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packingIssues, packingRequestOf, verifiedUnitPrices, type AgentQuoteClaim, type Priced, type PricingContext } from "@/lib/sales-chatbot/quote";
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
-import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
+import { CLAIM_SAFE_TEXT, orderValidityOf, pendingAddressText } from "@/lib/sales-chatbot/claim-guard";
 import type { ObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { bindCommitment, cartDraftDiff, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, mentionText, negatedCancel, unrequestedProducts, type CartCommitment, type CartDraftDiff } from "@/lib/sales-chatbot/cart-commitment";
 import { cartQuoteLines, type CatalogLite } from "@/lib/sales-chatbot/cancel-recovery";
@@ -1352,7 +1352,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         }
         const validity = simulated || !draft.orderId ? null : await confirmedValidity(draft.orderId);
         state.confirmed = { ...state.confirmed, total: priced.total ?? priced.subtotal, quoteId: priced.quote.quoteId, ...(validity ? { valid: validity.valid, pending: validity.pending } : {}) };
-        const pendingText = validity && !validity.valid ? (validity.pending === "ADDRESS" ? CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK) : null;
+        // Địa chỉ còn chờ xác minh mà tổ chức bật `upsellAfterContact` ⇒ nói tổng mới, KHÔNG «nhân viên sẽ xác nhận địa chỉ», KHÔNG «đã lên đơn».
+        const quiet = validity?.valid === false && validity.pending === "ADDRESS" && (await quietAddressReviewOn());
+        const pendingText = validity && !validity.valid ? (validity.pending === "ADDRESS" ? (quiet ? orderUpdatedText(cartView(priced).cod_total_text) : pendingAddressText(false)) : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK) : null;
         return ok(`${simulated ? "(Thử) " : ""}Sửa đơn đã chốt · ${formatVND(priced.subtotal)}`, { ...view, status: "Đã chốt — đã cập nhật theo ý khách", auto_confirmed: true, say_to_customer: pendingText ?? `${autoConfirmText(priced.lines)} Tổng đơn mới ${cartView(priced).cod_total_text} ạ.`, instruction: "Đơn ĐÃ CHỐT vừa được cập nhật theo ý khách. Gửi khách ĐÚNG MỘT câu say_to_customer — không hỏi xác nhận lại." }, state);
       }
       // TỰ CHỐT KHI ĐỦ ĐƠN (P0-A): đủ sáu điều kiện ⇒ chốt NGAY bằng chính lượt chốt của confirm_order (cùng kiểm giá · tồn · địa chỉ của lõi),
@@ -1475,10 +1477,15 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       state.stage = "DONE";
       // Đơn ĐÃ GHI nhưng CHƯA QUA KIỂM (địa chỉ chưa ghép · tổng lệch · cờ cần kiểm) ⇒ «khách đồng ý» ≠ «đơn đã tạo hợp lệ»: model nói
       // đúng câu ghi nhận, KHÔNG «đã lên đơn» (claim-guard chặn lần nữa nếu model vẫn viết).
-      const pendingText = validity && !validity.valid ? (validity.pending === "ADDRESS" ? CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK) : null;
-      // Lời mời SAU CHỐT (P0 19/10/2026): chỉ khi đơn đã ghi hợp lệ; câu do máy chủ dựng, engine gắn vào cuối tin xác nhận.
-      // (`cancelRequest` đã được xoá ngay trên khi chốt — cửa sổ vẫn xét nó cho lượt chốt có lỗi ghi đơn quay lại.)
-      await notePostConfirmOffer(state, ctx, priced.asked.map((a) => a.productId), priced.asked.map((a) => a.name), !pendingText, now);
+      // ĐỊA CHỈ CHỜ XÁC MINH, tổ chức bật `upsellAfterContact` (P0 21/10/2026, ca HSLC «Mai Le»): câu ghi nhận ngắn rồi SANG BƯỚC MỜI
+      // MUA THÊM — đơn vẫn mang cờ ADDRESS_UNRESOLVED (hàng «Cần người kiểm», tuyến ADDRESS_REVIEW, chưa xác minh thì không vận đơn).
+      // Cờ CHECK (giá · SĐT · cờ cần kiểm khác) KHÔNG đổi: đơn có vấn đề thật thì không mời.
+      const quietAddress = validity?.valid === false && validity.pending === "ADDRESS" && (await quietAddressReviewOn());
+      const pendingText = validity && !validity.valid ? (validity.pending === "ADDRESS" ? pendingAddressText(quietAddress) : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK) : null;
+      // Lời mời SAU CHỐT (P0 19/10/2026): chỉ khi đơn đã ghi hợp lệ — hoặc chỉ còn chờ xác minh địa chỉ khi tổ chức bật cờ trên; câu do
+      // máy chủ dựng, engine gửi ngay sau tin xác nhận. (`cancelRequest` đã được xoá ngay trên khi chốt — cửa sổ vẫn xét nó cho lượt
+      // chốt có lỗi ghi đơn quay lại.)
+      await notePostConfirmOffer(state, ctx, priced.asked.map((a) => a.productId), priced.asked.map((a) => a.name), !pendingText || quietAddress, now);
       return ok(`${simulated ? "(Thử) " : ""}Đã chốt đơn · ${formatVND(priced.subtotal)}${pendingText ? " · CHƯA qua kiểm" : ""}`, {
         confirmed: true,
         simulated,
@@ -1732,7 +1739,7 @@ export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "las
   if (gaps.includes("SĐT")) return "SĐT chưa hợp lệ — hỏi lại khách SĐT";
   if (gaps.includes("địa chỉ") || gaps.includes("tỉnh / thành")) return "Địa chỉ chưa đủ để giao (chưa đọc được tỉnh / thành) — hỏi khách đúng phần còn thiếu";
   // Xã / phường chưa ghép (biết tỉnh) KHÔNG chặn tự chốt — luật P0-A: đơn tự chốt kèm cờ ADDRESS_UNRESOLVED, câu ghi nhận
-  // ORDER_PENDING_ADDRESS, nhân viên hỏi lại. Tỉnh chỉ suy từ viết tắt («P13 GV») là CHƯA BIẾT TỈNH ⇒ đã dừng ở dòng trên.
+  // `pendingAddressText` (cờ `upsellAfterContact` bật ⇒ chỉ câu ghi nhận rồi mời mua thêm), nhân viên xác minh nội bộ. Tỉnh chỉ suy từ viết tắt («P13 GV») là CHƯA BIẾT TỈNH ⇒ đã dừng ở dòng trên.
   return null;
 }
 
@@ -1816,11 +1823,53 @@ async function templateVerdict(
   // Page / nhân viên / bot vừa gửi đúng câu này (chữ shop trong hội thoại) ⇒ không gửi trùng. Menu page gửi CHỈ bằng ảnh thì không có chữ
   // để so — không đoán.
   if (repeatsRecent(rendered.text, ctx.recentSaid ?? [])) return { ok: false, reason: "TEMPLATE_DUPLICATE" };
+  // …và menu page gửi BẰNG ẢNH (P0 21/10/2026): câu upsell của shop có ảnh mà page / Pancake đã gửi ảnh trong lượt mua này ⇒ không gửi
+  // trùng. Đọc lỗi ⇒ không mời (không kiểm được thì không nói).
+  if (rendered.imageIds.length) {
+    const sent = await pageMediaSentInRound(ctx.conversationId, state, new Date()).catch(() => true);
+    if (sent) return { ok: false, reason: "TEMPLATE_PAGE_SENT_MEDIA" };
+  }
   if (ctx.customerTexts && addressReaskVerdict(rendered.text, addressKnowledge(state, ctx.customerTexts), ctx.turn ?? 0, { botTexts: ctx.recentSaid ?? [] })) return { ok: false, reason: "TEMPLATE_ASKS_KNOWN_INFO" };
   if (quickReplySizeConflict(rendered.text, { cart: state.cart, lastUserText: ctx.lastUserText, facts })) return { ok: false, reason: "TEMPLATE_SIZE_CONFLICT" };
   const target = templateOfferTarget(rendered.text, facts, orderProductIds, orderNames, formatVND);
   if (!target) return { ok: false, reason: "TEMPLATE_NOTHING_TO_OFFER" };
   return { ok: true, quickReplyId: id, text: rendered.text, imageIds: rendered.imageIds, target: target.target, offerable: target.offerable };
+}
+
+/**
+ * Cửa sổ «lượt mua này» khi hội thoại CHƯA có mốc lượt mua (`roundStartAt` — chỉ lượt mua mới thứ hai trở đi mới có): 24 giờ. GIẢ ĐỊNH,
+ * không phải số đo — đủ dài để gồm menu page gửi trong cùng buổi hỏi mua, đủ ngắn để ảnh của một lần mua tuần trước không chặn lời mời.
+ */
+export const PAGE_MEDIA_ROUND_FALLBACK_MS = 24 * 3_600_000;
+
+/**
+ * Page / Pancake / nhân viên đã gửi ẢNH trong lượt mua này (dòng `PAGE_REPLY` có ảnh, không phải tiếng vọng của bot `AI_AGENT`, không phải
+ * chữ hệ thống `META_SYSTEM`). Tin tự động của Pancake CÓ tính — menu tự động cũng là một lời mời khách đã thấy.
+ */
+export async function pageMediaSentInRound(conversationId: string, state: Pick<ChatState, "roundStartAt">, now: Date): Promise<boolean> {
+  const db = await getDb();
+  const c = schema.salesChatConversations;
+  const [conv] = await db.select({ pageId: c.pageId, threadId: c.threadId }).from(c).where(eq(c.id, conversationId)).limit(1);
+  if (!conv?.pageId || !conv.threadId) return false;
+  const start = state.roundStartAt ? Date.parse(state.roundStartAt) : NaN;
+  const since = new Date(Number.isFinite(start) ? start : now.getTime() - PAGE_MEDIA_ROUND_FALLBACK_MS);
+  const i = schema.salesChatInbound;
+  const [hit] = await db
+    .select({ id: i.id })
+    .from(i)
+    .where(and(eq(i.pageId, conv.pageId), eq(i.threadId, conv.threadId), eq(i.note, "PAGE_REPLY"), gte(i.createdAt, since), sql`coalesce(${i.senderKind}, '') not in ('AI_AGENT', 'META_SYSTEM')`, sql`(case when jsonb_typeof(${i.imageUrls}) = 'array' then jsonb_array_length(${i.imageUrls}) else 0 end) > 0`))
+    .limit(1);
+  return Boolean(hit);
+}
+
+/** Tổ chức bật `upsellAfterContact` (cờ trong cài đặt câu mẫu). Đọc lỗi ⇒ TẮT — nhánh lỗi rơi về câu cũ, không về phía mời. */
+async function quietAddressReviewOn(): Promise<boolean> {
+  return (await loadQuickReplySettings().catch(() => null))?.upsellAfterContact === true;
+}
+
+/** Sửa đơn đã chốt khi địa chỉ còn chờ xác minh (`upsellAfterContact`) — tổng mới theo máy chủ, không «đã lên đơn». */
+export function orderUpdatedText(totalText: string): string {
+  return `Dạ em đã cập nhật đơn của mình, tổng đơn mới ${totalText} ạ.`;
 }
 
 /** Câu chốt ngắn khi máy chủ tự chốt — «Dạ em lên đơn 2 × Chả cá thu (1kg) cho mình rồi ạ, shop giao theo thông tin mình vừa gửi nhé.» */
