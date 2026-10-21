@@ -3,7 +3,7 @@
   "mission_id": "learning-proposals-gate",
   "title": "Tự học của bot chỉ ĐỀ XUẤT: bài học, từ khoá câu mẫu, câu mẫu máy soạn chờ người duyệt; nhật ký + rollback",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -36,11 +36,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-21T05:31:37.870Z",
-  "updated_at": "2026-10-21T06:11:22.077Z",
+  "updated_at": "2026-10-21T07:02:48.573Z",
   "last_heartbeat": "2026-10-21T05:32:43.654Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#939 → 6839f7842551eeaffff33503f428db2f43c6a574"
+    "merged": "#939 → 6839f7842551eeaffff33503f428db2f43c6a574",
+    "verify": "PASS 91c9de9abf7f080e3abefb8cc0fdd272062c4eaa 2026-10-21T07:02:19.233Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39557760742"
   },
   "handoff": {
     "branch": "claude/learning-proposals-gate",
