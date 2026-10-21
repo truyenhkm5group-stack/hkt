@@ -3,7 +3,7 @@
   "mission_id": "known-customer-contact",
   "title": "Khách cũ nhận diện chắc chắn: tự nạp SĐT, hỏi một câu địa chỉ lần trước, panel một nguồn SĐT",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-known-cust",
@@ -27,7 +27,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-21T10:04:53.584Z",
-  "updated_at": "2026-10-21T10:04:53.584Z",
-  "last_heartbeat": "2026-10-21T10:04:53.584Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-21T15:27:55.931Z",
+  "last_heartbeat": "2026-10-21T15:27:55.931Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/known-customer-contact",
+    "sha": "277788304e388885a29e37d612da264e0eb48c14",
+    "at": "2026-10-21T15:27:55.931Z",
+    "actor": "DESKTOP-56TH98Y:wt-known-cust",
+    "title": "Khách cũ nhận diện chắc chắn: tự nạp SĐT, hỏi một câu địa chỉ lần trước, panel một nguồn SĐT",
+    "summary": "",
+    "tests": [
+      "cổng cây sạch @277788304 (đã rebase lên main ea619013 + #953): typecheck · lint · npm test (TẤT CẢ KIỂM THỬ ĐẠT) · build — p0-known-customer-contact: thuần + chatTurn (cùng lượt · tự nạp SĐT · ca thật 17 ngày sau đơn nhân viên · vẫn đơn đó · listInbox thật) + bảo mật (luồng khác cùng page · người lạ · tổ chức khác), 9/9 đột biến đỏ; #945 «đặt thêm» cập nhật theo luật 21/10; ảnh chụp vàng 1 tệp đổi lời nhắc"
+    ]
+  }
 }
