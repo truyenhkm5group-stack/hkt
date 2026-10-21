@@ -31,14 +31,14 @@ export type HandoffReplyFact = {
   handoffAt: Date | null;
 };
 
-const after = (d: Date | null, ref: Date) => d !== null && d.getTime() > ref.getTime();
+const laterThan = (d: Date | null, ref: Date) => d !== null && d.getTime() > ref.getTime();
 
 /** HÀM THUẦN. `slaMs = null` ⇒ không đọc được hạn hoặc chủ shop cố ý không đặt hạn — KHÔNG kết luận quá hạn. */
 export function handoffReplyClass(f: HandoffReplyFact, now: Date, slaMs: number | null): HandoffReplyClass {
   const cust = f.lastCustomerAt;
   if (!cust) return "NO_CUSTOMER_MESSAGE";
-  if (after(f.lastStaffAt, cust) || after(f.pageHumanAt, cust)) return "ANSWERED_HUMAN";
-  if (after(f.lastBotAt, cust) || after(f.pageAiAt, cust)) return "ANSWERED_BOT";
+  if (laterThan(f.lastStaffAt, cust) || laterThan(f.pageHumanAt, cust)) return "ANSWERED_HUMAN";
+  if (laterThan(f.lastBotAt, cust) || laterThan(f.pageAiAt, cust)) return "ANSWERED_BOT";
   if (slaMs === null) return "UNANSWERED_NO_SLA";
   return now.getTime() - cust.getTime() > slaMs ? "UNANSWERED_OVER_SLA" : "UNANSWERED_WITHIN_SLA";
 }
@@ -66,14 +66,14 @@ export function handoffReplySplit(facts: readonly HandoffReplyFact[], now: Date,
     const k = handoffReplyClass(f, now, slaMs);
     s.total += 1;
     s.byClass[k] += 1;
-    if (k === "ANSWERED_HUMAN" && f.lastCustomerAt && !after(f.lastStaffAt, f.lastCustomerAt) && !after(f.pageVerifiedAt, f.lastCustomerAt)) s.answeredUnverified += 1;
+    if (k === "ANSWERED_HUMAN" && f.lastCustomerAt && !laterThan(f.lastStaffAt, f.lastCustomerAt) && !laterThan(f.pageVerifiedAt, f.lastCustomerAt)) s.answeredUnverified += 1;
     if (k === "UNANSWERED_OVER_SLA" && f.lastCustomerAt) {
       const h = (now.getTime() - f.lastCustomerAt.getTime()) / 3_600_000;
       if (h > 24) s.overSla24h += 1;
       if (h > 72) s.overSla72h += 1;
     }
     if (!f.handoffAt) s.handoffUnknown += 1;
-    else if (!after(f.lastCustomerAt, f.handoffAt)) {
+    else if (!laterThan(f.lastCustomerAt, f.handoffAt)) {
       s.quietTotal += 1;
       s.quietAfterHandoff[k] += 1;
     }
