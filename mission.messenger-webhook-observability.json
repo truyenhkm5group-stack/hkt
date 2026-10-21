@@ -3,7 +3,7 @@
   "mission_id": "messenger-webhook-observability",
   "title": "Sổ gói webhook Messenger bị từ chối (24 giờ · 7 ngày) trên /platform + check-integrations báo cấu hình Messenger không in secret",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -34,7 +34,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-21T03:13:04.652Z",
-  "updated_at": "2026-10-21T03:13:04.652Z",
-  "last_heartbeat": "2026-10-21T03:13:04.652Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-21T03:13:54.810Z",
+  "last_heartbeat": "2026-10-21T03:13:54.810Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/messenger-webhook-observability",
+    "sha": "b8a345e5b78d55dc5f4c8b5ca8a7eec1c6a9d59c",
+    "at": "2026-10-21T03:13:54.810Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "Sổ gói webhook Messenger bị từ chối (24 giờ · 7 ngày) trên /platform + check-integrations báo cấu hình Messenger không in secret",
+    "summary": "",
+    "tests": [
+      "worker code-erp-02: tsc · eslint ĐẠT · chạy riêng ĐẠT testMessengerWebhookRejections + testMessengerConfigReport (mới), testMessengerHealth, testMessenger, migration journal/upgrade/serve-compat, restore-drill-config, org-offboard pure+db, platform-isolation-static, repo-integrity · 3 đột biến ĐỎ · CHƯA ĐO cả bộ npm test + build (CI 8 shard)"
+    ]
+  }
 }
