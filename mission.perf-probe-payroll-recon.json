@@ -3,7 +3,7 @@
   "mission_id": "perf-probe-payroll-recon",
   "title": "perf-probe đếm nguồn việc PAYROLL_RECON theo phòng + đo thời gian adaptPayrollRecon nguội/ấm (chỉ script)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-21T11:03:58.295Z",
-  "updated_at": "2026-10-21T11:03:58.295Z",
-  "last_heartbeat": "2026-10-21T11:03:58.295Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-21T11:04:33.161Z",
+  "last_heartbeat": "2026-10-21T11:04:33.161Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/perf-probe-payroll-recon",
+    "sha": "d8cb7461123b7fd9da1db54ae95b1322b3111aa3",
+    "at": "2026-10-21T11:04:33.161Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "perf-probe đếm nguồn việc PAYROLL_RECON theo phòng + đo thời gian adaptPayrollRecon nguội/ấm (chỉ script)",
+    "summary": "",
+    "tests": [
+      "worker code-erp-01: typecheck · eslint · ops-log-leak ĐẠT; chỉ scripts/perf-probe.ts"
+    ]
+  }
 }
