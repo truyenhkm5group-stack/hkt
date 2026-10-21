@@ -1,0 +1,8 @@
+{
+  "pr": 953,
+  "sha": "e64617261f34948e33256d659fc4078b1ba68554",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T13:15:42.149Z",
+  "note": "review lead: đo production (perf-probe #950) — nguồn PAYROLL_RECON khi đệm nguội 8,1 s > hạn 2,5 s của /work ⇒ người mở trang đầu tiên thấy «thiếu một phần». Thêm mục work:payroll-recon (12 phút < đệm 15 phút) vào job dashboard-warm sẵn có; tổ chức chưa có bảng lương trả rỗng ngay. Chi phí CPU ~8 s mỗi 12–24 phút trên VPS 2 nhân — chấp nhận, đo lại sau deploy. Đã duyệt trước khi đo vượt hạn."
+}
