@@ -3,7 +3,7 @@
   "mission_id": "payroll-owner-self-approval-r2",
   "title": "Chủ shop tự lập/ký/duyệt lương có hiệu lực ngay (khai org.owner chỉ qua ops); kế toán lập ⇒ chờ chủ shop",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -33,11 +33,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-21T10:30:22.588Z",
-  "updated_at": "2026-10-21T16:35:12.935Z",
+  "updated_at": "2026-10-21T17:04:25.784Z",
   "last_heartbeat": "2026-10-21T10:31:04.855Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#949 → b166ff8ad5495a2d2431a2ff621fda0b10fe55cf"
+    "merged": "#949 → b166ff8ad5495a2d2431a2ff621fda0b10fe55cf",
+    "verify": "PASS b166ff8ad5495a2d2431a2ff621fda0b10fe55cf 2026-10-21T17:03:51.935Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39638314145"
   },
   "handoff": {
     "branch": "claude/payroll-owner-self-approval-r2",
