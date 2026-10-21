@@ -3,6 +3,8 @@ import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { audit, type AuditParams } from "@/lib/audit";
 import { isOpenTransaction, type DbOrTx } from "@/lib/db-transaction";
+import { isOrgOwner } from "@/lib/auth/org-owner";
+import { OWNER_SELF_APPROVAL_GROUPS, OWNER_SELF_APPROVAL_REASON } from "@/lib/constants/org-owner";
 import { emitDomainEvent } from "@/lib/events/emit";
 import {
   APPROVAL_ENFORCE_KEY,
@@ -528,6 +530,24 @@ export async function guardSecondApprovalCore(db: DbOrTx, user: ApprovalUser, in
         amount: input.amount ?? null,
         lyDo: !enforce ? "nhóm chưa bật cưỡng chế" : "dưới ngưỡng",
       },
+    });
+    return { mode: "PROCEED", recorded: true, group: input.group };
+  }
+
+  // ── CHỦ SHOP TỰ LÀM BẢNG LƯƠNG ⇒ KHÔNG CẦN NGƯỜI THỨ HAI (chủ shop 21/10/2026) ──
+  //
+  // Chỉ người khai ở `org.owner` (id · còn bật · ADMIN — lib/constants/org-owner.ts), chỉ nhóm lương. Kế toán
+  // hay bất kỳ ai khác làm ⇒ đi tiếp xuống luật hai người như cũ.
+  if (OWNER_SELF_APPROVAL_GROUPS.includes(input.group) && (await isOrgOwner(db, user.id))) {
+    await ghi({
+      userId: user.id,
+      userEmail: user.email,
+      actorKind: "USER",
+      action: `approval.owner-self:${input.action}`,
+      entity: input.entity ?? "APPROVAL",
+      entityId: input.entityId ?? "",
+      reason: OWNER_SELF_APPROVAL_REASON,
+      detail: { group: input.group, summary: input.summary, amount: input.amount ?? null },
     });
     return { mode: "PROCEED", recorded: true, group: input.group };
   }

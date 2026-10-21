@@ -400,3 +400,16 @@ giao phòng không giao người.
 - Đọc qua đệm 15 phút trên `getReconCenter` (khoảng tháng mặc định của trang); tổ chức chưa khai bảng lương
   không sinh việc nào.
 
+### 10.10 Chủ shop tự duyệt khi tự làm bảng lương (chủ shop 21/10/2026)
+
+«Nếu có kế toán thì kế toán làm bảng lương và tôi duyệt, nếu không có kế toán hoặc nếu tôi làm bảng lương thì
+không cần duyệt nữa.» — AGENTS.md mục 81.
+
+- ERP không có danh tính «chủ tổ chức»: chủ shop là MỘT `users.id` khai ở `settings` khoá `org.owner`
+  (`{"userId":"…","decidedAt":"YYYY-MM-DD","note":"…"}`), chỉ ops `set-setting` ghi. Dùng khi khớp id + còn bật +
+  `ADMIN`; lời khai hỏng / thiếu ⇒ luật hai người như cũ.
+- Miễn ở ba chỗ: cổng `guardSecondApproval` nhóm `PAYROLL_EDIT` (nhật ký `approval.owner-self:*`), duyệt số liệu
+  lương do chính chủ shop nhập, DUYỆT kỳ có thưởng khi chính chủ shop đã ký đối soát cấp 1 (chữ ký vẫn bắt buộc).
+- Production 21/10/2026: nhóm `PAYROLL_EDIT` CHƯA bật cưỡng chế (không có `approval.enforce.v2`) ⇒ chủ shop lưu quy
+  chế cổng / số dư mở sổ có hiệu lực ngay từ trước bản này; bản này chỉ đổi hai luật cứng và cổng khi cưỡng chế bật.
+
