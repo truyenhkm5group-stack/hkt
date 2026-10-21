@@ -63,7 +63,8 @@ function testNguon() {
     assert.doesNotMatch(src, /nhắn em «thêm \$\{/, `${f}: không câu mẫu «nhắn em "thêm …"»`);
   }
   const eng = readFileSync("lib/sales-chatbot/engine.ts", "utf8");
-  assert.match(eng, /customer360: c360, acceptedOffer: accepted,/, "công cụ của đường model nhận cùng quyết định đồng ý");
+  // Mọi lời gọi công cụ của lượt (vòng model · tra đơn · bước máy chủ) mang cùng quyết định đồng ý.
+  assert.ok((eng.match(/customer360: c360, (?:knownPhone, )?acceptedOffer: accepted,/g) ?? []).length >= 3, "công cụ của đường model nhận cùng quyết định đồng ý");
   assert.match(eng, /if \(accepted && state\.draft\?\.orderId && !state\.handoff/, "máy chủ tự thêm khi có đơn của lượt");
   console.log("  ✓ mã nguồn: không câu bắt nhắn lại cú pháp · một quyết định đồng ý cho bước máy chủ lẫn công cụ");
 }
