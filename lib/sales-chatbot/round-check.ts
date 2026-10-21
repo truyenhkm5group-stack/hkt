@@ -40,6 +40,39 @@ export function purchaseAmountIntent(text: string, catalog?: readonly string[]):
   return !EDIT_VERB_RE.test(foldCart(text));
 }
 
+/*
+  TRẢ LỜI SỐ LƯỢNG NGẮN (P0 21/10/2026, HSLC «Lan Nguyen»): bot hỏi «1kg hay 2kg?», khách «2kg» ⇒ câu mẫu báo giá khớp chữ «kg» đi LẠI
+  nguyên văn và hỏi «mình muốn mua 2kg ạ?». Tin chỉ mang MỘT số lượng (cộng tiểu từ / động từ mua / tên món đã gắn) là câu TRẢ LỜI, không
+  phải câu hỏi mới: máy chủ ghi nhận và đi tiếp bước bán — không câu mẫu, không lượt AI.
+*/
+const QTY_FILLER = new Set(["thoi", "thui", "nhe", "nha", "nhen", "nghen", "a", "ah", "em", "e", "chi", "c", "anh", "lay", "cho", "mua", "dat", "minh", "ok", "oke", "okie", "vay", "di", "shop", "nhi", "luon", "con", "the", "duoc", "dc", "roi", "r", "thi", "la", "vang", "da", "u", "uh", "um", "ừ"]);
+
+/** Tin chỉ là MỘT câu trả lời số lượng («2kg», «2kg nhé», «lấy 2», «nửa ký», «2kg thôi») cho món `labels`. HÀM THUẦN. */
+export function quantityOnlyAnswer(text: string, labels: readonly string[]): boolean {
+  if (!text.trim() || text.includes("?")) return false;
+  const c = classifyCartMessage(text);
+  if ((c.kind !== "ORDER" && c.kind !== "SET") || c.amounts.length !== 1 || c.tentative) return false;
+  const a = c.amounts[0];
+  const rest = foldCart(`${text.slice(0, a.index)} ${text.slice(a.end)}`).split(" ").filter(Boolean);
+  const labelWords = new Set(labels.flatMap((l) => foldCart(l).split(" ")));
+  return rest.every((w) => QTY_FILLER.has(w) || labelWords.has(w));
+}
+
+/**
+ * «lấy 2» ngay sau câu hỏi «1kg hay 2kg?» là 2kg: số TRẦN (không đơn vị) khớp ĐÚNG MỘT lựa chọn «N<đơn vị>» trong câu hỏi lựa chọn ngay trước
+ * («… hay …») ⇒ trả «2kg» để bộ đọc giỏ đọc như khách gõ đủ. Không khớp lựa chọn nào / câu trước không phải câu hỏi lựa chọn ⇒ `null`
+ * (không đoán đơn vị). HÀM THUẦN.
+ */
+export function choiceAmountText(text: string, botText: string | null): string | null {
+  if (!botText || !/\bhay\b/iu.test(botText) || !botText.includes("?")) return null;
+  const m = foldCart(text).match(/^(?:(?:lay|cho|mua|dat|ok|oke|u|vang|da|chi|c|em|e|minh|anh|toi)\s+)*(\d+(?:[.,]5)?)(?:\s+(?:thoi|thui|nhe|nha|a|em|e|chi|c|nhen|luon|di|nhe))*$/);
+  if (!m) return null;
+  const n = m[1].replace(",", ".");
+  const units = [...botText.toLowerCase().matchAll(/(\d+(?:[.,]\d+)?)\s?(kg|ký|kí|g|gr|hộp|gói|túi|hũ|cái|chai|bộ)(?![\p{L}])/gu)].filter((x) => x[1].replace(",", ".") === n).map((x) => x[2]);
+  const distinct = [...new Set(units)];
+  return distinct.length === 1 ? `${m[1]}${distinct[0]}` : null;
+}
+
 const LIVE_UNSHIPPED: readonly CustomerPhase[] = ["AWAITING_SHIPMENT"];
 const SHIPPED_OR_DONE: readonly CustomerPhase[] = ["IN_TRANSIT", "RECEIVED", "AFTER_SALES"];
 

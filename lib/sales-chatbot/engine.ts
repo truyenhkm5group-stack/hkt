@@ -73,7 +73,7 @@ import { recoveryPrompt, serverCancelStep } from "@/lib/sales-chatbot/cancel-flo
 import { autoConfirmBlocker, confirmedFromOrder, executeTool, orderTotalsOf, returningPendingOf, toolDefsFor, TOOLS_HOLDING_TEXT, type ChatState } from "@/lib/sales-chatbot/tools";
 import { purchaseRoundStart } from "@/lib/sales-chatbot/purchase-round";
 import { addressQuestion, looksLikeDeliveryAddress, looksLikeStreetFragment, parseCustomerAddress } from "@/lib/address/customer-address";
-import { roundCheckAnswer, roundCheckHandoffReason, roundCheckStep } from "@/lib/sales-chatbot/round-check";
+import { choiceAmountText, quantityOnlyAnswer, roundCheckAnswer, roundCheckHandoffReason, roundCheckStep } from "@/lib/sales-chatbot/round-check";
 import { amountText, amountsIn, applyCustomerCartMessage, botProposedDenial, buyingText, customerTextsSince, cartCommitmentPrompt, cartHoldVerdict, customerHesitates, invitedProductOf, itemObjectionCue, orderReadiness } from "@/lib/sales-chatbot/cart-commitment";
 import { readConversationControl } from "@/lib/sales-chatbot/conversation-control-shared";
 import { customerHandoffVerdict, nextObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
@@ -1105,16 +1105,20 @@ async function chatTurnCore(
     // Giỏ TRƯỚC tin này (P0 #863): câu huỷ xoá giỏ ở bước dưới, nhưng «đơn đúng như khách đặt» là giỏ ngay trước câu huỷ.
     const cartBefore = st0.cart;
     let cartNext: ChatState["cart"];
+    // Tin bot / page kể từ tin khách trước — căn cứ «món vừa được mời» và «câu hỏi lựa chọn vừa hỏi».
+    const shopSince = recentShopTexts(msgs.filter((m) => m.seq > (prevTurn ?? 0)), 6).map((t) => (t.startsWith(SHOP_SAID) ? t.slice(SHOP_SAID.length).trim() : t));
+    // «lấy 2» ngay sau câu hỏi lựa chọn «1kg hay 2kg?» ⇒ đọc như «2kg» (round-check.ts `choiceAmountText` — chỉ khi khớp đúng một lựa chọn).
+    const choiceText = choiceAmountText(text, shopSince[shopSince.length - 1] ?? null);
+    const cartInput = choiceText ?? text;
     try {
-      const catalog = await cartCatalogNames(text);
+      const catalog = await cartCatalogNames(cartInput);
       // Món VỪA ĐƯỢC MỜI (bot / page gọi tên đúng một món kể từ tin khách trước) — «ừ cho chị 1 hộp» là số của món đó (review 14/10). Danh mục
       // đầy đủ chỉ đọc khi giỏ đã có món khách nói (lời mời THÊM món / câu huỷ gọi tên món ngoài giỏ).
       // Số lượng TRẦN («1kg thôi») khi giỏ còn trống cũng cần đơn vị của món vừa được mời (P0 21/10/2026) ⇒ nạp đủ danh mục.
-      const full = st0.cart?.selectedItems.some((x) => x.customerExplicit) || amountsIn(text).some((a) => !a.label) ? await cartProducts() : undefined;
-      const lastCustSeq = prevTurn ?? 0;
-      const inv0 = invitedProductOf(recentShopTexts(msgs.filter((m) => m.seq > lastCustSeq), 6).map((t) => (t.startsWith(SHOP_SAID) ? t.slice(SHOP_SAID.length).trim() : t)), full?.names ?? catalog, st0.cart);
+      const full = st0.cart?.selectedItems.some((x) => x.customerExplicit) || amountsIn(cartInput).some((a) => !a.label) ? await cartProducts() : undefined;
+      const inv0 = invitedProductOf(shopSince, full?.names ?? catalog, st0.cart);
       const invited = inv0 && full ? { ...inv0, unit: full.unitOf(inv0.display) } : inv0;
-      cartNext = applyCustomerCartMessage(st0.cart, text, turnSeq, now, { catalog, invited, ...(full ? { products: full.names } : {}) });
+      cartNext = applyCustomerCartMessage(st0.cart, cartInput, turnSeq, now, { catalog, invited, ...(full ? { products: full.names } : {}) });
     } catch {
       cartNext = st0.cart ? { ...st0.cart, relaxedTurn: turnSeq } : undefined;
     }
@@ -1277,9 +1281,27 @@ async function chatTurnCore(
       // Lượt mua MỚI khách đã chọn trên nền một đơn cũ ⇒ đơn cũ chỉ là bối cảnh: lượt này (và mọi lượt sau tới khi chốt) là BÁN, không phải
       // hậu mãi — nếu không, đơn cũ chưa giao (đọc qua `pastOrders`) kéo mọi tin của lượt mới về lời nhắc «đơn đã chốt». Khiếu nại vẫn là
       // khiếu nại (nhánh khiếu nại chạy TRƯỚC khối này). Chạy mỗi lượt, trước mọi chỗ đọc `postSale`.
-      if (st0.roundCheck?.answer === "NEW" && !st0.confirmed && phase && phase.phase !== "COMPLAINT") {
+      if (st0.roundCheck?.answer === "NEW" && !st0.confirmed && phase) {
         phase = null;
         postSale = false;
+      }
+    }
+    // TRẢ LỜI SỐ LƯỢNG NGẮN (P0 21/10/2026, HSLC «Lan Nguyen» — round-check.ts `quantityOnlyAnswer`): «2kg» sau «1kg hay 2kg?» đã nằm trong
+    // giỏ có thẩm quyền, gắn đúng món vừa báo giá ⇒ MÁY CHỦ ghi nhận và hỏi đúng phần còn thiếu (SĐT / địa chỉ) — không câu mẫu báo giá gửi
+    // lại, không lượt AI. Đã đủ SĐT + địa chỉ ⇒ để luồng lên đơn (cần công cụ). Đơn nháp / đã chốt / hậu mãi / trả lời lời mời ⇒ luồng cũ.
+    if (!postSale && !st0.confirmed && !st0.draft && !st0.handoff && readConversationControl(st0)?.mode !== "HUMAN" && !(prevTurn !== undefined && st0.upsellTurn === prevTurn)) {
+      const said = (st0.cart?.selectedItems ?? []).filter((x) => x.customerExplicit && x.sourceMessageId === turnSeq);
+      const one = said.length === 1 && said[0].label && (said[0].productId || said[0].match) ? said[0] : null;
+      if (one && quantityOnlyAnswer(choiceText ?? text, [one.label])) {
+        const ask = silenceFallbackText(st0, text, turnSeq, false, prevTurn);
+        if (/số điện thoại|địa chỉ|phường|tỉnh/.test(ask)) {
+          const out = `Dạ em ghi nhận mình lấy ${amountText(one.quantity, one.unit, one.pieces)} ${one.label} ạ. ${ask.replace(/^Dạ,?\s*/, "").replace(/^\p{Ll}/u, (ch) => ch.toUpperCase())}`;
+          if ((await guardOutgoing(out, () => claimFacts(st0))).ok) {
+            await reply(conv, seq, out);
+            await bump({ turns: conv.turns + 1 });
+            return { ok: true, view: (await conversationView(conv.id))! };
+          }
+        }
       }
     }
     const dispute = st0.quote && !st0.confirmed ? detectPriceDispute(text, st0.quote) : null;

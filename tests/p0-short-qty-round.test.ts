@@ -18,7 +18,8 @@ import { getDb, schema } from "@/db";
 import { addressQuestion, looksLikeStreetFragment, parseCustomerAddress } from "@/lib/address/customer-address";
 import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
 import { EMPTY_REPLY_TEXT, silenceFallbackText } from "@/lib/sales-chatbot/engine";
-import { purchaseAmountIntent, roundCheckAnswer, roundCheckStep } from "@/lib/sales-chatbot/round-check";
+import { QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
+import { choiceAmountText, purchaseAmountIntent, quantityOnlyAnswer, roundCheckAnswer, roundCheckStep } from "@/lib/sales-chatbot/round-check";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { setSettingJson } from "@/lib/settings";
 import { runGoldenCases, say, tool, type GoldenCase, type GoldenHookCtx } from "./sales-agent-golden/harness";
@@ -51,6 +52,14 @@ function testThuan() {
   assert.equal(roundCheckStep({ ...base, text: "đổi thành 2kg" }), null);
   assert.equal(roundCheckStep({ ...base, confirmed: { ...base.confirmed, simulated: true } }), null);
   assert.equal(roundCheckStep({ ...base, phase: "COMPLAINT" }), null, "khiếu nại đi luồng khiếu nại");
+
+  // P0 «Lan Nguyen»: câu trả lời số lượng ngắn — máy chủ quyết, không câu mẫu / AI. Số trần mượn đơn vị của ĐÚNG câu hỏi lựa chọn vừa hỏi.
+  for (const t of ["1kg", "2kg", "2kg nhé", "nửa ký", "2kg thôi", "2kg chả cá thu nhé", "Ok 2kg em"]) assert.ok(quantityOnlyAnswer(t, ["Chả cá thu"]), `«${t}» là câu trả lời số lượng`);
+  for (const t of ["2kg thôi?", "2kg giao Hà Nội nhé", "2kg bao nhiêu", "thêm 2kg", "đổi thành 2kg", "1kg hay 2kg?", "cho chị 2kg 0912345678"]) assert.ok(!quantityOnlyAnswer(t, ["Chả cá thu"]), `«${t}» không chỉ là số lượng`);
+  const choice = "Dạ chả cá thu 280.000 ₫/kg ạ. Mình muốn mua 1kg hay 2kg ạ?";
+  assert.deepEqual(["lấy 2", "2", "1 thôi", "cho chị 2 nhé", "lấy 3", "2 hộp"].map((t) => choiceAmountText(t, choice)), ["2kg", "2kg", "1kg", "2kg", null, null]);
+  assert.equal(choiceAmountText("lấy 2", "Dạ chả cá thu 280.000 ₫/kg ạ."), null, "câu trước không phải câu hỏi lựa chọn ⇒ không đoán đơn vị");
+  assert.equal(choiceAmountText("lấy 2", "Mình lấy 2 hộp hay 2kg ạ?"), null, "số khớp hai đơn vị ⇒ không đoán");
 
   // Địa chỉ theo mốc địa danh: là mảnh địa chỉ, KHÔNG bịa tỉnh / xã, một câu hỏi phần còn thiếu.
   assert.ok(looksLikeStreetFragment(KCN), "«KCN …, cổng công ty …» là nơi giao");
@@ -130,7 +139,7 @@ const CASES: GoldenCase[] = [
     first("0961007205"),
     { say: "2kg nhé", ai: [() => [say("Dạ mình muốn đổi đơn thành 2kg đúng không ạ?")]] },
   ] },
-  { key: "rc-khach-moi", title: "Khách mới: câu mẫu «1kg hay 2kg?» ⇒ «1kg thôi» ghi giỏ ngay, model im ⇒ xin SĐT, không «nói rõ hơn»", shop: "food", channel: "FANPAGE", turns: [
+  { key: "rc-khach-moi", title: "Khách mới: câu báo giá «1kg hay 2kg?» ⇒ «1kg thôi» ghi giỏ ngay ⇒ máy chủ ghi nhận + xin SĐT, không «nói rõ hơn»", shop: "food", channel: "FANPAGE", turns: [
     { say: "1kg thôi", before: seedQuote, ai: silent },
   ] },
 ];
@@ -202,7 +211,8 @@ async function testChatTurn() {
         assert.equal(st.roundCheck, undefined);
       }
       if (c.key === "rc-khach-moi") {
-        assert.deepEqual(t.turns[0].shown, ["Dạ mình cho em xin số điện thoại nhận hàng nhé."], "giỏ đã có 1kg ⇒ hỏi đúng phần thiếu");
+        assert.deepEqual(t.turns[0].shown, ["Dạ em ghi nhận mình lấy 1kg Chả mực giã tay ạ. Mình cho em xin số điện thoại nhận hàng nhé."], "giỏ đã có 1kg ⇒ ghi nhận + hỏi đúng phần thiếu");
+        assert.equal(t.turns[0].rounds.length, 0, "câu trả lời số lượng rõ ràng ⇒ máy chủ quyết, không lượt AI");
         assert.equal(st.cart?.selectedItems.find((x) => x.customerExplicit)?.quantity, 1000);
         assert.equal(st.cart?.selectedItems.find((x) => x.customerExplicit)?.label, "Chả mực giã tay", "giỏ gắn đúng món vừa báo giá (mẫu mã + giá gắn ở bước công cụ — bindCommitment)");
       }
@@ -211,8 +221,60 @@ async function testChatTurn() {
   assert.deepEqual([...seen].sort(), CASES.map((c) => c.key).sort());
 }
 
+/** Câu mẫu báo giá như câu #1 của HSLC: khớp chữ «kg» ⇒ «2kg» cũng khớp (gốc ca «Lan Nguyen»). */
+const QUOTE = "Dạ chả mực giã tay 400.000 ₫/kg ạ. Mình muốn mua 1kg hay 2kg ạ?";
+const ASK_PRICE = "Chả mực giá bao nhiêu shop?";
+const QTY_CASES: GoldenCase[] = [
+  { key: "qty-2kg", title: "Ca «Lan Nguyen»: câu mẫu «1kg hay 2kg?» ⇒ «2kg» ⇒ máy chủ ghi nhận + xin SĐT, KHÔNG gửi lại câu báo giá, 0 lượt AI", shop: "food", channel: "FANPAGE", turns: [
+    { say: ASK_PRICE, ai: silent },
+    { say: "2kg", ai: silent },
+  ] },
+  { key: "qty-lay-2", title: "«lấy 2» sau «1kg hay 2kg?» ⇒ 2kg", shop: "food", channel: "FANPAGE", turns: [
+    { say: ASK_PRICE, ai: silent },
+    { say: "lấy 2", ai: silent },
+  ] },
+  { key: "qty-nua-ky", title: "«nửa ký» ⇒ ghi nhận đúng khối lượng", shop: "food", channel: "FANPAGE", turns: [
+    { say: ASK_PRICE, ai: silent },
+    { say: "nửa ký nhé", ai: silent },
+  ] },
+];
+
+async function testQuantityAnswers() {
+  const seen = new Set<string>();
+  await runGoldenCases(QTY_CASES, {
+    orgSuffix: "-qty",
+    beforeCase: async () => {
+      const db = await getDb();
+      const qr = schema.salesChatQuickReplies;
+      const [row] = await db.select({ id: qr.id }).from(qr).where(eq(qr.title, "Giá chả mực")).limit(1);
+      if (!row) await db.insert(qr).values({ title: "Giá chả mực", triggers: ["chả mực", "kg"], answer: QUOTE, active: true });
+      await setSettingJson(QUICK_REPLY_SETTING_KEY, { enabled: true, aiMatch: false, upsellReplyId: null, autoLearn: false, autoActivate: false });
+    },
+    afterCase: async (c, ctx, t) => {
+      seen.add(c.key);
+      const db = await getDb();
+      const [row] = await db.select({ state: schema.salesChatConversations.state }).from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, ctx.conversationId));
+      const st = (row.state ?? {}) as ChatState;
+      assert.deepEqual(t.turns[0].shown, [QUOTE], `[${c.key}] lượt đầu: câu mẫu báo giá`);
+      const second = t.turns[1];
+      const item = st.cart?.selectedItems.find((x) => x.customerExplicit);
+      if (c.key === "qty-2kg" || c.key === "qty-lay-2" || c.key === "qty-nua-ky") {
+        assert.equal(second.rounds.length, 0, `[${c.key}] máy chủ quyết, không lượt AI: ${JSON.stringify(second.rounds)}`);
+        assert.equal(second.shown.length, 1);
+        assert.ok(!second.shown.includes(QUOTE), `[${c.key}] KHÔNG gửi lại câu báo giá`);
+        assert.doesNotMatch(second.shown[0], /1kg hay 2kg|muốn mua \d/, `[${c.key}] KHÔNG hỏi lại số lượng`);
+        assert.match(second.shown[0], /^Dạ em ghi nhận mình lấy .+ Chả mực giã tay ạ\. Mình cho em xin số điện thoại nhận hàng nhé\.$/, `[${c.key}] ${second.shown[0]}`);
+        assert.equal(item?.label, "Chả mực giã tay", `[${c.key}] giỏ gắn đúng món vừa báo giá`);
+        assert.equal(item?.quantity, c.key === "qty-nua-ky" ? 500 : 2000, `[${c.key}] đúng khối lượng`);
+      }
+    },
+  });
+  assert.deepEqual([...seen].sort(), QTY_CASES.map((c) => c.key).sort());
+}
+
 export async function testP0ShortQtyRound(): Promise<void> {
   testThuan();
   await testChatTurn();
+  await testQuantityAnswers();
   console.log("✓ P0 câu chốt ngắn: «1kg thôi / nửa ký / 1,5kg / thôi lấy 1kg» ghi giỏ · lời mua mới trên đơn cũ chưa đi ⇒ MỘT câu đặt thêm / vẫn đơn đó (máy chủ) · đặt thêm ⇒ lượt mới không mang địa chỉ cũ · vẫn đơn đó ⇒ không đơn thứ hai · không rõ ⇒ người · đơn cũ đã rời kho ⇒ lượt mới · mốc địa danh KCN ⇒ hỏi đúng phần thiếu, không bịa xã · không «nói rõ hơn»");
 }

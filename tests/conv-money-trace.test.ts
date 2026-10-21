@@ -91,6 +91,7 @@ async function testDb() {
   const db = await getDb();
   const money = randomUUID();
   const empty = randomUUID();
+  const qty = randomUUID();
   const now = Date.now();
   const rows = (conv: string, parts: [string, unknown][]) => parts.map(([role, content], i) => ({ conversationId: conv, seq: i + 1, role: role as "user" | "assistant", content: content as Record<string, unknown>[], createdAt: new Date(now - (parts.length - i) * 60_000) }));
   const draftResult = JSON.stringify({ lines: [{ variant_id: "v-1kg", quantity: 1, unit_price: 280000, line_total: 280000 }], subtotal: 280000, shipping_fee: 0, cod_total: 280000, __summary: "Lên đơn nháp · 280.000 ₫" });
@@ -98,6 +99,7 @@ async function testDb() {
     await db.insert(schema.salesChatConversations).values([
       { id: money, channel: "WEB", status: "OPEN", state: { quote: { id: "q1", priceVersion: "p", verified: true, subtotal: 280000, total: 280000, amounts: [280000, 0], reasons: [], at: new Date(now).toISOString() }, upsellSent: true } },
       { id: empty, channel: "WEB", status: "WAITING", state: { upsellSent: true } },
+      { id: qty, channel: "WEB", status: "OPEN", state: {} },
     ]);
     await db.insert(schema.salesChatMessages).values([
       ...rows(money, [
@@ -111,6 +113,15 @@ async function testDb() {
         ["assistant", [{ type: "tool_use", id: "u1", name: "send_quick_reply", input: { code: "Q1" } }]],
         ["user", [{ type: "tool_result", toolUseId: "u1", content: JSON.stringify({ sent: true, __summary: "Gửi câu mẫu «Các món bán chạy»", __deliver: "Shop còn có chả mực ạ" }), isError: false }]],
         ["assistant", txt(EMPTY_REPLY_TEXT)],
+      ]),
+      // F (P0 21/10/2026, ca «Lan Nguyen»): «2kg» sau «1kg hay 2kg?» ⇒ bot gửi LẠI câu báo giá + hỏi lại số lượng; «lấy 2» lần sau cũng vậy.
+      ...rows(qty, [
+        ["user", txt("Chả cá thu giá bao nhiêu shop?")],
+        ["assistant", txt("Dạ chả cá thu 280.000 ₫/kg ạ. Mình muốn mua 1kg hay 2kg ạ?")],
+        ["user", txt("2kg")],
+        ["assistant", txt("Dạ chả cá thu 280.000 ₫/kg ạ. Mình muốn mua 1kg hay 2kg ạ?")],
+        ["user", txt("lấy 2")],
+        ["assistant", txt("Dạ em ghi nhận mình lấy 2kg Chả cá thu ạ. Mình cho em xin số điện thoại nhận hàng nhé.")],
       ]),
     ]);
     const ctx = { names: new Map([["v-1kg", "Chả cá thu · 1kg"]]), reference: new Set([0, 280000, 540000, 640000]), handoffText: null, aiDownText: null, templates: [] };
@@ -128,16 +139,18 @@ async function testDb() {
     const s3 = p3.filter((l) => l.startsWith("[ops:tom-tat]")).join("\n");
     assert.match(s3, /KHÔNG có tin khách mới kể từ tin bot trước [1-9]\d* tin/, s3);
     assert.match(s3, /≠ tổng giỏ \/ nháp máy chủ ngay trước: [1-9]\d* tin/, s3);
+    // F: đúng MỘT tin lặp (lượt «2kg»); lượt «lấy 2» được trả lời đúng ⇒ không tính; hai tin khách là câu trả lời số lượng (mẫu số).
+    assert.match(s3, /F trả lời số lượng ngắn mà bot hỏi lại \/ gửi lại câu đã gửi: 1 tin \/ 1 hội thoại · câu mẫu 0 \(0 token\) · AI 1 \(lời gọi model thừa\) · mẫu số 2 tin/, s3);
     // E (chủ shop 18/10): tốc độ + chi phí trả lời — chạy thật trên CSDL thử (sổ sự kiện + sổ AI nền tảng), chỉ số đếm.
     const p4 = await capture(() => scanAiPerformance(db, "khong-co-to-chuc", new Date(Date.now() - 86_400_000), new Date()));
     const s4 = p4.filter((l) => l.startsWith("[ops:tom-tat]")).join(" | ");
     assert.match(s4, /E lượt bot trả lời .* QUICK_REPLY \d+/, s4);
     assert.match(s4, /E lời gọi AI bot bán hàng: /, s4);
     for (const p of [...p1, ...p2, ...p3]) assert.ok(!p.includes(PHONE) && !p.includes("Bình Thạnh") && !p.includes("Quận 12") && !p.includes("chả mực ạ"), `không lọt SĐT / địa chỉ / chữ tin: ${p}`);
-    for (const p of [s1, s2, s3]) assert.ok(!p.includes(money) && !p.includes(empty), "kênh tóm tắt không in mã hội thoại");
+    for (const p of [s1, s2, s3]) assert.ok(!p.includes(money) && !p.includes(empty) && !p.includes(qty), "kênh tóm tắt không in mã hội thoại");
   } finally {
-    await db.delete(schema.salesChatMessages).where(inArray(schema.salesChatMessages.conversationId, [money, empty]));
-    await db.delete(schema.salesChatConversations).where(inArray(schema.salesChatConversations.id, [money, empty]));
+    await db.delete(schema.salesChatMessages).where(inArray(schema.salesChatMessages.conversationId, [money, empty, qty]));
+    await db.delete(schema.salesChatConversations).where(inArray(schema.salesChatConversations.id, [money, empty, qty]));
   }
 }
 
