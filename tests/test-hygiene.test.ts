@@ -236,6 +236,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "ĐẶT FACEBOOK_LOGIN_APP_ID / SECRET (app Facebook GIẢ — Graph cũng giả) và PLATFORM_SECRETS_KEY (khoá thử mã hoá page token), cùng cách messenger.test — ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai các biến đó hay không.",
   "tests/messenger-webhook-reliability.test.ts":
     "ĐẶT FACEBOOK_LOGIN_APP_ID / SECRET (app Facebook GIẢ — Graph cũng giả; secret ký gói webhook giả gửi vào route), gỡ cặp FACEBOOK_MESSENGER_APP_* và ĐẶT PLATFORM_SECRETS_KEY (khoá thử mã hoá page token), cùng cách messenger-multipage — ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai các biến đó hay không.",
+  "tests/messenger-config-report.test.ts":
+    "Dựng env của TIẾN TRÌNH CON từ process.env rồi XOÁ và ĐẶT lại đúng các biến Messenger (giá trị GIẢ, kể cả AUTH_SECRET) trước mỗi lượt chạy check-integrations --messenger — đầu vào của phép kiểm do bài tự dựng, process.env của tiến trình kiểm không bị đổi; kết luận (CÓ / KHÔNG, app đang dùng, không giá trị nào lọt ra) không phụ thuộc máy có khai các biến đó hay không.",
   "tests/messenger-multipage.test.ts":
     "ĐẶT FACEBOOK_LOGIN_APP_ID / SECRET (app Facebook GIẢ — Graph cũng giả) và PLATFORM_SECRETS_KEY (khoá thử mã hoá page token) — ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khai các biến đó hay không.",
   "tests/ops-signals.test.ts":
