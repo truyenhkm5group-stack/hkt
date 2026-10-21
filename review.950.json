@@ -1,0 +1,8 @@
+{
+  "pr": 950,
+  "sha": "d8cb7461123b7fd9da1db54ae95b1322b3111aa3",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-21T11:05:48.899Z",
+  "note": "review lead: chỉ script — thêm PAYROLL_RECON vào danh sách nguồn của perf-probe, đếm theo PHÒNG (không in tiêu đề vì có tên người), đo adaptPayrollRecon đệm nguội/ấm, in VƯỢT hạn 2,5 s nếu có. Để xác nhận #947 trên production. Không cần deploy."
+}
