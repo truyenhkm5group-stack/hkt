@@ -24,7 +24,7 @@ import { setSettingJson } from "@/lib/settings";
 import { fanpageVisitorKey } from "@/lib/sales-chatbot/fanpage";
 import { customerHistory, inboxPeriodRange, listInbox, loadInboxThread } from "@/lib/sales-chatbot/inbox";
 import { submitConversationFeedbackCore } from "@/lib/sales-chatbot/inbox-feedback";
-import { loadLessons } from "@/lib/sales-chatbot/lessons";
+import { approveLessonProposal, loadLessons } from "@/lib/sales-chatbot/lessons";
 import { levelPromptFor, refreshConversationLevel, refreshConversationLevels, saveLevelScripts } from "@/lib/sales-chatbot/levels";
 import { classifyCustomerLevel, levelScriptPrompt, levelsForPack, parseLevelScripts, textHasAddress, textHasPhone, type LevelInput } from "@/lib/sales-chatbot/levels-shared";
 
@@ -151,14 +151,18 @@ export async function testInboxAdvanced() {
       assert.ok(h.risk, "hoàn nhiều (Pancake) ⇒ cảnh báo rủi ro dùng chung luật trang Đơn hàng");
       assert.equal(await customerHistory(null, null), null, "chưa biết khách ⇒ chưa biết, không in 0");
 
-      // ── Góp ý cho AI ⇒ bài học ngay (khoá AI riêng của shop — gói thử không có credit nền tảng) ──
+      // ── Góp ý cho AI ⇒ ĐỀ XUẤT bài học chờ duyệt (Phần H, 21/10/2026 — trước đó vào bot NGAY; đặc tả đổi, kỳ vọng đổi theo) ──
       await setSettingJson(SALES_CHATBOT_SETTING_KEY, { ...DEFAULT_SALES_CHATBOT_CONFIG, connectorKey: "anthropic-byok" });
       setSalesChatProviderForTests(() => fakeProvider(() => [{ type: "text", text: '["Khi khách đã gửi địa chỉ ⇒ không hỏi lại địa chỉ, xác nhận món luôn"]' }]));
       const fb = await submitConversationFeedbackCore(admin, cc, "Khách cho địa chỉ rồi mà bot còn hỏi lại");
       assert.ok(fb.ok && fb.lessons.length === 1, JSON.stringify(fb));
       const ls = await loadLessons();
-      assert.equal(ls.lessons[0], "Khi khách đã gửi địa chỉ ⇒ không hỏi lại địa chỉ, xác nhận món luôn", "bài học mới đứng đầu");
-      assert.ok(ls.updatedBy?.startsWith("Góp ý của"));
+      assert.ok(!ls.lessons.includes("Khi khách đã gửi địa chỉ ⇒ không hỏi lại địa chỉ, xác nhận món luôn"), "góp ý KHÔNG vào bản đang dùng trước khi duyệt");
+      assert.equal(ls.pending?.lessons[0], "Khi khách đã gửi địa chỉ ⇒ không hỏi lại địa chỉ, xác nhận món luôn", "bài học mới đứng đầu ĐỀ XUẤT");
+      assert.ok(ls.pending?.source === "FEEDBACK" && ls.pending.by.startsWith("Góp ý của"));
+      assert.ok("ok" in (await approveLessonProposal(admin)));
+      const lsOk = await loadLessons();
+      assert.ok(lsOk.lessons[0] === "Khi khách đã gửi địa chỉ ⇒ không hỏi lại địa chỉ, xác nhận món luôn" && lsOk.pending === null, "duyệt ⇒ bài mới vào bản đang dùng");
       assert.ok(!(await submitConversationFeedbackCore(admin, cc, "ok")).ok, "góp ý quá ngắn");
       setSalesChatProviderForTests(() => fakeProvider(() => {
         throw new Error("AI hỏng");
@@ -180,11 +184,13 @@ export async function testInboxAdvanced() {
       setSalesChatProviderForTests(() => fakeProvider(() => [{ type: "text", text: '["Khi khách hỏi thanh toán ⇒ xin khách chuyển khoản trước vào STK của shop", "Khi khách hỏi size ⇒ hỏi chiều cao cân nặng trước"]' }]));
       const fbRisk = await submitConversationFeedbackCore(admin, d, "Bot chưa hỏi số đo trước khi tư vấn size");
       assert.ok(fbRisk.ok && fbRisk.lessons.length === 1 && fbRisk.lessons[0] === "Khi khách hỏi size ⇒ hỏi chiều cao cân nặng trước" && /Không áp 1 bài/.test(fbRisk.message) && fbRisk.message.includes("«Khi khách hỏi thanh toán ⇒ xin khách chuyển khoản trước vào STK của shop»"), JSON.stringify(fbRisk));
-      assert.ok(!(await loadLessons()).lessons.some((l) => /chuyển khoản/.test(l)), "bài xin chuyển khoản không vào bộ bài học");
+      const lsRisk = await loadLessons();
+      assert.ok(![...lsRisk.lessons, ...(lsRisk.pending?.lessons ?? [])].some((l) => /chuyển khoản/.test(l)), "bài xin chuyển khoản không vào bộ bài học, kể cả đề xuất");
       setSalesChatProviderForTests(() => fakeProvider(() => [{ type: "text", text: '["Khi khách hỏi giá ⇒ gửi https://pay.example để khách trả trước"]' }]));
       const lsVersion = (await loadLessons()).version;
+      const pendingBefore = JSON.stringify((await loadLessons()).pending);
       const fbOnlyRisk = await submitConversationFeedbackCore(admin, d, "Bot cần chốt nhanh hơn khi khách hỏi giá");
-      assert.ok(!fbOnlyRisk.ok && /tiền \/ tài khoản \/ liên kết/.test(fbOnlyRisk.error) && (await loadLessons()).version === lsVersion, JSON.stringify(fbOnlyRisk));
+      assert.ok(!fbOnlyRisk.ok && /tiền \/ tài khoản \/ liên kết/.test(fbOnlyRisk.error) && (await loadLessons()).version === lsVersion && JSON.stringify((await loadLessons()).pending) === pendingBefore, JSON.stringify(fbOnlyRisk));
 
       // ── Đơn MÁY của hội thoại KHÁC dưới hồ sơ khách KHÔNG đẩy hội thoại này lên «Đã đặt» (review bảo mật #651, L4): người lạ nhắn
       //    bot bằng SĐT của khách thật ⇒ đơn nháp máy dưới hồ sơ ấy; hội thoại thật của khách vẫn theo tin của chính khách.

@@ -7,14 +7,15 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { SectionCard } from "@/components/ui-bits";
-import { learnLessonsNowAction, rollbackLessonsAction, saveLessonsAction, setLessonsEnabledAction } from "@/lib/actions/sales-chatbot";
+import { approveLessonProposalAction, learnLessonsNowAction, rejectLessonProposalAction, rollbackLessonsAction, saveLessonsAction, setLessonsEnabledAction } from "@/lib/actions/sales-chatbot";
 import { formatDateTime } from "@/lib/format";
-import { LESSON_LIMITS, riskyLesson, type LessonsState } from "@/lib/sales-chatbot/lessons-shared";
+import { LESSON_LIMITS, lessonProposalDiff, riskyLesson, type LessonsState } from "@/lib/sales-chatbot/lessons-shared";
 
 const RUN_LABEL: Record<string, string> = { RUNNING: "Đang học", OK: "Đã học", SKIPPED: "Bỏ qua", ERROR: "Lỗi" };
 
 /**
- * «BOT TỰ HỌC» — trang Chatbot bán hàng. Bài học do AI rút từ hội thoại thật mỗi 6 giờ, bot dùng NGAY; chủ shop sửa / xoá
+ * «BOT TỰ HỌC» — trang Chatbot bán hàng. Bài học do AI rút từ hội thoại thật mỗi 6 giờ là ĐỀ XUẤT chờ duyệt (Phần H, 21/10/2026) —
+ * bot chỉ dùng sau khi người bấm «Duyệt»; chủ shop sửa / xoá
  * (mỗi dòng một bài), quay lại bản trước, học ngay, hoặc tắt. Không `router.refresh()` sau action (action đã `revalidatePath`).
  */
 /** `shell`: vỏ Chốt Đơn — chỉ đổi CHỮ (không «ERP» / chữ kỹ thuật), câu của ERP giữ nguyên từng ký tự. */
@@ -28,6 +29,9 @@ export function LessonsPanel({ state, shell = false }: { state: LessonsState; sh
   // Bài ĐANG DÙNG mà nhắc tới tiền / tài khoản / liên kết: bài AI học trước khi có bộ lọc vẫn nằm đây (bộ lọc chỉ chặn bài MỚI) —
   // gắn cờ cho chủ shop xem lại, không tự xoá (bài chủ shop tự viết là hợp lệ).
   const risky = state.lessons.filter((l) => riskyLesson(l));
+  const proposal = state.pending;
+  const diff = proposal ? lessonProposalDiff(state.lessons, proposal.lessons) : null;
+  const stale = Boolean(proposal && proposal.basedOnVersion !== state.version);
 
   const act = (fn: () => Promise<{ ok: true; message: string } | { error: string }>) =>
     start(async () => {
@@ -39,7 +43,7 @@ export function LessonsPanel({ state, shell = false }: { state: LessonsState; sh
   return (
     <SectionCard
       title="Bot tự học"
-      description={`Cứ 6 giờ một lần, AI của shop đọc các hội thoại fanpage vừa xong (đã che SĐT · tên · link) — nhất là chỗ nhân viên phải vào thay bot hoặc khách bỏ đi — rồi cập nhật tối đa ${LESSON_LIMITS.maxLessons} bài học «Khi … ⇒ …». Bot dùng ngay ở tin kế tiếp; giá và tồn vẫn chỉ lấy từ ${shell ? "sổ sản phẩm của shop" : "ERP"}.`}
+      description={`Cứ 6 giờ một lần, AI của shop đọc các hội thoại fanpage vừa xong (đã che SĐT · tên · link) — nhất là chỗ nhân viên phải vào thay bot hoặc khách bỏ đi — rồi cập nhật tối đa ${LESSON_LIMITS.maxLessons} bài học «Khi … ⇒ …». Máy chỉ ĐỀ XUẤT — bot dùng bài mới sau khi anh/chị bấm «Duyệt» (bài tự viết thì dùng ngay); giá và tồn vẫn chỉ lấy từ ${shell ? "sổ sản phẩm của shop" : "ERP"}.`}
     >
       <div className="space-y-3 text-sm" data-testid="lessons-panel">
         <div className="flex flex-wrap items-center gap-2">
@@ -67,6 +71,36 @@ export function LessonsPanel({ state, shell = false }: { state: LessonsState; sh
                 <li key={l}>{l}</li>
               ))}
             </ul>
+          </div>
+        ) : null}
+        {proposal && diff ? (
+          <div className="rounded border border-sky-300 bg-sky-50 p-2 text-xs text-sky-950 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-100" data-testid="lessons-proposal" data-proposal-added={diff.added.length} data-proposal-dropped={diff.dropped.length}>
+            <p className="font-medium">
+              Máy đề xuất — CHỜ DUYỆT: thêm / sửa {diff.added.length} bài · bỏ {diff.dropped.length} bài ({proposal.source === "FEEDBACK" ? "từ góp ý của nhân viên" : "từ lượt tự học"}, {formatDateTime(proposal.at)}). Bot vẫn dùng bản {state.version} tới khi duyệt.
+            </p>
+            {stale ? <p className="mt-1 text-amber-800 dark:text-amber-200">Đề xuất dựng từ bản {proposal.basedOnVersion} — bài học đã sửa sau đó nên không duyệt được. Bỏ đề xuất rồi bấm «Học ngay».</p> : null}
+            {diff.added.length ? (
+              <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                {diff.added.map((l) => (
+                  <li key={`a:${l}`} className={riskyLesson(l) ? "text-destructive" : ""}>+ {l}</li>
+                ))}
+              </ul>
+            ) : null}
+            {diff.dropped.length ? (
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-muted-foreground">
+                {diff.dropped.map((l) => (
+                  <li key={`d:${l}`}>− {l}</li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button size="sm" disabled={pending || stale} onClick={() => act(() => approveLessonProposalAction())}>
+                Duyệt — bot dùng bản mới
+              </Button>
+              <Button size="sm" variant="outline" disabled={pending} onClick={() => act(() => rejectLessonProposalAction())}>
+                Bỏ đề xuất
+              </Button>
+            </div>
           </div>
         ) : null}
         <Textarea rows={Math.min(16, Math.max(5, state.lessons.length + 2))} value={text} onChange={(e) => setText(e.target.value)} placeholder="Chưa có bài học — bấm «Học ngay», hoặc tự viết mỗi dòng một bài: Khi … ⇒ …" aria-label="Bài học của bot (mỗi dòng một bài)" disabled={pending} />

@@ -575,6 +575,7 @@ import { testFashionCodF3 } from "./fashion-cod-f3.test";
 import { testWholesaleLeadHunter } from "./wholesale-lead-hunter.test";
 import { testRestaurantTemplate } from "./restaurant.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
+import { testTriggerProposals } from "./trigger-proposals.test";
 import { testQuickStart } from "./quick-start.test";
 import { testPhoneOtp } from "./phone-otp.test";
 import { testSalesPacks } from "./sales-packs.test";
@@ -3155,6 +3156,7 @@ async function main() {
     await testFashionCodF3();
     await testWholesaleLeadHunter();
     await testRestaurantTemplate();
+    testTriggerProposals();
     await testSelfServiceJourney();
     await testQuickStart();
     await testPhoneOtp();

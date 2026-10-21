@@ -23,7 +23,7 @@ import { PAGE_REPLY } from "@/lib/sales-chatbot/fanpage";
 import { droppedLessonsText, lessonTranscript, LESSON_LIMITS, normalizeLessons, parseLessonsFromAi, screenAiLessons, type LessonsState, type TranscriptLine } from "@/lib/sales-chatbot/lessons-shared";
 import { loadLessons } from "@/lib/sales-chatbot/lessons";
 import { setSettingJson } from "@/lib/settings";
-import { LESSONS_SETTING_KEY } from "@/lib/sales-chatbot/lessons-shared";
+import { lessonProposalDiff, LESSONS_SETTING_KEY } from "@/lib/sales-chatbot/lessons-shared";
 import { customerFacing, customerQuotaError, customerSafeAiError } from "@/lib/saas/visibility";
 
 export const FEEDBACK_MAX = 1_000;
@@ -86,7 +86,7 @@ async function transcriptOf(convId: string): Promise<string | null> {
   return lessonTranscript(lines, "[HỘI THOẠI NHÂN VIÊN GÓP Ý]", names) ?? lines.map((l) => `${l.who}: ${l.text}`).join("\n").slice(-4000);
 }
 
-/** Góp ý của nhân viên ⇒ bài học ngay. Góp ý luôn được lưu; AI lỗi ⇒ `FAILED` (gửi lại được). */
+/** Góp ý của nhân viên ⇒ ĐỀ XUẤT bài học chờ duyệt (Phần H). Góp ý luôn được lưu; AI lỗi ⇒ `FAILED` (gửi lại được). */
 export async function submitConversationFeedbackCore(user: SessionUser, conversationId: unknown, rawText: unknown, now: Date = new Date()): Promise<Result> {
   if (!(await canUseModule("ai_sales"))) return { ok: false, error: "Module AI bán hàng chưa bật." };
   if (!canGiveFeedback(user)) return { ok: false, error: "Bạn không có quyền góp ý cho bot (cần quyền trả lời khách)." };
@@ -129,21 +129,22 @@ export async function submitConversationFeedbackCore(user: SessionUser, conversa
   const screened = screenAiLessons(parsed, state.lessons);
   const fresh = screened.kept;
   if (!fresh.length) return fail(`AI chỉ rút ra bài nhắc tới tiền / tài khoản / liên kết (${droppedLessonsText(screened.droppedLessons)}) — không tự áp; cần thật thì chủ shop tự viết ở trang Chatbot`);
-  const lessons = normalizeLessons([...fresh, ...state.lessons]);
+  // PHẦN H (21/10/2026): bài học AI rút từ góp ý là ĐỀ XUẤT chờ duyệt — KHÔNG vào bản đang dùng. Đề xuất đang chờ dựng từ ĐÚNG bản
+  // đang dùng ⇒ ghép vào nó (không mất đề xuất của lượt tự học); dựng từ bản cũ ⇒ dựng lại từ bản đang dùng.
+  const base = state.pending && state.pending.basedOnVersion === state.version ? state.pending.lessons : state.lessons;
+  const lessons = normalizeLessons([...fresh, ...base]);
+  const by = `Góp ý của ${user.name ?? user.email}`;
   await setSettingJson(LESSONS_SETTING_KEY, {
     ...state,
-    lessons,
-    version: state.version + 1,
-    updatedAt: now.toISOString(),
-    updatedBy: `Góp ý của ${user.name ?? user.email}`,
-    history: state.lessons.length ? [...state.history, { version: state.version, lessons: state.lessons, at: state.updatedAt ?? now.toISOString(), by: state.updatedBy ?? "" }].slice(-LESSON_LIMITS.history) : state.history,
+    pending: { lessons, basedOnVersion: state.version, at: now.toISOString(), by, source: "FEEDBACK", note: `${by}: ${text.slice(0, 200)}` },
   } satisfies LessonsState);
+  await audit({ userId: user.id, userEmail: user.email, action: "SALES_LESSONS_PROPOSE", entity: "SETTINGS", entityId: LESSONS_SETTING_KEY, before: { version: state.version, count: state.lessons.length }, after: { proposed: lessons.length, ...lessonProposalDiff(state.lessons, lessons) }, reason: "Góp ý của nhân viên ⇒ đề xuất bài học — chờ duyệt" });
   const applied = fresh.filter((l) => lessons.includes(l));
   await db.insert(f).values({ conversationId: id, userId: user.id, userName: user.name ?? user.email, text, lessons: applied, status: "APPLIED", createdAt: now });
   await audit({ userId: user.id, userEmail: user.email, action: "SALES_CHAT_FEEDBACK", entity: "SALES_CHAT", entityId: id, after: { lessons: applied }, reason: text.slice(0, 200) });
   publish({ type: "chat", conversationId: id });
   const skipped = screened.dropped ? ` Không áp ${screened.dropped} bài nhắc tới tiền / tài khoản / liên kết (${droppedLessonsText(screened.droppedLessons)}) — cần thật thì chủ shop tự viết ở trang Chatbot.` : "";
-  return { ok: true, message: (state.enabled ? `Bot đã học ${applied.length} bài — dùng từ lượt trả lời kế tiếp.` : `Đã lưu ${applied.length} bài học — bật «Tự học» ở trang Chatbot để bot dùng.`) + skipped, lessons: applied };
+  return { ok: true, message: `Đã rút ${applied.length} bài học — CHỜ chủ shop duyệt ở trang Chatbot (bot chưa dùng tới khi duyệt).` + skipped, lessons: applied };
 }
 
 /** Góp ý đã gửi cho một hội thoại (mới nhất trước). */

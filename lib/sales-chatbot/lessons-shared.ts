@@ -8,7 +8,7 @@
  * Tự học (lessons.ts) đọc hội thoại fanpage ĐÃ LƯU trong ERP (`sales_chat_inbound` có đủ ba giọng: KHÁCH · BOT · SHOP — tức
  * nhân viên / trả lời tự động của page), cứ `everyMs` một lần, cho AI của shop rút ra BÀI HỌC cụ thể «Khi … ⇒ …» và cập nhật
  * danh sách bài học đang dùng (giữ bài đúng, sửa bài sai, gộp trùng). Nguồn học mạnh nhất: chỗ NHÂN VIÊN phải vào trả lời thay
- * bot (câu của nhân viên là mẫu đúng) và chỗ khách phàn nàn. Bài học vào lời nhắc NGAY (không chờ duyệt) nhưng: không được trái
+ * bot (câu của nhân viên là mẫu đúng) và chỗ khách phàn nàn. Từ 21/10/2026 (Phần H) danh sách máy soạn là ĐỀ XUẤT chờ người duyệt (`pending`); ngoài ra: không được trái
  * luật cứng, mọi con số giá bị lọc (`stripPrices`), SĐT / tên khách được che trước khi gửi AI; chủ shop xem · sửa · xoá · quay
  * lại bản trước · tắt được.
  */
@@ -31,6 +31,12 @@ export const LESSON_LIMITS = {
 } as const;
 
 export type LessonVersion = { version: number; lessons: string[]; at: string; by: string };
+/**
+ * ĐỀ XUẤT CHỜ DUYỆT (Phần H «AI Sales Self-Optimizing», 21/10/2026): mọi danh sách bài học do MÁY soạn (lượt tự học, góp ý của
+ * nhân viên qua AI) đứng ở đây — bot vẫn đọc `lessons` (bản ĐANG DÙNG) tới khi NGƯỜI bấm duyệt. `basedOnVersion` = bản đang dùng lúc
+ * máy soạn: người sửa tay sau đó ⇒ đề xuất dựa trên bản cũ, không được duyệt (đè mất phần người vừa sửa).
+ */
+export type LessonProposal = { lessons: string[]; basedOnVersion: number; at: string; by: string; source: "AUTO_LEARN" | "FEEDBACK"; note: string };
 export type LessonsRun = { at: string; status: "RUNNING" | "OK" | "SKIPPED" | "ERROR"; threads: number; note: string };
 export type LessonsState = {
   enabled: boolean;
@@ -43,9 +49,26 @@ export type LessonsState = {
   lastRun: LessonsRun | null;
   /** Hội thoại có tin tới SAU mốc này mới là «mới» với lượt học kế tiếp. */
   learnedUntil: string | null;
+  /** Đề xuất của máy CHỜ DUYỆT — KHÔNG có hiệu lực. `null` = không có. */
+  pending: LessonProposal | null;
 };
 
-export const EMPTY_LESSONS: LessonsState = { enabled: true, lessons: [], version: 0, updatedAt: null, updatedBy: null, history: [], lastRun: null, learnedUntil: null };
+export const EMPTY_LESSONS: LessonsState = { enabled: true, lessons: [], version: 0, updatedAt: null, updatedBy: null, history: [], lastRun: null, learnedUntil: null, pending: null };
+
+function parseProposal(raw: unknown): LessonProposal | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const lessons = normalizeLessons(strList(o.lessons));
+  if (!lessons.length || typeof o.basedOnVersion !== "number") return null;
+  return { lessons, basedOnVersion: o.basedOnVersion, at: String(o.at ?? ""), by: String(o.by ?? ""), source: o.source === "FEEDBACK" ? "FEEDBACK" : "AUTO_LEARN", note: String(o.note ?? "").slice(0, 600) };
+}
+
+/** Bài THÊM / BỎ của một đề xuất so với bản đang dùng — để người duyệt đọc đúng phần đổi. HÀM THUẦN. */
+export function lessonProposalDiff(current: readonly string[], proposed: readonly string[]): { added: string[]; dropped: string[] } {
+  const cur = new Set(current);
+  const next = new Set(proposed);
+  return { added: proposed.filter((l) => !cur.has(l)), dropped: current.filter((l) => !next.has(l)) };
+}
 
 const strList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
@@ -63,6 +86,7 @@ export function parseLessonsState(raw: unknown): LessonsState {
       .map((h) => ({ version: Number(h.version) || 0, lessons: strList(h.lessons), at: String(h.at ?? ""), by: String(h.by ?? "") }))
       .slice(-LESSON_LIMITS.history),
     learnedUntil: typeof o.learnedUntil === "string" ? o.learnedUntil : null,
+    pending: parseProposal(o.pending),
     lastRun: run && typeof run.at === "string" ? { at: run.at, status: (["RUNNING", "OK", "SKIPPED", "ERROR"].includes(String(run.status)) ? run.status : "ERROR") as LessonsRun["status"], threads: Number(run.threads) || 0, note: String(run.note ?? "") } : null,
   };
 }

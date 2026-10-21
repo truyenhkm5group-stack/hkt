@@ -14,6 +14,8 @@ import {
   addQuickReplyImagesAction,
   autoLearnQuickRepliesNowAction,
   bulkQuickRepliesAction,
+  decideTriggerProposalAction,
+  removeApprovedTriggerAction,
   removeWrongProductTriggersAction,
   deleteQuickReplyAction,
   removeQuickReplyImageAction,
@@ -26,6 +28,7 @@ import {
 } from "@/lib/actions/sales-quick-replies";
 import { formatDateTime } from "@/lib/format";
 import { QUICK_REPLY_AUTO_LEARN, QUICK_REPLY_LIMITS, type QuickReplyAutoLearnRun, type QuickReplySettings } from "@/lib/sales-chatbot/quick-replies-shared";
+import type { TriggerProposal } from "@/lib/sales-chatbot/trigger-proposals-shared";
 
 export type QuickReplyView = {
   id: string;
@@ -59,7 +62,7 @@ const EMPTY: Draft = { id: null, title: "", triggers: "", answer: "", active: tr
  * action đã `revalidatePath`.
  */
 /** `shell`: vỏ Chốt Đơn — chỉ đổi CHỮ (không «token» / «ERP»), câu của ERP giữ nguyên. */
-export function QuickRepliesManager({ manage, settings, rows, autoLearnRun, shell = false }: { manage: boolean; settings: QuickReplySettings; rows: QuickReplyView[]; autoLearnRun: QuickReplyAutoLearnRun | null; shell?: boolean }) {
+export function QuickRepliesManager({ manage, settings, rows, autoLearnRun, triggerProposals = [], shell = false }: { manage: boolean; settings: QuickReplySettings; rows: QuickReplyView[]; autoLearnRun: QuickReplyAutoLearnRun | null; triggerProposals?: TriggerProposal[]; shell?: boolean }) {
   const [pending, start] = useTransition();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [probe, setProbe] = useState("");
@@ -159,8 +162,11 @@ export function QuickRepliesManager({ manage, settings, rows, autoLearnRun, shel
             Tự nạp mỗi ngày
           </label>
           <label className="flex items-center gap-2">
-            <Switch checked={learn.autoActivate} disabled={!manage || pending || !learn.autoLearn} onCheckedChange={(v) => setLearn({ ...learn, autoActivate: v })} aria-label="Bật ngay câu mẫu AI soạn" />
-            Bật ngay câu mẫu mới (tắt = chờ duyệt)
+            {/* PHẦN H (21/10/2026): câu mẫu máy soạn LUÔN chờ người duyệt — công tắc khoá, giá trị đã lưu giữ nguyên (chưa xoá dữ liệu). */}
+            <Switch checked={false} disabled aria-label="Bật ngay câu mẫu AI soạn — đang khoá" />
+            <span>
+              Bật ngay câu mẫu mới — <span className="text-muted-foreground">đang khoá: mọi câu mẫu và cách hỏi máy soạn đều chờ người duyệt</span>
+            </span>
           </label>
           {manage ? (
             <>
@@ -173,6 +179,7 @@ export function QuickRepliesManager({ manage, settings, rows, autoLearnRun, shel
             </>
           ) : null}
         </div>
+        <TriggerProposalsBlock proposals={triggerProposals} manage={manage} pending={pending} act={act} />
         {autoLearnRun ? (
           <p className="mt-2 text-xs text-muted-foreground" data-testid="quick-reply-auto-learn-run">
             Lượt gần nhất {formatDateTime(autoLearnRun.at)} · {RUN_LABEL[autoLearnRun.status]}: {autoLearnRun.note}
@@ -366,3 +373,60 @@ export function QuickRepliesManager({ manage, settings, rows, autoLearnRun, shel
     </div>
   );
 }
+
+/**
+ * Cách hỏi máy đề xuất (Phần H): CHỜ DUYỆT từng cụm — chưa có hiệu lực; cụm đã duyệt gần đây gỡ được. Sổ: trigger-proposals.ts.
+ */
+function TriggerProposalsBlock({ proposals, manage, pending, act }: { proposals: TriggerProposal[]; manage: boolean; pending: boolean; act: (fn: () => Promise<{ ok: true; message: string } | { error: string }>) => void }) {
+  const waiting = proposals.filter((p) => p.status === "PENDING");
+  const approved = proposals.filter((p) => p.status === "APPROVED").slice(-20).reverse();
+  if (!waiting.length && !approved.length) return null;
+  return (
+    <div className="mt-3 space-y-2 text-sm" data-testid="trigger-proposals" data-pending={waiting.length}>
+      <p className="font-medium">Cách hỏi máy đề xuất — chờ duyệt ({waiting.length})</p>
+      {waiting.length ? (
+        <ul className="space-y-1">
+          {waiting.map((p) => (
+            <li key={p.id} className="flex flex-wrap items-center gap-2">
+              <span>
+                «{p.trigger}» → <span className="text-muted-foreground">{p.entryTitle}</span>
+              </span>
+              {manage ? (
+                <>
+                  <Button size="sm" variant="outline" className="h-7" disabled={pending} onClick={() => act(() => decideTriggerProposalAction(p.id, "APPROVE"))}>
+                    Duyệt
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7" disabled={pending} onClick={() => act(() => decideTriggerProposalAction(p.id, "REJECT"))}>
+                    Bỏ
+                  </Button>
+                </>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-muted-foreground">Không có cách hỏi nào đang chờ.</p>
+      )}
+      {approved.length ? (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-muted-foreground">Đã duyệt gần đây ({approved.length}) — gỡ được</summary>
+          <ul className="mt-1 space-y-1">
+            {approved.map((p) => (
+              <li key={p.id} className="flex flex-wrap items-center gap-2">
+                <span>
+                  «{p.trigger}» → {p.entryTitle} · {p.decidedBy ?? "—"} {p.decidedAt ? formatDateTime(p.decidedAt) : ""}
+                </span>
+                {manage ? (
+                  <Button size="sm" variant="ghost" className="h-6" disabled={pending} onClick={() => act(() => removeApprovedTriggerAction(p.id))}>
+                    Gỡ
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
