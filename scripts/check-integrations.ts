@@ -10,6 +10,8 @@ import { PancakeClient } from "@/lib/integrations/pancake/client";
 import { mapOrder } from "@/lib/integrations/pancake/mapper";
 import { ViettelPostClient } from "@/lib/integrations/viettelpost/client";
 import { FacebookAdsClient } from "@/lib/integrations/facebook/client";
+import { messengerApp, messengerVerifyToken, messengerWebhookSecrets } from "@/lib/integrations/messenger/graph";
+import { loginConfigMode } from "@/lib/integrations/messenger/permission-guide";
 import { PancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { runCopilot } from "@/lib/ai/copilot";
 import { AGENT_GITHUB_ALLOWED, AGENT_GITHUB_DENIED, testAgentGithubIdentity } from "@/lib/integrations/github/agent-identity";
@@ -218,6 +220,34 @@ async function checkFacebook() {
  * số vòng, độ trễ, token) — KHÔNG in câu trả lời vì log Actions là công khai và câu trả lời có thể
  * chứa tên / SĐT khách.
  */
+/**
+ * Messenger trực tiếp — CHỈ khai CÓ / KHÔNG từng biến và app nào đang dùng; KHÔNG in giá trị (App ID, secret, verify token) — kho
+ * PUBLIC và dòng ✓ / ✗ ra log công khai. Đo được mà không cần người mở /platform.
+ */
+async function checkMessenger() {
+  section("Messenger trực tiếp (app Meta)");
+  const has = (v: string | null | undefined) => (v && v.trim() ? "CÓ" : "KHÔNG");
+  const o = env.oauth;
+  ok(`FACEBOOK_LOGIN_APP_ID ${has(o.facebookAppId)} · FACEBOOK_LOGIN_APP_SECRET ${has(o.facebookAppSecret)}`);
+  ok(`FACEBOOK_MESSENGER_APP_ID ${has(o.facebookMessengerAppId)} · FACEBOOK_MESSENGER_APP_SECRET ${has(o.facebookMessengerAppSecret)}`);
+  // KHÔNG dùng loginModeText ở đây: câu đó in nguyên Configuration ID (dành cho màn /platform), còn dòng này ra log công khai.
+  ok(`FACEBOOK_MESSENGER_LOGIN_CONFIG_ID ${has(o.facebookMessengerLoginConfigId)} — xin quyền bằng ${loginConfigMode(o.facebookMessengerLoginConfigId).mode === "CONFIG" ? "Configuration ID (Facebook Login for Business)" : "danh sách quyền (scope)"}`);
+  let verify = "";
+  try {
+    verify = messengerVerifyToken();
+  } catch {
+    verify = "";
+  }
+  if (verify) ok("Verify token webhook dựng được (dẫn xuất từ AUTH_SECRET)");
+  else bad("Không dựng được verify token webhook — thiếu AUTH_SECRET");
+  const app = messengerApp();
+  if (!app) bad("Chưa khai app nào đủ cặp ID + secret — nối page / gửi tin không chạy");
+  else ok(`Nối page / gửi tin dùng: ${app.source === "MESSENGER_APP" ? "App Messenger riêng" : "App đăng nhập (chưa khai đủ app Messenger)"}`);
+  const n = messengerWebhookSecrets().length;
+  if (n) ok(`Webhook nhận chữ ký của ${n} app secret`);
+  else bad("Webhook không có app secret nào — mọi gói Meta sẽ bị 401");
+}
+
 async function checkAi() {
   section("AI Copilot");
   const provider = resolveProviderName();
@@ -380,6 +410,10 @@ async function main() {
     await checkGithub();
     process.exit(0);
   }
+  if (process.argv.includes("--messenger")) {
+    await checkMessenger();
+    process.exit(0);
+  }
   if (process.argv.includes("--agent-identity")) {
     await checkAgentIdentity();
     process.exit(0);
@@ -387,6 +421,7 @@ async function main() {
   const vtpNumber = await checkPancake();
   await checkViettelPost(vtpNumber);
   await checkFacebook();
+  await checkMessenger();
   await checkPancakePages();
   await checkAi();
   await checkGeminiVideo();

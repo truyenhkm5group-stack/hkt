@@ -198,6 +198,7 @@ const MOI = [
   "0248_org_migration_status",
   "0249_product_marketer_assignments",
   "0250_payroll_code_pending",
+  "0251_platform_webhook_rejections",
 ] as const;
 
 /*

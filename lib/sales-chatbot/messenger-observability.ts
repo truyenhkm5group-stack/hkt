@@ -10,6 +10,8 @@
  * CHỈ số đếm, mã page, mã tổ chức và câu lỗi đã che bí mật (≤ 300 ký tự) — KHÔNG nội dung tin, KHÔNG PSID, KHÔNG token.
  */
 
+import { noteWebhookRejection } from "@/lib/platform/webhook-rejections";
+
 export type WebhookOutcome = { pageId: string; outcome: "QUEUED" | "DUPLICATE" | "IGNORED" | "UNKNOWN_PAGE" };
 
 /** Tóm tắt MỘT gói: `null` khi bình thường (không ghi log); có page lạ / sự kiện trùng ⇒ số đếm + mã page lạ. HÀM THUẦN. */
@@ -23,8 +25,15 @@ export function summarizeMessengerWebhook(outcomes: readonly WebhookOutcome[]): 
 
 type LogFields = Record<string, string | number | boolean | string[] | null>;
 
-export function messengerWebhookLog(evt: "messenger_webhook_rejected" | "messenger_webhook_anomaly" | "messenger_process_failed", fields: LogFields): void {
+/**
+ * Một dòng log có cấu trúc — VÀ, với gói bị từ chối / page lạ, cộng vào sổ bền `platform_webhook_rejections` (M4 mục 4) để /platform
+ * đọc được «chữ ký sai hàng loạt» thay vì chỉ có stdout. Trả về lượt ghi sổ (không bao giờ ném); bên gọi KHÔNG cần đợi.
+ */
+export function messengerWebhookLog(evt: "messenger_webhook_rejected" | "messenger_webhook_anomaly" | "messenger_process_failed", fields: LogFields): Promise<void> {
   const safe: LogFields = {};
   for (const [k, v] of Object.entries(fields)) safe[k] = typeof v === "string" ? v.slice(0, 300) : v;
   console.warn(JSON.stringify({ evt, ...safe }));
+  if (evt === "messenger_webhook_rejected" && typeof fields.reason === "string") return noteWebhookRejection("MESSENGER", fields.reason).then(() => undefined);
+  if (evt === "messenger_webhook_anomaly" && Array.isArray(fields.unknownPages) && fields.unknownPages.length) return noteWebhookRejection("MESSENGER", "UNKNOWN_PAGE", new Date(), fields.unknownPages.length).then(() => undefined);
+  return Promise.resolve();
 }

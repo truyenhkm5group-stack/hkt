@@ -12390,3 +12390,25 @@ export const productBonusTerms = pgTable(
     check("product_bonus_terms_cap_check", sql`${t.maxBonusAmount} IS NULL OR ${t.maxBonusAmount} >= 0`),
   ],
 );
+
+/**
+ * SỔ GÓI WEBHOOK BỊ TỪ CHỐI (0251 · M4) — mặt phẳng điều khiển, chỉ thật ở CSDL NHÀ. MỘT dòng mỗi (nguồn, lý do, phút); 24 giờ /
+ * 7 ngày tính lúc đọc. Không mã page / PSID / nội dung. Đường ghi + luật: `lib/platform/webhook-rejections.ts`.
+ */
+export const platformWebhookRejections = pgTable(
+  "platform_webhook_rejections",
+  {
+    provider: text("provider").notNull(),
+    reason: text("reason").notNull(),
+    bucket: ts("bucket").notNull(),
+    count: integer("count").notNull().default(1),
+    lastAt: ts("last_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "platform_webhook_rejections_pkey", columns: [t.provider, t.reason, t.bucket] }),
+    index("platform_webhook_rejections_bucket_idx").on(t.bucket),
+    check("platform_webhook_rejections_provider_check", sql`${t.provider} IN ('MESSENGER')`),
+    check("platform_webhook_rejections_reason_check", sql`${t.reason} ~ '^[A-Z][A-Z0-9_]{1,40}$'`),
+    check("platform_webhook_rejections_count_check", sql`${t.count} >= 1`),
+  ],
+);

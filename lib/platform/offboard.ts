@@ -70,6 +70,7 @@ export const OFFBOARD_TABLES: Readonly<Record<ControlPlaneTable, TableSpec>> = {
   platform_signup_invites: { disposition: "KEEP", why: "Mã mời đã dùng (chỉ băm, không dữ liệu người) — lịch sử; mã dùng một lần nên không mở lại được.", where: (s) => sql`organization_code = ${s.code}` },
   platform_signup_attempts: { disposition: "KEEP", why: "Lượt đăng ký (IP chỉ băm) — nguồn ĐẾM của trần chống dò, đồng thời là chứng cứ «tự đăng ký».", where: (s) => sql`organization_code = ${s.code}` },
   platform_settings: { disposition: "GLOBAL", why: "Cài đặt của nền tảng." },
+  platform_webhook_rejections: { disposition: "GLOBAL", why: "Sổ gói webhook bị từ chối MỨC NỀN TẢNG (nguồn · lý do · phút) — không mang mã tổ chức, không dữ liệu người." },
   platform_ai_usage: { disposition: "DELETE", why: "Sổ dùng AI theo MÃ — mã được dùng lại khi đăng ký lại; tổng chi phí theo nguồn được chép vào nhật ký ORG_OFFBOARD trước khi xoá.", where: byCode },
   platform_subscriptions: { disposition: "DELETE", why: "Cấu hình thu phí thuê bao (không phải tiền — tiền nằm ở platform_billing_payments).", where: byCode },
   platform_invoices: { disposition: "DELETE", why: "Hoá đơn đã huỷ / hết lượt — hoá đơn ĐÃ TRẢ là tiền thật (chặn ở MONEY_CHECKS VÀ không bao giờ khớp điều kiện xoá), hoá đơn OPEN còn nhận tiền được ⇒ từ chối.", where: (s) => sql`org_code = ${s.code} and status <> 'PAID'` },
