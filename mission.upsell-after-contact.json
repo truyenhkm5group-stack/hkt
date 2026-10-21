@@ -3,7 +3,7 @@
   "mission_id": "upsell-after-contact",
   "title": "Bỏ câu «nhân viên sẽ xác nhận lại địa chỉ» — sang upsell sau khi đủ thông tin giao (sau cờ tổ chức)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-upsell-contact",
@@ -18,7 +18,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-21T09:29:20.925Z",
-  "updated_at": "2026-10-21T09:29:20.925Z",
-  "last_heartbeat": "2026-10-21T09:29:20.925Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-21T12:04:05.157Z",
+  "last_heartbeat": "2026-10-21T12:04:05.157Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/upsell-after-contact",
+    "sha": "076aa468e4b9c940c76a3beb059dc6a5e3e48cf6",
+    "at": "2026-10-21T12:04:05.157Z",
+    "actor": "DESKTOP-56TH98Y:wt-upsell-contact",
+    "title": "Bỏ câu «nhân viên sẽ xác nhận lại địa chỉ» — sang upsell sau khi đủ thông tin giao (sau cờ tổ chức)",
+    "summary": "",
+    "tests": [
+      "cổng cây sạch @076aa468e: typecheck · lint · npm test (TẤT CẢ KIỂM THỬ ĐẠT) · build — p0-upsell-after-contact: 8 ca chatTurn (đủ 7 ý chủ shop + thiếu tỉnh) + thuần + mã nguồn, 5/5 đột biến đỏ"
+    ]
+  }
 }
