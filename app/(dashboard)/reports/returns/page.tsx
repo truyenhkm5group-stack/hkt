@@ -22,6 +22,9 @@ import { ORDER_SOURCE_HINT, ORDER_SOURCE_LABEL, ORDER_SOURCE_TONE } from "@/lib/
 import { SUCCESS_RATE_TERMINAL_LABEL } from "@/lib/queries/logistics";
 import { ProjectionConfidence } from "@/app/(dashboard)/reports/projection-confidence";
 import { ReturnReasonSection } from "@/app/(dashboard)/reports/returns/reason-section";
+import { ReasonFilterBar } from "@/app/(dashboard)/reports/returns/reason-filter-bar";
+import { CARE_NONE, CARE_UNOWNED } from "@/lib/constants/return-reason-filters";
+import { userLabelsByIds } from "@/lib/queries/users";
 import { MARKETER_UNRESOLVED, MARKETER_UNRESOLVED_LABEL } from "@/lib/constants/marketer-attribution";
 import { type SearchParams } from "@/lib/search-params";
 import { TIME_BASES, TIME_BASIS_LABEL, TIME_BASIS_QUESTION } from "@/lib/constants/report-time-basis";
@@ -67,11 +70,13 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
   // Dựng tham số và gọi truy vấn qua CÙNG hai hàm mà job giữ ấm gọi (`lib/queries/returns-report-page.ts`),
   // để khoá đệm trang đọc trùng khoá job làm ấm theo cấu trúc, không theo trí nhớ.
   const thamSo = returnsPageParams(raw);
-  const { params, minShipped, variantKey, giaTriDon, dangLocGiaTri, basis, codes, marketerIds, openReason, openGroup, openProduct, reasonFilter } = thamSo;
+  const { params, minShipped, variantKey, giaTriDon, dangLocGiaTri, basis, codes, marketerIds, openReason, openGroup, openProduct, reasonFilter, reasonSelection, reasonFiltered } = thamSo;
   const { rows, total, pageCount, all, productRows, loiBang, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia, causeBoard } = await loadReturnsPage(thamSo);
   // Hồ sơ ngành chỉ để đổi NHÃN chữ biến thể (shop thực phẩm: «Size: 1kg» ⇒ «Quy cách: 1kg») — đổi trên DỮ LIỆU trước khi truyền
   // xuống bảng client; KHÔNG đổi trong `loadReturnsPage` vì khoá đệm của nó dùng chung với job giữ ấm.
   const displayProfile = await readDisplayProfile();
+  // 2b: tên nhân viên care do MÁY CHỦ đọc từ `users` theo khoá tài khoản (luật 34) — không nhận chữ từ URL.
+  const careNames = await userLabelsByIds(reasonReport.facets.careOwners.map((x) => x.key).filter((k) => k !== CARE_UNOWNED && k !== CARE_NONE));
 
   const selected = variantKey ? all.find((r) => r.key === variantKey) : null;
 
@@ -686,6 +691,7 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
       </IntelSection>
 
       {/* ═════════ E. PHÂN TÍCH LÝ DO HOÀN ═════════ */}
+      <ReasonFilterBar facets={reasonReport.facets} careNames={careNames} active={reasonFiltered} postOffice={reasonSelection.postOffice ?? ""} />
       <ReturnReasonSection report={reasonReport} filter={reasonFilter} hrefWith={hrefWith} openReason={openReason} openGroup={openGroup} openProduct={openProduct} />
 
       {/* ═════════ E2. NGUYÊN NHÂN → GIẢI PHÁP → PHÒNG XỬ LÝ (chỉ khi cờ cách xếp = theo chứng cứ) ═════════ */}

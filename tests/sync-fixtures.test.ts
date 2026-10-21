@@ -448,6 +448,7 @@ import {
   testEvidenceTaxonomyContract,
   testEvidenceUsesOneAuthorityTable,
 } from "./return-reason-evidence.test";
+import { testReasonFilterParams, testReasonFiltersOnDb, testReasonFiltersPure, testReasonFiltersSource } from "./return-reason-filters.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -2311,6 +2312,10 @@ async function main() {
   }
   if (khoi.chay("K06")) {
     await testEvidenceOnDb(db);
+    testReasonFiltersPure();
+    testReasonFilterParams();
+    testReasonFiltersSource();
+    await testReasonFiltersOnDb(db);
     await testVtpBeatsPancakeRelayOnDb(db);
   await testSlowByTimeOnDb(db);
   testCauseBoard();
