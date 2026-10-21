@@ -5114,6 +5114,8 @@ export const platformAiUsage = pgTable(
      * `NULL` = CHƯA PHÂN LOẠI (dòng cũ, đường ghi chưa nối) — không backfill. Danh sách đóng: `AI_USAGE_ERROR_CLASSES`.
      */
     errorClass: text("error_class"),
+    /** 0253: phần của `input_tokens` GHI VÀO bộ đệm (nhà cung cấp trả). NULL = không biết. Ghi qua câu chèn liệt kê cột (serve-compat). */
+    cacheWriteTokens: integer("cache_write_tokens"),
   },
   (t) => [
     uniqueIndex("platform_ai_usage_org_event_key").on(t.orgCode, t.eventKey).where(sql`${t.eventKey} IS NOT NULL`),
@@ -5125,6 +5127,7 @@ export const platformAiUsage = pgTable(
       sql`${t.errorClass} IS NULL OR ${t.errorClass} IN ('CREDIT','AUTH','RATE_LIMIT','MODEL_UNAVAILABLE','SERVER_ERROR','TIMEOUT','INVALID_REQUEST','OTHER','REQUESTS_DAY','REQUESTS_MONTH','COST_HARD','NO_PLATFORM_CREDIT','PLATFORM_CREDIT_USED','PLAN_UNREADABLE')`,
     ),
     check("platform_ai_usage_event_key_check", sql`${t.eventKey} IS NULL OR length(${t.eventKey}) BETWEEN 1 AND 200`),
+    check("platform_ai_usage_cache_write_check", sql`${t.cacheWriteTokens} IS NULL OR ${t.cacheWriteTokens} >= 0`),
     index("platform_ai_usage_org_at_idx").on(t.orgCode, t.at),
     // 0231: sổ AI theo HỘI THOẠI cho dấu vết từng tin khách ở hộp thư (lib/ai-usage/conversation-evidence.ts).
     index("platform_ai_usage_org_ref_at_idx").on(t.orgCode, t.ref, t.at).where(sql`${t.ref} IS NOT NULL`),

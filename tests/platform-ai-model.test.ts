@@ -631,7 +631,8 @@ async function testStickyAndVerdict() {
   assert.deepEqual([seen[0].reasoning, seen[0].maxTokens], ["minimal", 1024]);
   assert.deepEqual(route(policy({ primaryModel: M31, canaryPct: 100, reasoning: "low", maxOutputTokens: 2048 }), can, []).overrides, { reasoning: "low", maxTokens: 2048 });
   assert.equal(route(policy({ primaryModel: M31, canaryPct: 10, reasoning: "low" }), ctl, []).overrides, undefined, "nhánh đối chứng giữ cấu hình của nơi gọi");
-  assert.deepEqual(usageDetail({ usage: { inputTokens: 100, outputTokens: 900, cacheReadTokens: 20, cacheWriteTokens: 0, thoughtTokens: 800 }, latencyMs: 1500 }), { cachedTokens: 20, thinkingTokens: 800, latencyMs: 1500 });
+  // 0253: token GHI vào bộ đệm cũng được tách (cột cache_write_tokens).
+  assert.deepEqual(usageDetail({ usage: { inputTokens: 100, outputTokens: 900, cacheReadTokens: 20, cacheWriteTokens: 7, thoughtTokens: 800 }, latencyMs: 1500 }), { cachedTokens: 20, cacheWriteTokens: 7, thinkingTokens: 800, latencyMs: 1500 });
   assert.equal(usageDetail({ usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }, latencyMs: 1 }).thinkingTokens, null, "nhà cung cấp không tách ⇒ CHƯA BIẾT");
 
   // Benchmark ghi đơn — chấm thuần.

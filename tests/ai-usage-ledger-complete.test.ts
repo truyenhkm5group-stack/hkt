@@ -13,8 +13,9 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { eq, sql } from "drizzle-orm";
 import { getPlatformDb, schema } from "@/db";
-import { aiCallKey, duplicateBlockedCount, recordAiUsage } from "@/lib/ai-usage/ledger";
+import { aiCallKey, duplicateBlockedCount, recordAiUsage, resetLedgerColumnProbeForTests } from "@/lib/ai-usage/ledger";
 import { AI_USAGE_WORKLOADS, PLATFORM_WORKLOADS } from "@/lib/ai-usage/types";
+import { rowsOf } from "@/lib/sql-rows";
 
 const ORG = "ledger-2a";
 const OLD_CHECK = `"workload" IS NULL OR "workload" IN ('sales_chatbot','order_sync','quick_extract','vision')`;
@@ -74,6 +75,27 @@ export async function testAiUsageLedgerComplete() {
       await pdb.execute(sql.raw(`ALTER TABLE platform_ai_usage ADD CONSTRAINT platform_ai_usage_workload_check CHECK ("workload" IS NULL OR "workload" IN (${AI_USAGE_WORKLOADS.map((w) => `'${w}'`).join(",")}))`));
     }
     await assert.rejects(() => recordAiUsage({ ...base, workload: "sales_chatbot", status: "LẠ" as never }), /Trạng thái lượt AI lạ/, "lỗi hình dạng khác vẫn ném như cũ");
+
+    // 4 · 0253 cache_write_tokens: ghi khi cột có; CSDL nhà chưa áp 0253 (cột vắng) ⇒ câu chèn liệt kê cột vẫn ghi đủ dòng tiền.
+    resetLedgerColumnProbeForTests();
+    const at = new Date("2026-10-21T03:00:00Z");
+    assert.deepEqual(await recordAiUsage({ ...base, workload: "sales_chatbot", ref: "cw", cachedTokens: 3, cacheWriteTokens: 4, at }), { recorded: true });
+    const cw = (await pdb.select().from(t).where(eq(t.ref, "cw")))[0];
+    assert.ok(cw && cw.cacheWriteTokens === 4 && cw.cachedTokens === 3 && cw.at.toISOString() === at.toISOString(), `cột 0253 được ghi, mốc at giữ đúng: ${JSON.stringify(cw)}`);
+    await pdb.execute(sql.raw(`ALTER TABLE platform_ai_usage DROP COLUMN cache_write_tokens`));
+    resetLedgerColumnProbeForTests();
+    try {
+      const k = aiCallKey({ workload: "sales_chatbot", scope: "cw-old", turn: 1 });
+      assert.deepEqual(await recordAiUsage({ ...base, workload: "sales_chatbot", ref: "cw-old", cacheWriteTokens: 9, eventKey: k }), { recorded: true }, "lược đồ chưa có cột ⇒ không ném, không mất dòng");
+      assert.deepEqual(await recordAiUsage({ ...base, workload: "sales_chatbot", ref: "cw-old", cacheWriteTokens: 9, eventKey: k }), { recorded: false }, "khoá sự kiện vẫn chặn bản sao trên lược đồ cũ");
+      const [{ n }] = rowsOf<{ n: number }>(await pdb.execute(sql`select count(*)::int as n from platform_ai_usage where ref = 'cw-old'`));
+      assert.equal(Number(n), 1);
+    } finally {
+      await pdb.execute(sql.raw(`ALTER TABLE platform_ai_usage ADD COLUMN IF NOT EXISTS cache_write_tokens integer`));
+      await pdb.execute(sql.raw(`ALTER TABLE platform_ai_usage DROP CONSTRAINT IF EXISTS platform_ai_usage_cache_write_check`));
+      await pdb.execute(sql.raw(`ALTER TABLE platform_ai_usage ADD CONSTRAINT platform_ai_usage_cache_write_check CHECK (cache_write_tokens IS NULL OR cache_write_tokens >= 0)`));
+      resetLedgerColumnProbeForTests();
+    }
     console.log("✓ Sổ dùng AI khai đủ (2A): workload bắt buộc + danh sách đóng khớp CHECK / migration · khoá sự kiện: retry là dòng riêng, chỉ bản sao tuyệt đối bị chặn và được đếm · lược đồ cũ lùi nhãn về NULL, không mất dòng tiền");
   } finally {
     await wipe();
