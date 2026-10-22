@@ -15,6 +15,7 @@ import { inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { CLAIM_SAFE_TEXT } from "@/lib/sales-chatbot/claim-guard";
 import { EMPTY_REPLY_TEXT } from "@/lib/sales-chatbot/engine";
+import { addressAskAfterText, ADDRESS_ASK_WINDOW_MS } from "../scripts/conv-money-trace";
 import { COMMENT_ALREADY_NOTE, COMMENT_CARRY_LABEL, fixedAmountsInTemplate, reviewCodesText, fixedTextKind, moneyOfToolResult, parseTraceArgs, QUICK_REPLAY_VARIANTS, quickDecisionAt, quickReplyHead, scanAiPerformance, scanPatterns, totalClaimsIn, traceConversation, wrongProductTemplate } from "../scripts/conv-money-trace";
 
 const PHONE = "0900003106";
@@ -208,7 +209,20 @@ function testWrongProduct() {
   assert.ok("error" in parseTraceArgs(["hslc", "--scan", "--since=2026-10-18T13:12Z", "--until=2026-10-18T13:00Z"]), "--until phải sau --since");
 }
 
+/** Dòng O (AGENTS 3.12b): cùng định nghĩa với điểm chặn của engine; biên cửa sổ; khách chưa gửi chữ địa chỉ ⇒ ngoài mẫu số. */
+function testAddressAskAfterText() {
+  const t0 = Date.parse("2031-03-01T03:00:00Z");
+  const said = [{ text: "Số 12 Nguyễn Trãi, Hà Nội", at: t0 }];
+  assert.equal(addressAskAfterText(said, "Dạ mình cho em xin tên phường nhé?", t0 + 60_000), true, "đã có chữ địa chỉ mà hỏi phường ⇒ đếm");
+  assert.equal(addressAskAfterText(said, "Dạ em lên đơn cho mình rồi ạ.", t0 + 60_000), false, "không hỏi ⇒ vào mẫu số, không đếm");
+  assert.equal(addressAskAfterText(said, "Dạ em ghi nhận địa chỉ của mình rồi ạ.", t0 + 60_000), false, "câu ghi nhận của hàng rào không phải câu hỏi");
+  assert.equal(addressAskAfterText([{ text: "ok em", at: t0 }], "Dạ mình cho em xin địa chỉ nhận hàng ạ?", t0 + 60_000), null, "chưa có chữ địa chỉ ⇒ ngoài mẫu số");
+  assert.equal(addressAskAfterText(said, "Dạ mình cho em xin tên phường nhé?", t0 + ADDRESS_ASK_WINDOW_MS + 1), null, "chữ địa chỉ quá cửa sổ lượt mua ⇒ không tính");
+  assert.equal(addressAskAfterText([{ text: "Số 12 Nguyễn Trãi, Hà Nội", at: t0 + 120_000 }], "Dạ mình cho em xin tên phường nhé?", t0 + 60_000), null, "tin khách SAU tin bot không tính");
+}
+
 export async function testConvMoneyTrace() {
+  testAddressAskAfterText();
   testPure();
   testWrongProduct();
   testSource();
