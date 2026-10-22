@@ -3,7 +3,7 @@
   "mission_id": "payroll-owner-apply",
   "title": "Thực hiện quyết định lương chủ shop 22/10 qua lõi của màn hình (job payroll-owner-apply)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -25,7 +25,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T06:59:15.129Z",
-  "updated_at": "2026-10-22T06:59:15.129Z",
-  "last_heartbeat": "2026-10-22T06:59:15.129Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-22T08:02:56.622Z",
+  "last_heartbeat": "2026-10-22T08:02:56.622Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/payroll-owner-apply",
+    "sha": "28a151848fa302df389d21ce19bf96cbf53a230d",
+    "at": "2026-10-22T08:02:56.622Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "Thực hiện quyết định lương chủ shop 22/10 qua lõi của màn hình (job payroll-owner-apply)",
+    "summary": "@28a151848. Script ops payroll-owner-apply (mã hoá; mặc định CHẠY THỬ, --apply mới ghi; chạy lại 0 lượt ghi; tháng lệch dự kiến ⇒ DỪNG đúng tháng) thực hiện quyết định lương chủ shop 22/10 qua ĐÚNG lõi của server action: updateExpenseAs · saveProfitGatePolicyAs · saveEmployeeAs · revoke/save/approveCodeRowAs · calculatePayrollPeriodAs + movePayrollRunAs. Action giữ quyền + guardSecondApproval; script dùng guardWithinScope, người thao tác = org.owner. Chạm lõi lib ⇒ HIGH, deploy riêng; sau deploy Lead chạy THỬ, gửi chủ shop rồi mới --apply.",
+    "tests": [
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "npm test shard 1/4 + 2/4: XANH trên bf31f3ad (#966 chỉ chạm sales/địa chỉ)",
+      "TEST_KHOI=K10 (gồm tests/payroll-owner-apply.test.ts): XANH trên 28a151848",
+      "đột biến chạy thử ghi chi phí: bị bắt (ĐỎ)",
+      "shard 3/4 + 4/4 + build: giao cho CI gates (§9, checkout sạch đúng SHA)"
+    ]
+  }
 }
