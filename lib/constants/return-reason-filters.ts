@@ -1,8 +1,9 @@
 /**
  * ═══════════ 2b — BỘ LỌC CỦA KHỐI LÝ DO HOÀN (21/10/2026) — HẰNG SỐ DÙNG CHUNG MÁY CHỦ + MÀN HÌNH ═══════════
  *
- * Sáu bộ lọc đi vào `baseRows` của `lib/queries/return-reason-report.ts` (nên cả drilldown, bảng «Nguyên nhân · giải pháp» và tầng quyết
- * định đi theo) và vào khoá nhớ đệm. Chúng KHÔNG áp cho KPI tổng quan / bảng theo mã hàng / bảng theo nguồn — màn hình nói rõ phạm vi.
+ * Sáu bộ lọc đi vào `baseRows` của `lib/queries/return-reason-report.ts` (nên cả drilldown và bảng «Nguyên nhân · giải pháp» đi theo) và
+ * vào khoá nhớ đệm. Chúng KHÔNG áp cho KPI tổng quan / bảng theo mã hàng / bảng theo nguồn / TẦNG QUYẾT ĐỊNH (D đọc bản KHÔNG lọc 2b —
+ * `reasonBaseP` trong `lib/queries/returns-report-page.ts`) — màn hình nói rõ phạm vi.
  * Đo trước khi dựng (db-query run 39525595681, 3.255 kiện đã có kết quả):
  *  · nguồn đơn / ĐVVC chỉ 2 giá trị ⇒ ô chọn;
  *  · tỉnh 67 giá trị chữ LẪN tên cũ + mới ⇒ quy về tỉnh MỚI bằng `findProvince` (lib/address — không bảng thứ hai); không nhận ra ⇒

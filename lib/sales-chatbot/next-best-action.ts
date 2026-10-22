@@ -327,9 +327,15 @@ const YES_PHRASES = [
 ]
   .map((p) => p.split(" "))
   .sort((a, b) => b.length - a.length);
+/**
+ * Biểu tượng BUỒN / KHÓC / GIẬN / NGHI NGỜ / CHÊ (kèm mặt ký tự `:(` · `:'(` · `T_T` · `T.T`). Bộ đọc bỏ mọi ký hiệu trước khi so chữ, nên
+ * «ok 😢» từng đọc thành «ok» = đồng ý; câu ấy là «thôi được» miễn cưỡng hoặc than giá, không phải lời đồng ý thêm món. Hỏi TRƯỚC khi bỏ ký
+ * hiệu — một chỗ cho mọi đường đồng ý (`isShortYes` · `isShortAccept`). Thà hỏi lại một câu còn hơn thêm món vào đơn của người đang buồn.
+ */
+export const NEGATIVE_EMOJI_RE = /[😢😭😞😔😟😕🙁☹😣😖😫😩😤😠😡🤬💔👎😒😑😐🥺😿🤔😥😓😪]|:'?\(|\bT[_.]T\b/u;
 export function isShortYes(text: string): boolean {
   const raw = text.normalize("NFC").toLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, " ").trim().split(/\s+/).filter(Boolean);
-  if (!raw.length || /[?？]/.test(text) || raw.some((w) => YES_NEGATION.has(w) || YES_NEGATION_FOLDED.has(foldVi(w)))) return false;
+  if (!raw.length || /[?？]/.test(text) || NEGATIVE_EMOJI_RE.test(text.normalize("NFC")) || raw.some((w) => YES_NEGATION.has(w) || YES_NEGATION_FOLDED.has(foldVi(w)))) return false;
   const rest = raw.filter((w) => !YES_PARTICLES.has(w));
   if (!rest.length) return false;
   let i = 0;

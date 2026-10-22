@@ -14,7 +14,7 @@
  * Lượt đó còn câu hỏi KHÁC lời mời («mình cho em xin SĐT ạ?») ⇒ `ambiguous` ⇒ «Ok» không biết trả lời câu nào ⇒ không tính.
  */
 import type { CatalogItem } from "@/lib/sales-chatbot/catalog";
-import { isShortYes } from "@/lib/sales-chatbot/next-best-action";
+import { isShortYes, NEGATIVE_EMOJI_RE } from "@/lib/sales-chatbot/next-best-action";
 import { calledByName, mentionsProduct } from "@/lib/sales-chatbot/cart-commitment";
 import { extractVndAmounts } from "@/lib/sales-chatbot/claim-guard";
 import { foldVi } from "@/lib/sales-chatbot/text";
@@ -39,11 +39,13 @@ const EMOJI_RE = /[\p{Extended_Pictographic}\u{FE0F}\u{1F3FB}-\u{1F3FF}]/gu;
 
 /**
  * Câu ĐỒNG Ý NGẮN: chỉ biểu tượng 👍 / 👌, hoặc câu «có» đóng của `isShortYes` (ok · vâng · được · lấy luôn · thêm nhé…) — kèm hay không
- * kèm biểu tượng. Có phủ định / câu hỏi / chữ thừa («ok nhưng…», «ok để chị hỏi chồng») ⇒ không. HÀM THUẦN.
+ * kèm biểu tượng. Có phủ định / câu hỏi / chữ thừa («ok nhưng…», «ok để chị hỏi chồng») ⇒ không. Có biểu tượng buồn / giận / chê
+ * (`NEGATIVE_EMOJI_RE` của next-best-action — một luật cho mọi đường đồng ý) ⇒ không, kể cả «👍😢» chỉ toàn biểu tượng. HÀM THUẦN.
  */
 export function isShortAccept(text: string): boolean {
   const t = text.normalize("NFC").trim();
   if (!t) return false;
+  if (NEGATIVE_EMOJI_RE.test(t)) return false;
   const rest = t.replace(EMOJI_RE, " ").trim();
   // Chỉ biểu tượng: chỉ 👍 / 👌 là đồng ý (😢 / 😂 không đọc được ý).
   if (!rest) return /[👍👌]/u.test(t);
