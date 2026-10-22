@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "short-accept-sad-emoji",
+  "title": "«ok 😢» thôi được tính là đồng ý thêm món + sửa chú thích phạm vi bộ lọc 2b",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-sad-emoji",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/short-accept-sad-emoji",
+  "base_sha": "e09383f7ae09460c79b5c0cd2a49d54a9115b708",
+  "domains": [],
+  "owned_paths": [
+    "lib/constants/",
+    "lib/sales-chatbot/",
+    "tests/p0-upsell-short-accept.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-22T03:41:31.032Z",
+  "updated_at": "2026-10-22T03:41:31.032Z",
+  "last_heartbeat": "2026-10-22T03:41:31.032Z",
+  "definition_of_done": []
+}
