@@ -155,6 +155,8 @@ async function testDaily() {
     await db.delete(schema.salesChatMessages).where(inArray(schema.salesChatMessages.conversationId, ids));
     await db.delete(schema.salesChatConversations).where(inArray(schema.salesChatConversations.id, ids));
     await db.delete(schema.notifications).where(like(schema.notifications.dedupeKey, "sales-quality:%:2031-%"));
+    // Hit năm 2031 nằm SAU mốc lên production của mọi dòng sổ theo dõi ⇒ lượt này còn mở việc tái diễn — dọn cùng.
+    await db.delete(schema.notifications).where(like(schema.notifications.dedupeKey, "sales-quality:regression:%"));
     await db.delete(schema.settings).where(eq(schema.settings.key, SALES_QUALITY_STATE_KEY));
   };
   await wipe();
@@ -189,6 +191,11 @@ async function testDaily() {
       assert.ok(n.kind === "SALES_QUALITY" && n.dedupeKey === salesQualityDedupeKey(code, "2031-03-01") && n.resolvedAt === null, JSON.stringify(n));
     }
     assert.equal(rows.filter((n) => n.entityId === "CLARIFY_FALLBACK").length, 1, "hai hội thoại cùng mã ⇒ MỘT việc, không hai");
+    // Sổ theo dõi tái diễn chạy KÉ lượt này: QTY_REASKED của 2031 nằm sau mốc #945 ⇒ MỘT việc tái diễn riêng, khoá theo (mã, sứ mệnh).
+    const tai = await db.select().from(schema.notifications).where(like(schema.notifications.dedupeKey, "sales-quality:regression:%"));
+    assert.ok(tai.some((n) => n.dedupeKey === "sales-quality:regression:QTY_REASKED:sales-short-qty-round" && n.resolvedAt === null), `việc tái diễn của #945: ${tai.map((n) => n.dedupeKey).join(", ")}`);
+    assert.ok(r.state.rates && r.state.rates.detected === r.state.rates.blocked + r.state.rates.leaked, "tỷ lệ: tự phát hiện = đã chặn + lọt");
+    assert.deepEqual(r.state.history?.map((h) => h.day), ["2031-03-01"], "lịch sử theo ngày");
     assert.match(byCode.get("HANDOFF_UNANSWERED")!.body, /tập = hàng đợi chờ người của \/work/, "việc nói rõ tập đang đếm");
     const clarify = byCode.get("CLARIFY_FALLBACK")!;
     assert.match(clarify.title, /2 tin \/ 2 hội thoại \(ngày 01\/03\)/, clarify.title);

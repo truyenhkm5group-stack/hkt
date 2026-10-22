@@ -24,10 +24,13 @@ import {
   vnDayOf,
   type SalesQualityCode,
 } from "@/lib/constants/sales-quality";
+import type { WatchHit } from "@/lib/constants/regression-watch";
+import { peekOrganization } from "@/lib/platform/context";
 import { getWorkConfig } from "@/lib/queries/work-config";
 import { aiSilentSql, handoffDueAt } from "@/lib/sales-chatbot/handoff-routing";
 import { listQuickReplies, loadFocusProducts } from "@/lib/sales-chatbot/quick-replies";
 import { addressNotApplied, conversationHash, scanThreadQuality, templateHead, type QualityBases } from "@/lib/sales-quality/detectors";
+import { applyRegressionWatch, type RegressionRowResult } from "@/lib/sales-quality/regression";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -44,7 +47,36 @@ export type SalesQualityState = {
   quoteConflictSources?: { PAGE_AUTOMATION: number; OTHER: number };
   /** Hạn chờ người đọc được (giờ); `null` ⇒ không kết luận HANDOFF_UNANSWERED. */
   slaHours: number | null;
+  /**
+   * Tỷ lệ theo ngày (sổ tái diễn, 22/10/2026): mọi hit tự phát hiện = đã CHẶN trước khi gửi + LỌT tới khách (chiều `delivery` của mã);
+   * `regressions` = phần lọt của mã có dòng trong sổ theo dõi, SAU mốc lên production của bản sửa.
+   */
+  rates?: SalesQualityRates;
+  /** Kết luận từng dòng sổ theo dõi của lượt này. */
+  regression?: { rows: RegressionRowResult[]; error?: string };
+  /** 30 ngày gần nhất của `rates` (ngày mới nhất ở cuối). */
+  history?: ({ day: string } & SalesQualityRates)[];
 };
+export type SalesQualityRates = { detected: number; blocked: number; leaked: number; regressions: number };
+/** Số ngày giữ trong `history`. */
+export const SALES_QUALITY_HISTORY_DAYS = 30;
+
+/** Tách số đếm theo chiều `delivery`. HÀM THUẦN. */
+export function salesQualityRates(counts: Readonly<Record<SalesQualityCode, number>>, regressions: number): SalesQualityRates {
+  let blocked = 0;
+  let leaked = 0;
+  for (const code of SALES_QUALITY_CODES) {
+    if (SALES_QUALITY_SPEC[code].delivery === "BLOCKED_PRE_SEND") blocked += counts[code];
+    else leaked += counts[code];
+  }
+  return { detected: blocked + leaked, blocked, leaked, regressions };
+}
+
+/** Nối ngày mới vào lịch sử: một dòng / ngày (chạy lại cùng ngày thay dòng cũ), giữ `SALES_QUALITY_HISTORY_DAYS` ngày. HÀM THUẦN. */
+export function appendHistory(prev: unknown, day: string, rates: SalesQualityRates): ({ day: string } & SalesQualityRates)[] {
+  const old = Array.isArray(prev) ? prev.filter((h): h is { day: string } & SalesQualityRates => Boolean(h) && typeof (h as { day?: unknown }).day === "string") : [];
+  return [...old.filter((h) => h.day !== day), { day, ...rates }].sort((a, b) => a.day.localeCompare(b.day)).slice(-SALES_QUALITY_HISTORY_DAYS);
+}
 export type SalesQualityResult = { ran: false; reason: string } | { ran: true; day: string; created: number; state: SalesQualityState };
 
 const toDate = (v: unknown): Date | null => {
@@ -89,7 +121,7 @@ export async function collectHandoffUnanswered(now: Date): Promise<{ ids: string
 }
 
 /** Quét tin của ngày hôm qua bằng bộ dò thuần. */
-async function scanDay(from: Date, to: Date): Promise<{ byCode: Map<SalesQualityCode, { hits: number; convs: Set<string> }>; bases: QualityBases; conversations: number; capped: boolean; automationQuoteConflicts: number }> {
+async function scanDay(from: Date, to: Date): Promise<{ byCode: Map<SalesQualityCode, { hits: number; convs: Set<string> }>; events: WatchHit[]; bases: QualityBases; conversations: number; capped: boolean; automationQuoteConflicts: number }> {
   const db = await getDb();
   const c = schema.salesChatConversations;
   const m = schema.salesChatMessages;
@@ -105,6 +137,8 @@ async function scanDay(from: Date, to: Date): Promise<{ byCode: Map<SalesQuality
   );
   let automationQuoteConflicts = 0;
   const byCode = new Map<SalesQualityCode, { hits: number; convs: Set<string> }>();
+  // Mỗi hit kèm MỐC của nó — sổ tái diễn đếm theo mốc từng hit (sau lúc bản sửa lên production), không theo ngày.
+  const events: WatchHit[] = [];
   const bases: QualityBases = { customerMessages: 0, botMessages: 0, quantityAnswers: 0, deliverySecondAsks: 0, complaints: 0, offerAccepts: 0, orderWrites: 0, staffTotals: 0 };
   for (let i = 0; i < ids.length; i += 200) {
     const rows = await db.select({ conv: m.conversationId, seq: m.seq, role: m.role, content: m.content, at: m.createdAt }).from(m).where(and(inArray(m.conversationId, ids.slice(i, i + 200)), lt(m.createdAt, to))).orderBy(asc(m.conversationId), asc(m.seq));
@@ -119,33 +153,39 @@ async function scanDay(from: Date, to: Date): Promise<{ byCode: Map<SalesQuality
         if (h.source === "PAGE_AUTOMATION") automationQuoteConflicts += 1;
         e.convs.add(conv);
         byCode.set(h.code, e);
+        events.push({ code: h.code, at: h.at, conv });
       }
     }
   }
-  return { byCode, bases, conversations: ids.length, capped: convs.length > SALES_QUALITY_MAX_CONVERSATIONS, automationQuoteConflicts };
+  return { byCode, events, bases, conversations: ids.length, capped: convs.length > SALES_QUALITY_MAX_CONVERSATIONS, automationQuoteConflicts };
 }
 
 /**
  * ADDRESS_RECEIVED_BUT_NOT_APPLIED lúc chạy: đơn bot chốt (gắn hội thoại) còn dòng cờ «địa chỉ chưa ghép» của máy mà đơn đã có phường /
  * tin khách đã nêu phường của đúng địa chỉ. Chỉ đơn ghi từ đầu kỳ trở đi (đơn cũ hơn đã có người xử lý ở hàng «Cần người kiểm»).
  */
-export async function collectAddressNotApplied(from: Date, to: Date): Promise<{ ids: string[]; flagged: number }> {
+export async function collectAddressNotApplied(from: Date, to: Date): Promise<{ ids: string[]; flagged: number; hits: { conv: string; at: Date }[] }> {
   const db = await getDb();
   const o = schema.orders;
   const rows = await db
-    .select({ conv: o.salesConversationId, raw: o.raw, shipAddress: o.shipAddress, shipProvince: o.shipProvince, shipCommune: o.shipCommune })
+    .select({ conv: o.salesConversationId, createdAt: o.createdAt, raw: o.raw, shipAddress: o.shipAddress, shipProvince: o.shipProvince, shipCommune: o.shipCommune })
     .from(o)
     .where(and(sql`${o.salesConversationId} is not null`, gte(o.updatedAt, from), sql`${o.raw}->'review'->'entries' @> '[{"code":"ADDRESS_UNRESOLVED"}]'::jsonb`))
     .limit(SALES_QUALITY_MAX_CONVERSATIONS);
   const m = schema.salesChatMessages;
   const ids: string[] = [];
+  // Mốc của hit = lúc ĐƠN ĐƯỢC GHI (bot chốt) — đơn ghi trước khi bản sửa lên production không phải tái diễn của bản sửa ấy.
+  const hits: { conv: string; at: Date }[] = [];
   for (const r of rows) {
     if (!r.conv) continue;
     const msgs = await db.select({ content: m.content }).from(m).where(and(eq(m.conversationId, r.conv), eq(m.role, "user"), lt(m.createdAt, to))).orderBy(asc(m.seq));
     const texts = msgs.map((x) => (Array.isArray(x.content) ? (x.content as { type?: unknown; text?: unknown }[]).filter((b) => b.type === "text" && typeof b.text === "string").map((b) => String(b.text)).join("\n").trim() : "")).filter(Boolean);
-    if (addressNotApplied({ raw: r.raw, shipAddress: r.shipAddress, shipProvince: r.shipProvince, shipCommune: r.shipCommune }, texts)) ids.push(r.conv);
+    if (addressNotApplied({ raw: r.raw, shipAddress: r.shipAddress, shipProvince: r.shipProvince, shipCommune: r.shipCommune }, texts)) {
+      ids.push(r.conv);
+      hits.push({ conv: r.conv, at: r.createdAt });
+    }
   }
-  return { ids: [...new Set(ids)], flagged: rows.length };
+  return { ids: [...new Set(ids)], flagged: rows.length, hits };
 }
 
 const dayLabel = (day: string) => `${day.slice(8, 10)}/${day.slice(5, 7)}`;
@@ -169,7 +209,7 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
   const { day, from, to } = salesQualityWindow(now);
   let attempts = 0;
   try {
-    const prev = await getSettingJson<{ day?: string; error?: string; attempts?: number }>(SALES_QUALITY_STATE_KEY, {});
+    const prev = await getSettingJson<{ day?: string; error?: string; attempts?: number; history?: unknown }>(SALES_QUALITY_STATE_KEY, {});
     // Lượt lỗi được thử lại ở nhịp 5 phút kế, TỐI ĐA `SALES_QUALITY_MAX_ATTEMPTS` lần / ngày — lỗi bền (CSDL hỏng) không được biến job
     // giám sát thành một vòng quét 5.000 hội thoại mỗi 5 phút.
     if (prev.day === day && (!prev.error || (prev.attempts ?? 0) >= SALES_QUALITY_MAX_ATTEMPTS)) return { ran: false, reason: "hôm nay đã chạy" };
@@ -219,7 +259,23 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
         .returning({ id: schema.notifications.id });
       created += ins.length;
     }
-    const state: SalesQualityState = { day, at: now.toISOString(), conversations: scan.conversations, capped: scan.capped, counts, bases: { ...b, handoffWaiting: ho.waiting }, slaHours, quoteConflictSources: { PAGE_AUTOMATION: scan.automationQuoteConflicts, OTHER: counts.STAFF_AI_QUOTE_CONFLICT - scan.automationQuoteConflicts } };
+    // Sổ tái diễn: cùng tập hit vừa đếm (tin của hôm qua + đơn bot chốt chưa ghép địa chỉ), không quét lại.
+    const watchHits: WatchHit[] = [...scan.events, ...na.hits.map((h) => ({ code: "ADDRESS_RECEIVED_BUT_NOT_APPLIED" as const, at: h.at, conv: h.conv }))];
+    const reg = await applyRegressionWatch(db, { day, now, hits: watchHits, orgCode: peekOrganization()?.code ?? null });
+    const rates = salesQualityRates(counts, reg.regressions);
+    const state: SalesQualityState = {
+      day,
+      at: now.toISOString(),
+      conversations: scan.conversations,
+      capped: scan.capped,
+      counts,
+      bases: { ...b, handoffWaiting: ho.waiting },
+      slaHours,
+      quoteConflictSources: { PAGE_AUTOMATION: scan.automationQuoteConflicts, OTHER: counts.STAFF_AI_QUOTE_CONFLICT - scan.automationQuoteConflicts },
+      rates,
+      regression: { rows: reg.rows, ...(reg.error ? { error: reg.error } : {}) },
+      history: appendHistory(prev.history, day, rates),
+    };
     await setSettingJson(SALES_QUALITY_STATE_KEY, state);
     return { ran: true, day, created, state };
   } catch (e) {
@@ -233,5 +289,7 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
 export function salesQualitySummary(r: SalesQualityResult): string {
   if (!r.ran) return r.reason === "chưa tới giờ chạy" || r.reason === "hôm nay đã chạy" ? "" : ` · chất lượng AI ngày: ${r.reason}`;
   const parts = SALES_QUALITY_CODES.filter((k) => r.state.counts[k] > 0).map((k) => `${k} ${r.state.counts[k]}`);
-  return ` · chất lượng AI ${r.day}: ${parts.length ? parts.join(" · ") : "không lỗi"} (${r.state.conversations} hội thoại · ${r.created} việc mới)`;
+  const re = r.state.regression?.rows.filter((x) => x.verdict === "REGRESSION_REOPENED") ?? [];
+  const tai = re.length ? ` · TÁI DIỄN ${re.map((x) => `${x.code}@${x.mission}`).join(" · ")}` : "";
+  return ` · chất lượng AI ${r.day}: ${parts.length ? parts.join(" · ") : "không lỗi"} (${r.state.conversations} hội thoại · ${r.created} việc mới)${tai}`;
 }
