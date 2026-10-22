@@ -3,7 +3,7 @@
   "mission_id": "vtp-reship-backfill-apply",
   "title": "Script vá 330 vận đơn tạo lại về đơn gốc — bước B: chạy thử + --apply qua relinkOrphanShipment",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-22T18:54:13.874Z",
-  "updated_at": "2026-10-22T19:36:04.109Z",
+  "updated_at": "2026-10-22T19:57:09.992Z",
   "last_heartbeat": "2026-10-22T19:34:07.142Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#982 → 6041f7f0d97db7617430c2e9b4e274eb44e8b1a4"
+  },
   "handoff": {
     "branch": "claude/vtp-reship-backfill-apply",
     "sha": "bf462a7121a25720b487449cd5900de74d2f0dbe",
