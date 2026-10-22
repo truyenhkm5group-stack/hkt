@@ -1,0 +1,8 @@
+{
+  "pr": 964,
+  "sha": "0ca95c6ffd8f5a09068efe920bb81d0a7119120d",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-22T03:44:04.321Z",
+  "note": "review lead: NEGATIVE_EMOJI_RE đặt trong isShortYes (một luật cho next-best-action + short-accept), isShortAccept giữ lượt kiểm riêng trước khi bỏ biểu tượng (đột biến chứng minh cần). Biểu tượng vui vẫn là đồng ý; 😐/🤔 thành không đồng ý — chấp nhận, hỏi lại an toàn hơn. Sửa chú thích 2b (D đọc bản không lọc). Việc sau: «t_t» viết thường."
+}
