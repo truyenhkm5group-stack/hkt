@@ -3,7 +3,7 @@
   "mission_id": "short-accept-sad-emoji",
   "title": "«ok 😢» thôi được tính là đồng ý thêm món + sửa chú thích phạm vi bộ lọc 2b",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-sad-emoji",
@@ -24,11 +24,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-22T03:41:31.032Z",
-  "updated_at": "2026-10-22T04:00:03.563Z",
+  "updated_at": "2026-10-22T04:38:39.974Z",
   "last_heartbeat": "2026-10-22T03:41:59.502Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#964 → 6d806b9baa967fa6f0543eac4a3cc3da194b9437"
+    "merged": "#964 → 6d806b9baa967fa6f0543eac4a3cc3da194b9437",
+    "verify": "PASS 6d806b9baa967fa6f0543eac4a3cc3da194b9437 2026-10-22T04:38:05.031Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39722268480"
   },
   "handoff": {
     "branch": "claude/short-accept-sad-emoji",
