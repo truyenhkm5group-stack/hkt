@@ -1,0 +1,8 @@
+{
+  "pr": 965,
+  "sha": "8e5ab4d65548dc03ea0c73e959dc5cc353d85c46",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-22T05:21:15.164Z",
+  "note": "review lead: (1) percentPersonal 0 ⇒ hoa hồng LN cá nhân = 0 chắc chắn, không để null làm cả dòng lương «—». (2) Cổng: khoản tạm tính chưa biết chỉ chặn khi E > 0 hoặc E chưa biết; E ≤ 0 ⇒ quỹ 0, đủ ĐK = 0 chắc chắn, phần giữ = null (không in 0). (3) Thực nhận đường cũ khi tạm tính cũ chưa biết = fixed + bonusRevenue + điều chỉnh + đủ ĐK — đúng bằng legacySalary − provisional (legacySalary = fixed"
+}
