@@ -257,7 +257,15 @@ export function evaluateProfitGate(input: ProfitGateInput): ProfitGateResult {
     );
   }
   if (!input.opening) return undecided("NOT_ESTABLISHED", input.openingProblem ?? "Số dư lũy kế đầu tháng chưa xác lập.");
-  if (demandTotal === null) return undecided("DATA_INCOMPLETE", "Một khoản thưởng % lợi nhuận tạm tính đang CHƯA BIẾT, nên chưa chia được quỹ.");
+  /*
+    Một khoản tạm tính CHƯA BIẾT chỉ chặn việc CHIA quỹ khi có quỹ để chia. Tháng không có lợi nhuận đủ điều
+    kiện (E ≤ 0) thì quỹ bằng 0 và mọi khoản đủ điều kiện CHẮC CHẮN bằng 0 — chặn cả công ty vì một số tạm
+    tính không ai trả được là biến một kết luận chắc chắn thành «chưa biết».
+  */
+  if (demandTotal === null) {
+    const E0 = eligibleProfitOf(input.opening, input.periodBase);
+    if (E0 === null || E0 > 0) return undecided("DATA_INCOMPLETE", "Một khoản thưởng % lợi nhuận tạm tính đang CHƯA BIẾT, nên chưa chia được quỹ.");
+  }
 
   const { cumulative: N, highWater: H } = input.opening;
   const B = input.periodBase;
@@ -279,15 +287,16 @@ export function evaluateProfitGate(input: ProfitGateInput): ProfitGateResult {
     Q,
   );
   const S = [...alloc.values()].reduce((t, v) => t + v, 0);
-  const tongDeNghi = rid ? othersDemand + residualDemand : demandTotal;
-  const scaled = (rid ? othersDemand : demandTotal) > Q;
+  // `demandTotal` chỉ còn null ở nhánh E ≤ 0 (quỹ 0) ⇒ đọc như 0 cho phép so, không in ra như một số đo.
+  const tongDeNghi = rid ? othersDemand + residualDemand : (demandTotal ?? 0);
+  const scaled = (rid ? othersDemand : (demandTotal ?? 0)) > Q;
   const vuot = rid ? Math.max(0, othersDemand - Q) : 0;
   /** Lỗ còn phải bù SAU tháng này (tháng lỗ thì lỗ tăng thêm). */
   const conLo = Math.max(0, L - B);
 
   const message =
     E > 0
-      ? `Lợi nhuận tháng ${vnd(B)}${L > 0 ? `, đã bù hết ${vnd(L)} lỗ lũy kế` : ""} ⇒ lợi nhuận đủ điều kiện chia ${vnd(E)}, quỹ thưởng tối đa ${cap}% = ${vnd(Q)}.${scaled ? ` Tổng đề nghị ${vnd(rid ? othersDemand : demandTotal)}${rid ? " của người khác" : ""} vượt quỹ nên chia theo tỷ lệ.` : ""}${rid ? ` Phần còn lại cho người nhận theo quy chế: ${vnd(alloc.get(residualKey!) ?? 0)}.` : ""}`
+      ? `Lợi nhuận tháng ${vnd(B)}${L > 0 ? `, đã bù hết ${vnd(L)} lỗ lũy kế` : ""} ⇒ lợi nhuận đủ điều kiện chia ${vnd(E)}, quỹ thưởng tối đa ${cap}% = ${vnd(Q)}.${scaled ? ` Tổng đề nghị ${vnd(rid ? othersDemand : (demandTotal ?? 0))}${rid ? " của người khác" : ""} vượt quỹ nên chia theo tỷ lệ.` : ""}${rid ? ` Phần còn lại cho người nhận theo quy chế: ${vnd(alloc.get(residualKey!) ?? 0)}.` : ""}`
       : L > 0
         ? `${PROFIT_GATE_LOSS_MESSAGE} Lỗ lũy kế cần bù đầu tháng ${vnd(L)}; lợi nhuận tháng ${vnd(B)}${conLo > 0 ? ` — còn ${vnd(conLo)} phải bù trước khi phát sinh thưởng mới` : ""}.`
         : `Lợi nhuận tháng ${vnd(B)} ≤ 0 nên không có lợi nhuận đủ điều kiện chia.`;
@@ -300,9 +309,10 @@ export function evaluateProfitGate(input: ProfitGateInput): ProfitGateResult {
     }
     const eligible = alloc.get(c.key) ?? 0;
     const prov = c.provisional ?? 0;
-    const withheld = Math.max(0, prov - eligible);
+    // Tạm tính CHƯA BIẾT (chỉ tới được đây khi E ≤ 0) ⇒ phần bị giữ cũng CHƯA BIẾT, không phải 0.
+    const withheld = c.provisional === null ? null : Math.max(0, prov - eligible);
     let reason: string | null = null;
-    if (withheld > 0) {
+    if (withheld === null || withheld > 0) {
       if (E <= 0) reason = L > 0 ? `${PROFIT_GATE_LOSS_MESSAGE} Còn ${vnd(conLo)} lỗ cần bù.` : "Lợi nhuận toàn công ty của tháng ≤ 0.";
       else {
         const parts: string[] = [];

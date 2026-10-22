@@ -1243,8 +1243,16 @@ export async function getPayrollReport(
               };
             })()
           : null;
+      /*
+        0% CỦA BẤT KỲ SỐ NÀO LÀ ĐÚNG 0. Sổ lỗ lũy kế bật mà tháng trước chưa có dòng sổ ⇒ cơ sở hoa hồng
+        CHƯA BIẾT — đúng cho người CÓ % LN cá nhân. Nhưng người 0% thì hoa hồng ấy chắc chắn bằng 0, và để
+        nó thành CHƯA BIẾT là biến cả dòng lương (lương cứng + mọi khoản khác) thành «—» (đo production
+        22/10/2026: mọi người từ tháng 08, kể cả người chỉ có % LN toàn shop).
+      */
       const bonusPersonal =
-        m && cashRatio === null
+        e.percentPersonal === 0
+          ? 0
+          : m && cashRatio === null
           ? null
           : carry
             ? carry.commissionBase === null
@@ -1658,10 +1666,21 @@ export async function getPayrollReport(
     if (codePendingBy.has(l.employee.id)) {
       l.profitShare.reasons.push("Có khoản thưởng theo mã đang chờ đối soát (PENDING_RECONCILIATION) — xem tab Lợi nhuận theo mã.");
     }
+    /*
+      Số tạm tính cũ CHƯA BIẾT (vd % LN cá nhân chưa có cơ sở) mà phần được duyệt ĐÃ kết luận (vd tháng
+      không có LN đủ điều kiện ⇒ 0) thì thực nhận vẫn tính được ở đường cũ: lương cứng + hoa hồng doanh thu
+      + điều chỉnh + thưởng ĐỦ ĐIỀU KIỆN. Đúng bằng «tạm tính − thưởng LN tạm tính + đủ điều kiện» khi cả hai
+      đều biết. Máy chung (engine) không có phép tách này ⇒ giữ CHƯA BIẾT.
+    */
+    const phanKhongTheoLoiNhuan = !l.engine && l.fixed !== null ? l.fixed + l.bonusRevenue + (l.legacyAdjustments?.total ?? 0) : null;
     l.salary =
-      l.provisionalSalary === null || provisional === null || eligible === null || (coKhoan && !gateResult.established) || codePendingBy.has(l.employee.id)
+      eligible === null || (coKhoan && !gateResult.established) || codePendingBy.has(l.employee.id)
         ? null
-        : l.provisionalSalary - provisional + eligible;
+        : l.provisionalSalary !== null && provisional !== null
+          ? l.provisionalSalary - provisional + eligible
+          : phanKhongTheoLoiNhuan !== null
+            ? phanKhongTheoLoiNhuan + eligible
+            : null;
   }
 
   /*
