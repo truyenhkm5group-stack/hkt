@@ -1,0 +1,8 @@
+{
+  "pr": 974,
+  "sha": "0d0eb1b0a2805ea8d3f26c9147d9080714d5e92a",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-22T13:23:56.199Z",
+  "note": "review lead: CHỈ-SCRIPT, chỉ đọc. conv-money-trace --scan thêm dòng O (KNOWN_ADDRESS_REASKED theo 3.12b): tin bot hỏi bất kỳ phần nào của địa chỉ khi khách đã gửi chữ địa chỉ ≤ 3 ngày, dùng đúng addressTextGiven · asksAnyAddressPart của lib (chạy trên image đã có #972), mẫu số in cạnh, nhãn ESTIMATED (trần dưới)."
+}
