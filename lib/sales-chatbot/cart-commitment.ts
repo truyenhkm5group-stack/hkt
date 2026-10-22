@@ -1056,17 +1056,34 @@ export function productsStatedAt(cart: CartCommitment | undefined, asked: readon
 }
 
 /**
+ * MÓN BỊ BỎ SÓT HẲN (P0 #865, HSLC 16/10/2026 — khách chốt «1kg chả cá thu và 1 chai mắm», đơn tự chốt chỉ có chả cá): món khách nói
+ * TƯỜNG MINH, tên đọc CHẮC theo danh mục (`confidence` HIGH), chưa gắn sản phẩm, mà KHÔNG dòng nào của đơn nháp mang tên đó. `productFor`
+ * chỉ gắn được món vào sản phẩm ĐÃ có trong đơn (`bindCommitment` cũng gắn sau lượt ghi), nên món vắng mặt hẳn không bao giờ được gắn và
+ * hai hàng rào dưới từng bỏ qua nó. Đơn có nhiều dòng cùng tên thì không phải vắng mặt. HÀM THUẦN.
+ */
+function missingFromDraft(item: CommittedItem, asked: readonly AskedLine[]): boolean {
+  return item.customerExplicit && item.quantity > 0 && !item.productId && item.confidence === "HIGH" && Boolean(item.match) && !asked.some((l) => labelsMatch(item.match, l.name));
+}
+
+/**
  * KIỂM CỨNG phía máy chủ: đơn đề nghị GIẢM hoặc BỎ một món khách đã nói tường minh mà giỏ chưa ghi nhận câu sửa tường minh nào mới
- * hơn ⇒ câu lỗi cho model (công cụ từ chối). Tăng / thêm món khác ⇒ `null`. Không đo được ⇒ `null`. Lượt khách có dấu hiệu sửa mà máy
- * không áp chắc được (`relaxedTurn` = `turn`) ⇒ `null` — không bao giờ chặn khách sửa. HÀM THUẦN.
+ * hơn ⇒ câu lỗi cho model (công cụ từ chối). Bỏ = cả khi món VẮNG MẶT HẲN khỏi đơn (`missingFromDraft`, #865). Tăng / thêm món khác ⇒
+ * `null`. Không đo được ⇒ `null`. Lượt khách có dấu hiệu sửa mà máy không áp chắc được (`relaxedTurn` = `turn`) ⇒ `null` — không bao giờ
+ * chặn khách sửa. HÀM THUẦN.
  */
 export function commitmentViolation(cart: CartCommitment | undefined, asked: readonly AskedLine[], turn?: number | null): string | null {
   if (!cart) return null;
   if (turn !== undefined && turn !== null && cart.relaxedTurn === turn) return null;
+  const dropped = (name: string, want: string, src: number | null) =>
+    `KHÔNG được bỏ «${name}»: khách đã nói TƯỜNG MINH ${want} ${name}${src !== null ? ` (tin #${src})` : ""} và CHƯA có câu sửa tường minh nào mới hơn. Giữ ĐÚNG ${want}; KHÔNG gợi ý gói ăn thử / gói nhỏ hơn, KHÔNG hỏi lại số lượng. Khách nói muốn đổi mà câu chưa rõ ⇒ HỎI LẠI khách muốn còn bao nhiêu. Mời thêm món chỉ được THÊM món khác — khách không nhận lời mời thì chốt đúng đơn ${want} ${name}.`;
   for (const item of cart.selectedItems) {
     if (!item.customerExplicit) continue;
     const pid = productFor(item, cart, asked);
-    if (!pid) continue;
+    if (!pid) {
+      // Vắng mặt hẳn: bỏ sót là sai dù số khách nói có đơn vị hay không (kiểm đơn vị chỉ có nghĩa khi món CÓ trong đơn).
+      if (missingFromDraft(item, asked)) return dropped(item.label, amountText(item.quantity, item.unit, item.pieces), item.sourceMessageId);
+      continue;
+    }
     // CHỈ dòng có ĐƠN VỊ khách nói rõ mới có thẩm quyền chặn hạ số lượng (P0 22/10/2026, #8037F35A: «thêm 10 nem» đọc thành 10 gói đã chặn
     // đúng 1 hộp 10 cái rồi ép model ghi 10 hộp — tổng 540.000 ⇒ 1.740.000). Số trần suy ra / mơ hồ ⇒ `quantityUnitIssue`.
     if (bareResolution(item, asked.filter((l) => l.productId === pid)).kind !== "STATED") continue;
@@ -1074,8 +1091,8 @@ export function commitmentViolation(cart: CartCommitment | undefined, asked: rea
     if (proposed === null || proposed >= item.quantity) continue;
     const name = item.label || productName(asked.find((l) => l.productId === pid)?.name ?? "") || "món khách chọn";
     const want = amountText(item.quantity, item.unit, item.pieces);
-    const what = proposed === 0 ? `bỏ «${name}»` : `hạ «${name}» từ ${want} xuống ${amountText(proposed, item.unit, item.pieces)}`;
-    return `KHÔNG được ${what}: khách đã nói TƯỜNG MINH ${want} ${name}${item.sourceMessageId !== null ? ` (tin #${item.sourceMessageId})` : ""} và CHƯA có câu sửa tường minh nào mới hơn. Giữ ĐÚNG ${want}; KHÔNG gợi ý gói ăn thử / gói nhỏ hơn, KHÔNG hỏi lại số lượng. Khách nói muốn đổi mà câu chưa rõ ⇒ HỎI LẠI khách muốn còn bao nhiêu. Mời thêm món chỉ được THÊM món khác — khách không nhận lời mời thì chốt đúng đơn ${want} ${name}.`;
+    if (proposed === 0) return dropped(name, want, item.sourceMessageId);
+    return `KHÔNG được hạ «${name}» từ ${want} xuống ${amountText(proposed, item.unit, item.pieces)}: khách đã nói TƯỜNG MINH ${want} ${name}${item.sourceMessageId !== null ? ` (tin #${item.sourceMessageId})` : ""} và CHƯA có câu sửa tường minh nào mới hơn. Giữ ĐÚNG ${want}; KHÔNG gợi ý gói ăn thử / gói nhỏ hơn, KHÔNG hỏi lại số lượng. Khách nói muốn đổi mà câu chưa rõ ⇒ HỎI LẠI khách muốn còn bao nhiêu. Mời thêm món chỉ được THÊM món khác — khách không nhận lời mời thì chốt đúng đơn ${want} ${name}.`;
   }
   return null;
 }
@@ -1096,7 +1113,11 @@ export function cartDraftDiff(cart: CartCommitment | undefined, asked: readonly 
     if (!item.customerExplicit || item.quantity <= 0) continue;
     if (opts.since !== undefined && opts.since !== null && (item.sourceMessageId === null || item.sourceMessageId <= opts.since)) continue;
     const pid = productFor(item, cart, asked);
-    if (!pid) continue;
+    if (!pid) {
+      // Món vắng mặt hẳn khỏi đơn nháp (#865) ⇒ lệch với «đơn ghi 0».
+      if (missingFromDraft(item, asked)) out.push({ label: item.label, want: amountText(item.quantity, item.unit, item.pieces), got: amountText(0, item.unit, item.pieces), wantAmount: item.quantity, gotAmount: 0, unit: item.unit, sourceMessageId: item.sourceMessageId });
+      continue;
+    }
     // Số trần (không đơn vị) của món bán theo hộp N cái: so theo số hộp SUY RA, mơ hồ ⇒ không đoán (bỏ qua).
     const res = bareResolution(item, asked.filter((l) => l.productId === pid));
     if (res.kind === "AMBIGUOUS") continue;
