@@ -3,7 +3,7 @@
   "mission_id": "sales-address-applied",
   "title": "P0 dứt điểm xin lại địa chỉ: phường khách đã cho vào đơn, cờ địa chỉ tự xét lại, xác minh độc lập với upsell",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-address",
@@ -32,7 +32,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T03:36:45.789Z",
-  "updated_at": "2026-10-22T03:36:45.789Z",
-  "last_heartbeat": "2026-10-22T03:36:45.789Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-22T06:35:40.304Z",
+  "last_heartbeat": "2026-10-22T06:35:40.304Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/sales-address-applied",
+    "sha": "36f65b3cde66613a224f1cf4c8151ef55341e072",
+    "at": "2026-10-22T06:35:40.304Z",
+    "actor": "DESKTOP-56TH98Y:wt-address",
+    "title": "Khách đã cho phường thì đơn nhận phường và hết «cần kiểm địa chỉ»; câu «nhân viên sẽ xác nhận lại địa chỉ» bỏ cho mọi tổ chức",
+    "summary": "P0 HSLC #8037F35A: cờ ADDRESS_UNRESOLVED của máy tự gỡ khi lượt ghi sau đã có phường (vết ADDRESS_SETTLED, máy) · gửi lại đúng phường đã lưu không bị từ chối · ghép tin chỉ-phường · câu chờ địa chỉ = ORDER_RECEIVED cho mọi tổ chức (lời mời vẫn sau cờ) · reconcile thu hẹp về CONFIRMED|CUSTOMER_RECONFIRMED · 2B thêm ADDRESS_RECEIVED_BUT_NOT_APPLIED, ADDRESS_REASK giữ khoá. Golden: chỉ hau-mai-da-nhan-hang đổi 2 dòng (khoá sha256).",
+    "tests": [
+      "npm test (4 shard) @36f65b3cd: TẤT CẢ KIỂM THỬ ĐẠT, exit 0",
+      "regression nhiều lượt đúng hình dạng trace: đỏ trước, xanh sau",
+      "đột biến 7/7 bị bắt",
+      "tsc + eslint: sạch"
+    ]
+  }
 }
