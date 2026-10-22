@@ -1,0 +1,8 @@
+{
+  "pr": 970,
+  "sha": "634f3298911cf99668799f49a2711f63acb318c9",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-22T09:15:58.990Z",
+  "note": "review lead: CHỈ-SCRIPT. perf-probe thêm đo getReturnReasonReport nguội (clearMemo) không lọc / có lọc 2b; chạy ngoài giờ cao điểm."
+}
