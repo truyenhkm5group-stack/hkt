@@ -95,6 +95,7 @@ async function donDep(db: Db) {
     await db.delete(schema.auditLogs).where(inArray(schema.auditLogs.entityId, ids));
     await db.delete(s).where(inArray(s.id, ids));
   }
+  await db.delete(schema.canonicalOrderOutcome).where(like(schema.canonicalOrderOutcome.orderId, "vtp-rs-%"));
   await db.delete(schema.orders).where(like(schema.orders.id, "vtp-rs-%"));
 }
 
@@ -163,6 +164,8 @@ async function testVtpReshipDbInner(db: Db) {
   assert.equal(v4.kind, "ATTEMPT");
   const r1 = await relinkOrphanShipment(db, { shipmentId: "vtp-rs-orphan4", verdict: v4, source: "SCRIPT_RELINK", reason: "thử", actor: "script:vtp-reship-patch" });
   assert.deepEqual(r1, { ok: true, orderId: O4, attemptNo: 2 });
+  const coo = await db.select({ shipmentId: schema.canonicalOrderOutcome.shipmentId }).from(schema.canonicalOrderOutcome).where(eq(schema.canonicalOrderOutcome.orderId, O4));
+  assert.ok(coo.some((r) => r.shipmentId === "vtp-rs-orphan4"), `kết quả đơn dựng lại NGAY trên lần gửi chính mới (không đợi job 5 phút): ${JSON.stringify(coo)}`);
   assert.deepEqual(await relinkOrphanShipment(db, { shipmentId: "vtp-rs-orphan4", verdict: v4, source: "SCRIPT_RELINK", reason: "thử", actor: "script:vtp-reship-patch" }), { ok: false, why: "ALREADY_LINKED" }, "chạy lại ⇒ không ghi gì");
   assert.deepEqual(await relinkOrphanShipment(db, { shipmentId: "vtp-rs-orphan4", verdict: { kind: "NONE", reason: "NO_PARENT" }, source: "x", reason: "x", actor: "script:x" }), { ok: false, why: "NOT_ATTEMPT" });
   const vet = await db.select().from(schema.auditLogs).where(and(eq(schema.auditLogs.action, "SHIPMENT_RESHIP_RELINK"), eq(schema.auditLogs.entityId, "vtp-rs-orphan4")));

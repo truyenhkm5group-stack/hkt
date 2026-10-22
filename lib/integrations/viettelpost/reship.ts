@@ -29,6 +29,7 @@ import { and, isNotNull, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { audit } from "@/lib/audit";
 import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
+import { rematerializeOutcomes } from "@/lib/queries/canonical-outcome";
 import { legBaseCode } from "@/lib/integrations/viettelpost/statement";
 
 export type ReshipCandidate = {
@@ -147,7 +148,10 @@ export type RelinkOrphanResult = { ok: true; orderId: string; attemptNo: number 
  * code-erp-95). Đường webhook / tệp TẠO dòng mới bằng cùng phán quyết; hàm này SỬA dòng đã có, cùng một tệp lõi.
  *  · Khoá dòng trong giao dịch; chỉ ghi khi dòng còn `order_id IS NULL` ⇒ chạy lại không ghi gì (`ALREADY_LINKED`).
  *  · Không tạo dòng, không đụng `shipment_events`. Trạng thái của dòng gốc và dòng vừa gắn dựng lại từ lịch sử
- *    (`materializeShipmentState` — người ghi DUY NHẤT của chặng), rồi một dòng `audit_logs`.
+ *    (`materializeShipmentState` — người ghi DUY NHẤT của chặng), KẾT QUẢ ĐƠN dựng lại ngay (`rematerializeOutcomes` —
+ *    báo cáo vốn đã rơi về tính trực tiếp nhờ điều kiện tươi mới, nhưng ai đọc thẳng `canonical_order_outcome`, kể cả
+ *    phép đo SAU của script, sẽ thấy kết luận cũ tới lượt job `outcome-materialize` kế — tối đa 5 phút), rồi một dòng
+ *    `audit_logs`. Đường webhook KHÔNG dựng lại tại chỗ: VTP đòi trả lời < 1 giây; job 5 phút nhặt đơn có đầu vào đổi.
  */
 export async function relinkOrphanShipment(
   db: Db,
@@ -172,6 +176,7 @@ export async function relinkOrphanShipment(
   if (!out.ok) return out;
   await materializeShipmentState(db, p.shipmentId);
   await materializeShipmentState(db, v.parentShipmentId);
+  await rematerializeOutcomes([out.orderId]);
   await audit({
     userId: null,
     userEmail: p.actor,
