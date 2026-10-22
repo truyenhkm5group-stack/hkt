@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "payroll-owner-apply",
+  "title": "Thực hiện quyết định lương chủ shop 22/10 qua lõi của màn hình (job payroll-owner-apply)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/payroll-owner-apply",
+  "base_sha": "bf31f3ad17cd121958950749f3264b2c138306ee",
+  "domains": [],
+  "owned_paths": [
+    "scripts/payroll-owner-apply.ts",
+    "lib/payroll/code-book-service.ts",
+    "lib/payroll/profit-gate-service.ts",
+    "lib/payroll/employee-service.ts",
+    "lib/finance/expense-service.ts",
+    "tests/payroll-owner-apply.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-22T06:59:15.129Z",
+  "updated_at": "2026-10-22T06:59:15.129Z",
+  "last_heartbeat": "2026-10-22T06:59:15.129Z",
+  "definition_of_done": []
+}
