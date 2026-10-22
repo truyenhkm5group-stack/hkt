@@ -3,7 +3,7 @@
   "mission_id": "payroll-carryover-first-month",
   "title": "Sổ lỗ cá nhân: tháng làm việc đầu tiên có số dư đầu kỳ 0 (gỡ chặn chốt lương 08/2026)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -22,7 +22,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T08:57:38.197Z",
-  "updated_at": "2026-10-22T08:57:38.197Z",
-  "last_heartbeat": "2026-10-22T08:57:38.197Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-22T08:58:11.445Z",
+  "last_heartbeat": "2026-10-22T08:58:11.445Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/payroll-carryover-first-month",
+    "sha": "15d7d0b52f558e2c4b32bb89e5784a61dcd9de26",
+    "at": "2026-10-22T08:58:11.445Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "Sổ lỗ cá nhân: tháng làm việc đầu tiên có số dư đầu kỳ 0 (gỡ chặn chốt lương 08/2026)",
+    "summary": "@15d7d0b52. Gỡ chặn chốt tháng 08: người vào làm trong tháng (ngày vào làm ≥ tháng này) và chưa có dòng sổ nào trước đó ⇒ số dư lỗ đầu kỳ 0, căn cứ FIRST_WORK_MONTH + câu giải thích. Vẫn CHƯA BIẾT: làm từ trước mà thiếu dòng tháng trước · không ngày vào làm · ngày vào làm mâu thuẫn với sổ. Không migration (cột ghi OPENING_DECLARATION, căn cứ thật trong ảnh chụp). Chạm lõi lương ⇒ HIGH, deploy riêng; sau deploy chạy lại payroll-owner-apply --apply (06/07 đã khoá sẽ bỏ qua).",
+    "tests": [
+      "npm run typecheck: sạch",
+      "eslint các tệp đổi: sạch",
+      "TEST_KHOI=K10 (payroll-carryover + payroll-owner-apply + profit-gate): XANH trên 15d7d0b52",
+      "đột biến bỏ điều kiện không-có-dòng-trước: bị bắt",
+      "đột biến bỏ điều kiện ngày vào làm: bị bắt",
+      "shard 1–4 + build: giao CI gates"
+    ]
+  }
 }
