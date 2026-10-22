@@ -30,7 +30,7 @@ import { listQuickReplies, loadFocusProducts } from "@/lib/sales-chatbot/quick-r
 import { addressNotApplied, conversationHash, scanThreadQuality, templateHead, type QualityBases } from "@/lib/sales-quality/detectors";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { rowsOf } from "@/lib/sql-rows";
-import { ADDRESS_RESOLVER_USAGE_KEY } from "@/lib/address/resolve-job";
+import { ADDRESS_RESOLVER_USAGE_KEY, countOutOfScope, type OutOfScopeReason } from "@/lib/address/resolve-job";
 
 export type SalesQualityCount = { hits: number; conversations: number; hashes: string[] };
 export type SalesQualityState = {
@@ -50,7 +50,8 @@ export type SalesQualityState = {
   addressResolver?: AddressResolverDay;
 };
 
-export type AddressResolverDay = { auto: number; staff: number; bySource: { TEXT: number; C360: number; PLACES: number }; placesCalls: number; placesCostUsd: number; placesError: string | null };
+/** `outOfScope` = đơn còn treo cờ máy mà máy KHÔNG được chạm (huỷ · đã khép · có vận đơn · quá tuổi) — đo được còn bao nhiêu đơn cũ treo cờ. */
+export type AddressResolverDay = { auto: number; staff: number; bySource: { TEXT: number; C360: number; PLACES: number }; placesCalls: number; placesCostUsd: number; placesError: string | null; outOfScope?: Record<OutOfScopeReason, number> };
 
 /** Đếm kết quả máy ánh xạ địa chỉ có mốc trong kỳ (`raw.addressResolution.at`) + sổ lượt Google của ngày chạy. */
 export async function collectAddressResolverDay(from: Date, to: Date, now: Date): Promise<AddressResolverDay> {
@@ -74,6 +75,8 @@ export async function collectAddressResolverDay(from: Date, to: Date, now: Date)
     out.placesCostUsd = Math.round((usage.costMicros ?? 0) / 10_000) / 100;
     out.placesError = usage.lastError ?? null;
   }
+  const oos = await countOutOfScope(now).catch(() => null);
+  if (oos) out.outOfScope = oos;
   return out;
 }
 export type SalesQualityResult = { ran: false; reason: string } | { ran: true; day: string; created: number; state: SalesQualityState };
@@ -267,5 +270,8 @@ export function salesQualitySummary(r: SalesQualityResult): string {
   const parts = SALES_QUALITY_CODES.filter((k) => r.state.counts[k] > 0).map((k) => `${k} ${r.state.counts[k]}`);
   const ar = r.state.addressResolver;
   const arText = ar && (ar.auto || ar.staff || ar.placesCalls) ? ` · ánh xạ địa chỉ: tự ${ar.auto} (chữ ${ar.bySource.TEXT} · C360 ${ar.bySource.C360} · Google ${ar.bySource.PLACES}) / cần nhân viên ${ar.staff} · Google ${ar.placesCalls} lượt ≈ ${ar.placesCostUsd} USD${ar.placesError ? ` · Google lỗi ${ar.placesError}` : ""}` : "";
-  return ` · chất lượng AI ${r.day}: ${parts.length ? parts.join(" · ") : "không lỗi"} (${r.state.conversations} hội thoại · ${r.created} việc mới)${arText}`;
+  const oos = ar?.outOfScope;
+  const oosTotal = oos ? oos.CANCELLED + oos.CLOSED + oos.SHIPMENT + oos.TOO_OLD : 0;
+  const oosText = oos && oosTotal ? ` · cờ địa chỉ ngoài phạm vi máy ${oosTotal} (huỷ ${oos.CANCELLED} · đã khép ${oos.CLOSED} · có vận đơn ${oos.SHIPMENT} · quá tuổi ${oos.TOO_OLD})` : "";
+  return ` · chất lượng AI ${r.day}: ${parts.length ? parts.join(" · ") : "không lỗi"} (${r.state.conversations} hội thoại · ${r.created} việc mới)${arText}${oosText}`;
 }

@@ -954,7 +954,11 @@ export async function applyAddressResolutionAsAgent(agent: OrderAgent, orderId: 
   const out = await db.transaction(async (tx) => {
     const o = schema.orders;
     const [row] = await tx.select({ id: o.id, stage: o.stage, raw: o.raw, address: o.shipAddress, commune: o.shipCommune }).from(o).where(eq(o.id, orderId)).limit(1).for("update");
-    if (!row || !manualOrderRaw(row.raw) || row.stage === "CANCELLED" || row.stage === "DELETED" || row.address !== expectAddress) return { applied: false, settled: [] as OrderReviewEntry[] };
+    // Phạm vi (Tech Lead 22/10/2026): chỉ đơn còn sửa được và KHÔNG có vận đơn giữ đơn — kiểm lại TRONG giao dịch (vận đơn tạo giữa lúc job
+    // chọn đơn và lúc ghi). Ngoài phạm vi ⇒ không ghi gì, kể cả vết.
+    if (!row || !manualOrderRaw(row.raw) || !(MANUAL_ORDER_STAGES as readonly string[]).includes(row.stage) || row.address !== expectAddress) return { applied: false, settled: [] as OrderReviewEntry[] };
+    const attempts = await tx.select({ stage: schema.shipments.stage, raw: schema.shipments.raw }).from(schema.shipments).where(eq(schema.shipments.orderId, row.id));
+    if (attempts.some((a) => attemptHoldsOrder(a))) return { applied: false, settled: [] as OrderReviewEntry[] };
     let raw: Record<string, unknown> = { ...(row.raw as Record<string, unknown>), addressResolution: r };
     if (r.status === "SURE" && r.ward && r.province && !row.commune.trim()) {
       const s = withAddressSettled(raw, { at: now.toISOString(), byName: `${w.name} · nguồn ${r.source ?? "?"}`, ward: r.ward });

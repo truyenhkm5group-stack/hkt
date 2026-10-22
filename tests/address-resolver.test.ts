@@ -13,6 +13,8 @@
  *  6. Công tắc tổ chức `address.resolver` {"enabled": false} ⇒ lượt không đọc / ghi gì; `perTick` = trần số đơn một lượt. Đơn chốt TRƯỚC
  *     khi có `raw.addressText` (đơn bản #966 — ca #A4FA1734 · #E63E4D6E): máy đọc lại tin KHÁCH tới lúc đơn tạo (tin gửi sau không tính),
  *     vết `textSource = CONVERSATION`.
+ *  7. Phạm vi ghi: có vận đơn chưa huỷ · đã khép (DELIVERED) · quá 14 ngày ⇒ máy KHÔNG chạm (không vết), kể cả khi gọi thẳng đường ghi
+ *     lúc đã có vận đơn; số còn treo cờ đếm theo lý do (`countOutOfScope`, 2B). Về lại trong phạm vi ⇒ máy xét bình thường.
  * Không gọi mạng thật (Google giả qua chỗ cắm `deps`). Dữ liệu dựng, không PII.
  */
 import assert from "node:assert/strict";
@@ -20,11 +22,12 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { ADDRESS_RESOLVER_SETTING_KEY, ADDRESS_RESOLVER_USAGE_KEY, resolvePendingAddresses } from "@/lib/address/resolve-job";
+import { ADDRESS_RESOLVER_SETTING_KEY, ADDRESS_RESOLVER_USAGE_KEY, countOutOfScope, resolvePendingAddresses } from "@/lib/address/resolve-job";
 import { resolveAddress } from "@/lib/address/resolver";
 import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
 import { orderReviewLogOf, orderReviewOf } from "@/lib/constants/order-review";
 import type { textSearch } from "@/lib/integrations/google-places/client";
+import { applyAddressResolutionAsAgent } from "@/lib/records/order-create";
 import { addressQueryText } from "@/lib/sales-chatbot/address-memory";
 import { QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
 import { collectAddressResolverDay } from "@/lib/sales-quality/daily";
@@ -81,6 +84,7 @@ const CASES: GoldenCase[] = [
   { key: "res-giao", title: "Xã cũ bị chia + Google ⇒ giao còn một xã ⇒ máy điền xã, gỡ cờ", shop: "food", channel: "WEB", turns: [turn("Cho chị 1 hộp ruốc bông tôm, Lan 0961007201, Số 8 ngõ 2 phường Đại Kim, quận Hoàng Mai, Hà Nội", "0961007201", "Số 8 ngõ 2 phường Đại Kim, quận Hoàng Mai, Hà Nội")] },
   { key: "res-auth", title: "Google từ chối khoá ⇒ ghi lỗi, ứng viên / lý do vào cờ, cờ còn mở, không ném", shop: "food", channel: "WEB", turns: [turn("Cho chị 1 hộp ruốc bông tôm, Lan 0961007202, Số 12 Nguyễn Trãi, Hà Nội", "0961007202", "Số 12 Nguyễn Trãi, Hà Nội")] },
   { key: "res-treo", title: "Google treo 30 giây ⇒ lượt job dừng đúng trần, đơn chờ nhân viên", shop: "food", channel: "WEB", turns: [turn("Cho chị 1 hộp ruốc bông tôm, Lan 0961007203, Số 3 ngõ 9 Trần Duy Hưng, Hà Nội", "0961007203", "Số 3 ngõ 9 Trần Duy Hưng, Hà Nội")] },
+  { key: "res-pham-vi", title: "Có vận đơn · đã giao · quá 14 ngày ⇒ máy không chạm, đếm «ngoài phạm vi»; về lại phạm vi ⇒ máy xét", shop: "food", channel: "WEB", turns: [turn("Cho chị 1 hộp ruốc bông tôm, Lan 0961007205, Số 12 Nguyễn Trãi, Hà Nội", "0961007205", "Số 12 Nguyễn Trãi, Hà Nội")] },
   { key: "res-cu", title: "Đơn bản #966 (không có raw.addressText) ⇒ công tắc tắt thì không chạm; bật lại thì đọc tin khách tới lúc đơn tạo", shop: "food", channel: "WEB", turns: [turn("Cho chị 1 hộp ruốc bông tôm, Lan 0961007204, Số 8 ngõ 2 phường Đại Kim, quận Hoàng Mai, Hà Nội", "0961007204", "Số 8 ngõ 2 phường Đại Kim, quận Hoàng Mai, Hà Nội")] },
 ];
 
@@ -140,6 +144,43 @@ export async function testAddressResolverJob() {
         const r2 = await resolvePendingAddresses(new Date(now.getTime() + 300_000), { openPlaces, textSearch: fakeOk(again, ["x"]) });
         assert.equal(again.length, 0, `chạy lại ⇒ 0 lời gọi Google: ${JSON.stringify(r2)}`);
       }
+      if (c.key === "res-pham-vi") {
+        const touched = async () => "addressResolution" in ((await orderOf()).raw as object);
+        const QUERY = "Số 12 Nguyễn Trãi";
+        const run = async () => {
+          const calls: FakeCall[] = [];
+          await resolvePendingAddresses(now, { openPlaces, textSearch: fakeOk(calls, ["12 P. Nguyễn Trãi, Khương Trung, Thanh Xuân, Hà Nội, Việt Nam", "12 Nguyễn Trãi, P. Quang Trung, Hà Đông, Hà Nội, Việt Nam"]) });
+          return calls.filter((x) => x.query.includes(QUERY)).length;
+        };
+        // (1) Có vận đơn chưa huỷ ⇒ không chọn, không gọi Google, không vết; gọi THẲNG đường ghi cũng bị chặn trong giao dịch.
+        const [ship] = await db.insert(schema.shipments).values({ orderId: before.id, vtpOrderNumber: "RES-PV-1", trackingCode: "RES-PV-1", stage: "PENDING" as never }).returning({ id: schema.shipments.id });
+        assert.ok((await countOutOfScope(now)).SHIPMENT >= 1, "có vận đơn ⇒ đếm SHIPMENT (nhánh CÓ của câu con)");
+        assert.equal(await run(), 0, "có vận đơn ⇒ máy không xét");
+        const direct = await applyAddressResolutionAsAgent({ name: "Máy ánh xạ địa chỉ", source: "test" }, before.id, before.shipAddress, { status: "SURE", source: "TEXT", ward: "Phường Khương Đình", province: HN, candidates: [], reason: "thử", textAt: null, places: false, placesError: null, attempts: 1, at: now.toISOString() }, now);
+        assert.equal(direct.applied, false, "đường ghi tự chặn khi đơn đã có vận đơn");
+        assert.equal((await orderOf()).shipCommune, "");
+        assert.equal(await touched(), false, "ngoài phạm vi ⇒ không vết");
+        await db.delete(schema.shipments).where(eq(schema.shipments.id, ship.id));
+        // (2) Quá 14 ngày ⇒ TOO_OLD, không chạm.
+        await db.update(schema.orders).set({ createdAt: new Date(now.getTime() - 20 * 24 * 3_600_000) }).where(eq(schema.orders.id, before.id));
+        assert.ok((await countOutOfScope(now)).TOO_OLD >= 1, "quá tuổi ⇒ TOO_OLD");
+        assert.equal(await run(), 0, "quá 14 ngày ⇒ máy không xét");
+        await db.update(schema.orders).set({ createdAt: before.createdAt }).where(eq(schema.orders.id, before.id));
+        // (3) Đã khép (giao) ⇒ CLOSED, không chạm.
+        await db.update(schema.orders).set({ stage: "DELIVERED" as never }).where(eq(schema.orders.id, before.id));
+        const closedN = (await countOutOfScope(now)).CLOSED;
+        assert.ok(closedN >= 1, "đã giao ⇒ CLOSED");
+        assert.equal(await run(), 0, "đã giao ⇒ máy không xét");
+        assert.equal(await touched(), false);
+        const day = await collectAddressResolverDay(new Date(now.getTime() - 3_600_000), new Date(now.getTime() + 3_600_000), now);
+        assert.ok((day.outOfScope?.CLOSED ?? 0) >= 1, `2B đếm ngoài phạm vi: ${JSON.stringify(day.outOfScope)}`);
+        // (4) Về lại phạm vi ⇒ máy xét (Google hai nơi ⇒ không chắc ⇒ việc nhân viên, có vết).
+        await db.update(schema.orders).set({ stage: before.stage }).where(eq(schema.orders.id, before.id));
+        assert.equal((await countOutOfScope(now)).CLOSED, closedN - 1, "về lại phạm vi ⇒ không còn đếm");
+        assert.equal(await run(), 1, "trong phạm vi ⇒ máy xét, gọi Google một lần");
+        assert.equal(await touched(), true);
+        assert.equal(addressReviewOpenOf((await orderOf()).raw), true, "Google hai nơi ⇒ cờ còn mở cho nhân viên");
+      }
       if (c.key === "res-cu") {
         // Dựng lại hình dạng đơn bản #966: không có raw.addressText.
         const { addressText: _drop, ...legacyRaw } = (before.raw ?? {}) as Record<string, unknown>;
@@ -170,7 +211,7 @@ export async function testAddressResolverJob() {
     },
   });
   assert.equal(seen.size, CASES.length, "mọi ca đều chạy");
-  console.log("  ✓ job: chắc ⇒ điền xã + gỡ cờ (ADDRESS_SETTLED nguồn PLACES) · Google lỗi xác thực ⇒ ghi lỗi + lý do vào cờ, không ném · Google treo ⇒ dừng đúng trần · chạy lại không gọi lại · 2B đếm · công tắc tắt ⇒ không chạm · perTick · đơn bản #966 đọc tin khách tới lúc đơn tạo");
+  console.log("  ✓ job: chắc ⇒ điền xã + gỡ cờ (ADDRESS_SETTLED nguồn PLACES) · Google lỗi xác thực ⇒ ghi lỗi + lý do vào cờ, không ném · Google treo ⇒ dừng đúng trần · chạy lại không gọi lại · 2B đếm · công tắc tắt ⇒ không chạm · perTick · đơn bản #966 đọc tin khách tới lúc đơn tạo · có vận đơn / đã giao / quá 14 ngày ⇒ không chạm, đếm ngoài phạm vi");
 }
 
 export async function testAddressResolver(): Promise<void> {

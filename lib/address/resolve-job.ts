@@ -14,13 +14,18 @@
  *  · CÔNG TẮC theo tổ chức, không cần deploy (Tech Lead 22/10/2026): `address.resolver` {"enabled": false} ⇒ cả máy ánh xạ dừng ngay lượt
  *    kế (không đọc đơn, không ghi gì); `perTick` = trần số đơn MỘT lượt (mặc định 15, tối đa 50). Lượt nào cũng CHỈ chạm đơn mang dòng cờ
  *    MÁY «địa chỉ chưa ghép» (tiền tố `MACHINE_ADDRESS_NOTE_PREFIX`) — cờ người gắn không bao giờ bị máy đụng.
+ *  · PHẠM VI (Tech Lead 22/10/2026 — đây là ghi lên đơn đã có): chỉ đơn ở stage đơn tay còn sửa được (`MANUAL_ORDER_STAGES` — không huỷ,
+ *    không «đã giao» / «giao không thành công»), KHÔNG có vận đơn chưa huỷ, tạo trong `ADDRESS_RESOLVER_SCOPE.maxAgeDays` ngày. Lọc ngay ở
+ *    câu chọn (đơn ngoài phạm vi không chiếm chỗ của lượt) VÀ kiểm lại trong giao dịch ghi (`applyAddressResolutionAsAgent` — vận đơn tạo
+ *    giữa hai bước). Đơn ngoài phạm vi KHÔNG bị ghi gì; số còn treo cờ đếm theo lý do (`countOutOfScope`) ở trạng thái ngày 2B.
  *  · Đơn chốt TRƯỚC khi có `raw.addressText` (đơn của bản #966): máy đọc lại tin CỦA KHÁCH trong hội thoại, từ 3 ngày trước tới lúc đơn
  *    tạo, qua đúng bộ lọc dòng địa chỉ của lượt chat (`addressTextLines`) — KHÔNG dùng dòng địa chỉ model chép lên đơn (xã chỉ ghi khi
  *    khách nói). Vết `raw.addressResolution.textSource` nói chữ lấy từ đâu.
  */
-import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { resolveAddress, type ResolverVerdict } from "@/lib/address/resolver";
+import { MANUAL_ORDER_STAGES } from "@/lib/constants/manual-orders";
 import { MACHINE_ADDRESS_NOTE_PREFIX, orderReviewOf } from "@/lib/constants/order-review";
 import { openActiveConnection } from "@/lib/connectors/service";
 import { placesRelayOf, textSearch, type PlacesClientDeps } from "@/lib/integrations/google-places/client";
@@ -46,6 +51,38 @@ export const ADDRESS_RESOLVER_USAGE_KEY = "address.resolver.usage";
 export const ADDRESS_RESOLVER_DEFAULTS = { dailyPlacesLimit: 100, perTick: 15, maxPerTick: 50, placesTimeoutMs: 8_000, tickBudgetMs: 25_000, maxAttempts: 3 } as const;
 /** Đơn chốt trước khi có `raw.addressText`: đọc tin khách trong cửa sổ này trước lúc đơn tạo (bằng hạn lượt mua của bot — 3 ngày). */
 export const LEGACY_TEXT_WINDOW_MS = 3 * 24 * 3_600_000;
+/** Phạm vi đơn máy được ghi: tuổi đơn tối đa (ngày, theo `orders.created_at`). */
+export const ADDRESS_RESOLVER_SCOPE = { maxAgeDays: 14 } as const;
+/** Lý do một đơn còn treo cờ máy nằm NGOÀI phạm vi: huỷ / xoá · đã khép (giao / giao không thành công) · có vận đơn chưa huỷ · quá tuổi. */
+export const OUT_OF_SCOPE_REASONS = ["CANCELLED", "CLOSED", "SHIPMENT", "TOO_OLD"] as const;
+export type OutOfScopeReason = (typeof OUT_OF_SCOPE_REASONS)[number];
+
+const scopeCutoff = (now: Date) => new Date(now.getTime() - ADDRESS_RESOLVER_SCOPE.maxAgeDays * 24 * 3_600_000);
+/**
+ * Đơn có vận đơn CHƯA HUỶ (stage). Câu con tương quan viết tên bảng ngoài TƯỜNG MINH: trong truy vấn một bảng drizzle in `${o.id}` thành
+ * `"id"` trần và câu con hiểu là id của vận đơn — điều kiện sai im lặng. Chặt hơn `attemptHoldsOrder` (vận đơn hãng báo huỷ mà stage chưa
+ * về CANCELLED vẫn tính là có) — sai về phía KHÔNG ghi.
+ */
+const activeShipmentSql = sql`exists (select 1 from "shipments" s where s.order_id = "orders"."id" and s.stage::text <> 'CANCELLED')`;
+/** Dòng cờ MÁY «địa chỉ chưa ghép» còn mở (cờ người gắn không tính). */
+const machineFlagSql = sql`exists (select 1 from jsonb_array_elements(coalesce("orders"."raw"->'review'->'entries', '[]'::jsonb)) e where e->>'code' = 'ADDRESS_UNRESOLVED' and starts_with(e->>'note', ${MACHINE_ADDRESS_NOTE_PREFIX}))`;
+
+/** Số đơn bot còn treo cờ máy «địa chỉ chưa ghép» mà máy KHÔNG được chạm, theo lý do (lý do đầu tiên khớp). Không ghi gì. */
+export async function countOutOfScope(now: Date): Promise<Record<OutOfScopeReason, number>> {
+  const db = await getDb();
+  const o = schema.orders;
+  const stages = sql.join(MANUAL_ORDER_STAGES.map((s) => sql`${s}`), sql`, `);
+  const reason = sql<string | null>`case when "orders"."stage"::text in ('CANCELLED', 'DELETED') then 'CANCELLED' when "orders"."stage"::text not in (${stages}) then 'CLOSED' when ${activeShipmentSql} then 'SHIPMENT' when "orders"."created_at" < ${scopeCutoff(now).toISOString()}::timestamptz then 'TOO_OLD' else null end`;
+  const rows = await db
+    .select({ reason, n: sql<number>`count(*)::int` })
+    .from(o)
+    .where(and(sql`${o.salesConversationId} is not null`, eq(o.shipCommune, ""), machineFlagSql))
+    .groupBy(sql`1`);
+  const out: Record<OutOfScopeReason, number> = { CANCELLED: 0, CLOSED: 0, SHIPMENT: 0, TOO_OLD: 0 };
+  for (const r of rows) if (r.reason && (OUT_OF_SCOPE_REASONS as readonly string[]).includes(r.reason)) out[r.reason as OutOfScopeReason] += Number(r.n);
+  return out;
+}
+
 export type AddressResolverConfig = { enabled?: boolean; places?: boolean; dailyPlacesLimit?: number; perTick?: number };
 
 export type AddressResolverUsage = { day: string; places: number; costMicros: number; lastError: string | null; lastErrorAt: string | null };
@@ -95,7 +132,9 @@ export async function resolvePendingAddresses(now: Date = new Date(), deps: Deps
       .where(
         and(
           sql`${o.salesConversationId} is not null`,
-          sql`${o.stage} not in ('CANCELLED', 'DELETED')`,
+          inArray(o.stage, [...MANUAL_ORDER_STAGES]),
+          gte(o.createdAt, scopeCutoff(now)),
+          sql`not ${activeShipmentSql}`,
           eq(o.shipCommune, ""),
           sql`${o.raw}->'review'->'entries' @> '[{"code":"ADDRESS_UNRESOLVED"}]'::jsonb`,
           sql`(${o.raw}->'addressResolution' is null or (${o.raw}->'addressResolution'->>'textAt') is distinct from (${o.raw}->'addressText'->>'at') or coalesce((${o.raw}->'addressResolution'->>'attempts')::int, 0) < ${ADDRESS_RESOLVER_DEFAULTS.maxAttempts} and (${o.raw}->'addressResolution'->>'places') = 'false')`,
