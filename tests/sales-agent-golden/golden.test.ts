@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { GOLDEN_CASES } from "./cases";
 import { firstDiff, normalizer, runGoldenCases, type GoldenTranscript } from "./harness";
+import { setPromptLayoutOverride } from "@/lib/sales-chatbot/prompt-layout";
 
 export const GOLDEN_SNAPSHOT_DIR = path.join("tests", "sales-agent-golden", "snapshots");
 
@@ -120,12 +121,47 @@ function testRunDateNormalizer() {
   assert.deepEqual(norm({ p: [`(chủ shop ${fixed}) · gần nhất ${fixed}`] }), { p: [`(chủ shop ${fixed}) · gần nhất <NGÀY CHẠY>`] });
 }
 
+/**
+ * BÀI HOÁN VỊ (AI Sales GĐ3 — prompt-layout.ts): phát lại CẢ bộ với cách xếp CACHE_FIRST. Mỗi lời nhắc phải có ĐÚNG tập dòng của lời
+ * nhắc tương ứng ở LEGACY (chỉ đổi thứ tự, không thêm / bớt / sửa dòng nào), và mọi thứ ngoài lời nhắc — công cụ, kết quả máy chủ, chữ
+ * tới khách, trạng thái cuối, đơn — giống hệt (model giả chạy theo kịch bản nên khác biệt chỉ có thể đến từ engine).
+ */
+async function permutationCheck(legacy: Map<string, GoldenTranscript>) {
+  setPromptLayoutOverride("CACHE_FIRST");
+  let cf: Map<string, GoldenTranscript>;
+  try {
+    // Tổ chức thử RIÊNG (CSDL của mã cũ còn sản phẩm của lượt đầu); tên shop giữ nguyên nên chữ lời nhắc không đổi.
+    cf = await runGoldenCases(GOLDEN_CASES, { orgSuffix: "-cf" });
+  } finally {
+    setPromptLayoutOverride(null);
+  }
+  const multiset = (p: string) => p.split("\n").sort();
+  let moved = 0;
+  for (const c of GOLDEN_CASES) {
+    const a = legacy.get(c.key)!;
+    const b = cf.get(c.key)!;
+    assert.equal(b.prompts.length, a.prompts.length, `[${c.key}] cùng số lời nhắc khác nhau`);
+    a.prompts.forEach((p, i) => {
+      assert.deepEqual(multiset(b.prompts[i]), multiset(p), `[${c.key}] lời nhắc #${i}: CACHE_FIRST phải cùng tập dòng với LEGACY`);
+      if (b.prompts[i] !== p) moved += 1;
+      // Dòng THỜI GIAN (tầng GIỜ) đứng SAU lời chào mẫu (tĩnh) — phần đệm được không mang giờ.
+      const greet = b.prompts[i].indexOf("Lời chào mở đầu mẫu");
+      const time = b.prompts[i].indexOf("THỜI GIAN: bây giờ là");
+      if (time >= 0) assert.ok(greet >= 0 && greet < time, `[${c.key}] CACHE_FIRST: dòng THỜI GIAN sau phần tĩnh`);
+    });
+    assert.deepEqual({ ...b, prompts: [] }, { ...a, prompts: [] }, `[${c.key}] ngoài lời nhắc không được đổi gì`);
+  }
+  assert.ok(moved > 0, "CACHE_FIRST phải thật sự đổi thứ tự ở ít nhất một lời nhắc");
+  console.log(`  ✓ hoán vị lời nhắc (GĐ3): ${GOLDEN_CASES.length} hội thoại · CACHE_FIRST cùng tập dòng với LEGACY ở mọi lời nhắc (${moved} lời nhắc đổi thứ tự), ngoài lời nhắc giống hệt`);
+}
+
 export async function testSalesAgentGolden() {
   testRunDateNormalizer();
   const keys = GOLDEN_CASES.map((c) => c.key);
   assert.equal(new Set(keys).size, keys.length, "khoá hội thoại vàng không trùng");
   const got = await runGoldenCases(GOLDEN_CASES);
   invariants(got);
+  await permutationCheck(got);
   const missing: string[] = [];
   for (const c of GOLDEN_CASES) {
     let expected: unknown;

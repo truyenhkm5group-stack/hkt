@@ -586,6 +586,7 @@ import { testQuickStart } from "./quick-start.test";
 import { testPhoneOtp } from "./phone-otp.test";
 import { testSalesPacks } from "./sales-packs.test";
 import { testSalesAgentGolden } from "./sales-agent-golden/golden.test";
+import { testSalesPromptLayout } from "./sales-prompt-layout.test";
 import { testOrderGolden } from "./order-golden/order-golden.test";
 import { testOrderReview } from "./order-review.test";
 import { testOrderCancelConsistency } from "./order-cancel-consistency.test";
@@ -3195,6 +3196,8 @@ async function main() {
     await testSalesPacks();
     // Bộ hội thoại vàng (M1): phát lại hội thoại kịch bản qua chatTurn, so ảnh chụp — tổ chức THẬT `gd-food` / `gd-fashion`.
     await testSalesAgentGolden();
+    // AI Sales GĐ3: thứ tự khối lời nhắc cho đệm tiền tố (công tắc sales.prompt-layout) — thuần; bài hoán vị nằm trong hội thoại vàng.
+    testSalesPromptLayout();
     // Bộ đo đơn vàng v2 (sứ mệnh saas-order-accuracy): dataset hội thoại có nhãn × 2 biến thể công tắc tự xác nhận qua chatTurn
     // thật, bộ đo thuần, số đo hiện trạng khớp tests/order-golden/BASELINE.md — tổ chức THẬT `og-food-off` / `og-food-on`.
     await testOrderGolden();

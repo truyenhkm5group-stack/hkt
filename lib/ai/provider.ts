@@ -56,7 +56,23 @@ export type AiUsage = { inputTokens: number; outputTokens: number; cacheReadToke
  * mặc định của nhà cung cấp. Đo 01/10/2026: suy luận ăn chung ngân sách `max_output_tokens` — đặt ngân sách nhỏ mà suy
  * luận «medium» thì model tiêu hết vào suy nghĩ và trả về RỖNG.
  */
-export type AiRequest = { system: string; messages: AiMessage[]; tools: AiToolDef[]; maxTokens?: number; reasoning?: "minimal" | "low" | "medium" | "high"; images?: AiImage[] };
+/**
+ * `systemCacheBreak` — số ký tự ĐẦU của `system` là phần TĨNH (lời nhắc bot bán hàng xếp CACHE_FIRST — prompt-layout.ts). Anthropic gửi
+ * phần ấy thành khối `system` riêng mang `cache_control`, phần sau là khối thứ hai không đánh dấu; thiếu / ngoài khoảng ⇒ một khối như
+ * cũ. Nhà cung cấp khác bỏ qua (đệm tiền tố tự động — chỉ cần thứ tự).
+ */
+export type AiRequest = { system: string; systemCacheBreak?: number; messages: AiMessage[]; tools: AiToolDef[]; maxTokens?: number; reasoning?: "minimal" | "low" | "medium" | "high"; images?: AiImage[] };
+
+/** Khối `system` của Anthropic: một khối đệm như cũ, hoặc khối TĨNH đệm + phần còn lại khi có điểm cắt hợp lệ. HÀM THUẦN. */
+export function anthropicSystemBlocks(system: string, cacheBreak?: number): { type: "text"; text: string; cache_control?: { type: "ephemeral" } }[] {
+  const head = cacheBreak !== undefined && Number.isInteger(cacheBreak) && cacheBreak > 0 && cacheBreak < system.length ? system.slice(0, cacheBreak) : null;
+  const tail = head === null ? "" : system.slice(cacheBreak).replace(/^\n/, "");
+  if (head === null || !tail) return [{ type: "text", text: system, cache_control: { type: "ephemeral" } }];
+  return [
+    { type: "text", text: head, cache_control: { type: "ephemeral" } },
+    { type: "text", text: tail },
+  ];
+}
 export type { AiImage } from "@/lib/ai/images";
 
 
@@ -220,8 +236,9 @@ export class AnthropicProvider implements AiProvider {
     const body = {
       model: this.model,
       max_tokens: req.maxTokens ?? 4000,
-      // Prompt hệ thống ổn định ⇒ đệm được; phần bối cảnh thay đổi nằm trong messages.
-      system: [{ type: "text" as const, text: req.system, cache_control: { type: "ephemeral" as const } }],
+      // Prompt hệ thống ổn định ⇒ đệm được; phần bối cảnh thay đổi nằm trong messages. Có điểm cắt (`systemCacheBreak`) ⇒ chỉ phần TĨNH
+      // mang dấu đệm, phần đổi theo khách / lượt đi khối sau.
+      system: anthropicSystemBlocks(req.system, req.systemCacheBreak),
       ...(caps.adaptiveThinking ? { thinking: { type: "adaptive" as const } } : {}),
       ...(caps.effort ? { output_config: { effort: this.effort } } : {}),
       // Từ chối vì chính sách ⇒ máy chủ tự chạy lại trên model dự phòng trong cùng một lần gọi.
