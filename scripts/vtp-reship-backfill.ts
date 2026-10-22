@@ -30,6 +30,7 @@ import "dotenv/config";
 import { and, gte, inArray, isNull, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
+import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import { relinkOrphanShipment, reshipCandidates, reshipParentOf, type ReshipVerdict } from "@/lib/integrations/viettelpost/reship";
 import { SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 import { loadReturnsPage, returnsPageParams, withDefaultReturnsBasis } from "@/lib/queries/returns-report-page";
@@ -40,6 +41,19 @@ export const RESHIP_FROM_DAY = "2026-10-15";
 export const RESHIP_REASON = "gắn vận đơn tạo lại trên web VTP vào đơn gốc — P0 22/10";
 export const RESHIP_SOURCE = "SCRIPT_RELINK";
 export const RESHIP_ACTOR = "script:vtp-reship-backfill";
+
+/**
+ * HÀNG RÀO `--apply` BẰNG MÃ, KHÔNG BẰNG LỜI NHẮC (Tech Lead 22/10/2026). Trước PR2 #981 (vtp-reship-outcome) `ERP_STOCK_SUB`
+ * nối MỌI lần gửi của đơn ⇒ gắn lần gửi kế cho ~73 đơn 15/10 còn vận đơn gốc PICKED_UP sẽ trừ tồn HAI lần. PR2 nâng
+ * `CANONICAL_OUTCOME_VERSION` 3 → 4; script lấy từ main nhưng `lib` lấy từ IMAGE đang chạy, nên hằng số đọc được ở đây là của
+ * bản ĐANG CHẠY trên máy chủ — đúng câu cần hỏi. Chạy thử không bị chặn.
+ */
+export const RESHIP_APPLY_MIN_OUTCOME_VERSION = 4;
+export const RESHIP_APPLY_BLOCKED = "#981 chưa lên production — vá bây giờ sẽ trừ tồn hai lần ~73 đơn 15/10";
+/** `null` = được ghi; còn lại là câu từ chối. HÀM THUẦN. */
+export function applyGateProblem(runningOutcomeVersion: number): string | null {
+  return runningOutcomeVersion >= RESHIP_APPLY_MIN_OUTCOME_VERSION ? null : `${RESHIP_APPLY_BLOCKED} (image đang chạy CANONICAL_OUTCOME_VERSION = ${runningOutcomeVersion}, cần ≥ ${RESHIP_APPLY_MIN_OUTCOME_VERSION})`;
+}
 
 /** Ngày giờ Việt Nam (YYYY-MM-DD). HÀM THUẦN. */
 export const vnToday = (now: Date) => new Date(now.getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
@@ -174,6 +188,13 @@ async function main() {
   if (!parsed.ok) {
     console.error(`vtp-reship-backfill: ${parsed.error}. Dùng: (rỗng) | --measure | --apply`);
     process.exit(2);
+  }
+  if (parsed.apply) {
+    const chan = applyGateProblem(CANONICAL_OUTCOME_VERSION);
+    if (chan) {
+      tomTat(`--apply TỪ CHỐI: ${chan}. Chạy thử (arg rỗng) vẫn được.`);
+      process.exit(3);
+    }
   }
   const db = await getDb();
   if (!parsed.apply) {

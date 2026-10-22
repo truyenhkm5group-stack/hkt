@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { and, eq, inArray, like } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { applyPlan, measureWindows, parseBackfillArgs, planReship, planSummaryLines, RESHIP_ACTOR, RESHIP_FROM_DAY, RESHIP_REASON, vnToday } from "../scripts/vtp-reship-backfill";
+import { applyGateProblem, applyPlan, measureWindows, parseBackfillArgs, planReship, planSummaryLines, RESHIP_ACTOR, RESHIP_APPLY_BLOCKED, RESHIP_FROM_DAY, RESHIP_REASON, vnToday } from "../scripts/vtp-reship-backfill";
 
 function testPure() {
   assert.deepEqual(parseBackfillArgs([]), { ok: true, apply: false });
@@ -18,7 +18,17 @@ function testPure() {
   assert.equal(vnToday(now), "2026-10-23", "ngày giờ Việt Nam");
   assert.deepEqual(measureWindows(now).map((w) => w.raw), [{ period: "7d" }, { period: "custom", from: RESHIP_FROM_DAY, to: "2026-10-23" }], "đúng tham số URL người dùng mở");
 
+  // Hàng rào --apply: image chưa có PR2 #981 (CANONICAL_OUTCOME_VERSION < 4) ⇒ từ chối, kèm câu nói rõ hậu quả.
+  for (const v of [1, 2, 3]) assert.match(applyGateProblem(v) ?? "", /^#981 chưa lên production — vá bây giờ sẽ trừ tồn hai lần ~73 đơn 15\/10/, `phiên bản ${v} ⇒ từ chối`);
+  assert.equal(applyGateProblem(4), null, "image có PR2 ⇒ được ghi");
+  assert.equal(applyGateProblem(5), null, "phiên bản sau PR2 ⇒ vẫn được");
+  assert.ok(RESHIP_APPLY_BLOCKED.includes("trừ tồn hai lần"));
+
   const src = readFileSync("scripts/vtp-reship-backfill.ts", "utf8");
+  const main = src.slice(src.indexOf("async function main("));
+  assert.ok(main.includes("applyGateProblem(CANONICAL_OUTCOME_VERSION)"), "hàng rào đọc hằng số của lib ĐANG CHẠY");
+  assert.ok(main.indexOf("applyGateProblem(") < main.indexOf("getDb()") && main.indexOf("applyGateProblem(") < main.indexOf("applyPlan("), "hàng rào đứng TRƯỚC mọi lần mở CSDL và mọi lượt ghi");
+  assert.ok(/if \(parsed\.apply\) \{\s*const chan = applyGateProblem/.test(main), "chỉ chặn --apply — chạy thử không bị chặn");
   assert.ok(src.includes('if (CHAY_THANG && !process.argv.slice(2).includes("--apply")) process.env.ERP_READ_ONLY = "1";') && src.includes("show transaction_read_only"), "chạy thử chỉ đọc do Postgres ép + hỏi lại phiên");
   for (const cam of [".insert(", ".update(", ".delete(", "insert into", "update shipments", "update orders", "set order_id"]) assert.ok(!src.toLowerCase().includes(cam.toLowerCase()), `không câu ghi trong script: ${cam}`);
   for (const loi of ["reshipCandidates(", "reshipParentOf(", "relinkOrphanShipment("]) assert.ok(src.includes(loi), `dùng đúng lõi ${loi}`);
