@@ -45,6 +45,10 @@ export function testAddressNeverReaskPure() {
   for (const ask of ["Dạ mình cho em xin tên phường / xã để em lên đơn nhé.", "Dạ mình ở tỉnh nào ạ?", "Dạ em giao về Số 10 như lần trước được không ạ?", "Dạ mình cho em xin số nhà, tên đường ạ.", "Dạ mình xác nhận giúp em phường Kim Liên đúng không ạ?", "Dạ mình cho em xin thêm tỉnh / thành phố giao hàng ạ.", "Nguyễn Trãi bên Thanh Xuân hay Hà Đông ạ?", "Đại Kim cũ nay là phường nào theo tên mới ạ?"])
     assert.deepEqual(dropAddressAsks(ask, true), { text: ADDRESS_KNOWN_TEXT, dropped: 1 }, ask);
   for (const keep of ["Dạ bên em giao 2-3 ngày tới địa chỉ của mình ạ.", "Dạ mình muốn giao giờ nào ạ?", "Dạ mình lấy thêm 1 hũ ruốc không ạ?", "Dạ em lên đơn 2kg chả cá cho mình rồi ạ.", "Đơn tạm tính 350.000 ₫ + phí ship (báo sau), anh xác nhận giúp em nhé.", "Dạ mình lấy như lần trước không ạ?", "Dạ mình lấy thêm đường phèn không ạ?", "Dạ mình lấy 1kg hay 2kg ạ?", "Dạ bên em ở Hà Nội, giao toàn quốc ạ."]) assert.deepEqual(dropAddressAsks(keep, true), { text: keep, dropped: 0 }, keep);
+  // Câu thay của chính hàng rào KHÔNG bao giờ bị coi là câu hỏi (gập dấu «ghi nhan dia chi» từng khớp «nhan dia chi») — nếu không, mỗi lần
+  // gửi nó lại đẻ một sự kiện KNOWN_ADDRESS_REASKED giả và làm phồng số 2B.
+  assert.deepEqual(dropAddressAsks(ADDRESS_KNOWN_TEXT, true), { text: ADDRESS_KNOWN_TEXT, dropped: 0 }, "câu ghi nhận của máy không phải câu hỏi");
+  assert.equal(dropAddressAsks("Dạ mình cho em ghi nhận lại địa chỉ nhé.", true).dropped, 1, "«ghi nhận LẠI địa chỉ» vẫn là lời xin lại");
   assert.deepEqual(dropAddressAsks("Dạ em lên đơn 2kg chả cá rồi ạ. Mình cho em xin tên phường nhé.", true), { text: "Dạ em lên đơn 2kg chả cá rồi ạ.", dropped: 1 }, "chỉ bỏ câu hỏi, giữ câu khác");
   assert.deepEqual(dropAddressAsks("Dạ mình ở tỉnh nào ạ?", false), { text: "Dạ mình ở tỉnh nào ạ?", dropped: 0 }, "chưa có chữ địa chỉ ⇒ được hỏi");
   const blocks = [{ type: "text" as const, text: "Dạ mình ở phường nào ạ?" }, { type: "tool_use" as const, id: "t1", name: "create_customer", input: { address: "x" } }];
