@@ -151,7 +151,8 @@ function testVerdictPure() {
   assert.equal(guardClaims("Dạ 2kg 540k", { ...facts, allowedAmounts: undefined }).ok, true, "người gọi chưa cấp tập số ⇒ không kiểm (tương thích ngược)");
   // Đơn có nhưng chưa qua kiểm ⇒ thay câu, KHÔNG chuyển người.
   const p = claimVerdict(["ORDER_CONFIRMED"], { ...facts, orderPending: "ADDRESS" });
-  assert.ok(!p.ok && p.safeText === CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS && p.handoff === false, JSON.stringify(p));
+  // 22/10/2026 (chủ shop — xác minh địa chỉ độc lập với upsell): câu thay cho MỌI tổ chức là câu ghi nhận, không «nhân viên xác nhận địa chỉ».
+  assert.ok(!p.ok && p.safeText === CLAIM_SAFE_TEXT.ORDER_RECEIVED && p.handoff === false, JSON.stringify(p));
   const c = claimVerdict(["ORDER_CONFIRMED"], { ...facts, orderPending: "CHECK" });
   assert.ok(!c.ok && c.safeText === CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK && !c.handoff);
   const none = claimVerdict(["ORDER_CONFIRMED"], facts);
@@ -390,7 +391,7 @@ async function testRuleOff() {
       assert.equal(order.shipCommune, "", "xã / phường chưa ghép");
       assert.equal(state.confirmed?.valid, false);
       assert.equal(state.confirmed?.pending, "ADDRESS");
-      assert.deepEqual(transcript.turns[1].shown, [CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS], "«đã lên đơn» bị thay bằng câu ghi nhận + nhân viên xác nhận địa chỉ");
+      assert.deepEqual(transcript.turns[1].shown, [CLAIM_SAFE_TEXT.ORDER_RECEIVED], "«đã lên đơn» bị thay bằng câu ghi nhận (không «nhân viên xác nhận địa chỉ» — 22/10/2026)");
       assert.notEqual(transcript.final.status, "HANDOFF", "không chuyển người — đơn đã nằm trong hàng «Cần người kiểm»");
       const conv = { id: row.id, orderId: row.orderId, pageId: row.pageId, threadId: row.threadId };
       const f = await claimFactsLoader(conv)(state);
@@ -744,7 +745,7 @@ async function testAutoConfirmCases() {
         const review = (order.raw as { review?: { entries: { code: string }[] } | null }).review;
         assert.ok(review?.entries.some((e) => e.code === "ADDRESS_UNRESOLVED"), "cờ cần kiểm địa chỉ");
         assert.equal(state.confirmed?.valid, false);
-        assert.deepEqual(transcript.turns[0].shown, [CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS], "câu ghi nhận — KHÔNG «đã lên đơn»");
+        assert.deepEqual(transcript.turns[0].shown, [CLAIM_SAFE_TEXT.ORDER_RECEIVED], "câu ghi nhận — KHÔNG «đã lên đơn», không «nhân viên xác nhận địa chỉ» (22/10/2026)");
         assert.notEqual(transcript.final.status, "HANDOFF", "không chuyển người — đơn nằm trong hàng «Cần người kiểm»");
         return;
       }
