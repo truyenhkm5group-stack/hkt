@@ -21,19 +21,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T18:54:13.874Z",
-  "updated_at": "2026-10-22T18:54:52.869Z",
-  "last_heartbeat": "2026-10-22T18:54:52.869Z",
+  "updated_at": "2026-10-22T19:34:07.142Z",
+  "last_heartbeat": "2026-10-22T19:34:07.142Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/vtp-reship-backfill-apply",
-    "sha": "804116dda5f141e02ce2f7ca5c36447bc3d5533c",
-    "at": "2026-10-22T18:54:52.869Z",
+    "sha": "bf462a7121a25720b487449cd5900de74d2f0dbe",
+    "at": "2026-10-22T19:34:07.142Z",
     "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
     "title": "Script vá 330 vận đơn tạo lại về đơn gốc — bước B: chạy thử + --apply qua relinkOrphanShipment",
-    "summary": "@804116dda (chứa main f87db2e0 + bước A). Script vtp-reship-backfill bước B: mặc định chạy thử (mốc TRƯỚC + kế hoạch theo ngày), --apply gắn qua relinkOrphanShipment (#979) rồi đo mốc SAU. CHỈ-SCRIPT. --apply CHỈ sau khi #981 deploy (ghi ở đầu tệp).",
+    "summary": "@bf462a712: thêm hàng rào --apply — image đang chạy CANONICAL_OUTCOME_VERSION < 4 (chưa có #981) ⇒ từ chối trước khi mở CSDL, mã 3, câu «#981 chưa lên production — vá bây giờ sẽ trừ tồn hai lần ~73 đơn 15/10»; chạy thử không bị chặn. CHỈ-SCRIPT.",
     "tests": [
       "npm run typecheck: sạch",
-      "K22 (bài vtp-reship-backfill: chạy thử 0 ghi · gắn đúng 1 · AMBIGUOUS/tự tham chiếu giữ · chạy lại 0 · audit lý do P0) · K18 · K15: XANH trên 804116dda",
+      "eslint: sạch",
+      "K22: XANH trên bản gốc (hàng rào + chạy thử/ghi/chạy lại)",
+      "đột biến if(chan)→if(false): bị bắt",
+      "đột biến bỏ process.exit(3): bị bắt",
+      "K18 · K15: XANH trên 804116dda (commit mới chỉ chạm script + bài kiểm của nó)",
       "shard 1–4 + build: CI gates"
     ]
   }
