@@ -3,7 +3,7 @@
   "mission_id": "trace-address-settled",
   "title": "conv-money-trace --order: máy ghép phường + vết máy ánh xạ",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-trace-addr",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-22T14:43:16.264Z",
-  "updated_at": "2026-10-22T14:45:22.375Z",
+  "updated_at": "2026-10-22T15:25:55.725Z",
   "last_heartbeat": "2026-10-22T14:43:50.574Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#976 → 47685d7bc0a3f721a55703ef784e0f92fdca55d1"
+  },
   "handoff": {
     "branch": "claude/trace-address-settled",
     "sha": "a44933f43fc6210148dc3b03aad8d12bb1057faf",
