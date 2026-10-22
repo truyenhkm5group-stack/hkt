@@ -3,7 +3,7 @@
   "mission_id": "short-accept-sad-emoji",
   "title": "«ok 😢» thôi được tính là đồng ý thêm món + sửa chú thích phạm vi bộ lọc 2b",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-sad-emoji",
@@ -22,7 +22,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T03:41:31.032Z",
-  "updated_at": "2026-10-22T03:41:31.032Z",
-  "last_heartbeat": "2026-10-22T03:41:31.032Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-22T03:41:59.502Z",
+  "last_heartbeat": "2026-10-22T03:41:59.502Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/short-accept-sad-emoji",
+    "sha": "0ca95c6ffd8f5a09068efe920bb81d0a7119120d",
+    "at": "2026-10-22T03:41:59.502Z",
+    "actor": "DESKTOP-56TH98Y:wt-sad-emoji",
+    "title": "«ok 😢» thôi được tính là đồng ý thêm món + sửa chú thích phạm vi bộ lọc 2b",
+    "summary": "NEGATIVE_EMOJI_RE đặt trong isShortYes (một luật cho mọi đường đồng ý, kể cả hỏi-xác-nhận-sau-chốt cũ) + isShortAccept kiểm riêng vì nó bỏ biểu tượng trước khi gọi isShortYes. Biểu tượng vui vẫn là đồng ý. Sửa chú thích return-reason-filters.ts: D đọc bản KHÔNG lọc 2b. Ghi việc sau: «t_t» chữ thường.",
+    "tests": [
+      "cổng sạch @0ca95c6ff: TYPECHECK 0 · LINT 0 · TEST 0 (TẤT CẢ KIỂM THỬ ĐẠT) · BUILD 0",
+      "K21/K22 ĐẠT",
+      "đột biến 3/3 đỏ"
+    ]
+  }
 }
