@@ -3,7 +3,7 @@
   "mission_id": "vtp-reship-relink",
   "title": "Vận đơn tạo lại trên web VTP gắn về đúng đơn (lần gửi kế) thay vì mồ côi",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-reship",
@@ -24,7 +24,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T16:06:33.527Z",
-  "updated_at": "2026-10-22T16:06:33.527Z",
-  "last_heartbeat": "2026-10-22T16:06:33.527Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-22T16:57:02.823Z",
+  "last_heartbeat": "2026-10-22T16:57:02.823Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/vtp-reship-relink",
+    "sha": "754984932087c7a9bb00b774c32a66ee2fabff32",
+    "at": "2026-10-22T16:57:02.823Z",
+    "actor": "DESKTOP-56TH98Y:wt-reship",
+    "title": "Vận đơn tạo lại trên web VTP gắn về đúng đơn (lần gửi kế) thay vì mồ côi",
+    "summary": "P0 22/10 — vận đơn tạo lại trên web VTP (330 mồ côi PKE: ORDER_REFERENCE = số vận đơn gốc của đơn đã có) nay gắn về đúng đơn thành LẦN GỬI KẾ (attempt_no+1, OUTBOUND, raw.reship) ở cả webhook lẫn nhập tệp — MỘT luật lib/integrations/viettelpost/reship.ts::reshipParentOf. Tham chiếu chỉ so vtp_order_number (mã VTP cấp); tracking_code chỉ khi dòng chưa có mã VTP (ca PKE1508295104; webhook không có RECEIVER_PHONE nên hàng rào SĐT không chặn được ở đó). Nhiều đơn ⇒ HOLD AMBIGUOUS, khác SĐT ⇒ HOLD PHONE_MISMATCH (mồ côi + raw.relink). Chiều hoàn [số]P[số] không bao giờ đi nhánh này. Nhập tệp: mã chưa có ⇒ tạo lần gửi kế / dòng mồ côi từ chứng từ ĐVVC (chỉ khi đủ thu hộ + cước — ô chưa biết không thành 0); preview thêm RESHIP_ATTEMPT / NEW_ORPHAN cùng điều kiện; dòng tạo trong lượt nhập không vào phép đo khoảng hụt webhook (AGENTS 51). relinkOrphanShipment (khoá dòng, idempotent, materialize gốc + mới, audit SHIPMENT_RESHIP_RELINK) cho script vá 330 dòng của code-erp-95. Độ phủ đồng bộ trên /reports/returns + /shipments: webhook cuối · nhập tệp cuối · ERP ghi nhận / đã gắn / chiều hoàn / lô huỷ / chưa ghép · lỗi đồng bộ · «tổng trên VTP: chưa đo được — cần tệp»; GTC in công thức + tử/mẫu + kỳ + độ mịn đơn. Không đổi ORDER_OUTCOME / PRIMARY_ATTEMPT / sổ kho (PR2 vtp-reship-outcome).",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "npm run lint: sạch",
+      "TEST_SHARD=1/4 (K01 K03 K04 K07 K11 … gồm vtp-reship-relink · vtp-source-of-truth · vtp-import-* · connectors): ĐẠT trên c258e1938, rebase sạch lên main 351068ef7 ⇒ 754984932 (tsc lại sạch)",
+      "shard 2–4 giao cho CI gates"
+    ]
+  }
 }
