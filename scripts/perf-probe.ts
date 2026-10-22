@@ -602,6 +602,16 @@ async function main() {
   await timed("/reports/returns", "logisticsPerformance 90d", () => logi.logisticsPerformance(ret90));
   const rrr = await import("@/lib/queries/return-reason-report");
   await timed("/reports/returns", "getReturnReasonReport 90d", () => rrr.getReturnReasonReport({ period: ret90 }));
+  /*
+    2b (bộ lọc khối lý do hoàn, #960): `baseRows` nay chọn thêm nguồn đơn · ĐVVC · tỉnh · bưu cục (câu con lần phát cuối) · đợt care mới nhất
+    (distinct on) cho MỌI lượt gọi, kể cả trang mặc định. Đo ĐÚNG hai cách trang gọi: mốc mặc định của trang (SHIPPED, không lọc 2b — cũng là
+    khoá job giữ ấm) và có lọc 2b (tỉnh + bưu cục + trạng thái — lượt đọc thứ hai của trang, chỉ khi người dùng bật lọc). `timed` xoá đệm
+    trước mỗi lần ⇒ đây là số NGUỘI. Chạy ngoài giờ cao điểm.
+  */
+  await timed("/reports/returns", "getReturnReasonReport 90d SHIPPED (trang mặc định)", () => rrr.getReturnReasonReport({ period: ret90, basis: "SHIPPED" }));
+  await timed("/reports/returns", "getReturnReasonReport 90d SHIPPED + lọc 2b", () =>
+    rrr.getReturnReasonReport({ period: ret90, basis: "SHIPPED", provinces: ["Thành phố Hà Nội"], postOffice: "buu cuc", outcomes: ["RETURNED"] }),
+  );
   const ri = await import("@/lib/queries/return-intelligence");
   /*
     Nơi gọi thật truyền `reasonReport` đã dựng sẵn để khỏi dựng lần hai. Ở đây CỐ Ý không truyền:
