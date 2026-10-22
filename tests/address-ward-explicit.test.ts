@@ -267,13 +267,14 @@ export async function testAddressWardExplicitTools() {
   const legacyGate = await executeTool("confirm_order", { customer_confirmation: "ok em" }, ctx(clone(base), "ok em", 3)).catch((e: unknown) => ({ isError: true, summary: `ném: ${String(e)}`, content: "", state: {} as ChatState }));
   assert.ok(!/địa chỉ chưa chuẩn hoá/.test(legacyGate.summary), `địa chỉ cũ đủ ⇒ không hỏi khách phường: ${legacyGate.summary}`);
 
-  // KHÔNG HỎI LẠI Ở LƯỢT SAU: địa chỉ THẬT SỰ thiếu (không có quận / huyện) ⇒ lượt 3 hỏi MỘT lần (câu ngắn, không danh sách) ...
+  // AGENTS 3.12b (chủ shop chốt 22/10/2026): địa chỉ thiếu quận / huyện nhưng khách ĐÃ gửi chữ địa chỉ ⇒ lượt chốt KHÔNG hỏi khách nữa
+  // (trước đây hỏi MỘT lần rồi DỪNG) — không «địa chỉ chưa chuẩn hoá», không mốc «đã hỏi»; máy ánh xạ nền / nhân viên kiểm ...
   const NO_DISTRICT = "230/20 Phan Huy Ích, TP.HCM";
   const askBase: ChatState = { customer: { ...base.customer!, address: NO_DISTRICT }, draft: { ...base.draft!, recipient: { ...recipient, address: NO_DISTRICT } } };
   const ask = await executeTool("confirm_order", { customer_confirmation: "ok em" }, ctx(clone(askBase), "ok em", 3));
-  assert.ok(ask.isError && /địa chỉ chưa chuẩn hoá/.test(ask.summary), ask.summary);
-  assert.ok(GO_VAP_SIX.every((w) => !ask.content.includes(w.replace(/^Phường/, "phường"))), `câu hỏi không liệt kê 6 phường: ${ask.content}`);
-  assert.equal(ask.state.addressAsk?.parts?.ward, 3);
+  assert.ok(!/địa chỉ chưa chuẩn hoá/.test(ask.summary) && !/Hỏi khách đúng câu/.test(ask.content), `đã có chữ địa chỉ ⇒ không dừng để hỏi: ${ask.summary}`);
+  assert.ok(GO_VAP_SIX.every((w) => !ask.content.includes(w.replace(/^Phường/, "phường"))), `không liệt kê 6 phường: ${ask.content}`);
+  assert.equal(ask.state.addressAsk?.parts?.ward, undefined, "không có câu hỏi ⇒ không có mốc «đã hỏi»");
   // ... lượt 4 model chép lại địa chỉ KHÁC chuỗi (khách thêm «gần chợ») ⇒ không hỏi lại, đơn đi tiếp (cờ cần kiểm của lõi đơn).
   const moved: ChatState = { ...clone(ask.state), draft: { ...clone(ask.state).draft!, recipient: { ...recipient, address: `${NO_DISTRICT} gần chợ` } } };
   const again = await executeTool("confirm_order", { customer_confirmation: "ok em" }, ctx(moved, "ok em", 4)).catch((e: unknown) => ({ isError: true, summary: `ném: ${String(e)}`, content: "", state: {} as ChatState }));
@@ -281,7 +282,7 @@ export async function testAddressWardExplicitTools() {
   // create_customer ở lượt sau cũng không đưa câu hỏi phường nữa.
   const cc2 = await executeTool("create_customer", { name: "Tuyết", phone: "0901234567", address: `${NO_DISTRICT} gần chợ` }, ctx(clone(ask.state), "giao giúp chị nhé", 4));
   const v2 = (JSON.parse(cc2.content) as { address_check: { ask_customer: string | null; note: string } }).address_check;
-  assert.deepEqual([v2.ask_customer, /KHÔNG hỏi lại/.test(v2.note)], [null, true], JSON.stringify(v2));
+  assert.deepEqual([v2.ask_customer, /KHÔNG hỏi/.test(v2.note)], [null, true], JSON.stringify(v2));
   // Lời trả lời phường ở tin TRƯỚC rồi «ok em» KHÔNG được nhận (review PR #848 lần 4: lời trả lời không gắn được với câu hỏi của đúng
   // nơi giao — «phường X» cho địa chỉ cũ rồi «giao chỗ làm, Viettel Tower» từng vào đơn mới). Đơn đi với ô xã trống + cờ cần kiểm.
   const prior = await executeTool("update_draft_order", { ward: "Phường An Hội Tây" }, ctx(clone(ask.state), "ok em", 4, ["phường An Hội Tây em nhé", "ok em"])).catch((e: unknown) => ({ isError: true, summary: `ném: ${String(e)}`, content: "", state: {} as ChatState }));
@@ -333,10 +334,13 @@ export async function testAddressWardExplicitTools() {
   // Trí nhớ «đã hỏi phường» chỉ áp cho CÙNG nơi giao: đổi hẳn địa chỉ ⇒ bắt đầu lại; chép lại khác chữ ⇒ giữ.
   assert.equal(sameDeliveryPlace(MODEL_LINE, `${MODEL_LINE} gần chợ`), true);
   assert.equal(sameDeliveryPlace(MODEL_LINE, NEW_ADDR), false);
-  assert.ok(askMemoryFor(ask.state.addressAsk, `${MODEL_LINE} gần chợ`));
-  assert.equal(askMemoryFor(ask.state.addressAsk, NEW_ADDR), undefined);
+  // (Từ 22/10/2026 lượt chốt không còn ghi mốc «đã hỏi» khi đã có chữ địa chỉ — kiểm cơ chế trí nhớ trên một mốc dựng sẵn.)
+  const memo = { key: `${MODEL_LINE}||`, turn: 3, parts: { ward: 3 } };
+  assert.ok(askMemoryFor(memo, `${MODEL_LINE} gần chợ`));
+  assert.equal(askMemoryFor(memo, NEW_ADDR), undefined);
   const elsewhere: ChatState = { ...clone(ask.state), draft: { ...clone(ask.state).draft!, recipient: { ...recipient, address: "99 Lê Văn Sỹ, TP.HCM" } } }; // không quận cũ ⇒ thật sự thiếu (từ #870 có quận cũ ⇒ nhân viên kiểm)
   const fresh = await executeTool("confirm_order", { customer_confirmation: "ok em" }, ctx(elsewhere, "ok em", 10)).catch((e: unknown) => ({ isError: true, summary: `ném: ${String(e)}`, content: "", state: {} as ChatState }));
-  assert.ok(/địa chỉ chưa chuẩn hoá/.test(fresh.summary), `địa chỉ khác hẳn, mơ hồ ⇒ được hỏi phường một lần: ${fresh.summary}`);
-  console.log("✓ Công cụ bot: chữ khách có phường ⇒ create_customer không hỏi, cổng chốt không chặn · hỏi đúng một lần (không danh sách 6) · lượt sau không hỏi lại dù địa chỉ chép khác · model không tự chọn phường");
+  // AGENTS 3.12b: kể cả địa chỉ khác hẳn, mơ hồ — khách ĐÃ gửi chữ địa chỉ ⇒ không hỏi khách phường; cờ + máy ánh xạ nền / nhân viên.
+  assert.ok(!/địa chỉ chưa chuẩn hoá/.test(fresh.summary) && !/Hỏi khách đúng câu/.test(fresh.content), `đã có chữ địa chỉ ⇒ không hỏi: ${fresh.summary}`);
+  console.log("✓ Công cụ bot: chữ khách có phường ⇒ create_customer không hỏi, cổng chốt không chặn · đã có chữ địa chỉ ⇒ không hỏi khách lần nào (AGENTS 3.12b) · lượt sau không hỏi lại dù địa chỉ chép khác · model không tự chọn phường");
 }

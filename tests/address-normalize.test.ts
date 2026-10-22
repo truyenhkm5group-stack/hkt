@@ -184,26 +184,29 @@ export async function testAddressNormalizeTools() {
   assert.ok(bogus.isError && /không có trong danh mục/.test(bogus.content), bogus.content);
 
   // Tự chốt của máy chủ (P0-A, main): biết tỉnh mà xã mơ hồ KHÔNG chặn — đơn tự chốt kèm cờ cần kiểm (tests/sales-quote-integrity
-  // «qi-tu-chot-can-kiem»). Chưa biết tỉnh («P13 GV» không ghi tỉnh) thì CÓ chặn: cổng «thiếu tỉnh» không bị viết tắt vượt qua.
+  // «qi-tu-chot-can-kiem»). A1 (chủ shop chốt 22/10/2026 — AGENTS 3.12b): ĐÃ CÓ chữ địa chỉ mà chưa đọc được tỉnh («P13 GV», «12 Lê Lợi q1»)
+  // cũng KHÔNG chặn tự chốt nữa — đơn chốt kèm cờ, vận đơn giữ lại, máy ánh xạ nền / nhân viên kiểm; không hỏi khách tỉnh.
   const ac: ChatState = { ...clone(base), draft: { ...clone(base).draft!, quote: { id: "q-addr", priceVersion: "pv-addr", subtotal: 280_000, total: 280_000 } } };
   assert.equal(autoConfirmBlocker(ac, { lastUserText: "ok em", turn: 5 }), null, "xã mơ hồ, biết tỉnh ⇒ tự chốt kèm cờ (luật P0-A)");
   const acGv: ChatState = { ...ac, draft: { ...ac.draft!, recipient: { ...recipient, address: GO_VAP } } };
-  assert.match(autoConfirmBlocker(acGv, { lastUserText: "ok em", turn: 5 }) ?? "", /tỉnh \/ thành/, "«P13 GV» không tỉnh ⇒ chưa tự chốt");
-  // Viết tắt loại / dính liền không ghi tỉnh cũng KHÔNG vượt cổng thiếu tỉnh của tự chốt (review Tech Lead #802: «12 Lê Lợi q1»).
+  assert.equal(autoConfirmBlocker(acGv, { lastUserText: "ok em", turn: 5 }), null, "A1: «P13 GV» là chữ địa chỉ (chưa đọc được tỉnh) ⇒ vẫn tự chốt kèm cờ");
   for (const address of ["12 Lê Lợi q1", "Số 5 tp Vinh", "875/4B trần hưng đạo f1q5"]) {
     const st: ChatState = { ...ac, draft: { ...ac.draft!, recipient: { ...recipient, address } } };
-    assert.match(autoConfirmBlocker(st, { lastUserText: "ok em", turn: 5 }) ?? "", /tỉnh \/ thành/, `${address}: chưa biết tỉnh ⇒ chưa tự chốt`);
+    assert.equal(autoConfirmBlocker(st, { lastUserText: "ok em", turn: 5 }), null, `${address}: đã có chữ địa chỉ ⇒ không chặn tự chốt (A1)`);
   }
+  // Không có chữ địa chỉ nào («gần chợ») ⇒ vẫn chặn, hỏi khách — biên của addressTextGiven.
+  assert.match(autoConfirmBlocker({ ...ac, draft: { ...ac.draft!, recipient: { ...recipient, address: "gần chợ" } }, customer: { ...ac.customer!, address: "gần chợ" } }, { lastUserText: "ok em", turn: 5, roundCustomerTexts: ["ok em"] }) ?? "", /Địa chỉ chưa đủ/, "chưa có chữ địa chỉ ⇒ vẫn chặn");
   assert.equal(autoConfirmBlocker({ ...ac, draft: { ...ac.draft!, recipient: { ...recipient, address: "12 Lê Lợi, Quận 1" } } }, { lastUserText: "ok em", turn: 5 }), null, "gõ nguyên «Quận 1» ⇒ biết tỉnh");
 
-  // Ca KimThu Le «P13 GV» không ghi tỉnh: cổng chốt hỏi TỈNH (xác nhận cách đọc «GV» = quận Gò Vấp, TP HCM), không đưa danh sách phường.
+  // Ca KimThu Le «P13 GV» không ghi tỉnh: AGENTS 3.12b (22/10/2026) — khách ĐÃ gửi chữ địa chỉ ⇒ cổng chốt KHÔNG hỏi khách tỉnh nữa (không
+  // «hỏi rồi DỪNG»); việc đọc «GV» = quận Gò Vấp là việc nội bộ (máy ánh xạ nền / nhân viên).
   const gvRecipient = { ...recipient, address: GO_VAP };
   const gv: ChatState = { ...clone(base), customer: { ...clone(base).customer!, address: GO_VAP }, draft: { ...clone(base).draft!, recipient: gvRecipient } };
   assert.deepEqual([addressCheckOf(gvRecipient).view.status, addressCheckOf(gvRecipient).view.province, addressCheckOf(gvRecipient).view.missing], ["NOT_FOUND", null, ["province", "ward"]]);
   const gvGate = await executeTool("confirm_order", { customer_confirmation: "ok em" }, ctx(gv, "ok em", 5));
-  assert.ok(gvGate.isError && gvGate.content.includes("TỈNH") && gvGate.content.includes("«GV»") && gvGate.content.includes("quận Gò Vấp") && !gvGate.content.includes("phường Hạnh Thông"), gvGate.content);
-  assert.ok(!gvGate.state.confirmed);
-  const gvWard = await executeTool("update_draft_order", { ward: "Phường Hạnh Thông" }, ctx(clone(gvGate.state), "phường Hạnh Thông em", 6));
+  assert.ok(!/Hỏi khách đúng câu/.test(gvGate.content) && !/Hỏi khách|hỏi khách/.test(gvGate.summary) && !gvGate.content.includes("phường Hạnh Thông"), `không bảo model hỏi khách tỉnh: ${gvGate.summary} · ${gvGate.content.slice(0, 300)}`);
+  assert.equal(addressCheckOf(gvRecipient, { customerTexts: [GO_VAP] }).view.ask_customer, null, "đã có chữ địa chỉ ⇒ công cụ không đưa câu hỏi");
+  const gvWard = await executeTool("update_draft_order", { ward: "Phường Hạnh Thông" }, ctx(clone(gv), "phường Hạnh Thông em", 6));
   assert.ok(gvWard.isError && /tỉnh \/ thành/.test(gvWard.content), `chưa biết tỉnh ⇒ không nhận xã: ${gvWard.content}`);
-  console.log("✓ Công cụ bot: địa chỉ mơ hồ ⇒ hỏi khách trước khi chốt · lượt sau mới chốt (cờ cần kiểm) · xã chỉ nhận khi khách nói và có trong danh mục · tự chốt cùng cổng · «P13 GV» không tỉnh ⇒ hỏi TỈNH");
+  console.log("✓ Công cụ bot: địa chỉ mơ hồ ⇒ hỏi khách trước khi chốt · lượt sau mới chốt (cờ cần kiểm) · xã chỉ nhận khi khách nói và có trong danh mục · tự chốt cùng cổng · «P13 GV» không tỉnh ⇒ chốt kèm cờ, KHÔNG hỏi khách tỉnh (AGENTS 3.12b)");
 }
