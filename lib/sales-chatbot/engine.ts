@@ -1238,7 +1238,7 @@ async function chatTurnCore(
     // tập tham chiếu của danh mục (`quote.ts`) — đọc lười, một lần mỗi lượt, chỉ khi câu có số tiền.
     const claimFactsBase = claimFactsLoader(
       { id: conv.id, orderId: conv.orderId, pageId: conv.pageId, threadId: conv.threadId },
-      { reference: () => catalogReferenceAmounts(cfg), breakdown: () => catalogReferenceBreakdown(cfg), turn: turnSeq, turnAt: now, quietAddressReview: qrSettings.upsellAfterContact },
+      { reference: () => catalogReferenceAmounts(cfg), breakdown: () => catalogReferenceBreakdown(cfg), turn: turnSeq, turnAt: now },
     );
     // Căn cứ của câu «đã cập nhật địa chỉ / đã sửa đơn» (claim-guard ORDER_EDITED): công cụ lưu khách / lên / sửa đơn GHI THÀNH CÔNG trong
     // CHÍNH lượt này (review #821 vòng 2 — trước bán, cập nhật địa chỉ khách bằng create_customer không được bị coi là bịa).

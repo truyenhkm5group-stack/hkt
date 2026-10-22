@@ -57,7 +57,10 @@ export function cancelEvidenceOf(r: ReconcileRow): ReconcileEvidence | null {
   const declined = r.declinedAt ? Date.parse(r.declinedAt) : NaN;
   if (Number.isFinite(declined) && declined > r.insertedAt.getTime()) {
     const confirmedAfter = r.confirmedAt ? Date.parse(r.confirmedAt) > declined : false;
-    const reconfirmedAfter = orderReviewLogOf({ reviewLog: r.reviewLog }).some((x) => x.action !== "CANCELLED" && Date.parse(x.at) > declined);
+    // «Xác nhận lại sau huỷ» = ĐÚNG hai action: người xác nhận đơn (CONFIRMED) · khách đồng ý lại qua bot (CUSTOMER_RECONFIRMED). Máy gỡ
+    // dòng «địa chỉ chưa ghép» (ADDRESS_SETTLED, 22/10/2026) KHÔNG phải lời ai giữ đơn — đọc «mọi action ≠ CANCELLED» là để một lượt ghép
+    // phường che mất lời huỷ của khách (vùng tiền).
+    const reconfirmedAfter = orderReviewLogOf({ reviewLog: r.reviewLog }).some((x) => (x.action === "CONFIRMED" || x.action === "CUSTOMER_RECONFIRMED") && Date.parse(x.at) > declined);
     const keptAfter = c?.rescue.result === "SUCCEEDED" && c.rescue.decidedAt !== null && Date.parse(c.rescue.decidedAt) > declined;
     if (!confirmedAfter && !reconfirmedAfter && !keptAfter) return "AI_AGREED";
   }

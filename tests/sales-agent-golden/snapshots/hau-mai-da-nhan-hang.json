@@ -151,7 +151,7 @@
               "cod_total": null,
               "cod_total_text": "350.000 ₫ + phí ship (báo sau)",
               "order_valid": false,
-              "say_to_customer": "Dạ em đã ghi nhận đơn của mình, nhân viên sẽ xác nhận lại địa chỉ giúp mình ngay ạ.",
+              "say_to_customer": "Dạ em đã ghi nhận đơn của mình ạ.",
               "instruction": "Đơn ĐÃ GHI nhưng CHƯA qua kiểm — TUYỆT ĐỐI KHÔNG nói «đã lên đơn», «đặt hàng thành công», «đã chốt đơn». Gửi khách ĐÚNG câu say_to_customer.",
               "stock_note": null,
               "address_check": {
@@ -177,7 +177,7 @@
         }
       ],
       "shown": [
-        "Dạ em đã ghi nhận đơn của mình, nhân viên sẽ xác nhận lại địa chỉ giúp mình ngay ạ."
+        "Dạ em đã ghi nhận đơn của mình ạ."
       ],
       "status": "OPEN"
     },

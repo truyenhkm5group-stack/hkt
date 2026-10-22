@@ -78,11 +78,14 @@ export const CLAIM_SAFE_TEXT = {
 } as const;
 
 /**
- * Câu nói với khách khi đơn đã ghi mà địa chỉ chưa ghép được — MỘT chỗ chọn cho cả hàng rào lẫn công cụ chốt / sửa đơn. `quiet` =
- * tổ chức bật `upsellAfterContact`. HÀM THUẦN.
+ * Câu nói với khách khi đơn đã ghi mà địa chỉ chưa ghép được — MỘT chỗ chọn cho cả hàng rào lẫn công cụ chốt / sửa đơn.
+ * XÁC MINH ĐỊA CHỈ ĐỘC LẬP VỚI UPSELL (chủ shop 22/10/2026, P0 HSLC #8037F35A): mọi tổ chức chỉ nghe câu GHI NHẬN — không «nhân viên sẽ
+ * xác nhận lại địa chỉ», không «đã lên đơn». Việc kiểm là việc NỘI BỘ (cờ ADDRESS_UNRESOLVED · hàng «Cần người kiểm» · tuyến
+ * ADDRESS_REVIEW, chưa xác minh thì không vận đơn). Cờ `upsellAfterContact` chỉ còn quyết LỜI MỜI mua thêm khi địa chỉ đang chờ.
+ * `ORDER_PENDING_ADDRESS` giữ trong sổ chỉ để các bộ đếm (conv-money-trace dòng J) nhận ra câu cũ. HÀM THUẦN.
  */
-export function pendingAddressText(quiet: boolean): string {
-  return quiet ? CLAIM_SAFE_TEXT.ORDER_RECEIVED : CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS;
+export function pendingAddressText(): string {
+  return CLAIM_SAFE_TEXT.ORDER_RECEIVED;
 }
 
 /** Lý do chuyển người — tiền tố `classifyHandoffReason` đọc (events-shared.ts) để đếm theo nhóm. */
@@ -134,8 +137,7 @@ export type ServerTotal = { total: number; shipping: number | null | "UNKNOWN" }
  * → bội số giá của nó (câu «nem 120k một hộp, 2 hộp 240k» gọi tên món thì được nói bội số của CHÍNH món đó); `shipFee` / `freeShipFrom` =
  * phí ship cố định và ngưỡng miễn ship của cấu hình (được nói cạnh chữ thanh toán).
  */
-/** `quietAddressReview` = tổ chức bật `upsellAfterContact`: đơn chỉ chờ xác minh ĐỊA CHỈ ⇒ câu thay là `ORDER_RECEIVED`, không phải `ORDER_PENDING_ADDRESS`. */
-export type ClaimFacts = { paymentVerified: boolean; orderConfirmed: boolean; orderCancelled: boolean; orderPending?: "ADDRESS" | "CHECK" | null; quietAddressReview?: boolean; allowedAmounts?: ReadonlySet<number>; orderEditedThisTurn?: boolean; totals?: ClaimTotals; suspicious?: ReadonlySet<number>; unitPrices?: ReadonlySet<number>; seen?: ReadonlySet<number>; namedAmounts?: ReadonlyMap<string, ReadonlySet<number>>; shipFee?: number | null; freeShipFrom?: number | null; rejected?: ReadonlySet<number> };
+export type ClaimFacts = { paymentVerified: boolean; orderConfirmed: boolean; orderCancelled: boolean; orderPending?: "ADDRESS" | "CHECK" | null; allowedAmounts?: ReadonlySet<number>; orderEditedThisTurn?: boolean; totals?: ClaimTotals; suspicious?: ReadonlySet<number>; unitPrices?: ReadonlySet<number>; seen?: ReadonlySet<number>; namedAmounts?: ReadonlyMap<string, ReadonlySet<number>>; shipFee?: number | null; freeShipFrom?: number | null; rejected?: ReadonlySet<number> };
 /** `handoff = false` ⇒ thay câu nhưng KHÔNG chuyển người (câu an toàn vẫn gửi trên mọi kênh). */
 export type ClaimVerdict = { ok: true } | { ok: false; claim: ClaimKind; safeText: string; handoffReason: string; note: string; handoff: boolean; amounts?: number[] };
 
@@ -520,7 +522,7 @@ export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, am
     // Đơn ĐÃ TẠO nhưng chưa qua kiểm (#463DEBAE: «Máy chốt khi địa chỉ chưa ghép được») ⇒ nói đúng sự thật, không chuyển người:
     // đơn đã nằm trong hàng «Cần người kiểm» với lý do của nó.
     if (facts.orderPending) {
-      const safeText = facts.orderPending === "ADDRESS" ? pendingAddressText(facts.quietAddressReview === true) : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK;
+      const safeText = facts.orderPending === "ADDRESS" ? pendingAddressText() : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK;
       return { ok: false, claim: "ORDER_CONFIRMED", safeText, handoffReason: CLAIM_HANDOFF_REASON.ORDER_PENDING, note: `Đã thay câu AI «đã lên đơn» — đơn còn cần kiểm (${facts.orderPending === "ADDRESS" ? "địa chỉ chưa chuẩn hoá" : "giá / SĐT / cờ cần kiểm"})`, handoff: false };
     }
     return { ok: false, claim: "ORDER_CONFIRMED", safeText: CLAIM_SAFE_TEXT.ORDER, handoffReason: CLAIM_HANDOFF_REASON.ORDER_CONFIRMED, note: "Đã chặn câu AI khẳng định đã chốt đơn — chưa có đơn ERP", handoff: true };
@@ -674,7 +676,7 @@ export function orderValidityOf(o: { id: string; raw: unknown; phone: string; ad
  * `confirm_order` có thể vừa chốt ở vòng trước của chính lượt này). `reference` = tập số tham chiếu của danh mục (`quote.ts`) —
  * thiếu ⇒ tập số tiền chỉ gồm báo giá của hội thoại.
  */
-export function claimFactsLoader(conv: ClaimConversation, opts: { reference?: () => Promise<ReadonlySet<number>>; breakdown?: () => Promise<ReferenceBreakdown>; turn?: number; turnAt?: Date; quietAddressReview?: boolean } = {}): (state: ChatState) => Promise<ClaimFacts> {
+export function claimFactsLoader(conv: ClaimConversation, opts: { reference?: () => Promise<ReadonlySet<number>>; breakdown?: () => Promise<ReferenceBreakdown>; turn?: number; turnAt?: Date } = {}): (state: ChatState) => Promise<ClaimFacts> {
   let db: Promise<LinkedFacts> | null = null;
   let ref: Promise<ReadonlySet<number>> | null = null;
   let bd: Promise<ReferenceBreakdown | null> | null = null;
@@ -702,7 +704,7 @@ export function claimFactsLoader(conv: ClaimConversation, opts: { reference?: ()
     const totals = totalAllowedOf(state, { turnAt: opts.turnAt });
     const suspicious = totals ? suspiciousTotalsOf(state, totals, breakdown) : undefined;
     const extra = breakdown ? { unitPrices: breakdown.unit, namedAmounts: namedAmountsOf(breakdown), shipFee: breakdown.shippingFee ?? null, freeShipFrom: breakdown.freeShipFrom ?? null } : {};
-    return { paymentVerified: liveOrders.some((o) => r.paidOrderIds.has(o.id)), orderConfirmed, orderPending, ...(opts.quietAddressReview ? { quietAddressReview: true } : {}), orderCancelled: Boolean(state.cancelledOrders?.length), allowedAmounts: allowed, orderEditedThisTurn, ...(totals ? { totals } : {}), ...(suspicious ? { suspicious } : {}), seen: new Set(state.seenTotals ?? []), ...(state.rejectedTotals?.length ? { rejected: new Set(state.rejectedTotals) } : {}), ...extra };
+    return { paymentVerified: liveOrders.some((o) => r.paidOrderIds.has(o.id)), orderConfirmed, orderPending, orderCancelled: Boolean(state.cancelledOrders?.length), allowedAmounts: allowed, orderEditedThisTurn, ...(totals ? { totals } : {}), ...(suspicious ? { suspicious } : {}), seen: new Set(state.seenTotals ?? []), ...(state.rejectedTotals?.length ? { rejected: new Set(state.rejectedTotals) } : {}), ...extra };
   };
 }
 
