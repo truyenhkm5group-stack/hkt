@@ -327,6 +327,8 @@ export const QUALITY_BASE_FIELD: Record<SalesQualityCode, string> = {
   CLAIM_GUARD_BLOCK: "botMessages",
   UPSELL_ACCEPTED_BUT_REASKED: "offerAccepts",
   UPSELL_ACCEPTED_NOT_ATTACHED: "offerAccepts",
+  // Mẫu số `na.flagged` của daily.ts CHƯA được lưu vào ảnh chụp (`state.bases`) ⇒ khoá này vắng ⇒ in «(mẫu số chưa có)», không in 0.
+  ADDRESS_RECEIVED_BUT_NOT_APPLIED: "addressFlagged",
 };
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);

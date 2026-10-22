@@ -339,7 +339,9 @@ function testQualityState() {
     const line = daily.split("\n").find((x) => x.trimStart().startsWith(`${c}: \``));
     assert.ok(line, `daily.ts baseOf thiếu mã ${c}`);
     const field = QUALITY_BASE_FIELD[c];
-    const want = field === "handoffWaiting" ? "${ho.waiting}" : `\${b.${field}}`;
+    // Mẫu số không nằm trong `QualityBases` (ảnh chụp lúc chạy) ⇒ đúng biểu thức daily.ts in cạnh mã đó.
+    const special: Record<string, string> = { handoffWaiting: "${ho.waiting}", addressFlagged: "${na.flagged}" };
+    const want = special[field] ?? `\${b.${field}}`;
     assert.ok(line.includes(want), `${c}: script lấy mẫu số «${field}» nhưng daily.ts in ${line.trim().slice(0, 120)}`);
   }
   console.log("  ✓ 2B: khoá vắng / hỏng / lượt lỗi ⇒ CHƯA ĐO ĐƯỢC (không 0, không câu lỗi) · mã vắng ⇒ — · mẫu < 30 ⇒ chưa đủ mẫu · dòng ≤ 300 ký tự · mẫu số khớp daily.ts");
