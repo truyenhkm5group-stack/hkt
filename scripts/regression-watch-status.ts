@@ -40,6 +40,8 @@ export type RegressionStatusRow = {
   mission: string;
   code: string | null;
   liveAt: string;
+  /** Bộ dò lọt có từ mốc này (lên sau bản sửa) — in kèm số lọt. */
+  leakMeasuredFrom: string | null;
   /** `null` = chưa đo được lọt (dòng sổ khai `leakUnavailable`). */
   leaked: number | null;
   blocked: number;
@@ -68,7 +70,7 @@ export function regressionStatusTable(orgs: readonly OrgRegressionSnapshot[]): R
             : blocked > 0
               ? "HOLDING"
               : "QUIET";
-      out.push({ mission: row.mission, code, liveAt: row.liveAt, leaked, blocked, reopened, status });
+      out.push({ mission: row.mission, code, liveAt: row.liveAt, leakMeasuredFrom: row.leakMeasuredFrom ?? null, leaked, blocked, reopened, status });
     }
   }
   return out;
@@ -82,7 +84,7 @@ export function regressionStatusTable(orgs: readonly OrgRegressionSnapshot[]): R
 export function regressionStatusLines(table: readonly RegressionStatusRow[], orgCount: number, ranCount: number, unreadable = 0): string[] {
   const lines = [`regression-watch: ${REGRESSION_WATCH.length} dòng sổ · ${orgCount} tổ chức · ${ranCount} đã chạy lượt 2B có sổ · ${unreadable} không đọc được`];
   for (const r of table) {
-    lines.push(`  ${r.code ?? "(chưa có mã lọt)"} · ${r.mission} · live ${r.liveAt} · lọt ${r.leaked === null ? "chưa đo được" : r.leaked} · đã chặn ${r.blocked} · ${r.status}`);
+    lines.push(`  ${r.code ?? "(chưa có mã lọt)"} · ${r.mission} · live ${r.liveAt} · lọt ${r.leaked === null ? "chưa đo được" : r.leaked}${r.leakMeasuredFrom && r.leaked !== null ? ` (đo lọt từ ${r.leakMeasuredFrom})` : ""} · đã chặn ${r.blocked} · ${r.status}`);
   }
   for (const m of [...new Set(REGRESSION_WATCH.map((r) => r.mission))]) {
     const rows = table.filter((r) => r.mission === m);

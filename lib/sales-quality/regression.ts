@@ -57,7 +57,7 @@ export function regressionText(row: RegressionWatchRow, code: SalesQualityCode, 
     title: `TÁI DIỄN sau bản sửa · ${spec.label}: ${n.hits} lần lọt tới khách / ${n.convs.length} hội thoại (ngày ${day.slice(8, 10)}/${day.slice(5, 7)}) — sứ mệnh ${row.mission}`,
     body:
       `Bản sửa ${row.mission} (PR #${row.pr}, ${row.sha.slice(0, 9)}) lên production lúc ${vnTime(row.liveAt)} (lượt deploy ${row.deployRun}); ` +
-      `sau mốc đó vẫn có ${n.hits} lần ${code} lọt tới khách. Mã hội thoại băm (≤ ${SALES_QUALITY_SAMPLE_HASHES}): ${hashes.join(" ")}. ` +
+      `sau mốc đó vẫn có ${n.hits} lần ${code} lọt tới khách${row.leakMeasuredFrom ? ` (bộ dò lọt có từ ${vnTime(row.leakMeasuredFrom)} — đo lọt từ mốc ấy)` : ""}. Mã hội thoại băm (≤ ${SALES_QUALITY_SAMPLE_HASHES}): ${hashes.join(" ")}. ` +
       `Commit đang chạy: ${sha ?? "không đọc được"}.` +
       (row.blockedCodes.length ? ` Đã CHẶN trước khi gửi trong cùng kỳ: ${blocked} (bằng chứng hàng rào đang chạy — không phải tái diễn).` : "") +
       ` Việc cần làm: mở lại sứ mệnh ${row.mission}, tra hội thoại băm bằng ops conv-money-trace. Đóng việc này khi đã sửa — còn lọt sau lúc đóng thì việc TỰ MỞ LẠI.`,

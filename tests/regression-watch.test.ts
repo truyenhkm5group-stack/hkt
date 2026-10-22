@@ -58,9 +58,10 @@ function testRegistry() {
   // Bốn bản sửa P0 có dòng, mốc là mốc DEPLOY xanh (đo API Actions 22/10/2026), không phải mốc gộp.
   assert.deepEqual(
     REGRESSION_WATCH.map((r) => [r.pr, r.liveAt]),
-    [[945, "2026-10-21T08:42:12Z"], [959, "2026-10-21T20:58:25Z"], [966, "2026-10-22T07:23:47Z"], [968, "2026-10-22T11:19:35Z"]],
+    [[945, "2026-10-21T08:42:12Z"], [959, "2026-10-21T20:58:25Z"], [966, "2026-10-22T07:23:47Z"], [968, "2026-10-22T11:19:35Z"], [972, "2026-10-22T13:35:10Z"]],
   );
-  assert.ok(!REGRESSION_WATCH.some((r) => r.leakCodes.includes("ADDRESS_REASK")), "ADDRESS_REASK chờ address-resolver-ladder lên production — chưa nối");
+  assert.deepEqual(REGRESSION_WATCH.filter((r) => r.leakCodes.includes("ADDRESS_REASK")).map((r) => r.mission), ["address-resolver-ladder"], "ADDRESS_REASK nối #972, không nối #966");
+  for (const r of REGRESSION_WATCH) if (r.leakMeasuredFrom) assert.ok(Date.parse(r.leakMeasuredFrom) >= Date.parse(r.liveAt), `${r.mission}: bộ dò lọt không thể có trước bản sửa`);
   assert.ok(watchAppliesTo(row("sales-address-applied"), null) && watchAppliesTo(row("sales-address-applied"), "hslc"), "ALL áp mọi tổ chức");
 }
 
@@ -224,5 +225,5 @@ export async function testRegressionWatch(db: Db) {
   testStatusTable();
   await testDoneGate();
   await testReopenFlow(db);
-  console.log("  ✓ Sổ theo dõi tái diễn: 4 bản sửa P0, mốc = deploy xanh · chỉ đếm SAU mốc · ĐÃ CHẶN ≠ LỌT · một việc / (mã, sứ mệnh), nhiều ngày không đẻ việc · đóng rồi lọt lại ⇒ MỞ LẠI đúng việc + một tin · chưa có bộ dò ⇒ «chưa đo được», không REOPEN · bảng ops không mã tổ chức, không kết luận ⇒ UNKNOWN · ai-tech từ chối DONE khi thiếu bằng chứng / còn tái diễn");
+  console.log("  ✓ Sổ theo dõi tái diễn: 5 bản sửa P0, mốc = deploy xanh · chỉ đếm SAU mốc · ĐÃ CHẶN ≠ LỌT · một việc / (mã, sứ mệnh), nhiều ngày không đẻ việc · đóng rồi lọt lại ⇒ MỞ LẠI đúng việc + một tin · chưa có bộ dò ⇒ «chưa đo được», không REOPEN · bảng ops không mã tổ chức, không kết luận ⇒ UNKNOWN · ai-tech từ chối DONE khi thiếu bằng chứng / còn tái diễn");
 }

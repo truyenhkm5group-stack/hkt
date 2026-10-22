@@ -33,13 +33,17 @@ export type RegressionWatchRow = {
   blockedCodes: readonly SalesQualityCode[];
   /** Có khi `leakCodes` rỗng: thiếu ĐÚNG cái gì để đo được lọt tới khách. */
   leakUnavailable?: string;
+  /**
+   * Bộ dò lọt lên production SAU bản sửa: lọt vẫn đếm từ `liveAt` (bộ dò đọc lịch sử tin), nhưng lượt 2B chỉ có số từ mốc này — mọi
+   * chỗ in số lọt in kèm «đo lọt từ <mốc>», để không ai đọc «0 lọt» thành «0 lọt từ lúc bản sửa lên».
+   */
+  leakMeasuredFrom?: string;
   /** Tổ chức áp dụng — mã bot chạy cho mọi tổ chức nên mặc định "ALL"; bằng chứng tách theo tổ chức ở phần mã hoá. */
   orgScope: "ALL" | readonly string[];
 };
 
 /*
-  TODO ADDRESS_REASK (hỏi lại địa chỉ / SĐT đã biết): nối với sứ mệnh `address-resolver-ladder` (PR-A, code-erp-56) KHI nó lên
-  production — Tech Lead 22/10/2026. Chưa nối: #966 sửa ADDRESS_RECEIVED_BUT_NOT_APPLIED, không sửa hiện tượng hỏi lại.
+  ADDRESS_REASK nối với `address-resolver-ladder` (#972, AGENTS 3.12b) — KHÔNG với #966 (#966 sửa ADDRESS_RECEIVED_BUT_NOT_APPLIED).
   TODO sales-qty-unit-guard: đổi `leakCodes` thành ["PACK_MULTIPLIER_LEAKED"] khi bộ dò lọt của code-erp-42 lên production; `liveAt` GIỮ
   mốc của #968 (bộ dò đọc lịch sử tin nên lọt sau mốc ấy vẫn đếm được).
 */
@@ -84,6 +88,16 @@ export const REGRESSION_WATCH: readonly RegressionWatchRow[] = [
     blockedCodes: ["QUANTITY_UNIT_AMBIGUOUS", "PACK_MULTIPLIER_MISMATCH", "CART_TOTAL_CONFLICT", "ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT"],
     leakUnavailable:
       "Chưa có bộ dò LỌT TỚI KHÁCH: cần phát hiện đơn ĐÃ GHI mà dòng mẫu mã «Hộp N cái» mang đúng số khách nói (bội của N, N > 1) — bộ dò PACK_MULTIPLIER_LEAKED (code-erp-42). Bốn mã hiện có đều là lần CHẶN trước khi ghi.",
+    orgScope: "ALL",
+  },
+  {
+    mission: "address-resolver-ladder",
+    pr: 972,
+    sha: "f53d1883d6a6b90b92c49aa1cbf7f63ac77a9362",
+    liveAt: "2026-10-22T13:35:10Z",
+    deployRun: 39785955118,
+    leakCodes: ["ADDRESS_REASK"],
+    blockedCodes: [],
     orgScope: "ALL",
   },
 ];
