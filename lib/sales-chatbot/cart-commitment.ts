@@ -91,7 +91,9 @@ const WORD_NUM: Record<string, number> = { mot: 1, hai: 2, ba: 3, bon: 4, nam: 5
 const WEIGHT_UNIT = "kilogram|kilo|ký lô|kí lô|ki lô|ky lo|ki lo|kg|kí|ký|ki|ky|cân|can|lạng|gram|gr|g";
 // «chai» / «thùng» (P0 #865, ca thật «1kg chả cá thu và 1 chai mắm»): thiếu hai chữ này thì món bán theo chai không bao giờ vào giỏ và hàng
 // rào «bỏ sót món» không có gì để bám. KHÔNG thêm «lon»: bỏ dấu thì trùng «lớn» (chữ cỡ trong ATTR_WORDS).
-const PACK_UNIT = "túi|tui|gói|goi|hộp|hop|set|phần|phan|bịch|bich|khay|combo|suất|suat|hũ|hủ|hu|lọ|lo|chai|thùng|thung|cái|cai|chiếc|chiec|đôi|doi|bộ|bo|cây|cay";
+// «chục» = 10 CÁI («1 chục nem» — trước đây giỏ rỗng): đếm như khách nói «10 cái», để hàng rào số lượng / đơn vị quy ra hộp theo quy cách.
+const PACK_UNIT = "túi|tui|gói|goi|hộp|hop|set|phần|phan|bịch|bich|khay|combo|suất|suat|hũ|hủ|hu|lọ|lo|chai|thùng|thung|chục|chuc|cái|cai|chiếc|chiec|đôi|doi|bộ|bo|cây|cay";
+const DOZEN_WORD_RE = /^(?:chục|chuc)$/i;
 const NUM_WORD = "một|mot|hai|ba|bốn|bon|năm|nam|sáu|sau|bảy|bay|tám|tam|chín|chin|mười|muoi";
 /** Nhận nguyên phân số trước số nguyên; chặn nhặt nhầm \"2 kg\" ở đuôi \"1/2 kg\" (#863). */
 const WEIGHT_RE = new RegExp(`(?<![\\p{L}\\d.,/:-])(\\d+\\s*\\/\\s*\\d+|\\d+(?:[.,]\\d+)?|${NUM_WORD}|nửa|nua)\\s*(${WEIGHT_UNIT})(?:\\s*(rưỡi|ruoi))?(?![\\p{L}\\d])`, "giu");
@@ -123,7 +125,7 @@ const STOP = new Set(
   (
     "chi anh em minh toi c a e ban cho lay mua dat gui ship giao them con doi bot giam thoi thui thoii thoiii thoy nhe nha ah voi va la thi nua sua thanh sang lai " +
     "chot len don order de ok oke okie vang u uh roi khong ko k hok hong hem khoi phai chu ma cua loai dt sdt so dien thoai dia gium giup dum luon di hang nay kia do nao " +
-    "the vay duoc dc can cai tong hay hoac moi ngon an truoc trc chiu bao nhieu bn gia sao dung tien het may tui goi hop set phan bich khay combo suat hu lo chai thung chiec cay " +
+    "the vay duoc dc can cai tong hay hoac moi ngon an truoc trc chiu bao nhieu bn gia sao dung tien het may tui goi hop set phan bich khay combo suat hu lo chai thung chuc chiec cay " +
     "kg ky ki can gram gr g x da uhm oki shop xuong tru ha mai mot ve du qua lam it lan gio hom ngay toi sang chieu trua dem tuan thang tet mon huy gi vao ra " +
     "nhen nghen nghe ne nhi hen nhaa ak day dau giu vs cung " +
     // «Mình MUỐN mua 1 kg» (#871, ca «Ngọc Nguyễn»): động từ «muốn / thích» không phải tên món — trước đây «muốn» thành nhãn món, số 1kg
@@ -339,7 +341,8 @@ export function amountsIn(text: string, catalog?: readonly string[]): CartAmount
       if (!catalog || !oneNameOf(capRunAt(text, idx + m[0].length), catalog)) continue;
     }
     if (out.some((a) => idx < a.end && idx + m[0].length > a.index)) continue;
-    push(n, "pack", idx, m[0].length, m[2]);
+    if (DOZEN_WORD_RE.test(m[2])) push(n * 10, "pack", idx, m[0].length, "cái");
+    else push(n, "pack", idx, m[0].length, m[2]);
   }
   // SỐ TRẦN + TÊN MÓN (P0 #855, ca «ThuyNgo» 16/10/2026): «Ship chị 1 mực giã tay» không có chữ đơn vị nên hai vòng trên ra 0 số lượng ⇒
   // giỏ có thẩm quyền rỗng ⇒ hàng rào căn cứ (`unrequestedProducts`) tắt ⇒ bot tự lên «1kg chả cá thu + 1kg chả mực = 680.000 ₫». Chỉ

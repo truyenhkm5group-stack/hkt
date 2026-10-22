@@ -67,10 +67,15 @@ function testThuan() {
   assert.deepEqual(muc("Chị lấy 1 kilo chả mực"), ["Chả mực giã tay:1000g"]);
   assert.deepEqual(muc("2 ký lô chả mực giã tay"), ["Chả mực giã tay:2000g"]);
   assert.deepEqual(gramsMentioned("1kilo chả mực"), [1000]);
+  // «chục» = 10 CÁI — cùng đường với «10 cái» (hàng rào số lượng quy ra hộp theo quy cách); «chúc» (lời chúc) không phải đơn vị.
+  const nem = (text: string) => applyCustomerCartMessage(undefined, text, 1, NOW, { catalog: ["Nem hải sản tôm bề bề", "Chả mực giã tay"] })?.selectedItems.map((i) => `${i.quantity}${i.pieces ? " cái" : i.unit}`) ?? [];
+  assert.deepEqual(nem("Chị lấy 1 chục nem hải sản"), ["10 cái"]);
+  assert.deepEqual(nem("2 chục nem hải sản tôm bề bề"), ["20 cái"]);
+  assert.deepEqual(nem("chúc em 1 ngày vui, lấy 1 hộp nem hải sản"), ["1pack"]);
   // Lượt khách có dấu hiệu sửa mà máy không áp chắc (relaxedTurn) ⇒ không chặn — luật an toàn sẵn có của giỏ.
   const relaxed = both ? { ...both, relaxedTurn: 9 } : both;
   assert.equal(commitmentViolation(relaxed, [MUC], 9), null);
-  console.log("  ✓ thuần: món khách gọi tên vắng mặt hẳn khỏi đơn ⇒ «KHÔNG được bỏ» + lệch «đơn ghi 0» · đủ món / đã bỏ / chỉ hỏi giá / lượt nới ⇒ không chặn · «chai» / «thùng» là đơn vị · «nước mắm» không thành «Mắm tôm chua» · «5 lạng» = 500 g, «Láng Hạ» không phải khối lượng");
+  console.log("  ✓ thuần: món khách gọi tên vắng mặt hẳn khỏi đơn ⇒ «KHÔNG được bỏ» + lệch «đơn ghi 0» · đủ món / đã bỏ / chỉ hỏi giá / lượt nới ⇒ không chặn · «chai» / «thùng» là đơn vị · «nước mắm» không thành «Mắm tôm chua» · «5 lạng» = 500 g, «Láng Hạ» không phải khối lượng · «1 kilo» = 1 kg · «1 chục» = 10 cái");
 }
 
 const ADDR = "9 Hai Bà Trưng, Phường Hoàn Kiếm, Thành phố Hà Nội";
