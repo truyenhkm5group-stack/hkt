@@ -3,7 +3,7 @@
   "mission_id": "address-resolver-bg",
   "title": "Máy ánh xạ địa chỉ nền (PR-B)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-resolver",
@@ -26,11 +26,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-22T12:39:40.686Z",
-  "updated_at": "2026-10-22T13:40:52.576Z",
+  "updated_at": "2026-10-22T13:56:28.788Z",
   "last_heartbeat": "2026-10-22T13:21:40.091Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#973 → 15d62efc7799be643c663bc327ceb1be9691ec7c"
+    "merged": "#973 → 15d62efc7799be643c663bc327ceb1be9691ec7c",
+    "verify": "PASS 15d62efc7799be643c663bc327ceb1be9691ec7c 2026-10-22T13:56:00.916Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39789194470"
   },
   "handoff": {
     "branch": "claude/address-resolver-bg",
