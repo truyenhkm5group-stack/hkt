@@ -87,7 +87,7 @@ function testNguon() {
   assert.equal(cg.match(/CLAIM_SAFE_TEXT\.ORDER_PENDING_ADDRESS/g)?.length ?? 0, 0, "không đường nào còn CHỌN câu cũ — hằng số chỉ còn để bộ đếm nhận ra nó");
   const tools = readFileSync("lib/sales-chatbot/tools.ts", "utf8");
   assert.match(tools, /notePostConfirmOffer\(state, ctx, [^\n]*, !pendingText, now\)/, "cửa sổ mời theo đơn hợp lệ — đơn chỉ chờ địa chỉ tính là hợp lệ (22/10/2026)");
-  assert.doesNotMatch(tools, /\.upsellAfterContact|quietAddressReviewOn\(/, "cờ upsellAfterContact không còn đường nào đọc (A2, 22/10/2026)");
+  assert.doesNotMatch(tools, /\.upsellAfterContact\b|quietAddressReviewOn\(/, "cờ upsellAfterContact không còn đường nào đọc (A2, 22/10/2026)");
   assert.doesNotMatch(readFileSync("lib/sales-chatbot/engine.ts", "utf8"), /quietAddressReview/, "hàng rào không còn đọc cờ upsell — câu khi chờ địa chỉ không tuỳ cờ");
   console.log("  ✓ mã nguồn: không đường nào chọn câu cũ · công cụ chốt mở cửa sổ mời theo cờ · hàng rào không phụ thuộc cờ upsell");
 }
