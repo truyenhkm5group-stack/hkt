@@ -3,7 +3,7 @@
   "mission_id": "trace-address-settled",
   "title": "conv-money-trace --order: máy ghép phường + vết máy ánh xạ",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-trace-addr",
@@ -21,7 +21,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T14:43:16.264Z",
-  "updated_at": "2026-10-22T14:43:16.264Z",
-  "last_heartbeat": "2026-10-22T14:43:16.264Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-22T14:43:50.574Z",
+  "last_heartbeat": "2026-10-22T14:43:50.574Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/trace-address-settled",
+    "sha": "a44933f43fc6210148dc3b03aad8d12bb1057faf",
+    "at": "2026-10-22T14:43:50.574Z",
+    "actor": "DESKTOP-56TH98Y:wt-trace-addr",
+    "title": "conv-money-trace --order: máy ghép phường + vết máy ánh xạ",
+    "summary": "conv-money-trace --order: (1) lượt MÁY gỡ cờ địa chỉ (ADDRESS_SETTLED) in «máy ghép phường ADDRESS_UNRESOLVED», không còn «người đã kiểm KHAC:ADDRESS_UNRESOLVED»; khách xác nhận lại in riêng; «người đã kiểm» chỉ còn CONFIRMED / CANCELLED. (2) Dòng tóm tắt mới cho raw.addressResolution — chỉ mã / có-không / số đếm: trạng thái · bậc TEXT/C360/PLACES · nguồn chữ · số ứng viên · xã máy chọn khớp / KHÁC ô xã đơn · Google có gọi / loại lỗi · số lần. Tên xã / tỉnh máy chọn, ứng viên, lý do CHỈ ở phần mã hoá (nơi giao của khách). Chữ ngoài danh sách đóng ⇒ KHAC. Script-only, không cần deploy app.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint scripts/conv-money-trace.ts tests/conv-money-trace.test.ts: sạch",
+      "TEST_KHOI=K21 (conv-money-trace): ĐẠT trên a44933f43 (đã rebase lên main 089189aa9)",
+      "full suite giao cho CI gates"
+    ]
+  }
 }
