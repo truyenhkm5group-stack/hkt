@@ -23,21 +23,21 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-22T16:26:07.570Z",
-  "updated_at": "2026-10-22T16:28:13.951Z",
-  "last_heartbeat": "2026-10-22T16:26:41.266Z",
+  "updated_at": "2026-10-22T16:46:21.779Z",
+  "last_heartbeat": "2026-10-22T16:46:21.779Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/vtp-reship-backfill",
-    "sha": "58de8a99d8d2b858327381dcca7f6d9081ae1290",
-    "at": "2026-10-22T16:26:41.266Z",
+    "sha": "36f145fe4ba26e87820fb0e402c3e4cb9fb7f556",
+    "at": "2026-10-22T16:46:21.779Z",
     "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
     "title": "Script vá vận đơn tạo lại trên web VTP về đơn gốc — bước A: chỉ đo mốc trước/sau",
-    "summary": "@58de8a99d. CHỈ-SCRIPT: ops vtp-reship-backfill bản CHỈ ĐO (ERP_READ_ONLY + hỏi lại phiên, mã hoá): GTC qua returnsPageParams + loadReturnsPage cho 7d và từ 15/10 · đơn huỷ theo ngày + phần là đơn gốc của vận đơn tạo lại · cặp cùng rời kho theo SHIPMENT_LEFT_WAREHOUSE. --apply bị từ chối. Cần vào main TRƯỚC deploy vtp-reship-relink để có mốc trước.",
+    "summary": "@36f145fe4 = 58de8a99d + gộp main 351068ef (#977): giữ cả regression-watch-status lẫn vtp-reship-backfill trong ba danh sách ops + case; giữ cả hai bài kiểm. CHỈ-SCRIPT, chỉ đo.",
     "tests": [
       "npm run typecheck: sạch",
-      "eslint 3 tệp: sạch",
-      "TEST_KHOI=K22 (bài vtp-reship-backfill): XANH trên 58de8a99d",
-      "TEST_KHOI=K18 (ops-log-leak, ops mới mã hoá): XANH",
+      "ops-script-size: 87.251 / 125.000 byte",
+      "TEST_KHOI=K22: XANH trên 36f145fe4",
+      "TEST_KHOI=K18 (ops-log-leak, hai thao tác mới cùng có): XANH",
       "shard 1–4 + build: CI gates"
     ]
   }
