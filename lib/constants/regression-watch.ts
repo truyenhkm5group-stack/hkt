@@ -9,8 +9,9 @@
  *                     là tái diễn. Hai số đứng riêng, không cộng.
  *  · `leakUnavailable` — chưa có bộ dò lọt tới khách cho bản sửa này: dòng không bao giờ REOPEN, bảng in «chưa đo được lọt», KHÔNG in 0.
  *
- * `liveAt` = lúc lượt Deploy ERP to VPS THÀNH CÔNG đầu tiên chứa commit gộp xong (verify + health của lượt ấy đạt) — KHÔNG phải mốc
- * gộp vào main: giữa hai mốc đó bản sửa chưa chạy, đếm lọt trong khoảng ấy là đổ oan cho bản sửa. Đo bằng API Actions 22/10/2026.
+ * `liveAt` — MỘT quy ước cho mọi dòng (Tech Lead 22/10/2026): `updated_at` của lượt Deploy ERP to VPS (deploy-vps.yml) THÀNH CÔNG
+ * đầu tiên có head_sha chứa commit gộp — lúc lượt ấy đã xong cả bước health, KHÔNG phải `created_at` (vài phút trước khi bản mới chạy) và
+ * KHÔNG phải mốc gộp vào main (giữa hai mốc đó bản sửa chưa chạy, đếm lọt trong khoảng ấy là đổ oan cho bản sửa). Đo bằng API Actions.
  *
  * KHAI TAY, có bài kiểm (tests/regression-watch.test.ts): mã có thật, đúng chiều `delivery`, `liveAt` là ISO, sứ mệnh không trùng.
  * `scripts/ai-tech.ts close --status=DONE` đọc tệp này TRÊN main để biết sứ mệnh nào phải kèm `--regression-run` — nên tên sứ mệnh
