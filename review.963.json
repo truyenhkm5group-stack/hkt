@@ -1,0 +1,8 @@
+{
+  "pr": 963,
+  "sha": "9c2d04ccbc11e24c41ddc5bfeecabf4688c76e61",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-22T03:38:25.792Z",
+  "note": "review lead: CHỈ-SCRIPT, chỉ đọc. org-catalog in thêm quickReplySettings.upsellAfterContact (parseQuickReplySettings của image đã có trường từ #952 ⇒ không lệch phiên bản lib) + một vế dòng tóm tắt. Là bằng chứng cấu hình HSLC cho DoD P0 22/10."
+}
