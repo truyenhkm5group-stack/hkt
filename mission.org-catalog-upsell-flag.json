@@ -3,7 +3,7 @@
   "mission_id": "org-catalog-upsell-flag",
   "title": "ops org-catalog in cờ upsellAfterContact",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-org-catalog",
@@ -21,7 +21,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T03:34:16.256Z",
-  "updated_at": "2026-10-22T03:34:16.256Z",
-  "last_heartbeat": "2026-10-22T03:34:16.256Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-22T03:35:09.231Z",
+  "last_heartbeat": "2026-10-22T03:35:09.231Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/org-catalog-upsell-flag",
+    "sha": "9c2d04ccbc11e24c41ddc5bfeecabf4688c76e61",
+    "at": "2026-10-22T03:35:09.231Z",
+    "actor": "DESKTOP-56TH98Y:wt-org-catalog",
+    "title": "ops org-catalog in cờ «mời mua thêm khi địa chỉ chờ xác minh» (upsellAfterContact) của tổ chức",
+    "summary": "Chỉ script: org-catalog in thêm cờ upsellAfterContact (#952) ở báo cáo + dòng tóm tắt thứ ba (BẬT / TẮT) — bằng chứng cấu hình HSLC cho P0 xin lại địa chỉ. parseQuickReplySettings của image đã có trường từ #952 nên không lệch phiên bản lib.",
+    "tests": [
+      "tests/org-catalog.test.ts (testOrgCatalogPure + testOrgCatalogDb): ĐẠT",
+      "đột biến upsellAfterContact luôn false: bị bắt",
+      "tsc --noEmit: sạch",
+      "eslint 2 tệp: sạch",
+      "npm test đầy đủ: CHƯA chạy trên máy này (để cổng CI)"
+    ]
+  }
 }
