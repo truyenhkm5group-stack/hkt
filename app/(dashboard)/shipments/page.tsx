@@ -32,6 +32,8 @@ import { getCareNotePresets, getCareWorkbench, getResolutionNotePresets } from "
 import { listShipments, shipmentFacets, shipmentSummary, SHIPMENT_SORTABLE } from "@/lib/queries/shipments";
 import { productCodesOfShipments, variantIdsOfCodes } from "@/lib/queries/product-code";
 import { getVtpReconcileQueue } from "@/lib/queries/vtp-reconcile-queue";
+import { getVtpSyncCoverage } from "@/lib/queries/vtp-sync-coverage";
+import { VtpSyncCoverageCard } from "@/components/vtp-sync-coverage";
 import { getFreshnessConfig } from "@/lib/queries/logistics-config";
 import { effectiveThresholdFor, FRESHNESS_BY_STAGE } from "@/lib/constants/logistics-freshness";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
@@ -155,6 +157,10 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
       <Suspense fallback={null}>
         <DataFreshnessStrip />
       </Suspense>
+      {/* Độ phủ đồng bộ Viettel Post (P0 22/10/2026) — chỉ ở các tab đọc toàn bộ kho vận đơn, không chen vào hàng đợi care. */}
+      {ngoaiCare ? (
+        <VtpSyncCoverageCard c={await getVtpSyncCoverage(resolvePeriod({ period: "7d" }, "7d"))} periodLabel="7 ngày qua" />
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
         {/* Điện thoại: một hàng tab cuộn ngang thay vì gãy hai hàng. */}

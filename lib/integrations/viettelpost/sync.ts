@@ -17,6 +17,7 @@ import { nextSyncAt } from "@/lib/constants/vtp-reconcile";
 import { afterShipmentStateChange } from "@/lib/care/lifecycle";
 import { resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
 import { carrierCodeObservation, carrierEventObservations, ghiQuanSat, type QuanSatMoi } from "@/lib/returns/reason-observe";
+import { nextAttemptNo, reshipCandidates, reshipParentOf, reshipTrace } from "@/lib/integrations/viettelpost/reship";
 
 /**
  * `changed: false` KHÔNG có nghĩa là xử lý thành công. Có hai lý do rất khác nhau:
@@ -150,9 +151,18 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
   let created = false;
   if (!shipment) {
     if (!options.allowCreate || !record.orderNumber) return null;
+    /*
+      VẬN ĐƠN TẠO LẠI TRÊN WEB VTP (P0 22/10/2026 — lib/integrations/viettelpost/reship.ts): tham chiếu là SỐ VẬN
+      ĐƠN GỐC của một đơn ⇒ đây là LẦN GỬI KẾ của chính đơn đó (attempt_no + 1, chiều đi), không phải mồ côi. Không
+      đủ chắc (nhiều đơn · khác SĐT) ⇒ mồ côi kèm lý do trên `raw.relink`. Chiều hoàn `[số]P[số]` không đi nhánh này.
+    */
+    const ref = record.orderReference || "";
+    const verdict = reshipParentOf(record, ref ? ((await reshipCandidates(db, [ref])).get(ref.trim().toUpperCase()) ?? []) : []);
+    const attempt = verdict.kind === "ATTEMPT" ? { orderId: verdict.orderId, attemptNo: await nextAttemptNo(db, verdict.orderId), direction: "OUTBOUND" as const } : {};
     const [row] = await db
       .insert(schema.shipments)
       .values({
+        ...attempt,
         carrier: "Viettel Post",
         vtpOrderNumber: record.orderNumber,
         trackingCode: record.orderNumber,
@@ -161,10 +171,14 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
         receiverName: record.receiverName,
         receiverPhone: record.receiverPhone,
         receiverAddress: record.receiverAddress,
+        ...(verdict.kind === "NONE" ? {} : { raw: reshipTrace(verdict, source, new Date()) }),
       })
+      // Hai gói tin của cùng một mã tới cùng lúc (VTP thử lại tới 5 lần): lượt thua đọc lại dòng lượt thắng vừa tạo.
+      .onConflictDoNothing({ target: schema.shipments.vtpOrderNumber })
       .returning();
-    shipment = row;
-    created = true;
+    shipment = row ?? (await findShipmentForVtp(db, record));
+    if (!shipment) return null;
+    created = Boolean(row);
   }
 
   // Cùng bộ dịch với luồng nhập tệp — xem lib/integrations/viettelpost/status.ts.

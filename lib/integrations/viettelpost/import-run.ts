@@ -140,6 +140,8 @@ export async function runVtpDataFileImport(
         matchedBatch: null,
         note: `Toàn bộ tệp danh sách gộp lại: cập nhật ${applied.updated} vận đơn`
           + (applied.linked ? ` (${applied.linked} vận đơn được gắn mã theo SĐT người nhận)` : "")
+          + (applied.reshipped ? `, ${applied.reshipped} vận đơn tạo lại trên web VTP gắn thành lần gửi kế của đơn gốc` : "")
+          + (applied.orphansCreated ? `, ${applied.orphansCreated} vận đơn chưa có đơn được tạo từ tệp` : "")
           + `, ${applied.legs} chiều hoàn, bỏ qua ${applied.stale} dòng cũ, ${applied.conflicts} xung đột cần đối chiếu`
           + (applied.unmatched ? `, ${applied.unmatched} vận đơn của VTP chưa có trong ERP` : "")
           // Phép đo chất lượng webhook của chính lượt này — lý do một lần nhập vẫn đáng chạy kể
