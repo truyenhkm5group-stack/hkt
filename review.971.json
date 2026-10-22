@@ -1,8 +1,8 @@
 {
   "pr": 971,
-  "sha": "e8a7cf5189e1df0178a2c03d479e2e039ac2dd76",
+  "sha": "af84b798e985ce921f160085924152ee75f41d2a",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-22T10:46:54.586Z",
-  "note": "review lead: sổ lỗ cá nhân — tháng làm việc ĐẦU TIÊN (ngày vào làm ≥ tháng tính) và không dòng sổ nào trước ⇒ số dư đầu kỳ 0, căn cứ FIRST_WORK_MONTH; vẫn chưa biết khi làm từ trước thiếu dòng / không ngày vào làm / mâu thuẫn. Migration 0254 viết tay idempotent chỉ mở CHECK thêm FIRST_WORK_MONTH (không UPDATE), schema + nơi đọc/ghi cột đồng bộ. Kiểm chốt kỳ thật + upgrade-path + đột biến. HIGH: de"
+  "at": "2026-10-22T11:41:35.790Z",
+  "note": "review lead: so với e8a7cf51 (đã PASS) chỉ thêm mục 0254 vào MIGRATION_SERVE_COMPAT (chỉ nới CHECK, đọc không đổi, đường ghi duy nhất chốt kỳ + dòng sổ cùng giao dịch ⇒ chưa áp 0254 thì hỏng sạch) + proof thật trong payroll-carryover.test.ts. Không đổi kỳ vọng."
 }
