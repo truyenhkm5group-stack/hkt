@@ -224,6 +224,29 @@ export async function testPayrollCarryover(db: Db) {
   assert.equal(cu4?.src, "OPENING_DECLARATION", "3b. dòng cũ giữ nguyên nguồn");
   await db.delete(schema.payrollPeriods).where(sql`${schema.payrollPeriods.periodKey} like '2027-06-01..%'`);
   await db.delete(schema.marketerProfitCarryover).where(sql`${schema.marketerProfitCarryover.id} = 'co-ledger-lech-t4' or (${schema.marketerProfitCarryover.employeeId} = ${MOI.id})`);
+
+  /*
+    CHỨNG MINH CHO SỔ PHỤC VỤ BẰNG LƯỢC ĐỒ CŨ (lib/constants/migration-serve-compat.ts · 0254): CSDL chưa áp 0254 thì ràng
+    buộc cũ chỉ nhận hai nguồn. Chốt kỳ có người ở tháng làm việc đầu tiên phải HỎNG SẠCH — giao dịch huỷ, kỳ không được tạo,
+    không dòng sổ nào — chứ không ghi nhầm căn cứ. Dựng lại đúng ràng buộc trước 0254, đo, rồi trả lại ràng buộc của 0254.
+  */
+  const rangBuoc = async (vals: string) => {
+    await db.execute(sql.raw("alter table marketer_profit_carryover drop constraint if exists marketer_carryover_source_check"));
+    await db.execute(sql.raw(`alter table marketer_profit_carryover add constraint marketer_carryover_source_check check (opening_source in (${vals}))`));
+  };
+  await rangBuoc("'PREV_MONTH', 'OPENING_DECLARATION'");
+  try {
+    clearMemo();
+    await assert.rejects(
+      () => calculatePayrollPeriodAs({ id: null, email: "kiem-thu@erp" }, { from: "2027-06-01", to: "2027-06-30", basis: "profit1", note: "lược đồ trước 0254" }),
+      (e: unknown) => /marketer_carryover_source_check/.test(`${String((e as { message?: string })?.message ?? e)} ${String((e as { cause?: { message?: string } })?.cause?.message ?? "")}`),
+      "0254 chưa áp: chốt kỳ có người tháng đầu báo lỗi ràng buộc, không ghi nhầm nguồn",
+    );
+    assert.equal((await db.select({ id: schema.payrollPeriods.id }).from(schema.payrollPeriods).where(sql`${schema.payrollPeriods.periodKey} like '2027-06-01..%'`)).length, 0, "0254 chưa áp: giao dịch huỷ ⇒ kỳ KHÔNG được tạo");
+    assert.equal((await db.select({ id: schema.marketerProfitCarryover.id }).from(schema.marketerProfitCarryover).where(eq(schema.marketerProfitCarryover.employeeId, MOI.id))).length, 0, "0254 chưa áp: không dòng sổ nào được ghi");
+  } finally {
+    await rangBuoc("'PREV_MONTH', 'OPENING_DECLARATION', 'FIRST_WORK_MONTH'");
+  }
   await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [MKT] });
   clearMemo();
 
