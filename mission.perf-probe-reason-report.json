@@ -3,7 +3,7 @@
   "mission_id": "perf-probe-reason-report",
   "title": "perf-probe đo báo cáo lý do hoàn nguội: mốc mặc định SHIPPED + có lọc 2b",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-perf-reason",
@@ -20,7 +20,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T09:09:35.172Z",
-  "updated_at": "2026-10-22T09:09:35.172Z",
-  "last_heartbeat": "2026-10-22T09:09:35.172Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-22T09:10:11.634Z",
+  "last_heartbeat": "2026-10-22T09:10:11.634Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/perf-probe-reason-report",
+    "sha": "634f3298911cf99668799f49a2711f63acb318c9",
+    "at": "2026-10-22T09:10:11.634Z",
+    "actor": "DESKTOP-56TH98Y:wt-perf-reason",
+    "title": "perf-probe đo báo cáo lý do hoàn nguội: mốc mặc định SHIPPED + có lọc 2b",
+    "summary": "Thêm hai phép đo qua timed() (clearMemo trước mỗi lần ⇒ số nguội): getReturnReasonReport 90d SHIPPED (trang mặc định, khoá job giữ ấm) và + lọc 2b (tỉnh · bưu cục · trạng thái). Job giữ ấm không đo được lượt nguội (lượt đầu sau khởi động 29 ms).",
+    "tests": [
+      "tsc 0 · lint 0",
+      "chỉ đổi script ⇒ gộp không cần deploy",
+      "chạy probe sau 17:00Z"
+    ]
+  }
 }
