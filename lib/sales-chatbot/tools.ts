@@ -47,7 +47,8 @@ import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, t
 import { CLAIM_SAFE_TEXT, orderValidityOf, pendingAddressText } from "@/lib/sales-chatbot/claim-guard";
 import { usableKnownPhone } from "@/lib/sales-chatbot/known-contact";
 import type { ObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
-import { bindCommitment, cartDraftDiff, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, mentionText, negatedCancel, unrequestedProducts, type CartCommitment, type CartDraftDiff } from "@/lib/sales-chatbot/cart-commitment";
+import { bindCommitment, cartDraftDiff, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, mentionText, negatedCancel, productName, productsStatedAt, quantityUnitIssue, unrequestedProducts, type CartCommitment, type CartDraftDiff } from "@/lib/sales-chatbot/cart-commitment";
+import { CONFIRMED_EDIT_MAX_GROWTH, ORDER_GUARD_SUMMARY, type OrderGuardCode } from "@/lib/constants/sales-order-guard";
 import { cartQuoteLines, type CatalogLite } from "@/lib/sales-chatbot/cancel-recovery";
 import { acceptCustomerWard, addressQuestion, canAutoFill, legacyAddressUnmapped, namesOtherWard, otherWardNamed, parseCustomerAddress, sameDeliveryPlace, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
 import { addressKnowledge, addressReaskVerdict, askedBefore, askMemoryFor, askMemoryParts, askParts, deliveryAddressDecision, hasChangeCue, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
@@ -619,6 +620,19 @@ function ok(summary: string, data: unknown, state: ChatState): ToolOutcome {
 function err(summary: string, message: string, state: ChatState, orderSignal?: ToolOutcome["orderSignal"]): ToolOutcome {
   return { content: JSON.stringify({ error: message }), isError: true, summary, state, ...(orderSignal ? { orderSignal } : {}) };
 }
+/**
+ * Lời từ chối của hàng rào giá trị đơn (P0 22/10/2026): mang MÃ (`guard`) trong kết quả công cụ để Quality Supervisor (2B) đếm được từ
+ * chính lịch sử hội thoại — tên lỗi hằng ở `ORDER_GUARD_SUMMARY`, không gõ lại.
+ */
+function guardErr(code: OrderGuardCode, message: string, state: ChatState): ToolOutcome {
+  return { content: JSON.stringify({ error: message, guard: code }), isError: true, summary: ORDER_GUARD_SUMMARY[code], state, orderSignal: { reason: "BAD_INPUT", fields: ["items.quantity"] } };
+}
+/** Tổng số lượng theo sản phẩm (mẫu mã khi chưa gắn sản phẩm). HÀM THUẦN. */
+const qtyByProduct = (asked: readonly { productId: string | null; variantId: string; quantity: number }[]) => {
+  const m = new Map<string, number>();
+  for (const a of asked) m.set(a.productId ?? a.variantId, (m.get(a.productId ?? a.variantId) ?? 0) + a.quantity);
+  return m;
+};
 
 /**
  * Bảng giá áp cho khách của hội thoại khi shop BẬT báo giá sỉ (`wholesalePricing`); TẮT ⇒ `null` = giá lẻ như trước. Khách
@@ -1280,8 +1294,14 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       let offerYesProduct: string | null = null;
       // Sản phẩm MỚI của lượt sửa đơn đã chốt — để đo «khách nhận lời mời» của câu upsell nhiều món (không có món đích).
       let addedKeys: ReadonlySet<string> = new Set();
+      // Số lượng từng sản phẩm của đơn ĐÃ CHỐT trước lần sửa này (hàng rào đồng ý bên dưới).
+      let hadQty = new Map<string, number>();
+      // Sản phẩm MỚI của lượt sửa đơn đã chốt mà khách GỌI TÊN như một lời mua (đã qua `confirmedAddIssue`) — căn cứ của khách cho món đó.
+      let namedAdded: ReadonlySet<string> = new Set();
       if (editingConfirmed && v.data.items && existing) {
-        const had = new Set((await priceLines(existing.lines, ctx.config, verifiedCustomerId(state))).asked.map((a) => a.productId ?? a.variantId));
+        const hadAsked = (await priceLines(existing.lines, ctx.config, verifiedCustomerId(state))).asked;
+        hadQty = qtyByProduct(hadAsked);
+        const had = new Set(hadAsked.map((a) => a.productId ?? a.variantId));
         const added = priced.asked.filter((a) => !had.has(a.productId ?? a.variantId));
         addedKeys = new Set(added.map((a) => a.productId ?? a.variantId));
         // Chữ MUA của tin này (bỏ câu hỏi giá / câu từ chối — review vòng 2) phải gọi tên món; món vừa được mời phải đúng mẫu mã đã mời.
@@ -1309,6 +1329,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         const pcoYes = state.postConfirmOffer;
         if (!issue && pcoYes?.askedTurn !== undefined && ctx.prevTurn === pcoYes.askedTurn && pcoYes.productId && added.some((a) => a.productId === pcoYes.productId)) offerYesProduct = pcoYes.productId;
         if (!issue && ctx.acceptedOffer && added.some((a) => a.productId === ctx.acceptedOffer!.productId)) offerYesProduct = ctx.acceptedOffer.productId;
+        if (!issue) namedAdded = addedKeys;
         if (issue?.kind === "WRONG_VARIANT") {
           const pco = state.postConfirmOffer;
           return err("Sửa đơn đã chốt: sai mẫu mã được mời", `Mẫu mã chọn không khớp mẫu mã đã mời / khối lượng khách nói — món vừa mời là variant_id ${pco?.variantId} (${pco?.name}, ${formatVND(pco?.price ?? 0)}). KHÔNG thêm mẫu mã khác.${ask}`, state);
@@ -1318,6 +1339,30 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (packMistake) return err("Đơn nháp: nhầm quy cách thành số lượng", packMistake, state, { reason: "BAD_INPUT", fields: ["items.quantity"] });
       const choice = v.data.items ? packChoiceMistake(priced, ctx.config, ctx.lastUserText) : null;
       if (choice) return err("Đơn nháp: nhầm gói", choice, state, { reason: "BAD_INPUT", fields: ["items"] });
+      /*
+        HÀNG RÀO SỐ LƯỢNG / ĐƠN VỊ (P0 22/10/2026, đơn HSLC #8037F35A): «thêm 10 nem» với nem bán «Hộp 10 cái» từng được giỏ đọc thành 10
+        GÓI khách nói tường minh ⇒ hàng rào cam kết chặn đúng 1 hộp («hạ số lượng khách đã chốt») ⇒ model ghi 10 hộp ⇒ đơn đã chốt 540.000 ₫
+        thành 1.740.000 ₫. Số KHÔNG kèm đơn vị nay quy theo quy cách mẫu mã; mơ hồ ⇒ không ghi, hỏi một câu. Chạy TRƯỚC hàng rào cam kết,
+        trên MỌI đường ghi đơn (tạo / sửa). Sửa đơn ĐÃ CHỐT mà sai bội quy cách ⇒ không ghi, chuyển người.
+      */
+      const unitIssue = v.data.items ? quantityUnitIssue(state.cart, priced.asked) : null;
+      if (unitIssue) {
+        if (unitIssue.code === "QUANTITY_UNIT_AMBIGUOUS" && state.cart) state.cart = { ...state.cart, selectedItems: state.cart.selectedItems.map((x, i) => (i === unitIssue.itemIndex ? { ...x, unitPending: true } : x)) };
+        const e = guardErr(unitIssue.code, unitIssue.message, state);
+        return editingConfirmed && unitIssue.code === "PACK_MULTIPLIER_MISMATCH" ? { ...e, requireHuman: `Sửa đơn đã chốt — khách nói «${unitIssue.said}» không kèm đơn vị, đơn đề nghị sai bội quy cách hộp: nhân viên xác nhận số hộp với khách` } : e;
+      }
+      // ĐƠN ĐÃ CHỐT chỉ được TĂNG món mà khách nói số lượng ở CHÍNH lượt này (hoặc vừa đồng ý đúng lời mời) — không có lời khách thì không
+      // ghi, không nói «đã cập nhật đơn», chuyển người (ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT). Đứng TRƯỚC các hàng rào giỏ: chúng chỉ trả
+      // lỗi cho model thử lại, còn đơn ĐÃ CHỐT bị đề nghị tăng không căn cứ là việc người phải nhìn.
+      // Món TĂNG so với đơn đã chốt, và những món đó có phải CHỈ là món khách vừa đồng ý đúng lời mời (giá đã xác minh) không.
+      // Món của lời mời sau chốt mà khách gọi tên đúng món đó (giá của lời mời đã xác minh) cũng là đồng ý lời mời.
+      const offerAgreed = (k: string) => k === offerYesProduct || k === ctx.acceptedOffer?.productId || (namedAdded.has(k) && k === state.postConfirmOffer?.productId);
+      const grownKeys = editingConfirmed && v.data.items && existing ? [...qtyByProduct(priced.asked)].filter(([k, q]) => q > (hadQty.get(k) ?? 0)).map(([k]) => k) : [];
+      if (editingConfirmed && v.data.items && existing) {
+        const stated = productsStatedAt(state.cart, priced.asked, ctx.turn ?? null);
+        const grew = grownKeys.filter((k) => !stated.has(k) && !offerAgreed(k) && !namedAdded.has(k)).map((k) => productName(priced.asked.find((a) => (a.productId ?? a.variantId) === k)?.name ?? ""));
+        if (grew.length) return { ...guardErr("ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT", `KHÔNG sửa đơn đã chốt: tăng ${grew.map((n) => `«${n}»`).join(", ")} mà khách CHƯA nói số lượng ở tin này. KHÔNG nói đã cập nhật đơn; máy chủ đã chuyển nhân viên.`, state), requireHuman: `Sửa đơn đã chốt — đề nghị tăng ${grew.join(", ")} chưa có lời khách ở lượt này` };
+      }
       // GIỎ CÓ THẨM QUYỀN (P0 12/10/2026): hạ / bỏ món khách đã nói tường minh mà khách chưa sửa tường minh ⇒ từ chối (trình tự hội
       // thoại, không phải đơn hỏng ⇒ không gắn tín hiệu đơn không hợp lệ).
       const cartBreak = v.data.items ? commitmentViolation(state.cart, priced.asked, ctx.turn ?? null) : null;
@@ -1334,6 +1379,21 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (!priced.quote.verified) {
         state.quote = quoteSnapshotOf(priced.quote, now);
         return { ...err("Đơn nháp: giá chưa xác thực", `${QUOTE_UNVERIFIED_INSTRUCTION} (${quoteReasons(priced.quote)})`, state, { reason: "PRICE_UNVERIFIED" }), requireHuman: priceUnverifiedReason(quoteReasons(priced.quote)) };
+      }
+      /*
+        SỬA ĐƠN ĐÃ CHỐT mà tổng TĂNG quá `CONFIRMED_EDIT_MAX_GROWTH` lần (ca #8037F35A: ×3,2) ⇒ không ghi tự động, chuyển người
+        (CART_TOTAL_CONFLICT). Chỉ xét khi có món tăng mà KHÔNG được giải thích bởi lời khách: khách nói RÕ đơn vị ở chính lượt này («thêm 1kg
+        chả mực», «10 hộp») hoặc vừa đồng ý đúng lời mời một món (giá đã xác minh) là căn cứ đủ — đơn 350.000 ₫ thêm 1kg chả mực 400.000 ₫ đã
+        gấp 2,1 lần mà là đúng ý khách. Còn lại (số trần SUY RA theo quy cách, số không ai nói) mà tổng tăng cỡ đó ⇒ người nhìn trước khi hàng đi.
+      */
+      const unitStated = editingConfirmed && v.data.items ? productsStatedAt(state.cart, priced.asked, ctx.turn ?? null, { unitStated: true }) : new Set<string>();
+      const explained = grownKeys.every((k) => offerAgreed(k) || unitStated.has(k));
+      if (editingConfirmed && !explained && state.confirmed && typeof state.confirmed.total === "number" && state.confirmed.total > 0) {
+        const before = state.confirmed.total;
+        const after = priced.total ?? priced.subtotal;
+        if (after > before * CONFIRMED_EDIT_MAX_GROWTH) {
+          return { ...guardErr("CART_TOTAL_CONFLICT", `KHÔNG sửa đơn đã chốt: tổng mới ${formatVND(after)} gấp ${(after / before).toFixed(1).replace(".", ",")} lần tổng đã chốt ${formatVND(before)}. KHÔNG nói đã cập nhật đơn, KHÔNG báo tổng mới; máy chủ đã chuyển nhân viên đối chiếu với khách.`, state), requireHuman: `Sửa đơn đã chốt — tổng ${formatVND(before)} ⇒ ${formatVND(after)} (gấp ${(after / before).toFixed(1).replace(".", ",")} lần): nhân viên đối chiếu món / số lượng với khách trước khi ghi` };
+        }
       }
       const firstShown = existing?.firstShownTurn ?? existing?.shownTurn ?? ctx.turn;
       // Đơn nháp giữ dòng ĐÃ QUY GÓI (đúng những dòng ghi vào đơn) — chốt đơn tính lại trên chính chúng.
@@ -1456,6 +1516,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (priced.addOnOnly) return err("Chốt: chỉ có món bán kèm", ADD_ON_ONLY_ERROR, state);
       // Đơn nháp có dòng hàng không có căn cứ từ khách ⇒ KHÔNG chốt — kể cả máy tự chốt (P0-A đi qua đúng nhánh này).
       // Đơn nháp khách đã thấy ở lượt TRƯỚC ⇒ dòng của nó đã qua kiểm lúc ghi; lên + chốt trong cùng lượt (máy tự chốt) ⇒ kiểm lại cả đơn.
+      // Hàng rào số lượng / đơn vị chạy cả ở bước CHỐT (mọi đường ghi đơn): số trần mơ hồ / sai bội quy cách ⇒ KHÔNG chốt.
+      const unitIssueAtConfirm = quantityUnitIssue(state.cart, priced.asked);
+      if (unitIssueAtConfirm) return guardErr(unitIssueAtConfirm.code, `${unitIssueAtConfirm.message} CHƯA chốt.`, state);
       const seenBefore = d.shownTurn !== undefined && ctx.turn !== undefined && d.shownTurn < ctx.turn;
       const noBasis = lineBasisViolation(state.cart, priced.asked, ctx.turn ?? null, ctx.customerSaid ?? "", seenBefore ? new Set(priced.asked.map((l) => l.productId ?? l.variantId)) : new Set<string>());
       if (noBasis) return err("Chốt: dòng hàng không có căn cứ từ khách", `${noBasis} Sửa đơn nháp (update_draft_order) cho đúng món khách chọn rồi mới chốt.`, state);

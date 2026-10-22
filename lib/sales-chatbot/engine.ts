@@ -322,6 +322,17 @@ export function silenceFallbackText(st: ChatState, lastUserText: string, turn: n
   return items.length ? `Dạ em lên đơn ${items.join(" + ")} cho mình nhé, mình xác nhận giúp em ạ.` : EMPTY_REPLY_TEXT;
 }
 
+/** Tổng ERP mới của một lần SỬA ĐƠN ĐÃ CHỐT thành công (chữ `formatVND` của tổng / tiền hàng trong kết quả công cụ); không đọc được ⇒ `null`. HÀM THUẦN. */
+export function confirmedEditTotalOf(content: string): string | null {
+  try {
+    const p = JSON.parse(content) as { cod_total?: unknown; subtotal?: unknown };
+    const n = typeof p.cod_total === "number" ? p.cod_total : typeof p.subtotal === "number" ? p.subtotal : null;
+    return n === null ? null : formatVND(n);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Tóm tắt đơn nháp / đơn vừa chốt theo ĐÚNG kết quả công cụ (dòng + tổng của MÁY CHỦ) — gửi khi công cụ lên / sửa đơn thành công mà
  * model không nói câu nào sau đó (ca «Viet Nguyen Thi»: câu upsell → lên đơn → model im ⇒ trước đây khách nhận «nói rõ hơn»).
@@ -1629,6 +1640,17 @@ async function chatTurnCore(
     let modelSpoke = false;
     // Tóm tắt đơn (số MÁY CHỦ) còn NỢ khách: công cụ lên / sửa / chốt đơn thành công mà model chưa nói câu nào sau đó.
     let draftUnsaid: string | null = null;
+    /*
+      TỔNG MỚI NỢ KHÁCH (P0 22/10/2026, ca #8037F35A): sửa ĐƠN ĐÃ CHỐT thành công trong lượt ⇒ câu gửi khách phải nói lại TỔNG ERP mới
+      ngay trong câu đó — khách gõ nhầm «10 hộp» thì thấy «1.550.000 ₫» liền mà sửa. Model không nêu ⇒ máy chủ nối đúng số của công cụ.
+    */
+    let editTotalOwed: string | null = null;
+    const withEditTotal = (t: string): string => {
+      if (!editTotalOwed) return t;
+      const owed = editTotalOwed;
+      editTotalOwed = null;
+      return t.includes(owed) ? t : `${t.replace(/\s+$/, "")} Tổng đơn mới ${owed} ạ.`;
+    };
     // Lượt LẶP (gói tin trùng) mà model chỉ ghi lại ĐÚNG đơn nháp đang có — không có gì mới để nói, không phải lượt «model im» cần người.
     let replayNoop = false;
     // Bộ lọc hậu mãi đã bỏ HẾT một tin của model (chỉ toàn lời mời / xin chốt lại) — lượt im thì câu thay là câu hậu mãi, không phải câu chung.
@@ -1886,8 +1908,9 @@ async function chatTurnCore(
               }
               continue;
             }
-            const kept = await offerGuard(out);
-            if (!kept) continue;
+            const kept0 = await offerGuard(out);
+            if (!kept0) continue;
+            const kept = withEditTotal(kept0);
             content.push({ ...b, text: kept });
             modelOut.push(kept);
             spoke = true;
@@ -1917,6 +1940,7 @@ async function chatTurnCore(
           const sameDraftReplay = repeatOfAnswered && u.name !== "confirm_order" && draftBefore !== null && draftFingerprint(state.draft) === draftBefore;
           if (sameDraftReplay && !r.isError) replayNoop = true;
           if (!r.isError && (u.name === "create_draft_order" || u.name === "update_draft_order" || u.name === "confirm_order")) draftUnsaid = sameDraftReplay ? null : draftSummaryFromTool(r.content);
+          if (!r.isError && u.name === "update_draft_order" && /Sửa đơn đã chốt/.test(r.summary ?? "")) editTotalOwed = confirmedEditTotalOf(r.content);
           // Câu mẫu AI gửi qua công cụ cũng qua hàng rào khẳng định — bị chặn ⇒ không gửi, chuyển người như chữ model.
           const deliverVerdict = r.deliver ? await guardOutgoing(r.deliver.text, () => claimFacts(state)) : null;
           const deliver = deliverVerdict?.ok ? r.deliver : undefined;
@@ -1950,7 +1974,12 @@ async function chatTurnCore(
         // Chữ có số tiền giữ lại ở trên: kiểm theo trạng thái SAU công cụ (báo giá mới). Qua ⇒ gửi; không ⇒ câu thay (nói lại đúng tổng
         // máy chủ, hoặc câu an toàn + chuyển người khi báo giá đã cũ).
         // Lời mời sai lúc trong chữ có số tiền giữ lại cũng bị bỏ (#868) — trước hàng rào khẳng định, theo trạng thái SAU công cụ.
+        // Sửa đơn ĐÃ CHỐT trong lượt ⇒ câu có số tiền đầu tiên mang TỔNG ERP mới (nối trước hàng rào khẳng định — số ấy cũng qua kiểm).
         for (let i = 0; i < heldMoney.length; i++) heldMoney[i] = await offerGuard(heldMoney[i]);
+        if (heldMoney.some(Boolean)) {
+          const first = heldMoney.findIndex(Boolean);
+          heldMoney[first] = withEditTotal(heldMoney[first]);
+        }
         for (const out of heldMoney) {
           if (!out) continue;
           const v = await guardOutgoing(out, () => claimFacts(state));

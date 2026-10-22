@@ -24,6 +24,12 @@ export const SALES_QUALITY_CODES = [
   "UPSELL_ACCEPTED_BUT_REASKED",
   "UPSELL_ACCEPTED_NOT_ATTACHED",
   "ADDRESS_RECEIVED_BUT_NOT_APPLIED",
+  // Hàng rào giá trị đơn (P0 22/10/2026, đơn HSLC #8037F35A — lib/constants/sales-order-guard.ts): bốn lần CHẶN trước khi ghi + tổng lệch.
+  "QUANTITY_UNIT_AMBIGUOUS",
+  "PACK_MULTIPLIER_MISMATCH",
+  "CART_TOTAL_CONFLICT",
+  "STAFF_AI_QUOTE_CONFLICT",
+  "ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT",
 ] as const;
 export type SalesQualityCode = (typeof SALES_QUALITY_CODES)[number];
 
@@ -109,6 +115,36 @@ export const SALES_QUALITY_SPEC: Record<SalesQualityCode, SalesQualitySpec> = {
     unit: "CONVERSATION",
     source: "lib/address/customer-address.ts",
     action: "Đơn bot chốt mang cờ «địa chỉ chưa ghép» trong khi đơn đã có xã / phường hoặc tin khách đã nêu phường của đúng địa chỉ — mở hàng «Cần người kiểm», chọn xã rồi xác nhận; báo kỹ thuật nếu lặp lại (luật ghép phường lọt ca).",
+  },
+  QUANTITY_UNIT_AMBIGUOUS: {
+    label: "Khách nói số không kèm đơn vị, không quy được ra số hộp — đã chặn ghi đơn",
+    unit: "MESSAGE",
+    source: "lib/sales-chatbot/cart-commitment.ts",
+    action: "Xem quy cách mẫu mã («Hộp 10 cái») và câu mời: khách hay nói số cái thì câu mời ghi rõ «1 hộp 10 cái» để khách trả lời bằng hộp.",
+  },
+  PACK_MULTIPLIER_MISMATCH: {
+    label: "Đơn đề nghị sai bội quy cách hộp (10 cái ⇒ 10 hộp) — đã chặn ghi đơn",
+    unit: "MESSAGE",
+    source: "lib/sales-chatbot/cart-commitment.ts",
+    action: "Mở hội thoại: model đọc số cái thành số hộp; kiểm tên mẫu mã có ghi số cái mỗi hộp, đơn đã chốt thì nhân viên xác nhận lại với khách.",
+  },
+  CART_TOTAL_CONFLICT: {
+    label: "Sửa đơn đã chốt mà tổng tăng bất thường — đã chặn, chuyển người",
+    unit: "MESSAGE",
+    source: "lib/constants/sales-order-guard.ts",
+    action: "Mở đơn của hội thoại, đối chiếu món / số lượng với khách rồi mới sửa; ngưỡng ở CONFIRMED_EDIT_MAX_GROWTH.",
+  },
+  STAFF_AI_QUOTE_CONFLICT: {
+    label: "Tổng bot báo khác tổng nhân viên / page báo trong cùng hội thoại",
+    unit: "MESSAGE",
+    source: "lib/sales-chatbot/cancel-recovery.ts",
+    action: "Mở hội thoại: hai con số tổng tới tay khách — xác định số đúng theo đơn ERP, nhắn khách MỘT tổng, sửa nguồn sai (câu tự động Pancake / đơn POS).",
+  },
+  ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT: {
+    label: "Bot đề nghị tăng đơn đã chốt khi khách chưa nói số lượng — đã chặn, chuyển người",
+    unit: "MESSAGE",
+    source: "lib/sales-chatbot/tools.ts",
+    action: "Mở hội thoại: khách chưa nói lấy thêm bao nhiêu mà bot định sửa đơn đã chốt — nhân viên hỏi khách rồi mới sửa.",
   },
 };
 
