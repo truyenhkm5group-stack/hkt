@@ -5,6 +5,15 @@
 > Git / PR / production THẮNG mọi thứ ghi ở đây nếu lệch — kiểm `origin/main`, PR mở, `https://app.chotdontudong.com/api/health` (`commit`).
 > Nguồn sự thật readiness: `docs/saas/LAUNCH_GATE.md` trên main. Readiness chỉ tăng bằng BẰNG CHỨNG PRODUCTION, không bằng mã.
 
+## 23/10/2026 ~02:30 VN (19:30Z 22/10) — Worker code-erp-06 (DESKTOP-56TH98Y:wt-tonight · wt-prompt-cache): hai việc PR_READY + dọn sổ / máy
+
+- **Production lúc chụp:** health `commit f87db2e0b1e3` (#979) · 255 migration · `degradedMigration: false`. PR mở: #978 #980 #981 (lead đang làm) · #875 (nháp, đứng từ 17/10, sửa AGENTS.md — chưa ai cầm).
+- **claim-guard-added-claim** (P1 trong danh sách «chưa có chủ» 19/10) → PR_READY `claude/claim-guard-added-claim` @ 9e590dcf. Câu «đã sửa» TRẦN («Dạ em thêm rồi ạ») giờ bị chặn khi hội thoại đã có đơn và lượt không ghi gì; trước đơn (giỏ) không chặn. K21 + K09 ĐẠT, đột biến bắt.
+- **sales-prompt-cache-first** (AI Sales GĐ3, quyết định lead 22/10) → PR_READY `claude/sales-prompt-cache-first` @ e1cd5952. Công tắc `sales.prompt-layout` `{"layout":"CACHE_FIRST"}`, mặc định LEGACY = lời nhắc cũ từng ký tự (deploy KHÔNG đổi hành vi). Bench có `--layout`. **Lead:** sau deploy mới bench A/A → A/B (≤ 3 × 0,2 USD) rồi canary HSLC; bài hoán vị thêm ~97 s vào K21.
+- **Sổ:** đóng CANCELLED `test-flake-ai-balance` (đã sửa ở #904) và `inbox-unread-gate` (hộp thư V3 không còn cổng last_customer_at). Các sứ mệnh PR_READY cũ `cost-actual-mkt-price` · `inbox-unread-perf` (nhánh đã nằm trọn trong main) và `payroll-code-split-contribution` (#941 được dựng lại thành #942) chỉ còn là sổ lệch — lead đóng khi rà.
+- **Việc chỉ nằm trên đĩa (AGENTS §9) đã chụp lên remote, cây giữ nguyên:** `wip/legal-acceptance-1009` @ 33a66529 (15 tệp · migration `0236_legal_acceptances.sql` + `lib/legal/acceptance.ts` — sứ mệnh legal-acceptance BLOCKED chờ luật sư; main đã tới 0255 ⇒ mở lại phải ĐÁNH SỐ LẠI migration) · `wip/saas-l1-hide-internal-1007` @ 0b4ec4d1 (20 tệp chưa commit sau #639 — cần người đối chiếu còn gì chưa vào main).
+- **Máy:** xoá 964 thư mục `*/data/pglite-test-*` của tiến trình đã chết (giữ 7 của tiến trình đang chạy) — ổ C 41 → 106 GB trống.
+
 
 
 
