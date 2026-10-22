@@ -27,6 +27,7 @@ import { PRICE_UNVERIFIED_PREFIX } from "@/lib/sales-chatbot/quote-shared";
 import { RESUME_MAX_TURN_AGE_MS } from "@/lib/sales-chatbot/response-ownership";
 import { WATCHDOG_MAX_PER_SWEEP } from "@/lib/sales-chatbot/handoff-routing";
 import { DEAD_AI_DOWN_NOTE } from "@/lib/sales-chatbot/inbound-retry";
+import { SALES_QUALITY_CODES } from "@/lib/constants/sales-quality";
 import {
   addSilent,
   AI_DOWN_RETRY_MINUTES,
@@ -41,6 +42,9 @@ import {
   replySplitSummary,
   type HandoffReplyFact,
   parseStuckArgs,
+  QUALITY_BASE_FIELD,
+  QUALITY_MIN_SAMPLE,
+  qualityStateSummary,
   queueSetSummary,
   RECEIPT_CLAIM_RE,
   RECEIPT_CLAIM_SQL_RE,
@@ -280,6 +284,8 @@ function testSource() {
   assert.doesNotMatch(code, /from "@\/lib\/sales-chatbot\//, "phần đếm chính không nhập lib bot tĩnh — ops lấy lib từ image (lib #800 nạp động, thiếu ⇒ CHƯA ĐO ĐƯỢC)");
   assert.doesNotMatch(code, /tomTat\([^\n]*\$\{[^}]*\b(id|threadId|pageId|text)\b/, "tóm tắt không nhận mã / chữ tin");
   assert.match(code, /process\.stdout\.write\("", \(\) => process\.exit\(code\)\)/, "xả stdout trước khi thoát");
+  assert.match(code, /select value from "settings" where key = \$\{SALES_QUALITY_STATE_KEY\} limit 1/, "2B đọc đúng khoá ảnh chụp (hằng số, không gõ lại chuỗi)");
+  assert.match(code, /for \(const line of qualityStateSummary\(org\.code, q\?\.value\)\) tomTat\(line\);/, "2B ra kênh tóm tắt qua hàm thuần");
   const ops = readFileSync(".github/workflows/ops-vps.yml", "utf8");
   assert.match(ops, /- stuck-conversation-audit\s+#/, "ops-vps khai lựa chọn");
   assert.match(ops, /OPS_THAO_TAC_MA_HOA: "[^"]*\bstuck-conversation-audit\b/, "kết quả MÃ HOÁ");
@@ -288,9 +294,63 @@ function testSource() {
   console.log("  ✓ mã nguồn: chỉ đọc (Postgres ép + hỏi lại) · không câu ghi · không nhập tĩnh lib bot · tóm tắt không mã · xả stdout · ops khai đủ bốn chỗ");
 }
 
+/** 2B — ảnh chụp Quality Supervisor: chưa biết KHÔNG in 0, mẫu nhỏ không in tỷ lệ, mẫu số khớp `baseOf` của daily.ts. */
+function testQualityState() {
+  const nope = (raw: unknown) => qualityStateSummary("demo", raw);
+  for (const raw of [undefined, null, "không phải json", JSON.stringify("chuỗi"), JSON.stringify([1, 2]), JSON.stringify({ day: "2026-10-21" }), JSON.stringify({ counts: {} })]) {
+    const l = nope(raw);
+    assert.equal(l.length, 1, String(raw));
+    assert.match(l[0], /^demo 2B · CHƯA ĐO ĐƯỢC — /, `khoá vắng / hỏng ⇒ CHƯA ĐO ĐƯỢC, không in số: ${String(raw)}`);
+    assert.doesNotMatch(l[0], /\b0\b/, "không in 0 thay cho chưa biết");
+  }
+  assert.match(nope(JSON.stringify({ day: "2026-10-22", at: "x", error: "chi tiết riêng", attempts: 2 }))[0], /lượt ngày 2026-10-22 LỖI \(lần thử 2\)/);
+  assert.doesNotMatch(nope(JSON.stringify({ day: "2026-10-22", error: "Khách 0901234567 lỗi" }))[0], /0901234567/, "câu lỗi không ra kênh tóm tắt");
+
+  const state = {
+    day: "2026-10-21",
+    at: "2026-10-22T00:05:12.000Z",
+    conversations: 412,
+    capped: false,
+    counts: { HANDOFF_UNANSWERED: 98, QTY_REASKED: 3, UPSELL_ACCEPTED_BUT_REASKED: 0, UPSELL_ACCEPTED_NOT_ATTACHED: 1 },
+    bases: { customerMessages: 900, botMessages: 1200, quantityAnswers: 40, deliverySecondAsks: 5, complaints: 12, offerAccepts: 4, handoffWaiting: 214 },
+    slaHours: 4,
+  };
+  const out = qualityStateSummary("demo", JSON.stringify(state));
+  const all = out.join("\n");
+  assert.match(out[0], /^demo 2B · ngày 2026-10-21 \(chạy 2026-10-22T00:05Z\) · quét 412 hội thoại · hạn chờ người 4 giờ$/);
+  assert.match(all, /HANDOFF_UNANSWERED 98\/214 = 45,8%/, "mẫu đủ ⇒ tỷ lệ");
+  assert.match(all, /QTY_REASKED 3\/40 = 7,5%/);
+  assert.match(all, /UPSELL_ACCEPTED_BUT_REASKED 0\/4 chưa đủ mẫu/, "0 THẬT vẫn in 0 — nhưng mẫu nhỏ không có tỷ lệ");
+  assert.match(all, /UPSELL_ACCEPTED_NOT_ATTACHED 1\/4 chưa đủ mẫu/);
+  assert.match(all, /SECONDARY_INTENT_UNANSWERED —/, "mã vắng trong ảnh chụp ⇒ «—», không phải 0");
+  assert.match(all, /COMPLAINT_WHILE_SELLING —/);
+  for (const c of SALES_QUALITY_CODES) assert.ok(all.includes(c), `mọi mã có mặt: ${c}`);
+  assert.equal(qualityStateSummary("demo", state).join("\n"), all, "giá trị đã là object (driver giải JSON) ⇒ cùng kết quả");
+  assert.match(qualityStateSummary("demo", { ...state, capped: true, slaHours: null })[0], /CHẠM TRẦN — số là trần dưới · hạn chờ người không đặt/);
+  assert.match(qualityStateSummary("demo", { ...state, bases: undefined }).join(" "), /HANDOFF_UNANSWERED 98 \(mẫu số chưa có\)/);
+  // Kênh [ops:tom-tat] cắt ở 300 ký tự: mọi dòng lọt, kể cả mã tổ chức dài và số sáu chữ số.
+  const big = { ...state, conversations: 999_999, capped: true, counts: Object.fromEntries(SALES_QUALITY_CODES.map((c) => [c, 999_999])), bases: Object.fromEntries(Object.keys(state.bases).map((k) => [k, 999_999])) };
+  for (const l of qualityStateSummary("hslc-hmt-shop", big)) assert.ok(l.length <= 300, `${l.length} ký tự > 300: ${l}`);
+  assert.equal(QUALITY_MIN_SAMPLE, 30);
+
+  // Mẫu số của script = ĐÚNG trường `baseOf` của daily.ts in cạnh mã đó (bản sao có lý do: ops lấy lib từ image).
+  const daily = readFileSync("lib/sales-quality/daily.ts", "utf8");
+  for (const c of SALES_QUALITY_CODES) {
+    const line = daily.split("\n").find((x) => x.trimStart().startsWith(`${c}: \``));
+    assert.ok(line, `daily.ts baseOf thiếu mã ${c}`);
+    const field = QUALITY_BASE_FIELD[c];
+    // Mẫu số không nằm trong `QualityBases` (ảnh chụp lúc chạy) ⇒ đúng biểu thức daily.ts in cạnh mã đó.
+    const special: Record<string, string> = { handoffWaiting: "${ho.waiting}", addressFlagged: "${na.flagged}" };
+    const want = special[field] ?? `\${b.${field}}`;
+    assert.ok(line.includes(want), `${c}: script lấy mẫu số «${field}» nhưng daily.ts in ${line.trim().slice(0, 120)}`);
+  }
+  console.log("  ✓ 2B: khoá vắng / hỏng / lượt lỗi ⇒ CHƯA ĐO ĐƯỢC (không 0, không câu lỗi) · mã vắng ⇒ — · mẫu < 30 ⇒ chưa đủ mẫu · dòng ≤ 300 ký tự · mẫu số khớp daily.ts");
+}
+
 export async function testStuckConversationAudit() {
   console.log("Ops stuck-conversation-audit (hội thoại AI kẹt · không chủ · SLA · nhắn lại sau đơn · đơn chưa đồng bộ — chỉ đọc):");
   testPure();
+  testQualityState();
   testCopies();
   testSource();
   await testDb();
