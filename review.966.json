@@ -1,0 +1,8 @@
+{
+  "pr": 966,
+  "sha": "36f65b3cde66613a224f1cf4c8151ef55341e072",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-22T06:38:52.188Z",
+  "note": "review lead (P0 22/10 HSLC #8037F35A, phần địa chỉ): (1) addressReview: lượt ghi của MÁY mà đơn nay có ward ⇒ withAddressSettled gỡ ĐÚNG dòng ADDRESS_UNRESOLVED do máy dựng (tiền tố MACHINE_ADDRESS_NOTE_PREFIX), vết ADDRESS_SETTLED byUserId null + audit RESOLVE; dòng «khách đổi địa chỉ» + mã khác giữ. (2) keptWardOf: gửi lại đúng phường đã lưu (cùng địa chỉ + tỉnh, tin cuối không nêu phường khác) "
+}
