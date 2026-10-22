@@ -3,6 +3,6 @@
   "sha": "818f3604212d1cc896b3f53f68e9d75527a9f1ef",
   "verdict": "FAIL",
   "actor": "DESKTOP-56TH98Y:wt-prompt-cache",
-  "at": "2026-10-22T18:51:46.657Z",
-  "note": "Review độc lập (worker code-erp-06), tái hiện bằng ca dựng trên 818f3604 so với main f87db2e0: (1) CAO — đơn erp- do NGƯỜI huỷ + lần gửi 2 (POS «tạo lần gửi mới» / gửi lại trên web VTP) chờ lấy ⇒ AWAITING_PICKUP, đang đi ⇒ IN_TRANSIT (main: CANCELLED cả hai) — trái ORDER_OUTCOME.md 11.5 «Người huỷ đơn ⇒ CANCELLED như cũ»; mục 12 chỉ nói Pancake huỷ đơn gốc. Đề xuất: vế lần gửi thay thế của ORDER_A"
+  "at": "2026-10-22T18:55:17.979Z",
+  "note": "BỔ SUNG (3) CAO — chiều TIỀN THẬT: đơn Pancake «Đã hủy» + lần gửi lại GIAO THÀNH CÔNG, COD thực thu 450.000 ⇒ ORDER_OUTCOME = DELIVERED nhưng ORDER_OUTCOME_VERIFIED = CANCELLED (nhánh đầu «o.stage huỷ ⇒ CANCELLED» vô điều kiện). Lệch này ĐÃ có trên main/production từ #979 (lần gửi lại nay gắn vào đơn) và sẽ phủ ~81 đơn đã giao khi script vá #978 ghi; #981 tuyên bố «chứng từ ĐVVC của lần gửi thay t"
 }
