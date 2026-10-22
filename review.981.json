@@ -1,0 +1,8 @@
+{
+  "pr": 981,
+  "sha": "818f3604212d1cc896b3f53f68e9d75527a9f1ef",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-22T18:03:10.611Z",
+  "note": "review lead (P0 22/10, ORDER_OUTCOME.md mục 12): (3a) ORDER_ALIVE_OR_RESHIP — ba nhánh AWAITING_PICKUP/IN_TRANSIT nhận lần gửi thay thế attempt_no > 1 dù Pancake «Đã hủy» (3.2), mã huỷ 101/107/201 trên chính lần ấy vẫn CANCELLED; chỉ đọc attempt_no, không cờ ghi chú. (3b) PRIMARY_ATTEMPT thêm vế «còn sống = chứng từ bàn giao (luật 41) ∧ chưa huỷ» sau DELIVERED, vanDonDaiDien khớp từng bậc (parity "
+}
