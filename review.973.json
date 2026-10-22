@@ -1,0 +1,8 @@
+{
+  "pr": 973,
+  "sha": "116e4b35bfbd136611ec52fe2dad9adea9684808",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-22T12:45:08.095Z",
+  "note": "review lead: máy ánh xạ địa chỉ NỀN trong job sales-followup, không trên đường trả lời: thang chữ khách → địa chỉ đã xác minh của khách (C360) → Google Places của chính tổ chức (chỉ lưu tên xã/tỉnh danh mục ERP + place_id); chắc ⇒ ghi qua lượt máy + withAddressSettled gỡ cờ; không chắc ⇒ giữ cờ + ứng viên + lý do ⇒ một việc. Công tắc address.resolver {enabled/places/perTick}; phạm vi: Mới/Chờ hàng"
+}
