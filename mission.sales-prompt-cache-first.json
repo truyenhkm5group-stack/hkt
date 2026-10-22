@@ -3,7 +3,7 @@
   "mission_id": "sales-prompt-cache-first",
   "title": "AI Sales GĐ3: lời nhắc xếp tĩnh → ngày → giờ → hội thoại → lượt cho đệm tiền tố (công tắc sales.prompt-layout, mặc định LEGACY)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-prompt-cache",
@@ -28,11 +28,27 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T17:58:26.836Z",
-  "updated_at": "2026-10-22T18:44:02.731Z",
-  "last_heartbeat": "2026-10-22T18:44:02.731Z",
+  "updated_at": "2026-10-22T18:44:35.906Z",
+  "last_heartbeat": "2026-10-22T18:44:35.906Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/sales-prompt-cache-first",
+    "sha": "e1cd59523be0cf9866d4ad40ffb6c511502f9d1e",
+    "at": "2026-10-22T18:44:35.906Z",
+    "actor": "DESKTOP-56TH98Y:wt-prompt-cache",
+    "title": "AI Sales GĐ3: lời nhắc xếp tĩnh → ngày → giờ → hội thoại → lượt cho đệm tiền tố (công tắc sales.prompt-layout, mặc định LEGACY)",
+    "summary": "AI Sales GĐ3 (quyết định lead 22/10): lời nhắc chia khối theo tầng STATIC·DAY·HOUR·CONVERSATION·TURN (prompt-layout.ts). Công tắc tổ chức sales.prompt-layout = object {\"layout\":\"CACHE_FIRST\"} ⇒ xếp tĩnh → ngày → giờ → hội thoại → lượt (cùng tập dòng) + Anthropic tách khối system: chỉ phần tĩnh mang cache_control (AiRequest.systemCacheBreak). Mặc định / chuỗi trần / lỗi ⇒ LEGACY = chuỗi cũ từng ký tự ⇒ KHÔNG đổi hành vi production khi deploy. Bench: SalesCallObs + tóm tắt có đệm đọc/ghi/tỷ lệ; platform-ai-bench sales --layout=LEGACY|CACHE_FIRST (ghi đè trong tiến trình). VIỆC CỦA LEAD sau gộp+deploy: bench A/A rồi A/B (≤ 3 × 0,2 USD, ngoài giờ cao điểm, kiểm số dư credit trước) → canary HSLC set-setting sales.prompt-layout {\"layout\":\"CACHE_FIRST\"} ≥ 3 ngày làm việc; promptHash đổi khi bật.",
+    "tests": [
+      "tsc --noEmit (heap 8 GB): sạch",
+      "eslint 9 tệp: sạch",
+      "TEST_KHOI=K21: TẤT CẢ KIỂM THỬ CỦA chỉ K21 ĐẠT trên f87db2e0b (hội thoại vàng khớp ảnh chụp KHÔNG đổi + hoán vị CACHE_FIRST 23 hội thoại · 28 lời nhắc đổi thứ tự · ngoài lời nhắc giống hệt; order-golden; claim-guard; sales-packs)",
+      "TEST_KHOI=K16,K19,K23,K24: ĐẠT (agent-chi-phi quét cache_control · đặt lịch · platform-ai-model bench obs · ai-sales-knowledge)",
+      "đột biến: bỏ tầng DAY khỏi CACHE_FIRST ⇒ bài thuần ĐỎ",
+      "lưu ý: bài hoán vị thêm ~97 s vào K21 (shard 3)"
+    ]
   }
 }
