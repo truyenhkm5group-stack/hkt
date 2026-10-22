@@ -928,6 +928,11 @@ export type AddressResolution = {
   reason: string;
   /** Mốc `raw.addressText.at` đã xét — chữ khách mới hơn ⇒ máy xét lại. */
   textAt: string | null;
+  /**
+   * Chữ khách máy đã đọc lấy từ đâu: `ORDER_TEXT` = `raw.addressText` lưu lúc chốt · `CONVERSATION` = đơn chốt trước khi có trường đó,
+   * đọc lại tin khách trong hội thoại tới lúc đơn tạo · `NONE` = không có dòng địa chỉ nào của khách (chỉ còn bậc C360 / Google).
+   */
+  textSource?: "ORDER_TEXT" | "CONVERSATION" | "NONE";
   /** Đã tra Google ở lượt này (đếm chi phí). */
   places: boolean;
   /** Lỗi bậc Google (xác thực / hạn mức / mạng) — ghi rõ, máy lùi về bậc (a)(b) + nhân viên. */

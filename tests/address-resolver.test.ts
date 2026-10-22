@@ -10,6 +10,9 @@
  *     hai cho đơn đã xét; mọi kết quả có vết `raw.addressResolution`.
  *  4. Đường trả lời khách KHÔNG import máy ánh xạ (treo / lỗi / chậm không chạm lượt chat); job chỉ chạy kế `sales-followup`.
  *  5. 2B đếm tự ánh xạ / cần nhân viên + lượt Google.
+ *  6. Công tắc tổ chức `address.resolver` {"enabled": false} ⇒ lượt không đọc / ghi gì; `perTick` = trần số đơn một lượt. Đơn chốt TRƯỚC
+ *     khi có `raw.addressText` (đơn bản #966 — ca #A4FA1734 · #E63E4D6E): máy đọc lại tin KHÁCH tới lúc đơn tạo (tin gửi sau không tính),
+ *     vết `textSource = CONVERSATION`.
  * Không gọi mạng thật (Google giả qua chỗ cắm `deps`). Dữ liệu dựng, không PII.
  */
 import assert from "node:assert/strict";
@@ -17,7 +20,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { ADDRESS_RESOLVER_USAGE_KEY, resolvePendingAddresses } from "@/lib/address/resolve-job";
+import { ADDRESS_RESOLVER_SETTING_KEY, ADDRESS_RESOLVER_USAGE_KEY, resolvePendingAddresses } from "@/lib/address/resolve-job";
 import { resolveAddress } from "@/lib/address/resolver";
 import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
 import { orderReviewLogOf, orderReviewOf } from "@/lib/constants/order-review";
@@ -78,6 +81,7 @@ const CASES: GoldenCase[] = [
   { key: "res-giao", title: "Xã cũ bị chia + Google ⇒ giao còn một xã ⇒ máy điền xã, gỡ cờ", shop: "food", channel: "WEB", turns: [turn("Cho chị 1 hộp ruốc bông tôm, Lan 0961007201, Số 8 ngõ 2 phường Đại Kim, quận Hoàng Mai, Hà Nội", "0961007201", "Số 8 ngõ 2 phường Đại Kim, quận Hoàng Mai, Hà Nội")] },
   { key: "res-auth", title: "Google từ chối khoá ⇒ ghi lỗi, ứng viên / lý do vào cờ, cờ còn mở, không ném", shop: "food", channel: "WEB", turns: [turn("Cho chị 1 hộp ruốc bông tôm, Lan 0961007202, Số 12 Nguyễn Trãi, Hà Nội", "0961007202", "Số 12 Nguyễn Trãi, Hà Nội")] },
   { key: "res-treo", title: "Google treo 30 giây ⇒ lượt job dừng đúng trần, đơn chờ nhân viên", shop: "food", channel: "WEB", turns: [turn("Cho chị 1 hộp ruốc bông tôm, Lan 0961007203, Số 3 ngõ 9 Trần Duy Hưng, Hà Nội", "0961007203", "Số 3 ngõ 9 Trần Duy Hưng, Hà Nội")] },
+  { key: "res-cu", title: "Đơn bản #966 (không có raw.addressText) ⇒ công tắc tắt thì không chạm; bật lại thì đọc tin khách tới lúc đơn tạo", shop: "food", channel: "WEB", turns: [turn("Cho chị 1 hộp ruốc bông tôm, Lan 0961007204, Số 8 ngõ 2 phường Đại Kim, quận Hoàng Mai, Hà Nội", "0961007204", "Số 8 ngõ 2 phường Đại Kim, quận Hoàng Mai, Hà Nội")] },
 ];
 
 export async function testAddressResolverJob() {
@@ -136,10 +140,37 @@ export async function testAddressResolverJob() {
         const r2 = await resolvePendingAddresses(new Date(now.getTime() + 300_000), { openPlaces, textSearch: fakeOk(again, ["x"]) });
         assert.equal(again.length, 0, `chạy lại ⇒ 0 lời gọi Google: ${JSON.stringify(r2)}`);
       }
+      if (c.key === "res-cu") {
+        // Dựng lại hình dạng đơn bản #966: không có raw.addressText.
+        const { addressText: _drop, ...legacyRaw } = (before.raw ?? {}) as Record<string, unknown>;
+        void _drop;
+        await db.update(schema.orders).set({ raw: legacyRaw }).where(eq(schema.orders.id, before.id));
+        // Tin khách gửi SAU lúc đơn tạo mang một địa chỉ khác (đủ xã) — không thuộc đơn này, máy không được dùng.
+        await db.insert(schema.salesChatMessages).values({ conversationId: ctx.conversationId, seq: 9_000, role: "user", content: [{ type: "text", text: "Số 1 Tràng Tiền, Phường Hoàn Kiếm, Hà Nội" }], createdAt: new Date(before.createdAt.getTime() + 60_000) });
+        try {
+          await setSettingJson(ADDRESS_RESOLVER_SETTING_KEY, { enabled: false });
+          const tat: FakeCall[] = [];
+          const off = await resolvePendingAddresses(now, { openPlaces, textSearch: fakeOk(tat, ["x"]) });
+          assert.ok(off.off && off.checked === 0 && tat.length === 0, `công tắc tắt ⇒ không đọc, không gọi: ${JSON.stringify(off)}`);
+          assert.ok(!("addressResolution" in ((await orderOf()).raw as object)), "công tắc tắt ⇒ không ghi vết");
+          await setSettingJson(ADDRESS_RESOLVER_SETTING_KEY, { perTick: 1 });
+          const calls: FakeCall[] = [];
+          const r = await resolvePendingAddresses(now, { openPlaces, textSearch: fakeOk(calls, ["8 ngõ 2, Khương Trung, Thanh Xuân, Hà Nội, Việt Nam"]) });
+          assert.ok(r.checked === 1 && r.sure === 1 && !r.error, `perTick 1 ⇒ đúng một đơn: ${JSON.stringify(r)}`);
+          const o = await orderOf();
+          assert.equal(o.shipCommune, "Phường Khương Đình", "đọc tin khách tới lúc đơn tạo, không dùng tin gửi sau («Hoàn Kiếm»)");
+          const res = (o.raw as { addressResolution?: { textSource?: string; source?: string } }).addressResolution;
+          assert.ok(res?.textSource === "CONVERSATION" && res.source === "PLACES", JSON.stringify(res));
+          assert.ok(calls.length === 1 && !/Lan|ruốc|0961007204|Tràng Tiền/.test(calls[0].query), `chỉ vế địa chỉ của tin trước đơn: ${JSON.stringify(calls)}`);
+          assert.equal(addressReviewOpenOf(o.raw), false);
+        } finally {
+          await setSettingJson(ADDRESS_RESOLVER_SETTING_KEY, {});
+        }
+      }
     },
   });
   assert.equal(seen.size, CASES.length, "mọi ca đều chạy");
-  console.log("  ✓ job: chắc ⇒ điền xã + gỡ cờ (ADDRESS_SETTLED nguồn PLACES) · Google lỗi xác thực ⇒ ghi lỗi + lý do vào cờ, không ném · Google treo ⇒ dừng đúng trần · chạy lại không gọi lại · 2B đếm");
+  console.log("  ✓ job: chắc ⇒ điền xã + gỡ cờ (ADDRESS_SETTLED nguồn PLACES) · Google lỗi xác thực ⇒ ghi lỗi + lý do vào cờ, không ném · Google treo ⇒ dừng đúng trần · chạy lại không gọi lại · 2B đếm · công tắc tắt ⇒ không chạm · perTick · đơn bản #966 đọc tin khách tới lúc đơn tạo");
 }
 
 export async function testAddressResolver(): Promise<void> {

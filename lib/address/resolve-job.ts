@@ -11,22 +11,31 @@
  *    `address.resolver.usage`. Lỗi xác thực / hạn mức ⇒ ghi rõ, tắt Google cho phần còn lại của lượt, lùi về bậc (a)(b) + nhân viên.
  *  · Chỉ lưu tên xã / tỉnh của DANH MỤC ERP — không chép chữ / toạ độ Google lên đơn (điều khoản Google: dữ liệu ≤ 30 ngày).
  *  · Không ném: lỗi trả về trong kết quả, job khác vẫn chạy.
+ *  · CÔNG TẮC theo tổ chức, không cần deploy (Tech Lead 22/10/2026): `address.resolver` {"enabled": false} ⇒ cả máy ánh xạ dừng ngay lượt
+ *    kế (không đọc đơn, không ghi gì); `perTick` = trần số đơn MỘT lượt (mặc định 15, tối đa 50). Lượt nào cũng CHỈ chạm đơn mang dòng cờ
+ *    MÁY «địa chỉ chưa ghép» (tiền tố `MACHINE_ADDRESS_NOTE_PREFIX`) — cờ người gắn không bao giờ bị máy đụng.
+ *  · Đơn chốt TRƯỚC khi có `raw.addressText` (đơn của bản #966): máy đọc lại tin CỦA KHÁCH trong hội thoại, từ 3 ngày trước tới lúc đơn
+ *    tạo, qua đúng bộ lọc dòng địa chỉ của lượt chat (`addressTextLines`) — KHÔNG dùng dòng địa chỉ model chép lên đơn (xã chỉ ghi khi
+ *    khách nói). Vết `raw.addressResolution.textSource` nói chữ lấy từ đâu.
  */
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { resolveAddress, type ResolverVerdict } from "@/lib/address/resolver";
 import { MACHINE_ADDRESS_NOTE_PREFIX, orderReviewOf } from "@/lib/constants/order-review";
 import { openActiveConnection } from "@/lib/connectors/service";
 import { placesRelayOf, textSearch, type PlacesClientDeps } from "@/lib/integrations/google-places/client";
 import { applyAddressResolutionAsAgent, type AddressResolution, type OrderAgent } from "@/lib/records/order-create";
-import { addressQueryText } from "@/lib/sales-chatbot/address-memory";
+import { addressQueryText, addressTextLines } from "@/lib/sales-chatbot/address-memory";
 import { loadCustomer360 } from "@/lib/sales-chatbot/customer-360";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { DEFAULT_LEAD_HUNTER_CONFIG, skuCostMicros } from "@/lib/wholesale/config";
 
 export const ADDRESS_RESOLVER_AGENT: OrderAgent = { name: "Máy ánh xạ địa chỉ", source: "lib/address/resolve-job.ts" };
-/** Cấu hình theo tổ chức (OBJECT — luật cờ settings): `places` = bậc Google (vắng ⇒ BẬT khi kết nối hoạt động) · `dailyPlacesLimit`. */
+/**
+ * Cấu hình theo tổ chức (OBJECT — luật cờ settings): `enabled` = công tắc cả máy (vắng ⇒ BẬT; `false` ⇒ dừng, không cần deploy) ·
+ * `places` = bậc Google (vắng ⇒ BẬT khi kết nối hoạt động) · `dailyPlacesLimit` · `perTick`.
+ */
 export const ADDRESS_RESOLVER_SETTING_KEY = "address.resolver";
 /** Sổ đếm lượt Google trong ngày giờ Việt Nam + lỗi gần nhất (2B đọc để in). */
 export const ADDRESS_RESOLVER_USAGE_KEY = "address.resolver.usage";
@@ -34,10 +43,13 @@ export const ADDRESS_RESOLVER_USAGE_KEY = "address.resolver.usage";
  * `dailyPlacesLimit` 100 lượt / ngày / tổ chức (≈ 3,2 USD theo giá Text Search Pro 32 USD / 1.000 lượt) — ĐỀ XUẤT ban đầu, ghi đè ở
  * `address.resolver`. `perTick` · `tickBudgetMs` giữ một lượt job ngắn; `maxAttempts` = số lượt xét lại cùng một chữ địa chỉ.
  */
-export const ADDRESS_RESOLVER_DEFAULTS = { dailyPlacesLimit: 100, perTick: 15, placesTimeoutMs: 8_000, tickBudgetMs: 25_000, maxAttempts: 3 } as const;
+export const ADDRESS_RESOLVER_DEFAULTS = { dailyPlacesLimit: 100, perTick: 15, maxPerTick: 50, placesTimeoutMs: 8_000, tickBudgetMs: 25_000, maxAttempts: 3 } as const;
+/** Đơn chốt trước khi có `raw.addressText`: đọc tin khách trong cửa sổ này trước lúc đơn tạo (bằng hạn lượt mua của bot — 3 ngày). */
+export const LEGACY_TEXT_WINDOW_MS = 3 * 24 * 3_600_000;
+export type AddressResolverConfig = { enabled?: boolean; places?: boolean; dailyPlacesLimit?: number; perTick?: number };
 
 export type AddressResolverUsage = { day: string; places: number; costMicros: number; lastError: string | null; lastErrorAt: string | null };
-export type ResolvePendingResult = { checked: number; sure: number; unsure: number; none: number; placesCalls: number; placesOff: string | null; placesError: string | null; error: string | null };
+export type ResolvePendingResult = { checked: number; sure: number; unsure: number; none: number; placesCalls: number; placesOff: string | null; placesError: string | null; error: string | null; off: string | null };
 
 const vnDay = (at: Date) => new Date(at.getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
 
@@ -63,11 +75,13 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | "TIMEOUT"> {
 
 /** Một lượt. `now` là tham số (bài kiểm không đọc đồng hồ thật). Không ném. */
 export async function resolvePendingAddresses(now: Date = new Date(), deps: Deps = {}): Promise<ResolvePendingResult> {
-  const out: ResolvePendingResult = { checked: 0, sure: 0, unsure: 0, none: 0, placesCalls: 0, placesOff: null, placesError: null, error: null };
+  const out: ResolvePendingResult = { checked: 0, sure: 0, unsure: 0, none: 0, placesCalls: 0, placesOff: null, placesError: null, error: null, off: null };
   const clock = deps.now ?? (() => Date.now());
   const started = clock();
   try {
-    const cfg = await getSettingJson<{ places?: boolean; dailyPlacesLimit?: number }>(ADDRESS_RESOLVER_SETTING_KEY, {});
+    const cfg = await getSettingJson<AddressResolverConfig>(ADDRESS_RESOLVER_SETTING_KEY, {});
+    if (cfg.enabled === false) return { ...out, off: "tắt ở address.resolver" };
+    const perTick = Number.isInteger(cfg.perTick) && (cfg.perTick as number) >= 1 ? Math.min(cfg.perTick as number, ADDRESS_RESOLVER_DEFAULTS.maxPerTick) : ADDRESS_RESOLVER_DEFAULTS.perTick;
     const limit = Number.isInteger(cfg.dailyPlacesLimit) && (cfg.dailyPlacesLimit ?? -1) >= 0 ? (cfg.dailyPlacesLimit as number) : ADDRESS_RESOLVER_DEFAULTS.dailyPlacesLimit;
     const day = vnDay(now);
     const prev = await getSettingJson<Partial<AddressResolverUsage>>(ADDRESS_RESOLVER_USAGE_KEY, {});
@@ -76,20 +90,19 @@ export async function resolvePendingAddresses(now: Date = new Date(), deps: Deps
     const db = await getDb();
     const o = schema.orders;
     const rows = await db
-      .select({ id: o.id, raw: o.raw, address: o.shipAddress, province: o.shipProvince, conv: o.salesConversationId })
+      .select({ id: o.id, raw: o.raw, address: o.shipAddress, province: o.shipProvince, conv: o.salesConversationId, createdAt: o.createdAt })
       .from(o)
       .where(
         and(
           sql`${o.salesConversationId} is not null`,
           sql`${o.stage} not in ('CANCELLED', 'DELETED')`,
           eq(o.shipCommune, ""),
-          sql`${o.raw} ? 'addressText'`,
           sql`${o.raw}->'review'->'entries' @> '[{"code":"ADDRESS_UNRESOLVED"}]'::jsonb`,
           sql`(${o.raw}->'addressResolution' is null or (${o.raw}->'addressResolution'->>'textAt') is distinct from (${o.raw}->'addressText'->>'at') or coalesce((${o.raw}->'addressResolution'->>'attempts')::int, 0) < ${ADDRESS_RESOLVER_DEFAULTS.maxAttempts} and (${o.raw}->'addressResolution'->>'places') = 'false')`,
         ),
       )
       .orderBy(desc(o.updatedAt))
-      .limit(ADDRESS_RESOLVER_DEFAULTS.perTick);
+      .limit(perTick);
     if (!rows.length) return out;
 
     // Bậc Google: mở kết nối MỘT lần / lượt.
@@ -108,7 +121,9 @@ export async function resolvePendingAddresses(now: Date = new Date(), deps: Deps
       if (clock() - started > ADDRESS_RESOLVER_DEFAULTS.tickBudgetMs) break;
       const raw = (r.raw ?? {}) as { addressText?: { lines?: unknown; at?: unknown }; addressResolution?: Partial<AddressResolution> };
       if (!orderReviewOf(r.raw)?.entries.some((e) => e.code === "ADDRESS_UNRESOLVED" && e.note.startsWith(MACHINE_ADDRESS_NOTE_PREFIX))) continue;
-      const lines = Array.isArray(raw.addressText?.lines) ? (raw.addressText!.lines as unknown[]).filter((x): x is string => typeof x === "string") : [];
+      const stored = Array.isArray(raw.addressText?.lines) ? (raw.addressText!.lines as unknown[]).filter((x): x is string => typeof x === "string") : null;
+      const lines = stored ?? (r.conv ? await conversationAddressLines(r.conv, r.createdAt).catch(() => []) : []);
+      const textSource: AddressResolution["textSource"] = stored ? "ORDER_TEXT" : lines.length ? "CONVERSATION" : "NONE";
       const textAt = typeof raw.addressText?.at === "string" ? raw.addressText.at : null;
       const attempts = raw.addressResolution?.textAt === textAt ? (raw.addressResolution?.attempts ?? 0) + 1 : 1;
       out.checked += 1;
@@ -146,6 +161,7 @@ export async function resolvePendingAddresses(now: Date = new Date(), deps: Deps
         candidates: v.candidates.map((c) => c.ward).slice(0, 6),
         reason: placesError ? `${v.reason} · Google lỗi ${placesError}` : v.reason,
         textAt,
+        textSource,
         places: usedPlaces,
         placesError,
         attempts,
@@ -170,6 +186,22 @@ async function openPlacesConnection(): Promise<{ apiKey: string; relay: ReturnTy
   return { off: conn.ok ? "kết nối google-places thiếu khoá" : conn.reason.slice(0, 160) };
 }
 
+/**
+ * Đơn chốt trước khi có `raw.addressText`: các dòng mang địa chỉ trong tin CỦA KHÁCH (vai `user`, chỉ khối chữ) từ
+ * `LEGACY_TEXT_WINDOW_MS` trước tới lúc đơn tạo — tin gửi SAU khi đơn tạo không thuộc đơn này.
+ */
+export async function conversationAddressLines(conversationId: string, orderAt: Date): Promise<string[]> {
+  const db = await getDb();
+  const m = schema.salesChatMessages;
+  const msgs = await db
+    .select({ content: m.content })
+    .from(m)
+    .where(and(eq(m.conversationId, conversationId), eq(m.role, "user"), gte(m.createdAt, new Date(orderAt.getTime() - LEGACY_TEXT_WINDOW_MS)), lte(m.createdAt, orderAt)))
+    .orderBy(asc(m.seq));
+  const texts = msgs.map((x) => (Array.isArray(x.content) ? (x.content as { type?: unknown; text?: unknown }[]).filter((b) => b.type === "text" && typeof b.text === "string").map((b) => String(b.text)).join("\n").trim() : "")).filter(Boolean);
+  return addressTextLines(texts);
+}
+
 /** Địa chỉ ĐÃ XÁC MINH của chính khách (Customer 360, cùng tổ chức) cho bậc (b). */
 async function verifiedOf(conversationId: string): Promise<{ address: string; province: string; ward: string }[]> {
   const db = await getDb();
@@ -183,6 +215,7 @@ async function verifiedOf(conversationId: string): Promise<{ address: string; pr
 /** Dòng tóm tắt cho `sync_runs` (chỉ số đếm). HÀM THUẦN. */
 export function resolvePendingSummary(r: ResolvePendingResult): string {
   if (r.error) return ` · ánh xạ địa chỉ lỗi: ${r.error}`;
+  if (r.off) return ` · ánh xạ địa chỉ: ${r.off}`;
   if (!r.checked) return "";
   return ` · ánh xạ địa chỉ: ${r.checked} đơn (chắc ${r.sure} · cần nhân viên ${r.unsure + r.none}) · Google ${r.placesCalls}${r.placesOff ? ` (tắt: ${r.placesOff})` : ""}${r.placesError ? ` · Google lỗi ${r.placesError}` : ""}`;
 }
