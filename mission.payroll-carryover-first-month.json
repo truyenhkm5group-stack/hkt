@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "payroll-carryover-first-month",
+  "title": "Sổ lỗ cá nhân: tháng làm việc đầu tiên có số dư đầu kỳ 0 (gỡ chặn chốt lương 08/2026)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/payroll-carryover-first-month",
+  "base_sha": "2d588c63005edfd6897d4ba5e4abbfb5ac6889d0",
+  "domains": [],
+  "owned_paths": [
+    "lib/queries/payroll-carryover.ts",
+    "lib/constants/payroll-carryover.ts",
+    "tests/payroll-carryover.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-22T08:57:38.197Z",
+  "updated_at": "2026-10-22T08:57:38.197Z",
+  "last_heartbeat": "2026-10-22T08:57:38.197Z",
+  "definition_of_done": []
+}
