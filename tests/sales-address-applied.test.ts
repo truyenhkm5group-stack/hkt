@@ -96,7 +96,10 @@ export function testSalesAddressAppliedPure() {
   const msg = (role: string, text: string, i: number) => ({ seq: i, role, at: new Date(t0 + i * 1000), content: [{ type: "text", text }] });
   assert.deepEqual(scanThreadQuality([msg("user", "ok", 1), msg("assistant", CLAIM_SAFE_TEXT.ORDER_RECEIVED, 2)], w).hits, [], "ORDER_RECEIVED không tính là CLAIM_GUARD_BLOCK");
   assert.deepEqual(scanThreadQuality([msg("user", "ck rồi", 1), msg("assistant", CLAIM_SAFE_TEXT.PAYMENT, 2)], w).hits.map((h) => h.code), ["CLAIM_GUARD_BLOCK"], "câu an toàn khác vẫn tính");
-  assert.equal(SALES_QUALITY_CODES[SALES_QUALITY_CODES.length - 1], "ADDRESS_RECEIVED_BUT_NOT_APPLIED");
+  // Mã mới THÊM SAU các khoá đã lưu (không chen giữa, không đổi thứ tự cũ) — các nhánh khác cũng thêm mã ở cuối nên «phần tử cuối» không phải bất biến.
+  const OLD_CODES = ["HANDOFF_UNANSWERED", "QTY_REASKED", "SECONDARY_INTENT_UNANSWERED", "WRONG_PRODUCT_TEMPLATE", "ADDRESS_REASK", "COMPLAINT_WHILE_SELLING", "CLARIFY_FALLBACK", "CLAIM_GUARD_BLOCK", "UPSELL_ACCEPTED_BUT_REASKED", "UPSELL_ACCEPTED_NOT_ATTACHED"];
+  assert.deepEqual(SALES_QUALITY_CODES.slice(0, OLD_CODES.length), OLD_CODES, "khoá cũ giữ nguyên thứ tự ở đầu danh sách");
+  assert.ok(SALES_QUALITY_CODES.indexOf("ADDRESS_RECEIVED_BUT_NOT_APPLIED") >= OLD_CODES.length, "mã mới đứng SAU các khoá cũ");
   assert.ok(SALES_QUALITY_CODES.includes("ADDRESS_REASK") && !(SALES_QUALITY_CODES as readonly string[]).includes("KNOWN_ADDRESS_REASKED"), "khoá lưu ADDRESS_REASK giữ nguyên — một hiện tượng, một mã");
   assert.match(SALES_QUALITY_SPEC.ADDRESS_REASK.label, /KNOWN_ADDRESS_REASKED/);
   const flaggedRaw = { review: { entries: [machine] } };

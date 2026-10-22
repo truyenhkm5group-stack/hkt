@@ -51,6 +51,17 @@ export type CommittedItem = {
    * «Hộp 10 cái» = 1 hộp). So với đơn đề nghị bằng số cái của quy cách mẫu mã (`piecesOf`).
    */
   pieces?: boolean;
+  /**
+   * Khách nói SỐ mà KHÔNG kèm chữ đơn vị («thêm 10 nem hải sản» — P0 22/10/2026, đơn HSLC #8037F35A). Với món bán theo «Hộp 10 cái» số ấy
+   * có thể là 10 CÁI (= 1 hộp) hoặc 10 HỘP — không phải số hộp khách nói tường minh. `bareResolution` quyết suy ra / mơ hồ; chỉ dòng có
+   * đơn vị khách nói rõ mới có thẩm quyền chặn model hạ số lượng.
+   */
+  bare?: boolean;
+  /**
+   * Hàng rào số lượng / đơn vị đã từ chối ghi dòng này vì số trần mơ hồ và đã hỏi khách «mấy hộp» ⇒ dòng KHÔNG có thẩm quyền giữ đơn
+   * (`cartHoldVerdict` bỏ qua) cho tới khi khách nói lại số — lần áp kế tiếp xoá dấu.
+   */
+  unitPending?: boolean;
 };
 
 /**
@@ -184,7 +195,8 @@ const namePairs = (name: string) =>
     .filter(([f]) => f && !/^\d/.test(f) && f !== "kg" && f !== "g");
 
 /** Tên sản phẩm bỏ phần quy cách trong ngoặc («Chả mực giã tay (Size: 1kg)» ⇒ «Chả mực giã tay»). */
-const productName = (name: string) => name.replace(/\s*\([^)]*\)\s*$/, "").trim() || name;
+/** Tên sản phẩm bỏ phần quy cách trong ngoặc cuối («Ruốc bông tôm 100% (Size: 250g)» ⇒ «Ruốc bông tôm 100%»). HÀM THUẦN. */
+export const productName = (name: string) => name.replace(/\s*\([^)]*\)\s*$/, "").trim() || name;
 
 /**
  * Chữ khách gõ ⇒ tên món. Có DANH MỤC: chỉ nhận đoạn chữ nằm TRONG đúng một tên sản phẩm (dài nhất trước) và trả TÊN DANH MỤC có dấu;
@@ -744,7 +756,7 @@ function findItem(items: readonly CommittedItem[], label: string): number | null
   return hits.length === 1 ? hits[0] : null;
 }
 
-const newItem = (a: CartAmount, turn: number | null, explicit: boolean): CommittedItem => ({ label: a.display, match: a.label, productId: null, variantId: null, sku: null, quantity: a.value, unit: a.unit, sourceMessageId: turn, confidence: a.label ? "HIGH" : "MEDIUM", customerExplicit: explicit, ...(a.pieces ? { pieces: true } : {}) });
+const newItem = (a: CartAmount, turn: number | null, explicit: boolean): CommittedItem => ({ label: a.display, match: a.label, productId: null, variantId: null, sku: null, quantity: a.value, unit: a.unit, sourceMessageId: turn, confidence: a.label ? "HIGH" : "MEDIUM", customerExplicit: explicit, ...(a.pieces ? { pieces: true } : {}), ...(a.bare ? { bare: true } : {}) });
 
 /**
  * Áp MỘT tin khách lên giỏ. Trả ĐÚNG đối tượng cũ khi không đổi gì (engine chỉ ghi khi khác). Đích của MỌI lượng trong câu được tính
@@ -892,7 +904,7 @@ function applyCart(cart: CartCommitment | undefined, text: string, turn: number 
     const t = targets[0];
     if (intent.amounts.length !== 1 || typeof t !== "number" || !intent.amounts[0].label) return relax("Khách chọn lại món («chỉ / thôi») nhưng chưa rõ giữ món nào — hỏi lại");
     const a = intent.amounts[0];
-    return done([{ ...items[t], quantity: a.value, unit: a.unit, sourceMessageId: turn, customerExplicit: true, confidence: "HIGH" }]);
+    return done([{ ...items[t], quantity: a.value, unit: a.unit, sourceMessageId: turn, customerExplicit: true, confidence: "HIGH", bare: a.bare || undefined, unitPending: undefined }]);
   }
   const next = items.map((x) => ({ ...x }));
   const added: CommittedItem[] = [];
@@ -922,7 +934,9 @@ function applyCart(cart: CartCommitment | undefined, text: string, turn: number 
       else return relax(`Khách nói ${amountText(a.value, a.unit)} mà món đang tính theo ${cur.unit === "g" ? "khối lượng" : "gói"} — chưa quy đổi được, hỏi lại khách muốn còn bao nhiêu`);
     }
     const quantity = intent.kind === "ADD" ? cur.quantity + delta : intent.kind === "REDUCE" ? cur.quantity - delta : a.value;
-    next[t] = { ...cur, quantity, unit: relative ? cur.unit : a.unit, ...(relative ? {} : { pieces: Boolean(a.pieces) || undefined }), sourceMessageId: turn, customerExplicit: true, confidence: cur.productId || a.label ? "HIGH" : "MEDIUM", ...(a.label && !cur.match ? { match: a.label, label: a.display } : {}) };
+    // Số KHÔNG kèm chữ đơn vị (`bare`) giữ dấu qua mọi lần áp: cộng một số trần vào số đã nói rõ đơn vị ⇒ cả dòng thành «chưa rõ đơn vị»
+    // (QUANTITY/UNIT GUARD quyết — `bareResolution`), không bao giờ được coi là số hộp khách nói tường minh.
+    next[t] = { ...cur, quantity, unit: relative ? cur.unit : a.unit, ...(relative ? {} : { pieces: Boolean(a.pieces) || undefined }), bare: (relative ? cur.bare || a.bare : a.bare) || undefined, unitPending: undefined, sourceMessageId: turn, customerExplicit: true, confidence: cur.productId || a.label ? "HIGH" : "MEDIUM", ...(a.label && !cur.match ? { match: a.label, label: a.display } : {}) };
     changed = true;
   }
   if (!changed) return hasEditCue(text, labels) && cart ? relax("Khách có vẻ muốn sửa nhưng máy chưa áp được — hỏi lại") : cart;
@@ -967,6 +981,80 @@ function proposedAmount(productId: string, unit: CartUnit, asked: readonly Asked
   return lines.reduce((s, l) => s + (l.weightGrams ?? 0) * l.quantity, 0);
 }
 
+// ─────────────────────────── QUANTITY / UNIT GUARD (P0 22/10/2026 — đơn HSLC #8037F35A) ───────────────────────────
+
+/**
+ * Thẩm quyền của MỘT dòng giỏ đối với các dòng đơn đề nghị của CÙNG sản phẩm (`lines`):
+ *  · `STATED`    — khách nói rõ đơn vị («10 hộp» · «10 cái» · «2kg»), hoặc món không bán theo hộp N cái ⇒ luật cũ, có thẩm quyền.
+ *  · `INFERRED`  — số TRẦN («10 nem») mà mẫu mã là «Hộp N cái» và số là BỘI của N ⇒ suy ra `packs` hộp. Suy ra, KHÔNG phải khách nói.
+ *  · `AMBIGUOUS` — số trần không chia hết N ⇒ không biết khách đếm cái hay hộp ⇒ không ghi, hỏi đúng một câu.
+ * Mẫu mã không ghi số cái (`piecesOf` = null) hoặc bán lẻ từng cái (N = 1) ⇒ `STATED` (số trần là số gói như #855). HÀM THUẦN.
+ */
+export type BareResolution = { kind: "STATED" } | { kind: "INFERRED"; packs: number; perPack: number } | { kind: "AMBIGUOUS"; perPack: number };
+export function bareResolution(item: Pick<CommittedItem, "bare" | "unit" | "pieces" | "quantity">, lines: readonly { name: string }[]): BareResolution {
+  if (!item.bare || item.unit !== "pack" || item.pieces || !lines.length) return { kind: "STATED" };
+  const per = [...new Set(lines.map((l) => piecesOf(l.name)))];
+  if (per.length !== 1 || per[0] === null || per[0] <= 1) return { kind: "STATED" };
+  const n = per[0];
+  return item.quantity > 0 && item.quantity % n === 0 ? { kind: "INFERRED", packs: item.quantity / n, perPack: n } : { kind: "AMBIGUOUS", perPack: n };
+}
+
+/** Mã chặn của hàng rào số lượng / đơn vị — trùng mã 2B (lib/constants/sales-quality.ts). */
+export type QuantityUnitCode = "QUANTITY_UNIT_AMBIGUOUS" | "PACK_MULTIPLIER_MISMATCH";
+export type QuantityUnitIssue = { code: QuantityUnitCode; product: string; said: string; message: string; ask: string | null; itemIndex: number };
+
+/** Câu hỏi DUY NHẤT khi số khách nói không quy được ra số hộp. HÀM THUẦN. */
+export function packQuestion(product: string, perPack: number): string {
+  return `Dạ ${product.toLowerCase()} bên em đóng hộp ${perPack} cái, mình lấy mấy hộp ạ?`;
+}
+
+/**
+ * HÀNG RÀO SỐ LƯỢNG / ĐƠN VỊ — chạy TRƯỚC mọi lần ghi đơn (tạo / sửa), không gọi model. Mỗi dòng giỏ khách nói bằng SỐ TRẦN mà sản phẩm
+ * có mặt trong đơn đề nghị:
+ *  · mơ hồ ⇒ `QUANTITY_UNIT_AMBIGUOUS`: KHÔNG ghi, hỏi đúng một câu (`ask`);
+ *  · suy ra được mà đơn ghi khác số hộp suy ra ⇒ `PACK_MULTIPLIER_MISMATCH` (vd «10 nem» với hộp 10 cái mà đơn ghi 10 hộp = 100 cái).
+ * Sản phẩm không có trong đơn đề nghị ⇒ không xét (model có thể đang hỏi lại). `null` = qua. HÀM THUẦN.
+ */
+export function quantityUnitIssue(cart: CartCommitment | undefined, asked: readonly AskedLine[]): QuantityUnitIssue | null {
+  if (!cart) return null;
+  for (const [itemIndex, item] of cart.selectedItems.entries()) {
+    if (!item.customerExplicit || !item.bare) continue;
+    const pid = productFor(item, cart, asked);
+    if (!pid) continue;
+    const lines = asked.filter((l) => l.productId === pid);
+    const res = bareResolution(item, lines);
+    if (res.kind === "STATED") continue;
+    const product = item.label || productName(lines[0]?.name ?? "") || "món khách chọn";
+    const said = `${item.quantity} ${item.label ? item.label.toLowerCase() : "(không đơn vị)"}`;
+    const packs = lines.reduce((t, l) => t + l.quantity, 0);
+    if (res.kind === "AMBIGUOUS") {
+      const ask = packQuestion(product, res.perPack);
+      return { code: "QUANTITY_UNIT_AMBIGUOUS", product, said, ask, itemIndex, message: `KHÔNG ghi «${product}»: khách nói «${said}» KHÔNG kèm đơn vị, mẫu mã bán theo hộp ${res.perPack} cái — ${item.quantity} không quy được ra số hộp. Hỏi khách ĐÚNG MỘT câu: «${ask}» — không nói đã thêm, không tự chọn số hộp.` };
+    }
+    if (packs === res.packs) continue;
+    return { code: "PACK_MULTIPLIER_MISMATCH", product, said, ask: null, itemIndex, message: `KHÔNG ghi ${packs} hộp «${product}»: khách nói «${said}» KHÔNG kèm đơn vị, mẫu mã hộp ${res.perPack} cái ⇒ ${item.quantity} cái = ${res.packs} hộp (quantity ${res.packs}), không phải ${packs} hộp = ${packs * res.perPack} cái. quantity là SỐ HỘP. Sửa quantity = ${res.packs}; báo khách rõ «${res.packs} hộp ${res.perPack} cái» khi xác nhận.` };
+  }
+  return null;
+}
+
+/**
+ * Sản phẩm mà khách NÓI số lượng ở ĐÚNG lượt `turn` (dòng giỏ khách nói tường minh, `sourceMessageId === turn`) — căn cứ đồng ý cho lần sửa
+ * đơn ĐÃ CHỐT của lượt đó (ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT). HÀM THUẦN.
+ */
+export function productsStatedAt(cart: CartCommitment | undefined, asked: readonly AskedLine[], turn: number | null, opts: { unitStated?: boolean } = {}): Set<string> {
+  const out = new Set<string>();
+  if (!cart || turn === null) return out;
+  for (const item of cart.selectedItems) {
+    if (!item.customerExplicit || item.sourceMessageId !== turn) continue;
+    const pid = productFor(item, cart, asked);
+    if (!pid) continue;
+    // `unitStated` ⇒ chỉ dòng khách nói RÕ đơn vị («1kg», «10 hộp», «10 cái») — số trần suy ra theo quy cách không tính.
+    if (opts.unitStated && bareResolution(item, asked.filter((l) => l.productId === pid)).kind !== "STATED") continue;
+    out.add(pid);
+  }
+  return out;
+}
+
 /**
  * KIỂM CỨNG phía máy chủ: đơn đề nghị GIẢM hoặc BỎ một món khách đã nói tường minh mà giỏ chưa ghi nhận câu sửa tường minh nào mới
  * hơn ⇒ câu lỗi cho model (công cụ từ chối). Tăng / thêm món khác ⇒ `null`. Không đo được ⇒ `null`. Lượt khách có dấu hiệu sửa mà máy
@@ -979,6 +1067,9 @@ export function commitmentViolation(cart: CartCommitment | undefined, asked: rea
     if (!item.customerExplicit) continue;
     const pid = productFor(item, cart, asked);
     if (!pid) continue;
+    // CHỈ dòng có ĐƠN VỊ khách nói rõ mới có thẩm quyền chặn hạ số lượng (P0 22/10/2026, #8037F35A: «thêm 10 nem» đọc thành 10 gói đã chặn
+    // đúng 1 hộp 10 cái rồi ép model ghi 10 hộp — tổng 540.000 ⇒ 1.740.000). Số trần suy ra / mơ hồ ⇒ `quantityUnitIssue`.
+    if (bareResolution(item, asked.filter((l) => l.productId === pid)).kind !== "STATED") continue;
     const proposed = proposedAmount(pid, item.unit, asked, item.pieces);
     if (proposed === null || proposed >= item.quantity) continue;
     const name = item.label || productName(asked.find((l) => l.productId === pid)?.name ?? "") || "món khách chọn";
@@ -1006,6 +1097,16 @@ export function cartDraftDiff(cart: CartCommitment | undefined, asked: readonly 
     if (opts.since !== undefined && opts.since !== null && (item.sourceMessageId === null || item.sourceMessageId <= opts.since)) continue;
     const pid = productFor(item, cart, asked);
     if (!pid) continue;
+    // Số trần (không đơn vị) của món bán theo hộp N cái: so theo số hộp SUY RA, mơ hồ ⇒ không đoán (bỏ qua).
+    const res = bareResolution(item, asked.filter((l) => l.productId === pid));
+    if (res.kind === "AMBIGUOUS") continue;
+    if (res.kind === "INFERRED") {
+      const gotPacks = asked.filter((l) => l.productId === pid).reduce((t, l) => t + l.quantity, 0);
+      if (gotPacks === res.packs) continue;
+      const label = item.label || productName(asked.find((l) => l.productId === pid)?.name ?? "") || "món khách chọn";
+      out.push({ label, want: `${res.packs} hộp (${item.quantity} cái)`, got: `${gotPacks} hộp`, wantAmount: res.packs, gotAmount: gotPacks, unit: "pack", sourceMessageId: item.sourceMessageId });
+      continue;
+    }
     const got = proposedAmount(pid, item.unit, asked, item.pieces);
     if (got === null || got === item.quantity) continue;
     const label = item.label || productName(asked.find((l) => l.productId === pid)?.name ?? "") || "món khách chọn";
@@ -1209,6 +1310,8 @@ export function lineBasisViolation(cart: CartCommitment | undefined, asked: read
       qua (1kg → 10kg). Không quy đổi được thì GIỮ hàng rào — bot hỏi lại, chứ không tự chốt một con số.
     */
     if (explicitCoMa.some((e) => e.pid === pid && e.it !== item && donViHopNhau(e.it, item))) continue;
+    // Số không kèm đơn vị của món bán theo hộp N cái: không phải số khách nói tường minh ⇒ `quantityUnitIssue` quyết, không phải hàng rào này.
+    if (bareResolution(item, asked.filter((l) => l.productId === pid)).kind !== "STATED") continue;
     const proposed = proposedAmount(pid, item.unit, asked, item.pieces);
     // Khách đếm CÁI mà quy cách mẫu mã không ghi số cái / hộp ⇒ không quy được ⇒ HỎI LẠI, không lên đơn món này (không mặc định 1 cái = 1 hộp).
     if (item.pieces && asked.some((l) => l.productId === pid && piecesOf(l.name) === null)) {
@@ -1369,7 +1472,12 @@ function holdReason(botText: string, cart: CartCommitment, customerText: string)
  * ⇒ trả câu giữ đơn để thay chỗ, kèm lại những câu còn lại không vướng (vd câu xin SĐT — bước kế không mất). Khách VỪA có ý sửa / bớt /
  * huỷ ⇒ không bao giờ thay (bot đang làm theo khách). HÀM THUẦN.
  */
-export function cartHoldVerdict(botText: string, cart: CartCommitment | undefined, customerText = "", opts: { hasDraft?: boolean } = {}): { reason: HoldReason; safeText: string; note: string } | null {
+export function cartHoldVerdict(botText: string, cart0: CartCommitment | undefined, customerText = "", opts: { hasDraft?: boolean } = {}): { reason: HoldReason; safeText: string; note: string } | null {
+  // Dòng hàng rào số lượng / đơn vị đang hỏi lại «mấy hộp» không có thẩm quyền giữ đơn — câu hỏi ấy CHÍNH là việc phải làm.
+  const pending = cart0?.selectedItems.filter((x) => x.unitPending) ?? [];
+  // Câu gọi tên ĐÚNG món đang chờ đơn vị («nem … đóng hộp 10 cái, mình lấy mấy hộp ạ?») là câu hàng rào yêu cầu — không phải hỏi lại món đã chốt.
+  if (pending.some((x) => x.label && (mentionsProduct(x.label, botText) || calledByName(x.label, botText)))) return null;
+  const cart = cart0 && pending.length ? { ...cart0, selectedItems: cart0.selectedItems.filter((x) => !x.unitPending) } : cart0;
   if (!cart || !cart.selectedItems.some((x) => x.customerExplicit)) return null;
   if (customerText && (hasEditCue(customerText, cart.selectedItems.map((x) => x.match)) || ["SET", "REDUCE", "KEEP", "REMOVE", "CANCEL"].includes(classifyCartMessage(customerText).kind))) return null;
   const reason = holdReason(botText, cart, customerText);

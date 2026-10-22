@@ -137,12 +137,26 @@ export function staffTotalConflict(staffTexts: readonly string[], draftTotals: r
   const known = new Set(draftTotals.filter((n) => Number.isFinite(n) && n > 0));
   if (!known.size) return null;
   for (const s of staffTexts) {
-    for (const clause of s.split(/[,.;!?\n]+/)) {
-      const f = foldVi(clause);
-      if (!TOTAL_CUE_RE.test(f) || NOT_TOTAL_RE.test(f)) continue;
-      const amounts = extractVndAmounts(clause).filter((a) => a >= 10_000);
-      if (amounts.length && !amounts.some((a) => known.has(a))) return amounts[amounts.length - 1];
+    for (const amounts of totalClauses(s)) {
+      if (!amounts.some((a) => known.has(a))) return amounts[amounts.length - 1];
     }
   }
   return null;
+}
+
+/**
+ * Số tiền của từng mệnh đề BÁO TỔNG trong một câu (có chữ báo tổng, không phải phí ship / đơn giá / đơn cũ) — cùng luật `staffTotalConflict`,
+ * để bộ dò 2B (STAFF_AI_QUOTE_CONFLICT) đọc tổng của bot và của nhân viên bằng MỘT định nghĩa. HÀM THUẦN.
+ */
+export function totalClauses(text: string): number[][] {
+  const out: number[][] = [];
+  // Dấu chấm / phẩy ĐỨNG TRƯỚC CHỮ SỐ là dấu nghìn / thập phân («tổng 1.740.000 ₫», «1,5kg»), không phải ranh giới mệnh đề — tách ở đó thì
+  // «1.740.000» thành «1» · «740» · «000» và mọi tổng viết đủ số bị bỏ qua (chỉ «400k» còn đọc được). Không dùng nhìn-ngược (Safari < 16.4).
+  for (const clause of text.split(/[;!?\n]+|[.,](?!\d)/)) {
+    const f = foldVi(clause);
+    if (!TOTAL_CUE_RE.test(f) || NOT_TOTAL_RE.test(f)) continue;
+    const amounts = extractVndAmounts(clause).filter((a) => a >= 10_000);
+    if (amounts.length) out.push(amounts);
+  }
+  return out;
 }

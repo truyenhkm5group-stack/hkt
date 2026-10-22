@@ -312,7 +312,13 @@ export function extractVndAmounts(text: string): number[] {
     });
   };
   take(MILLION_SPLIT_RE, (m) => Number(m[2]) * 1_000_000 + Number(m[3]) * 10 ** (6 - m[3].length));
-  take(UNIT_AMOUNT_RE, (m) => Number(m[2].replace(",", ".")) * (m[3].toLowerCase() === "k" || m[3].toLowerCase().startsWith("ng") ? 1000 : 1_000_000));
+  // «1.740k» / «1,740k» = 1.740 NGHÌN (dấu nghìn), không phải 1,74 nghìn: với «k» / «nghìn», phần sau dấu có ĐÚNG 3 chữ số là dấu nghìn (P0
+  // 22/10/2026 — tổng nhân viên viết kiểu này từng đọc thành 1.740 ₫). «1.5k» · «1,5tr» vẫn là thập phân.
+  take(UNIT_AMOUNT_RE, (m) => {
+    const thousand = m[3].toLowerCase() === "k" || m[3].toLowerCase().startsWith("ng");
+    const n = thousand && /^\d{1,3}[.,]\d{3}$/.test(m[2]) ? Number(m[2].replace(/[.,]/, "")) : Number(m[2].replace(",", "."));
+    return n * (thousand ? 1000 : 1_000_000);
+  });
   take(GROUPED_AMOUNT_RE, (m) => Number(m[2].replace(/[.,]/g, "")));
   take(PLAIN_CURRENCY_RE, (m) => Number(m[2]));
   return out;

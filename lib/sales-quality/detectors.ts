@@ -11,6 +11,9 @@
  *    DƯỚI, không bao giờ bắt nhầm hơn hàng rào.
  *  · COMPLAINT_WHILE_SELLING — tin khách `customerComplaintSignal` mà tin bot ngay sau có câu `classifySentence` UPSELL / CROSS_SELL.
  *  · CLAIM_GUARD_BLOCK — tin bot đúng một câu an toàn `CLAIM_SAFE_TEXT` (hàng rào đã thay câu model).
+ *  · QUANTITY_UNIT_AMBIGUOUS · PACK_MULTIPLIER_MISMATCH · CART_TOTAL_CONFLICT · ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT — kết quả công cụ
+ *    ghi đơn bị hàng rào giá trị đơn từ chối (ô `guard`, lib/constants/sales-order-guard.ts); mẫu số = số lần bot gọi công cụ ghi đơn.
+ *  · STAFF_AI_QUOTE_CONFLICT — tin nhân viên / page báo TỔNG khác mọi tổng bot đã báo trong hội thoại (`staffTotalConflict` + `totalClauses`).
  * HANDOFF_UNANSWERED không ở đây: nó là ảnh chụp lúc chạy, luật ở lib/constants/handoff-reply.ts.
  */
 import { createHash } from "node:crypto";
@@ -30,20 +33,39 @@ import { choiceAmountText, quantityOnlyAnswer } from "@/lib/sales-chatbot/round-
 import { calledByName, mentionsProduct } from "@/lib/sales-chatbot/cart-commitment";
 import { extractVndAmounts } from "@/lib/sales-chatbot/claim-guard";
 import { isShortAccept } from "@/lib/sales-chatbot/short-accept";
+import { staffTotalConflict, totalClauses } from "@/lib/sales-chatbot/cancel-recovery";
+import { ORDER_GUARD_CODES, type OrderGuardCode } from "@/lib/constants/sales-order-guard";
 import { foldVi } from "@/lib/sales-chatbot/text";
 
 export type QualityMsg = { seq: number; role: string; at: Date; content: unknown };
 export type QualityTemplate = { title: string; answer: string; head: string };
-export type QualityContext = { from: Date; to: Date; templates: readonly QualityTemplate[]; products: readonly FocusProduct[] };
-export type QualityHit = { code: SalesQualityCode; at: Date };
+/**
+ * `automationTexts` = chữ (đã trim) các tin page do MẪU TỰ ĐỘNG Pancake gửi (`sales_chat_inbound.sender_kind = PANCAKE_AUTOMATION`) — tin page
+ * chép vào lịch sử không mang người gửi, nên nơi gọi (đọc được CSDL) nạp tập chữ này để bộ dò tách nhánh «mẫu tự động page».
+ */
+export type QualityContext = { from: Date; to: Date; templates: readonly QualityTemplate[]; products: readonly FocusProduct[]; automationTexts?: ReadonlySet<string> };
+/** `source` = nhánh của mã (hiện chỉ STAFF_AI_QUOTE_CONFLICT: tổng lệch đến từ MẪU TỰ ĐỘNG của page, không phải nhân viên gõ). */
+export type QualityHit = { code: SalesQualityCode; at: Date; source?: "PAGE_AUTOMATION" };
 /** Mẫu số trong kỳ: tin khách · tin bot · tin khách chỉ là câu trả lời số lượng (F) · tin hai ý số lượng + giao (G) · tin phàn nàn. */
-export type QualityBases = { customerMessages: number; botMessages: number; quantityAnswers: number; deliverySecondAsks: number; complaints: number; offerAccepts: number };
+/** `orderWrites` = lần bot gọi công cụ ghi đơn (tạo / sửa đơn nháp) · `staffTotals` = tin nhân viên / page có câu báo tổng. */
+export type QualityBases = { customerMessages: number; botMessages: number; quantityAnswers: number; deliverySecondAsks: number; complaints: number; offerAccepts: number; orderWrites: number; staffTotals: number };
 export type ThreadQuality = { hits: QualityHit[]; bases: QualityBases };
 
 /** Băm ngắn mã hội thoại — cùng phép băm `hashConv` của scripts/conv-money-trace.ts. HÀM THUẦN. */
 export const conversationHash = (id: string) => createHash("sha256")["update"](id).digest("hex").slice(0, 8);
 
-type Block = { type?: unknown; text?: unknown; content?: unknown; isError?: unknown };
+type Block = { type?: unknown; text?: unknown; content?: unknown; isError?: unknown; name?: unknown };
+const ORDER_WRITE_TOOLS = new Set(["create_draft_order", "update_draft_order"]);
+const GUARD_CODES = new Set<string>(ORDER_GUARD_CODES);
+/** Mã hàng rào giá trị đơn trong một kết quả công cụ bị từ chối (`{ error, guard }`). HÀM THUẦN. */
+function guardOf(raw: unknown): OrderGuardCode | null {
+  try {
+    const p = JSON.parse(String(raw)) as Record<string, unknown>;
+    return typeof p.guard === "string" && GUARD_CODES.has(p.guard) ? (p.guard as OrderGuardCode) : null;
+  } catch {
+    return null;
+  }
+}
 const blocksOf = (content: unknown): Block[] => (Array.isArray(content) ? (content as Block[]) : []);
 const textOf = (content: unknown) =>
   blocksOf(content)
@@ -104,9 +126,11 @@ export function oneProductInvite(text: string, products: readonly FocusProduct[]
 /** Đi một hội thoại. Chỉ ĐẾM tin có mốc trong [from, to); tin trước `from` vẫn được đọc làm ngữ cảnh. HÀM THUẦN. */
 export function scanThreadQuality(msgs: readonly QualityMsg[], ctx: QualityContext): ThreadQuality {
   const hits: QualityHit[] = [];
-  const bases: QualityBases = { customerMessages: 0, botMessages: 0, quantityAnswers: 0, deliverySecondAsks: 0, complaints: 0, offerAccepts: 0 };
+  const bases: QualityBases = { customerMessages: 0, botMessages: 0, quantityAnswers: 0, deliverySecondAsks: 0, complaints: 0, offerAccepts: 0, orderWrites: 0, staffTotals: 0 };
+  /** Mọi tổng BOT đã báo trong hội thoại — tổng nhân viên / page khác hết chúng ⇒ STAFF_AI_QUOTE_CONFLICT. */
+  const botTotals: number[] = [];
   const inWindow = (at: Date) => at.getTime() >= ctx.from.getTime() && at.getTime() < ctx.to.getTime();
-  const hit = (code: SalesQualityCode, at: Date) => hits.push({ code, at });
+  const hit = (code: SalesQualityCode, at: Date, source?: QualityHit["source"]) => hits.push({ code, at, ...(source ? { source } : {}) });
   const lines: FocusLine[] = [];
   const customerTexts: string[] = [];
   const botTexts: string[] = [];
@@ -154,7 +178,12 @@ export function scanThreadQuality(msgs: readonly QualityMsg[], ctx: QualityConte
         offer = null;
       }
       for (const b of blocksOf(m.content)) {
-        if (b.type !== "tool_result" || b.isError) continue;
+        if (b.type === "tool_result" && b.isError) {
+          const g = guardOf(b.content);
+          if (g && counted) hit(g, m.at);
+          continue;
+        }
+        if (b.type !== "tool_result") continue;
         if (accept && foldVi(String(b.content)).includes(foldVi(accept.name))) accept.attached = true;
         const sent = deliverOf(b.content);
         if (!sent) continue;
@@ -165,9 +194,16 @@ export function scanThreadQuality(msgs: readonly QualityMsg[], ctx: QualityConte
       }
       continue;
     }
+    if (counted) for (const b of blocksOf(m.content)) if (b.type === "tool_use" && ORDER_WRITE_TOOLS.has(String(b.name))) bases.orderWrites += 1;
     const t = textOf(m.content);
     if (!t) continue;
     if (t.startsWith(SHOP_SAID)) {
+      const said = t.slice(SHOP_SAID.length);
+      if (totalClauses(said).length) {
+        if (counted) bases.staffTotals += 1;
+        // Mẫu tự động của page in một tổng CỐ ĐỊNH (ca #8037F35A: mẫu Pancake luôn in 400.000 ₫) — cùng mã, nhánh nguồn riêng để thấy ngay khi mẫu còn chạy.
+        if (counted && staffTotalConflict([said], botTotals) !== null) hit("STAFF_AI_QUOTE_CONFLICT", m.at, ctx.automationTexts?.has(said.trim()) ? "PAGE_AUTOMATION" : undefined);
+      }
       lines.push({ who: "SHOP", text: t });
       prevBot = t.slice(SHOP_SAID.length).trim();
       botTexts.push(t);
@@ -178,6 +214,7 @@ export function scanThreadQuality(msgs: readonly QualityMsg[], ctx: QualityConte
       if (ATTACHED_SAY_RE.test(t)) accept.attached = true;
       else if (accept.counted && REASK_AFTER_ACCEPT_RE.test(t)) hit("UPSELL_ACCEPTED_BUT_REASKED", m.at);
     }
+    for (const amounts of totalClauses(t)) botTotals.push(...amounts);
     offer = oneProductInvite(t, ctx.products);
     if (counted) {
       bases.botMessages += 1;

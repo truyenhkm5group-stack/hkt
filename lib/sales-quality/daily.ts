@@ -40,6 +40,8 @@ export type SalesQualityState = {
   capped: boolean;
   counts: Record<SalesQualityCode, number>;
   bases: QualityBases & { handoffWaiting: number };
+  /** STAFF_AI_QUOTE_CONFLICT tách theo nguồn: từ MẪU TỰ ĐỘNG page (Pancake) hay tin page khác (nhân viên / chưa rõ). */
+  quoteConflictSources?: { PAGE_AUTOMATION: number; OTHER: number };
   /** Hạn chờ người đọc được (giờ); `null` ⇒ không kết luận HANDOFF_UNANSWERED. */
   slaHours: number | null;
 };
@@ -87,7 +89,7 @@ export async function collectHandoffUnanswered(now: Date): Promise<{ ids: string
 }
 
 /** Quét tin của ngày hôm qua bằng bộ dò thuần. */
-async function scanDay(from: Date, to: Date): Promise<{ byCode: Map<SalesQualityCode, { hits: number; convs: Set<string> }>; bases: QualityBases; conversations: number; capped: boolean }> {
+async function scanDay(from: Date, to: Date): Promise<{ byCode: Map<SalesQualityCode, { hits: number; convs: Set<string> }>; bases: QualityBases; conversations: number; capped: boolean; automationQuoteConflicts: number }> {
   const db = await getDb();
   const c = schema.salesChatConversations;
   const m = schema.salesChatMessages;
@@ -96,24 +98,31 @@ async function scanDay(from: Date, to: Date): Promise<{ byCode: Map<SalesQuality
   const ids = convs.slice(0, SALES_QUALITY_MAX_CONVERSATIONS).map((x) => x.id);
   const templates = (await listQuickReplies().catch(() => [])).map((r) => ({ title: r.title, answer: r.answer, head: templateHead(r.answer) }));
   const products = await loadFocusProducts().catch(() => []);
+  // Chữ các tin MẪU TỰ ĐỘNG của page (STAFF_AI_QUOTE_CONFLICT nhánh «mẫu tự động page») — mẫu ít, đọc một lần cho cả lượt.
+  const ib = schema.salesChatInbound;
+  const automationTexts = new Set(
+    (await db.selectDistinct({ text: ib.text }).from(ib).where(and(eq(ib.note, "PAGE_REPLY"), eq(ib.senderKind, "PANCAKE_AUTOMATION"))).limit(2000).catch(() => [])).map((r) => String(r.text ?? "").trim()).filter(Boolean),
+  );
+  let automationQuoteConflicts = 0;
   const byCode = new Map<SalesQualityCode, { hits: number; convs: Set<string> }>();
-  const bases: QualityBases = { customerMessages: 0, botMessages: 0, quantityAnswers: 0, deliverySecondAsks: 0, complaints: 0, offerAccepts: 0 };
+  const bases: QualityBases = { customerMessages: 0, botMessages: 0, quantityAnswers: 0, deliverySecondAsks: 0, complaints: 0, offerAccepts: 0, orderWrites: 0, staffTotals: 0 };
   for (let i = 0; i < ids.length; i += 200) {
     const rows = await db.select({ conv: m.conversationId, seq: m.seq, role: m.role, content: m.content, at: m.createdAt }).from(m).where(and(inArray(m.conversationId, ids.slice(i, i + 200)), lt(m.createdAt, to))).orderBy(asc(m.conversationId), asc(m.seq));
     const threads = new Map<string, typeof rows>();
     for (const r of rows) (threads.get(r.conv) ?? threads.set(r.conv, []).get(r.conv)!).push(r);
     for (const [conv, msgs] of threads) {
-      const q = scanThreadQuality(msgs, { from, to, templates, products });
+      const q = scanThreadQuality(msgs, { from, to, templates, products, automationTexts });
       for (const k of Object.keys(bases) as (keyof QualityBases)[]) bases[k] += q.bases[k];
       for (const h of q.hits) {
         const e = byCode.get(h.code) ?? { hits: 0, convs: new Set<string>() };
         e.hits += 1;
+        if (h.source === "PAGE_AUTOMATION") automationQuoteConflicts += 1;
         e.convs.add(conv);
         byCode.set(h.code, e);
       }
     }
   }
-  return { byCode, bases, conversations: ids.length, capped: convs.length > SALES_QUALITY_MAX_CONVERSATIONS };
+  return { byCode, bases, conversations: ids.length, capped: convs.length > SALES_QUALITY_MAX_CONVERSATIONS, automationQuoteConflicts };
 }
 
 /**
@@ -191,6 +200,11 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
       UPSELL_ACCEPTED_BUT_REASKED: `Mẫu số: ${b.offerAccepts} lần khách đồng ý ngắn («Ok», 👍) ngay sau lời mời một món`,
       UPSELL_ACCEPTED_NOT_ATTACHED: `Mẫu số: ${b.offerAccepts} lần khách đồng ý ngắn ngay sau lời mời một món`,
       ADDRESS_RECEIVED_BUT_NOT_APPLIED: `Mẫu số: ${na.flagged} đơn bot chốt còn cờ «địa chỉ chưa ghép» (ghi từ đầu kỳ)`,
+      QUANTITY_UNIT_AMBIGUOUS: `Mẫu số: ${b.orderWrites} lần bot gọi công cụ ghi đơn`,
+      PACK_MULTIPLIER_MISMATCH: `Mẫu số: ${b.orderWrites} lần bot gọi công cụ ghi đơn`,
+      CART_TOTAL_CONFLICT: `Mẫu số: ${b.orderWrites} lần bot gọi công cụ ghi đơn`,
+      STAFF_AI_QUOTE_CONFLICT: `Mẫu số: ${b.staffTotals} tin nhân viên / page báo tổng · trong đó từ MẪU TỰ ĐỘNG page (Pancake) ${scan.automationQuoteConflicts} lần`,
+      ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT: `Mẫu số: ${b.orderWrites} lần bot gọi công cụ ghi đơn`,
     };
     const db = await getDb();
     let created = 0;
@@ -205,7 +219,7 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
         .returning({ id: schema.notifications.id });
       created += ins.length;
     }
-    const state: SalesQualityState = { day, at: now.toISOString(), conversations: scan.conversations, capped: scan.capped, counts, bases: { ...b, handoffWaiting: ho.waiting }, slaHours };
+    const state: SalesQualityState = { day, at: now.toISOString(), conversations: scan.conversations, capped: scan.capped, counts, bases: { ...b, handoffWaiting: ho.waiting }, slaHours, quoteConflictSources: { PAGE_AUTOMATION: scan.automationQuoteConflicts, OTHER: counts.STAFF_AI_QUOTE_CONFLICT - scan.automationQuoteConflicts } };
     await setSettingJson(SALES_QUALITY_STATE_KEY, state);
     return { ran: true, day, created, state };
   } catch (e) {
