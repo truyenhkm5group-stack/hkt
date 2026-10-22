@@ -206,6 +206,26 @@ export function withAddressSettled(raw: Record<string, unknown>, by: { at: strin
 }
 
 /**
+ * Máy ánh xạ địa chỉ nền KHÔNG CHẮC (address-resolver-ladder, 22/10/2026) ⇒ ghi ứng viên + lý do vào ĐÚNG dòng cờ máy «địa chỉ chưa
+ * ghép» (một việc cho nhân viên, không thêm dòng). Đã có cùng ghi chú ⇒ không đổi. HÀM THUẦN.
+ */
+export function withAddressCandidates(raw: Record<string, unknown>, hint: string): { raw: Record<string, unknown>; changed: boolean } {
+  const open = orderReviewOf(raw);
+  if (!open) return { raw, changed: false };
+  const tag = " · Máy ánh xạ: ";
+  let changed = false;
+  const entries = open.entries.map((e) => {
+    if (e.code !== "ADDRESS_UNRESOLVED" || !e.note.startsWith(MACHINE_ADDRESS_NOTE_PREFIX)) return e;
+    const base = e.note.split(tag)[0];
+    const note = `${base}${tag}${hint}`.slice(0, ORDER_REVIEW_LIMITS.noteMax);
+    if (note === e.note) return e;
+    changed = true;
+    return { ...e, note };
+  });
+  return changed ? { raw: { ...raw, review: { entries } }, changed } : { raw, changed: false };
+}
+
+/**
  * Khách đã báo huỷ rồi lại ĐỒNG Ý qua bot (lời xác nhận hợp lệ): ghi MỘT dòng vết «khách xác nhận lại» — KHÔNG gỡ cờ, người vẫn
  * quyết (chủ shop 08/10/2026: «người huỷ, hoặc cứu được thì xác nhận lại»). Không có cờ «khách huỷ» đang mở ⇒ không ghi; câu y
  * hệt đã ghi ⇒ không ghi lại. HÀM THUẦN.

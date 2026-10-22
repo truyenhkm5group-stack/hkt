@@ -90,7 +90,7 @@ export const LEGAL_DOCUMENTS: Readonly<Record<LegalDocumentKey, LegalDocument>> 
     path: PRIVACY_POLICY.path,
     contentSource: "components/legal/privacy-content.tsx",
     content: PRIVACY_CONTENT,
-    contentSha256: "a6f79000abf258086daabeffc9d04c4ff3aef1a673f84c3347665f9c736e53c2",
+    contentSha256: "9c7cc51b2b1cfe23e9af65080b020b8731ddae269235209b8cbb1487dcbc6523",
   },
   DPA: {
     key: "DPA",

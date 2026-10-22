@@ -30,6 +30,7 @@ import { listQuickReplies, loadFocusProducts } from "@/lib/sales-chatbot/quick-r
 import { addressNotApplied, conversationHash, scanThreadQuality, templateHead, type QualityBases } from "@/lib/sales-quality/detectors";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { rowsOf } from "@/lib/sql-rows";
+import { ADDRESS_RESOLVER_USAGE_KEY, countOutOfScope, type OutOfScopeReason } from "@/lib/address/resolve-job";
 
 export type SalesQualityCount = { hits: number; conversations: number; hashes: string[] };
 export type SalesQualityState = {
@@ -45,7 +46,39 @@ export type SalesQualityState = {
   quoteConflictSources?: { PAGE_AUTOMATION: number; OTHER: number };
   /** Hạn chờ người đọc được (giờ); `null` ⇒ không kết luận HANDOFF_UNANSWERED. */
   slaHours: number | null;
+  /** Máy ánh xạ địa chỉ nền trong kỳ (address-resolver-ladder): tự ánh xạ theo bậc / cần nhân viên + lượt Google, chi phí ước tính, lỗi. */
+  addressResolver?: AddressResolverDay;
 };
+
+/** `outOfScope` = đơn còn treo cờ máy mà máy KHÔNG được chạm (huỷ · đã khép · có vận đơn · quá tuổi) — đo được còn bao nhiêu đơn cũ treo cờ. */
+export type AddressResolverDay = { auto: number; staff: number; bySource: { TEXT: number; C360: number; PLACES: number }; placesCalls: number; placesCostUsd: number; placesError: string | null; outOfScope?: Record<OutOfScopeReason, number> };
+
+/** Đếm kết quả máy ánh xạ địa chỉ có mốc trong kỳ (`raw.addressResolution.at`) + sổ lượt Google của ngày chạy. */
+export async function collectAddressResolverDay(from: Date, to: Date, now: Date): Promise<AddressResolverDay> {
+  const db = await getDb();
+  const o = schema.orders;
+  const rows = await db
+    .select({ status: sql<string>`${o.raw}->'addressResolution'->>'status'`, source: sql<string | null>`${o.raw}->'addressResolution'->>'source'`, n: sql<number>`count(*)::int` })
+    .from(o)
+    .where(and(sql`${o.raw} ? 'addressResolution'`, sql`(${o.raw}->'addressResolution'->>'at') >= ${from.toISOString()}`, sql`(${o.raw}->'addressResolution'->>'at') < ${to.toISOString()}`))
+    .groupBy(sql`1`, sql`2`);
+  const out: AddressResolverDay = { auto: 0, staff: 0, bySource: { TEXT: 0, C360: 0, PLACES: 0 }, placesCalls: 0, placesCostUsd: 0, placesError: null };
+  for (const r of rows) {
+    if (r.status === "SURE") {
+      out.auto += Number(r.n);
+      if (r.source === "TEXT" || r.source === "C360" || r.source === "PLACES") out.bySource[r.source] += Number(r.n);
+    } else out.staff += Number(r.n);
+  }
+  const usage = await getSettingJson<{ day?: string; places?: number; costMicros?: number; lastError?: string | null }>(ADDRESS_RESOLVER_USAGE_KEY, {});
+  if (usage.day === vnDayOf(from) || usage.day === vnDayOf(now)) {
+    out.placesCalls = usage.places ?? 0;
+    out.placesCostUsd = Math.round((usage.costMicros ?? 0) / 10_000) / 100;
+    out.placesError = usage.lastError ?? null;
+  }
+  const oos = await countOutOfScope(now).catch(() => null);
+  if (oos) out.outOfScope = oos;
+  return out;
+}
 export type SalesQualityResult = { ran: false; reason: string } | { ran: true; day: string; created: number; state: SalesQualityState };
 
 const toDate = (v: unknown): Date | null => {
@@ -220,7 +253,8 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
         .returning({ id: schema.notifications.id });
       created += ins.length;
     }
-    const state: SalesQualityState = { day, at: now.toISOString(), conversations: scan.conversations, capped: scan.capped, counts, bases: { ...b, handoffWaiting: ho.waiting, addressFlagged: na.flagged }, slaHours, quoteConflictSources: { PAGE_AUTOMATION: scan.automationQuoteConflicts, OTHER: counts.STAFF_AI_QUOTE_CONFLICT - scan.automationQuoteConflicts } };
+    const addressResolver = await collectAddressResolverDay(from, to, now).catch(() => undefined);
+    const state: SalesQualityState = { day, at: now.toISOString(), conversations: scan.conversations, capped: scan.capped, counts, bases: { ...b, handoffWaiting: ho.waiting, addressFlagged: na.flagged }, slaHours, quoteConflictSources: { PAGE_AUTOMATION: scan.automationQuoteConflicts, OTHER: counts.STAFF_AI_QUOTE_CONFLICT - scan.automationQuoteConflicts }, ...(addressResolver ? { addressResolver } : {}) };
     await setSettingJson(SALES_QUALITY_STATE_KEY, state);
     return { ran: true, day, created, state };
   } catch (e) {
@@ -234,5 +268,10 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
 export function salesQualitySummary(r: SalesQualityResult): string {
   if (!r.ran) return r.reason === "chưa tới giờ chạy" || r.reason === "hôm nay đã chạy" ? "" : ` · chất lượng AI ngày: ${r.reason}`;
   const parts = SALES_QUALITY_CODES.filter((k) => r.state.counts[k] > 0).map((k) => `${k} ${r.state.counts[k]}`);
-  return ` · chất lượng AI ${r.day}: ${parts.length ? parts.join(" · ") : "không lỗi"} (${r.state.conversations} hội thoại · ${r.created} việc mới)`;
+  const ar = r.state.addressResolver;
+  const arText = ar && (ar.auto || ar.staff || ar.placesCalls) ? ` · ánh xạ địa chỉ: tự ${ar.auto} (chữ ${ar.bySource.TEXT} · C360 ${ar.bySource.C360} · Google ${ar.bySource.PLACES}) / cần nhân viên ${ar.staff} · Google ${ar.placesCalls} lượt ≈ ${ar.placesCostUsd} USD${ar.placesError ? ` · Google lỗi ${ar.placesError}` : ""}` : "";
+  const oos = ar?.outOfScope;
+  const oosTotal = oos ? oos.CANCELLED + oos.CLOSED + oos.SHIPMENT + oos.TOO_OLD : 0;
+  const oosText = oos && oosTotal ? ` · cờ địa chỉ ngoài phạm vi máy ${oosTotal} (huỷ ${oos.CANCELLED} · đã khép ${oos.CLOSED} · có vận đơn ${oos.SHIPMENT} · quá tuổi ${oos.TOO_OLD})` : "";
+  return ` · chất lượng AI ${r.day}: ${parts.length ? parts.join(" · ") : "không lỗi"} (${r.state.conversations} hội thoại · ${r.created} việc mới)${arText}${oosText}`;
 }
