@@ -5,18 +5,25 @@
  * mang mã gốc (hoặc không mã) ⇒ bot nhà / nhân viên đọc POS thấy mã cũ. Script ghi khối `partner` của đơn POS = mã vận đơn MỚI qua
  * `PUT /shops/{SHOP_ID}/orders/{ORDER_ID}` (spec OpenAPI chính thức: «chỉ field được gửi mới được ghi; field không gửi giữ nguyên»).
  *
+ * MỘT LUẬT GHÉP, Ở ERP — POS CHỈ ĐI THEO. Script KHÔNG tự ghép vận đơn mới với vận đơn gốc: ứng viên là đơn có LẦN GỬI CHÍNH
+ * (`PRIMARY_ATTEMPT` — cùng luật với `vanDonDaiDien` của bot) mang vết `raw.reship` (dấu mà luật gắn lần gửi kế ghi ở CẢ BA đường:
+ * webhook, nhập tệp, vá dòng cũ — chỉ đường vá dòng cũ có thêm audit `SHIPMENT_RESHIP_RELINK`). Bản đầu tự ghép bằng
+ * `order_reference` đã đếm 698 «cặp» trong khi thật chỉ 330: 368 dòng còn lại là CHẶNG HOÀN `…P…` (đo 22/10/2026) — ghi chúng
+ * vào POS là gắn mã chiều hoàn vào đơn. Hai luật ghép là đúng thứ không được có.
+ *
  * Luật (quyết định Tech Lead + chủ shop duyệt pilot 22/10/2026):
  *  · MẶC ĐỊNH CHẠY THỬ: đếm cặp từ CSDL, đọc tối đa `--limit` (mặc định 20) đơn trên POS để in kế hoạch — không ghi gì;
  *  · `--apply` BẮT BUỘC kèm `--limit=N`; chỉ ghi `partner.extend_code` + `partner.order_number_vtp` — KHÔNG BAO GIỜ đổi `status`
  *    (đổi trạng thái có thể làm Pancake trừ tồn / sinh doanh thu lần nữa — chưa xác minh thì không làm);
  *  · chỉ ghi khi mã hiện có trên POS TRỐNG hoặc ĐÚNG mã gốc — mã lạ (ĐVVC khác, nhân viên đã sửa) ⇒ không đè, đếm riêng;
  *  · đúng mã mới rồi ⇒ không PUT (idempotent); đọc lại NGAY sau PUT, so mọi field khác trước / sau; ghi nhật ký ERP (audit);
- *  · cặp phải MỘT-MỘT (một vận đơn mới ↔ một vận đơn gốc ↔ một đơn), cùng CSDL nhà; không in tên / SĐT.
- * arg: `[--apply] [--limit=1..1000] [--pilot] [--order=<mã đơn POS>]`. `--pilot` = vận đơn mới ĐÃ GIAO + vận đơn gốc ĐÃ HUỶ.
+ *  · mỗi đơn đúng MỘT lần gửi chính (`PRIMARY_ATTEMPT`), cùng CSDL nhà; không in tên / SĐT.
+ * arg: `[--apply] [--limit=1..1000] [--pilot] [--order=<mã đơn POS>]`. `--pilot` = lần gửi chính ĐÃ GIAO + vận đơn gốc ĐÃ HUỶ.
  */
 import "dotenv/config";
 import { sql } from "drizzle-orm";
-import { getDb } from "@/db";
+import { getDb, type Db } from "@/db";
+import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { env } from "@/lib/env";
 import { asRecord, fetchJson, sleep } from "@/lib/integrations/http";
 import { maskPancakeKey } from "@/lib/constants/pancake-pos-org";
@@ -61,14 +68,14 @@ export function partnerOf(order: Record<string, unknown>): PosPartner {
 
 /**
  * Việc với một đơn: cả hai mã đã = mã mới ⇒ ALREADY; mỗi mã đang TRỐNG hoặc = mã GỐC ⇒ LINK; có mã nào khác cả hai ⇒ FOREIGN_CODE (không đè —
- * có thể là ĐVVC khác hoặc nhân viên đã sửa tay). HÀM THUẦN.
+ * có thể là ĐVVC khác hoặc nhân viên đã sửa tay). Không đọc được mã gốc (`null`) ⇒ chỉ ô TRỐNG mới gắn. HÀM THUẦN.
  */
-export function linkPlan(current: PosPartner, oldCode: string, newCode: string): LinkPlan {
-  const o = oldCode.toUpperCase();
+export function linkPlan(current: PosPartner, oldCode: string | null, newCode: string): LinkPlan {
+  const o = clean(oldCode);
   const n = newCode.toUpperCase();
   const codes = [clean(current.extend_code), clean(current.order_number_vtp)];
   if (codes.every((c) => c === n)) return "ALREADY";
-  return codes.every((c) => c === null || c === o || c === n) ? "LINK" : "FOREIGN_CODE";
+  return codes.every((c) => c === null || (o !== null && c === o) || c === n) ? "LINK" : "FOREIGN_CODE";
 }
 
 /** Thân PUT: CHỈ khối partner, hai mã. Không status, không field nào khác. HÀM THUẦN. */
@@ -101,22 +108,27 @@ export function unexpectedChanges(before: Record<string, unknown>, after: Record
 
 // ─────────────────────────── PHẦN CSDL + POS ───────────────────────────
 
-export type ReshipPair = { orderId: string; oldCode: string; newCode: string; newStage: string; oldStage: string };
+export type ReshipPair = { orderId: string; oldCode: string | null; newCode: string; newStage: string; oldStage: string | null; viaAudit: boolean };
 
-/** Cặp vận đơn tạo lại ↔ vận đơn gốc (đã gắn đơn) — MỘT-MỘT, chiều đi, không phải chặng hoàn `…P…`. CHỈ ĐỌC. */
-async function readPairs(): Promise<{ pairs: ReshipPair[]; notOneToOne: number }> {
-  const db = await getDb();
-  const rows = rowsOf<{ order_id: string; old_code: string; new_code: string; new_stage: string; old_stage: string; n_per_order: number | string; n_per_new: number | string }>(
-    await db.execute(sql`select g.order_id, g.vtp_order_number as old_code, n.vtp_order_number as new_code, n.stage::text as new_stage, g.stage::text as old_stage,
-        count(*) over (partition by g.order_id) as n_per_order, count(*) over (partition by n.id) as n_per_new
-      from shipments n
-      join shipments g on g.vtp_order_number = n.order_reference and g.order_id is not null and g.id <> n.id
-      where n.order_reference is not null and n.order_id is null and coalesce(n.direction, 'OUTBOUND') <> 'RETURN' and n.order_reference !~ '[0-9]P[0-9]'
-        and n.vtp_order_number is not null and g.order_id not like 'erp-%'
-      order by n.created_at desc nulls last, n.id`),
+/**
+ * Ứng viên: đơn Pancake (không phải đơn `erp-`) mà LẦN GỬI CHÍNH (`PRIMARY_ATTEMPT`) là lần gửi kế do luật gắn của ERP tạo / gắn
+ * (`raw.reship.of` = vận đơn gốc), chiều đi, mã VTP không phải chặng hoàn `…P…`. Script KHÔNG ghép gì — mã gốc chỉ đọc theo
+ * `raw.reship.of`. CHỈ ĐỌC.
+ */
+export async function readPairs(db: Db): Promise<{ pairs: ReshipPair[] }> {
+  const rows = rowsOf<{ order_id: string; old_code: string | null; new_code: string; new_stage: string; old_stage: string | null; via_audit: boolean }>(
+    await db.execute(sql`select "orders"."id" as order_id, "shipments"."vtp_order_number" as new_code, "shipments"."stage"::text as new_stage,
+        g.vtp_order_number as old_code, g.stage::text as old_stage,
+        exists (select 1 from audit_logs a where a.action = 'SHIPMENT_RESHIP_RELINK' and a.entity_id = "shipments"."id") as via_audit
+      from "shipments"
+      join "orders" on "orders"."id" = "shipments"."order_id" and ${PRIMARY_ATTEMPT}
+      left join shipments g on g.id = "shipments"."raw" -> 'reship' ->> 'of'
+      where "shipments"."raw" -> 'reship' ->> 'of' is not null
+        and "shipments"."vtp_order_number" is not null and "shipments"."vtp_order_number" !~ '[0-9]P[0-9]+$'
+        and coalesce("shipments"."direction"::text, 'OUTBOUND') <> 'RETURN' and "orders"."id" not like 'erp-%'
+      order by "shipments"."created_at" desc nulls last, "shipments"."id"`),
   );
-  const one = rows.filter((r) => Number(r.n_per_order) === 1 && Number(r.n_per_new) === 1);
-  return { pairs: one.map((r) => ({ orderId: String(r.order_id), oldCode: String(r.old_code), newCode: String(r.new_code), newStage: r.new_stage, oldStage: r.old_stage })), notOneToOne: rows.length - one.length };
+  return { pairs: rows.map((r) => ({ orderId: String(r.order_id), oldCode: r.old_code, newCode: String(r.new_code), newStage: r.new_stage, oldStage: r.old_stage, viaAudit: Boolean(r.via_audit) })) };
 }
 
 let lastCall = 0;
@@ -140,11 +152,12 @@ async function pos(method: "GET" | "PUT", orderId: string, body?: unknown): Prom
 }
 
 export async function runReshipLink(args: Exclude<ReshipArgs, { error: string }>, runId: string): Promise<boolean> {
-  const { pairs: all, notOneToOne } = await readPairs();
+  const { pairs: all } = await readPairs(await getDb());
   const delivered = all.filter((p) => p.newStage === "DELIVERED").length;
   const cancelledOld = all.filter((p) => p.oldStage === "CANCELLED").length;
+  const viaAudit = all.filter((p) => p.viaAudit).length;
   const pilotSet = all.filter((p) => p.newStage === "DELIVERED" && p.oldStage === "CANCELLED");
-  tomTat(`pos-reship-link ${args.apply ? "GHI" : "CHẠY THỬ"} · cặp một-một ${all.length} (không một-một bị loại ${notOneToOne}) · vận đơn mới đã giao ${delivered} · gốc đã huỷ ${cancelledOld} · cả hai (nhóm pilot) ${pilotSet.length}`);
+  tomTat(`pos-reship-link ${args.apply ? "GHI" : "CHẠY THỬ"} · đơn có lần gửi chính do ERP gắn ${all.length} (có audit vá dòng cũ ${viaAudit}) · lần gửi chính đã giao ${delivered} · gốc đã huỷ ${cancelledOld} · cả hai (nhóm pilot) ${pilotSet.length}`);
   let chon = args.pilot ? pilotSet : all;
   if (args.order) chon = chon.filter((p) => p.orderId === args.order);
   chon = chon.slice(0, args.limit);
@@ -161,7 +174,7 @@ export async function runReshipLink(args: Exclude<ReshipArgs, { error: string }>
     const cur = partnerOf(before);
     const plan = linkPlan(cur, p.oldCode, p.newCode);
     dem[plan] += 1;
-    console.log(`đơn ${p.orderId}: ${plan} · POS hiện ${cur.order_number_vtp ?? "—"}/${cur.extend_code ?? "—"} · gốc ${p.oldCode} (${p.oldStage}) → mới ${p.newCode} (${p.newStage})`);
+    console.log(`đơn ${p.orderId}: ${plan} · POS hiện ${cur.order_number_vtp ?? "—"}/${cur.extend_code ?? "—"} · gốc ${p.oldCode ?? "—"} (${p.oldStage ?? "—"}) → mới ${p.newCode} (${p.newStage})${p.viaAudit ? " · vá dòng cũ" : ""}`);
     if (!args.apply || plan !== "LINK") continue;
     try {
       await pos("PUT", p.orderId, linkBody(p.newCode));
