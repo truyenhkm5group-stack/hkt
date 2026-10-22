@@ -3,7 +3,7 @@
   "mission_id": "qty-leak-detector",
   "title": "2B PACK_MULTIPLIER_LEAKED: đơn đã ghi số hộp = số trần khách nói (bội quy cách) — «lọt tới khách» của sales-qty-unit-guard",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-qty-leak",
@@ -20,11 +20,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-22T12:44:08.151Z",
-  "updated_at": "2026-10-22T14:51:01.106Z",
+  "updated_at": "2026-10-22T15:24:46.195Z",
   "last_heartbeat": "2026-10-22T14:27:25.336Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#975 → 63303e94f87614ea7415837a92811cd2b90c5dcd"
+    "merged": "#975 → 63303e94f87614ea7415837a92811cd2b90c5dcd",
+    "verify": "PASS 63303e94f87614ea7415837a92811cd2b90c5dcd 2026-10-22T15:24:21.235Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39802211235"
   },
   "handoff": {
     "branch": "claude/qty-leak-detector",
