@@ -201,6 +201,7 @@ const MOI = [
   "0251_platform_webhook_rejections",
   "0252_ai_usage_workloads",
   "0253_ai_usage_cache_write",
+  "0254_carryover_first_work_month",
 ] as const;
 
 /*
@@ -1945,6 +1946,20 @@ export async function testMigrationUpgradePath() {
     await client.query(`insert into meta_pages (id, slug, name, module_key) values ('up-pg1', 'up-trang', 'Trang cũ', 'core')`);
     assert.equal(await dem("select count(*)::int as n from meta_pages where id = 'up-pg1' and draft_revision = 0"), 1, "0167: trang cũ mang revision 0");
     await client.query(`delete from meta_pages where id = 'up-pg1'`);
+
+    /*
+      0254 (sổ lỗ cá nhân · tháng làm việc đầu tiên): CHỈ MỞ RỘNG tập giá trị của `opening_source`. Dòng mang căn cứ mới
+      ghi được, giá trị lạ vẫn bị chặn, và tệp không chứa UPDATE nào — dòng cũ giữ nguyên nguồn (mục 35).
+    */
+    assert.ok(!/update/i.test(readFileSync(path.join(goc, "0254_carryover_first_work_month.sql"), "utf8").replace(/--.*$/gm, "")), "0254: migration KHÔNG được chứa UPDATE — không viết lại nguồn của dòng sổ cũ");
+    await client.query(`insert into marketer_profit_carryover (id, employee_id, month_key, opening_balance, opening_source, real_profit, commission_base, commission_rate_bp, signed_commission, payable_commission, closing_balance) values ('up-co-fwm', 'mkt-moi', '2026-08', 0, 'FIRST_WORK_MONTH', 0, 0, 1000, 0, 0, 0)`);
+    assert.equal(await dem("select count(*)::int as n from marketer_profit_carryover where id = 'up-co-fwm' and opening_source = 'FIRST_WORK_MONTH'"), 1, "0254: dòng tháng làm việc đầu tiên ghi được đúng căn cứ");
+    await assert.rejects(
+      () => client.query(`insert into marketer_profit_carryover (id, employee_id, month_key, opening_balance, opening_source, real_profit, commission_base, commission_rate_bp, signed_commission, payable_commission, closing_balance) values ('up-co-la', 'mkt-moi', '2026-09', 0, 'GUESS', 0, 0, 1000, 0, 0, 0)`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("marketer_carryover_source_check"),
+      "0254: giá trị nguồn lạ vẫn bị chặn ở CSDL — mở rộng, không bỏ ràng buộc",
+    );
+    await client.query(`delete from marketer_profit_carryover where id = 'up-co-fwm'`);
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });

@@ -21,6 +21,7 @@ import { payrollFinalizeBlockers } from "@/lib/constants/payroll-readiness";
 import type { CostEngineWarning } from "@/lib/queries/cost-engine";
 import { getPayrollReport } from "@/lib/queries/payroll";
 import { getCarryoverConfig, resolveOpening } from "@/lib/queries/payroll-carryover";
+import { calculatePayrollPeriodAs } from "@/lib/payroll/run-service";
 import type { Period } from "@/lib/search-params";
 import { setSettingJson } from "@/lib/settings";
 
@@ -208,25 +209,21 @@ export async function testPayrollCarryover(db: Db) {
   assert.equal((await resolveOpening(MOI.id, "2027-06", cfg, undefined, MOI.startedOn)).basis, "FIRST_WORK_MONTH");
   assert.equal((await resolveOpening(LECH.id, "2027-06", cfg, undefined, LECH.startedOn)).basis, "NONE");
   assert.equal((await resolveOpening(CU.id, "2027-06", cfg, undefined, CU.startedOn)).basis, "NONE");
-  // Đã ghi dòng tháng 6 (cột nguồn chỉ có hai giá trị) ⇒ đọc lại vẫn ra đúng căn cứ, từ ảnh chụp.
-  await db.insert(schema.marketerProfitCarryover).values({
-    id: "co-ledger-moi-t6",
-    employeeId: MOI.id,
-    monthKey: "2027-06",
-    openingBalance: 0,
-    openingSource: "OPENING_DECLARATION",
-    realProfit: 0,
-    commissionBase: 0,
-    commissionRateBp: 1000,
-    signedCommission: 0,
-    payableCommission: 0,
-    closingBalance: 0,
-    status: "DRAFT",
-    snapshot: { canCuSoDu: "FIRST_WORK_MONTH", lyDoSoDu: "câu đã chụp lúc tính" },
-  });
+  // Chốt kỳ qua ĐÚNG đường ghi (calculatePayrollPeriodAs): dòng sổ của người mới mang căn cứ THẬT ở CỘT (0254) —
+  // dòng này sắp bị khoá, và báo cáo / ops đọc cột chứ không đọc ảnh chụp. Dòng cũ không bị đổi nguồn.
+  await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [MOI] });
+  clearMemo();
+  const tinh = await calculatePayrollPeriodAs({ id: null, email: "kiem-thu@erp" }, { from: "2027-06-01", to: "2027-06-30", basis: "profit1", note: "kiểm thử tháng làm việc đầu tiên" });
+  assert.ok("ok" in tinh, `3b. chốt được tháng 6 cho người mới: ${"error" in tinh ? tinh.error : ""}`);
+  const soMoi = await db.select().from(schema.marketerProfitCarryover).where(sql`${schema.marketerProfitCarryover.employeeId} = ${MOI.id} and ${schema.marketerProfitCarryover.monthKey} = '2027-06'`);
+  assert.deepEqual(soMoi.map((r) => [r.openingSource, r.openingBalance]), [["FIRST_WORK_MONTH", 0]], "3b. dòng sổ ghi opening_source = FIRST_WORK_MONTH — không ghi nhầm thành «chủ shop khai đích danh»");
   const docLai = await resolveOpening(MOI.id, "2027-06", cfg, undefined, MOI.startedOn);
-  assert.deepEqual([docLai.basis, docLai.reason], ["FIRST_WORK_MONTH", "câu đã chụp lúc tính"], "3b. dòng đã ghi giữ căn cứ thật trong ảnh chụp, không đổi thành «chủ shop khai đích danh»");
-  await db.delete(schema.marketerProfitCarryover).where(sql`${schema.marketerProfitCarryover.id} in ('co-ledger-lech-t4', 'co-ledger-moi-t6')`);
+  assert.equal(docLai.basis, "FIRST_WORK_MONTH", "3b. đọc lại dòng đã ghi ra đúng căn cứ, từ cột");
+  assert.match(docLai.reason, /tháng làm việc ĐẦU TIÊN/, "3b. và câu giải thích chụp lúc tính");
+  const [cu4] = await db.select({ src: schema.marketerProfitCarryover.openingSource }).from(schema.marketerProfitCarryover).where(eq(schema.marketerProfitCarryover.id, "co-ledger-lech-t4"));
+  assert.equal(cu4?.src, "OPENING_DECLARATION", "3b. dòng cũ giữ nguyên nguồn");
+  await db.delete(schema.payrollPeriods).where(sql`${schema.payrollPeriods.periodKey} like '2027-06-01..%'`);
+  await db.delete(schema.marketerProfitCarryover).where(sql`${schema.marketerProfitCarryover.id} = 'co-ledger-lech-t4' or (${schema.marketerProfitCarryover.employeeId} = ${MOI.id})`);
   await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [MKT] });
   clearMemo();
 

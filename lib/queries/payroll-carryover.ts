@@ -66,11 +66,11 @@ const thangDauTien = (monthKey: string, startedOn: string): OpeningResolution =>
   reason: firstWorkMonthReason(monthKey, startedOn),
 });
 
-/** Dòng của CHÍNH tháng đang hỏi: nguồn ghi ở cột chỉ có hai giá trị, căn cứ thật nằm trong ảnh chụp. */
+/** Dòng của CHÍNH tháng đang hỏi: căn cứ đọc từ cột `opening_source` (ba giá trị từ 0254). */
 function fromOwnRow(row: CarryoverRow): OpeningResolution {
-  const anh = (row.snapshot ?? null) as { canCuSoDu?: unknown; lyDoSoDu?: unknown } | null;
-  if (anh?.canCuSoDu === "FIRST_WORK_MONTH") {
-    return { balance: row.openingBalance, basis: "FIRST_WORK_MONTH", established: true, reason: typeof anh.lyDoSoDu === "string" ? anh.lyDoSoDu : "Tháng làm việc đầu tiên — số dư lỗ đầu kỳ bằng 0." };
+  if (row.openingSource === "FIRST_WORK_MONTH") {
+    const anh = (row.snapshot ?? null) as { lyDoSoDu?: unknown } | null;
+    return { balance: row.openingBalance, basis: "FIRST_WORK_MONTH", established: true, reason: typeof anh?.lyDoSoDu === "string" ? anh.lyDoSoDu : "Tháng làm việc đầu tiên — số dư lỗ đầu kỳ bằng 0." };
   }
   return {
     balance: row.openingBalance,
