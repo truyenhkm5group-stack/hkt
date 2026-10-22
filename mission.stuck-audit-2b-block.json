@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "mission_id": "stuck-audit-2b-block",
+  "title": "stuck-conversation-audit in ảnh chụp 2B của tổ chức (settings sales-quality.daily) cạnh A2[/work]",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-2b-block",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/stuck-audit-2b-block",
+  "base_sha": "2d588c63005edfd6897d4ba5e4abbfb5ac6889d0",
+  "domains": [],
+  "owned_paths": [
+    "scripts/stuck-conversation-audit.ts",
+    "tests/stuck-conversation-audit.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-22T09:08:18.074Z",
+  "updated_at": "2026-10-22T09:08:18.074Z",
+  "last_heartbeat": "2026-10-22T09:08:18.074Z",
+  "definition_of_done": []
+}
