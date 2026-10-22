@@ -9,6 +9,7 @@ import { ghiSoTrangThai } from "@/lib/integrations/viettelpost/registry";
 import { measureWebhookGap } from "@/lib/constants/webhook-gap";
 import { afterShipmentStateChange } from "@/lib/care/lifecycle";
 import { resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
+import { nextAttemptNo, reshipCandidates, reshipParentOf, reshipTrace, type ReshipVerdict } from "@/lib/integrations/viettelpost/reship";
 
 /** Tạo / cập nhật đợt nhận tiền theo mã bảng kê (tổng hợp, chưa cần chi tiết vận đơn) */
 /**
@@ -195,12 +196,30 @@ export type OrderListMatch = VtpOrderListRow & {
    * direct = khớp mã vận đơn trong ERP;
    * leg    = vận đơn chiều về của vận đơn gốc (ghi thành vận đơn riêng, không đè trạng thái đơn gốc);
    * phone  = ERP có đơn nhưng vận đơn CHƯA có mã (shop tạo đơn thẳng trên web VTP), khớp theo SĐT người nhận.
+   * reship = mã CHƯA có, "Mã đơn hàng" là số vận đơn GỐC của một đơn ⇒ đường ghi TẠO lần gửi kế cho đơn đó
+   *          (lib/integrations/viettelpost/reship.ts — cùng luật với webhook, P0 22/10/2026).
+   * new    = mã CHƯA có, không gắn được đơn nào ⇒ đường ghi TẠO dòng mồ côi từ chính chứng từ ĐVVC (trước đây bị
+   *          bỏ qua — kiện mà webhook rơi thì tệp cũng không cứu được). Mang `reship` HOLD thì kèm lý do.
    */
-  matchKind: "direct" | "leg" | "phone" | null;
+  matchKind: "direct" | "leg" | "phone" | "reship" | "new" | null;
+  /** Phán quyết của luật gửi lại (chỉ khi mã chưa có trong ERP và có "Mã đơn hàng"). */
+  reship?: ReshipVerdict;
   /** Mã vận đơn gốc khi đây là vận đơn chiều về */
   legOf: string | null;
   matchIssue?: string;
 };
+
+/**
+ * Dòng tệp mang mã CHƯA có trong ERP có được TẠO thành vận đơn không (lần gửi kế / mồ côi). Dùng chung cho đường ghi
+ * và màn hình xem trước — hai bước không được lệch nhau vì hai luật (AGENTS 49). HÀM THUẦN.
+ */
+export function orderListRowCreatable(m: Pick<OrderListMatch, "matchKind" | "mapped" | "statusAt" | "statusDate" | "cod" | "fee">): boolean {
+  if (m.matchKind !== "reship" && m.matchKind !== "new") return false;
+  if (m.mapped.stage === "UNKNOWN") return false;
+  const at = m.statusAt ? new Date(m.statusAt) : m.statusDate ? vnStartOfDay(m.statusDate) : null;
+  if (!at || !Number.isFinite(at.getTime())) return false;
+  return m.cod !== null && m.fee !== null;
+}
 
 /** 9 số cuối: đủ phân biệt thuê bao mà không lệ thuộc 0/84/+84 hay khoảng trắng. */
 function phoneKey(value: string | null | undefined): string {
@@ -334,6 +353,11 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
         .leftJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
         .where(and(NO_CODE, inArray(SHIPMENT_PHONE, [...needPhone])))
     : [];
+  // Vận đơn tạo lại trên web VTP: "Mã đơn hàng" = số vận đơn GỐC của một đơn (lib/integrations/viettelpost/reship.ts).
+  const reshipPool = await reshipCandidates(
+    db,
+    rows.filter((r) => !legBaseCode(r.trackingCode) && !byCode.has(up(r.trackingCode)) && r.orderCode).map((r) => r.orderCode),
+  );
   const byPhone = new Map<string, typeof codeless>();
   for (const c of codeless) {
     const list = byPhone.get(c.phone) ?? [];
@@ -354,7 +378,12 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
     let matchIssue = ambiguous.has(usedCode) ? "Mã tham chiếu ghép được nhiều vận đơn; cần đối chiếu" : undefined;
     // Chỉ xét SĐT khi mã không ghép được — mã vẫn là bằng chứng mạnh hơn.
     let byPhoneMatch: (typeof codeless)[number] | undefined;
-    if (!matchIssue && !direct && !leg && !isLeg) {
+    // Mã chưa có mà "Mã đơn hàng" là số vận đơn gốc ⇒ lần gửi kế (mã là bằng chứng mạnh hơn SĐT, nên xét TRƯỚC).
+    const reship = !matchIssue && !direct && !isLeg && r.orderCode
+      ? reshipParentOf({ orderNumber: r.trackingCode, orderReference: r.orderCode, receiverPhone: r.receiverPhone }, reshipPool.get(up(r.orderCode)) ?? [])
+      : undefined;
+    const reshipFound = reship && reship.kind !== "NONE" ? reship : undefined;
+    if (!matchIssue && !direct && !leg && !isLeg && !reshipFound) {
       const key = phoneKey(r.receiverPhone);
       const all = key ? byPhone.get(key) ?? [] : [];
       // Nhiều đơn cùng SĐT thì lấy đúng đơn có COD khai báo trùng khít; vẫn nhập nhằng thì không đoán.
@@ -383,7 +412,8 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
       // HOÀN với "Chờ xử lý" = chưa lấy hàng (xem `mapVtpStatusText`). Trước bản này nó được đọc
       // và lưu vào `snapshot` nhưng không ảnh hưởng một quyết định nào.
       mapped: resolveVtpStatus({ code: r.statusCode ?? null, text: r.statusText, returnFlag: r.returnFlag ?? false }),
-      matchKind: f ? (direct ? "direct" : leg ? "leg" : "phone") : null,
+      matchKind: f ? (direct ? "direct" : leg ? "leg" : "phone") : matchIssue || isLeg ? null : reshipFound?.kind === "ATTEMPT" ? "reship" : "new",
+      ...(reshipFound ? { reship: reshipFound } : {}),
       legOf: leg ? (leg.vtp ?? base) : null,
       matchIssue,
     };
@@ -435,6 +465,15 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
   let legs = 0;
   /** Vận đơn ERP chưa có mã, nay được gắn mã nhờ SĐT người nhận trên file. */
   let linked = 0;
+  /** Mã chưa có, tạo thành LẦN GỬI KẾ của đơn gốc (vận đơn tạo lại trên web VTP — reship.ts). */
+  let reshipped = 0;
+  /** Mã chưa có, không gắn được đơn ⇒ tạo dòng mồ côi từ chính dòng tệp. */
+  let orphansCreated = 0;
+  /**
+   * Dòng do CHÍNH lượt nhập này tạo. Chúng KHÔNG vào phép đo khoảng hụt webhook (AGENTS 51): ERP chưa từng có kiện đó,
+   * điều đó không chứng minh một gói tin đã rơi — y như `UNMATCHED` ở màn hình xem trước, để hai bước đo cùng một tập.
+   */
+  const createdHere = new Set<string>();
   let stale = 0;
   let duplicate = 0;
   let missingDate = 0;
@@ -481,6 +520,42 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
       const at = m.statusAt ? new Date(m.statusAt) : m.statusDate ? vnStartOfDay(m.statusDate) : null;
       if (at && Number.isFinite(at.getTime())) {
         await ghiLoiKhaiTho(db, m.shipmentId, { code: m.mapped.code, name: m.statusText, occurredAt: at, mapped: false }).catch(() => undefined);
+      }
+    }
+    /*
+      MÃ CHƯA CÓ TRONG ERP ⇒ TẠO DÒNG TỪ CHÍNH CHỨNG TỪ ĐVVC (P0 22/10/2026, cùng luật với webhook — reship.ts):
+      lần gửi kế của đơn gốc (`reship`) hoặc dòng mồ côi (`new`). Chỉ khi dòng tệp dùng được (chặng đọc được, có mốc,
+      có ĐỦ thu hộ + cước): cột tiền của `shipments` là NOT NULL, ghi 0 cho ô chưa biết là biến CHƯA BIẾT thành 0.
+      Màn hình xem trước dùng đúng điều kiện này (`orderListRowCreatable`).
+    */
+    if (!m.shipmentId && orderListRowCreatable(m)) {
+      const v = m.reship;
+      const attempt = v?.kind === "ATTEMPT" ? { orderId: v.orderId, attemptNo: await nextAttemptNo(db, v.orderId), direction: "OUTBOUND" as const } : {};
+      const [row] = await db
+        .insert(schema.shipments)
+        .values({
+          ...attempt,
+          carrier: "Viettel Post",
+          vtpOrderNumber: m.trackingCode,
+          trackingCode: m.trackingCode,
+          orderReference: m.orderCode || null,
+          codAmount: m.cod!,
+          shippingFee: m.fee!,
+          receiverName: m.receiverName ?? "",
+          receiverPhone: m.receiverPhone ?? "",
+          receiverAddress: m.receiverAddress ?? "",
+          ...(v ? { raw: reshipTrace(v, "VTP_IMPORT", now) } : {}),
+        })
+        .onConflictDoNothing({ target: schema.shipments.vtpOrderNumber })
+        .returning({ id: schema.shipments.id });
+      const id = row?.id ?? (await db.select({ id: schema.shipments.id }).from(schema.shipments).where(eq(schema.shipments.vtpOrderNumber, m.trackingCode)).limit(1))[0]?.id;
+      if (id) {
+        m.shipmentId = id;
+        createdHere.add(id);
+        if (row) {
+          if (m.matchKind === "reship") reshipped++;
+          else orphansCreated++;
+        }
       }
     }
     if (!m.shipmentId || m.mapped.stage === "UNKNOWN") continue;
@@ -540,9 +615,9 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
         Dòng TRÙNG (`verdict === "same"`) đã thoát ở trên, nên tới đây mỗi dòng là một lời khai mà
         ERP hoặc đã biết, hoặc chưa. Cả hai đều vào mẫu số.
       */
-      checked += 1;
-      const dauVet = measureWebhookGap({ carrierEventAt: occurredAt, erpKnewAt: current.vtpStatusDate, importedAt });
-      if (dauVet.isGap) {
+      const dauVet = createdHere.has(current.id) ? null : measureWebhookGap({ carrierEventAt: occurredAt, erpKnewAt: current.vtpStatusDate, importedAt });
+      if (dauVet) checked += 1;
+      if (dauVet?.isGap) {
         gaps += 1;
         /*
           GOM LẠI, GHI SAU VÒNG LẶP — CỐ Ý KHÔNG GHI TRONG TRANSACTION NÀY.
@@ -567,7 +642,7 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
           gapMinutes: dauVet.minutes,
           severity: dauVet.severity,
         });
-      } else if (dauVet.reason === "ERP_ALREADY_AHEAD") {
+      } else if (dauVet?.reason === "ERP_ALREADY_AHEAD") {
         webhookOk += 1;
       }
       if (!older && !sameTimeConflict) {
@@ -623,7 +698,7 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
     });
   }
 
-  return { total: rows.length, matched: matches.filter((m) => m.shipmentId).length, updated, linked, paid: 0, legs, stale, duplicate, conflicts, missingDate,
+  return { total: rows.length, matched: matches.filter((m) => m.shipmentId).length, updated, linked, reshipped, orphansCreated, paid: 0, legs, stale, duplicate, conflicts, missingDate,
     unmatched: matches.filter((m) => !m.shipmentId).length, unknown: matches.filter((m) => m.shipmentId && m.mapped.stage === "UNKNOWN").length,
     // Phép đo chất lượng webhook của chính lần nhập này — xem lib/constants/webhook-gap.ts.
     checked, webhookOk, webhookGaps: gaps };
