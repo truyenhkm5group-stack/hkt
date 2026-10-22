@@ -18,18 +18,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T16:22:00.257Z",
-  "updated_at": "2026-10-22T16:37:13.685Z",
-  "last_heartbeat": "2026-10-22T16:37:13.685Z",
+  "updated_at": "2026-10-22T17:03:53.237Z",
+  "last_heartbeat": "2026-10-22T17:03:53.237Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/pos-reship-link",
-    "sha": "ee2e661f84b01133f5cf1d4d1c94893b88eda0b3",
-    "at": "2026-10-22T16:37:13.685Z",
+    "sha": "5002245977a9fbb71f0fb76242211b3a8f4c78d8",
+    "at": "2026-10-22T17:03:53.237Z",
     "actor": "DESKTOP-56TH98Y:wt-pos-reship",
     "title": "ops pos-reship-link: gắn mã vận đơn VTP tạo lại vào khối partner đơn Pancake POS (chạy thử mặc định, pilot 1 đơn)",
     "summary": "",
     "tests": [
-      "tsc --noEmit sạch · eslint 3 tệp sạch · tsx testPosReshipLink() XANH · đột biến 6/6 bị bắt (bỏ --limit, status trong thân PUT, đè mã lạ, bỏ idempotent, bỏ đọc lại, chạy thử không chỉ đọc) · ops-script-size 87.093/125.000 · full suite giao cho CI gates (máy đang 4 phiên chạy npm test)"
+      "tsc --noEmit sạch · eslint 3 tệp sạch · TEST_KHOI=K10 «TẤT CẢ KIỂM THỬ CỦA chỉ K10 ĐẠT» (gồm testPosReshipLinkDb trên PGlite) · đột biến SQL 2/2 bị bài CSDL bắt (bỏ PRIMARY_ATTEMPT, bỏ lọc raw.reship) + đột biến thuần 6/6 · full suite giao cho CI gates"
     ]
   }
 }
