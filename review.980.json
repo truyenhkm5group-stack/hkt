@@ -1,0 +1,8 @@
+{
+  "pr": 980,
+  "sha": "5002245977a9fbb71f0fb76242211b3a8f4c78d8",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-22T17:05:35.732Z",
+  "note": "review lead: CHỈ-SCRIPT. Ứng viên = đơn Pancake mà lần gửi CHÍNH (PRIMARY_ATTEMPT dùng lại nguyên) mang raw.reship.of, chiều đi, không phải …P… — một luật ghép duy nhất ở ERP (reshipParentOf), script không tự ghép. Mặc định CHẠY THỬ; --apply bắt buộc --limit; --pilot chọn đơn lần gửi mới DELIVERED ∧ gốc huỷ; PUT CHỈ partner{extend_code, order_number_vtp}, không status; FOREIGN_CODE không đè; idemp"
+}
