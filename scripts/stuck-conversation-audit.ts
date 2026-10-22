@@ -44,6 +44,7 @@ import { findOrganization, listOrganizations } from "@/lib/platform/organization
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { handoffReplyClass, handoffReplySplit, type HandoffReplyFact, type HandoffReplySplit } from "@/lib/constants/handoff-reply";
 import { CONFIRMED_ORDER_WATCH_DAYS } from "@/lib/constants/shipment-status-age";
+import { SALES_QUALITY_CODES, SALES_QUALITY_STATE_KEY, type SalesQualityCode } from "@/lib/constants/sales-quality";
 import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -304,6 +305,76 @@ export function queueSetSummary(org: string, oldIds: readonly string[], workIds:
   const n = (a: readonly string[]) => new Set(a).size;
   const chung = both(oldIds, workIds);
   return `${org} A2 · HAI TẬP chờ người: cũ (nhóm WAITING_HUMAN của script) ${n(oldIds)} · /work = 2B (aiSilentSql) ${n(workIds)} · chung ${chung} · chỉ tập cũ ${n(oldIds) - chung} · chỉ /work ${n(workIds) - chung} · HANDOFF_UNANSWERED cũ ${n(oldUnanswered)} · /work ${n(workUnanswered)} (số 2B) · chung ${both(oldUnanswered, workUnanswered)}`;
+}
+
+// ─────────────────────────── 2B — ẢNH CHỤP QUALITY SUPERVISOR ───────────────────────────
+
+/** Dưới ngưỡng này một tỷ lệ là nhiễu: in mẫu số + «chưa đủ mẫu», không in phần trăm (cùng ngưỡng mẫu nhỏ của AGENTS 51). */
+export const QUALITY_MIN_SAMPLE = 30;
+
+/**
+ * Mẫu số của từng mã = ĐÚNG trường `bases` mà `lib/sales-quality/daily.ts::baseOf` in cạnh mã đó (bài kiểm so hai bảng). Bản sao nằm ở
+ * script vì ops lấy lib từ image: script không được đòi một hằng số chưa deploy.
+ */
+export const QUALITY_BASE_FIELD: Record<SalesQualityCode, string> = {
+  HANDOFF_UNANSWERED: "handoffWaiting",
+  QTY_REASKED: "quantityAnswers",
+  SECONDARY_INTENT_UNANSWERED: "deliverySecondAsks",
+  WRONG_PRODUCT_TEMPLATE: "botMessages",
+  ADDRESS_REASK: "botMessages",
+  COMPLAINT_WHILE_SELLING: "complaints",
+  CLARIFY_FALLBACK: "botMessages",
+  CLAIM_GUARD_BLOCK: "botMessages",
+  UPSELL_ACCEPTED_BUT_REASKED: "offerAccepts",
+  UPSELL_ACCEPTED_NOT_ATTACHED: "offerAccepts",
+};
+
+const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+/**
+ * Dòng tóm tắt 2B từ khoá `settings.sales-quality.daily` (giá trị là CHUỖI JSON). Khoá vắng / hỏng / lượt lỗi ⇒ «CHƯA ĐO ĐƯỢC», KHÔNG in 0.
+ * Mã vắng trong ảnh chụp (ảnh chụp cũ hơn mã) ⇒ «—». Mẫu số < `QUALITY_MIN_SAMPLE` ⇒ «chưa đủ mẫu», không tỷ lệ. Chỉ số đếm. HÀM THUẦN.
+ */
+export function qualityStateSummary(org: string, raw: unknown): string[] {
+  const nope = (why: string) => [`${org} 2B · CHƯA ĐO ĐƯỢC — ${why}`];
+  if (raw === null || raw === undefined) return nope(`chưa có khoá ${SALES_QUALITY_STATE_KEY} (job sales-health chưa chạy lượt chất lượng nào)`);
+  let v: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      v = JSON.parse(raw);
+    } catch {
+      return nope(`khoá ${SALES_QUALITY_STATE_KEY} không phải JSON`);
+    }
+  }
+  if (!v || typeof v !== "object" || Array.isArray(v)) return nope(`khoá ${SALES_QUALITY_STATE_KEY} không phải object`);
+  const st = v as Record<string, unknown>;
+  const day = typeof st.day === "string" ? st.day : null;
+  if (typeof st.error === "string") return nope(`lượt ngày ${day ?? "?"} LỖI (lần thử ${isNum(st.attempts) ? st.attempts : "?"}) — chi tiết lỗi chỉ trong CSDL`);
+  const counts = st.counts && typeof st.counts === "object" ? (st.counts as Record<string, unknown>) : null;
+  const bases = st.bases && typeof st.bases === "object" ? (st.bases as Record<string, unknown>) : null;
+  if (!day || !counts) return nope(`khoá ${SALES_QUALITY_STATE_KEY} thiếu ngày / số đếm`);
+  const sla = isNum(st.slaHours) ? `${st.slaHours} giờ` : "không đặt / không đọc được";
+  const head = `${org} 2B · ngày ${day} (chạy ${typeof st.at === "string" ? st.at.slice(0, 16) + "Z" : "?"}) · quét ${isNum(st.conversations) ? st.conversations : "?"} hội thoại${st.capped === true ? " · CHẠM TRẦN — số là trần dưới" : ""} · hạn chờ người ${sla}`;
+  const cells = SALES_QUALITY_CODES.map((code) => {
+    const n = counts[code];
+    const field = QUALITY_BASE_FIELD[code];
+    const base = bases && field ? bases[field] : undefined;
+    if (!isNum(n)) return `${code} —`;
+    if (!isNum(base)) return `${code} ${n} (mẫu số chưa có)`;
+    if (base < QUALITY_MIN_SAMPLE) return `${code} ${n}/${base} chưa đủ mẫu`;
+    return `${code} ${n}/${base} = ${((n / base) * 100).toFixed(1).replace(".", ",")}%`;
+  });
+  const lines = [head];
+  let cur = "";
+  for (const c of cells) {
+    const next = cur ? `${cur} · ${c}` : `${org} 2B · ${c}`;
+    if (next.length > 300 && cur) {
+      lines.push(cur);
+      cur = `${org} 2B · ${c}`;
+    } else cur = next;
+  }
+  if (cur) lines.push(cur);
+  return lines;
 }
 
 // ─────────────────────────── PHẦN CSDL ───────────────────────────
@@ -612,6 +683,9 @@ async function oneOrg(org: { code: string; isHome: boolean }, args: StuckArgs, n
     } else {
       tomTat(`${org.code} A2[/work] · CHƯA ĐO ĐƯỢC — ${w.why}`);
     }
+    // 2B — ảnh chụp ngày gần nhất của Quality Supervisor, đọc CÙNG lượt với A2[/work] để hai số đối chiếu được ngay.
+    const [q] = rowsOf<{ value: unknown }>(await db.execute(sql`select value from "settings" where key = ${SALES_QUALITY_STATE_KEY} limit 1`));
+    for (const line of qualityStateSummary(org.code, q?.value)) tomTat(line);
 
     const d = await collectOrders(db, args.days, now);
     tomTat(`${org.code} D · nhắn lại ${args.days} ngày: ${d.m.followupsSent} tin · sau khi đã có đơn sống (không phải nháp) ${d.m.followupsAfterOrder}`);
