@@ -1,0 +1,8 @@
+{
+  "pr": 977,
+  "sha": "dc809737203c103b5aab16ede5912e1cdc8a583e",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-22T15:52:02.786Z",
+  "note": "review lead (P0 22/10 mục E/F): SALES_QUALITY_SPEC.delivery bắt buộc (BLOCKED_PRE_SEND / REACHED_CUSTOMER); sổ REGRESSION_WATCH (mã ↔ sứ mệnh ↔ PR/SHA ↔ liveAt = updated_at run deploy xanh, orgScope ALL); 2B đếm hit theo mốc, chỉ lọt-tới-khách SAU liveAt mới tính; một notification SALES_QUALITY dedupe theo mã + sứ mệnh, đã đóng mà có hit lọt SAU lúc đóng ⇒ mở lại chính dòng đó; tỷ lệ phát hiện / c"
+}
