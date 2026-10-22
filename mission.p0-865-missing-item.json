@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "p0-865-missing-item",
+  "title": "P0 #865: món khách nói tường minh mà đơn nháp bỏ sót hẳn ⇒ không lên / không tự chốt đơn thiếu món",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-865b",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/p0-865-missing-item",
+  "base_sha": "f87db2e0b1e3ca2819210336d592495220a24c3c",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/cart-commitment.ts",
+    "tests/p0-865-missing-item.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-22T19:18:54.116Z",
+  "updated_at": "2026-10-22T19:18:54.116Z",
+  "last_heartbeat": "2026-10-22T19:18:54.116Z",
+  "definition_of_done": [],
+  "intake": {
+    "verdict": "MISSING",
+    "evidence": []
+  }
+}
