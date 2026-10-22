@@ -22,7 +22,7 @@ import { DEFAULT_PROFIT_GATE_CONFIG, PAYROLL_PROFIT_GATE_KEY, type ProfitGateCon
 import { monthPeriodKey } from "@/lib/queries/payroll-profit-gate";
 import { PAYROLL_RECOGNITION_KEY } from "@/lib/queries/payroll-cost";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
-import { monthVerdict, runOwnerApply, type OwnerApplyPlan } from "../scripts/payroll-owner-apply";
+import { dienTen, monthVerdict, PLAN as PLAN_PROD, runOwnerApply, ten, type OwnerApplyPlan } from "../scripts/payroll-owner-apply";
 
 const OWNER = "poa-chu";
 const X: Employee = { id: "poa-x", name: "Nhân sự POA X", shortName: "POA-X", department: "Marketing", aliases: [], accountIds: [], userEmail: "", fixed: 1_000_000, percentTotal: 0, percentPersonal: 20, percentRevenue: 0, active: true, note: "" };
@@ -45,7 +45,7 @@ const PLAN: OwnerApplyPlan = {
     ],
     residualClaimantId: Y.id,
     regulationRef: "Quy chế kiểm thử POA",
-    reason: "Bài kiểm payroll-owner-apply",
+    reason: `Bài kiểm payroll-owner-apply — ${ten("poa-y")} nhận phần còn lại`,
   },
   employees: [{ id: X.id, set: { percentPersonal: 0, startedOn: "2030-01-01" } }],
   code: { productId: "poa-prod", employeeId: X.id, fromRateBp: 2500, toRatePercent: 30, effectiveFrom: "2030-01-01", policyRef: "Quy chế kiểm thử POA", revokeReason: "Chủ shop đổi lên 30% (kiểm thử)", note: "kiểm thử" },
@@ -105,6 +105,16 @@ function testSourceFences() {
   }
 }
 
+function testNameTokens() {
+  const nv = [{ id: "u1", name: "Tên Đầy Đủ", shortName: "Tên" }, { id: "u2", name: "Không Tên Ngắn", shortName: "" }];
+  assert.equal(dienTen(`${ten("u1")} và ${ten("u2")}`, nv), "Tên và Không Tên Ngắn");
+  assert.equal(dienTen(`${ten("u9")} nhận`, nv), null, "mã không có trong hồ sơ ⇒ null (script DỪNG), không ghi câu thiếu tên");
+  // Kho PUBLIC: kế hoạch production chỉ mang MÃ nhân sự; tên chỉ xuất hiện lúc chạy, trong CSDL và phần mã hoá.
+  const chu = JSON.stringify(PLAN_PROD);
+  assert.ok(chu.includes("{ten:"), "lý do mang tên được ghép lúc chạy");
+  assert.ok(!/(Quân|Hiếu|Trinh|Nhật)/u.test(readFileSync("scripts/payroll-owner-apply.ts", "utf8").replace(/\/\*[\s\S]*?\*\//g, "")), "tệp script không mang tên nhân sự");
+}
+
 function testVerdictPure() {
   const ok = { established: true, status: "NO_ELIGIBLE_PROFIT", lines: [{ name: "Tên Riêng A", salary: 5, eligible: 0 }] };
   assert.equal(monthVerdict(ok, 0), null);
@@ -159,6 +169,7 @@ async function testFlow(db: Db) {
     const e = await db.select().from(schema.expenses).where(like(schema.expenses.id, "poa-%"));
     assert.deepEqual(e.sort((a, b) => a.id.localeCompare(b.id)).map((r) => [r.category, r.costSource]), [["OTHER", "MANUAL"], ["RETURN_FEE", "MANUAL_ADJUSTMENT"]]);
     assert.equal(e.find((r) => r.id === "poa-e2")?.reason, PLAN.expenses[1].to.reason);
+    assert.equal((await getSettingJson<ProfitGateConfig>(PAYROLL_PROFIT_GATE_KEY, DEFAULT_PROFIT_GATE_CONFIG)).active?.reason, "Bài kiểm payroll-owner-apply — POA-Y nhận phần còn lại", "lý do ghi vào sổ mang tên thật, ghép lúc chạy từ hồ sơ");
     const cfg = await getSettingJson<ProfitGateConfig>(PAYROLL_PROFIT_GATE_KEY, DEFAULT_PROFIT_GATE_CONFIG);
     assert.deepEqual([cfg.active?.openingMonth, cfg.active?.poolCapPercent, cfg.active?.residualClaimant?.employeeId, cfg.active?.approvedById], ["2030-01", null, Y.id, OWNER], "quy chế khai qua lõi, người duyệt = chủ shop");
     const nv = (await getSettingJson<{ list: Employee[] }>(PAYROLL_EMPLOYEES_KEY, { list: [] })).list.find((n) => n.id === X.id)!;
@@ -209,6 +220,7 @@ async function testFlow(db: Db) {
 export async function testPayrollOwnerApply(db: Db) {
   testSourceFences();
   testVerdictPure();
+  testNameTokens();
   await testFlow(db);
   console.log("  ✓ payroll-owner-apply: chạy thử không ghi · ghi qua đúng lõi của màn hình (chi phí · quy chế · hồ sơ · sổ mã · chốt kỳ LẦN LƯỢT) · chạy lại 0 lượt ghi · lệch dự kiến ⇒ dừng đúng tháng · kênh tóm tắt không tên/tiền · action và script cùng một lõi");
 }

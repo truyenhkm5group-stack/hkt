@@ -62,6 +62,20 @@ const NV_HIEU = "63752895-1ed3-4880-bdac-916880d52d97";
 const NV_TRINH = "590efdb6-e5e0-4b57-b40f-1cdcb717f750";
 const NV_NHAT = "fe7ae7d7-74ad-4a70-b382-93359d4a2785";
 const NV_QUAN = "b6373e43-97ea-45a3-908d-3f55e2a4b1ce";
+/**
+ * Kho PUBLIC: câu lý do mang TÊN người (đúng câu chủ shop / Tech Lead viết) được ghép LÚC CHẠY từ hồ sơ nhân sự —
+ * trong tệp chỉ có mã. Mã không có trong hồ sơ ⇒ DỪNG, không ghi một câu thiếu tên.
+ */
+export const ten = (employeeId: string) => `{ten:${employeeId}}`;
+export function dienTen(s: string, nv: Pick<Employee, "id" | "name" | "shortName">[]): string | null {
+  let thieu = false;
+  const out = s.replace(/\{ten:([^}]+)\}/g, (_, id: string) => {
+    const e = nv.find((n) => n.id === id);
+    if (!e) thieu = true;
+    return e ? e.shortName || e.name : "";
+  });
+  return thieu ? null : out;
+}
 const CHI_KHAC = "Sổ ngân hàng: chủ shop xếp giao dịch này nhóm «Chi phí vận hành khác» (OTHER_EXPENSE) — không phải cước vận đơn.";
 
 /** Kế hoạch production (đo 22/10/2026: db-query 39733590290 · 39731480532 · 39733710649). */
@@ -100,7 +114,7 @@ export const PLAN: OwnerApplyPlan = {
     ],
     residualClaimantId: NV_QUAN,
     regulationRef: MKT_REF,
-    reason: "Chủ shop quyết 21/10/2026: số dư mở sổ 0 ₫ tại 06/2026; trần 35% tới 10/2026, 40% từ 11/2026; Quân nhận phần còn lại.",
+    reason: `Chủ shop quyết 21/10/2026: số dư mở sổ 0 ₫ tại 06/2026; trần 35% tới 10/2026, 40% từ 11/2026; ${ten(NV_QUAN)} nhận phần còn lại.`,
   },
   employees: [
     { id: NV_HIEU, set: { percentPersonal: 0 } },
@@ -114,7 +128,7 @@ export const PLAN: OwnerApplyPlan = {
     toRatePercent: 30,
     effectiveFrom: "2026-06-01",
     policyRef: MKT_REF,
-    revokeReason: "Chủ shop đổi Hiếu lên 30% ngày 21/10/2026",
+    revokeReason: `Chủ shop đổi ${ten(NV_HIEU)} lên 30% ngày 21/10/2026`,
     note: "Chủ shop đổi tỷ lệ OWNER mã Q006 lên 30% ngày 21/10/2026",
   },
   months: ["2026-06", "2026-07", "2026-08", "2026-09", "2026-10"],
@@ -213,7 +227,10 @@ export async function runOwnerApply(plan: OwnerApplyPlan, opts: { apply: boolean
   log.summary("1 · nguồn ghi nhận chi phí nhân sự = Bảng Lương ✓");
 
   // ── 2 · Quy chế chia thưởng ──
-  const gp = profitGateSchema.safeParse(plan.gate);
+  const nv = await listEmployees();
+  const lyDoQuyChe = typeof plan.gate.reason === "string" ? dienTen(plan.gate.reason, nv) : null;
+  if (lyDoQuyChe === null) return dung("2 · quy chế", "lý do quy chế trỏ tới một nhân sự không có trong hồ sơ");
+  const gp = profitGateSchema.safeParse({ ...plan.gate, reason: lyDoQuyChe });
   if (!gp.success) return dung("2 · quy chế", gp.error.issues[0]?.message ?? "lược đồ");
   const cfg = await getSettingJson<ProfitGateConfig>(PAYROLL_PROFIT_GATE_KEY, DEFAULT_PROFIT_GATE_CONFIG);
   const a = cfg.active;
@@ -236,7 +253,6 @@ export async function runOwnerApply(plan: OwnerApplyPlan, opts: { apply: boolean
   log.summary(`2 · quy chế chia thưởng: ${gateXong ? "đã đúng" : opts.apply ? "đã khai phiên bản mới" : "cần khai phiên bản mới"}`);
 
   // ── 3 · Hồ sơ nhân sự ──
-  const nv = await listEmployees();
   let doi3 = 0;
   for (const x of plan.employees) {
     const e = nv.find((n) => n.id === x.id);
@@ -266,7 +282,9 @@ export async function runOwnerApply(plan: OwnerApplyPlan, opts: { apply: boolean
     log.detail(`   4 · mã ${c.productId.slice(0, 8)} · nhân sự ${c.employeeId.slice(0, 8)}: OWNER ${(c.fromRateBp / 100).toFixed(0)}% → ${c.toRatePercent}% từ ${c.effectiveFrom}${daCo ? " · ĐÃ ĐÚNG" : ""}`);
     if (!daCo && opts.apply) {
       if (cu) {
-        const r1 = await revokeCodeRowAs(actor, { kind: "ASSIGNMENT", id: cu.id, reason: c.revokeReason }, { guard, auditNote: AUDIT_NOTE });
+        const lyDo = dienTen(c.revokeReason, nv);
+        if (lyDo === null) return dung("4 · sổ mã (huỷ)", "lý do huỷ trỏ tới một nhân sự không có trong hồ sơ");
+        const r1 = await revokeCodeRowAs(actor, { kind: "ASSIGNMENT", id: cu.id, reason: lyDo }, { guard, auditNote: AUDIT_NOTE });
         if ("error" in r1) return dung("4 · sổ mã (huỷ)", r1.error);
         out.changes++;
       }
