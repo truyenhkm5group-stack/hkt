@@ -3,7 +3,7 @@
   "mission_id": "payroll-net-pay-certain",
   "title": "Thực nhận không còn «—» chỉ vì một số tạm tính không ai trả: 0% là 0, tháng không có LN đủ điều kiện là thưởng 0",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -25,11 +25,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-22T05:18:44.073Z",
-  "updated_at": "2026-10-22T05:36:50.440Z",
+  "updated_at": "2026-10-22T05:53:56.989Z",
   "last_heartbeat": "2026-10-22T05:19:19.107Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#965 → bf31f3ad17cd121958950749f3264b2c138306ee"
+    "merged": "#965 → bf31f3ad17cd121958950749f3264b2c138306ee",
+    "verify": "PASS bf31f3ad17cd121958950749f3264b2c138306ee 2026-10-22T05:53:17.289Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39729161998"
   },
   "handoff": {
     "branch": "claude/payroll-net-pay-certain",
