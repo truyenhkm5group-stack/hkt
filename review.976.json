@@ -1,0 +1,8 @@
+{
+  "pr": 976,
+  "sha": "a44933f43fc6210148dc3b03aad8d12bb1057faf",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-22T14:45:27.846Z",
+  "note": "review lead: CHỈ-SCRIPT, chỉ đọc. conv-money-trace: nhãn lượt kiểm đúng bốn action (ADDRESS_SETTLED = máy ghép phường, CUSTOMER_RECONFIRMED, người chỉ CONFIRMED/CANCELLED); --order thêm dòng tóm tắt máy ánh xạ (trạng thái · bậc · nguồn chữ · số ứng viên · khớp/KHÁC ô xã · Google có gọi · số lần) — chỉ mã/số, tên xã/ứng viên chỉ ở phần mã hoá."
+}
