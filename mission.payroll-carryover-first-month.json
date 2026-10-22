@@ -29,25 +29,23 @@
     "0254": "2026-10-22T09:00:10.687Z"
   },
   "created_at": "2026-10-22T08:57:38.197Z",
-  "updated_at": "2026-10-22T10:46:48.067Z",
-  "last_heartbeat": "2026-10-22T09:17:11.999Z",
+  "updated_at": "2026-10-22T11:40:55.150Z",
+  "last_heartbeat": "2026-10-22T11:40:55.150Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/payroll-carryover-first-month",
-    "sha": "e8a7cf5189e1df0178a2c03d479e2e039ac2dd76",
-    "at": "2026-10-22T09:17:11.999Z",
+    "sha": "af84b798e985ce921f160085924152ee75f41d2a",
+    "at": "2026-10-22T11:40:55.150Z",
     "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
     "title": "Sổ lỗ cá nhân: tháng làm việc đầu tiên có số dư đầu kỳ 0 (gỡ chặn chốt lương 08/2026)",
-    "summary": "@e8a7cf518. Như 15d7d0b52 + migration 0254 (viết tay, đã giữ chỗ số): marketer_carryover_source_check nhận thêm FIRST_WORK_MONTH, không UPDATE dòng nào; run-service ghi đúng FIRST_WORK_MONTH vào cột; đọc lại căn cứ từ cột. HIGH (migration + lõi lương), deploy riêng; sau deploy chạy lại payroll-owner-apply --apply (06/07 đã khoá sẽ bỏ qua).",
+    "summary": "@af84b798e. Sửa đỏ gates #971: 0254 thêm vào MIGRATION_SERVE_COMPAT (chỉ nới CHECK; đọc không đổi; chốt kỳ ghi kỳ + sổ lỗ cùng giao dịch ⇒ chưa áp 0254 thì hỏng sạch, không ghi nhầm nguồn) kèm proof thật trong tests/payroll-carryover.test.ts. Không sửa kỳ vọng nào.",
     "tests": [
       "npm run typecheck: sạch",
       "eslint các tệp đổi: sạch",
-      "TEST_KHOI=K10 (payroll-carryover chốt qua calculatePayrollPeriodAs + payroll-owner-apply): XANH trên e8a7cf518",
-      "TEST_KHOI=K05 (migration-journal): XANH",
-      "TEST_KHOI=K18 (migration-upgrade-path 86 → 254, khối 0254): XANH",
-      "đột biến ghi OPENING_DECLARATION cho FIRST_WORK_MONTH: bị bắt",
-      "2 đột biến luật (không-có-dòng-trước, ngày vào làm): bị bắt",
-      "shard 1–4 + build: giao CI gates"
+      "TEST_KHOI=K20 (migration-serve-compat DEGRADED_MIGRATION — khối đỏ ở job 119780072374): XANH trên af84b798e",
+      "TEST_KHOI=K10 (payroll-carryover gồm chứng minh lược đồ trước 0254 + payroll-owner-apply): XANH trên af84b798e",
+      "K05 + K18 (sổ migration, nâng cấp 86 → 254): XANH trên e8a7cf518 (commit mới không chạm drizzle/)",
+      "shard 1–4 + build: CI gates"
     ]
   }
 }
