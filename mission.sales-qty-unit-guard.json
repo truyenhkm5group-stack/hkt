@@ -3,7 +3,7 @@
   "mission_id": "sales-qty-unit-guard",
   "title": "Quantity/Unit Guard: số không đơn vị không phải số hộp; hàng rào giỏ không ép số suy ra; sửa đơn chốt tăng bất thường ⇒ chuyển người (ca #8037F35A)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-qty-guard",
@@ -18,7 +18,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T03:42:42.618Z",
-  "updated_at": "2026-10-22T03:42:42.618Z",
-  "last_heartbeat": "2026-10-22T03:42:42.618Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-22T09:01:01.113Z",
+  "last_heartbeat": "2026-10-22T09:01:01.113Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/sales-qty-unit-guard",
+    "sha": "22b8cde304d736171d0624194ff83cb38bcd7609",
+    "at": "2026-10-22T09:01:01.113Z",
+    "actor": "DESKTOP-56TH98Y:wt-qty-guard",
+    "title": "Quantity/Unit Guard: số không đơn vị không phải số hộp; hàng rào giỏ không ép số suy ra; sửa đơn chốt tăng bất thường ⇒ chuyển người (ca #8037F35A)",
+    "summary": "Ca HSLC #8037F35A: «thêm 10 nem» (nem hộp 10 cái) bị giỏ đọc thành 10 gói khách nói ⇒ hàng rào cam kết chặn 1 hộp ⇒ model ghi 10 hộp (540k⇒1,74tr). Sửa: cờ bare + bareResolution (STATED/INFERRED/AMBIGUOUS); hàng rào cũ chỉ có thẩm quyền với STATED; quantityUnitIssue trước hàng rào cam kết ở sửa nháp + chốt; sửa đơn ĐÃ CHỐT: tăng không lời khách ⇒ chuyển người, tổng >×2 không do lời khách rõ đơn vị/đồng ý lời mời ⇒ chuyển người, sửa thành công ⇒ câu nêu tổng ERP mới. 5 mã 2B mới + nhánh PAGE_AUTOMATION. Sửa phụ: tách tổng «1.740.000», extractVndAmounts «1.740k». Nơi gọi extractVndAmounts: cancel-recovery · claim-guard · engine · integrity-audit · short-accept · upsell-probe · sales-quality/detectors · scripts conv-money-trace · org-ai-cutover · sales-integrity-audit. Một dòng bài kiểm của 3a («phần tử cuối» ⇒ «sau khoá cũ»).",
+    "tests": [
+      "cây sạch @22b8cde30: tsc 0 · lint 0",
+      "TEST_KHOI=K08,K09,K19,K20,K21,K22,K23 ĐẠT (mọi nơi gọi extractVndAmounts / cart-commitment / claim-guard / sales-quality)",
+      "cổng sạch đầy đủ @c4e06bddb (trước rebase lên 705f954c): TYPECHECK/LINT/TEST/BUILD 0",
+      "đột biến 14/14 đỏ",
+      "full suite giao cho CI gates (4 shard song song, checkout sạch)"
+    ]
+  }
 }
