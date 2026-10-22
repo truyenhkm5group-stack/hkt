@@ -11,8 +11,13 @@
  *  · `UNKNOWN_STATUS` — ERP chưa dịch được câu của ĐVVC. Chữ gốc vẫn vào sổ, không bị ném đi.
  * Gộp chúng vào một nhãn "bỏ qua" là mời người dùng đọc một sự cố thành chuyện bình thường, hoặc
  * ngược lại.
+ *
+ * Từ 22/10/2026 (P0 vận đơn tạo lại trên web VTP — lib/integrations/viettelpost/reship.ts) mã CHƯA có trong ERP không
+ * còn bị bỏ qua: `RESHIP_ATTEMPT` = đường ghi tạo LẦN GỬI KẾ cho đơn gốc ("Mã đơn hàng" là số vận đơn gốc);
+ * `NEW_ORPHAN` = tạo dòng không đơn từ chính chứng từ ĐVVC. `UNMATCHED` chỉ còn cho dòng không tạo được (thiếu cột thu
+ * hộ / cước — ô chưa biết không được thành 0).
  */
-export const PREVIEW_VERDICTS = ["SAME", "NEWER", "OLDER", "STATUS_CONFLICT", "UNMATCHED", "UNKNOWN_STATUS", "AMBIGUOUS", "INVALID", "DUPLICATE_ROW"] as const;
+export const PREVIEW_VERDICTS = ["SAME", "NEWER", "OLDER", "STATUS_CONFLICT", "RESHIP_ATTEMPT", "NEW_ORPHAN", "UNMATCHED", "UNKNOWN_STATUS", "AMBIGUOUS", "INVALID", "DUPLICATE_ROW"] as const;
 export type PreviewVerdict = (typeof PREVIEW_VERDICTS)[number];
 
 export const PREVIEW_VERDICT_LABEL: Record<PreviewVerdict, string> = {
@@ -20,6 +25,8 @@ export const PREVIEW_VERDICT_LABEL: Record<PreviewVerdict, string> = {
   NEWER: "Mới hơn ERP",
   OLDER: "Cũ hơn ERP",
   STATUS_CONFLICT: "Cùng mốc, khác trạng thái",
+  RESHIP_ATTEMPT: "Gửi lại — gắn về đơn gốc",
+  NEW_ORPHAN: "Chưa có đơn — sẽ tạo vận đơn",
   UNMATCHED: "Không có trong ERP",
   UNKNOWN_STATUS: "Trạng thái ERP chưa hiểu",
   AMBIGUOUS: "Ghép được nhiều vận đơn",
@@ -32,7 +39,9 @@ export const PREVIEW_VERDICT_HINT: Record<PreviewVerdict, string> = {
   NEWER: "Tệp mang chứng từ MUỘN HƠN thứ ERP đang giữ. Đây là phần tệp thật sự vá được.",
   OLDER: "Tệp mang chứng từ CŨ HƠN. ERP giữ trạng thái mới hơn và vẫn ghi dòng này vào lịch sử — không bao giờ hạ trạng thái vì một tệp cũ.",
   STATUS_CONFLICT: "ĐVVC và ERP nói hai điều khác nhau về ĐÚNG MỘT khoảnh khắc. Không phải lỗi ghép dòng: mã đã ghép chắc chắn, chỉ hai lời khai không khớp. Đường ghi dừng lại cho người đối chiếu, vì chọn hộ một bên là bịa ra một chứng từ.",
-  UNMATCHED: "ERP chưa có vận đơn nào mang mã này. Không tự tạo: một vận đơn không gắn đơn là một vận đơn không ai đối chiếu được.",
+  RESHIP_ATTEMPT: "Mã mới chưa có trong ERP, \"Mã đơn hàng\" là số vận đơn GỐC của một đơn (shop tạo lại vận đơn trên web Viettel Post). Đường ghi tạo LẦN GỬI KẾ của chính đơn đó — không phải dòng mồ côi.",
+  NEW_ORPHAN: "Mã chưa có trong ERP và không gắn được đơn nào. Đường ghi tạo dòng vận đơn KHÔNG ĐƠN từ chính chứng từ ĐVVC, để kiện mà webhook bỏ rơi vẫn hiện ở /shipments và trang chất lượng dữ liệu.",
+  UNMATCHED: "ERP chưa có vận đơn nào mang mã này và dòng tệp thiếu cột thu hộ / cước. Không tạo: ghi 0 cho ô chưa biết là biến CHƯA BIẾT thành 0.",
   UNKNOWN_STATUS: "Chữ của Viettel Post được ghi nguyên văn vào sổ trạng thái và lên chính vận đơn, nhưng KHÔNG dùng để kết luận chặng — không đủ căn cứ thì không đoán.",
   AMBIGUOUS: "Mã hoặc số điện thoại ghép được nhiều vận đơn. Người phải quyết, máy không đoán.",
   INVALID: "Thiếu mốc thời gian đọc được. Không có mốc thì không so được mới/cũ, nên dòng bị bỏ qua.",
@@ -44,6 +53,8 @@ export const PREVIEW_VERDICT_TONE: Record<PreviewVerdict, string> = {
   NEWER: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300",
   OLDER: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
   STATUS_CONFLICT: "bg-orange-100 text-orange-800 dark:bg-orange-950/60 dark:text-orange-300",
+  RESHIP_ATTEMPT: "bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300",
+  NEW_ORPHAN: "bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300",
   UNMATCHED: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
   UNKNOWN_STATUS: "bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300",
   AMBIGUOUS: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
@@ -52,7 +63,7 @@ export const PREVIEW_VERDICT_TONE: Record<PreviewVerdict, string> = {
 };
 
 /** Thứ tự đọc: việc phải làm trước, chuyện bình thường sau. */
-export const PREVIEW_VERDICT_ORDER: PreviewVerdict[] = ["NEWER", "STATUS_CONFLICT", "UNKNOWN_STATUS", "AMBIGUOUS", "UNMATCHED", "OLDER", "INVALID", "DUPLICATE_ROW", "SAME"];
+export const PREVIEW_VERDICT_ORDER: PreviewVerdict[] = ["NEWER", "RESHIP_ATTEMPT", "NEW_ORPHAN", "STATUS_CONFLICT", "UNKNOWN_STATUS", "AMBIGUOUS", "UNMATCHED", "OLDER", "INVALID", "DUPLICATE_ROW", "SAME"];
 
 /**
  * ═══════════ HAI LOẠI "KHÔNG KHỚP", HAI VIỆC PHẢI LÀM KHÁC HẲN NHAU ═══════════

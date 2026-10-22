@@ -67,6 +67,7 @@ import { testOrderValueFilter } from "./order-value-filter.test";
 import { testCanonicalTruth } from "./canonical-truth.test";
 import { testVtpIngestion } from "./vtp-ingestion.test";
 import { testVtpSourceOfTruth } from "./vtp-source-of-truth.test";
+import { testVtpReshipRelink } from "./vtp-reship-relink.test";
 import { testWebhookLatency } from "./webhook-latency.test";
 import { testReconciliation } from "./reconciliation.test";
 import { testMetricsContract } from "./metrics-contract.test";
@@ -2579,6 +2580,8 @@ async function main() {
     await testVtpState(db);
     await testVtpIngestion(db);
     await testVtpSourceOfTruth(db);
+    // P0 22/10/2026: vận đơn tạo lại trên web VTP ⇒ lần gửi kế của đơn gốc (webhook + nhập tệp, một luật). Tự dọn dữ liệu gieo.
+    await testVtpReshipRelink(db);
     // Độ trễ webhook: hàm thuần + một lượt đọc truy vấn thật. KHÔNG gieo dòng nào vào
     // `webhook_events`, nên nó không đổi tổng của bài nào khác.
     await testWebhookLatency();
