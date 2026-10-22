@@ -23,21 +23,20 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-22T16:26:07.570Z",
-  "updated_at": "2026-10-22T16:46:21.779Z",
-  "last_heartbeat": "2026-10-22T16:46:21.779Z",
+  "updated_at": "2026-10-22T17:33:19.144Z",
+  "last_heartbeat": "2026-10-22T17:33:19.144Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/vtp-reship-backfill",
-    "sha": "36f145fe4ba26e87820fb0e402c3e4cb9fb7f556",
-    "at": "2026-10-22T16:46:21.779Z",
+    "sha": "2858937e9c1a1625f39207636ef62b5429458fb9",
+    "at": "2026-10-22T17:33:19.144Z",
     "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
     "title": "Script vá vận đơn tạo lại trên web VTP về đơn gốc — bước A: chỉ đo mốc trước/sau",
-    "summary": "@36f145fe4 = 58de8a99d + gộp main 351068ef (#977): giữ cả regression-watch-status lẫn vtp-reship-backfill trong ba danh sách ops + case; giữ cả hai bài kiểm. CHỈ-SCRIPT, chỉ đo.",
+    "summary": "@2858937e9: sửa đỏ gates #978 — tests/vtp-reship-backfill.test.ts khai vào DOC_MOI_TRUONG_DA_KHAI (chuỗi ERP_READ_ONLY chỉ là chữ cần tìm trong mã nguồn script, không đọc môi trường). Không sửa kỳ vọng nào.",
     "tests": [
       "npm run typecheck: sạch",
-      "ops-script-size: 87.251 / 125.000 byte",
-      "TEST_KHOI=K22: XANH trên 36f145fe4",
-      "TEST_KHOI=K18 (ops-log-leak, hai thao tác mới cùng có): XANH",
+      "TEST_KHOI=K15 (test-hygiene — khối đỏ ở gates #978): XANH trên 2858937e9",
+      "TEST_KHOI=K22 + K18: XANH trên 36f145fe4 (commit mới chỉ chạm tests/test-hygiene.test.ts)",
       "shard 1–4 + build: CI gates"
     ]
   }
