@@ -20,7 +20,7 @@ import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { customerStatedAddresses, parseCustomerAddress, wardFromCustomerWords } from "@/lib/address/customer-address";
 import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
-import { ORDER_REVIEW_ACTIONS, orderReviewLogOf, orderReviewOf, withAddressSettled, type OrderReviewAction } from "@/lib/constants/order-review";
+import { lastAddressSettledOf, lastHumanReviewOf, ORDER_REVIEW_ACTIONS, orderReviewLogOf, orderReviewOf, reviewResolveReason, withAddressSettled, type OrderReviewAction } from "@/lib/constants/order-review";
 import { SALES_QUALITY_CODES, SALES_QUALITY_SPEC } from "@/lib/constants/sales-quality";
 import { cancelEvidenceOf } from "@/lib/records/order-cancel-reconcile";
 import { keptWardOf } from "@/lib/sales-chatbot/tools";
@@ -89,6 +89,22 @@ export function testSalesAddressAppliedPure() {
     const reviewLog = [{ entries: [], action, at: new Date(t0).toISOString(), byUserId: null, byName: "x" }];
     assert.equal(cancelEvidenceOf({ ...base, reviewLog }), expect[action], `${action} sau lời huỷ ⇒ ${expect[action] ?? "không phải ứng viên"}`);
   }
+
+  // Hiển thị: lượt MÁY gỡ cờ địa chỉ KHÔNG bao giờ hiện như «người xác nhận đơn» (Tech Lead 22/10/2026).
+  const vet = (actions: OrderReviewAction[]) => ({ reviewLog: actions.map((action, i) => ({ entries: [], action, at: `2026-10-22T0${i}:00:00.000Z`, byUserId: action === "ADDRESS_SETTLED" ? null : "u1", byName: action === "ADDRESS_SETTLED" ? "Máy ánh xạ địa chỉ · nguồn TEXT" : "Chị A" })) });
+  assert.equal(lastHumanReviewOf(vet(["CONFIRMED", "ADDRESS_SETTLED"]))?.action, "CONFIRMED", "lượt người gần nhất, bỏ qua lượt máy mới hơn");
+  assert.equal(lastHumanReviewOf(vet(["ADDRESS_SETTLED"])), null, "chỉ có lượt máy ⇒ không có «đã kiểm bởi người»");
+  assert.equal(lastHumanReviewOf(vet(["CUSTOMER_RECONFIRMED"])), null);
+  assert.equal(lastHumanReviewOf(vet(["CANCELLED"]))?.action, "CANCELLED");
+  assert.equal(lastAddressSettledOf(vet(["CONFIRMED", "ADDRESS_SETTLED"]))?.byUserId, null);
+  assert.equal(reviewResolveReason("ADDRESS_SETTLED"), "Máy gỡ cờ địa chỉ — đơn đã có xã / phường");
+  assert.equal(reviewResolveReason("CONFIRMED"), "Người đã kiểm — xác nhận đơn");
+  assert.equal(reviewResolveReason("CANCELLED"), "Người đã kiểm — huỷ đơn");
+  const page = readFileSync("app/(dashboard)/orders/[id]/page.tsx", "utf8");
+  assert.match(page, /const lastReview = manual \? lastHumanReviewOf\(order\.raw\) : null;/, "trang đơn chọn lượt NGƯỜI kiểm");
+  assert.doesNotMatch(page, /action !== "CUSTOMER_RECONFIRMED"/, "không còn lọc «mọi action trừ khách xác nhận lại»");
+  assert.match(page, /Máy ghép được phường \/ xã/, "lượt máy có nhãn riêng");
+  assert.match(readFileSync("lib/records/order-create.ts", "utf8"), /: reviewResolveReason\(detail\.action\),/, "nhật ký kiểm toán lấy lý do theo đúng action");
 
   // 2B: câu ghi nhận không còn là «lần chặn khẳng định»; mã mới ở CUỐI danh sách, khoá cũ giữ nguyên.
   const w = { from: new Date(t0 - 3_600_000), to: new Date(t0 + 3_600_000), templates: [], products: [] };
@@ -178,6 +194,9 @@ export async function testSalesAddressAppliedChat() {
       // (2) Cờ địa chỉ của máy tự đóng, có vết của MÁY.
       assert.equal(addressReviewOpenOf(o.raw), false, `[${c.key}] cờ ADDRESS_UNRESOLVED còn mở sau khi đơn đã có phường: ${JSON.stringify(orderReviewOf(o.raw))}`);
       const settled = orderReviewLogOf(o.raw).find((r) => r.action === "ADDRESS_SETTLED");
+      const db2 = await getDb();
+      const auditRows = await db2.select({ reason: schema.auditLogs.reason, action: schema.auditLogs.action }).from(schema.auditLogs).where(eq(schema.auditLogs.entityId, o.id));
+      assert.ok(auditRows.some((a) => a.action === "ORDER_REVIEW_RESOLVE" && a.reason === "Máy gỡ cờ địa chỉ — đơn đã có xã / phường") && !auditRows.some((a) => a.action === "ORDER_REVIEW_RESOLVE" && /Người đã kiểm/.test(a.reason ?? "")), `[${c.key}] nhật ký: máy gỡ cờ, không «người đã kiểm»: ${JSON.stringify(auditRows)}`);
       assert.ok(settled && settled.byUserId === null, `[${c.key}] vết gỡ cờ của máy: ${JSON.stringify(orderReviewLogOf(o.raw))}`);
       // (5) Sau khi khách đã cho, không câu nào xin lại phường / địa chỉ.
       for (const s of t.turns.slice(1).flatMap((x) => x.shown)) assert.doesNotMatch(s, ASKS_ADDRESS, `[${c.key}] xin lại địa chỉ: ${s}`);

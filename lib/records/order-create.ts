@@ -91,7 +91,7 @@ import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { normalizePhone as pancakePhone } from "@/lib/integrations/http";
 import { orderCancellationOf, withCancelOutcome, type CancelActor, type CancelRequester, type RescueResult } from "@/lib/constants/order-cancel";
-import { canFlagOrderForReview, MACHINE_ADDRESS_NOTE_PREFIX, ORDER_REVIEW_HOLD_CODES, orderReviewOf, reviewConflictMessage, unseenReviewEntries, withAddressSettled, withCustomerReconfirm, withReviewEntry, withReviewResolved, type OrderReviewEntry, type OrderReviewResolution, type ReviewSeen } from "@/lib/constants/order-review";
+import { canFlagOrderForReview, MACHINE_ADDRESS_NOTE_PREFIX, ORDER_REVIEW_HOLD_CODES, orderReviewOf, reviewConflictMessage, reviewResolveReason, unseenReviewEntries, withAddressSettled, withCustomerReconfirm, withReviewEntry, withReviewResolved, type OrderReviewEntry, type OrderReviewResolution, type ReviewSeen } from "@/lib/constants/order-review";
 
 export type OrderGate = { allowed: true } | { allowed: false; code: "FORBIDDEN" | "NOT_SUPPORTED" | "MODULE_DISABLED"; reason: string };
 
@@ -468,7 +468,7 @@ async function auditReview(w: Writer, orderId: string, kind: "FLAG" | "RESOLVE",
     entityId: orderId,
     before: kind === "FLAG" ? null : { review: detail.entries },
     after: kind === "FLAG" ? { review: detail.entries } : { review: null, action: detail.action ?? null },
-    reason: kind === "FLAG" ? `Cần người kiểm: ${detail.entries.map((e) => e.code).join(", ")}` : `Người đã kiểm — ${detail.action === "CANCELLED" ? "huỷ đơn" : "xác nhận đơn"}`,
+    reason: kind === "FLAG" ? `Cần người kiểm: ${detail.entries.map((e) => e.code).join(", ")}` : reviewResolveReason(detail.action),
   });
 }
 

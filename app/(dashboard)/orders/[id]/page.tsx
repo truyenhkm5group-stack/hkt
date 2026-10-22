@@ -46,7 +46,7 @@ import { OrderQuickDecision, OrderReviewEntries } from "@/components/orders/orde
 import { getBrandCopy } from "@/lib/branding/service";
 import { displayVariationText } from "@/lib/constants/experience-profile";
 import { readDisplayProfile } from "@/lib/experience/profile";
-import { ORDER_REVIEW_LABEL, orderReviewLogOf, orderReviewOf, reconfirmsSinceOpen } from "@/lib/constants/order-review";
+import { lastAddressSettledOf, lastHumanReviewOf, ORDER_REVIEW_LABEL, orderReviewOf, reconfirmsSinceOpen } from "@/lib/constants/order-review";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -134,7 +134,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const cogsCover = order.liveCogsCoverage;
   // CẦN NGƯỜI KIỂM (chủ shop 08/10/2026): lý do đang mở + lượt kiểm gần nhất. Chỉ đơn tay mang cờ này.
   const reviewEntries = manual ? (orderReviewOf(order.raw)?.entries ?? []) : [];
-  const lastReview = manual ? (orderReviewLogOf(order.raw).find((r) => r.action !== "CUSTOMER_RECONFIRMED") ?? null) : null;
+  // Chỉ lượt NGƯỜI kiểm (xác nhận / huỷ); lượt MÁY gỡ cờ địa chỉ hiện ở dòng riêng (Tech Lead 22/10/2026).
+  const lastReview = manual ? lastHumanReviewOf(order.raw) : null;
+  const addressSettled = manual ? lastAddressSettledOf(order.raw) : null;
   const reconfirms = manual ? reconfirmsSinceOpen(order.raw) : [];
   const gaps = manual ? manualOrderGaps({ phone: order.shipPhone, address: order.shipAddress, province: order.shipProvince, ward: order.shipCommune }, order.itemsCount) : [];
   const canDecide = manual && manualGate?.allowed === true;
@@ -291,6 +293,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           Đã kiểm {formatDateTime(lastReview.at)}
           {lastReview.byName ? ` bởi ${lastReview.byName}` : ""} — {lastReview.action === "CANCELLED" ? "huỷ đơn" : "xác nhận đơn"} ({lastReview.entries.map((e) => ORDER_REVIEW_LABEL[e.code]).join(" · ")}
           {lastReview.entries.find((e) => e.quote)?.quote ? `; khách nhắn «${lastReview.entries.find((e) => e.quote)?.quote}»` : ""}).
+        </p>
+      ) : null}
+      {addressSettled ? (
+        <p className="text-[12px] text-muted-foreground">
+          Máy ghép được phường / xã {formatDateTime(addressSettled.at)} — {addressSettled.byName} (máy gỡ cờ «địa chỉ chưa ghép», không phải người xác nhận đơn).
         </p>
       ) : null}
 
