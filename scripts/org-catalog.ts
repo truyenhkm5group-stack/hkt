@@ -51,7 +51,7 @@ export type CatalogReport = {
   priceLists: { id: string; name: string; isDefault: boolean; active: boolean; tiers: { variantId: string; variantLabel: string; minQuantity: number; unitPrice: number }[] }[];
   quickReplies: { title: string; triggers: string[]; answer: string; upsell: boolean; images: number }[];
   /** Cài đặt câu mẫu: bật / tắt; `upsellSet` = đã chọn câu upsell (kèm ảnh menu) cho bước mời thêm món. `null` = không đọc được. */
-  quickReplySettings: { enabled: boolean; upsellSet: boolean; /** Tự nạp câu mẫu mỗi ngày (AI) · câu tự nạp được tự bật (18/10/2026: in ra để biết cấu hình sai có thể tự quay lại). */ autoLearn: boolean; autoActivate: boolean; /** Câu upsell đã chọn mà đang TẮT / đã xoá ⇒ bot coi như chưa có (chỉ đọc câu đang bật). */ upsellStale?: { title: string | null; state: "INACTIVE" | "MISSING" } } | null;
+  quickReplySettings: { enabled: boolean; upsellSet: boolean; /** Tự nạp câu mẫu mỗi ngày (AI) · câu tự nạp được tự bật (18/10/2026: in ra để biết cấu hình sai có thể tự quay lại). */ autoLearn: boolean; autoActivate: boolean; /** `upsellAfterContact` (#952): đơn chỉ còn chờ xác minh ĐỊA CHỈ thì vẫn mời mua thêm. In ra để soát đúng cấu hình của tổ chức mà không mở màn hình (22/10/2026). */ upsellAfterContact: boolean; /** Câu upsell đã chọn mà đang TẮT / đã xoá ⇒ bot coi như chưa có (chỉ đọc câu đang bật). */ upsellStale?: { title: string | null; state: "INACTIVE" | "MISSING" } } | null;
 };
 
 /** Quy cách của một mẫu mã như bot đọc (`variantText` trong lib/sales-chatbot/catalog.ts). HÀM THUẦN. */
@@ -129,7 +129,7 @@ export async function collectOrgCatalog(org: { code: string; name: string; isHom
     products,
     priceLists,
     quickReplies,
-    quickReplySettings: { enabled: qs.enabled, upsellSet: quickReplies.some((q) => q.upsell), autoLearn: qs.autoLearn, autoActivate: qs.autoActivate, ...(upsellStale ? { upsellStale } : {}) },
+    quickReplySettings: { enabled: qs.enabled, upsellSet: quickReplies.some((q) => q.upsell), autoLearn: qs.autoLearn, autoActivate: qs.autoActivate, upsellAfterContact: qs.upsellAfterContact, ...(upsellStale ? { upsellStale } : {}) },
   };
 }
 
@@ -200,7 +200,7 @@ export function catalogSummary(r: CatalogReport): string[] {
   return [
     `Tổ chức ${r.org.code}: ${live.length} sản phẩm · ${variants.length} mẫu mã (${variants.filter((v) => v.price === null).length} chưa có giá · ${variants.filter((v) => v.hidden).length} ẩn · ${variants.filter((v) => v.addOnOnly).length} chỉ bán kèm) · nguồn ${r.syncedProducts === null ? "—" : r.syncedProducts ? "ĐỒNG BỘ" : "tạo tay"}`,
     `Bot: ${r.bot ? `${onOff(r.bot.enabled)} · giá sỉ ${onOff(r.bot.wholesalePricing)} · chốt không kiểm tồn ${onOff(r.bot.sellWithoutStockCheck)}` : "— (chưa có cấu hình)"} · bảng giá sỉ đang dùng ${activeLists.length} (${tiers} bậc) · câu mẫu đang bật ${r.quickReplies.length} · câu upsell ${r.quickReplySettings?.upsellSet ? `ĐÃ CHỌN (${r.quickReplies.find((q) => q.upsell)?.images ?? 0} ảnh)` : r.quickReplySettings?.upsellStale ? `TRỎ TỚI CÂU ${r.quickReplySettings.upsellStale.state === "INACTIVE" ? "ĐANG TẮT" : "ĐÃ XOÁ"}` : "CHƯA CHỌN"}`,
-    `Câu mẫu: cách hỏi gắn nhầm món ${conflicts.length} (ở ${new Set(conflicts.map((c) => c.title)).size} câu mẫu đang bật) · cụm chung trên câu một món ${generic.length} (ở ${new Set(generic.map((g) => g.title)).size} câu) · tự nạp ${r.quickReplySettings ? `${onOff(r.quickReplySettings.autoLearn)} (tự bật ${onOff(r.quickReplySettings.autoActivate)})` : "—"} — chạy thử, gỡ trên màn hình Câu trả lời mẫu`,
+    `Câu mẫu: cách hỏi gắn nhầm món ${conflicts.length} (ở ${new Set(conflicts.map((c) => c.title)).size} câu mẫu đang bật) · cụm chung trên câu một món ${generic.length} (ở ${new Set(generic.map((g) => g.title)).size} câu) · tự nạp ${r.quickReplySettings ? `${onOff(r.quickReplySettings.autoLearn)} (tự bật ${onOff(r.quickReplySettings.autoActivate)})` : "—"} · mời mua thêm khi địa chỉ chờ xác minh ${r.quickReplySettings ? onOff(r.quickReplySettings.upsellAfterContact) : "—"} — chạy thử, gỡ trên màn hình Câu trả lời mẫu`,
   ].map((l) => l.slice(0, SUMMARY_MAX_CHARS));
 }
 
