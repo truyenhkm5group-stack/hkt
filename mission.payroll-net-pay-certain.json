@@ -3,7 +3,7 @@
   "mission_id": "payroll-net-pay-certain",
   "title": "Thực nhận không còn «—» chỉ vì một số tạm tính không ai trả: 0% là 0, tháng không có LN đủ điều kiện là thưởng 0",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -23,7 +23,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T05:18:44.073Z",
-  "updated_at": "2026-10-22T05:18:44.073Z",
-  "last_heartbeat": "2026-10-22T05:18:44.073Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-22T05:19:19.107Z",
+  "last_heartbeat": "2026-10-22T05:19:19.107Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/payroll-net-pay-certain",
+    "sha": "8e5ab4d65548dc03ea0c73e959dc5cc353d85c46",
+    "at": "2026-10-22T05:19:19.107Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "Thực nhận không còn «—» chỉ vì một số tạm tính không ai trả: 0% là 0, tháng không có LN đủ điều kiện là thưởng 0",
+    "summary": "Đo production 22/10 (payroll-reconcile 39719781762): từ 08 thực nhận mọi người «—». Sửa 3 lỗi: (1) % LN cá nhân 0 ⇒ hoa hồng cá nhân 0 dù sổ lỗ chưa có số dư đầu; (2) cổng: khoản tạm tính chưa biết chỉ chặn khi E > 0, E ≤ 0 ⇒ NO_ELIGIBLE_PROFIT chắc chắn; (3) đường cũ: thực nhận = lương cứng + hoa hồng DT + điều chỉnh + thưởng đủ ĐK khi tạm tính cũ chưa biết. Production: thực nhận chỉ tính được sau khi chủ shop chuyển nguồn ghi nhận sang Bảng Lương + khai quy chế; dự kiến 06–10 thưởng % LN = 0 (lỗ lũy kế mọi tháng), thực nhận = lương cứng.",
+    "tests": [
+      "typecheck: OK",
+      "lint: OK",
+      "npm test shard 1-4/4: ĐẠT",
+      "build: OK",
+      "đột biến 4/4 đỏ"
+    ]
+  }
 }
