@@ -150,6 +150,8 @@ export function testKhongSoBangMocDocLaiDongHo() {
 
 /** Miễn trừ — mỗi dòng nói RÕ vì sao đọc môi trường ở đó là đo MÃ NGUỒN chứ không đo máy. */
 const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
+  "tests/vtp-reship-backfill.test.ts":
+    "KHÔNG đọc môi trường: chuỗi «process.env.ERP_READ_ONLY = \"1\"» chỉ xuất hiện như CHỮ CẦN TÌM trong mã nguồn của scripts/vtp-reship-backfill.ts (khẳng định chạy thử chỉ đọc do Postgres ép) — đo MÃ NGUỒN, không đo máy; không khẳng định nào rẽ nhánh theo giá trị của biến.",
   "tests/shell-locale.ts":
     "ĐỌC process.env để KẾ THỪA môi trường của tiến trình rồi GHIM LC_COLLATE=C và GỠ LC_ALL — đây chính là chỗ bài kiểm thôi đo cái máy: không ghim thì `sort`/`ls` của shell xếp theo collation của từng máy và cùng một commit cho hai kết luận (đo thật 13/10/2026: backup.test.ts xanh ở CI, đỏ trên Git Bash Windows). Không một khẳng định nào rẽ nhánh theo giá trị đọc được.",
   "tests/migration-serve-compat.test.ts":
