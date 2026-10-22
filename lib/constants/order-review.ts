@@ -167,6 +167,26 @@ export function withReviewResolved(raw: Record<string, unknown>, by: { action: "
   return { raw: { ...raw, review: null, reviewLog: [...prior, entry].slice(-ORDER_REVIEW_LIMITS.log) }, changed: true, resolved: open.entries };
 }
 
+/**
+ * Lượt kiểm gần nhất của NGƯỜI (xác nhận / huỷ đơn) — không bao giờ là lời khách xác nhận lại hay lượt MÁY gỡ cờ địa chỉ: trang đơn in
+ * «Đã kiểm … bởi … — xác nhận đơn», chọn nhầm `ADDRESS_SETTLED` là để nhân viên tưởng đã có người xác nhận (Tech Lead 22/10/2026). HÀM THUẦN.
+ */
+export function lastHumanReviewOf(raw: unknown): OrderReviewResolution | null {
+  return orderReviewLogOf(raw).find((r) => r.action === "CONFIRMED" || r.action === "CANCELLED") ?? null;
+}
+
+/** Lượt MÁY gỡ cờ địa chỉ gần nhất (đơn đã có xã / phường) — hiện bằng nhãn RIÊNG, không như lời người kiểm. HÀM THUẦN. */
+export function lastAddressSettledOf(raw: unknown): OrderReviewResolution | null {
+  return orderReviewLogOf(raw).find((r) => r.action === "ADDRESS_SETTLED") ?? null;
+}
+
+/** Lý do ghi nhật ký kiểm toán cho một lượt GỠ cờ — một chỗ, theo đúng action (máy gỡ cờ địa chỉ KHÔNG phải «người đã kiểm»). HÀM THUẦN. */
+export function reviewResolveReason(action: OrderReviewAction | undefined): string {
+  if (action === "ADDRESS_SETTLED") return "Máy gỡ cờ địa chỉ — đơn đã có xã / phường";
+  if (action === "CUSTOMER_RECONFIRMED") return "Khách xác nhận lại qua bot — cờ giữ nguyên, người quyết";
+  return `Người đã kiểm — ${action === "CANCELLED" ? "huỷ đơn" : "xác nhận đơn"}`;
+}
+
 /** Đầu câu ghi chú của dòng cờ «địa chỉ chưa ghép» do MÁY dựng lúc tự chốt (`addressReview` trong lib/records/order-create.ts). */
 export const MACHINE_ADDRESS_NOTE_PREFIX = "Máy chốt khi địa chỉ chưa ghép được";
 

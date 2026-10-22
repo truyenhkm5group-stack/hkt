@@ -9,7 +9,8 @@
  *    một đơn đã chốt chưa đi.
  *  · Bản sửa (máy chủ, không phải lời nhắc — round-check.ts): một câu «đặt thêm hay vẫn đơn đó» (ghi nhận đúng món + số lượng) ⇒ «đặt thêm» =
  *    lượt mua mới (giỏ đi theo, KHÔNG mang địa chỉ đơn cũ — AGENTS 3.12) · «vẫn đơn đó» = giữ đơn cũ · không rõ = người. Mảnh địa chỉ theo mốc
- *    địa danh (KCN / công ty / cổng) ⇒ hỏi đúng phần còn thiếu, không bịa xã, không chuyển người.
+ *    địa danh (KCN / công ty / cổng) ⇒ không bịa xã, không chuyển người. Từ AGENTS 3.12b (chủ shop chốt 22/10/2026) khách ĐÃ gửi chữ địa chỉ
+ *    thì bot KHÔNG hỏi thêm phường / tỉnh — đơn đi tiếp kèm cờ, máy ánh xạ nền / nhân viên kiểm (trước đó: hỏi đúng phần còn thiếu).
  * Dữ liệu giả. Mốc thời gian đi theo đồng hồ thật (AGENTS mục 50).
  */
 import assert from "node:assert/strict";
@@ -17,6 +18,7 @@ import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { addressQuestion, looksLikeStreetFragment, parseCustomerAddress } from "@/lib/address/customer-address";
 import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
+import { asksAnyAddressPart } from "@/lib/sales-chatbot/address-memory";
 import { EMPTY_REPLY_TEXT, silenceFallbackText } from "@/lib/sales-chatbot/engine";
 import { QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
 import { askedQuantityChoice, choiceAmountText, DELIVERY_ASK_NEEDS_ADDRESS, purchaseAmountIntent, quantityOnlyAnswer, quantityWithDeliveryAsk, roundCheckAnswer, roundCheckStep } from "@/lib/sales-chatbot/round-check";
@@ -70,7 +72,7 @@ function testThuan() {
   for (const t of ["Cho chị 2kg, giao Hà Nội nhé", "2kg nhé. Shop ở đâu vậy?", "Cho chị 2kg", "Lấy 2kg, gửi địa chỉ cũ"]) assert.equal(quantityWithDeliveryAsk(t, ["Chả cá thu"], isD), null, t);
   assert.doesNotMatch(DELIVERY_ASK_NEEDS_ADDRESS, /\d|hôm nay|ngày mai|mai /, "không mốc, không số ngày khi chưa biết nơi giao");
 
-  // Địa chỉ theo mốc địa danh: là mảnh địa chỉ, KHÔNG bịa tỉnh / xã, một câu hỏi phần còn thiếu.
+  // Địa chỉ theo mốc địa danh: là mảnh địa chỉ, KHÔNG bịa tỉnh / xã, addressQuestion vẫn dựng được câu phần thiếu (cho nhân viên), bot không gửi nó khi khách đã gửi chữ địa chỉ.
   assert.ok(looksLikeStreetFragment(KCN), "«KCN …, cổng công ty …» là nơi giao");
   const p = parseCustomerAddress(KCN);
   assert.deepEqual([p.province, p.ward], [null, null], "không tự gán tỉnh / xã cho mốc địa danh");
@@ -80,7 +82,9 @@ function testThuan() {
   const cartSt = { cart: { selectedItems: [{ label: "Chả cá thu", match: "cha ca thu", productId: "p1", variantId: "v1", sku: "CC", quantity: 1000, unit: "g", sourceMessageId: 50, confidence: "HIGH", customerExplicit: true }] } } as unknown as ChatState;
   assert.match(silenceFallbackText(cartSt, "1kg thôi", 50, true), /số điện thoại/, "giỏ có món, chưa SĐT ⇒ xin SĐT");
   const withPhone = { ...cartSt, customer: { id: null, name: "A", phone: "0961000000", address: "", province: "", simulated: false } } as ChatState;
-  assert.equal(silenceFallbackText(withPhone, KCN, 52, true), KCN_Q, "khách vừa gửi mảnh địa chỉ ⇒ hỏi đúng phần thiếu, không xin lại cả địa chỉ");
+  // AGENTS 3.12b: khách vừa gửi mảnh địa chỉ ⇒ KHÔNG hỏi phần thiếu nữa (đã có chữ địa chỉ) — câu im lặng đi tiếp sang chốt.
+  const kcnFallback = silenceFallbackText(withPhone, KCN, 52, true);
+  assert.ok(!asksAnyAddressPart(kcnFallback) && kcnFallback !== KCN_Q, `khách vừa gửi mảnh địa chỉ ⇒ không hỏi lại phần nào của địa chỉ: ${kcnFallback}`);
   assert.notEqual(silenceFallbackText(withPhone, "đặt thêm đơn mới em nhé", 51, true), EMPTY_REPLY_TEXT);
 }
 
@@ -121,7 +125,7 @@ const shipOld = async (ctx: GoldenHookCtx) => {
 };
 
 const CASES: GoldenCase[] = [
-  { key: "rc-ngoc-bich", title: "Phát lại ca «Ngọc Bích»: đơn cũ 2,5 ngày chưa đi ⇒ «1kg thôi» = một câu đơn mới/đơn cũ ⇒ «đặt thêm» ⇒ hỏi địa chỉ (không lấy địa chỉ cũ) ⇒ KCN ⇒ hỏi đúng phần thiếu ⇒ đủ ⇒ đơn MỚI, đơn cũ nguyên vẹn", shop: "food", channel: "FANPAGE", turns: [
+  { key: "rc-ngoc-bich", title: "Phát lại ca «Ngọc Bích»: đơn cũ 2,5 ngày chưa đi ⇒ «1kg thôi» = một câu đơn mới/đơn cũ ⇒ «đặt thêm» ⇒ hỏi địa chỉ (không lấy địa chỉ cũ) ⇒ KCN ⇒ không hỏi lại phần nào (3.12b) ⇒ đủ ⇒ đơn MỚI, đơn cũ nguyên vẹn", shop: "food", channel: "FANPAGE", turns: [
     first("0961007201"),
     { say: "1kg thôi", before: reorder(60), ai: silent },
     { say: "đặt thêm đơn mới em nhé", ai: silent },
@@ -190,7 +194,8 @@ async function testChatTurn() {
         assert.doesNotMatch(askAddr, /Hai Bà Trưng|xác nhận giúp em/, "không tự lấy địa chỉ đơn cũ, không xin chốt với địa chỉ cũ");
         assert.equal(t.turns[3].status, "OPEN", "lượt sau câu trả lời vẫn là BÁN, không chuyển người");
         assert.match(t.turns[3].shown.join(" "), /địa chỉ nhận hàng/, `model im ⇒ xin địa chỉ: ${t.turns[3].shown.join(" | ")}`);
-        assert.deepEqual(t.turns[4].shown, [KCN_Q], "mảnh địa chỉ KCN ⇒ đúng một câu hỏi phần thiếu");
+        // AGENTS 3.12b: model cố hỏi phường / tỉnh sau mảnh địa chỉ KCN ⇒ điểm chặn cuối gỡ câu hỏi; khách không bị hỏi lại phần nào.
+        assert.ok(!t.turns[4].shown.includes(KCN_Q) && !t.turns[4].shown.some(asksAnyAddressPart), `mảnh địa chỉ KCN ⇒ không hỏi lại: ${JSON.stringify(t.turns[4].shown)}`);
         assert.notEqual(t.turns[4].status, "HANDOFF", "không chuyển người chỉ vì thiếu tỉnh / xã");
         assert.ok(!t.turns.slice(1).some((x) => x.rounds.some((r) => r.tools.some((y) => y.name === "update_draft_order"))), "không sửa đơn cũ");
         // Gốc ca thật: lời nhắc hậu mãi («khách ĐÃ CÓ ĐƠN… KHÔNG gọi create_draft_order») kéo model về sửa đơn cũ. Sau «đặt thêm», mọi vòng model
@@ -351,5 +356,5 @@ export async function testP0ShortQtyRound(): Promise<void> {
   testThuan();
   await testChatTurn();
   await testQuantityAnswers();
-  console.log("✓ P0 câu chốt ngắn: «1kg thôi / nửa ký / 1,5kg / thôi lấy 1kg» ghi giỏ · lời mua mới trên đơn cũ chưa đi ⇒ MỘT câu đặt thêm / vẫn đơn đó (máy chủ) · đặt thêm ⇒ lượt mới không mang địa chỉ cũ · vẫn đơn đó ⇒ không đơn thứ hai · không rõ ⇒ người · đơn cũ đã rời kho ⇒ lượt mới · mốc địa danh KCN ⇒ hỏi đúng phần thiếu, không bịa xã · không «nói rõ hơn»");
+  console.log("✓ P0 câu chốt ngắn: «1kg thôi / nửa ký / 1,5kg / thôi lấy 1kg» ghi giỏ · lời mua mới trên đơn cũ chưa đi ⇒ MỘT câu đặt thêm / vẫn đơn đó (máy chủ) · đặt thêm ⇒ lượt mới không mang địa chỉ cũ · vẫn đơn đó ⇒ không đơn thứ hai · không rõ ⇒ người · đơn cũ đã rời kho ⇒ lượt mới · mốc địa danh KCN ⇒ không hỏi lại phần nào (3.12b), không bịa xã · không «nói rõ hơn»");
 }

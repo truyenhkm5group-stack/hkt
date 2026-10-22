@@ -391,16 +391,21 @@ async function testRuleOff() {
       assert.equal(order.shipCommune, "", "xã / phường chưa ghép");
       assert.equal(state.confirmed?.valid, false);
       assert.equal(state.confirmed?.pending, "ADDRESS");
-      assert.deepEqual(transcript.turns[1].shown, [CLAIM_SAFE_TEXT.ORDER_RECEIVED], "«đã lên đơn» bị thay bằng câu ghi nhận (không «nhân viên xác nhận địa chỉ» — 22/10/2026)");
+      // 22/10/2026 (AGENTS 3.12b): đơn chỉ chờ xác minh địa chỉ là đơn ĐÃ CHỐT với khách ⇒ câu «đã lên đơn» của bot đi qua, không bị thay.
+      assert.ok(transcript.turns[1].shown.length && !transcript.turns[1].shown.some((x) => x === CLAIM_SAFE_TEXT.ORDER_RECEIVED || x === CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS), `câu chốt thường đi qua: ${transcript.turns[1].shown.join(" | ")}`);
       assert.notEqual(transcript.final.status, "HANDOFF", "không chuyển người — đơn đã nằm trong hàng «Cần người kiểm»");
       const conv = { id: row.id, orderId: row.orderId, pageId: row.pageId, threadId: row.threadId };
       const f = await claimFactsLoader(conv)(state);
-      assert.equal(f.orderConfirmed, false, "đơn CẦN XÁC THỰC không đủ cho «đã lên đơn»");
-      assert.equal(f.orderPending, "ADDRESS");
-      // Đơn chốt TRƯỚC bản này (state không có `valid`) ⇒ đọc CSDL: cờ «địa chỉ chưa ghép» vẫn chặn.
+      // 22/10/2026 (AGENTS 3.12b): đơn chỉ chờ xác minh ĐỊA CHỈ là đơn đã chốt với khách — kiểm địa chỉ là việc nội bộ, vận đơn giữ lại.
+      assert.equal(f.orderConfirmed, true, "chỉ chờ địa chỉ ⇒ «đã lên đơn» đúng sự thật");
+      assert.equal(f.orderPending, null);
+      // Đơn chốt TRƯỚC bản này (state không có `valid`) ⇒ đọc CSDL: dòng cờ «địa chỉ chưa ghép» cũng KHÔNG chặn câu chốt nữa.
       const legacy: ChatState = { ...state, confirmed: { ...state.confirmed!, valid: undefined, pending: undefined } };
       const fl = await claimFactsLoader(conv)(legacy);
-      assert.ok(!fl.orderConfirmed && fl.orderPending === "ADDRESS", JSON.stringify(fl));
+      assert.ok(fl.orderConfirmed && fl.orderPending === null, JSON.stringify(fl));
+      // Cờ CHECK (giá · SĐT · cần kiểm khác) VẪN chặn «đã lên đơn».
+      const fc = await claimFactsLoader(conv)({ ...state, confirmed: { ...state.confirmed!, valid: false, pending: "CHECK" } });
+      assert.ok(!fc.orderConfirmed && fc.orderPending === "CHECK", JSON.stringify(fc));
       // Người sửa địa chỉ + gỡ cờ ⇒ đơn qua kiểm ⇒ câu «đã lên đơn» hợp lệ.
       const db = await getDb();
       await db.update(schema.orders).set({ shipCommune: "Phường Hoàn Kiếm", shipProvince: "Thành phố Hà Nội", raw: { ...(order.raw as Record<string, unknown>), review: null } }).where(and(eq(schema.orders.id, order.id)));
@@ -745,7 +750,7 @@ async function testAutoConfirmCases() {
         const review = (order.raw as { review?: { entries: { code: string }[] } | null }).review;
         assert.ok(review?.entries.some((e) => e.code === "ADDRESS_UNRESOLVED"), "cờ cần kiểm địa chỉ");
         assert.equal(state.confirmed?.valid, false);
-        assert.deepEqual(transcript.turns[0].shown, [CLAIM_SAFE_TEXT.ORDER_RECEIVED], "câu ghi nhận — KHÔNG «đã lên đơn», không «nhân viên xác nhận địa chỉ» (22/10/2026)");
+        assert.ok(transcript.turns[0].shown.length && !transcript.turns[0].shown.some((x) => x === CLAIM_SAFE_TEXT.ORDER_RECEIVED || x === CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS), `câu chốt thường đi qua (AGENTS 3.12b): ${transcript.turns[0].shown.join(" | ")}`);
         assert.notEqual(transcript.final.status, "HANDOFF", "không chuyển người — đơn nằm trong hàng «Cần người kiểm»");
         return;
       }

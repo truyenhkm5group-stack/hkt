@@ -39,7 +39,8 @@ export type SalesQualityState = {
   /** Đọc chạm trần ⇒ số đếm là trần dưới. */
   capped: boolean;
   counts: Record<SalesQualityCode, number>;
-  bases: QualityBases & { handoffWaiting: number };
+  /** `addressFlagged` = mẫu số của ADDRESS_RECEIVED_BUT_NOT_APPLIED (đơn bot chốt còn cờ «địa chỉ chưa ghép», từ đầu kỳ). */
+  bases: QualityBases & { handoffWaiting: number; addressFlagged: number };
   /** STAFF_AI_QUOTE_CONFLICT tách theo nguồn: từ MẪU TỰ ĐỘNG page (Pancake) hay tin page khác (nhân viên / chưa rõ). */
   quoteConflictSources?: { PAGE_AUTOMATION: number; OTHER: number };
   /** Hạn chờ người đọc được (giờ); `null` ⇒ không kết luận HANDOFF_UNANSWERED. */
@@ -219,7 +220,7 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
         .returning({ id: schema.notifications.id });
       created += ins.length;
     }
-    const state: SalesQualityState = { day, at: now.toISOString(), conversations: scan.conversations, capped: scan.capped, counts, bases: { ...b, handoffWaiting: ho.waiting }, slaHours, quoteConflictSources: { PAGE_AUTOMATION: scan.automationQuoteConflicts, OTHER: counts.STAFF_AI_QUOTE_CONFLICT - scan.automationQuoteConflicts } };
+    const state: SalesQualityState = { day, at: now.toISOString(), conversations: scan.conversations, capped: scan.capped, counts, bases: { ...b, handoffWaiting: ho.waiting, addressFlagged: na.flagged }, slaHours, quoteConflictSources: { PAGE_AUTOMATION: scan.automationQuoteConflicts, OTHER: counts.STAFF_AI_QUOTE_CONFLICT - scan.automationQuoteConflicts } };
     await setSettingJson(SALES_QUALITY_STATE_KEY, state);
     return { ran: true, day, created, state };
   } catch (e) {

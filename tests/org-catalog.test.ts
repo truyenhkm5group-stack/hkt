@@ -68,11 +68,11 @@ export function testOrgCatalogPure() {
   assert.ok(all.includes("Hướng dẫn thêm (20 ký tự): Giá sỉ hỏi nhân viên"));
 
   const sum = catalogSummary(r);
-  assert.deepEqual(sum, ["Tổ chức x: 1 sản phẩm · 2 mẫu mã (1 chưa có giá · 1 ẩn · 1 chỉ bán kèm) · nguồn tạo tay", "Bot: BẬT · giá sỉ TẮT · chốt không kiểm tồn BẬT · bảng giá sỉ đang dùng 1 (1 bậc) · câu mẫu đang bật 1 · câu upsell ĐÃ CHỌN (1 ảnh)", "Câu mẫu: cách hỏi gắn nhầm món 0 (ở 0 câu mẫu đang bật) · cụm chung trên câu một món 0 (ở 0 câu) · tự nạp TẮT (tự bật TẮT) · mời mua thêm khi địa chỉ chờ xác minh TẮT — chạy thử, gỡ trên màn hình Câu trả lời mẫu"]);
+  assert.deepEqual(sum, ["Tổ chức x: 1 sản phẩm · 2 mẫu mã (1 chưa có giá · 1 ẩn · 1 chỉ bán kèm) · nguồn tạo tay", "Bot: BẬT · giá sỉ TẮT · chốt không kiểm tồn BẬT · bảng giá sỉ đang dùng 1 (1 bậc) · câu mẫu đang bật 1 · câu upsell ĐÃ CHỌN (1 ảnh)", "Câu mẫu: cách hỏi gắn nhầm món 0 (ở 0 câu mẫu đang bật) · cụm chung trên câu một món 0 (ở 0 câu) · tự nạp TẮT (tự bật TẮT) · mời mua thêm khi địa chỉ chờ xác minh TẮT (không còn tác dụng 22/10) — chạy thử, gỡ trên màn hình Câu trả lời mẫu"]);
   // P0 18/10/2026: câu mẫu NEM mang cách hỏi «xin giá chả cá» ⇒ một dòng cảnh báo (phần mã hoá) + số đếm ở kênh tóm tắt.
   const nhamMon: CatalogReport = { ...r, products: [...r.products, { id: "erp-p9", name: "Nem hải sản tôm bề bề", code: null, manual: true, removed: false, variants: [{ id: "erp-v9", sku: "NEM-1", label: "Hộp 10 cái", price: 120_000, weightGrams: null, hidden: false, manual: true }] }], quickReplies: [...r.quickReplies, { title: "Nem giá", triggers: ["nem bao nhiêu", "xin giá chả cá"], answer: "Nem {{giá:NEM-1}}/hộp", upsell: false, images: 3 }] };
   assert.ok(catalogLines(nhamMon).includes("  ⚠ CÁCH HỎI GẮN NHẦM MÓN · Nem giá: «xin giá chả cá» gọi tên Chả cá thu"), catalogLines(nhamMon).join(" | "));
-  assert.equal(catalogSummary(nhamMon)[2], "Câu mẫu: cách hỏi gắn nhầm món 1 (ở 1 câu mẫu đang bật) · cụm chung trên câu một món 0 (ở 0 câu) · tự nạp TẮT (tự bật TẮT) · mời mua thêm khi địa chỉ chờ xác minh TẮT — chạy thử, gỡ trên màn hình Câu trả lời mẫu");
+  assert.equal(catalogSummary(nhamMon)[2], "Câu mẫu: cách hỏi gắn nhầm món 1 (ở 1 câu mẫu đang bật) · cụm chung trên câu một món 0 (ở 0 câu) · tự nạp TẮT (tự bật TẮT) · mời mua thêm khi địa chỉ chờ xác minh TẮT (không còn tác dụng 22/10) — chạy thử, gỡ trên màn hình Câu trả lời mẫu");
   // Cụm chung «báo giá» trên câu nem (một món) ⇒ liệt kê để gỡ; câu upsell không bị liệt kê.
   const chung: CatalogReport = { ...nhamMon, quickReplies: [...nhamMon.quickReplies, { title: "Nem 2", triggers: ["báo giá", "nem hộp mấy cái"], answer: "Nem {{giá:NEM-1}}/hộp", upsell: false, images: 0 }] };
   assert.deepEqual(genericSingleProductTriggers(chung).map((g) => `${g.title}:${g.trigger}:${g.product}`), ["Nem 2:báo giá:Nem hải sản tôm bề bề"]);
@@ -145,7 +145,7 @@ export async function testOrgCatalogDb() {
       await db.insert(schema.settings).values({ key: "ai.salesChatbot.quickReplies", value: JSON.stringify({ enabled: true, aiMatch: true, upsellReplyId: tatQr.id, upsellAfterContact: true }) });
       const r2 = await collectOrgCatalog({ code: ORG, name: "Danh mục thử", isHome: false }, view);
       assert.deepEqual(r2.quickReplySettings, { enabled: true, upsellSet: false, autoLearn: false, autoActivate: false, upsellAfterContact: true, upsellStale: { title: "Tắt rồi", state: "INACTIVE" } });
-      assert.match(catalogSummary(r2)[2], / · mời mua thêm khi địa chỉ chờ xác minh BẬT — /, "cờ upsellAfterContact của tổ chức đọc được ở kênh tóm tắt");
+      assert.match(catalogSummary(r2)[2], / · mời mua thêm khi địa chỉ chờ xác minh BẬT \(không còn tác dụng 22\/10\) — /, "cờ upsellAfterContact của tổ chức đọc được ở kênh tóm tắt");
       const all = [...catalogLines(r), ...catalogSummary(r)].join("\n");
       assert.ok(!all.includes(BI_MAT) && !all.includes(SDT), `không dòng nào lộ tên khách / SĐT / câu đã tắt:\n${all}`);
       assert.equal(catalogSummary(r)[0], `Tổ chức ${ORG}: 2 sản phẩm · 2 mẫu mã (1 chưa có giá · 0 ẩn · 0 chỉ bán kèm) · nguồn tạo tay`);

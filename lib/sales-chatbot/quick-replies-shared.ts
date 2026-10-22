@@ -73,6 +73,9 @@ export const QUICK_REPLY_AUTO_LEARN_RUN_KEY = "ai.salesChatbot.quickReplies.auto
  * phường / xã ⇒ KHÔNG nhắn «nhân viên sẽ xác nhận lại địa chỉ» nữa: bot nói câu ghi nhận ngắn rồi sang bước mời mua thêm (đúng đường
  * lời mời sau chốt); đơn VẪN mang cờ ADDRESS_UNRESOLVED, nằm ở hàng «Cần người kiểm» và tuyến ADDRESS_REVIEW — chưa xác minh thì không
  * vận đơn. MẶC ĐỊNH TẮT, bật theo từng tổ chức.
+ *
+ * KHÔNG CÒN TÁC DỤNG từ 22/10/2026 (chủ shop — AGENTS 3.12b): xác minh địa chỉ không ảnh hưởng chốt / mời mua thêm cho MỌI tổ chức. Giá trị đã
+ * lưu vẫn đọc (không xoá, không ghi đè) nhưng không đường nào dùng; ops org-catalog in «không còn tác dụng».
  */
 export type QuickReplySettings = { enabled: boolean; aiMatch: boolean; upsellReplyId: string | null; autoLearn: boolean; autoActivate: boolean; autoUpsellOffer: boolean; upsellAfterContact: boolean };
 export const DEFAULT_QUICK_REPLY_SETTINGS: QuickReplySettings = { enabled: true, aiMatch: true, upsellReplyId: null, autoLearn: false, autoActivate: false, autoUpsellOffer: false, upsellAfterContact: false };

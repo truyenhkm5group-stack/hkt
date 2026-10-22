@@ -15,13 +15,12 @@
  * Dữ liệu dựng (không PII): SĐT 0961005xxx, số nhà / ngõ hư cấu.
  */
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { customerStatedAddresses, parseCustomerAddress, wardFromCustomerWords } from "@/lib/address/customer-address";
 import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
-import { ORDER_REVIEW_ACTIONS, orderReviewLogOf, orderReviewOf, withAddressSettled, type OrderReviewAction } from "@/lib/constants/order-review";
+import { lastAddressSettledOf, lastHumanReviewOf, ORDER_REVIEW_ACTIONS, orderReviewLogOf, orderReviewOf, reviewResolveReason, withAddressSettled, type OrderReviewAction } from "@/lib/constants/order-review";
 import { SALES_QUALITY_CODES, SALES_QUALITY_SPEC } from "@/lib/constants/sales-quality";
 import { cancelEvidenceOf } from "@/lib/records/order-cancel-reconcile";
 import { keptWardOf } from "@/lib/sales-chatbot/tools";
@@ -91,6 +90,22 @@ export function testSalesAddressAppliedPure() {
     assert.equal(cancelEvidenceOf({ ...base, reviewLog }), expect[action], `${action} sau lời huỷ ⇒ ${expect[action] ?? "không phải ứng viên"}`);
   }
 
+  // Hiển thị: lượt MÁY gỡ cờ địa chỉ KHÔNG bao giờ hiện như «người xác nhận đơn» (Tech Lead 22/10/2026).
+  const vet = (actions: OrderReviewAction[]) => ({ reviewLog: actions.map((action, i) => ({ entries: [], action, at: `2026-10-22T0${i}:00:00.000Z`, byUserId: action === "ADDRESS_SETTLED" ? null : "u1", byName: action === "ADDRESS_SETTLED" ? "Máy ánh xạ địa chỉ · nguồn TEXT" : "Chị A" })) });
+  assert.equal(lastHumanReviewOf(vet(["CONFIRMED", "ADDRESS_SETTLED"]))?.action, "CONFIRMED", "lượt người gần nhất, bỏ qua lượt máy mới hơn");
+  assert.equal(lastHumanReviewOf(vet(["ADDRESS_SETTLED"])), null, "chỉ có lượt máy ⇒ không có «đã kiểm bởi người»");
+  assert.equal(lastHumanReviewOf(vet(["CUSTOMER_RECONFIRMED"])), null);
+  assert.equal(lastHumanReviewOf(vet(["CANCELLED"]))?.action, "CANCELLED");
+  assert.equal(lastAddressSettledOf(vet(["CONFIRMED", "ADDRESS_SETTLED"]))?.byUserId, null);
+  assert.equal(reviewResolveReason("ADDRESS_SETTLED"), "Máy gỡ cờ địa chỉ — đơn đã có xã / phường");
+  assert.equal(reviewResolveReason("CONFIRMED"), "Người đã kiểm — xác nhận đơn");
+  assert.equal(reviewResolveReason("CANCELLED"), "Người đã kiểm — huỷ đơn");
+  const page = readFileSync("app/(dashboard)/orders/[id]/page.tsx", "utf8");
+  assert.match(page, /const lastReview = manual \? lastHumanReviewOf\(order\.raw\) : null;/, "trang đơn chọn lượt NGƯỜI kiểm");
+  assert.doesNotMatch(page, /action !== "CUSTOMER_RECONFIRMED"/, "không còn lọc «mọi action trừ khách xác nhận lại»");
+  assert.match(page, /Máy ghép được phường \/ xã/, "lượt máy có nhãn riêng");
+  assert.match(readFileSync("lib/records/order-create.ts", "utf8"), /: reviewResolveReason\(detail\.action\),/, "nhật ký kiểm toán lấy lý do theo đúng action");
+
   // 2B: câu ghi nhận không còn là «lần chặn khẳng định»; mã mới ở CUỐI danh sách, khoá cũ giữ nguyên.
   const w = { from: new Date(t0 - 3_600_000), to: new Date(t0 + 3_600_000), templates: [], products: [] };
   const msg = (role: string, text: string, i: number) => ({ seq: i, role, at: new Date(t0 + i * 1000), content: [{ type: "text", text }] });
@@ -109,13 +124,10 @@ export function testSalesAddressAppliedPure() {
   assert.equal(addressNotApplied({ raw: { review: { entries: [changed] } }, shipAddress: STREET, shipProvince: "", shipCommune: WARD }, []), false, "cờ «khách đổi địa chỉ» là việc của người ⇒ không đếm");
   assert.equal(addressNotApplied({ raw: {}, shipAddress: STREET, shipProvince: "", shipCommune: WARD }, []), false);
 
-  // Ảnh chụp golden DUY NHẤT được phép đổi (Tech Lead 22/10/2026, điều kiện i–iv): `hau-mai-da-nhan-hang` — đổi ĐÚNG câu chờ địa chỉ ở
-  // say_to_customer + chữ khách thấy (2 chỗ). Đổi ngược câu mới về câu cũ ⇒ phải TRÙNG BYTE với bản trước P0 (sha256 dưới) ⇒ chuỗi công
-  // cụ, kết quả, trạng thái đơn của ca KHÔNG đổi. Ca này đổi vì lý do khác ⇒ cập nhật hằng số CÓ CHỦ Ý trong PR đó.
+  // Ảnh chụp golden `hau-mai-da-nhan-hang` (bước 1 đổi đúng câu chờ địa chỉ; PR-A address-resolver-ladder 22/10/2026 đổi tiếp có chủ ý: đơn
+  // chỉ chờ địa chỉ là đơn ĐÃ CHỐT với khách ⇒ câu chốt thường của bot đi qua). Không câu nào của ca còn nhắc «nhân viên xác nhận địa chỉ».
   const snap = readFileSync("tests/sales-agent-golden/snapshots/hau-mai-da-nhan-hang.json", "utf8");
-  assert.equal(snap.split(CLAIM_SAFE_TEXT.ORDER_RECEIVED).length - 1, 2, "câu ghi nhận ở đúng 2 chỗ (say_to_customer + chữ khách thấy)");
-  assert.ok(!snap.includes(BANNED), "câu cũ không còn trong ảnh chụp");
-  assert.equal(createHash("sha256").update(snap.split(CLAIM_SAFE_TEXT.ORDER_RECEIVED).join(BANNED)).digest("hex"), "27d408482787b82f688e764d8e85f57228265643c0030b4ae9b2c8640544bc00", "ngoài câu chờ địa chỉ, ảnh chụp trùng byte với bản trước P0 22/10/2026");
+  assert.ok(!snap.includes(BANNED) && !snap.includes(CLAIM_SAFE_TEXT.ORDER_RECEIVED), "ca hậu mãi: không câu cũ, không câu ghi nhận thay câu chốt");
   console.log("  ✓ thuần: tin chỉ-phường ghép vào địa chỉ có tỉnh đứng trước nó · không ghép tỉnh khác / địa chỉ cũ · gỡ đúng dòng cờ máy, vết ADDRESS_SETTLED");
 }
 
@@ -174,13 +186,17 @@ export async function testSalesAddressAppliedChat() {
       assert.equal(o.stage, "CONFIRMED", `[${c.key}] đơn tự chốt như chính sách`);
       // (4) Không câu «nhân viên sẽ xác nhận lại địa chỉ» dù cờ upsell TẮT.
       assert.ok(!all.some((s) => s.includes(BANNED)), `[${c.key}] câu cũ tới khách: ${all.join(" | ")}`);
-      assert.ok(t.turns[0].shown.includes(CLAIM_SAFE_TEXT.ORDER_RECEIVED), `[${c.key}] lượt chốt ⇒ câu ghi nhận: ${t.turns[0].shown.join(" | ")} · ${results[0].slice(0, 600)}`);
+      // 22/10/2026 (AGENTS 3.12b): đơn chỉ chờ địa chỉ là đơn ĐÃ CHỐT với khách ⇒ câu chốt THƯỜNG của bot đi qua nguyên văn, không câu ghi nhận.
+      assert.ok(t.turns[0].shown.includes("Dạ em lên đơn 1 × Ruốc bông tôm 100% cho mình rồi ạ.") && !t.turns[0].shown.includes(CLAIM_SAFE_TEXT.ORDER_RECEIVED), `[${c.key}] lượt chốt ⇒ câu chốt thường: ${t.turns[0].shown.join(" | ")} · ${results[0].slice(0, 600)}`);
       // (1) Phường vào đơn; lượt gửi lại không bị từ chối.
       assert.equal(o.shipCommune, WARD, `[${c.key}] phường khách đã cho vào đơn: ${results.slice(1).join(" || ").slice(0, 900)}`);
       for (const r of results.slice(1)) assert.doesNotMatch(r, /xã \/ phường chưa xác nhận/, `[${c.key}] gửi lại đúng phường đã lưu bị từ chối: ${r.slice(0, 600)}`);
       // (2) Cờ địa chỉ của máy tự đóng, có vết của MÁY.
       assert.equal(addressReviewOpenOf(o.raw), false, `[${c.key}] cờ ADDRESS_UNRESOLVED còn mở sau khi đơn đã có phường: ${JSON.stringify(orderReviewOf(o.raw))}`);
       const settled = orderReviewLogOf(o.raw).find((r) => r.action === "ADDRESS_SETTLED");
+      const db2 = await getDb();
+      const auditRows = await db2.select({ reason: schema.auditLogs.reason, action: schema.auditLogs.action }).from(schema.auditLogs).where(eq(schema.auditLogs.entityId, o.id));
+      assert.ok(auditRows.some((a) => a.action === "ORDER_REVIEW_RESOLVE" && a.reason === "Máy gỡ cờ địa chỉ — đơn đã có xã / phường") && !auditRows.some((a) => a.action === "ORDER_REVIEW_RESOLVE" && /Người đã kiểm/.test(a.reason ?? "")), `[${c.key}] nhật ký: máy gỡ cờ, không «người đã kiểm»: ${JSON.stringify(auditRows)}`);
       assert.ok(settled && settled.byUserId === null, `[${c.key}] vết gỡ cờ của máy: ${JSON.stringify(orderReviewLogOf(o.raw))}`);
       // (5) Sau khi khách đã cho, không câu nào xin lại phường / địa chỉ.
       for (const s of t.turns.slice(1).flatMap((x) => x.shown)) assert.doesNotMatch(s, ASKS_ADDRESS, `[${c.key}] xin lại địa chỉ: ${s}`);
