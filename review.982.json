@@ -1,0 +1,8 @@
+{
+  "pr": 982,
+  "sha": "bf462a7121a25720b487449cd5900de74d2f0dbe",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-22T19:36:08.602Z",
+  "note": "review lead: CHỈ-SCRIPT. Chạy thử (ERP_READ_ONLY + hỏi lại phiên): mốc TRƯỚC (GTC qua loadReturnsPage 7d + từ 15/10, đơn huỷ theo ngày, cặp gốc↔tạo lại rời kho) + kế hoạch theo ngày. --apply: hàng rào CANONICAL_OUTCOME_VERSION ≥ 4 của image (PR2 #981) đứng trước getDb, từ chối ⇒ exit 3; gắn qua relinkOrphanShipment (luật ghép duy nhất ở lib, audit lý do P0 22/10, actor script), clearMemo rồi đo mố"
+}
