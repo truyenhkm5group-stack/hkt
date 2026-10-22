@@ -3,7 +3,7 @@
   "mission_id": "claim-guard-added-claim",
   "title": "Hàng rào khẳng định bắt «Dạ em thêm rồi ạ» / «em sửa rồi» khi lượt sửa đơn không ghi",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tonight",
@@ -22,11 +22,27 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T17:30:15.497Z",
-  "updated_at": "2026-10-22T18:01:50.914Z",
-  "last_heartbeat": "2026-10-22T18:01:50.914Z",
+  "updated_at": "2026-10-22T18:02:27.571Z",
+  "last_heartbeat": "2026-10-22T18:02:27.571Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/claim-guard-added-claim",
+    "sha": "9e590dcf571a98e3e315f6d52c38b35c2d06a019",
+    "at": "2026-10-22T18:02:27.571Z",
+    "actor": "DESKTOP-56TH98Y:wt-tonight",
+    "title": "Hàng rào khẳng định bắt «Dạ em thêm rồi ạ» / «em sửa rồi» khi lượt sửa đơn không ghi",
+    "summary": "Câu «đã sửa» TRẦN («Dạ em thêm rồi ạ», «em sửa lại cho mình rồi ạ») không tân ngữ nên mọi luật ORDER_EDITED bỏ qua và guardOutgoing không đọc căn cứ. Thêm bareEditClaimIn (thuần, đọc chữ CÓ DẤU — «đợi»≠«đổi», «sữa»≠«sửa»; chủ ngữ shop hoặc «đã/vừa» đầu mệnh đề + dấu đã xong) — chỉ là khẳng định về ĐƠN khi orderOnFile (đã chốt / nháp có mã); trước đó là nói về giỏ ⇒ không chặn. Không vào detectClaims (bộ đếm ops giữ nghĩa). Đọc căn cứ lỗi ⇒ coi như có đơn (phía HẸP). Ca chatTurn: đơn đã chốt, «Thêm 5 nem», update bị từ chối, model nói «Dạ em thêm rồi ạ.» ⇒ câu an toàn ORDER_EDIT + HANDOFF, đơn giữ nguyên.",
+    "tests": [
+      "tsc --noEmit (heap 8 GB): sạch",
+      "eslint 3 tệp: sạch",
+      "TEST_KHOI=K21: TẤT CẢ KIỂM THỬ CỦA chỉ K21 ĐẠT (sales-claim-guard + p0-qty-unit-guard + hội thoại vàng + quote-640 + upsell-after-confirm) trên 351068ef",
+      "TEST_KHOI=K09: ĐẠT (p0-855-address có câu «Dạ em sửa rồi ạ.» sau ghi thành công)",
+      "đột biến: tắt vế mới trong claimVerdict ⇒ ca chatTurn qg-noi-da-them ĐỎ với đúng câu «Dạ em thêm rồi ạ.» tới khách",
+      "rebase sạch lên f87db2e0b (#979, chỉ tệp VTP)"
+    ]
   }
 }
