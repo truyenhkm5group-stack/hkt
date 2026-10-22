@@ -3,7 +3,7 @@
   "mission_id": "address-resolver-ladder",
   "title": "AGENTS 3.12b: khách đã gửi chữ địa chỉ thì bot không bao giờ hỏi lại; đơn chờ xác minh địa chỉ chốt + mời mua thêm như đơn thường",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-ladder",
@@ -36,11 +36,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-22T06:36:34.551Z",
-  "updated_at": "2026-10-22T13:01:05.636Z",
+  "updated_at": "2026-10-22T13:36:20.886Z",
   "last_heartbeat": "2026-10-22T12:38:18.246Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#972 → f53d1883d6a6b90b92c49aa1cbf7f63ac77a9362"
+    "merged": "#972 → f53d1883d6a6b90b92c49aa1cbf7f63ac77a9362",
+    "verify": "PASS f53d1883d6a6b90b92c49aa1cbf7f63ac77a9362 2026-10-22T13:35:49.927Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39785955118"
   },
   "handoff": {
     "branch": "claude/address-resolver-ladder",
