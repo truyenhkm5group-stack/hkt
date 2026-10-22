@@ -24,8 +24,8 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T19:18:54.116Z",
-  "updated_at": "2026-10-22T21:15:03.136Z",
-  "last_heartbeat": "2026-10-22T21:15:03.136Z",
+  "updated_at": "2026-10-22T22:12:45.330Z",
+  "last_heartbeat": "2026-10-22T22:12:45.330Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
@@ -33,16 +33,15 @@
   },
   "handoff": {
     "branch": "claude/p0-865-missing-item",
-    "sha": "d41a8534d902d49d216e103a25c74ffca12541b6",
-    "at": "2026-10-22T21:15:03.136Z",
+    "sha": "282e341502d234e6cf2c6a2d988ca3ac90df372c",
+    "at": "2026-10-22T22:12:45.330Z",
     "actor": "DESKTOP-56TH98Y:wt-865b",
     "title": "P0 #865: món khách nói tường minh mà đơn nháp bỏ sót hẳn ⇒ không lên / không tự chốt đơn thiếu món",
-    "summary": "P0 #865 — ba commit: (1) món khách gọi tên bị bỏ sót HẲN khỏi đơn ⇒ công cụ từ chối «KHÔNG được bỏ», lệch «đơn ghi 0» (trước: đơn TỰ CHỐT thiếu món); (2) bộ đọc giỏ hiểu «chai» / «thùng» (câu thật «1 chai mắm» trước đó không vào giỏ) + vế đối xứng resolveLabel: «nước mắm» không bị gán vào «Mắm tôm chua»; (3) «lạng» (100 g, chỉ dạng có dấu — bỏ dấu trùng «Láng») và «kilo / ký lô» (kg) — trước đó giỏ rỗng; cùng luật cho gramsMentioned + variantWeightGrams. Phần còn lại của #865 không thuộc mã: HANDOFF kẹt chờ owner-handoff-team; miễn ship thiếu căn cứ là tin phía page.",
+    "summary": "P0 #865 — bốn commit: (1) món khách gọi tên bị bỏ sót HẲN khỏi đơn ⇒ công cụ từ chối «KHÔNG được bỏ», lệch «đơn ghi 0» (trước: đơn TỰ CHỐT thiếu món); (2) bộ đọc giỏ hiểu «chai» / «thùng» (câu thật «1 chai mắm») + vế đối xứng resolveLabel: «nước mắm» không bị gán vào «Mắm tôm chua»; (3) «lạng» = 100 g (chỉ dạng có dấu — bỏ dấu trùng «Láng») và «kilo / ký lô» = kg, cùng luật cho gramsMentioned + variantWeightGrams; (4) «chục» = 10 cái (đi đường «10 cái» sẵn có của hàng rào số lượng / đơn vị). Phần còn lại của #865 không thuộc mã: HANDOFF kẹt chờ owner-handoff-team; miễn ship thiếu căn cứ là tin phía page.",
     "tests": [
       "tsc --noEmit: sạch",
-      "eslint 4 tệp: sạch",
-      "TEST_KHOI=K21: ĐẠT trên d41a8534 (vàng khớp ảnh chụp, order-golden khớp BASELINE)",
-      "TEST_KHOI=K09,K19,K20,K22,K23: ĐẠT",
+      "eslint: sạch",
+      "TEST_KHOI=K21 + K09,K19,K20,K22,K23: ĐẠT (vàng khớp ảnh chụp, order-golden khớp BASELINE)",
       "đột biến missingFromDraft ⇒ false ⇒ ĐỎ"
     ]
   }
