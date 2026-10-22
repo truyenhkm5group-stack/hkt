@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "mission_id": "address-resolver-ladder",
+  "title": "AGENTS 3.12b: khách đã gửi chữ địa chỉ thì bot không bao giờ hỏi lại; đơn chờ xác minh địa chỉ chốt + mời mua thêm như đơn thường",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-ladder",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/address-resolver-ladder",
+  "base_sha": "6d806b9baa967fa6f0543eac4a3cc3da194b9437",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/engine.ts",
+    "lib/sales-chatbot/tools.ts",
+    "lib/sales-chatbot/address-memory.ts",
+    "lib/sales-chatbot/claim-guard.ts",
+    "lib/sales-chatbot/cart-commitment.ts",
+    "lib/sales-chatbot/followup.ts",
+    "lib/sales-chatbot/quick-replies-shared.ts",
+    "lib/records/order-create.ts",
+    "app/(dashboard)/ai/sales-chatbot/quick-replies/quick-replies-manager.tsx",
+    "scripts/org-catalog.ts",
+    "AGENTS.md",
+    "tests/address-never-reask.test.ts",
+    "tests/sales-agent-golden/snapshots"
+  ],
+  "dependencies": [
+    "sales-address-applied"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-22T06:36:34.551Z",
+  "updated_at": "2026-10-22T06:36:34.551Z",
+  "last_heartbeat": "2026-10-22T06:36:34.551Z",
+  "definition_of_done": []
+}
