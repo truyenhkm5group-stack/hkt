@@ -1,0 +1,8 @@
+{
+  "pr": 972,
+  "sha": "22655f65728238994b6e695d2c58545b6b3207bc",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-22T12:43:06.179Z",
+  "note": "review lead (chủ shop 22/10: địa chỉ KHÔNG BAO GIỜ hỏi lại; ánh xạ không ảnh hưởng chốt/upsell): addressTextGiven (biên chặt, chữ không mang tín hiệu địa chỉ không tính) + dropAddressAsks là điểm chặn cuối trong appendMessage + tin theo dõi (quét nguồn khoá); gỡ câu hỏi tại nguồn (ask_customer null · confirm_order bỏ «hỏi rồi DỪNG» · CHANGE_INCOMPLETE · NEED_ADDRESS chỉ khi chưa có chữ · «như lần "
+}
