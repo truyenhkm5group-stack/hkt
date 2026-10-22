@@ -1,4 +1,3 @@
-{"at":"2026-10-16T09:14:24.554Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"fix-main-ssj","detail":"#866 @ b5be4e72e098 → 2982fafb0783 (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-16T09:16:06.465Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"2982fafb0783 · run 38879230154 https://github.com/truyenhkm5group-stack/hkt/actions/runs/38879230154"}
 {"at":"2026-10-16T09:37:22.308Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"p0-868-smart-upsell","detail":"RUNNING · 0 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-16T09:50:58.498Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"p0-863-cancel-flow","detail":"claude/p0-863-cancel-flow @ 07ca5244ac98 · 3 lệnh kiểm thử"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-22T16:22:00.397Z","actor":"DESKTOP-56TH98Y:wt-reship","kind":"CLAIM","mission":"pos-reship-link","detail":"PLANNING · 0 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-22T16:26:07.702Z","actor":"DESKTOP-56TH98Y:wt-payroll-gate","kind":"CLAIM","mission":"vtp-reship-backfill","detail":"PLANNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-22T16:26:41.308Z","actor":"DESKTOP-56TH98Y:wt-payroll-gate","kind":"HANDOFF","mission":"vtp-reship-backfill","detail":"claude/vtp-reship-backfill @ 58de8a99d8d2 · 5 lệnh kiểm thử"}
+{"at":"2026-10-22T16:28:13.994Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"vtp-reship-backfill","detail":"#978 cho claude/vtp-reship-backfill @ 58de8a99d8d2"}
