@@ -10,12 +10,14 @@
  *  · `PREV_MONTH_FINAL`      — tháng trước đã CHỐT, lấy số dư cuối của nó. Đủ căn cứ để chốt tiếp.
  *  · `OPENING_DECLARATION`   — chủ shop khai số dư mở sổ, có ngày và có lý do. Đủ căn cứ.
  *  · `PREV_MONTH_DRAFT`      — tháng trước mới là NHÁP. Dùng được để XEM, không đủ để chốt.
+ *  · `FIRST_WORK_MONTH`      — tháng ĐẦU TIÊN làm việc theo ngày vào làm chủ shop khai, và người ấy chưa có
+ *                              dòng sổ nào trước đó: chưa làm thì không gánh lỗ, nên 0 là SỰ THẬT. Đủ căn cứ.
  *  · `NONE`                  — chưa có gì. CHƯA BIẾT, không phải 0.
  *
  * `NOT_APPLICABLE` là thứ thứ năm và cũng phải tách riêng: kỳ đang xem không phải một tháng lịch,
  * hoặc sổ chưa được bật. "Không áp dụng" khác "chưa biết" khác "bằng 0" (AGENTS.md mục 42).
  */
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, lt } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import {
   DEFAULT_PAYROLL_CARRYOVER,
@@ -24,6 +26,7 @@ import {
   isMonthKey,
   prevMonthKey,
   compareMonthKey,
+  startedWithinOrAfter,
   type PayrollCarryoverConfig,
 } from "@/lib/constants/payroll-carryover";
 import { getSettingJson } from "@/lib/settings";
@@ -32,6 +35,7 @@ export type OpeningBasis =
   | "PREV_MONTH_FINAL"
   | "OPENING_DECLARATION"
   | "PREV_MONTH_DRAFT"
+  | "FIRST_WORK_MONTH"
   | "NONE"
   | "NOT_APPLICABLE";
 
@@ -50,6 +54,43 @@ const KHONG_AP_DUNG = (reason: string): OpeningResolution => ({
   established: false,
   reason,
 });
+
+/** Câu giải thích hiện trên bảng lương cho số dư `FIRST_WORK_MONTH`. */
+export const firstWorkMonthReason = (monthKey: string, startedOn: string) =>
+  `Vào làm ${startedOn.split("-").reverse().join("/")} (ngày vào làm trong hồ sơ nhân sự) — tháng ${monthKey} là tháng làm việc ĐẦU TIÊN và chưa có dòng sổ nào trước đó, nên số dư lỗ đầu kỳ bằng 0: chưa làm thì không gánh lỗ.`;
+
+const thangDauTien = (monthKey: string, startedOn: string): OpeningResolution => ({
+  balance: 0,
+  basis: "FIRST_WORK_MONTH",
+  established: true,
+  reason: firstWorkMonthReason(monthKey, startedOn),
+});
+
+/** Dòng của CHÍNH tháng đang hỏi: nguồn ghi ở cột chỉ có hai giá trị, căn cứ thật nằm trong ảnh chụp. */
+function fromOwnRow(row: CarryoverRow): OpeningResolution {
+  const anh = (row.snapshot ?? null) as { canCuSoDu?: unknown; lyDoSoDu?: unknown } | null;
+  if (anh?.canCuSoDu === "FIRST_WORK_MONTH") {
+    return { balance: row.openingBalance, basis: "FIRST_WORK_MONTH", established: true, reason: typeof anh.lyDoSoDu === "string" ? anh.lyDoSoDu : "Tháng làm việc đầu tiên — số dư lỗ đầu kỳ bằng 0." };
+  }
+  return {
+    balance: row.openingBalance,
+    basis: row.openingSource === "OPENING_DECLARATION" ? "OPENING_DECLARATION" : "PREV_MONTH_FINAL",
+    established: true,
+    reason: row.openingSource === "OPENING_DECLARATION" ? "Số dư mở sổ do chủ shop khai đích danh." : "Lấy từ số dư cuối của tháng trước đã chốt.",
+  };
+}
+
+/** Những người trong `employeeIds` đã có ít nhất MỘT dòng sổ ở tháng nào đó TRƯỚC `monthKey`. */
+async function employeesWithEarlierRows(employeeIds: string[], monthKey: string, componentCode: string): Promise<Set<string>> {
+  if (!employeeIds.length) return new Set();
+  const db = await getDb();
+  const t = schema.marketerProfitCarryover;
+  const rows = await db
+    .selectDistinct({ employeeId: t.employeeId })
+    .from(t)
+    .where(and(inArray(t.employeeId, employeeIds), lt(t.monthKey, monthKey), eq(t.componentCode, componentCode)));
+  return new Set(rows.map((r) => r.employeeId));
+}
 
 export async function getCarryoverConfig(): Promise<PayrollCarryoverConfig> {
   const raw = await getSettingJson<PayrollCarryoverConfig>(PAYROLL_CARRYOVER_KEY, DEFAULT_PAYROLL_CARRYOVER);
@@ -97,6 +138,8 @@ export async function resolveOpening(
   config: PayrollCarryoverConfig,
   /** Khoản bù lỗ nào — xem `carryoverRowsForMonth`. Mặc định là khoản của đường tính cũ. */
   componentCode: string = LEGACY_CARRY_COMPONENT,
+  /** Ngày vào làm (`YYYY-MM-DD`) trong hồ sơ nhân sự — căn cứ của `FIRST_WORK_MONTH`. */
+  startedOn?: string | null,
 ): Promise<OpeningResolution> {
   if (!config.enabled) {
     return KHONG_AP_DUNG("Sổ lỗ lũy kế chưa được bật. Bật ở Cấu hình lương → Lỗ lũy kế, kèm tháng mở sổ.");
@@ -118,17 +161,7 @@ export async function resolveOpening(
     .select()
     .from(t)
     .where(and(eq(t.employeeId, employeeId), eq(t.monthKey, monthKey), eq(t.componentCode, componentCode)));
-  if (chinhThang) {
-    return {
-      balance: chinhThang.openingBalance,
-      basis: chinhThang.openingSource === "OPENING_DECLARATION" ? "OPENING_DECLARATION" : "PREV_MONTH_FINAL",
-      established: true,
-      reason:
-        chinhThang.openingSource === "OPENING_DECLARATION"
-          ? "Số dư mở sổ do chủ shop khai đích danh."
-          : "Lấy từ số dư cuối của tháng trước đã chốt.",
-    };
-  }
+  if (chinhThang) return fromOwnRow(chinhThang);
 
   // 2 · Chính tháng mở sổ mà chưa có dòng nào: số dư đầu là 0 THEO KHAI BÁO của chủ shop (mốc mở
   //     sổ là một quyết định có chủ, có ngày), không phải máy tự điền 0 cho mọi người.
@@ -163,6 +196,10 @@ export async function resolveOpening(
       reason: `Tháng ${truoc} MỚI LÀ NHÁP nên số dư này là mô phỏng — xem được, chưa đủ căn cứ để chốt tháng ${monthKey}.`,
     };
   }
+  // 4 · Tháng làm việc đầu tiên: vào làm từ tháng này trở đi VÀ không có dòng sổ nào trước đó.
+  if (startedOn && startedWithinOrAfter(startedOn, monthKey) && !(await employeesWithEarlierRows([employeeId], monthKey, componentCode)).has(employeeId)) {
+    return thangDauTien(monthKey, startedOn);
+  }
   return {
     balance: null,
     basis: "NONE",
@@ -177,6 +214,8 @@ export async function resolveOpeningMany(
   monthKey: string,
   config: PayrollCarryoverConfig,
   componentCode: string = LEGACY_CARRY_COMPONENT,
+  /** Ngày vào làm theo nhân sự — căn cứ của `FIRST_WORK_MONTH`. Thiếu ⇒ không ai được coi là tháng đầu. */
+  startedOnById?: ReadonlyMap<string, string | null | undefined>,
 ): Promise<Map<string, OpeningResolution>> {
   const out = new Map<string, OpeningResolution>();
   if (!employeeIds.length) return out;
@@ -191,18 +230,13 @@ export async function resolveOpeningMany(
     carryoverRowsForMonth(prevMonthKey(monthKey), [...employeeIds], componentCode),
   ]);
   const truoc = prevMonthKey(monthKey);
+  // Ứng viên "tháng làm việc đầu tiên": chưa có dòng tháng này lẫn tháng trước, ngày vào làm từ tháng này trở đi.
+  const ungVien = employeeIds.filter((id) => !thisMonth.has(id) && !prevRows.has(id) && startedWithinOrAfter(startedOnById?.get(id), monthKey));
+  const daCoDongTruoc = monthKey === config.startMonth ? new Set<string>() : await employeesWithEarlierRows(ungVien, monthKey, componentCode);
   for (const id of employeeIds) {
     const here = thisMonth.get(id);
     if (here) {
-      out.set(id, {
-        balance: here.openingBalance,
-        basis: here.openingSource === "OPENING_DECLARATION" ? "OPENING_DECLARATION" : "PREV_MONTH_FINAL",
-        established: true,
-        reason:
-          here.openingSource === "OPENING_DECLARATION"
-            ? "Số dư mở sổ do chủ shop khai đích danh."
-            : "Lấy từ số dư cuối của tháng trước đã chốt.",
-      });
+      out.set(id, fromOwnRow(here));
       continue;
     }
     if (monthKey === config.startMonth) {
@@ -224,6 +258,8 @@ export async function resolveOpeningMany(
         established: false,
         reason: `Tháng ${truoc} MỚI LÀ NHÁP nên số dư này là mô phỏng — xem được, chưa đủ căn cứ để chốt tháng ${monthKey}.`,
       });
+    } else if (ungVien.includes(id) && !daCoDongTruoc.has(id)) {
+      out.set(id, thangDauTien(monthKey, startedOnById!.get(id)!));
     } else {
       out.set(id, {
         balance: null,

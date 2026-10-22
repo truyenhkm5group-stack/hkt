@@ -178,7 +178,9 @@ export async function calculatePayrollPeriodAs(actor: PayrollActor, input: Calcu
         // Đường tính cũ có đúng một khoản bù lỗ; khoá thành phần của nó là hằng số này.
         componentCode: LEGACY_CARRY_COMPONENT,
         openingBalance: c.openingBalance ?? 0,
-        openingSource: c.openingBasis === "OPENING_DECLARATION" ? "OPENING_DECLARATION" : "PREV_MONTH",
+        // Cột chỉ nhận hai giá trị. Tháng làm việc đầu tiên: số dư 0 dựa trên NGÀY VÀO LÀM chủ shop khai ⇒ ghi
+        // OPENING_DECLARATION; căn cứ thật (`FIRST_WORK_MONTH` + câu giải thích) giữ trong ảnh chụp bên dưới.
+        openingSource: c.openingBasis === "OPENING_DECLARATION" || c.openingBasis === "FIRST_WORK_MONTH" ? "OPENING_DECLARATION" : "PREV_MONTH",
         realProfit: c.realProfit ?? 0,
         lossApplied: c.lossApplied ?? 0,
         commissionBase: c.commissionBase ?? 0,

@@ -1132,7 +1132,7 @@ export async function getPayrollReport(
   const marketerIds = employees.filter(inPeriod).map((e) => e.id);
   const openings =
     carryMonth && carryConfig.enabled
-      ? await resolveOpeningMany(marketerIds, carryMonth, carryConfig)
+      ? await resolveOpeningMany(marketerIds, carryMonth, carryConfig, undefined, new Map(employees.map((e) => [e.id, e.startedOn ?? null])))
       : new Map<string, OpeningResolution>();
   const nominalTotal = marketers.nominal.totals.expectedProfit;
   const modelTotal = marketers.totals.profit;
