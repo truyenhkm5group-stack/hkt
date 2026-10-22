@@ -3,7 +3,7 @@
   "mission_id": "stuck-audit-a2-silent",
   "title": "stuck-audit A2 in tập /work (= tập 2B) cạnh tập cũ + tách dòng A2 cho lọt kênh tóm tắt",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-a2-silent",
@@ -25,9 +25,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-21T22:34:12.881Z",
-  "updated_at": "2026-10-21T22:36:47.626Z",
+  "updated_at": "2026-10-22T02:25:58.483Z",
   "last_heartbeat": "2026-10-21T22:34:44.614Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#962 → 2df2e963171207802d5140ccb5f584ad49921324"
+  },
   "handoff": {
     "branch": "claude/stuck-audit-a2-silent",
     "sha": "a1ca081da8668301ddfbd21dc1e7c3dd77310fa6",
