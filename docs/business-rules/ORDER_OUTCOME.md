@@ -314,11 +314,15 @@ Shop tạo LẠI vận đơn cho chính đơn của mình thẳng trên viettelp
   - CÒN SỐNG = có chứng từ bàn giao cho ĐVVC (luật 41 — `CARRIER_HANDOFF_KNOWN_SQL`) **và** chưa huỷ.
   - «stage khác CANCELLED» thôi KHÔNG đủ. Đo 22/10: cả 27 đơn đổi lần gửi chính theo vế đó đều là lần mới CANCELLED → lần cũ
     PENDING chưa từng được lấy. Một vận đơn đứng yên không phải bằng chứng hàng đang đi.
-- **Chứng từ ĐVVC của lần gửi thay thế thắng «Đã hủy» của Pancake (mục 3.2).**
-  - Với vận đơn `attempt_no > 1`, ba nhánh «chờ lấy» (`AWAITING_PICKUP`) / «đang đi» (`IN_TRANSIT`) không còn đòi đơn ở trạng
-    thái chưa huỷ.
-  - Mã huỷ 101 / 107 / 201 trên chính lần gửi ấy vẫn ra `CANCELLED`.
-  - Luật chỉ đọc `attempt_no`, không đọc cờ ghi chú (`raw.reship` là vết cho người).
+- **Chứng từ ĐVVC của lần gửi thay thế CÒN SỐNG thắng «Đã hủy» của Pancake (mục 3.2).** Còn sống = cả bốn vế
+  (`RESHIP_ALIVE` trong `lib/queries/return-rate.ts`):
+  - `attempt_no > 1` — luật chỉ đọc số này, không đọc cờ ghi chú (`raw.reship` là vết cho người);
+  - đơn KHÔNG phải đơn tay ERP — đơn tay do NGƯỜI huỷ trong ERP vẫn `CANCELLED` (mục 11.5);
+  - ĐVVC ĐÃ CẦM HÀNG (luật 41) — vận đơn tạo lại rồi bỏ, đứng PENDING, không làm đơn sống lại; nên nhánh «chờ lấy»
+    (`AWAITING_PICKUP`) vẫn đòi đơn chưa huỷ, chỉ hai nhánh «đang đi» (`IN_TRANSIT`) nhận lần gửi thay thế;
+  - chưa huỷ — mã huỷ 101 / 107 / 201 trên chính lần gửi ấy vẫn ra `CANCELLED`.
+  - Áp CẢ cho chiều tiền thật (`ORDER_OUTCOME_VERIFIED`): lần gửi thay thế còn sống không rơi vào nhánh huỷ đầu, nên đơn giao
+    thành công có COD thật không vừa `DELIVERED` (logistics) vừa `CANCELLED` (tiền thật).
 - **Sổ kho (làm rõ AGENTS 3.10, chữ luật giữ nguyên):** «đã xuất» của ĐƠN = TỒN TẠI một lần gửi chiều đi đã rời kho
   (`ORDER_LEFT_WAREHOUSE`). Đếm MỘT lần mỗi đơn, không bao giờ trừ tồn theo từng lần gửi.
   - Đơn có hai lần gửi chiều đi cùng rời kho ⇒ cảnh báo đối soát `ORDER_DOUBLE_LEFT_WAREHOUSE` cho người. Máy không biết đó là

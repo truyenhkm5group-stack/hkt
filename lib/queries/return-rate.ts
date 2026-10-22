@@ -244,13 +244,20 @@ const CARRIER_TOOK_PACKAGE = sql.raw(CARRIER_HANDOFF_KNOWN_SQL);
  * Contract test khoá luật: tests/contract-order-outcome.test.ts (đỏ nghĩa là code sai, không phải test sai).
  */
 /**
- * Đơn còn sống THEO NGUỒN ĐƠN, hoặc vận đơn đang xét là LẦN GỬI THAY THẾ (`attempt_no > 1`) — vtp-reship-outcome, P0 22/10/2026,
- * ORDER_OUTCOME.md mục 12. Shop tạo lại vận đơn trên web VTP cho chính đơn đó, còn Pancake thì huỷ đơn gốc: chứng từ ĐVVC của lần
- * gửi thay thế THẮNG trạng thái «Đã hủy» của Pancake (mục 3.2 — không bao giờ suy từ trạng thái Pancake), nên ba nhánh «chờ lấy /
- * đang đi» không còn rơi xuống `CANCELLED`. Mã huỷ 101/107/201 trên chính lần gửi ấy vẫn ra `CANCELLED` (nhánh `VTP_CANCELLED`
- * đứng trước). Luật chỉ đọc `attempt_no` — KHÔNG đọc cờ ghi chú nào (`raw.reship` là vết cho người).
+ * LẦN GỬI THAY THẾ CÒN SỐNG — vtp-reship-outcome, P0 22/10/2026, ORDER_OUTCOME.md mục 12. Shop tạo lại vận đơn trên web VTP cho
+ * chính đơn đó, còn Pancake thì huỷ đơn gốc: chứng từ ĐVVC của lần gửi thay thế THẮNG trạng thái «Đã hủy» của Pancake (mục 3.2 —
+ * không bao giờ suy từ trạng thái Pancake). Bốn vế, mỗi vế chặn một cách sai:
+ *  · `attempt_no > 1` — lần gửi THAY THẾ; luật chỉ đọc số này, KHÔNG đọc cờ ghi chú nào (`raw.reship` là vết cho người).
+ *  · KHÔNG phải đơn tay ERP — đơn tay thì NGƯỜI huỷ trong ERP, và mục 11.5 giữ «Người huỷ đơn ⇒ CANCELLED như cũ».
+ *  · ĐVVC ĐÃ CẦM HÀNG (luật 41 — `CARRIER_TOOK_PACKAGE`) — vận đơn tạo rồi bỏ, đứng PENDING, không phải bằng chứng đơn còn sống
+ *    (cùng nguyên tắc với vế «còn sống» của `PRIMARY_ATTEMPT`). Nên nhánh «chờ lấy» KHÔNG nhận vế này.
+ *  · chưa huỷ — mã huỷ trên chính lần gửi ấy vẫn ra `CANCELLED`.
+ * Dùng CHUNG cho `ORDER_OUTCOME` (hai nhánh «đang đi») và `ORDER_OUTCOME_VERIFIED` (chặn nhánh huỷ đầu) — thiếu vế sau thì cùng một
+ * đơn giao thành công có COD thật vừa là `DELIVERED` ở chiều logistics vừa là `CANCELLED` ở chiều tiền thật.
  */
-const ORDER_ALIVE_OR_RESHIP = sql`(${o.stage} not in ('CANCELLED','DELETED') or coalesce(${s.attemptNo}, 1) > 1)`;
+const RESHIP_ALIVE = sql`(coalesce(${s.attemptNo}, 1) > 1 and not ${IS_MANUAL_ORDER} and ${CARRIER_TOOK_PACKAGE} and ${s.stage} <> 'CANCELLED')`;
+const ORDER_ALIVE = sql`${o.stage} not in ('CANCELLED','DELETED')`;
+const ORDER_ALIVE_OR_RESHIP = sql`(${ORDER_ALIVE} or ${RESHIP_ALIVE})`;
 
 export const ORDER_OUTCOME = sql<OrderOutcome>`case
   -- ĐƠN TẠO TAY KHÔNG QUA ĐVVC + PHIẾU GIAO CÓ KÝ NHẬN còn hiệu lực ⇒ 'DELIVERED' (G-ORDER, chủ nền tảng quyết
@@ -309,7 +316,7 @@ export const ORDER_OUTCOME = sql<OrderOutcome>`case
   --
   -- Phải đứng SAU mọi nhánh kết cục (giao / hoàn / huỷ): một kiện đã tới tay khách thì chuyện mốc
   -- lấy hàng có được ghi lại hay không cũng không làm nó thành "chờ lấy".
-  when ${HAS_VTP_EVIDENCE} and not ${CARRIER_TOOK_PACKAGE} and ${ORDER_ALIVE_OR_RESHIP} then 'AWAITING_PICKUP'
+  when ${HAS_VTP_EVIDENCE} and not ${CARRIER_TOOK_PACKAGE} and ${ORDER_ALIVE} then 'AWAITING_PICKUP'
   when ${HAS_VTP_EVIDENCE} and ${ORDER_ALIVE_OR_RESHIP} then 'IN_TRANSIT'
   when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
   when ${s.stage} = 'DELIVERED' and coalesce(${s.codCollected}, 0) + ${PREPAID} > ${MAX_COD} then 'DELIVERED'
@@ -513,7 +520,8 @@ const DELIVERY_SIGNAL = sql`(${s.stage} = 'DELIVERED' or ${o.stage} in ('DELIVER
  *     · có bằng chứng → so tiền thật với hai ngưỡng.
  */
 export const ORDER_OUTCOME_VERIFIED = sql<VerifiedOutcome>`case
-  when ${o.stage} in ('CANCELLED','DELETED') then 'CANCELLED'
+  -- Lần gửi thay thế còn sống của đơn Pancake «Đã hủy» đi tiếp các nhánh dưới (ORDER_OUTCOME.md mục 12 — RESHIP_ALIVE).
+  when ${o.stage} in ('CANCELLED','DELETED') and not ${RESHIP_ALIVE} then 'CANCELLED'
   -- Đơn tay đã giao bằng phiếu ký nhận: giao là SỰ THẬT, tiền thì CHƯA XÁC MINH (G-ORDER, ORDER_OUTCOME.md mục 11).
   -- Không có nhánh này thì DELIVERY_SIGNAL (stage 'DELIVERED') + trần tiền 0 ⇒ kết luận 'RETURNED' — sai cả hai chiều.
   -- Tiền của đơn tay ĐÃ XÁC MINH chỉ khi CHỨNG TỪ THANH TOÁN (order_payments, phiếu còn hiệu lực, thu − hoàn) đủ số khách
