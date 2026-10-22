@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "perf-probe-reason-report",
+  "title": "perf-probe đo báo cáo lý do hoàn nguội: mốc mặc định SHIPPED + có lọc 2b",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-perf-reason",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/perf-probe-reason-report",
+  "base_sha": "2d588c63005edfd6897d4ba5e4abbfb5ac6889d0",
+  "domains": [],
+  "owned_paths": [
+    "scripts/perf-probe.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-22T09:09:35.172Z",
+  "updated_at": "2026-10-22T09:09:35.172Z",
+  "last_heartbeat": "2026-10-22T09:09:35.172Z",
+  "definition_of_done": []
+}
