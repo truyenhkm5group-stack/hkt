@@ -44,7 +44,7 @@ import { findOrganization, listOrganizations } from "@/lib/platform/organization
 import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { handoffReplyClass, handoffReplySplit, type HandoffReplyFact, type HandoffReplySplit } from "@/lib/constants/handoff-reply";
 import { CONFIRMED_ORDER_WATCH_DAYS } from "@/lib/constants/shipment-status-age";
-import { SALES_QUALITY_CODES, SALES_QUALITY_STATE_KEY, type SalesQualityCode } from "@/lib/constants/sales-quality";
+import { SALES_QUALITY_CODES, SALES_QUALITY_STATE_KEY } from "@/lib/constants/sales-quality";
 import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -316,7 +316,11 @@ export const QUALITY_MIN_SAMPLE = 30;
  * Mẫu số của từng mã = ĐÚNG trường `bases` mà `lib/sales-quality/daily.ts::baseOf` in cạnh mã đó (bài kiểm so hai bảng). Bản sao nằm ở
  * script vì ops lấy lib từ image: script không được đòi một hằng số chưa deploy.
  */
-export const QUALITY_BASE_FIELD: Record<SalesQualityCode, string> = {
+/*
+  Kiểu theo CHUỖI, không theo `SalesQualityCode`: ops lấy script từ main còn lib từ image, nên script phải chạy được cả trước lẫn sau khi một
+  mã mới vào main — khoá của mã chưa có thì thừa vô hại, mã có mà thiếu khoá thì bài kiểm chống lệch đỏ.
+*/
+export const QUALITY_BASE_FIELD: Readonly<Record<string, string>> = {
   HANDOFF_UNANSWERED: "handoffWaiting",
   QTY_REASKED: "quantityAnswers",
   SECONDARY_INTENT_UNANSWERED: "deliverySecondAsks",
@@ -329,6 +333,12 @@ export const QUALITY_BASE_FIELD: Record<SalesQualityCode, string> = {
   UPSELL_ACCEPTED_NOT_ATTACHED: "offerAccepts",
   // Mẫu số `na.flagged` của daily.ts CHƯA được lưu vào ảnh chụp (`state.bases`) ⇒ khoá này vắng ⇒ in «(mẫu số chưa có)», không in 0.
   ADDRESS_RECEIVED_BUT_NOT_APPLIED: "addressFlagged",
+  // Hàng rào giá trị đơn (sales-qty-unit-guard): bốn mã chặn đếm trên số lần gọi công cụ ghi đơn, tổng lệch trên số tin page báo tổng.
+  QUANTITY_UNIT_AMBIGUOUS: "orderWrites",
+  PACK_MULTIPLIER_MISMATCH: "orderWrites",
+  CART_TOTAL_CONFLICT: "orderWrites",
+  STAFF_AI_QUOTE_CONFLICT: "staffTotals",
+  ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT: "orderWrites",
 };
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
