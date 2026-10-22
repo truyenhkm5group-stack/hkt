@@ -1,4 +1,3 @@
-{"at":"2026-10-16T08:30:33.005Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"main-red-857-861","detail":"#867 cho fix/main-red-address-reask @ e4d7e70f97b2"}
 {"at":"2026-10-16T08:32:42.892Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#867 @ e4d7e70f97b2 · review độc lập PASS: chỉ dữ liệu giả, không đổi khẳng định"}
 {"at":"2026-10-16T09:12:31.168Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#866 @ b5be4e72e098 · tương đương #867 đã review độc lập PASS; chỉ đổi model giả, không đổi khẳng định"}
 {"at":"2026-10-16T09:13:01.282Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CANCELLED","mission":"main-red-857-861","detail":"trùng #866"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-22T16:05:52.111Z","actor":"DESKTOP-56TH98Y:wt-reship","kind":"OVERLAP_DETECTED","mission":"vtp-reship-relink","detail":"OVERLAP với upsell-short-accept: phạm vi lib/constants/shipment-pick.ts ↔ lib/constants/ ⇒ tuần tự hoá (--after=upsell-short-accept) hoặc khai cách tích hợp (--accept-overlap=\"…\")"}
 {"at":"2026-10-22T16:06:33.661Z","actor":"DESKTOP-56TH98Y:wt-reship","kind":"CLAIM","mission":"vtp-reship-relink","detail":"PLANNING · 5 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-22T16:06:33.661Z","actor":"DESKTOP-56TH98Y:wt-reship","kind":"OVERLAP_ACCEPTED","mission":"vtp-reship-relink","detail":"OVERLAP_ACCEPTED với return-reason-evidence: phạm vi lib/integrations/viettelpost/sync.ts — cách tích hợp: return-reason-evidence: chỉ chạm findShipmentForVtp / nhánh tạo vận đơn trong sync.ts, không đụng phần ghi quan sát lý do; return-rate.ts / stock.ts CHƯA nhận — chờ Tech Lead quyết thiết kế điểm 3–4"}
+{"at":"2026-10-22T16:10:07.756Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"regression-reopen-watch","detail":"#977 @ dc809737203c → 351068ef7a9d (MERGE_ISOLATED · HIGH · gates success)"}
