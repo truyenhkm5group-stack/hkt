@@ -239,6 +239,7 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
       CART_TOTAL_CONFLICT: `Mẫu số: ${b.orderWrites} lần bot gọi công cụ ghi đơn`,
       STAFF_AI_QUOTE_CONFLICT: `Mẫu số: ${b.staffTotals} tin nhân viên / page báo tổng · trong đó từ MẪU TỰ ĐỘNG page (Pancake) ${scan.automationQuoteConflicts} lần`,
       ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT: `Mẫu số: ${b.orderWrites} lần bot gọi công cụ ghi đơn`,
+      PACK_MULTIPLIER_LEAKED: `Mẫu số: ${b.orderWrites} lần bot gọi công cụ ghi đơn`,
     };
     const db = await getDb();
     let created = 0;
