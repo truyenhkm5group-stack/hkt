@@ -12,6 +12,8 @@
       hội thoại AI HỎNG ĐÃ QUÁ 30 PHÚT tính từ mốc hỏng thật mà vẫn bị coi là đang trong khoảng chờ (`AI_DOWN_CLOCK_PUSHED`).
    A2 TRONG nhóm chờ người: tin khách cuối đã có người / page / bot trả lời chưa (đọc cả dòng PAGE_REPLY — nhân viên trả lời thẳng
       trên Pancake) ⇒ HANDOFF_UNANSWERED = không ai trả lời VÀ quá SLA; «khách không nhắn gì sau lúc chuyển» cắt ngang (21/10/2026).
+      In trên HAI tập (22/10/2026): A2[cũ] = nhóm chờ người của script; A2[/work] = hàng đợi người `aiSilentSql`, ĐÚNG tập và ĐÚNG câu
+      SQL của Quality Supervisor (`collectHandoffFacts`) ⇒ số HANDOFF_UNANSWERED của A2[/work] là số 2B ghi; một dòng in phần giao.
    B  CẦN NGƯỜI MÀ KHÔNG CHỦ — câu đếm `countUnownedHandoffs` của #800 (chưa vào hàng đợi · phòng không ai xem được hộp thư) + số
       người xem được hộp thư của CẢ tổ chức (≥ 1 ⇒ hội thoại «không chủ» vẫn có người nhận được nếu có hàng đợi chung).
    C  SLA QUÁ HẠN — hạn theo `work.sla` (`handoffDueAt` của #800) tính từ mốc vào hàng đợi; quá hạn · quá hạn > 24 giờ mà chưa ai
@@ -273,15 +275,35 @@ export function silentSummary(org: string, c: StuckCounts): string[] {
 // A2 — luật HANDOFF_UNANSWERED sống ở lib/constants/handoff-reply.ts (dùng chung với Quality Supervisor); ở đây chỉ đọc mốc + in.
 export { HANDOFF_REPLY_CLASSES, handoffReplyClass, handoffReplySplit, type HandoffReplyClass, type HandoffReplyFact, type HandoffReplySplit } from "@/lib/constants/handoff-reply";
 
-/** Dòng tóm tắt A2 (chỉ số đếm). HÀM THUẦN. */
-export function replySplitSummary(org: string, s: HandoffReplySplit, slaMs: number | null): string[] {
+/**
+ * Dòng tóm tắt A2 (chỉ số đếm). HÀM THUẦN. BA dòng, mỗi dòng ≤ 300 ký tự: kênh [ops:tom-tat] cắt ở 300 (`tomTat`), và dòng gộp cũ mất đúng
+ * phần (b) — con số HANDOFF_UNANSWERED. `set` nói dòng thuộc tập «chờ người» nào (xem `queueSetSummary`).
+ */
+export function replySplitSummary(org: string, s: HandoffReplySplit, slaMs: number | null, set = "A2"): string[] {
   const b = s.byClass;
   const q = s.quietAfterHandoff;
   const sla = slaMs === null ? "KHÔNG đọc được / không đặt hạn" : `${Math.round(slaMs / 3_600_000)} giờ (work.sla)`;
   return [
-    `${org} A2 · trong ${s.total} hội thoại chờ người — (a) ĐÃ có người/page trả lời sau tin khách cuối ${b.ANSWERED_HUMAN} (trong đó chỉ dòng page chưa rõ người gửi ${s.answeredUnverified}) · bot đã trả lời tin khách cuối ${b.ANSWERED_BOT} · (b) HANDOFF_UNANSWERED (không ai trả lời, quá SLA ${sla}) ${b.UNANSWERED_OVER_SLA} (> 24 giờ ${s.overSla24h} · > 72 giờ ${s.overSla72h}) · chưa ai trả lời, còn trong hạn ${b.UNANSWERED_WITHIN_SLA} · chưa ai trả lời, không có hạn ${b.UNANSWERED_NO_SLA} · không có tin khách ${b.NO_CUSTOMER_MESSAGE}`,
-    `${org} A2 · (c) khách KHÔNG nhắn gì sau lúc chuyển ${s.quietTotal}/${s.total - s.handoffUnknown} (mốc chuyển không rõ ${s.handoffUnknown}) — cắt ngang: đã có người trả lời ${q.ANSWERED_HUMAN} · bot đã trả lời ${q.ANSWERED_BOT} · tin GÂY RA lượt chuyển chưa ai trả lời, quá hạn ${q.UNANSWERED_OVER_SLA} · còn hạn ${q.UNANSWERED_WITHIN_SLA + q.UNANSWERED_NO_SLA} · không có tin khách ${q.NO_CUSTOMER_MESSAGE}`,
+    `${org} ${set} · ${s.total} hội thoại chờ người — (a) ĐÃ có người/page trả lời sau tin khách cuối ${b.ANSWERED_HUMAN} (trong đó chỉ dòng page chưa rõ người gửi ${s.answeredUnverified}) · bot đã trả lời tin khách cuối ${b.ANSWERED_BOT}`,
+    `${org} ${set} · (b) HANDOFF_UNANSWERED (không ai trả lời, quá SLA ${sla}) ${b.UNANSWERED_OVER_SLA} (> 24 giờ ${s.overSla24h} · > 72 giờ ${s.overSla72h}) · chưa ai trả lời, còn hạn ${b.UNANSWERED_WITHIN_SLA} · không có hạn ${b.UNANSWERED_NO_SLA} · không có tin khách ${b.NO_CUSTOMER_MESSAGE}`,
+    `${org} ${set} · (c) khách KHÔNG nhắn gì sau lúc chuyển ${s.quietTotal}/${s.total - s.handoffUnknown} (mốc chuyển không rõ ${s.handoffUnknown}) — cắt ngang: đã có người trả lời ${q.ANSWERED_HUMAN} · bot đã trả lời ${q.ANSWERED_BOT} · tin GÂY RA lượt chuyển chưa ai trả lời, quá hạn ${q.UNANSWERED_OVER_SLA} · còn hạn ${q.UNANSWERED_WITHIN_SLA + q.UNANSWERED_NO_SLA} · không có tin khách ${q.NO_CUSTOMER_MESSAGE}`,
   ];
+}
+
+/**
+ * HAI TẬP «chờ người» cạnh nhau. Tập CŨ = nhóm WAITING_HUMAN của script (status HANDOFF / mode HUMAN, xếp bằng `addSilent`); tập /work =
+ * `aiSilentSql` — hàng đợi người của hộp thư, và là ĐÚNG tập Quality Supervisor (2B) dùng cho HANDOFF_UNANSWERED. Hai tập khác nhau (tập
+ * /work gồm cả hội thoại nhân viên đang tiếp quản); in phần giao + hai phần lệch để số của script và số 2B đối chiếu được, không ai phải
+ * đi tìm lỗi trong một con số lệch. HÀM THUẦN.
+ */
+export function queueSetSummary(org: string, oldIds: readonly string[], workIds: readonly string[], oldUnanswered: readonly string[], workUnanswered: readonly string[]): string {
+  const both = (a: readonly string[], b: readonly string[]) => {
+    const sb = new Set(b);
+    return new Set(a.filter((x) => sb.has(x))).size;
+  };
+  const n = (a: readonly string[]) => new Set(a).size;
+  const chung = both(oldIds, workIds);
+  return `${org} A2 · HAI TẬP chờ người: cũ (nhóm WAITING_HUMAN của script) ${n(oldIds)} · /work = 2B (aiSilentSql) ${n(workIds)} · chung ${chung} · chỉ tập cũ ${n(oldIds) - chung} · chỉ /work ${n(workIds) - chung} · HANDOFF_UNANSWERED cũ ${n(oldUnanswered)} · /work ${n(workUnanswered)} (số 2B) · chung ${both(oldUnanswered, workUnanswered)}`;
 }
 
 // ─────────────────────────── PHẦN CSDL ───────────────────────────
@@ -385,6 +407,21 @@ export async function collectOwnership(org: { code: string; isHome: boolean }, n
       const slaMs = dueOf(new Date(0), ctx.cfg)?.getTime() ?? null;
       return { ok: true as const, silent: u.silent, person: u.person, department: u.department, shared: u.shared ?? 0, unowned: u.unowned, byReason: u.byReason, responders: u.responders, viewers: viewers.length, departmentCode: u.departmentCode, overdue, stale, queued, unqueued: list.length - queued, slaMs };
     });
+  } catch (e) {
+    return { ok: false, why: e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160) };
+  }
+}
+
+/**
+ * A2 trên tập /work — ĐÚNG câu SQL của Quality Supervisor (`collectHandoffFacts`, lib/sales-quality/daily.ts) chạy bằng handle CHỈ ĐỌC của
+ * tổ chức; script không chép lại điều kiện hàng đợi. Image chưa có hàm ⇒ CHƯA ĐO ĐƯỢC, không đoán.
+ */
+export async function collectWorkQueueFacts(db: Db, now: Date): Promise<{ ok: true; facts: (HandoffReplyFact & { id: string })[] } | { ok: false; why: string }> {
+  try {
+    const daily = (await import("@/lib/sales-quality/daily")) as Record<string, unknown>;
+    const collect = daily.collectHandoffFacts as ((db: Db, now: Date) => Promise<(HandoffReplyFact & { id: string })[]>) | undefined;
+    if (!collect) return { ok: false, why: "image chưa có collectHandoffFacts" };
+    return { ok: true, facts: await collect(db, now) };
   } catch (e) {
     return { ok: false, why: e instanceof Error ? e.message.slice(0, 160) : String(e).slice(0, 160) };
   }
@@ -563,9 +600,18 @@ async function oneOrg(org: { code: string; isHome: boolean }, args: StuckArgs, n
     }
     const slaMs = b.ok ? b.slaMs : null;
     const split = handoffReplySplit(a.waitingHuman, now, slaMs);
-    for (const line of replySplitSummary(org.code, split, slaMs)) tomTat(line);
+    for (const line of replySplitSummary(org.code, split, slaMs, "A2[cũ]")) tomTat(line);
     const unanswered = a.waitingHuman.filter((f) => handoffReplyClass(f, now, slaMs) === "UNANSWERED_OVER_SLA").map((f) => f.id);
-    console.log(`${org.code} A2 · mã hội thoại HANDOFF_UNANSWERED (≤ 30): ${JSON.stringify(unanswered.slice(0, 30))}`);
+    console.log(`${org.code} A2[cũ] · mã hội thoại HANDOFF_UNANSWERED (≤ 30): ${JSON.stringify(unanswered.slice(0, 30))}`);
+    const w = await collectWorkQueueFacts(db, now);
+    if (w.ok) {
+      for (const line of replySplitSummary(org.code, handoffReplySplit(w.facts, now, slaMs), slaMs, "A2[/work]")) tomTat(line);
+      const workUnanswered = w.facts.filter((f) => handoffReplyClass(f, now, slaMs) === "UNANSWERED_OVER_SLA").map((f) => f.id);
+      tomTat(queueSetSummary(org.code, a.waitingHuman.map((f) => f.id), w.facts.map((f) => f.id), unanswered, workUnanswered));
+      console.log(`${org.code} A2[/work] · mã hội thoại HANDOFF_UNANSWERED (≤ 30): ${JSON.stringify(workUnanswered.slice(0, 30))}`);
+    } else {
+      tomTat(`${org.code} A2[/work] · CHƯA ĐO ĐƯỢC — ${w.why}`);
+    }
 
     const d = await collectOrders(db, args.days, now);
     tomTat(`${org.code} D · nhắn lại ${args.days} ngày: ${d.m.followupsSent} tin · sau khi đã có đơn sống (không phải nháp) ${d.m.followupsAfterOrder}`);

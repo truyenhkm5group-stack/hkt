@@ -34,12 +34,14 @@ import {
   collectOrders,
   collectOwnership,
   collectSilent,
+  collectWorkQueueFacts,
   emptyCounts,
   handoffReplyClass,
   handoffReplySplit,
   replySplitSummary,
   type HandoffReplyFact,
   parseStuckArgs,
+  queueSetSummary,
   RECEIPT_CLAIM_RE,
   RECEIPT_CLAIM_SQL_RE,
   REASON_TEXT,
@@ -126,9 +128,23 @@ function testPure() {
   assert.deepEqual([sp.overSla24h, sp.overSla72h], [3, 1]);
   assert.deepEqual([sp.quietTotal, sp.quietAfterHandoff.UNANSWERED_OVER_SLA, sp.quietAfterHandoff.ANSWERED_BOT, sp.handoffUnknown], [2, 1, 1, 1], "(c) cắt ngang: tin gây ra lượt chuyển chưa ai trả lời vẫn đếm vào (b)");
   const sl = replySplitSummary("demo", sp, 4 * H);
-  assert.match(sl[0], /\(a\) ĐÃ có người\/page trả lời sau tin khách cuối 2 \(trong đó chỉ dòng page chưa rõ người gửi 1\) .* \(b\) HANDOFF_UNANSWERED \(không ai trả lời, quá SLA 4 giờ \(work\.sla\)\) 3 \(> 24 giờ 3 · > 72 giờ 1\)/);
-  assert.match(sl[1], /\(c\) khách KHÔNG nhắn gì sau lúc chuyển 2\/6 \(mốc chuyển không rõ 1\)/);
-  assert.match(replySplitSummary("demo", handoffReplySplit([f0], now, null), null)[0], /quá SLA KHÔNG đọc được \/ không đặt hạn\) 0 .* không có hạn 1/);
+  assert.equal(sl.length, 3, "A2 tách ba dòng: (a) · (b) · (c)");
+  assert.match(sl[0], /^demo A2 · 7 hội thoại chờ người — \(a\) ĐÃ có người\/page trả lời sau tin khách cuối 2 \(trong đó chỉ dòng page chưa rõ người gửi 1\) · bot đã trả lời tin khách cuối 1$/);
+  assert.match(sl[1], /\(b\) HANDOFF_UNANSWERED \(không ai trả lời, quá SLA 4 giờ \(work\.sla\)\) 3 \(> 24 giờ 3 · > 72 giờ 1\)/);
+  assert.match(sl[2], /\(c\) khách KHÔNG nhắn gì sau lúc chuyển 2\/6 \(mốc chuyển không rõ 1\)/);
+  assert.match(replySplitSummary("demo", handoffReplySplit([f0], now, null), null)[1], /quá SLA KHÔNG đọc được \/ không đặt hạn\) 0 .* không có hạn 1/);
+  assert.ok(replySplitSummary("demo", sp, 4 * H, "A2[/work]").every((l) => l.startsWith("demo A2[/work] · ")), "nhãn tập đứng đầu mỗi dòng");
+  // Kênh [ops:tom-tat] cắt ở 300 ký tự (dòng gộp cũ mất đúng phần (b)): mọi dòng phải lọt, kể cả mã tổ chức dài và số năm chữ số.
+  const big = JSON.parse(JSON.stringify(sp), (_k, v: unknown) => (typeof v === "number" ? 99_999 : v)) as typeof sp;
+  for (const l of [...replySplitSummary("hslc-hmt-shop", big, 999 * H, "A2[/work]"), ...replySplitSummary("hslc-hmt-shop", big, null, "A2[/work]")]) assert.ok(l.length <= 300, `${l.length} ký tự > 300: ${l}`);
+
+  // Hai tập chờ người: phần giao + hai phần lệch, HANDOFF_UNANSWERED của từng tập.
+  assert.equal(
+    queueSetSummary("demo", ["a", "b", "c", "c"], ["b", "c", "d", "e"], ["a", "b"], ["b", "d"]),
+    "demo A2 · HAI TẬP chờ người: cũ (nhóm WAITING_HUMAN của script) 3 · /work = 2B (aiSilentSql) 4 · chung 2 · chỉ tập cũ 1 · chỉ /work 2 · HANDOFF_UNANSWERED cũ 2 · /work 2 (số 2B) · chung 1",
+  );
+  const many = Array.from({ length: 20_000 }, (_, i) => `x${i}`);
+  assert.ok(queueSetSummary("hslc-hmt-shop", many, many, many, many).length <= 300, "dòng hai tập lọt kênh tóm tắt");
 
   for (const yes of ["Tôi nhận hàng rồi nhưng chưa thử chất lượng", "em đã nhận được hàng", "hàng về rồi shop ơi", "mình vừa nhận hàng"]) assert.ok(RECEIPT_CLAIM_RE.test(yes), yes);
   for (const no of ["khi nào nhận hàng", "không nhận hàng đâu", "nhận hàng ở đâu"]) assert.ok(!RECEIPT_CLAIM_RE.test(no), no);
@@ -202,6 +218,18 @@ async function testDb() {
       assert.ok(a.samples.POST_ORDER?.includes(k1.id), "mã hội thoại chỉ ở phần MÃ HOÁ");
       assert.ok(silentSummary(ORG, a.counts).every((l) => !l.includes(k1.id)), "tóm tắt không mang mã hội thoại");
 
+      // A2[/work]: ĐÚNG tập của Quality Supervisor (2B) — gồm cả hội thoại nhân viên đang tiếp quản (k3), tập cũ thì không.
+      const w = await collectWorkQueueFacts(db, now);
+      assert.ok(w.ok, `A2[/work] đọc được bằng collectHandoffFacts: ${JSON.stringify(w)}`);
+      if (w.ok) {
+        const ids = w.facts.map((f) => f.id);
+        assert.ok(ids.includes(k1.id), "chờ người sau chốt đơn ở cả hai tập");
+        assert.ok(!ids.includes(k4.id), "AI đang trả lời không ở hàng đợi người");
+        assert.ok(ids.some((x) => !a.waitingHuman.some((f) => f.id === x)), "tập /work rộng hơn tập cũ (tiếp quản)");
+        assert.match(queueSetSummary(ORG, a.waitingHuman.map((f) => f.id), ids, [], []), /cũ \(nhóm WAITING_HUMAN của script\) 1 · .* chung 1 · chỉ tập cũ 0 · chỉ \/work [1-9]/);
+        assert.deepEqual(w.facts.find((f) => f.id === k1.id)?.pageVerifiedAt, ago(2), "cùng mốc trả lời trên page như tập cũ");
+      }
+
       const b = await collectOwnership({ code: ORG, isHome: false }, now);
       assert.ok(b.ok, `B/C đọc được bằng lib #800: ${JSON.stringify(b)}`);
       if (b.ok) {
@@ -236,7 +264,7 @@ async function testDb() {
       const [x] = (await db.execute(sql`select 'Tôi nhận hàng rồi nhưng chưa thử chất lượng' ~* ${RECEIPT_CLAIM_SQL_RE} as a, 'khi nào nhận hàng' ~* ${RECEIPT_CLAIM_SQL_RE} as b`)).rows as { a: boolean; b: boolean }[];
       assert.deepEqual([x.a, x.b], [true, false], "bản SQL = bản TS");
     });
-    console.log("  ✓ PGlite: A nhóm × ngưỡng phút (sau chốt 1.520 p · AI hỏng đồng hồ bị đẩy · tiếp quản; TEST loại) · D nhắn lại sau đơn · E chưa vận đơn > 3 ngày · thiếu xã · «đã nhận hàng» chưa có chứng từ giao");
+    console.log("  ✓ PGlite: A nhóm × ngưỡng phút (sau chốt 1.520 p · AI hỏng đồng hồ bị đẩy · tiếp quản; TEST loại) · A2[/work] = tập 2B (gồm tiếp quản) · D nhắn lại sau đơn · E chưa vận đơn > 3 ngày · thiếu xã · «đã nhận hàng» chưa có chứng từ giao");
   } finally {
     await cleanup();
   }

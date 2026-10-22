@@ -9,7 +9,7 @@
  *  · Không bao giờ ném: lỗi trả về trong kết quả, job giám sát vẫn chạy tiếp.
  */
 import { and, asc, gte, inArray, lt, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { getDb, schema, type Db } from "@/db";
 import { handoffReplyClass, type HandoffReplyFact } from "@/lib/constants/handoff-reply";
 import {
   SALES_QUALITY_CODES,
@@ -51,10 +51,14 @@ const toDate = (v: unknown): Date | null => {
   return Number.isFinite(d.getTime()) ? d : null;
 };
 
-/** HANDOFF_UNANSWERED lúc `now`: hội thoại trong hàng đợi người (`aiSilentSql` — đúng định nghĩa hộp thư / hàng đợi /work). */
-export async function collectHandoffUnanswered(now: Date): Promise<{ ids: string[]; waiting: number; slaMs: number | null }> {
-  const slaMs = handoffDueAt(new Date(0), await getWorkConfig())?.getTime() ?? null;
-  const db = await getDb();
+export type HandoffFactRow = HandoffReplyFact & { id: string };
+
+/**
+ * Mốc trả lời của MỌI hội thoại trong hàng đợi người lúc `now` (`aiSilentSql` — đúng định nghĩa hộp thư / hàng đợi /work). `db` truyền vào
+ * để ops `stuck-conversation-audit` đọc ĐÚNG tập này bằng handle CHỈ ĐỌC của tổ chức — tập «chờ người» của script và của Quality Supervisor
+ * là MỘT câu SQL, không phải hai bản chép.
+ */
+export async function collectHandoffFacts(db: Db, now: Date): Promise<HandoffFactRow[]> {
   // Không đặt bí danh cho bảng: `aiSilentSql` (định nghĩa hàng đợi của hộp thư) trỏ cột theo TÊN BẢNG đầy đủ.
   const C = sql.raw(`"sales_chat_conversations"`);
   const res = await db.execute(sql`select ${C}.id, ${C}.last_customer_at, ${C}.last_bot_at, ${C}.last_staff_at, ${C}.handoff_queued_at, ${C}.state->'handoff'->>'at' as handoff_at,
@@ -63,22 +67,23 @@ export async function collectHandoffUnanswered(now: Date): Promise<{ ids: string
       (select max(i.created_at) from "sales_chat_inbound" i where i.page_id = ${C}.page_id and i.thread_id = ${C}.thread_id and i.note = 'PAGE_REPLY' and i.sender_kind = 'VERIFIED_HUMAN') as page_verified_at,
       (select max(i.created_at) from "sales_chat_inbound" i where i.page_id = ${C}.page_id and i.thread_id = ${C}.thread_id and i.note = 'PAGE_REPLY' and i.sender_kind = 'AI_AGENT') as page_ai_at
     from ${C} where ${aiSilentSql(now)} limit 20000`);
-  const ids: string[] = [];
-  let waiting = 0;
-  for (const r of rowsOf<Record<string, unknown>>(res)) {
-    waiting += 1;
-    const fact: HandoffReplyFact = {
-      lastCustomerAt: toDate(r.last_customer_at),
-      lastBotAt: toDate(r.last_bot_at),
-      lastStaffAt: toDate(r.last_staff_at),
-      pageHumanAt: toDate(r.page_human_at),
-      pageVerifiedAt: toDate(r.page_verified_at),
-      pageAiAt: toDate(r.page_ai_at),
-      handoffAt: toDate(r.handoff_queued_at) ?? toDate(r.handoff_at),
-    };
-    if (handoffReplyClass(fact, now, slaMs) === "UNANSWERED_OVER_SLA") ids.push(String(r.id));
-  }
-  return { ids, waiting, slaMs };
+  return rowsOf<Record<string, unknown>>(res).map((r) => ({
+    id: String(r.id),
+    lastCustomerAt: toDate(r.last_customer_at),
+    lastBotAt: toDate(r.last_bot_at),
+    lastStaffAt: toDate(r.last_staff_at),
+    pageHumanAt: toDate(r.page_human_at),
+    pageVerifiedAt: toDate(r.page_verified_at),
+    pageAiAt: toDate(r.page_ai_at),
+    handoffAt: toDate(r.handoff_queued_at) ?? toDate(r.handoff_at),
+  }));
+}
+
+/** HANDOFF_UNANSWERED lúc `now`: hội thoại trong hàng đợi người (`collectHandoffFacts`) quá hạn mà chưa ai trả lời. */
+export async function collectHandoffUnanswered(now: Date): Promise<{ ids: string[]; waiting: number; slaMs: number | null }> {
+  const slaMs = handoffDueAt(new Date(0), await getWorkConfig())?.getTime() ?? null;
+  const facts = await collectHandoffFacts(await getDb(), now);
+  return { ids: facts.filter((f) => handoffReplyClass(f, now, slaMs) === "UNANSWERED_OVER_SLA").map((f) => f.id), waiting: facts.length, slaMs };
 }
 
 /** Quét tin của ngày hôm qua bằng bộ dò thuần. */
