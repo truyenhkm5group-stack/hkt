@@ -58,7 +58,8 @@ import { catalogReferenceAmounts } from "@/lib/sales-chatbot/quote";
 import { listQuickReplies, loadFocusProducts, loadQuickReplySettings } from "@/lib/sales-chatbot/quick-replies";
 import { fitsFocus, productFocusOf, quickReplyCovers, quickReplyFocusGuard, type FocusLine, type FocusProduct } from "@/lib/sales-chatbot/quick-reply-focus";
 import { isMultiPart, looksLikeOrdering, looksWholesale, matchQuickReplyByKeyword, parsePlaceholders, type KeywordMatch, type QuickReplyEntry } from "@/lib/sales-chatbot/quick-replies-shared";
-import { foldVi } from "@/lib/sales-chatbot/text";
+import { foldVi, sentencesOf } from "@/lib/sales-chatbot/text";
+import { addressTextGiven, asksAnyAddressPart } from "@/lib/sales-chatbot/address-memory";
 import { DEFAULT_SHIPPING_ROUTING } from "@/lib/constants/shipping-routing";
 import { addressReviewOpenOf, decideShippingRoute, orderReviewOpenOf } from "@/lib/shipping/route";
 import { rowsOf } from "@/lib/sql-rows";
@@ -532,6 +533,21 @@ export function shownPhoneOf(p: { customerPhone?: string | null; statePhone?: st
   return null;
 }
 
+/** Cửa sổ «cùng lượt mua» của dòng O: chữ địa chỉ khách gửi quá chừng này trước tin bot không tính (bằng hạn lượt mua của bot — 3 ngày). */
+export const ADDRESS_ASK_WINDOW_MS = 3 * 24 * 3_600_000;
+
+/**
+ * O · KNOWN_ADDRESS_REASKED theo AGENTS 3.12b (chủ shop chốt 22/10/2026): tin bot `botText` lúc `botAt` có HỎI / XIN bất kỳ phần nào của
+ * địa chỉ trong khi khách ĐÃ gửi chữ địa chỉ (trong `ADDRESS_ASK_WINDOW_MS` trước đó). Cùng định nghĩa với điểm chặn của engine
+ * (`addressTextGiven` · `asksAnyAddressPart`) — script import từ lib nên CHỈ chạy được trên image đã có PR address-resolver-ladder.
+ * `null` = khách chưa gửi chữ địa chỉ (không vào mẫu số). HÀM THUẦN.
+ */
+export function addressAskAfterText(customer: readonly { text: string; at: number }[], botText: string, botAt: number): boolean | null {
+  const texts = customer.filter((c) => c.at <= botAt && botAt - c.at <= ADDRESS_ASK_WINDOW_MS).map((c) => c.text);
+  if (!addressTextGiven(texts)) return null;
+  return sentencesOf(botText).some(asksAnyAddressPart);
+}
+
 export type UpsellScanRow = { pco: Record<string, unknown> | null; confirmed: Record<string, unknown> | null; cancel: unknown; declined: unknown; dispute: Record<string, unknown> | null; pageMedia: boolean };
 
 /**
@@ -577,6 +593,10 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   // bot xin địa chỉ trong hội thoại có đơn như thế. M: hội thoại có tin khách chứa SĐT mà hộp thư không có SĐT nào để hiện.
   const K = { base: 0, msgs: 0, convs: new Set<string>() };
   const L = { base: 0, msgs: 0, convs: new Set<string>() };
+  // O · KNOWN_ADDRESS_REASKED (AGENTS 3.12b, 22/10/2026): tin bot hỏi / xin bất kỳ phần nào của địa chỉ sau khi khách đã gửi CHỮ địa chỉ
+  // (`addressAskAfterText`). Mẫu số = tin bot gửi khi khách đã có chữ địa chỉ trong cửa sổ. Chỉ đọc tin TRONG kỳ quét ⇒ chữ địa chỉ gửi
+  // trước mốc `--since` không thấy ⇒ số là TRẦN DƯỚI (ESTIMATED).
+  const O = { base: 0, msgs: 0, convs: new Set<string>(), ids: [] as string[] };
   const typedPhoneConvs = new Set<string>();
   const ordT = schema.orders;
   const threadOrders = new Map<string, { phoneAt: number | null; addressAt: number | null }>();
@@ -634,8 +654,9 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
     let sentHeads = new Set<string>();
     let secondAsk = false;
     let phoneTyped = false;
+    let custTexts: { text: string; at: number }[] = [];
     for (const r of rows) {
-      if (r.conv !== cur) [cur, userSince, quoteTotal, lines, qtyAnswer, prevBot, sentHeads, secondAsk, phoneTyped] = [r.conv, false, null, [], false, "", new Set<string>(), false, false];
+      if (r.conv !== cur) [cur, userSince, quoteTotal, lines, qtyAnswer, prevBot, sentHeads, secondAsk, phoneTyped, custTexts] = [r.conv, false, null, [], false, "", new Set<string>(), false, false, []];
       if (r.role === "user") {
         if (textOf(r.content)) {
           const said = textOf(r.content);
@@ -648,6 +669,7 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
           secondAsk = amountsIn(said).length > 0 && classifyDeliveryQuestion(said)?.intent === "DELIVERY_TIME";
           if (secondAsk) G.base += 1;
           userSince = true;
+          if (r.at) custTexts.push({ text: said, at: r.at.getTime() });
           lines.push({ who: "CUSTOMER", text: textOf(r.content) });
           countDecision(lines);
         }
@@ -686,6 +708,15 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
         if (asksAddressAgain(t)) {
           L.msgs += 1;
           L.convs.add(r.conv);
+        }
+      }
+      const reask = Number.isFinite(atMs) ? addressAskAfterText(custTexts, t, atMs) : null;
+      if (reask !== null) {
+        O.base += 1;
+        if (reask) {
+          O.msgs += 1;
+          if (!O.convs.has(r.conv) && O.ids.length < 20) O.ids.push(r.conv);
+          O.convs.add(r.conv);
         }
       }
       if (t.includes(CLAIM_SAFE_TEXT.ORDER_PENDING_ADDRESS)) {
@@ -838,6 +869,8 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
     if (v.skippedValid) [UP.skipped, UP.skippedIds] = [UP.skipped + 1, [...UP.skippedIds, String(r.id)]];
     if (v.duplicate) [UP.dup, UP.dupIds] = [UP.dup + 1, [...UP.dupIds, String(r.id)]];
   }
+  console.log(`  mẫu O (≤ 20): ${O.ids.join(" ") || "—"}`);
+  tomTat(`O KNOWN_ADDRESS_REASKED (AGENTS 3.12b) — tin bot hỏi / xin bất kỳ phần nào của địa chỉ khi khách ĐÃ gửi chữ địa chỉ (≤ 3 ngày trước): ${O.msgs} tin / ${O.convs.size} hội thoại · mẫu số ${O.base} tin bot sau chữ địa chỉ (ESTIMATED — chỉ chữ địa chỉ gửi trong kỳ quét; phải = 0 sau deploy)`);
   console.log(`  mẫu H (≤ 20): ${UP.skippedIds.slice(0, 20).join(" ") || "—"}`);
   console.log(`  mẫu I (≤ 20): ${UP.dupIds.slice(0, 20).join(" ") || "—"}`);
   tomTat(
