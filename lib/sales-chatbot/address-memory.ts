@@ -718,6 +718,20 @@ export function addressTextLines(customerTexts: readonly string[]): string[] {
   return out.slice(-ADDRESS_TEXT_LIMITS.lines);
 }
 
+/**
+ * Chữ gửi sang dịch vụ ánh xạ bên ngoài (Google Places — address-resolver-ladder PR-B): CHỈ các VẾ mang tín hiệu địa chỉ của các dòng đã
+ * lưu, nối bằng «, » — không tên khách, không món, không SĐT (chính sách riêng tư 1.3 mục 6). Không vế nào ⇒ "". HÀM THUẦN.
+ */
+export function addressQueryText(lines: readonly string[]): string {
+  const out: string[] = [];
+  for (const raw of lines)
+    for (const seg of withoutPhones(raw).split(/[,;\n]+/)) {
+      const s = seg.trim();
+      if (s && isAddressTextLine(s) && !out.includes(s)) out.push(s);
+    }
+  return out.join(", ").slice(0, 300);
+}
+
 /** Một dòng (đã bỏ SĐT) có mang tín hiệu địa chỉ không — biên của `addressTextGiven`. HÀM THUẦN. */
 function isAddressTextLine(line: string): boolean {
   if (line.length < 3) return false;

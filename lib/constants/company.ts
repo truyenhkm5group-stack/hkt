@@ -15,7 +15,7 @@ export const COMPANY = {
 } as const;
 
 /** Phiên bản + ngày hiệu lực của Chính sách quyền riêng tư đang công bố. Sửa nội dung trang ⇒ tăng phiên bản. */
-export const PRIVACY_POLICY = { version: "1.2", effective: "21/10/2026", path: "/chinh-sach-bao-mat" } as const;
+export const PRIVACY_POLICY = { version: "1.3", effective: "22/10/2026", path: "/chinh-sach-bao-mat" } as const;
 
 /**
  * Điều khoản sử dụng đang công bố (`/dieu-khoan-su-dung`). Sửa nội dung trang ⇒ tăng phiên bản. Phiên bản người đăng ký

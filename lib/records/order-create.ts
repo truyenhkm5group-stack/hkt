@@ -91,7 +91,7 @@ import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { normalizePhone as pancakePhone } from "@/lib/integrations/http";
 import { orderCancellationOf, withCancelOutcome, type CancelActor, type CancelRequester, type RescueResult } from "@/lib/constants/order-cancel";
-import { canFlagOrderForReview, MACHINE_ADDRESS_NOTE_PREFIX, ORDER_REVIEW_HOLD_CODES, orderReviewOf, reviewConflictMessage, reviewResolveReason, unseenReviewEntries, withAddressSettled, withCustomerReconfirm, withReviewEntry, withReviewResolved, type OrderReviewEntry, type OrderReviewResolution, type ReviewSeen } from "@/lib/constants/order-review";
+import { canFlagOrderForReview, MACHINE_ADDRESS_NOTE_PREFIX, ORDER_REVIEW_HOLD_CODES, orderReviewOf, reviewConflictMessage, reviewResolveReason, unseenReviewEntries, withAddressCandidates, withAddressSettled, withCustomerReconfirm, withReviewEntry, withReviewResolved, type OrderReviewEntry, type OrderReviewResolution, type ReviewSeen } from "@/lib/constants/order-review";
 
 export type OrderGate = { allowed: true } | { allowed: false; code: "FORBIDDEN" | "NOT_SUPPORTED" | "MODULE_DISABLED"; reason: string };
 
@@ -916,6 +916,56 @@ export async function flagOrderForReviewAsAgent(agent: OrderAgent, orderId: stri
     announceOrder(orderId, "updated");
   }
   return { ok: true, id: orderId, flagged: true, stage: out.stage };
+}
+
+/** Kết quả của MỘT lượt máy ánh xạ địa chỉ nền trên một đơn — vết ở `raw.addressResolution` (đo tỷ lệ theo từng bậc). */
+export type AddressResolution = {
+  status: "SURE" | "UNSURE" | "NONE";
+  source: "TEXT" | "C360" | "PLACES" | null;
+  ward: string | null;
+  province: string | null;
+  candidates: string[];
+  reason: string;
+  /** Mốc `raw.addressText.at` đã xét — chữ khách mới hơn ⇒ máy xét lại. */
+  textAt: string | null;
+  /** Đã tra Google ở lượt này (đếm chi phí). */
+  places: boolean;
+  /** Lỗi bậc Google (xác thực / hạn mức / mạng) — ghi rõ, máy lùi về bậc (a)(b) + nhân viên. */
+  placesError: string | null;
+  attempts: number;
+  at: string;
+};
+
+/**
+ * MÁY ÁNH XẠ ĐỊA CHỈ NỀN (address-resolver-ladder PR-B, chủ shop chốt 22/10/2026): ghi KẾT QUẢ lên ô địa chỉ của đơn — chỉ khi dòng cờ máy
+ * «địa chỉ chưa ghép» còn mở, ô xã còn trống và dòng địa chỉ chưa đổi kể từ lúc đọc (`expectAddress`). CHẮC ⇒ điền tỉnh / xã + gỡ dòng cờ
+ * (vết ADDRESS_SETTLED, máy). Không chắc / không ra ⇒ không đổi ô nào, ghi ứng viên + lý do vào dòng cờ (một việc cho nhân viên). Không
+ * đổi stage, không đụng tiền / hàng / vận đơn. Không ném.
+ */
+export async function applyAddressResolutionAsAgent(agent: OrderAgent, orderId: string, expectAddress: string, r: AddressResolution, now: Date = new Date()): Promise<{ applied: boolean; settled: boolean }> {
+  if (!isManualOrderId(orderId) || orderId.length > 200) return { applied: false, settled: false };
+  const w = agentWriter(agent);
+  const db = await getDb();
+  const out = await db.transaction(async (tx) => {
+    const o = schema.orders;
+    const [row] = await tx.select({ id: o.id, stage: o.stage, raw: o.raw, address: o.shipAddress, commune: o.shipCommune }).from(o).where(eq(o.id, orderId)).limit(1).for("update");
+    if (!row || !manualOrderRaw(row.raw) || row.stage === "CANCELLED" || row.stage === "DELETED" || row.address !== expectAddress) return { applied: false, settled: [] as OrderReviewEntry[] };
+    let raw: Record<string, unknown> = { ...(row.raw as Record<string, unknown>), addressResolution: r };
+    if (r.status === "SURE" && r.ward && r.province && !row.commune.trim()) {
+      const s = withAddressSettled(raw, { at: now.toISOString(), byName: `${w.name} · nguồn ${r.source ?? "?"}`, ward: r.ward });
+      raw = s.raw;
+      await tx.update(o).set({ shipProvince: r.province, shipCommune: r.ward, shipFullAddress: fullAddressLine(row.address, r.ward, r.province), raw, updatedAt: now }).where(eq(o.id, row.id));
+      return { applied: true, settled: s.settled };
+    }
+    if (r.candidates.length || r.reason) raw = withAddressCandidates(raw, r.candidates.length ? `ứng viên ${r.candidates.join(" / ")} — ${r.reason}` : r.reason).raw;
+    await tx.update(o).set({ raw, updatedAt: now }).where(eq(o.id, row.id));
+    return { applied: true, settled: [] as OrderReviewEntry[] };
+  });
+  if (out.settled.length) {
+    await auditReview(w, orderId, "RESOLVE", { entries: out.settled, action: "ADDRESS_SETTLED" });
+    announceOrder(orderId, "updated");
+  }
+  return { applied: out.applied, settled: out.settled.length > 0 };
 }
 
 /**
