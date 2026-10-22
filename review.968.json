@@ -1,0 +1,8 @@
+{
+  "pr": 968,
+  "sha": "22b8cde304d736171d0624194ff83cb38bcd7609",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-22T09:12:21.266Z",
+  "note": "review lead (P0 HSLC #8037F35A, phần số lượng): cart-commitment đánh dấu số trần (bare); bareResolution STATED / INFERRED (bội quy cách Hộp N cái ⇒ N/quy cách) / AMBIGUOUS; chỉ dòng STATED có thẩm quyền chặn model hạ số / ép số lên đơn (gốc ca: #35 chặn 1 hộp ⇒ #37 ép 10). quantityUnitIssue chạy trước mọi lần ghi: mơ hồ ⇒ không ghi + đúng một câu «đóng hộp N cái, mấy hộp ạ»; sai bội ⇒ PACK_MULTIPL"
+}
