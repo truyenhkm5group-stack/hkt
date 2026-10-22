@@ -3,7 +3,7 @@
   "mission_id": "sales-qty-unit-guard",
   "title": "Quantity/Unit Guard: số không đơn vị không phải số hộp; hàng rào giỏ không ép số suy ra; sửa đơn chốt tăng bất thường ⇒ chuyển người (ca #8037F35A)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-qty-guard",
@@ -20,11 +20,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-22T03:42:42.618Z",
-  "updated_at": "2026-10-22T10:49:48.456Z",
+  "updated_at": "2026-10-22T11:20:11.190Z",
   "last_heartbeat": "2026-10-22T09:01:01.113Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#968 → eb615ec19fa68fe5b824813d4eb40ed672e64abc"
+    "merged": "#968 → eb615ec19fa68fe5b824813d4eb40ed672e64abc",
+    "verify": "PASS eb615ec19fa68fe5b824813d4eb40ed672e64abc 2026-10-22T11:19:43.967Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39767972088"
   },
   "handoff": {
     "branch": "claude/sales-qty-unit-guard",
