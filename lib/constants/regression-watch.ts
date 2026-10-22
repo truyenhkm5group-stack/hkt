@@ -45,8 +45,8 @@ export type RegressionWatchRow = {
 
 /*
   ADDRESS_REASK nối với `address-resolver-ladder` (#972, AGENTS 3.12b) — KHÔNG với #966 (#966 sửa ADDRESS_RECEIVED_BUT_NOT_APPLIED).
-  TODO sales-qty-unit-guard: đổi `leakCodes` thành ["PACK_MULTIPLIER_LEAKED"] khi bộ dò lọt của code-erp-42 lên production; `liveAt` GIỮ
-  mốc của #968 (bộ dò đọc lịch sử tin nên lọt sau mốc ấy vẫn đếm được).
+  sales-qty-unit-guard: bộ dò lọt PACK_MULTIPLIER_LEAKED (#975, code-erp-42) lên SAU bản sửa #968 — `liveAt` GIỮ mốc của #968 (bộ dò đọc
+  lịch sử tin nên lọt sau mốc ấy vẫn đếm được), `leakMeasuredFrom` = mốc deploy xanh của #975 để mọi chỗ in số nói rõ đo từ khi nào.
 */
 export const REGRESSION_WATCH: readonly RegressionWatchRow[] = [
   {
@@ -85,10 +85,10 @@ export const REGRESSION_WATCH: readonly RegressionWatchRow[] = [
     sha: "eb615ec19fa68fe5b824813d4eb40ed672e64abc",
     liveAt: "2026-10-22T11:19:35Z",
     deployRun: 39767972088,
-    leakCodes: [],
+    leakCodes: ["PACK_MULTIPLIER_LEAKED"],
     blockedCodes: ["QUANTITY_UNIT_AMBIGUOUS", "PACK_MULTIPLIER_MISMATCH", "CART_TOTAL_CONFLICT", "ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT"],
-    leakUnavailable:
-      "Chưa có bộ dò LỌT TỚI KHÁCH: cần phát hiện đơn ĐÃ GHI mà dòng mẫu mã «Hộp N cái» mang đúng số khách nói (bội của N, N > 1) — bộ dò PACK_MULTIPLIER_LEAKED (code-erp-42). Bốn mã hiện có đều là lần CHẶN trước khi ghi.",
+    // Bộ dò lọt #975 (63303e94f876), lượt Deploy ERP to VPS 39802211235.
+    leakMeasuredFrom: "2026-10-22T15:23:51Z",
     orgScope: "ALL",
   },
   {

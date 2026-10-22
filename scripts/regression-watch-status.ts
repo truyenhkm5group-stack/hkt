@@ -18,7 +18,7 @@ if (CHAY_THANG) process.env.ERP_READ_ONLY = "1";
 import "dotenv/config";
 import { like, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { REGRESSION_WATCH, regressionDedupeKey, regressionSummaryLine } from "@/lib/constants/regression-watch";
+import { REGRESSION_WATCH, regressionDedupeKey, regressionSummaryLine, type RegressionWatchRow } from "@/lib/constants/regression-watch";
 import { SALES_QUALITY_STATE_KEY } from "@/lib/constants/sales-quality";
 import { withOrganization } from "@/lib/platform/context";
 import { listOrganizations } from "@/lib/platform/organizations";
@@ -51,10 +51,10 @@ export type RegressionStatusRow = {
 };
 
 /** Gộp ảnh chụp các tổ chức thành bảng theo dòng sổ. HÀM THUẦN. */
-export function regressionStatusTable(orgs: readonly OrgRegressionSnapshot[]): RegressionStatusRow[] {
+export function regressionStatusTable(orgs: readonly OrgRegressionSnapshot[], watch: readonly RegressionWatchRow[] = REGRESSION_WATCH): RegressionStatusRow[] {
   const out: RegressionStatusRow[] = [];
   const ran = orgs.filter((o) => o.day !== null);
-  for (const row of REGRESSION_WATCH) {
+  for (const row of watch) {
     const codes = row.leakCodes.length ? row.leakCodes : [null];
     for (const code of codes) {
       const mine = ran.flatMap((o) => o.rows.filter((r) => r.mission === row.mission && r.code === code));

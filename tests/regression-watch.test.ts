@@ -80,7 +80,13 @@ function testCounting() {
   const c2 = countAfterLive(g, [{ code: "PACK_MULTIPLIER_MISMATCH", at: new Date(Date.parse(g.liveAt) + 1000), conv: "x" }, { code: "CART_TOTAL_CONFLICT", at: new Date(Date.parse(g.liveAt) - 1000), conv: "x" }]);
   assert.equal(c2.blocked, 1, "lần CHẶN sau mốc đếm vào «đã chặn»");
   assert.equal(c2.leaked.size, 0, "ĐÃ CHẶN không bao giờ là lọt");
-  assert.equal(regressionVerdict(g, 0, c2.blocked), "LEAK_UNAVAILABLE", "chưa có bộ dò lọt ⇒ không kết luận «yên», không REOPEN");
+  assert.equal(regressionVerdict(g, 0, c2.blocked), "HOLDING", "có chặn, 0 lọt ⇒ hàng rào đang giữ");
+  assert.deepEqual(g.leakCodes, ["PACK_MULTIPLIER_LEAKED"], "#968 đo lọt bằng bộ dò #975");
+  assert.equal(g.leakMeasuredFrom, "2026-10-22T15:23:51Z", "bộ dò lọt có từ lúc #975 lên production");
+  const c3 = countAfterLive(g, [{ code: "PACK_MULTIPLIER_LEAKED", at: new Date(Date.parse(g.liveAt) + 1000), conv: "x" }]);
+  assert.equal(regressionVerdict(g, c3.leaked.get("PACK_MULTIPLIER_LEAKED")?.hits ?? 0, 0), "REGRESSION_REOPENED", "lọt sau mốc #968 ⇒ tái diễn (đếm từ liveAt, không từ leakMeasuredFrom)");
+  const chuaDo = { ...g, leakCodes: [], leakUnavailable: "chưa có bộ dò lọt — kiểm thử" };
+  assert.equal(regressionVerdict(chuaDo, 0, 1), "LEAK_UNAVAILABLE", "chưa có bộ dò lọt ⇒ không kết luận «yên», không REOPEN");
   const t = new Date("2026-10-23T00:00:00Z");
   assert.equal(reopenAction(null, t), "CREATE");
   assert.equal(reopenAction({ resolvedAt: null }, t), "REFRESH");
@@ -147,11 +153,18 @@ async function testReopenFlow(db: Db) {
     assert.equal(v2.id, v.id, "mở lại ĐÚNG việc cũ, không tạo việc mới");
     assert.deepEqual([v2.resolvedAt, v2.resolution, v2.notifiedAt, v2.notifyAttempts], [null, null, null, null], "xoá mốc đóng + mốc gửi để kênh cảnh báo báo lại");
     assert.deepEqual(sent, [[v.id], [v.id]], "mở lại ⇒ gửi đúng MỘT tin");
-    // Dòng chưa có bộ dò lọt: lần chặn sau mốc ⇒ không việc nào.
+    // Hàng rào chặn sau mốc, không lọt ⇒ HOLDING, không việc nào.
     const g = row("sales-qty-unit-guard");
     const r5 = await applyRegressionWatch(db, { day: "2026-10-25", now: new Date(Date.parse(g.liveAt) + 3_600_000), hits: [{ code: "PACK_MULTIPLIER_MISMATCH", at: new Date(Date.parse(g.liveAt) + 60_000), conv: "x" }], orgCode: null }, deps);
     const gr = r5.rows.find((x) => x.mission === g.mission)!;
-    assert.deepEqual([gr.verdict, gr.leaked, gr.blocked, gr.action], ["LEAK_UNAVAILABLE", null, 1, null], "đã chặn ⇒ bằng chứng hàng rào chạy, lọt «chưa đo được» (null), không việc");
+    assert.deepEqual([gr.code, gr.verdict, gr.leaked, gr.blocked, gr.action], ["PACK_MULTIPLIER_LEAKED", "HOLDING", 0, 1, null], "đã chặn ⇒ bằng chứng hàng rào chạy, 0 lọt, không việc");
+    assert.equal((await db.select().from(n).where(eq(n.dedupeKey, regressionDedupeKey("PACK_MULTIPLIER_LEAKED", g.mission)))).length, 0);
+    // Lọt sau mốc ⇒ việc tái diễn nói rõ bộ dò lọt có từ khi nào, và tách số đã chặn.
+    const sau = Date.parse(g.leakMeasuredFrom!);
+    await applyRegressionWatch(db, { day: "2026-10-25", now: new Date(sau + 3_600_000), hits: [{ code: "PACK_MULTIPLIER_LEAKED", at: new Date(sau + 60_000), conv: "y" }], orgCode: null }, deps);
+    const [gv] = await db.select().from(n).where(eq(n.dedupeKey, regressionDedupeKey("PACK_MULTIPLIER_LEAKED", g.mission)));
+    assert.match(gv?.body ?? "", /bộ dò lọt có từ 22:23 22\/10 — đo lọt từ mốc ấy/, "việc nói rõ đo lọt từ lúc bộ dò lên");
+    assert.match(gv?.body ?? "", /Đã CHẶN trước khi gửi trong cùng kỳ/, "kèm số đã chặn — tách khỏi số lọt");
     // Phạm vi tổ chức: dòng khai riêng một tổ chức thì tổ chức khác không thấy.
     assert.equal(watchAppliesTo({ ...g, orgScope: ["hslc"] }, "khac"), false);
     assert.equal(watchAppliesTo({ ...g, orgScope: ["hslc"] }, null), false, "không biết tổ chức ⇒ phía HẸP");
@@ -165,15 +178,20 @@ function testStatusTable() {
   const reopenKey = regressionDedupeKey("UPSELL_ACCEPTED_BUT_REASKED", "upsell-short-accept");
   const snaps: OrgRegressionSnapshot[] = [
     { ...base, rows: [{ mission: "upsell-short-accept", code: "UPSELL_ACCEPTED_BUT_REASKED", leaked: 3, blocked: 0, verdict: "REGRESSION_REOPENED", action: "CREATE" }], items: [{ dedupeKey: reopenKey, open: true }] },
-    { ...base, rows: [{ mission: "sales-qty-unit-guard", code: null, leaked: null, blocked: 4, verdict: "LEAK_UNAVAILABLE", action: null }], items: [{ dedupeKey: reopenKey, open: false }] },
+    { ...base, rows: [{ mission: "sales-qty-unit-guard", code: "PACK_MULTIPLIER_LEAKED", leaked: 0, blocked: 4, verdict: "HOLDING", action: null }], items: [{ dedupeKey: reopenKey, open: false }] },
   ];
   const t = regressionStatusTable(snaps);
+  const q = t.find((x) => x.mission === "sales-qty-unit-guard")!;
+  assert.deepEqual([q.code, q.leaked, q.blocked, q.status, q.leakMeasuredFrom], ["PACK_MULTIPLIER_LEAKED", 0, 4, "HOLDING", "2026-10-22T15:23:51Z"]);
+  assert.ok(regressionStatusLines(t, 2, 2).some((l) => l.includes("sales-qty-unit-guard") && l.includes("lọt 0 (đo lọt từ 2026-10-22T15:23:51Z)")), "0 lọt in kèm mốc bộ dò — không đọc nhầm thành 0 từ 11:19Z");
+  // Dòng chưa có bộ dò lọt (sổ giả trong bài kiểm): in «chưa đo được», không in 0.
+  const chuaDo = [{ ...row("sales-qty-unit-guard"), leakCodes: [], leakUnavailable: "chưa có bộ dò — kiểm thử", leakMeasuredFrom: undefined }];
+  const tc = regressionStatusTable([{ ...base, rows: [{ mission: "sales-qty-unit-guard", code: null, leaked: null, blocked: 4, verdict: "LEAK_UNAVAILABLE", action: null }] }], chuaDo);
+  assert.deepEqual([tc[0].code, tc[0].leaked, tc[0].blocked, tc[0].status], [null, null, 4, "LEAK_UNAVAILABLE"]);
   const up = t.find((x) => x.code === "UPSELL_ACCEPTED_BUT_REASKED")!;
   assert.deepEqual([up.leaked, up.reopened, up.status], [3, 1, "REGRESSION_REOPENED"], "đếm việc MỞ theo tổ chức; việc đã đóng không tính");
-  const g = t.find((x) => x.mission === "sales-qty-unit-guard")!;
-  assert.deepEqual([g.leaked, g.blocked, g.status], [null, 4, "LEAK_UNAVAILABLE"]);
   const lines = regressionStatusLines(t, 2, 2);
-  assert.ok(lines.some((l) => l.includes("sales-qty-unit-guard") && l.includes("lọt chưa đo được")), "bảng in «chưa đo được», không in 0");
+  assert.ok(regressionStatusLines(tc, 1, 1).some((l) => l.includes("lọt chưa đo được")), "bảng in «chưa đo được», không in 0");
   assert.ok(lines.every((l) => !l.includes("kiem-thu") && !l.includes("hslc")), "kênh tóm tắt không mang mã tổ chức");
   const sum = parseRegressionSummary(lines.join("\n"));
   assert.equal(sum.get("upsell-short-accept"), 1);
@@ -225,5 +243,5 @@ export async function testRegressionWatch(db: Db) {
   testStatusTable();
   await testDoneGate();
   await testReopenFlow(db);
-  console.log("  ✓ Sổ theo dõi tái diễn: 5 bản sửa P0, mốc = deploy xanh · chỉ đếm SAU mốc · ĐÃ CHẶN ≠ LỌT · một việc / (mã, sứ mệnh), nhiều ngày không đẻ việc · đóng rồi lọt lại ⇒ MỞ LẠI đúng việc + một tin · chưa có bộ dò ⇒ «chưa đo được», không REOPEN · bảng ops không mã tổ chức, không kết luận ⇒ UNKNOWN · ai-tech từ chối DONE khi thiếu bằng chứng / còn tái diễn");
+  console.log("  ✓ Sổ theo dõi tái diễn: 5 bản sửa P0, mốc = updated_at deploy xanh · #968 đo lọt bằng PACK_MULTIPLIER_LEAKED từ 15:23Z · chỉ đếm SAU mốc · ĐÃ CHẶN ≠ LỌT · một việc / (mã, sứ mệnh), nhiều ngày không đẻ việc · đóng rồi lọt lại ⇒ MỞ LẠI đúng việc + một tin · chưa có bộ dò ⇒ «chưa đo được», không REOPEN · bảng ops không mã tổ chức, không kết luận ⇒ UNKNOWN · ai-tech từ chối DONE khi thiếu bằng chứng / còn tái diễn");
 }
