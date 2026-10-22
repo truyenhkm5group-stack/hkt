@@ -151,15 +151,20 @@ function testPure() {
 }
 
 function testSourceFences() {
-  const act = readFileSync("lib/actions/payroll-code.ts", "utf8");
-  const approve = act.slice(act.indexOf("export async function approveCodeRow"), act.indexOf("export async function endCodeRow"));
+  // Từ 22/10/2026 thân giao · duyệt · huỷ nằm ở lõi dùng chung `lib/payroll/code-book-service.ts` (màn hình và
+  // scripts/payroll-owner-apply.ts); action giữ quyền + lược đồ và truyền `guardSecondApproval`.
+  const cua = readFileSync("lib/actions/payroll-code.ts", "utf8");
+  const loi = readFileSync("lib/payroll/code-book-service.ts", "utf8");
+  const act = cua + loi;
+  const approve = loi.slice(loi.indexOf("export async function approveCodeRowAs"), loi.indexOf("export async function revokeCodeRowAs"));
   assert.ok(approve.length > 100, "có đường DUYỆT riêng");
   assert.equal((act.match(/\.set\(\{ status: "APPROVED"/g) ?? []).length, 1, "chỉ MỘT lệnh ghi đưa dòng sang APPROVED");
-  assert.ok(approve.includes('.set({ status: "APPROVED"'), "và lệnh ấy nằm trong approveCodeRow");
+  assert.ok(approve.includes('.set({ status: "APPROVED"'), "và lệnh ấy nằm trong approveCodeRowAs");
   assert.ok(!/\.values\(\{[^}]*status: "APPROVED"/.test(act), "không đường khai nào chèn thẳng một dòng ĐÃ DUYỆT");
-  assert.equal((act.match(/status: "PENDING", createdBy: guard\.id, approvedBy: null, approvedAt: null/g) ?? []).length, 2, "khai phân công và khai điều khoản đều chỉ tạo dòng CHỜ DUYỆT");
-  assert.ok(approve.includes('if (duyet.id && duyet.id === row.createdBy && !(duyet.id === guard.id && guard.role === "ADMIN"))'), "người khai không tự duyệt (trừ chủ shop)");
-  assert.ok(/guardSecondApproval/.test(approve), "duyệt đi qua duyệt người thứ hai của nhóm PAYROLL_EDIT");
+  assert.equal((act.match(/status: "PENDING", createdBy: (guard|actor)\.id, approvedBy: null, approvedAt: null/g) ?? []).length, 2, "khai phân công và khai điều khoản đều chỉ tạo dòng CHỜ DUYỆT");
+  assert.ok(approve.includes('if (duyet.id && duyet.id === row.createdBy && !(duyet.id === actor.id && actor.role === "ADMIN"))'), "người khai không tự duyệt (trừ chủ shop)");
+  assert.ok(approve.includes("await opts.guard({") && approve.includes('group: "PAYROLL_EDIT"'), "duyệt đi qua duyệt người thứ hai của nhóm PAYROLL_EDIT");
+  assert.ok(/approveCodeRowAs\([^;]*\{ guard: guardSecondApproval \}\)/.test(cua), "màn hình truyền ĐÚNG cổng người thứ hai vào lõi");
   assert.ok(approve.includes("if (!duyet.id) return"), "không duyệt một dòng mà không ghi được ai đã duyệt");
   const q = readFileSync("lib/queries/payroll-code-ledger.ts", "utf8");
   assert.ok((q.match(/eq\(a\.status, "APPROVED"\)/g) ?? []).length >= 1 && (q.match(/eq\(t\.status, "APPROVED"\)/g) ?? []).length >= 1, "bảng lương chỉ đọc dòng ĐÃ DUYỆT");

@@ -102,7 +102,8 @@ export async function testApproval(db: Db) {
   // lần trong một ngày (job không có lịch · phép nối không canh grain · lá chắn chi phí canh sáu
   // tệp · ranh giới ghi canh 15 tệp · khung xương canh 21 tuyến).
   const nhomDaNoi = new Set<string>();
-  for (const f of ["lib/actions/stock.ts", "lib/actions/expenses.ts", "lib/actions/payroll.ts", "lib/actions/report-settings.ts", "lib/actions/production.ts"]) {
+  // Lõi dùng chung của màn hình và job (22/10/2026) giữ phép gọi cổng; action truyền `guardSecondApproval` vào.
+  for (const f of ["lib/actions/stock.ts", "lib/actions/expenses.ts", "lib/finance/expense-service.ts", "lib/actions/payroll.ts", "lib/payroll/profit-gate-service.ts", "lib/payroll/code-book-service.ts", "lib/actions/report-settings.ts", "lib/actions/production.ts"]) {
     const src = readFileSync(f, "utf8");
     for (const g of APPROVAL_GROUPS) if (src.includes(`"${g}"`)) nhomDaNoi.add(g);
   }

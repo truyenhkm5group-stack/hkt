@@ -32,6 +32,7 @@ import { testCostDoubleCount } from "./cost-double-count.test";
 import { testPayrollCostPreservation } from "./payroll-cost-preservation.test";
 import { testPayrollCarryover } from "./payroll-carryover.test";
 import { testPayrollProfitGate } from "./payroll-profit-gate.test";
+import { testPayrollOwnerApply } from "./payroll-owner-apply.test";
 import { testPayrollCodeLedger } from "./payroll-code-ledger.test";
 import { testPayrollReconciliationPure } from "./payroll-reconciliation.test";
 import { testPayrollReconCenter } from "./payroll-recon-center.test";
@@ -2553,6 +2554,7 @@ async function main() {
     await testPayrollCodeLedger(db);
     testPayrollReconciliationPure();
     await testPayrollReconCenter(db);
+    await testPayrollOwnerApply(db);
     testOpsScriptSize();
     await testDataTruth(db);
     await testPayrollCogsCutoff(db);

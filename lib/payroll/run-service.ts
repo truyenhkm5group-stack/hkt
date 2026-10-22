@@ -25,6 +25,7 @@
 import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
+import type { GuardInput, GuardResult } from "@/lib/approvals/service";
 import {
   PAYROLL_BASIS_ELIGIBILITY,
   PAYROLL_BASIS_SHORT,
@@ -559,4 +560,51 @@ export async function transitionPayrollRunAs(actor: PayrollActor, input: Transit
     }
   }
   return { ok: true, status: spec.to, sideEffects };
+}
+
+/**
+ * CHUYỂN TRẠNG THÁI MỘT KỲ KÈM CÁC KIỂM TRA CỦA NGƯỜI BẤM — lý do bắt buộc · bảng chuyển trạng thái · cổng người
+ * thứ hai — rồi vào `transitionPayrollRunAs`. `lib/actions/payroll-run.ts::movePayrollRun` (nút trên màn hình, sau
+ * khi kiểm QUYỀN) và `scripts/payroll-owner-apply.ts` (Tech Lead theo ủy quyền chủ shop) đi qua ĐÚNG hàm này.
+ */
+export async function movePayrollRunAs(actor: PayrollActor, input: TransitionInput, opts: { guard: (input: GuardInput) => Promise<GuardResult> }): Promise<RunActionResult> {
+  const { periodKey, basis, action, reason } = input;
+  const spec = PAYROLL_ACTION_SPEC[action];
+  // 2 · LÝ DO BẮT BUỘC cho những việc làm đổi một kỳ đã có số.
+  if (spec.requiresReason && reason.length < 3) {
+    return { error: `“${spec.label}” bắt buộc ghi LÝ DO. Không có lý do thì người đọc sau chỉ biết là “có gì đó đã đổi”.` };
+  }
+
+  const db = await getDb();
+  const p = schema.payrollPeriods;
+  const [row] = await db.select().from(p).where(and(eq(p.periodKey, periodKey), eq(p.basis, basis))).limit(1);
+  if (!row) return { error: "Kỳ này chưa có bản ghi nào. Bấm “Tính & chụp ảnh kỳ” trước." };
+  const current = normalizePayrollStatus(row.status);
+
+  // 3 · BẢNG CHUYỂN TRẠNG THÁI — cùng một bảng mà màn hình dùng để quyết định hiện nút nào.
+  if (!canTransition(current, action)) {
+    return { error: `Kỳ đang ở trạng thái “${current}” nên không làm được việc “${spec.label}”.` };
+  }
+
+  // 4 · NGƯỜI THỨ HAI, cho ba việc mà một mình quyết là quá nhiều quyền.
+  if (spec.secondApproval) {
+    const cong = await opts.guard({
+      group: "PAYROLL_EDIT",
+      action: `payroll.run.${action.toLowerCase()}`,
+      entity: "PAYROLL_PERIOD",
+      entityId: `${periodKey}:${basis}`,
+      summary: `${spec.label} — kỳ ${periodKey}, cơ sở ${PAYROLL_BASIS_SHORT[basis]}${reason ? ` · lý do: ${reason}` : ""}`,
+      amount: null,
+      payload: { periodKey, basis, action, reason },
+    });
+    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+  }
+
+  /*
+    KHOÁ TÊN, ĐỌC LẠI TRONG KHOÁ, BẢNG CHUYỂN TRẠNG THÁI và NHẬT KÝ nằm ở lõi dùng chung
+    (`lib/payroll/run-service.ts`) — máy tự động đi CÙNG cửa ấy cho hai bước nó được phép.
+    Phần ở trên (quyền · lý do · người thứ hai) chỉ có nghĩa khi có một NGƯỜI đang bấm.
+  */
+  return transitionPayrollRunAs(actor, { periodKey, basis, action, reason });
 }
