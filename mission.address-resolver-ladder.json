@@ -3,7 +3,7 @@
   "mission_id": "address-resolver-ladder",
   "title": "AGENTS 3.12b: khách đã gửi chữ địa chỉ thì bot không bao giờ hỏi lại; đơn chờ xác minh địa chỉ chốt + mời mua thêm như đơn thường",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-ladder",
@@ -34,7 +34,25 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T06:36:34.551Z",
-  "updated_at": "2026-10-22T06:36:34.551Z",
-  "last_heartbeat": "2026-10-22T06:36:34.551Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-22T12:38:18.246Z",
+  "last_heartbeat": "2026-10-22T12:38:18.246Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/address-resolver-ladder",
+    "sha": "22655f65728238994b6e695d2c58545b6b3207bc",
+    "at": "2026-10-22T12:38:18.246Z",
+    "actor": "DESKTOP-56TH98Y:wt-ladder",
+    "title": "AGENTS 3.12b: khách đã gửi chữ địa chỉ thì bot không bao giờ hỏi lại; đơn chờ xác minh địa chỉ chốt + mời mua thêm như đơn thường",
+    "summary": "AGENTS 3.12b (chủ shop chốt 22/10/2026): khách đã gửi chữ địa chỉ thì bot KHÔNG BAO GIỜ hỏi lại. Đơn chỉ chờ xác minh địa chỉ thì chốt + mời mua thêm như đơn thường; vận đơn vẫn giữ (ADDRESS_REVIEW). Chồng trên sales-address-applied.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "npm run lint: sạch",
+      "TEST_KHOI=K09 (address-normalize · address-ward-explicit · org-catalog · p0-855-address · address-reask-audit): ĐẠT",
+      "TEST_KHOI=K15 (test-hygiene · legal-registers): ĐẠT",
+      "TEST_KHOI=K19: ĐẠT",
+      "TEST_KHOI=K21 (sales-agent-golden · order-golden · sales-quote-integrity · p0-upsell-* · p0-short-qty-round): ĐẠT",
+      "TEST_KHOI=K22 (sales-quality-daily · sales-address-applied · address-never-reask): ĐẠT — chạy trên đỉnh PR-B 116e4b35b (chứa trọn PR-A 22655f657) sau rebase lên main có #968",
+      "full suite giao cho CI gates"
+    ]
+  }
 }
