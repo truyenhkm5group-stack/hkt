@@ -1,0 +1,8 @@
+{
+  "pr": 975,
+  "sha": "ebd1412ce91289bc82f7dad7f5d113cdfda3e949",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-22T14:28:53.010Z",
+  "note": "review lead: bộ dò 2B PACK_MULTIPLIER_LEAKED (REACHED_CUSTOMER) — đơn ĐÃ GHI có dòng mẫu mã «Hộp N cái» (N>1) mà số hộp = số trần / số CÁI khách nói và là bội của N; chỉ đọc kết quả THÀNH CÔNG create/update_draft_order (không tính calculate_cart), mỗi (món, số) một lần/hội thoại, mốc hit = lượt ghi. Không bắt «10 hộp» nói rõ / số không chia hết / món không bán hộp. Kiểm trên chuỗi #30→#39 của #803"
+}
