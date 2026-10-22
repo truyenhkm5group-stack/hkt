@@ -24,23 +24,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T12:42:27.980Z",
-  "updated_at": "2026-10-22T13:39:23.689Z",
-  "last_heartbeat": "2026-10-22T13:39:23.689Z",
+  "updated_at": "2026-10-22T15:49:56.713Z",
+  "last_heartbeat": "2026-10-22T15:49:56.713Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/regression-reopen-watch",
-    "sha": "372cffeaaf5e9e46d4d01f2ddaf1714016351254",
-    "at": "2026-10-22T13:39:23.689Z",
+    "sha": "dc809737203c103b5aab16ede5912e1cdc8a583e",
+    "at": "2026-10-22T15:49:56.713Z",
     "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
     "title": "Lỗi 2B đã sửa mà tái diễn tự MỞ LẠI (sổ theo dõi + REGRESSION_REOPENED + chặn DONE)",
-    "summary": "@372cffeaa. Sổ theo dõi tái diễn 2B: delivery REACHED_CUSTOMER/BLOCKED_PRE_SEND cho mọi mã; REGRESSION_WATCH 4 bản sửa (#945 #959 #966 #968, liveAt = deploy xanh); lượt 2B chỉ đếm hit sau liveAt, một việc / (mã, sứ mệnh), đóng rồi lọt lại ⇒ MỞ LẠI + một tin; rates + history 30 ngày; ops regression-watch-status chỉ đọc mã hoá; ai-tech close DONE đòi --regression-run reopened=0. Không migration. Chạm lib/sales-quality (đường 2B chạy production) + scripts/ai-tech.ts.",
+    "summary": "@dc8097372 (chứa main 47685d7b: #972–#976). Sổ theo dõi tái diễn 2B: 5 dòng (#945 #959 #966 #968 #972), liveAt = updated_at deploy xanh; #968 leakCodes PACK_MULTIPLIER_LEAKED + leakMeasuredFrom 15:23:51Z; ADDRESS_REASK ↔ address-resolver-ladder; một việc / (mã, sứ mệnh), đóng rồi lọt lại ⇒ MỞ LẠI + một tin; rates + history 30 ngày; ops regression-watch-status chỉ đọc mã hoá; ai-tech close DONE đòi --regression-run reopened=0. Không migration.",
     "tests": [
       "npm run typecheck: sạch",
-      "eslint 9 tệp đổi: sạch",
-      "TEST_KHOI=K22 (regression-watch + sales-quality-daily): XANH trên 372cffeaa",
-      "TEST_KHOI=K18 (ops-log-leak, ops mới mã hoá + tóm tắt không trường người): XANH",
+      "eslint các tệp đổi: sạch",
+      "TEST_KHOI=K22 (regression-watch + sales-quality-daily + bộ dò #975): XANH trên dc8097372",
+      "TEST_KHOI=K18 (ops-log-leak): XANH",
       "TEST_KHOI=K17 (ai-tech-room + repo-integrity): XANH",
-      "4 đột biến (bỏ mốc live · không mở lại · gửi lại khi refresh · DONE khi còn tái diễn): đều bị bắt",
+      "4 đột biến (bỏ mốc live · không mở lại · gửi lại khi refresh · DONE khi còn tái diễn): bị bắt trên 372cffeaa, phần luật không đổi từ đó",
       "shard 1–4 + build: giao CI gates"
     ]
   }
