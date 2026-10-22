@@ -100,6 +100,17 @@ function ruleSql(rule: ReconciliationRuleKey): SQL {
         where s.stage not in ('CANCELLED','RETURNED','DELIVERED')
         group by o.id, o.system_id
         having count(s.id) > 1`;
+    case "ORDER_DOUBLE_LEFT_WAREHOUSE":
+      // Cùng vị ngữ rời kho với sổ kho (SHIPMENT_LEFT_WAREHOUSE), chỉ chiều đi. Đếm theo ĐƠN.
+      return sql`select coalesce(o.system_id::text, o.id) as code,
+          count(s.id)::text || ' lần gửi chiều đi cùng có chứng từ rời kho — sổ kho chỉ trừ một lần' as evidence,
+          max(s.updated_at) as at, o.id as entity_id
+        from orders o
+        join shipments s on s.order_id = o.id
+        where coalesce(s.direction, 'OUTBOUND') <> 'RETURN'
+          and (s.picked_up_at is not null or s.stage in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','DELIVERED','RETURNING','RETURNED'))
+        group by o.id, o.system_id
+        having count(s.id) > 1`;
     case "SHIPMENT_STATE_DRIFT":
       return sql`select coalesce(s.vtp_order_number, s.tracking_code, s.id) as code,
           'ảnh chụp ' || s.stage::text || ' · lịch sử ' || ev.normalized_stage::text as evidence,

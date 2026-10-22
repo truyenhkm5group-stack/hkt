@@ -299,3 +299,30 @@ người ghi (khoá `users.id`), trạng thái (`CONFIRMED` · `VOIDED`). Chỉ 
 - Tạo lần gửi mới ⇒ kết quả theo lần gửi mới (`PRIMARY_ATTEMPT`). Người huỷ đơn ⇒ `CANCELLED` như cũ.
 - Đơn Pancake (nhà) không đổi: hãng huỷ thì Pancake huỷ đơn, kết quả `CANCELLED` như mục 4.
 
+
+## 12. Gửi lại trên web Viettel Post (chủ shop giao P0 22/10/2026)
+
+Shop tạo LẠI vận đơn cho chính đơn của mình thẳng trên viettelpost.vn. Mã vận đơn mới là số VTP 12 chữ; `ORDER_REFERENCE`
+(cột «Mã đơn hàng» của tệp) là SỐ VẬN ĐƠN GỐC. Pancake thì huỷ đơn gốc hoặc để nó đứng «Đã gửi hàng». Đo 22/10/2026: 330 vận
+đơn như vậy từng là dòng mồ côi và GTC tụt đúng bằng số đơn ấy.
+
+- **Ghép (vtp-reship-relink):** vận đơn mới là LẦN GỬI KẾ của cùng đơn (`attempt_no` + 1, chiều đi). Luật ghép DUY NHẤT nằm ở
+  `lib/integrations/viettelpost/reship.ts::reshipParentOf`, dùng chung cho webhook, nhập tệp và script vá. Vận đơn chiều hoàn
+  `[số]P[số]` không bao giờ đi nhánh này (AGENTS 3.7).
+- **Lần gửi quyết định (`PRIMARY_ATTEMPT` / `vanDonDaiDien`):**
+  `(đã giao) desc, (CÒN SỐNG) desc, attempt_no desc, created_at desc, id`.
+  - CÒN SỐNG = có chứng từ bàn giao cho ĐVVC (luật 41 — `CARRIER_HANDOFF_KNOWN_SQL`) **và** chưa huỷ.
+  - «stage khác CANCELLED» thôi KHÔNG đủ. Đo 22/10: cả 27 đơn đổi lần gửi chính theo vế đó đều là lần mới CANCELLED → lần cũ
+    PENDING chưa từng được lấy. Một vận đơn đứng yên không phải bằng chứng hàng đang đi.
+- **Chứng từ ĐVVC của lần gửi thay thế thắng «Đã hủy» của Pancake (mục 3.2).**
+  - Với vận đơn `attempt_no > 1`, ba nhánh «chờ lấy» (`AWAITING_PICKUP`) / «đang đi» (`IN_TRANSIT`) không còn đòi đơn ở trạng
+    thái chưa huỷ.
+  - Mã huỷ 101 / 107 / 201 trên chính lần gửi ấy vẫn ra `CANCELLED`.
+  - Luật chỉ đọc `attempt_no`, không đọc cờ ghi chú (`raw.reship` là vết cho người).
+- **Sổ kho (làm rõ AGENTS 3.10, chữ luật giữ nguyên):** «đã xuất» của ĐƠN = TỒN TẠI một lần gửi chiều đi đã rời kho
+  (`ORDER_LEFT_WAREHOUSE`). Đếm MỘT lần mỗi đơn, không bao giờ trừ tồn theo từng lần gửi.
+  - Đơn có hai lần gửi chiều đi cùng rời kho ⇒ cảnh báo đối soát `ORDER_DOUBLE_LEFT_WAREHOUSE` cho người. Máy không biết đó là
+    một gói hay hai gói.
+- **Bảng vật chất hoá:** đổi luật ⇒ `CANONICAL_OUTCOME_VERSION` 3 → 4. Báo cáo tính trực tiếp tới khi job
+  `outcome-materialize` dựng xong (đo 23/10: 5.688 dòng ≈ 15 phút).
+- Đơn không có vận đơn chiều đi nào bàn giao, chỉ có vận đơn PENDING / CANCELLED ⇒ thứ tự cũ: lần `attempt_no` lớn nhất quyết.

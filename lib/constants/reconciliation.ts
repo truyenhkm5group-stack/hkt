@@ -33,6 +33,7 @@ export type ReconciliationRuleKey =
   | "ORDER_SHIPMENT_CONFLICT"
   | "AMBIGUOUS_ORDER_SHIPMENT_MAPPING"
   | "ORDER_WITH_MULTIPLE_SHIPMENTS"
+  | "ORDER_DOUBLE_LEFT_WAREHOUSE"
   | "COGS_BASIS_UNVERIFIED"
   | "INVENTORY_RETURN_CONFLICT"
   | "FAILED_EVENT_PROCESSING"
@@ -107,6 +108,18 @@ export const RECONCILIATION_RULES: Record<ReconciliationRuleKey, ReconciliationR
       "Đơn đã giao nhưng tại thời điểm giao KHÔNG có phiếu nhập nào cho mẫu mã đó. Giá vốn đang TẠM TÍNH (phiếu lập sau, hoặc giá Pancake / giá nhập mẫu mã) hoặc CHƯA BIẾT (báo cáo tính 0). Lợi nhuận của nhóm đơn này chưa có căn cứ.",
     suggestedAction:
       "Nhập phiếu nhập cũ với ngày nhập THẬT nếu còn chứng từ: giá vốn được chốt lại đúng MỘT lần, có nhật ký, rồi đóng băng. Nếu không còn, đây là giới hạn của dữ liệu lịch sử — cần biết để không đọc lợi nhuận kỳ cũ như số đã kiểm chứng.",
+    autoRepair: false,
+  },
+  ORDER_DOUBLE_LEFT_WAREHOUSE: {
+    key: "ORDER_DOUBLE_LEFT_WAREHOUSE",
+    entity: "order",
+    severity: "WARNING",
+    label: "Một đơn có hai lần gửi chiều đi cùng đã rời kho",
+    reason:
+      "Sổ kho trừ hàng MỘT lần mỗi đơn (ORDER_OUTCOME.md mục 12, vtp-reship-outcome 22/10/2026). Nhưng ở đây hai lần gửi chiều đi đều có chứng từ rời kho: hoặc shop tạo lại vận đơn cho cùng một gói (đúng là một lần xuất), hoặc hai gói hàng thật đã đi — khi đó tồn thực tế đang báo DƯ đúng số món của một gói.",
+    suggestedAction:
+      "Mở đơn, xem hai mã vận đơn trên viettelpost.vn. Cùng một gói thì không cần làm gì thêm. Hai gói thật thì lập phiếu xuất tay cho gói thứ hai để tồn kho khớp.",
+    // KHÔNG tự sửa: máy không biết đó là một gói hay hai gói.
     autoRepair: false,
   },
   ORDER_WITH_MULTIPLE_SHIPMENTS: {

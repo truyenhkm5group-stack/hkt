@@ -117,6 +117,7 @@ import { testSuaCongTrongLuot } from "./sua-cong-trong-luot.test";
 import { testLoiGoiHongVanGiuTien, testNganSachDocTep } from "./agent-read-budget.test";
 import { cleanupViecDiTiepFixtures, testDispatchKemMaViec, testGiaoLaiSuaTuErp, testIngestGhiNhanhViec, testNhanhVeToiViecPure, testViecDiTiepGuards } from "./viec-di-tiep.test";
 import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa, testHaiLuatKhongTroiXaNhau, testKhongCoOneTrenKhoaNgoaiKhongDuyNhat } from "./shipment-pick.test";
+import { testVtpReshipOutcome } from "./vtp-reship-outcome.test";
 import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, testTaskAdvancePure } from "./task-advance.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
 import { testCtoProposal } from "./tech-cto-proposal.test";
@@ -2767,6 +2768,8 @@ async function main() {
     await testGuiLaiKhongDamKhoa();
     await testHaiLuatKhongTroiXaNhau();
     await cleanupShipmentPickFixtures();
+    // P0 22/10/2026 — gửi lại trên web VTP: lần gửi chính còn sống · Pancake huỷ + lần thay thế đang đi · sổ kho theo đơn. Tự dọn `vro-`.
+    await testVtpReshipOutcome();
     await testTaskAdvanceDb();
     await testNhacFinishDungMotLan();
     await testDemTienLuotChay();

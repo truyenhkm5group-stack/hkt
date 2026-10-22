@@ -45,4 +45,13 @@
  * mang vận đơn ERP tạo (POS tự chủ vừa lên) ⇒ không dòng vật chất hoá nào đổi kết luận. Sự kiện hãng mới về làm vận đơn và
  * đơn của ĐÚNG kiện đó thành cũ theo điều kiện tươi mới. Tăng số chỉ làm mọi dòng của nhà thành cũ cùng lúc vô ích.
  */
-export const CANONICAL_OUTCOME_VERSION = 3;
+/*
+ * ─── 4 (vtp-reship-outcome, P0 22/10/2026 — ORDER_OUTCOME.md mục 12): TĂNG SỐ, có chủ ý ───
+ *
+ * Khác hai lần trên: kết luận của dòng ĐÃ CÓ đổi. (a) Lần gửi chính chọn lần CÒN SỐNG (có chứng từ bàn giao ∧ chưa huỷ) trước
+ * `attempt_no`; (b) đơn Pancake «Đã hủy» mà lần gửi thay thế (`attempt_no > 1`) đang đi / chờ lấy thôi rơi về `CANCELLED`. Không
+ * tăng số thì bảng vật chất hoá phục vụ kết luận cũ cho những đơn đó tới khi đầu vào của chúng tình cờ đổi. Giá: mọi dòng thành
+ * cũ cùng lúc ⇒ báo cáo tính trực tiếp tới khi job `outcome-materialize` (5 phút, ≤ 2.000 dòng / lượt) dựng xong — đo 23/10:
+ * 5.688 dòng ⇒ 3 lượt ≈ 15 phút.
+ */
+export const CANONICAL_OUTCOME_VERSION = 4;

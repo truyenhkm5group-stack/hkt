@@ -2,7 +2,7 @@ import { and, desc, eq, gte, lte, sql, type SQL, type SQLWrapper } from "drizzle
 import { chayKhongJit, getDb, schema } from "@/db";
 import { CARRIER_EVENT_SOURCES, FINISHED_OUTCOMES_SQL, OTHER_CARRIER_DOCUMENT_SOURCES, RETURNED_OUTCOMES_SQL, sqlSourceList, VTP_DOCUMENT_SOURCES_SQL } from "@/lib/constants/truth";
 import { finalStatuses, type FinalKind } from "@/lib/constants/carrier-status";
-import { CARRIER_HANDOFF_KNOWN_SQL } from "@/lib/constants/carrier-handoff";
+import { CARRIER_HANDOFF_KNOWN_SQL, carrierHandoffKnownSqlFor } from "@/lib/constants/carrier-handoff";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import type { VerifiedOutcome } from "@/lib/constants/data-quality";
 import { ELIGIBLE_SENT_SQL, RETURN_RULE, RETURN_RATE_SORTABLE, type OrderOutcome } from "@/lib/constants/returns";
@@ -243,6 +243,15 @@ const CARRIER_TOOK_PACKAGE = sql.raw(CARRIER_HANDOFF_KNOWN_SQL);
  * Đặc tả bắt buộc: docs/business-rules/ORDER_OUTCOME.md — đọc trước khi sửa.
  * Contract test khoá luật: tests/contract-order-outcome.test.ts (đỏ nghĩa là code sai, không phải test sai).
  */
+/**
+ * Đơn còn sống THEO NGUỒN ĐƠN, hoặc vận đơn đang xét là LẦN GỬI THAY THẾ (`attempt_no > 1`) — vtp-reship-outcome, P0 22/10/2026,
+ * ORDER_OUTCOME.md mục 12. Shop tạo lại vận đơn trên web VTP cho chính đơn đó, còn Pancake thì huỷ đơn gốc: chứng từ ĐVVC của lần
+ * gửi thay thế THẮNG trạng thái «Đã hủy» của Pancake (mục 3.2 — không bao giờ suy từ trạng thái Pancake), nên ba nhánh «chờ lấy /
+ * đang đi» không còn rơi xuống `CANCELLED`. Mã huỷ 101/107/201 trên chính lần gửi ấy vẫn ra `CANCELLED` (nhánh `VTP_CANCELLED`
+ * đứng trước). Luật chỉ đọc `attempt_no` — KHÔNG đọc cờ ghi chú nào (`raw.reship` là vết cho người).
+ */
+const ORDER_ALIVE_OR_RESHIP = sql`(${o.stage} not in ('CANCELLED','DELETED') or coalesce(${s.attemptNo}, 1) > 1)`;
+
 export const ORDER_OUTCOME = sql<OrderOutcome>`case
   -- ĐƠN TẠO TAY KHÔNG QUA ĐVVC + PHIẾU GIAO CÓ KÝ NHẬN còn hiệu lực ⇒ 'DELIVERED' (G-ORDER, chủ nền tảng quyết
   -- 29/09/2026 — ORDER_OUTCOME.md mục 11). Phiếu là chứng từ logistics ngang mã 501 chiều đi; nó KHÔNG phải chứng từ
@@ -300,8 +309,8 @@ export const ORDER_OUTCOME = sql<OrderOutcome>`case
   --
   -- Phải đứng SAU mọi nhánh kết cục (giao / hoàn / huỷ): một kiện đã tới tay khách thì chuyện mốc
   -- lấy hàng có được ghi lại hay không cũng không làm nó thành "chờ lấy".
-  when ${HAS_VTP_EVIDENCE} and not ${CARRIER_TOOK_PACKAGE} and ${o.stage} not in ('CANCELLED','DELETED') then 'AWAITING_PICKUP'
-  when ${HAS_VTP_EVIDENCE} and ${o.stage} not in ('CANCELLED','DELETED') then 'IN_TRANSIT'
+  when ${HAS_VTP_EVIDENCE} and not ${CARRIER_TOOK_PACKAGE} and ${ORDER_ALIVE_OR_RESHIP} then 'AWAITING_PICKUP'
+  when ${HAS_VTP_EVIDENCE} and ${ORDER_ALIVE_OR_RESHIP} then 'IN_TRANSIT'
   when ${s.stage} in ('RETURNING','RETURNED') then 'RETURNED'
   when ${s.stage} = 'DELIVERED' and coalesce(${s.codCollected}, 0) + ${PREPAID} > ${MAX_COD} then 'DELIVERED'
   when ${s.stage} = 'DELIVERED' and ${REVENUE_EDITED_AFTER_DELIVERY} then 'RETURNED'
@@ -319,7 +328,7 @@ export const ORDER_OUTCOME = sql<OrderOutcome>`case
   -- Và nó sẽ sai ở đúng ca mà kho mã đã chốt từ trước (fixture rr-9007): vận đơn chưa có sự kiện
   -- nhưng COD đã về theo bảng kê > 100K. Tiền về được là bằng chứng gói hàng ĐÃ đi — bảng kê chỉ
   -- tồn tại khi ĐVVC đã thu hộ. Gọi kiện đó là "chờ lấy hàng" là đoán ngược lại một chứng từ.
-  when ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED') and ${o.stage} not in ('CANCELLED','DELETED') then 'IN_TRANSIT'
+  when ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED') and ${ORDER_ALIVE_OR_RESHIP} then 'IN_TRANSIT'
   when ${o.stage} in ('CANCELLED','DELETED') then 'CANCELLED'
   when ${o.stage} in ('RETURNING','PARTIAL_RETURN','RETURNED') then 'RETURNED'
   -- Pancake báo "đã giao" / "đã thanh toán" KHÔNG phải chứng từ giao hàng: đó là trạng thái bán
@@ -399,12 +408,22 @@ export const OUTCOME_FENCE = sql`0` as unknown as number;
  * luật chọn lần gửi quyết định như cũ. Nó chỉ thôi bắt 2.433 đơn một-lần-gửi trả giá cho một luật
  * sinh ra vì thiểu số.
  */
+/**
+ * LẦN GỬI CÒN SỐNG (vtp-reship-outcome, chủ shop giao P0 22/10/2026 — ORDER_OUTCOME.md mục 12): có CHỨNG TỪ BÀN GIAO
+ * (luật 41 — `carrierHandoffKnownSqlFor`) VÀ chưa huỷ. Đứng ngay sau vế «đã giao»: shop tạo lại vận đơn trên web VTP thì lần
+ * gửi MỚI có `attempt_no` cao hơn nhưng có thể đã bị VTP huỷ, trong khi lần cũ là lần hàng thật sự đi. «stage <> CANCELLED»
+ * thôi KHÔNG đủ: đo 22/10 (run 39817299365) cả 27 đơn đổi lần gửi chính theo vế đó đều là CANCELLED (mới) → PENDING (cũ,
+ * chưa từng được lấy) — một vận đơn đứng yên không phải bằng chứng hàng đang đi. Không lần nào còn sống ⇒ thứ tự cũ.
+ * Bản TypeScript `vanDonDaiDien` khớp TỪNG BẬC (tests/shipment-pick.test.ts).
+ */
+const ATTEMPT_ALIVE_SH = `(${carrierHandoffKnownSqlFor("sh.id", "sh.picked_up_at")} and sh.stage::text <> 'CANCELLED')`;
+
 export const PRIMARY_ATTEMPT = sql`(
   not exists (select 1 from shipments sh0 where sh0.order_id = ${o.id} and sh0.id <> ${s.id})
   or ${s.id} = (
     select sh.id from shipments sh
     where sh.order_id = ${o.id}
-    order by (sh.stage = 'DELIVERED') desc, sh.attempt_no desc nulls last, sh.created_at desc, sh.id
+    order by (sh.stage = 'DELIVERED') desc, ${sql.raw(ATTEMPT_ALIVE_SH)} desc, sh.attempt_no desc nulls last, sh.created_at desc, sh.id
     limit 1
   )
 )`;
@@ -556,7 +575,16 @@ export const SHIPMENT_LEFT_WAREHOUSE = sql`(${s.pickedUpAt} is not null
  *
  * `coalesce(…, false)`: đơn chưa có vận đơn thì `SHIPMENT_LEFT_WAREHOUSE` là NULL — xem chú thích của `RESERVED_IN_WAREHOUSE` (lib/queries/stock.ts).
  */
-export const ORDER_LEFT_WAREHOUSE = sql`(coalesce(${SHIPMENT_LEFT_WAREHOUSE}, false) or ${MANUAL_ORDER_DELIVERED})`;
+/**
+ * ĐƠN ĐÃ XUẤT = TỒN TẠI một lần gửi CHIỀU ĐI đã rời kho (vtp-reship-outcome, P0 22/10/2026 — ORDER_OUTCOME.md mục 12, làm rõ AGENTS
+ * 3.10, chữ luật giữ nguyên). Vẫn đếm MỘT lần mỗi đơn (vị ngữ trên dòng đơn, không cộng theo lần gửi). Trước đây chỉ đọc lần gửi
+ * CHÍNH: lần cũ đã được lấy rồi bị huỷ + lần tạo lại chưa được lấy ⇒ lần chính là lần mới ⇒ hàng đã đi «quay lại» thành chờ xuất.
+ * Đơn có HAI lần gửi cùng rời kho là việc cho người (control-tower `DOUBLE_LEFT_WAREHOUSE`), không trừ tồn hai lần.
+ */
+const ANY_OUTBOUND_ATTEMPT_LEFT = sql`exists (select 1 from shipments shx where shx.order_id = ${o.id} and coalesce(shx.direction, 'OUTBOUND') <> 'RETURN'
+  and (shx.picked_up_at is not null or shx.stage in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','DELIVERED','RETURNING','RETURNED')))`;
+
+export const ORDER_LEFT_WAREHOUSE = sql`(coalesce(${SHIPMENT_LEFT_WAREHOUSE}, false) or ${ANY_OUTBOUND_ATTEMPT_LEFT} or ${MANUAL_ORDER_DELIVERED})`;
 
 /** Hàng hoàn kho CHƯA xác nhận nhận về — không được cộng lại tồn kho. */
 export const IS_RETURN_NOT_RECEIVED = sql`(${s.stage} in ('RETURNING','RETURNED') and ${s.returnReceivedAt} is null)`;
