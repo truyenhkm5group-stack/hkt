@@ -8,7 +8,7 @@
  *  · Việc KHÔNG mang chữ tin, họ tên, SĐT hay mã hội thoại thô — chỉ số đếm, mẫu số và mã BĂM.
  *  · Không bao giờ ném: lỗi trả về trong kết quả, job giám sát vẫn chạy tiếp.
  */
-import { and, asc, gte, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lt, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
 import { handoffReplyClass, type HandoffReplyFact } from "@/lib/constants/handoff-reply";
 import {
@@ -27,7 +27,7 @@ import {
 import { getWorkConfig } from "@/lib/queries/work-config";
 import { aiSilentSql, handoffDueAt } from "@/lib/sales-chatbot/handoff-routing";
 import { listQuickReplies, loadFocusProducts } from "@/lib/sales-chatbot/quick-replies";
-import { conversationHash, scanThreadQuality, templateHead, type QualityBases } from "@/lib/sales-quality/detectors";
+import { addressNotApplied, conversationHash, scanThreadQuality, templateHead, type QualityBases } from "@/lib/sales-quality/detectors";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -116,6 +116,29 @@ async function scanDay(from: Date, to: Date): Promise<{ byCode: Map<SalesQuality
   return { byCode, bases, conversations: ids.length, capped: convs.length > SALES_QUALITY_MAX_CONVERSATIONS };
 }
 
+/**
+ * ADDRESS_RECEIVED_BUT_NOT_APPLIED lúc chạy: đơn bot chốt (gắn hội thoại) còn dòng cờ «địa chỉ chưa ghép» của máy mà đơn đã có phường /
+ * tin khách đã nêu phường của đúng địa chỉ. Chỉ đơn ghi từ đầu kỳ trở đi (đơn cũ hơn đã có người xử lý ở hàng «Cần người kiểm»).
+ */
+export async function collectAddressNotApplied(from: Date, to: Date): Promise<{ ids: string[]; flagged: number }> {
+  const db = await getDb();
+  const o = schema.orders;
+  const rows = await db
+    .select({ conv: o.salesConversationId, raw: o.raw, shipAddress: o.shipAddress, shipProvince: o.shipProvince, shipCommune: o.shipCommune })
+    .from(o)
+    .where(and(sql`${o.salesConversationId} is not null`, gte(o.updatedAt, from), sql`${o.raw}->'review'->'entries' @> '[{"code":"ADDRESS_UNRESOLVED"}]'::jsonb`))
+    .limit(SALES_QUALITY_MAX_CONVERSATIONS);
+  const m = schema.salesChatMessages;
+  const ids: string[] = [];
+  for (const r of rows) {
+    if (!r.conv) continue;
+    const msgs = await db.select({ content: m.content }).from(m).where(and(eq(m.conversationId, r.conv), eq(m.role, "user"), lt(m.createdAt, to))).orderBy(asc(m.seq));
+    const texts = msgs.map((x) => (Array.isArray(x.content) ? (x.content as { type?: unknown; text?: unknown }[]).filter((b) => b.type === "text" && typeof b.text === "string").map((b) => String(b.text)).join("\n").trim() : "")).filter(Boolean);
+    if (addressNotApplied({ raw: r.raw, shipAddress: r.shipAddress, shipProvince: r.shipProvince, shipCommune: r.shipCommune }, texts)) ids.push(r.conv);
+  }
+  return { ids: [...new Set(ids)], flagged: rows.length };
+}
+
 const dayLabel = (day: string) => `${day.slice(8, 10)}/${day.slice(5, 7)}`;
 
 /** Chữ của một việc — số đếm, mẫu số, mã băm, việc phải làm. Không chữ tin, không tên, không SĐT. HÀM THUẦN. */
@@ -144,11 +167,13 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
     attempts = prev.day === day ? (prev.attempts ?? 0) : 0;
     const scan = await scanDay(from, to);
     const ho = await collectHandoffUnanswered(now);
+    const na = await collectAddressNotApplied(from, now);
     const counts = Object.fromEntries(SALES_QUALITY_CODES.map((k) => [k, 0])) as Record<SalesQualityCode, number>;
     const detail = new Map<SalesQualityCode, SalesQualityCount>();
     const sample = (convs: Iterable<string>) => [...convs].map(conversationHash).sort().slice(0, SALES_QUALITY_SAMPLE_HASHES);
     for (const [code, e] of scan.byCode) detail.set(code, { hits: e.hits, conversations: e.convs.size, hashes: sample(e.convs) });
     if (ho.ids.length) detail.set("HANDOFF_UNANSWERED", { hits: ho.ids.length, conversations: ho.ids.length, hashes: sample(ho.ids) });
+    if (na.ids.length) detail.set("ADDRESS_RECEIVED_BUT_NOT_APPLIED", { hits: na.ids.length, conversations: na.ids.length, hashes: sample(na.ids) });
     for (const [code, n] of detail) counts[code] = n.hits;
     const b = scan.bases;
     const slaHours = ho.slaMs === null ? null : Math.round(ho.slaMs / 3_600_000);
@@ -165,13 +190,14 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
       CLAIM_GUARD_BLOCK: `Mẫu số: ${b.botMessages} tin bot`,
       UPSELL_ACCEPTED_BUT_REASKED: `Mẫu số: ${b.offerAccepts} lần khách đồng ý ngắn («Ok», 👍) ngay sau lời mời một món`,
       UPSELL_ACCEPTED_NOT_ATTACHED: `Mẫu số: ${b.offerAccepts} lần khách đồng ý ngắn ngay sau lời mời một món`,
+      ADDRESS_RECEIVED_BUT_NOT_APPLIED: `Mẫu số: ${na.flagged} đơn bot chốt còn cờ «địa chỉ chưa ghép» (ghi từ đầu kỳ)`,
     };
     const db = await getDb();
     let created = 0;
     for (const code of SALES_QUALITY_CODES) {
       const n = detail.get(code);
       if (!n || n.conversations === 0) continue;
-      const { title, body } = salesQualityText(code, day, n, `${baseOf[code]}${scan.capped && code !== "HANDOFF_UNANSWERED" ? ` · đọc chạm trần ${SALES_QUALITY_MAX_CONVERSATIONS} hội thoại — số là trần dưới` : ""}`, now);
+      const { title, body } = salesQualityText(code, day, n, `${baseOf[code]}${scan.capped && code !== "HANDOFF_UNANSWERED" && code !== "ADDRESS_RECEIVED_BUT_NOT_APPLIED" ? ` · đọc chạm trần ${SALES_QUALITY_MAX_CONVERSATIONS} hội thoại — số là trần dưới` : ""}`, now);
       const ins = await db
         .insert(schema.notifications)
         .values({ kind: "SALES_QUALITY", severity: "warning", title, body, href: "/ai/sales-chatbot/inbox", entityType: "SALES_QUALITY", entityId: code, dedupeKey: salesQualityDedupeKey(code, day), occurredAt: now })

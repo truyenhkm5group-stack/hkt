@@ -323,8 +323,41 @@ export function customerStatedAddresses(texts: readonly string[]): StatedAddress
     for (let j = lines.length - 1; j >= 0; j--) tryLine(lines[j], i);
     if (lines.length > 1) tryLine(lines.join(", "), i);
     if (i > 0) tryLine(`${msgs[i - 1].split(/\n+/).pop() ?? ""}, ${lines[0]}`, i - 1);
+    // TIN CHỈ-PHƯỜNG (P0 22/10/2026, HSLC #8037F35A): «Phường Kim Liên» đứng RIÊNG một tin, NGAY SAU tin mang dòng địa chỉ có tỉnh mà
+    // chưa có phường ⇒ đặt phường vào đúng chỗ của nó (giữa phần đường và tỉnh), mốc là tin chỉ-phường. Chỉ chiều «địa chỉ rồi phường»: một
+    // tin chỉ-phường đứng TRƯỚC một địa chỉ mới là phần của địa chỉ cũ, ghép xuôi xuống là gắn phường cũ vào nơi giao mới.
+    if (i > 0) {
+      const joined = wardOnlyJoin(msgs[i], msgs[i - 1]);
+      if (joined) tryLine(joined, i);
+    }
   }
   return out;
+}
+
+/**
+ * Ghép một tin CHỈ có tên phường / xã (một dòng, không số nhà / đường, không tỉnh) vào dòng địa chỉ của tin cạnh nó khi dòng đó đọc được
+ * tỉnh mà chưa có phường: «<phần đường>, <phường>, <tỉnh>». Phường phải có trong danh mục CỦA TỈNH ĐÓ (đọc chắc) — không ghép thì `null`.
+ * HÀM THUẦN.
+ */
+function wardOnlyJoin(wardMsg: string, addrMsg: string): string | null {
+  const addrLine = withoutPhones(addrMsg.split(/\n+/).map((l) => l.trim()).filter(Boolean).pop() ?? "").trim();
+  if (!addrLine) return null;
+  const a = parseCustomerAddress(addrLine);
+  if (!a.province || a.provinceCode === null || canAutoFill(a) || !streetLooksReal(a)) return null;
+  const w = wardOnlyOf(wardMsg, a.province, a.provinceCode);
+  return w ? `${a.street}, ${w.ward}, ${a.province}` : null;
+}
+
+/**
+ * Một tin CHỈ là tên một phường / xã của tỉnh `province` (một dòng, không «?», không số nhà / đường / SĐT) ⇒ tên chuẩn + mức tin cậy; còn
+ * lại ⇒ `null`. «ok em», «giao giờ hành chính», tên phường tỉnh khác ⇒ `null`. HÀM THUẦN.
+ */
+function wardOnlyOf(msg: string, province: string, provinceCode: number): { ward: string; confidence: AddressConfidence } | null {
+  const lines = msg.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length !== 1 || lines[0].includes("?") || /\d{3,}/.test(lines[0])) return null;
+  const w = parseCustomerAddress(`${lines[0]}, ${province}`);
+  if (!canAutoFill(w) || !w.ward || w.provinceCode !== provinceCode || foldVnText(w.street).length) return null;
+  return { ward: w.ward, confidence: w.confidence };
 }
 
 /**
@@ -534,6 +567,17 @@ export function wardFromCustomerWords(a: CustomerAddress, toolAddress: string, t
     const hs = houseKey(s.houseNumber);
     if (!hn || !hs || hn !== hs) continue;
     return { ward: s.ward, province: s.province, provinceCode: s.provinceCode, confidence: s.confidence };
+  }
+  // TIN CHỈ-PHƯỜNG BỔ SUNG (P0 22/10/2026, HSLC #8037F35A): dòng công cụ đọc được tỉnh mà chưa có phường; khách nhắn RIÊNG «Phường Kim
+  // Liên» SAU tin địa chỉ mới nhất, và tin địa chỉ ấy chính là dòng công cụ đang giữ (cùng đường) ⇒ đó là phần còn thiếu của CHÍNH địa chỉ
+  // này. Tin chỉ-phường đứng TRƯỚC địa chỉ mới nhất là của địa chỉ cũ — không lấy; tin sau nó nêu phường khác ⇒ không lấy (khách sửa).
+  if (a.province && a.provinceCode !== null && newestAddress >= 0 && msgs[newestAddress].split(/\n+/).some((l) => sameStreet(toolStreet, parseCustomerAddress(withoutPhones(l)).street))) {
+    for (let i = msgs.length - 1; i > newestAddress; i--) {
+      const w = wardOnlyOf(msgs[i], a.province, a.provinceCode);
+      if (!w) continue;
+      if (msgs.slice(i + 1).some((m) => m.split(/\n+/).some((x) => namesOtherWard(x, a.province!, w.ward)))) return null;
+      return { ward: w.ward, province: a.province, provinceCode: a.provinceCode, confidence: w.confidence };
+    }
   }
   return null;
 }

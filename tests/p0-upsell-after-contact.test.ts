@@ -9,6 +9,9 @@
  * Bảy ý nghiệm thu của chủ shop: (1) đủ SĐT + địa chỉ ⇒ không còn câu cũ · (2) có câu upsell ⇒ đúng chữ + ảnh · (3) không có câu ⇒ không
  * bịa · (4) đồng ý ⇒ đúng món / tổng ERP · (5) từ chối / im ⇒ đơn chính vẫn đi · (6) địa chỉ chưa xác minh ⇒ không vận đơn · (7) page đã
  * gửi menu ⇒ ERP không gửi trùng. Thuần + chatTurn thật (`gd-food-uac`). Dữ liệu khách là dữ liệu dựng, không PII.
+ *
+ * 22/10/2026 (chủ shop, P0 HSLC #8037F35A — «xác minh địa chỉ độc lập với upsell»): câu ghi nhận thay «nhân viên sẽ xác nhận lại địa chỉ»
+ * nay áp cho MỌI tổ chức, cờ TẮT cũng vậy; cờ `upsellAfterContact` chỉ còn quyết LỜI MỜI mua thêm khi địa chỉ đang chờ (ca `uac-co-tat`).
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -42,18 +45,15 @@ function testThuan() {
   assert.equal(parseQuickReplySettings({ upsellAfterContact: true }).upsellAfterContact, true);
 
   // Câu: một chỗ chọn, câu mới không khẳng định «đã lên đơn» / không hứa nhân viên gọi lại.
-  assert.equal(pendingAddressText(false), BANNED, "cờ tắt ⇒ câu cũ (không đổi hành vi tổ chức khác)");
-  assert.equal(pendingAddressText(true), CLAIM_SAFE_TEXT.ORDER_RECEIVED);
+  assert.equal(pendingAddressText(), CLAIM_SAFE_TEXT.ORDER_RECEIVED, "mọi tổ chức ⇒ câu ghi nhận (22/10/2026: xác minh độc lập với upsell)");
   assert.doesNotMatch(CLAIM_SAFE_TEXT.ORDER_RECEIVED, /nhân viên|xác nhận|địa chỉ/);
   assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.ORDER_RECEIVED), [], "câu ghi nhận không phải lời khẳng định đã chốt");
   assert.ok(!detectClaims(orderUpdatedText("750.000 ₫")).includes("ORDER_CONFIRMED"), "câu cập nhật đơn không khẳng định «đã lên đơn»");
   const facts = { paymentVerified: false, orderConfirmed: false, orderCancelled: false, orderPending: "ADDRESS" as const };
   const v1 = claimVerdict(["ORDER_CONFIRMED"], facts);
-  const v2 = claimVerdict(["ORDER_CONFIRMED"], { ...facts, quietAddressReview: true });
-  assert.ok(!v1.ok && v1.safeText === BANNED && !v1.handoff, "hàng rào, cờ tắt ⇒ câu cũ");
-  assert.ok(!v2.ok && v2.safeText === CLAIM_SAFE_TEXT.ORDER_RECEIVED && !v2.handoff, "hàng rào, cờ bật ⇒ câu ghi nhận, không chuyển người");
-  const v3 = claimVerdict(["ORDER_CONFIRMED"], { ...facts, orderPending: "CHECK", quietAddressReview: true });
-  assert.ok(!v3.ok && v3.safeText === CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK, "cờ CHỈ đổi trường hợp địa chỉ — đơn có vấn đề khác giữ câu kiểm");
+  assert.ok(!v1.ok && v1.safeText === CLAIM_SAFE_TEXT.ORDER_RECEIVED && !v1.handoff, "hàng rào, đơn chỉ chờ địa chỉ ⇒ câu ghi nhận, không chuyển người");
+  const v3 = claimVerdict(["ORDER_CONFIRMED"], { ...facts, orderPending: "CHECK" });
+  assert.ok(!v3.ok && v3.safeText === CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK, "CHỈ trường hợp địa chỉ đổi câu — đơn có vấn đề khác giữ câu kiểm");
 
   // Một lời mời mỗi lượt mua, đếm theo sự kiện gửi: page đã gửi ⇒ không câu tự soạn nào nữa.
   for (const r of OFFER_ALREADY_SENT_SKIPS) assert.deepEqual(choosePostConfirmSource({ template: { usable: false, reason: r }, autoEnabled: true }), { source: null, reason: r }, r);
@@ -78,11 +78,11 @@ function testNguon() {
   // Câu cũ chỉ còn ĐƯỢC CHỌN ở một chỗ (`pendingAddressText`) — không đường gửi nào gõ thẳng nó.
   for (const f of ["lib/sales-chatbot/tools.ts", "lib/sales-chatbot/engine.ts", "lib/sales-chatbot/followup.ts"]) assert.doesNotMatch(readFileSync(f, "utf8"), /ORDER_PENDING_ADDRESS/, `${f} không gõ thẳng câu cũ`);
   const cg = readFileSync("lib/sales-chatbot/claim-guard.ts", "utf8");
-  assert.equal(cg.match(/CLAIM_SAFE_TEXT\.ORDER_PENDING_ADDRESS/g)?.length, 1, "claim-guard chọn câu cũ ĐÚNG một chỗ (pendingAddressText)");
+  assert.equal(cg.match(/CLAIM_SAFE_TEXT\.ORDER_PENDING_ADDRESS/g)?.length ?? 0, 0, "không đường nào còn CHỌN câu cũ — hằng số chỉ còn để bộ đếm nhận ra nó");
   const tools = readFileSync("lib/sales-chatbot/tools.ts", "utf8");
   assert.match(tools, /notePostConfirmOffer\(state, ctx, [^\n]*, !pendingText \|\| quietAddress, now\)/, "cửa sổ mời mở khi chỉ còn chờ xác minh địa chỉ (cờ bật)");
-  assert.match(readFileSync("lib/sales-chatbot/engine.ts", "utf8"), /quietAddressReview: qrSettings\.upsellAfterContact/, "engine cấp cờ cho hàng rào");
-  console.log("  ✓ mã nguồn: câu cũ chỉ được chọn ở pendingAddressText · công cụ chốt mở cửa sổ mời theo cờ · engine cấp cờ cho hàng rào");
+  assert.doesNotMatch(readFileSync("lib/sales-chatbot/engine.ts", "utf8"), /quietAddressReview/, "hàng rào không còn đọc cờ upsell — câu khi chờ địa chỉ không tuỳ cờ");
+  console.log("  ✓ mã nguồn: không đường nào chọn câu cũ · công cụ chốt mở cửa sổ mời theo cờ · hàng rào không phụ thuộc cờ upsell");
 }
 
 type Mode = { template: boolean; flag: boolean; auto?: boolean };
@@ -137,7 +137,7 @@ const CASES: GoldenCase[] = [
     { say: "Shop ơi còn ruốc bông tôm không", ai: [() => [say("Dạ bên em còn ruốc bông tôm ạ, mình lấy mấy hộp ạ?")]] },
     { say: INFO("0961004201"), ai: orderInfo("0961004201"), ...keepMedia("uac-mai-le-replay") },
   ] },
-  { key: "uac-co-tat", title: "Tổ chức CHƯA bật cờ ⇒ hành vi cũ giữ nguyên (câu cũ, không mời) — cờ theo tổ chức, mặc định tắt", shop: "food", channel: "WEB", turns: [
+  { key: "uac-co-tat", title: "Tổ chức CHƯA bật cờ ⇒ câu ghi nhận (xác minh độc lập với upsell, 22/10/2026) nhưng KHÔNG mời mua thêm — cờ chỉ quyết lời mời", shop: "food", channel: "WEB", turns: [
     { say: INFO("0961004202"), ai: orderInfo("0961004202") },
   ] },
   { key: "uac-khong-cau-mau", title: "Cờ bật, shop KHÔNG có câu upsell, tự soạn tắt ⇒ chỉ câu ghi nhận, KHÔNG bịa lời mời", shop: "food", channel: "WEB", turns: [
@@ -190,15 +190,14 @@ async function testChatTurn() {
     },
     afterCase: async (c, ctx: GoldenHookCtx, t) => {
       seen.add(c.key);
-      const mode = MODE_OF[c.key];
       const st = await stateOf(ctx.conversationId);
       const { order, lines, shipments } = await orderOf(ctx.conversationId, ctx.ids);
       const all = t.turns.flatMap((x) => x.shown);
       const results = JSON.stringify(t.turns.map((x) => x.rounds.map((r) => r.results)));
       const pco = st.postConfirmOffer;
       const info = t.turns[c.key === "uac-mai-le-replay" ? 1 : 0].shown;
-      // (1) Cờ bật ⇒ câu cũ KHÔNG BAO GIỜ tới khách, ở bất kỳ lượt nào.
-      if (mode.flag) assert.ok(!all.some((s) => s.includes(BANNED)), `[${c.key}] câu cũ tới khách: ${all.join(" | ")}`);
+      // (1) Câu cũ KHÔNG BAO GIỜ tới khách, ở bất kỳ lượt nào — cờ bật hay tắt (22/10/2026).
+      assert.ok(!all.some((s) => s.includes(BANNED)), `[${c.key}] câu cũ tới khách: ${all.join(" | ")}`);
       assert.doesNotMatch(all.join("\n"), AUTO, `[${c.key}] bot tự soạn lời mời: ${all.join(" | ")}`);
       // (6) Địa chỉ chưa xác minh ⇒ đơn mang cờ ADDRESS_UNRESOLVED, không vận đơn.
       if (order && c.key !== "uac-thieu-tinh") {
@@ -222,7 +221,7 @@ async function testChatTurn() {
         assert.deepEqual(lines, ["RUOC-TOM×1"], "(5) khách im ⇒ đơn chính giữ nguyên, đã chốt");
       }
       if (c.key === "uac-co-tat") {
-        assert.deepEqual(info, [BANNED], `cờ tắt ⇒ hành vi cũ: ${info.join(" | ")}`);
+        assert.deepEqual(info, [CLAIM_SAFE_TEXT.ORDER_RECEIVED], `cờ tắt ⇒ câu ghi nhận, không lời mời: ${info.join(" | ")}`);
         assert.equal(pco?.outcome, "ORDER_PROBLEM");
         assert.ok(!all.includes(TPL));
       }

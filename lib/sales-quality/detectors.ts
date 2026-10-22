@@ -14,6 +14,8 @@
  * HANDOFF_UNANSWERED không ở đây: nó là ảnh chụp lúc chạy, luật ở lib/constants/handoff-reply.ts.
  */
 import { createHash } from "node:crypto";
+import { parseCustomerAddress, wardFromCustomerWords } from "@/lib/address/customer-address";
+import { MACHINE_ADDRESS_NOTE_PREFIX, orderReviewOf } from "@/lib/constants/order-review";
 import type { SalesQualityCode } from "@/lib/constants/sales-quality";
 import { addressKnowledge, addressReaskVerdict } from "@/lib/sales-chatbot/address-memory";
 import { amountsIn } from "@/lib/sales-chatbot/cart-commitment";
@@ -80,7 +82,8 @@ export function wrongTemplateOf<T extends QualityTemplate>(sent: string, lines: 
 
 const QTY_REASK_RE = /\d+(?:[.,]\d+)?\s?kg\s+hay\s+\d+(?:[.,]\d+)?\s?kg|muốn (?:mua|lấy) \d/iu;
 const DELIVERY_WORDS_RE = /(?:^| )(?:giao|nhan|ngay|dia chi|ship|van chuyen)(?= |$)/;
-const CLAIM_SAFE = new Set<string>(Object.values(CLAIM_SAFE_TEXT));
+// Câu ghi nhận `ORDER_RECEIVED` là câu THƯỜNG của đơn tự chốt khi địa chỉ chờ xác minh nội bộ (22/10/2026) — không phải lần chặn khẳng định.
+const CLAIM_SAFE = new Set<string>(Object.values(CLAIM_SAFE_TEXT).filter((t) => t !== CLAIM_SAFE_TEXT.ORDER_RECEIVED));
 /** Câu bot hỏi lại / bắt khách nhắn tên món sau lời đồng ý. */
 const REASK_AFTER_ACCEPT_RE = /nhắn (?:giúp |lại )?(?:em|shop)|đúng không ạ\?|món nào|muốn thêm .* không ạ\?/iu;
 /** Câu bot báo đã thêm / tổng mới — dấu vết món đã vào đơn khi bước máy chủ thêm (không có kết quả công cụ trong lịch sử). */
@@ -198,4 +201,19 @@ export function scanThreadQuality(msgs: readonly QualityMsg[], ctx: QualityConte
   }
   closeAccept();
   return { hits, bases };
+}
+
+/** Một đơn bot chốt, đọc cho mã ADDRESS_RECEIVED_BUT_NOT_APPLIED. */
+export type AddressAppliedOrder = { raw: unknown; shipAddress: string; shipProvince: string; shipCommune: string };
+
+/**
+ * ADDRESS_RECEIVED_BUT_NOT_APPLIED (P0 22/10/2026, HSLC #8037F35A): đơn mang dòng cờ «địa chỉ chưa ghép» do MÁY dựng, mà (a) đơn ĐÃ có xã /
+ * phường — cờ không được xét lại; hoặc (b) tin khách đã nêu phường của ĐÚNG địa chỉ đơn (`wardFromCustomerWords` — cùng luật đường ghi đơn)
+ * mà đơn để trống. Dòng «khách đổi địa chỉ» (người phải xác minh) KHÔNG tính. HÀM THUẦN.
+ */
+export function addressNotApplied(o: AddressAppliedOrder, customerTexts: readonly string[]): boolean {
+  const open = orderReviewOf(o.raw)?.entries ?? [];
+  if (!open.some((e) => e.code === "ADDRESS_UNRESOLVED" && e.note.startsWith(MACHINE_ADDRESS_NOTE_PREFIX))) return false;
+  if (o.shipCommune.trim()) return true;
+  return wardFromCustomerWords(parseCustomerAddress(o.shipAddress, o.shipProvince), o.shipAddress, customerTexts) !== null;
 }

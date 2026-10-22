@@ -91,7 +91,14 @@ export type OrderReview = { entries: OrderReviewEntry[] };
  * khi đã báo huỷ (`CUSTOMER_RECONFIRMED` — chỉ là lời khai mới, KHÔNG gỡ cờ; người vẫn quyết). Quy kết bằng KHOÁ TÀI KHOẢN (AGENTS
  * mục 34) — tên chỉ là ảnh chụp; `byUserId = null` = máy ghi.
  */
-export type OrderReviewAction = "CONFIRMED" | "CANCELLED" | "CUSTOMER_RECONFIRMED";
+/**
+ * `ADDRESS_SETTLED` (P0 22/10/2026, HSLC #8037F35A): MÁY gỡ dòng «địa chỉ chưa ghép» do CHÍNH máy dựng lúc tự chốt, khi lượt ghi sau
+ * của máy đã có xã / phường (khách cho thêm phường, công cụ nhận theo danh mục). Không phải lời người xác nhận đơn, không phải lời
+ * khách xác nhận lại sau huỷ — đọc «xác nhận lại sau huỷ» phải lọc ĐÚNG hai action đó (order-cancel-reconcile).
+ */
+export type OrderReviewAction = "CONFIRMED" | "CANCELLED" | "CUSTOMER_RECONFIRMED" | "ADDRESS_SETTLED";
+/** Mọi action của vết, để nơi đọc / bài kiểm liệt kê đủ. */
+export const ORDER_REVIEW_ACTIONS: readonly OrderReviewAction[] = ["CONFIRMED", "CANCELLED", "CUSTOMER_RECONFIRMED", "ADDRESS_SETTLED"];
 export type OrderReviewResolution = { entries: OrderReviewEntry[]; action: OrderReviewAction; at: string; byUserId: string | null; byName: string; quote?: string | null };
 
 /** Trần — chặn một hội thoại «huỷ» trăm lần làm phình `raw`. */
@@ -130,9 +137,9 @@ export function orderReviewLogOf(raw: unknown): OrderReviewResolution[] {
   for (const v of log) {
     if (!v || typeof v !== "object") continue;
     const r = v as Record<string, unknown>;
-    if (r.action !== "CONFIRMED" && r.action !== "CANCELLED" && r.action !== "CUSTOMER_RECONFIRMED") continue;
+    if (!(ORDER_REVIEW_ACTIONS as readonly unknown[]).includes(r.action)) continue;
     const entries = Array.isArray(r.entries) ? r.entries.map(parseEntry).filter((e): e is OrderReviewEntry => e !== null) : [];
-    out.push({ entries, action: r.action, at: str(r.at), byUserId: typeof r.byUserId === "string" ? r.byUserId : null, byName: str(r.byName), quote: typeof r.quote === "string" && r.quote ? r.quote : null });
+    out.push({ entries, action: r.action as OrderReviewAction, at: str(r.at), byUserId: typeof r.byUserId === "string" ? r.byUserId : null, byName: str(r.byName), quote: typeof r.quote === "string" && r.quote ? r.quote : null });
   }
   return out.reverse();
 }
@@ -158,6 +165,24 @@ export function withReviewResolved(raw: Record<string, unknown>, by: { action: "
   const prior = Array.isArray(raw.reviewLog) ? (raw.reviewLog as unknown[]) : [];
   const entry: OrderReviewResolution = { entries: open.entries, ...by };
   return { raw: { ...raw, review: null, reviewLog: [...prior, entry].slice(-ORDER_REVIEW_LIMITS.log) }, changed: true, resolved: open.entries };
+}
+
+/** Đầu câu ghi chú của dòng cờ «địa chỉ chưa ghép» do MÁY dựng lúc tự chốt (`addressReview` trong lib/records/order-create.ts). */
+export const MACHINE_ADDRESS_NOTE_PREFIX = "Máy chốt khi địa chỉ chưa ghép được";
+
+/**
+ * Lượt ghi của MÁY mà đơn nay ĐÃ có xã / phường ⇒ gỡ ĐÚNG những dòng «địa chỉ chưa ghép» do máy dựng (`MACHINE_ADDRESS_NOTE_PREFIX`), vết
+ * `ADDRESS_SETTLED` (máy — `byUserId` null, AGENTS mục 34). Dòng «khách đổi địa chỉ» (người phải xác minh) và mọi mã khác GIỮ NGUYÊN; hết
+ * dòng thì cờ về `null`. Không có gì để gỡ ⇒ `changed = false`. HÀM THUẦN.
+ */
+export function withAddressSettled(raw: Record<string, unknown>, by: { at: string; byName: string; ward: string }): { raw: Record<string, unknown>; changed: boolean; settled: OrderReviewEntry[] } {
+  const open = orderReviewOf(raw);
+  const settled = open?.entries.filter((e) => e.code === "ADDRESS_UNRESOLVED" && e.note.startsWith(MACHINE_ADDRESS_NOTE_PREFIX)) ?? [];
+  if (!open || !settled.length) return { raw, changed: false, settled: [] };
+  const rest = open.entries.filter((e) => !settled.includes(e));
+  const prior = Array.isArray(raw.reviewLog) ? (raw.reviewLog as unknown[]) : [];
+  const entry: OrderReviewResolution = { entries: settled, action: "ADDRESS_SETTLED", at: by.at, byUserId: null, byName: `${by.byName} · khách đã cho xã / phường «${by.ward}»`.slice(0, ORDER_REVIEW_LIMITS.noteMax) };
+  return { raw: { ...raw, review: rest.length ? { entries: rest } : null, reviewLog: [...prior, entry].slice(-ORDER_REVIEW_LIMITS.log) }, changed: true, settled };
 }
 
 /**

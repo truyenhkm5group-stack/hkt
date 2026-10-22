@@ -23,6 +23,7 @@ export const SALES_QUALITY_CODES = [
   "CLAIM_GUARD_BLOCK",
   "UPSELL_ACCEPTED_BUT_REASKED",
   "UPSELL_ACCEPTED_NOT_ATTACHED",
+  "ADDRESS_RECEIVED_BUT_NOT_APPLIED",
 ] as const;
 export type SalesQualityCode = (typeof SALES_QUALITY_CODES)[number];
 
@@ -62,8 +63,11 @@ export const SALES_QUALITY_SPEC: Record<SalesQualityCode, SalesQualitySpec> = {
     source: "lib/sales-chatbot/quick-reply-focus.ts",
     action: "Mở Câu mẫu, sửa từ khoá kích hoạt / gắn đúng sản phẩm cho câu mẫu bị gửi nhầm món.",
   },
+  // KHOÁ LƯU giữ nguyên `ADDRESS_REASK` (dedupe `sales-quality:<mã>:<ngày>` + notifications đang dùng — Tech Lead 22/10/2026). Đây là
+  // hiện tượng KNOWN_ADDRESS_REASKED (hỏi lại phần địa chỉ / SĐT / tên đã biết), RỘNG HƠN dòng L KNOWN_CUSTOMER_ADDRESS_REASK của
+  // scripts/conv-money-trace.ts (chỉ khách CŨ có đơn nối chắc). Một hiện tượng, một mã.
   ADDRESS_REASK: {
-    label: "Bot hỏi lại địa chỉ / SĐT khách đã cho",
+    label: "Bot hỏi lại địa chỉ / SĐT khách đã cho (KNOWN_ADDRESS_REASKED)",
     unit: "MESSAGE",
     source: "lib/sales-chatbot/address-memory.ts",
     action: "Câu hỏi lại đã lọt qua hàng rào hỏi-lại — xem câu mẫu / lời dặn xin địa chỉ đang gửi ở bước chốt.",
@@ -80,6 +84,8 @@ export const SALES_QUALITY_SPEC: Record<SalesQualityCode, SalesQualitySpec> = {
     source: "lib/sales-chatbot/engine.ts",
     action: "Lượt model không ra câu nào gửi khách — xem lỗi lượt AI / độ dài lời dặn; khách nhận một câu không trả lời gì.",
   },
+  // KHÔNG gồm câu ghi nhận `ORDER_RECEIVED` («Dạ em đã ghi nhận đơn của mình ạ.»): từ 22/10/2026 đó là câu THƯỜNG của mọi đơn tự chốt khi
+  // địa chỉ chờ xác minh nội bộ (chủ shop: xác minh độc lập với upsell), không phải một lần hàng rào chặn khẳng định.
   CLAIM_GUARD_BLOCK: {
     label: "Hàng rào khẳng định thay câu của bot bằng câu an toàn",
     unit: "MESSAGE",
@@ -97,6 +103,12 @@ export const SALES_QUALITY_SPEC: Record<SalesQualityCode, SalesQualitySpec> = {
     unit: "MESSAGE",
     source: "lib/sales-chatbot/short-accept.ts",
     action: "Mở đơn của hội thoại: khách đã đồng ý mua thêm mà đơn chưa có món — thêm món / gọi lại khách xác nhận.",
+  },
+  ADDRESS_RECEIVED_BUT_NOT_APPLIED: {
+    label: "Khách đã cho phường / địa chỉ mà đơn vẫn «cần kiểm địa chỉ»",
+    unit: "CONVERSATION",
+    source: "lib/address/customer-address.ts",
+    action: "Đơn bot chốt mang cờ «địa chỉ chưa ghép» trong khi đơn đã có xã / phường hoặc tin khách đã nêu phường của đúng địa chỉ — mở hàng «Cần người kiểm», chọn xã rồi xác nhận; báo kỹ thuật nếu lặp lại (luật ghép phường lọt ca).",
   },
 };
 

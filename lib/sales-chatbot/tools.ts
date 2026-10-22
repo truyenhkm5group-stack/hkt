@@ -1207,7 +1207,12 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // nào khác (không đoán thay). Tên xã ở một tin TRƯỚC chỉ nhận khi nằm trong một địa chỉ đầy đủ KHỚP dòng đơn (`wardFromCustomerWords`:
       // cùng đường, cùng số nhà, quận cũ, không lời sửa). Review độc lập PR #848: nối mọi tin khách lại, hay nhận «lời trả lời phường» ở tin
       // trước, đều để phường của địa chỉ CŨ lọt vào đơn của địa chỉ MỚI.
-      if (v.data.ward) {
+      // GỬI LẠI ĐÚNG PHƯỜNG ĐÃ LƯU (P0 22/10/2026, HSLC #8037F35A): phường khách đã cho được nhận ở lượt trước — lượt sửa sau model gửi lại
+      // nguyên ô ward, nhưng tin CUỐI của khách đã sang chuyện khác ⇒ trước đây «xã / phường chưa xác nhận». Cùng dòng địa chỉ + tỉnh + cùng
+      // phường đã lưu, và tin cuối KHÔNG nêu phường nào khác ⇒ giữ phường đã lưu, không hỏi lại điều đã biết.
+      const keptWard = keptWardOf(existing?.recipient, recipient, v.data.ward, ctx.lastUserText);
+      if (keptWard) recipient.ward = keptWard;
+      else if (v.data.ward) {
         const parsedWard = parseCustomerAddress(recipient.address, recipient.province);
         const okWard = acceptCustomerWard(parsedWard, v.data.ward, ctx.lastUserText);
         const lastNamesOther = okWard.ok && Boolean(parsedWard.province) && ctx.lastUserText.split(/\n+/).some((l) => namesOtherWard(l, parsedWard.province!, okWard.ward));
@@ -1379,9 +1384,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         }
         const validity = simulated || !draft.orderId ? null : await confirmedValidity(draft.orderId);
         state.confirmed = { ...state.confirmed, total: priced.total ?? priced.subtotal, quoteId: priced.quote.quoteId, ...(validity ? { valid: validity.valid, pending: validity.pending } : {}) };
-        // Địa chỉ còn chờ xác minh mà tổ chức bật `upsellAfterContact` ⇒ nói tổng mới, KHÔNG «nhân viên sẽ xác nhận địa chỉ», KHÔNG «đã lên đơn».
-        const quiet = validity?.valid === false && validity.pending === "ADDRESS" && (await quietAddressReviewOn());
-        const pendingText = validity && !validity.valid ? (validity.pending === "ADDRESS" ? (quiet ? orderUpdatedText(cartView(priced).cod_total_text) : pendingAddressText(false)) : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK) : null;
+        // Địa chỉ còn chờ xác minh ⇒ nói tổng mới, KHÔNG «nhân viên sẽ xác nhận địa chỉ», KHÔNG «đã lên đơn» — mọi tổ chức (chủ shop 22/10/2026:
+        // xác minh địa chỉ độc lập với upsell; việc kiểm nằm ở hàng đợi nội bộ).
+        const pendingText = validity && !validity.valid ? (validity.pending === "ADDRESS" ? orderUpdatedText(cartView(priced).cod_total_text) : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK) : null;
         return ok(`${simulated ? "(Thử) " : ""}Sửa đơn đã chốt · ${formatVND(priced.subtotal)}`, { ...view, status: "Đã chốt — đã cập nhật theo ý khách", auto_confirmed: true, say_to_customer: pendingText ?? `${autoConfirmText(priced.lines)} Tổng đơn mới ${cartView(priced).cod_total_text} ạ.`, instruction: "Đơn ĐÃ CHỐT vừa được cập nhật theo ý khách. Gửi khách ĐÚNG MỘT câu say_to_customer — không hỏi xác nhận lại." }, state);
       }
       // TỰ CHỐT KHI ĐỦ ĐƠN (P0-A): đủ sáu điều kiện ⇒ chốt NGAY bằng chính lượt chốt của confirm_order (cùng kiểm giá · tồn · địa chỉ của lõi),
@@ -1504,11 +1509,12 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       state.stage = "DONE";
       // Đơn ĐÃ GHI nhưng CHƯA QUA KIỂM (địa chỉ chưa ghép · tổng lệch · cờ cần kiểm) ⇒ «khách đồng ý» ≠ «đơn đã tạo hợp lệ»: model nói
       // đúng câu ghi nhận, KHÔNG «đã lên đơn» (claim-guard chặn lần nữa nếu model vẫn viết).
-      // ĐỊA CHỈ CHỜ XÁC MINH, tổ chức bật `upsellAfterContact` (P0 21/10/2026, ca HSLC «Mai Le»): câu ghi nhận ngắn rồi SANG BƯỚC MỜI
-      // MUA THÊM — đơn vẫn mang cờ ADDRESS_UNRESOLVED (hàng «Cần người kiểm», tuyến ADDRESS_REVIEW, chưa xác minh thì không vận đơn).
-      // Cờ CHECK (giá · SĐT · cờ cần kiểm khác) KHÔNG đổi: đơn có vấn đề thật thì không mời.
+      // ĐỊA CHỈ CHỜ XÁC MINH: câu ghi nhận ngắn cho MỌI tổ chức (chủ shop 22/10/2026 — xác minh địa chỉ độc lập với upsell); đơn vẫn mang
+      // cờ ADDRESS_UNRESOLVED (hàng «Cần người kiểm», tuyến ADDRESS_REVIEW, chưa xác minh thì không vận đơn). CHỈ lời mời mua thêm khi địa
+      // chỉ còn chờ là ở sau cờ `upsellAfterContact` (P0 21/10/2026, ca HSLC «Mai Le»). Cờ CHECK (giá · SĐT · cờ cần kiểm khác) KHÔNG đổi:
+      // đơn có vấn đề thật thì không mời.
       const quietAddress = validity?.valid === false && validity.pending === "ADDRESS" && (await quietAddressReviewOn());
-      const pendingText = validity && !validity.valid ? (validity.pending === "ADDRESS" ? pendingAddressText(quietAddress) : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK) : null;
+      const pendingText = validity && !validity.valid ? (validity.pending === "ADDRESS" ? pendingAddressText() : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK) : null;
       // Lời mời SAU CHỐT (P0 19/10/2026): chỉ khi đơn đã ghi hợp lệ — hoặc chỉ còn chờ xác minh địa chỉ khi tổ chức bật cờ trên; câu do
       // máy chủ dựng, engine gửi ngay sau tin xác nhận. (`cancelRequest` đã được xoá ngay trên khi chốt — cửa sổ vẫn xét nó cho lượt
       // chốt có lỗi ghi đơn quay lại.)
@@ -1766,7 +1772,7 @@ export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "las
   if (gaps.includes("SĐT")) return "SĐT chưa hợp lệ — hỏi lại khách SĐT";
   if (gaps.includes("địa chỉ") || gaps.includes("tỉnh / thành")) return "Địa chỉ chưa đủ để giao (chưa đọc được tỉnh / thành) — hỏi khách đúng phần còn thiếu";
   // Xã / phường chưa ghép (biết tỉnh) KHÔNG chặn tự chốt — luật P0-A: đơn tự chốt kèm cờ ADDRESS_UNRESOLVED, câu ghi nhận
-  // `pendingAddressText` (cờ `upsellAfterContact` bật ⇒ chỉ câu ghi nhận rồi mời mua thêm), nhân viên xác minh nội bộ. Tỉnh chỉ suy từ viết tắt («P13 GV») là CHƯA BIẾT TỈNH ⇒ đã dừng ở dòng trên.
+  // `pendingAddressText` (mọi tổ chức — cờ `upsellAfterContact` chỉ quyết lời mời mua thêm), nhân viên xác minh nội bộ. Tỉnh chỉ suy từ viết tắt («P13 GV») là CHƯA BIẾT TỈNH ⇒ đã dừng ở dòng trên.
   return null;
 }
 
@@ -1887,6 +1893,21 @@ export async function pageMediaSentInRound(conversationId: string, state: Pick<C
     .where(and(eq(i.pageId, conv.pageId), eq(i.threadId, conv.threadId), eq(i.note, "PAGE_REPLY"), gte(i.createdAt, since), sql`coalesce(${i.senderKind}, '') not in ('AI_AGENT', 'META_SYSTEM')`, sql`(case when jsonb_typeof(${i.imageUrls}) = 'array' then jsonb_array_length(${i.imageUrls}) else 0 end) > 0`))
     .limit(1);
   return Boolean(hit);
+}
+
+/**
+ * Phường ĐÃ LƯU trên đơn nháp mà model gửi lại nguyên văn ở lượt sửa (P0 22/10/2026): cùng dòng địa chỉ, cùng tỉnh, cùng phường (so lõi tên,
+ * bỏ tiền tố «phường / xã»), và tin cuối không nêu phường KHÁC ⇒ trả tên đã lưu; còn lại ⇒ `null` (đi đường kiểm như cũ). HÀM THUẦN.
+ */
+export function keptWardOf(stored: Recipient | undefined, next: Recipient, ward: string | undefined, lastUserText: string): string | null {
+  const have = (stored?.ward ?? "").trim();
+  if (!have || !ward?.trim()) return null;
+  const core = (x: string) => foldVnText(x).replace(/^(phuong|xa|thi tran|dac khu) /, "").trim();
+  if (core(have) !== core(ward)) return null;
+  if (foldVnText(stored!.address) !== foldVnText(next.address) || foldVnText(stored!.province ?? "") !== foldVnText(next.province ?? "")) return null;
+  const province = parseCustomerAddress(next.address, next.province).province ?? next.province;
+  if (province && lastUserText.split(/\n+/).some((l) => namesOtherWard(l, province, have))) return null;
+  return have;
 }
 
 /** Tổ chức bật `upsellAfterContact` (cờ trong cài đặt câu mẫu). Đọc lỗi ⇒ TẮT — nhánh lỗi rơi về câu cũ, không về phía mời. */

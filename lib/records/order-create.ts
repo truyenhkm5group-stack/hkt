@@ -91,7 +91,7 @@ import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { normalizePhone as pancakePhone } from "@/lib/integrations/http";
 import { orderCancellationOf, withCancelOutcome, type CancelActor, type CancelRequester, type RescueResult } from "@/lib/constants/order-cancel";
-import { canFlagOrderForReview, ORDER_REVIEW_HOLD_CODES, orderReviewOf, reviewConflictMessage, unseenReviewEntries, withCustomerReconfirm, withReviewEntry, withReviewResolved, type OrderReviewEntry, type OrderReviewResolution, type ReviewSeen } from "@/lib/constants/order-review";
+import { canFlagOrderForReview, MACHINE_ADDRESS_NOTE_PREFIX, ORDER_REVIEW_HOLD_CODES, orderReviewOf, reviewConflictMessage, unseenReviewEntries, withAddressSettled, withCustomerReconfirm, withReviewEntry, withReviewResolved, type OrderReviewEntry, type OrderReviewResolution, type ReviewSeen } from "@/lib/constants/order-review";
 
 export type OrderGate = { allowed: true } | { allowed: false; code: "FORBIDDEN" | "NOT_SUPPORTED" | "MODULE_DISABLED"; reason: string };
 
@@ -420,18 +420,29 @@ export type ManualOrderResult = { ok: true; id: string; reused?: boolean } | Met
  * MÁY chốt («Đã xác nhận») khi xã / phường CHƯA ghép được ⇒ cờ CẦN NGƯỜI KIỂM (chủ shop 08/10/2026: vẫn chốt như trước, người
  * kiểm lại địa chỉ rồi xác nhận). Người chốt tay thì không gắn — người đã nhìn thấy ô xã trống trên form. HÀM THUẦN.
  */
-/** `addressReview` + cờ máy khai qua `AgentOrderOptions.review` — một lượt, cùng giao dịch. HÀM THUẦN. */
-function reviewsOnWrite(w: Writer, p: Prepared, raw: Record<string, unknown>, now: Date, agentOpts?: AgentOrderOptions): { raw: Record<string, unknown>; changed: boolean } {
+/**
+ * `addressReview` + cờ máy khai qua `AgentOrderOptions.review` — một lượt, cùng giao dịch. `changed` = có dòng cờ MỚI (vết FLAG);
+ * `settled` = dòng «địa chỉ chưa ghép» của máy vừa được gỡ vì đơn nay đã có xã / phường (vết RESOLVE · ADDRESS_SETTLED). HÀM THUẦN.
+ */
+function reviewsOnWrite(w: Writer, p: Prepared, raw: Record<string, unknown>, now: Date, agentOpts?: AgentOrderOptions): { raw: Record<string, unknown>; changed: boolean; settled: OrderReviewEntry[] } {
   const a = addressReview(w, p, raw, now);
   if (w.actorKind !== "AGENT" || !agentOpts?.review) return a;
   const b = withReviewEntry(a.raw, { ...agentOpts.review, at: now.toISOString(), by: w.name });
-  return { raw: b.raw, changed: a.changed || b.changed };
+  return { raw: b.raw, changed: a.changed || b.changed, settled: a.settled };
 }
 
-function addressReview(w: Writer, p: Prepared, raw: Record<string, unknown>, now: Date): { raw: Record<string, unknown>; changed: boolean } {
-  if (w.actorKind !== "AGENT" || p.stage !== "CONFIRMED" || (p.recipient.ward ?? "").trim()) return { raw, changed: false };
+function addressReview(w: Writer, p: Prepared, raw: Record<string, unknown>, now: Date): { raw: Record<string, unknown>; changed: boolean; settled: OrderReviewEntry[] } {
+  const ward = (p.recipient.ward ?? "").trim();
+  // ĐƠN NAY ĐÃ CÓ PHƯỜNG (P0 22/10/2026, HSLC #8037F35A): máy tự chốt lúc khách chưa cho phường ⇒ cờ «địa chỉ chưa ghép»; khách cho phường
+  // ở tin sau, công cụ ghi được ⇒ dòng cờ ấy hết căn cứ. Trước đây không nhánh nào xét lại ⇒ đơn đủ tỉnh + xã vẫn «cần kiểm địa chỉ». Chỉ
+  // lượt ghi của MÁY, chỉ dòng do máy dựng — lời «khách đổi địa chỉ» và mọi cờ khác vẫn chờ người.
+  if (w.actorKind === "AGENT" && ward) {
+    const s = withAddressSettled(raw, { at: now.toISOString(), byName: w.name, ward });
+    return { raw: s.raw, changed: false, settled: s.settled };
+  }
+  if (w.actorKind !== "AGENT" || p.stage !== "CONFIRMED" || ward) return { raw, changed: false, settled: [] };
   const where = p.recipient.province ? `tỉnh ${p.recipient.province}, chưa có xã / phường${p.wardCandidates.length ? ` — có thể là ${p.wardCandidates.join(" / ")}, hỏi khách` : ""}` : `chưa nhận ra tỉnh / thành và xã / phường${p.provinceHint ? ` — ${p.provinceHint}, hỏi khách` : ""}`;
-  return withReviewEntry(raw, { code: "ADDRESS_UNRESOLVED", note: `Máy chốt khi địa chỉ chưa ghép được (${where}) — dòng địa chỉ: ${p.recipient.address}`, quote: null, at: now.toISOString(), by: w.name });
+  return { ...withReviewEntry(raw, { code: "ADDRESS_UNRESOLVED", note: `${MACHINE_ADDRESS_NOTE_PREFIX} (${where}) — dòng địa chỉ: ${p.recipient.address}`, quote: null, at: now.toISOString(), by: w.name }), settled: [] };
 }
 
 /** Nhật ký một lượt gắn / gỡ cờ CẦN NGƯỜI KIỂM — tách khỏi nhật ký sửa đơn để tra được riêng. */
@@ -721,7 +732,7 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
   // đó + bản mới: gửi lại đúng lượt sửa này thì bản mới = bản đang lưu ⇒ không đổi gì ⇒ không sự kiện; A→B→A→B thì mỗi
   // lượt một mốc khác ⇒ mỗi lượt một sự kiện.
   const promoted = p !== prep.p;
-  let flagged: { raw: Record<string, unknown>; changed: boolean } = { raw: {}, changed: false };
+  let flagged: { raw: Record<string, unknown>; changed: boolean; settled: OrderReviewEntry[] } = { raw: {}, changed: false, settled: [] };
   let resolved: { changed: boolean; resolved: OrderReviewEntry[] } = { changed: false, resolved: [] };
   const event: { name: "order.confirmed" | "order.updated"; key: string } | null =
     !wasConfirmed && p.stage === "CONFIRMED"
@@ -775,6 +786,7 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
     reason: w.agent ? `Sửa đơn bởi ${w.agent}` : "Sửa đơn tạo tay",
   });
   if (flagged.changed) await auditReview(w, row.id, "FLAG", { entries: orderReviewOf(flagged.raw)?.entries ?? [] });
+  if (flagged.settled.length) await auditReview(w, row.id, "RESOLVE", { entries: flagged.settled, action: "ADDRESS_SETTLED" });
   if (resolved.changed) await auditReview(w, row.id, "RESOLVE", { entries: resolved.resolved, action: "CONFIRMED" });
   if (event) await kickWorkflows();
   announceOrder(row.id, "updated");
