@@ -3,7 +3,7 @@
   "mission_id": "sales-address-applied",
   "title": "P0 dứt điểm xin lại địa chỉ: phường khách đã cho vào đơn, cờ địa chỉ tự xét lại, xác minh độc lập với upsell",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-address",
@@ -34,11 +34,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-22T03:36:45.789Z",
-  "updated_at": "2026-10-22T06:56:37.738Z",
+  "updated_at": "2026-10-22T07:24:42.198Z",
   "last_heartbeat": "2026-10-22T06:35:40.304Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#966 → 705f954cfeb93b16efdaef6d0ad0ed3324c3e48f"
+    "merged": "#966 → 705f954cfeb93b16efdaef6d0ad0ed3324c3e48f",
+    "verify": "PASS 705f954cfeb93b16efdaef6d0ad0ed3324c3e48f 2026-10-22T07:24:12.177Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39738661026"
   },
   "handoff": {
     "branch": "claude/sales-address-applied",
