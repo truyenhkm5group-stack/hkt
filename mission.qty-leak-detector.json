@@ -3,7 +3,7 @@
   "mission_id": "qty-leak-detector",
   "title": "2B PACK_MULTIPLIER_LEAKED: đơn đã ghi số hộp = số trần khách nói (bội quy cách) — «lọt tới khách» của sales-qty-unit-guard",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-qty-leak",
@@ -18,7 +18,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T12:44:08.151Z",
-  "updated_at": "2026-10-22T12:44:08.151Z",
-  "last_heartbeat": "2026-10-22T12:44:08.151Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-22T13:41:45.142Z",
+  "last_heartbeat": "2026-10-22T13:41:45.142Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/qty-leak-detector",
+    "sha": "06f9280abc149873dfb6620b7f214e8fc7d0dba8",
+    "at": "2026-10-22T13:41:45.142Z",
+    "actor": "DESKTOP-56TH98Y:wt-qty-leak",
+    "title": "2B PACK_MULTIPLIER_LEAKED: đơn đã ghi số hộp = số trần khách nói (bội quy cách) — «lọt tới khách» của sales-qty-unit-guard",
+    "summary": "PACK_MULTIPLIER_LEAKED (thêm cuối SALES_QUALITY_CODES, tên đã thống nhất với code-erp-95): đơn ĐÃ GHI có dòng mẫu mã «Hộp N cái» số hộp = số trần / số cái khách nói (bội của N). Chỉ kết quả thành công của create/update_draft_order (ghép theo mã lời gọi), một lần mỗi (món, số) mỗi hội thoại, mốc = lượt ghi đơn. Mẫu số = lần gọi công cụ ghi đơn; khối 2B stuck-audit có mẫu số. delivery (PR của 95) = REACHED_CUSTOMER — ai vào main sau điền.",
+    "tests": [
+      "cây sạch @06f9280ab: tsc 0 · lint 0 · TEST_KHOI=K21,K22 ĐẠT",
+      "tests/p0-qty-unit-guard.test.ts: chuỗi #30→#39 ghi 10 hộp ⇒ bắt 1 lần (mốc = lượt ghi), đúng 1 hộp ⇒ không bắt",
+      "đột biến 4/4 đỏ",
+      "full suite giao cho CI gates"
+    ]
+  }
 }
