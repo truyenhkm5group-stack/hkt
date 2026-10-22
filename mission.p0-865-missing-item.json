@@ -3,7 +3,7 @@
   "mission_id": "p0-865-missing-item",
   "title": "P0 #865: món khách nói tường minh mà đơn nháp bỏ sót hẳn ⇒ không lên / không tự chốt đơn thiếu món",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-865b",
@@ -22,11 +22,26 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T19:18:54.116Z",
-  "updated_at": "2026-10-22T19:43:42.814Z",
-  "last_heartbeat": "2026-10-22T19:43:42.814Z",
+  "updated_at": "2026-10-22T19:44:14.707Z",
+  "last_heartbeat": "2026-10-22T19:44:14.707Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/p0-865-missing-item",
+    "sha": "1a27ebf8dad8e25068d24ec715e1f0b213147371",
+    "at": "2026-10-22T19:44:14.707Z",
+    "actor": "DESKTOP-56TH98Y:wt-865b",
+    "title": "P0 #865: món khách nói tường minh mà đơn nháp bỏ sót hẳn ⇒ không lên / không tự chốt đơn thiếu món",
+    "summary": "P0 #865 (HSLC 16/10, chưa ai nhận): món khách đã gọi tên bị bỏ sót hẳn khỏi đơn vẫn lên + TỰ CHỐT được. Gốc: món giỏ chỉ được gắn sản phẩm khi có trong đơn nháp ⇒ món vắng mặt không bao giờ gắn ⇒ commitmentViolation + cartDraftDiff bỏ qua. Thêm missingFromDraft (thuần: explicit · HIGH · chưa gắn · không dòng nháp nào cùng tên) ⇒ cùng câu từ chối «KHÔNG được bỏ «…»» và lệch «đơn ghi 0». Câu từ chối cũ giữ nguyên chữ; lượt nới relaxedTurn vẫn không chặn. Phần còn lại của #865 KHÔNG thuộc mã: HANDOFF kẹt chờ quyết định chủ shop (owner-handoff-team); miễn ship thiếu căn cứ là tin phía page (2B STAFF_AI_QUOTE_CONFLICT).",
+    "tests": [
+      "tsc --noEmit (heap 8 GB): sạch",
+      "eslint 3 tệp: sạch",
+      "TEST_KHOI=K09,K21: TẤT CẢ KIỂM THỬ ĐẠT trên f87db2e0b (hội thoại vàng khớp ảnh chụp, order-golden khớp BASELINE, p0-855 · qty-unit-guard · upsell · claim-guard · p0-865 mới)",
+      "đột biến: missingFromDraft ⇒ false ⇒ bài thuần ĐỎ «thiếu hẳn ruốc ⇒ từ chối: null»",
+      "tái hiện trước bản sửa trên main: chatTurn tự chốt ⇒ đơn CONFIRMED 400.000 chỉ chả mực, bot «Dạ em lên đơn cho mình rồi ạ»"
+    ]
   }
 }
