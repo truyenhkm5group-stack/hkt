@@ -634,6 +634,7 @@ import { testMessengerHealth } from "./messenger-health.test";
 import { testMessengerWebhookRejections } from "./messenger-webhook-rejections.test";
 import { testMessengerWebhookAlerts } from "./messenger-webhook-alerts.test";
 import { testSalesQualityDaily } from "./sales-quality-daily.test";
+import { testVtpReshipBackfill } from "./vtp-reship-backfill.test";
 import { testSalesAddressApplied } from "./sales-address-applied.test";
 import { testAddressNeverReask } from "./address-never-reask.test";
 import { testAddressResolver } from "./address-resolver.test";
@@ -3316,6 +3317,8 @@ async function main() {
     await testMessengerWebhookAlerts();
     // 2B: giám sát chất lượng AI bán hàng hằng ngày — một việc / mã / ngày, bộ dò lib = conv-money-trace, 0 lời gọi AI.
     await testSalesQualityDaily();
+    // P0 22/10/2026: vận đơn tạo lại trên web VTP — bản chỉ đo mốc trước / sau.
+    testVtpReshipBackfill();
     // P0 22/10/2026 (HSLC #8037F35A): phường khách đã cho vào đơn, cờ địa chỉ của máy tự đóng, xác minh độc lập với upsell.
     await testSalesAddressApplied();
     // AGENTS 3.12b (chủ shop 22/10/2026): địa chỉ khách không bao giờ hỏi lại — một điểm chặn cuối, chốt + upsell như đơn thường.
