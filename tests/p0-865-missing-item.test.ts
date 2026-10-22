@@ -15,6 +15,8 @@ import { getDb, schema } from "@/db";
 import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
 import { applyCustomerCartMessage, cartDraftDiff, commitmentViolation, type AskedLine } from "@/lib/sales-chatbot/cart-commitment";
 import { QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
+import { variantWeightGrams } from "@/lib/sales-chatbot/shipping";
+import { gramsMentioned } from "@/lib/sales-chatbot/tools";
 import { setSettingJson } from "@/lib/settings";
 import { runGoldenCases, say, tool, type GoldenCase, type StepCtx } from "./sales-agent-golden/harness";
 
@@ -54,10 +56,21 @@ function testThuan() {
   // (nếu không, hàng rào bỏ sót sẽ ép model thêm SAI món).
   assert.deepEqual(sauce(["Chả cá thu", "Mắm tôm chua"], "Chị lấy 1kg chả cá thu và 1 chai nước mắm"), ["Chả cá thu:1000g"], "«nước mắm» không bị gán vào «Mắm tôm chua»");
   assert.deepEqual(sauce(["Chả mực giã tay", "Ruốc bông tôm 100%"], "mẹ chị thích ruốc, lấy 1 hũ ruốc"), ["Ruốc bông tôm 100%:1pack"], "câu thường vẫn đọc như cũ");
+  // «lạng» = 100 g (trước đây giỏ RỖNG với «5 lạng chả mực»); chỉ dạng có dấu — «số 12 Láng Hạ» không phải 1,2 kg.
+  const muc = (text: string) => applyCustomerCartMessage(undefined, text, 1, NOW, { catalog: CATALOG })?.selectedItems.map((i) => `${i.label}:${i.quantity}${i.unit}`) ?? [];
+  assert.deepEqual(muc("Chị lấy 5 lạng chả mực"), ["Chả mực giã tay:500g"]);
+  assert.deepEqual(muc("2 lạng rưỡi chả mực giã tay"), ["Chả mực giã tay:250g"]);
+  assert.deepEqual(muc("Giao số 12 Láng Hạ, 1kg chả mực"), ["Chả mực giã tay:1000g"], "«Láng» của địa chỉ không phải đơn vị");
+  assert.deepEqual(gramsMentioned("5 lạng chả mực, giao số 12 Láng Hạ"), [500], "bộ đọc khối lượng của công cụ cùng luật");
+  assert.equal(variantWeightGrams(null, "Gói 3 lạng"), 300, "quy cách mẫu mã cùng luật");
+  // «kilo» / «ký lô» (= kg): trước đây «1 kilo chả mực» cho giỏ rỗng, «2 ký lô chả cá thu» thì «lô» thành tên món (mất tên chả mực).
+  assert.deepEqual(muc("Chị lấy 1 kilo chả mực"), ["Chả mực giã tay:1000g"]);
+  assert.deepEqual(muc("2 ký lô chả mực giã tay"), ["Chả mực giã tay:2000g"]);
+  assert.deepEqual(gramsMentioned("1kilo chả mực"), [1000]);
   // Lượt khách có dấu hiệu sửa mà máy không áp chắc (relaxedTurn) ⇒ không chặn — luật an toàn sẵn có của giỏ.
   const relaxed = both ? { ...both, relaxedTurn: 9 } : both;
   assert.equal(commitmentViolation(relaxed, [MUC], 9), null);
-  console.log("  ✓ thuần: món khách gọi tên vắng mặt hẳn khỏi đơn ⇒ «KHÔNG được bỏ» + lệch «đơn ghi 0» · đủ món / đã bỏ / chỉ hỏi giá / lượt nới ⇒ không chặn · «chai» / «thùng» là đơn vị · «nước mắm» không thành «Mắm tôm chua»");
+  console.log("  ✓ thuần: món khách gọi tên vắng mặt hẳn khỏi đơn ⇒ «KHÔNG được bỏ» + lệch «đơn ghi 0» · đủ món / đã bỏ / chỉ hỏi giá / lượt nới ⇒ không chặn · «chai» / «thùng» là đơn vị · «nước mắm» không thành «Mắm tôm chua» · «5 lạng» = 500 g, «Láng Hạ» không phải khối lượng");
 }
 
 const ADDR = "9 Hai Bà Trưng, Phường Hoàn Kiếm, Thành phố Hà Nội";

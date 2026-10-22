@@ -85,7 +85,10 @@ export type CartIntent = { kind: CartIntentKind; amounts: CartAmount[]; label: s
 // ─────────────────────────── ĐỌC SỐ LƯỢNG ───────────────────────────
 
 const WORD_NUM: Record<string, number> = { mot: 1, hai: 2, ba: 3, bon: 4, nam: 5, sau: 6, bay: 7, tam: 8, chin: 9, muoi: 10 };
-const WEIGHT_UNIT = "kg|kí|ký|ki|ky|cân|can|gram|gr|g";
+// «lạng» = 100 g («5 lạng chả mực» — cách nói phổ biến ở miền Bắc; trước đây giỏ RỖNG nên mọi hàng rào số lượng không áp). CHỈ dạng CÓ
+// DẤU: bỏ dấu thì trùng «Láng» của địa chỉ («số 12 Láng Hạ» sẽ thành 1,2 kg).
+// «kilo» / «ký lô» (= kg) đứng TRƯỚC «kí / ký / ki»: «1 kilo chả mực» từng cho giỏ rỗng, «2 ký lô chả cá thu» thì «lô» thành tên món.
+const WEIGHT_UNIT = "kilogram|kilo|ký lô|kí lô|ki lô|ky lo|ki lo|kg|kí|ký|ki|ky|cân|can|lạng|gram|gr|g";
 // «chai» / «thùng» (P0 #865, ca thật «1kg chả cá thu và 1 chai mắm»): thiếu hai chữ này thì món bán theo chai không bao giờ vào giỏ và hàng
 // rào «bỏ sót món» không có gì để bám. KHÔNG thêm «lon»: bỏ dấu thì trùng «lớn» (chữ cỡ trong ATTR_WORDS).
 const PACK_UNIT = "túi|tui|gói|goi|hộp|hop|set|phần|phan|bịch|bich|khay|combo|suất|suat|hũ|hủ|hu|lọ|lo|chai|thùng|thung|cái|cai|chiếc|chiec|đôi|doi|bộ|bo|cây|cay";
@@ -321,7 +324,7 @@ export function amountsIn(text: string, catalog?: readonly string[]): CartAmount
     if (n === null || wordNumGlued(m)) continue;
     const unit = foldVi(m[2]);
     const half = m[3] ? 0.5 : 0;
-    const grams = Math.round(/^(?:gram|gr|g)$/.test(unit) ? n + half : (n + half) * 1000);
+    const grams = Math.round(/^(?:gram|gr|g)$/.test(unit) ? n + half : (n + half) * (unit === "lang" ? 100 : 1000));
     if (grams > 0) push(grams, "g", m.index ?? 0, m[0].length);
   }
   for (const m of text.matchAll(PACK_RE)) {

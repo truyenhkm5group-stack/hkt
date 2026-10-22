@@ -20,11 +20,12 @@ export const DEFAULT_FREE_SHIPPING: FreeShippingRule = { enabled: false, minSubt
 /** Khối lượng một mẫu mã (gram): cột weight > 0 ⇒ dùng; trống ⇒ quy cách trong tên («1kg», «0,5 kg», «500g»); không ra ⇒ `null`. */
 export function variantWeightGrams(weight: number | null | undefined, ...texts: readonly string[]): number | null {
   if (typeof weight === "number" && weight > 0) return weight;
-  const m = /(\d+(?:[.,]\d+)?)\s*(kg|kí|ký|ki|ky|cân|can|gram|gr|g)(?![\p{L}])/iu.exec(texts.join(" "));
+  const m = /(\d+(?:[.,]\d+)?)\s*(kilogram|kilo|ký lô|kí lô|ki lô|ky lo|ki lo|kg|kí|ký|ki|ky|cân|can|lạng|gram|gr|g)(?![\p{L}])/iu.exec(texts.join(" "));
   if (!m) return null;
   const n = Number(m[1].replace(",", "."));
   if (!Number.isFinite(n) || n <= 0) return null;
-  return /^(g|gr|gram)$/i.test(m[2]) ? Math.round(n) : Math.round(n * 1000);
+  // «lạng» = 100 g, chỉ dạng có dấu (bỏ dấu trùng «Láng»).
+  return /^(g|gr|gram)$/i.test(m[2]) ? Math.round(n) : Math.round(n * (/^lạng$/i.test(m[2]) ? 100 : 1000));
 }
 
 /** Địa chỉ có thuộc một khu vực miễn ship không — so theo TỪ trên chữ bỏ dấu. */
