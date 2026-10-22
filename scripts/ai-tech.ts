@@ -3521,12 +3521,92 @@ function cmdHeartbeat(ctx: RepoCtx, idIn: string | undefined, values: Map<string
   return r.startsWith("✓") ? 0 : 1;
 }
 
-function cmdClose(ctx: RepoCtx, idIn: string | undefined, flags: Set<string>, values: Map<string, string>): number {
+/*
+  ═══ SỔ THEO DÕI TÁI DIỄN CHẶN DONE (lib/constants/regression-watch.ts, Tech Lead 22/10/2026) ═══
+
+  «Lỗi đã đóng mà tái diễn phải tự MỞ LẠI, không báo DONE.» Sứ mệnh có dòng trong sổ chỉ được khép DONE khi kèm
+  `--regression-run=<run id>` của ops `regression-watch-status` (chỉ đọc) mà dòng tóm tắt công khai nói `reopened=0` cho ĐÚNG sứ
+  mệnh ấy. ai-tech không có đường tới CSDL, nên bằng chứng là log CÔNG KHAI của lượt ops — không mở đường ghi mới.
+  Sổ đọc TRÊN nhánh tích hợp (sửa cục bộ không nới được), bằng chữ: tệp sổ chỉ `import type` và khai `mission: "<mã>"` mỗi dòng
+  — `tests/regression-watch.test.ts` khoá phép đọc này bằng đúng hàm của tệp sổ.
+  Mọi nhánh lỗi rơi về phía HẸP: thiếu run · run không phải ops-vps · hỏng · quá cũ · không có dòng của sứ mệnh · `UNKNOWN` ⇒ TỪ CHỐI.
+*/
+export const REGRESSION_RUN_MAX_AGE_HOURS = 48;
+export const REGRESSION_WATCH_FILE = "lib/constants/regression-watch.ts";
+
+/** Sứ mệnh khai trong chữ của sổ theo dõi. HÀM THUẦN. */
+export function regressionWatchedMissions(source: string): string[] {
+  return [...new Set([...source.matchAll(/^\s*mission:\s*"([a-z0-9][a-z0-9-]*)",\s*$/gm)].map((m) => m[1]))];
+}
+
+/** `regression-watch mission=<m> reopened=<n|UNKNOWN>` trong log ⇒ map. Nhiều dòng một sứ mệnh: UNKNOWN thắng, số thì cộng. HÀM THUẦN. */
+export function parseRegressionRunLog(text: string): Map<string, number | "UNKNOWN"> {
+  const out = new Map<string, number | "UNKNOWN">();
+  for (const m of text.matchAll(/regression-watch mission=([a-z0-9][a-z0-9-]*) reopened=(\d+|UNKNOWN) rows=\d+/g)) {
+    const cur = out.get(m[1]);
+    out.set(m[1], m[2] === "UNKNOWN" || cur === "UNKNOWN" ? "UNKNOWN" : (cur ?? 0) + Number(m[2]));
+  }
+  return out;
+}
+
+export type RegressionGateDeps = { getJson: (p: string) => Promise<unknown>; getText: (p: string) => Promise<string>; now: Date };
+const LAY_RUN = "chạy ops `regression-watch-status` (Actions → «Vận hành ERP trên VPS» → action = regression-watch-status, arg rỗng), đợi xong, rồi";
+
+/**
+ * Cổng DONE của sổ theo dõi. `source` = chữ của sổ trên nhánh tích hợp (`null` = sổ chưa có trên main ⇒ không sứ mệnh nào bị theo dõi).
+ * Trả `null` khi sứ mệnh không có dòng trong sổ (không kiểm), `{ ok }` khi được khép.
+ */
+export async function regressionDoneGate(mission: string, source: string | null, runId: string | undefined, deps: RegressionGateDeps): Promise<{ ok: true; note: string } | { ok: false; msg: string } | null> {
+  if (source === null || !regressionWatchedMissions(source).includes(mission)) return null;
+  const hd = `${mission} có dòng trong sổ theo dõi tái diễn (${REGRESSION_WATCH_FILE}) — DONE chỉ khi lượt đo mới nhất nói 0 việc tái diễn đang mở`;
+  if (!runId) return { ok: false, msg: `${hd}. Thiếu --regression-run: ${LAY_RUN} \`close ${mission} --status=DONE --evidence=… --regression-run=<run id>\`` };
+  if (!/^\d{5,20}$/.test(runId)) return { ok: false, msg: `${hd}. --regression-run phải là số run của GitHub Actions` };
+  try {
+    const run = (await deps.getJson(`/actions/runs/${runId}`)) as Record<string, unknown>;
+    if (!String(run.path ?? "").endsWith("ops-vps.yml")) return { ok: false, msg: `${hd}. Run ${runId} không phải lượt «Vận hành ERP trên VPS» — ${LAY_RUN} dùng run đó` };
+    if (run.conclusion !== "success") return { ok: false, msg: `${hd}. Run ${runId} chưa xong / không thành công (${String(run.conclusion ?? run.status)}) — ${LAY_RUN} dùng run thành công` };
+    const tuoi = (deps.now.getTime() - Date.parse(String(run.created_at ?? ""))) / 3_600_000;
+    if (!(tuoi <= REGRESSION_RUN_MAX_AGE_HOURS)) return { ok: false, msg: `${hd}. Run ${runId} đã cũ hơn ${REGRESSION_RUN_MAX_AGE_HOURS} giờ — ${LAY_RUN} dùng run mới` };
+    const jobs = ((await deps.getJson(`/actions/runs/${runId}/jobs?per_page=20`)) as { jobs?: unknown[] }).jobs ?? [];
+    let log = "";
+    for (const j of jobs) if (isObj(j) && j.id !== undefined) log += `${await deps.getText(`/actions/jobs/${String(j.id)}/logs`)}\n`;
+    const v = parseRegressionRunLog(log).get(mission);
+    if (v === undefined) return { ok: false, msg: `${hd}. Run ${runId} không có dòng \`regression-watch mission=${mission}\` — đó không phải lượt regression-watch-status, hoặc bản script trên máy chủ cũ hơn sổ; ${LAY_RUN} dùng run đó` };
+    if (v === "UNKNOWN") return { ok: false, msg: `${hd}. Run ${runId} không kết luận được (có tổ chức không đọc được, hoặc chưa tổ chức nào chạy lượt 2B có sổ) — đợi lượt 2B kế tiếp (từ 07:00 giờ VN) rồi đo lại` };
+    if (v > 0) return { ok: false, msg: `${hd}. Run ${runId}: ${v} việc TÁI DIỄN đang mở — lỗi vẫn lọt tới khách sau bản sửa; mở lại / sửa tiếp sứ mệnh, KHÔNG DONE` };
+    return { ok: true, note: `regression-watch run ${runId}: reopened=0` };
+  } catch (e) {
+    return { ok: false, msg: `${hd}. Không đọc được run ${runId} (${e instanceof Error ? e.message.slice(0, 120) : String(e)}) — cần mạng + GH_TOKEN để đọc log Actions` };
+  }
+}
+
+/** Nối cổng tái diễn vào `close`: đọc sổ trên nhánh tích hợp, hỏi GitHub. Không phải DONE ⇒ không kiểm. */
+async function regressionGateFor(ctx: RepoCtx, idIn: string | undefined, values: Map<string, string>): Promise<{ ok: true; note: string } | { ok: false; msg: string } | null> {
+  if (values.get("status") !== "DONE" || !idIn) return null;
+  const source = gitTry(ctx.top, ["show", `${ctx.config.integrationRef}:${REGRESSION_WATCH_FILE}`]);
+  if (source === null || !regressionWatchedMissions(source).includes(idIn)) return null;
+  const gh = githubClient(ctx);
+  if (!gh) return { ok: false, msg: `${idIn} có dòng trong sổ theo dõi tái diễn nhưng không đọc được remote GitHub để kiểm --regression-run` };
+  const token = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "").trim() || null;
+  const getText = async (p: string) => {
+    // Log job chuyển hướng sang blob ký sẵn: fetch của Node bỏ Authorization khi đổi gốc, nên token không đi theo ra ngoài GitHub.
+    const r = await fetch(`https://api.github.com/repos/${gh.repo.owner}/${gh.repo.repo}${p}`, { headers: { Accept: "application/vnd.github+json", "User-Agent": "ai-tech-room", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, signal: AbortSignal.timeout(30000) });
+    if (!r.ok) throw new Error(`GitHub ${r.status} ${p}`);
+    return r.text();
+  };
+  return regressionDoneGate(idIn, source, values.get("regression-run"), { getJson: gh.get, getText, now: new Date() });
+}
+
+function cmdClose(ctx: RepoCtx, idIn: string | undefined, flags: Set<string>, values: Map<string, string>, regression: { ok: true; note: string } | { ok: false; msg: string } | null = null): number {
   const id = mustMission(idIn);
   const status = values.get("status");
   if (status !== "DONE" && status !== "CANCELLED") throw new UsageError("--status=DONE|CANCELLED");
   const evidence = (values.get("evidence") ?? "").trim();
   if (!evidence) throw new UsageError("--evidence=… bắt buộc: PR, SHA, kết quả verify — hoặc lý do huỷ");
+  if (status === "DONE" && regression && !regression.ok) {
+    out(`✗ ${regression.msg}`);
+    return 1;
+  }
   gitRun(ctx.top, ["fetch", "--quiet", ctx.config.remote]);
   const r = mutateControl(ctx, controlActor(ctx), (st) => {
     const e = st.entries.find((x) => x.mission_id === id);
@@ -3586,7 +3666,7 @@ function cmdClose(ctx: RepoCtx, idIn: string | undefined, flags: Set<string>, va
       }
     }
     const now = new Date().toISOString();
-    const next: RegistryEntry = { ...e, status: status as MissionState, updated_at: now, last_heartbeat: now, needs_owner: undefined, evidence: { ...(e.evidence ?? {}), done: `${flags.has("no-runtime") ? "không đổi mã chạy · " : ""}${evidence}` } };
+    const next: RegistryEntry = { ...e, status: status as MissionState, updated_at: now, last_heartbeat: now, needs_owner: undefined, evidence: { ...(e.evidence ?? {}), done: `${flags.has("no-runtime") ? "không đổi mã chạy · " : ""}${evidence}${status === "DONE" && regression?.ok ? ` · ${regression.note}` : ""}` } };
     return {
       change: { put: { [entryFile(id)]: entryJson(next) }, events: [{ kind: status === "DONE" ? "DONE" : "CANCELLED", mission: id, detail: evidence.slice(0, 400) }], message: `khép sứ mệnh ${id}: ${status}` },
       result: { ok: true, msg: `${id} → ${status}; phạm vi (${e.owned_paths.length} mẫu) và giữ chỗ migration (${e.migration_reservations.join(", ") || "không"}) đã nhả` },
@@ -4266,7 +4346,7 @@ MẶT PHẲNG ĐIỀU KHIỂN XUYÊN SỨ MỆNH — docs/ai-tech-room/delivery-
   npm run ai -- claim <mã> [--title=… --branch=… --paths=a,b --after=<mã> --intake=… --status=… --dry-run]
                                                          đăng ký / cập nhật sứ mệnh; TỪ CHỐI khi chồng phạm vi / điểm nóng với sứ mệnh đang mở
   npm run ai -- heartbeat <mã> [--status=…]              nhịp tim (phiên còn sống) + đổi trạng thái
-  npm run ai -- close <mã> --status=DONE|CANCELLED --evidence=… [--no-runtime]
+  npm run ai -- close <mã> --status=DONE|CANCELLED --evidence=… [--no-runtime] [--regression-run=<run id>]
                                                          khép + nhả phạm vi / giữ chỗ; DONE đòi bằng chứng đã vào main + verify ĐẠT
   npm run ai -- lease acquire|renew|release|status [integration-lead|tech-lead] [--ttl=phút] [--purpose=…] [--token=…|--resume]
                                                          MỘT chủ gộp/deploy tại một thời điểm (nhãn máy:cây + MÃ PHIÊN); hết hạn là nhả
@@ -4333,7 +4413,7 @@ export async function main(argv: readonly string[], cwd: string, opts: { actor?:
     case "heartbeat":
       return cmdHeartbeat(ctx, rest[0], a.values);
     case "close":
-      return cmdClose(ctx, rest[0], a.flags, a.values);
+      return cmdClose(ctx, rest[0], a.flags, a.values, await regressionGateFor(ctx, rest[0], a.values));
     case "lease":
       return cmdLease(ctx, rest[0], rest[1], a.flags, a.values);
     case "migration":
