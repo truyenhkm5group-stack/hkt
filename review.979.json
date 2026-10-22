@@ -1,8 +1,8 @@
 {
   "pr": 979,
-  "sha": "754984932087c7a9bb00b774c32a66ee2fabff32",
+  "sha": "b02a41a9992b9862aa374bdb3498194bd8916f6f",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-22T16:58:50.246Z",
-  "note": "review lead (P0 22/10 VTP gửi lại trên web): reshipParentOf thuần — ORDER_REFERENCE trùng vtp_order_number (tracking_code chỉ khi gốc chưa có mã VTP) của đúng MỘT shipment có order_id ⇒ lần gửi kế cùng đơn (attempt_no = max+1, OUTBOUND); 0 ứng viên ⇒ mồ côi; ≥2 / đơn mất ⇒ mồ côi + raw.relink lý do; mã chiều hoàn [số]P[số] KHÔNG BAO GIỜ đi nhánh này (3.7). relinkOrphanShipment: giao dịch FOR UPDAT"
+  "at": "2026-10-22T17:07:09.566Z",
+  "note": "review lead: so với 75498493 chỉ thêm rematerializeOutcomes([orderId]) sau materialize trong relinkOrphanShipment (đường vá dòng cũ) để phép đo đọc thẳng canonical_order_outcome thấy kết luận mới ngay; webhook giữ nhịp job 5 phút. Bài kiểm có khẳng định."
 }
