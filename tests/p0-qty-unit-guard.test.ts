@@ -18,7 +18,7 @@ import { extractVndAmounts } from "@/lib/sales-chatbot/claim-guard";
 import { QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
 import { SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { createProductCore } from "@/lib/records/product-create";
-import { scanThreadQuality, type QualityMsg } from "@/lib/sales-quality/detectors";
+import { packMultiplierLeaks, scanThreadQuality, type QualityMsg } from "@/lib/sales-quality/detectors";
 import { CONFIRMED_EDIT_MAX_GROWTH, ORDER_GUARD_CODES } from "@/lib/constants/sales-order-guard";
 import { SALES_QUALITY_CODES, SALES_QUALITY_SPEC } from "@/lib/constants/sales-quality";
 import { setSettingJson } from "@/lib/settings";
@@ -128,6 +128,48 @@ function testBoDo() {
   console.log("  ✓ 2B: mã chặn đọc từ ô guard của kết quả công cụ · tổng page ≠ tổng bot · mẫu số lần ghi đơn / tin báo tổng");
 }
 
+/* ───── 2b · PACK_MULTIPLIER_LEAKED — «lọt tới khách» (sổ tái diễn đọc mã này) ───── */
+function testLotToiKhach() {
+  const NEM_NAME = `${NEM} (Size: Hộp 10 cái)`;
+  const products = [{ name: NEM, skus: ["NEM-10"] }, { name: "Ruốc bông tôm 100%", skus: ["RUOC-TOM"] }];
+  const names = products.map((p) => p.name);
+  // Hàm thuần: số hộp = số cái / số trần khách nói (bội quy cách) ⇒ lọt; đúng số hộp / khách nói rõ «hộp» ⇒ không.
+  assert.deepEqual(packMultiplierLeaks("Thêm 10 nem hải sản tôm bề bề", [{ name: NEM_NAME, quantity: 10 }], names), [{ name: NEM, quantity: 10, perPack: 10 }], "ca #8037F35A: 10 nem ⇒ 10 hộp");
+  assert.deepEqual(packMultiplierLeaks("Thêm 10 cái nem hải sản tôm bề bề", [{ name: NEM_NAME, quantity: 10 }], names).length, 1, "«10 cái» ⇒ 10 hộp cũng là lọt");
+  assert.deepEqual(packMultiplierLeaks("Thêm 10 nem hải sản tôm bề bề", [{ name: NEM_NAME, quantity: 1 }], names), [], "đúng 1 hộp ⇒ không bắt");
+  assert.deepEqual(packMultiplierLeaks("Thêm 10 hộp nem hải sản tôm bề bề", [{ name: NEM_NAME, quantity: 10 }], names), [], "khách nói rõ «10 hộp» ⇒ không bắt");
+  assert.deepEqual(packMultiplierLeaks("Thêm 5 nem hải sản tôm bề bề", [{ name: NEM_NAME, quantity: 5 }], names), [], "không phải bội quy cách ⇒ không kết luận lọt (đã là việc của QUANTITY_UNIT_AMBIGUOUS)");
+  assert.deepEqual(packMultiplierLeaks("Thêm 1 hộp ruốc", [{ name: "Ruốc bông tôm 100% (Size: 250g)", quantity: 1 }], names), [], "mẫu mã không bán theo hộp N cái ⇒ không xét");
+  assert.deepEqual(packMultiplierLeaks("giao chiều nhé", [{ name: NEM_NAME, quantity: 10 }], names), [], "tin khách không nói số món ⇒ không bắt");
+
+  // Chuỗi #30 → #39 của ca thật trên LỊCH SỬ: lần × 1 bị chặn, lần × 10 ghi THÀNH CÔNG ⇒ bắt, mốc = lượt ghi đơn.
+  const at = (m: number) => new Date(Date.UTC(2031, 2, 1, 3, m));
+  const text = (t: string) => [{ type: "text", text: t }];
+  const result = (q: number) => JSON.stringify({ order_code: "#X", lines: [{ variant_id: "v-ruoc", name: "Ruốc bông tôm 100% (Size: 250g)", quantity: 1 }, { variant_id: "v-nem", name: NEM_NAME, quantity: q }] });
+  const chuoi = (finalQty: number): QualityMsg[] => [
+    { seq: 1, role: "user", at: at(0), content: text("Thêm 10 nem hải sản tôm bề bề") },
+    { seq: 2, role: "assistant", at: at(1), content: [{ type: "tool_use", id: "u1", name: "update_draft_order", input: {} }] },
+    { seq: 3, role: "user", at: at(1), content: [{ type: "tool_result", toolUseId: "u1", isError: true, content: JSON.stringify({ error: "KHÔNG được hạ" }) }] },
+    { seq: 4, role: "assistant", at: at(2), content: [{ type: "tool_use", id: "u2", name: "update_draft_order", input: {} }] },
+    { seq: 5, role: "user", at: at(2), content: [{ type: "tool_result", toolUseId: "u2", isError: false, content: result(finalQty) }] },
+    { seq: 6, role: "assistant", at: at(3), content: text("Dạ em thêm vào đơn rồi ạ.") },
+    // Lượt sửa sau (đổi ghi chú) đọc lại đúng các dòng cũ ⇒ KHÔNG bắt lần hai cho cùng (món, số).
+    { seq: 7, role: "user", at: at(4), content: text("Thêm 10 nem hải sản tôm bề bề giao chiều nhé") },
+    { seq: 8, role: "assistant", at: at(5), content: [{ type: "tool_use", id: "u3", name: "update_draft_order", input: {} }] },
+    { seq: 9, role: "user", at: at(5), content: [{ type: "tool_result", toolUseId: "u3", isError: false, content: result(finalQty) }] },
+  ];
+  const w = { from: at(0), to: at(30), templates: [], products };
+  const sai = scanThreadQuality(chuoi(10), w).hits.filter((h) => h.code === "PACK_MULTIPLIER_LEAKED");
+  assert.equal(sai.length, 1, "trước bản sửa (ghi 10 hộp) ⇒ bắt đúng MỘT lần");
+  assert.equal(sai[0].at.getTime(), at(2).getTime(), "mốc của hit = lượt ghi đơn (sổ tái diễn đếm theo mốc từng hit)");
+  assert.equal(scanThreadQuality(chuoi(1), w).hits.filter((h) => h.code === "PACK_MULTIPLIER_LEAKED").length, 0, "đúng 1 hộp ⇒ không bắt");
+  // Kết quả công cụ KHÔNG phải ghi đơn (calculate_cart — báo giá) mang cùng dòng ⇒ không phải đơn đã ghi.
+  const quote = chuoi(10).map((m) => (m.seq === 4 ? { ...m, content: [{ type: "tool_use", id: "u2", name: "calculate_cart", input: {} }] } : m)).filter((m) => m.seq < 7);
+  assert.equal(scanThreadQuality(quote, w).hits.filter((h) => h.code === "PACK_MULTIPLIER_LEAKED").length, 0, "báo giá không phải đơn đã ghi");
+  assert.ok((SALES_QUALITY_CODES as readonly string[]).includes("PACK_MULTIPLIER_LEAKED"), "mã 2B có đặc tả (không khẳng định «phần tử cuối» — nhánh khác cũng thêm mã ở cuối)");
+  console.log("  ✓ 2B PACK_MULTIPLIER_LEAKED: chuỗi #30 → #39 ghi 10 hộp ⇒ bắt một lần, mốc = lượt ghi · đúng 1 hộp / «10 hộp» / không bội / báo giá ⇒ không bắt");
+}
+
 /* ───── 3 · chatTurn: chuỗi #30 → #39 và biến thể ───── */
 const ADDR = "9 Hai Bà Trưng, Phường Hoàn Kiếm, Thành phố Hà Nội";
 const INFO = (phone: string) => `Cho chị 1 hộp ruốc bông tôm, Lan ${phone}, ${ADDR}`;
@@ -232,6 +274,7 @@ export async function testP0QtyUnitGuard(): Promise<void> {
   testThuan();
   testNguon();
   testBoDo();
+  testLotToiKhach();
   await testChatTurn();
   console.log("✓ P0 hàng rào số lượng / đơn vị (đơn HSLC #8037F35A): «10 nem» không còn thành 10 hộp; mọi lần chặn mang mã 2B");
 }

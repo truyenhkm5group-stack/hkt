@@ -15,7 +15,7 @@ import { inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { CLAIM_SAFE_TEXT } from "@/lib/sales-chatbot/claim-guard";
 import { EMPTY_REPLY_TEXT } from "@/lib/sales-chatbot/engine";
-import { COMMENT_ALREADY_NOTE, COMMENT_CARRY_LABEL, fixedAmountsInTemplate, reviewCodesText, fixedTextKind, moneyOfToolResult, parseTraceArgs, QUICK_REPLAY_VARIANTS, quickDecisionAt, quickReplyHead, scanAiPerformance, scanPatterns, totalClaimsIn, traceConversation, wrongProductTemplate } from "../scripts/conv-money-trace";
+import { addressAskAfterText, ADDRESS_ASK_WINDOW_MS, addressResolutionText, COMMENT_ALREADY_NOTE, COMMENT_CARRY_LABEL, fixedAmountsInTemplate, reviewCodesText, fixedTextKind, moneyOfToolResult, parseTraceArgs, QUICK_REPLAY_VARIANTS, quickDecisionAt, quickReplyHead, scanAiPerformance, scanPatterns, totalClaimsIn, traceConversation, wrongProductTemplate } from "../scripts/conv-money-trace";
 
 const PHONE = "0900003106";
 
@@ -30,6 +30,22 @@ function testPure() {
   assert.equal(reviewCodesText({}), "đang mở không · người đã kiểm chưa");
   assert.equal(reviewCodesText({ review: { entries: [{ code: "ADDRESS_UNRESOLVED", note: "Hà Nội" }, { code: "LA" }] } }), "đang mở ADDRESS_UNRESOLVED+KHAC · người đã kiểm chưa", "mã lạ ⇒ KHAC, không in ghi chú");
   assert.equal(reviewCodesText({ review: null, reviewLog: [{ action: "CONFIRMED", byName: "Chị A", entries: [{ code: "ADDRESS_UNRESOLVED" }] }] }), "đang mở không · người đã kiểm CONFIRMED:ADDRESS_UNRESOLVED", "nhân viên bấm Xác nhận ⇒ cờ về null, lượt kiểm vào reviewLog; không in tên người bấm");
+  // Lượt MÁY gỡ cờ địa chỉ (ADDRESS_SETTLED) không bao giờ in thành «người đã kiểm KHAC:…» (Tech Lead 22/10/2026, sau #973).
+  const settledLog = { reviewLog: [{ action: "ADDRESS_SETTLED", byName: "Máy ánh xạ địa chỉ · nguồn PLACES", entries: [{ code: "ADDRESS_UNRESOLVED", note: "Hà Nội" }] }] };
+  assert.equal(reviewCodesText(settledLog), "đang mở không · người đã kiểm chưa · máy ghép phường ADDRESS_UNRESOLVED", "máy gỡ cờ ⇒ nhãn riêng, không phải người");
+  assert.equal(reviewCodesText({ reviewLog: [{ action: "CONFIRMED", entries: [] }, { action: "ADDRESS_SETTLED", entries: [{ code: "ADDRESS_UNRESOLVED" }] }, { action: "CUSTOMER_RECONFIRMED", entries: [] }] }), "đang mở không · người đã kiểm CONFIRMED:— · máy ghép phường ADDRESS_UNRESOLVED · khách xác nhận lại 1 lần");
+  for (const a of ["CONFIRMED", "CANCELLED", "CUSTOMER_RECONFIRMED", "ADDRESS_SETTLED"]) assert.ok(readFileSync(path.join(__dirname, "..", "lib", "constants", "order-review.ts"), "utf8").includes(`"${a}"`), `nhãn ${a} trùng đúng ORDER_REVIEW_ACTIONS của lib`);
+  // Vết máy ánh xạ: tóm tắt chỉ mã / có-không / số đếm; tên xã, ứng viên, lý do chỉ ở chi tiết (mã hoá).
+  const res = { addressResolution: { status: "SURE", source: "PLACES", ward: "Phường Khương Đình", province: "Thành phố Hà Nội", candidates: ["Phường Khương Đình", "Phường Định Công"], reason: "TEXT ∩ PLACES còn một xã", textSource: "CONVERSATION", places: true, placesError: null, attempts: 1, at: "2026-10-22T13:40:00.000Z" } };
+  const ar = addressResolutionText(res, "Phường Khương Đình");
+  assert.equal(ar.tom, "máy ánh xạ: SURE · bậc PLACES · chữ CONVERSATION · 2 ứng viên · khớp ô xã đơn · Google có gọi · lần 1");
+  assert.ok(!/Khương|Định Công|Hà Nội|TEXT ∩/.test(ar.tom), "tóm tắt không mang tên nơi giao / lý do");
+  assert.ok(ar.chiTiet?.includes("Phường Khương Đình") && ar.chiTiet.includes("TEXT ∩ PLACES"), "chi tiết (mã hoá) có xã chọn + lý do để kiểm ĐÚNG / SAI");
+  assert.match(addressResolutionText(res, "").tom, /KHÁC ô xã đơn/, "xã máy chọn ≠ ô xã đơn ⇒ lộ ra");
+  assert.equal(addressResolutionText({}, "").tom, "máy ánh xạ: chưa xét");
+  assert.match(addressResolutionText({ addressResolution: { status: "UNSURE", source: null, ward: null, candidates: ["A", "B", "C"], places: true, placesError: "AUTH: API key not valid", attempts: 2 } }, "").tom, /^máy ánh xạ: UNSURE · bậc — · chữ — · 3 ứng viên · không chọn xã · Google có gọi \(lỗi AUTH\) · lần 2$/);
+  assert.match(addressResolutionText({ addressResolution: { status: "lạ", source: "x", placesError: "Lỗi lạ: …" } }, "").tom, /máy ánh xạ: KHAC · bậc KHAC .*lỗi KHAC/, "chữ ngoài danh sách đóng ⇒ KHAC");
+  assert.ok(readFileSync(path.join(__dirname, "..", "lib", "address", "resolve-job.ts"), "utf8").includes("textSource"), "trường vết trùng lib/address/resolve-job.ts");
   assert.ok(readFileSync(path.join(__dirname, "..", "lib", "sales-chatbot", "engine.ts"), "utf8").includes(`\`${COMMENT_CARRY_LABEL}\${at.toISOString()}]\``), "nhãn đếm ở dòng C TRÙNG đúng nhãn carryCommentTurn gắn (đổi một bên thì dòng C đếm 0 mãi)");
   assert.ok(readFileSync(path.join(__dirname, "..", "lib", "sales-chatbot", "fanpage.ts"), "utf8").includes(`reason: "${COMMENT_ALREADY_NOTE} (Pancake tự động / nhân viên)`), "mẫu số ALREADY đếm đúng câu lý do fanpage.ts ghi vào dòng tin");
   assert.deepEqual(parseTraceArgs(["hslc", "--scan", "--since=2026-10-14T08:10Z"]), { code: "hslc", conv: null, order: null, scan: true, days: 3, since: new Date("2026-10-14T08:10:00Z") }, "--since đo đúng khoảng sau deploy");
@@ -208,7 +224,20 @@ function testWrongProduct() {
   assert.ok("error" in parseTraceArgs(["hslc", "--scan", "--since=2026-10-18T13:12Z", "--until=2026-10-18T13:00Z"]), "--until phải sau --since");
 }
 
+/** Dòng O (AGENTS 3.12b): cùng định nghĩa với điểm chặn của engine; biên cửa sổ; khách chưa gửi chữ địa chỉ ⇒ ngoài mẫu số. */
+function testAddressAskAfterText() {
+  const t0 = Date.parse("2031-03-01T03:00:00Z");
+  const said = [{ text: "Số 12 Nguyễn Trãi, Hà Nội", at: t0 }];
+  assert.equal(addressAskAfterText(said, "Dạ mình cho em xin tên phường nhé?", t0 + 60_000), true, "đã có chữ địa chỉ mà hỏi phường ⇒ đếm");
+  assert.equal(addressAskAfterText(said, "Dạ em lên đơn cho mình rồi ạ.", t0 + 60_000), false, "không hỏi ⇒ vào mẫu số, không đếm");
+  assert.equal(addressAskAfterText(said, "Dạ em ghi nhận địa chỉ của mình rồi ạ.", t0 + 60_000), false, "câu ghi nhận của hàng rào không phải câu hỏi");
+  assert.equal(addressAskAfterText([{ text: "ok em", at: t0 }], "Dạ mình cho em xin địa chỉ nhận hàng ạ?", t0 + 60_000), null, "chưa có chữ địa chỉ ⇒ ngoài mẫu số");
+  assert.equal(addressAskAfterText(said, "Dạ mình cho em xin tên phường nhé?", t0 + ADDRESS_ASK_WINDOW_MS + 1), null, "chữ địa chỉ quá cửa sổ lượt mua ⇒ không tính");
+  assert.equal(addressAskAfterText([{ text: "Số 12 Nguyễn Trãi, Hà Nội", at: t0 + 120_000 }], "Dạ mình cho em xin tên phường nhé?", t0 + 60_000), null, "tin khách SAU tin bot không tính");
+}
+
 export async function testConvMoneyTrace() {
+  testAddressAskAfterText();
   testPure();
   testWrongProduct();
   testSource();

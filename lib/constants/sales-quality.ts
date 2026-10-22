@@ -30,6 +30,8 @@ export const SALES_QUALITY_CODES = [
   "CART_TOTAL_CONFLICT",
   "STAFF_AI_QUOTE_CONFLICT",
   "ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT",
+  // «Lọt tới khách» của hàng rào số lượng / đơn vị: đơn ĐÃ GHI số hộp = số cái khách nói (sổ tái diễn regression-reopen-watch đọc mã này).
+  "PACK_MULTIPLIER_LEAKED",
 ] as const;
 export type SalesQualityCode = (typeof SALES_QUALITY_CODES)[number];
 
@@ -167,6 +169,13 @@ export const SALES_QUALITY_SPEC: Record<SalesQualityCode, SalesQualitySpec> = {
     delivery: "BLOCKED_PRE_SEND",
     source: "lib/sales-chatbot/tools.ts",
     action: "Mở hội thoại: khách chưa nói lấy thêm bao nhiêu mà bot định sửa đơn đã chốt — nhân viên hỏi khách rồi mới sửa.",
+  },
+  PACK_MULTIPLIER_LEAKED: {
+    label: "Đơn ĐÃ GHI số hộp bằng số cái khách nói (10 nem ⇒ 10 hộp) — lọt qua hàng rào số lượng / đơn vị tới khách",
+    unit: "MESSAGE",
+    delivery: "REACHED_CUSTOMER",
+    source: "lib/sales-quality/detectors.ts",
+    action: "Mở đơn của hội thoại NGAY: số hộp có thể gấp N lần ý khách — sửa về đúng số hộp (số cái / quy cách), báo khách tổng mới; báo kỹ thuật vì hàng rào sales-qty-unit-guard đã để lọt.",
   },
 };
 
