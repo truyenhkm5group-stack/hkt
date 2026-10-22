@@ -14,6 +14,8 @@
   "domains": [],
   "owned_paths": [
     "lib/sales-chatbot/cart-commitment.ts",
+    "lib/sales-chatbot/tools.ts",
+    "lib/sales-chatbot/shipping.ts",
     "tests/p0-865-missing-item.test.ts",
     "tests/sync-fixtures.test.ts"
   ],
@@ -22,8 +24,8 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T19:18:54.116Z",
-  "updated_at": "2026-10-22T20:29:45.175Z",
-  "last_heartbeat": "2026-10-22T20:29:45.175Z",
+  "updated_at": "2026-10-22T21:14:32.404Z",
+  "last_heartbeat": "2026-10-22T21:14:32.404Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
