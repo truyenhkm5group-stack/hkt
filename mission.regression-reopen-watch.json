@@ -3,7 +3,7 @@
   "mission_id": "regression-reopen-watch",
   "title": "Lỗi 2B đã sửa mà tái diễn tự MỞ LẠI (sổ theo dõi + REGRESSION_REOPENED + chặn DONE)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -24,7 +24,24 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-22T12:42:27.980Z",
-  "updated_at": "2026-10-22T12:42:27.980Z",
-  "last_heartbeat": "2026-10-22T12:42:27.980Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-22T13:39:23.689Z",
+  "last_heartbeat": "2026-10-22T13:39:23.689Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/regression-reopen-watch",
+    "sha": "372cffeaaf5e9e46d4d01f2ddaf1714016351254",
+    "at": "2026-10-22T13:39:23.689Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "Lỗi 2B đã sửa mà tái diễn tự MỞ LẠI (sổ theo dõi + REGRESSION_REOPENED + chặn DONE)",
+    "summary": "@372cffeaa. Sổ theo dõi tái diễn 2B: delivery REACHED_CUSTOMER/BLOCKED_PRE_SEND cho mọi mã; REGRESSION_WATCH 4 bản sửa (#945 #959 #966 #968, liveAt = deploy xanh); lượt 2B chỉ đếm hit sau liveAt, một việc / (mã, sứ mệnh), đóng rồi lọt lại ⇒ MỞ LẠI + một tin; rates + history 30 ngày; ops regression-watch-status chỉ đọc mã hoá; ai-tech close DONE đòi --regression-run reopened=0. Không migration. Chạm lib/sales-quality (đường 2B chạy production) + scripts/ai-tech.ts.",
+    "tests": [
+      "npm run typecheck: sạch",
+      "eslint 9 tệp đổi: sạch",
+      "TEST_KHOI=K22 (regression-watch + sales-quality-daily): XANH trên 372cffeaa",
+      "TEST_KHOI=K18 (ops-log-leak, ops mới mã hoá + tóm tắt không trường người): XANH",
+      "TEST_KHOI=K17 (ai-tech-room + repo-integrity): XANH",
+      "4 đột biến (bỏ mốc live · không mở lại · gửi lại khi refresh · DONE khi còn tái diễn): đều bị bắt",
+      "shard 1–4 + build: giao CI gates"
+    ]
+  }
 }
