@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "payroll-net-pay-certain",
+  "title": "Thực nhận không còn «—» chỉ vì một số tạm tính không ai trả: 0% là 0, tháng không có LN đủ điều kiện là thưởng 0",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/payroll-net-pay-certain",
+  "base_sha": "6d806b9baa967fa6f0543eac4a3cc3da194b9437",
+  "domains": [],
+  "owned_paths": [
+    "lib/queries/payroll.ts",
+    "lib/payroll/profit-gate.ts",
+    "tests/payroll-profit-gate.test.ts",
+    "tests/payroll-carryover.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-22T05:18:44.073Z",
+  "updated_at": "2026-10-22T05:18:44.073Z",
+  "last_heartbeat": "2026-10-22T05:18:44.073Z",
+  "definition_of_done": []
+}
