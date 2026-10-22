@@ -42,6 +42,7 @@ import { buildPayrollSnapshot, type PayrollSnapshot } from "@/lib/queries/payrol
 import { lockedMonthFigures, monthPeriodKey, monthsBetween } from "@/lib/queries/payroll-profit-gate";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { PAYROLL_RECOGNITION_KEY } from "@/lib/queries/payroll-cost";
+import { PAYROLL_CARRYOVER_KEY } from "@/lib/constants/payroll-carryover";
 import { PAYROLL_PROFIT_SIGNOFF_KEY } from "@/lib/constants/payroll-reconciliation";
 
 const TR = 1_000_000;
@@ -350,6 +351,18 @@ async function testFlow(db: Db) {
   const chan1 = payrollFinalizeBlockers({ bounded: true, basisEligible: true, basisWhy: "", basisLabel: "", totalSalary: r1.totalSalary, costWarnings: r1.marketers.costWarnings, lines: [], profitGate: profitGateReadiness(r1) });
   assert.ok(!chan1.some((b) => b.code.startsWith("PROFIT_GATE")), "đã kết luận ⇒ cổng không chặn chốt");
 
+  /* ── Tháng KHÔNG có LN đủ điều kiện + % LN cá nhân CHƯA BIẾT (sổ lỗ chưa có số dư đầu) ⇒ thực nhận vẫn tính được ── */
+  await setSettingJson(PAYROLL_CARRYOVER_KEY, { enabled: true, startMonth: "2027-11", startNote: "kiểm thử: sổ lỗ mở trước tháng đo, tháng trước chưa có dòng" });
+  clearMemo();
+  const r1cb = await getPayrollReport(T1, "profit1");
+  assert.equal(dong(r1cb, B.id).bonusPersonal, null, "chuẩn bị: % LN cá nhân của B CHƯA BIẾT (sổ lỗ chưa có số dư đầu)");
+  assert.equal(r1cb.profitGate.result.status, "NO_ELIGIBLE_PROFIT", "không có LN đủ điều kiện ⇒ kết luận chắc chắn, không chặn vì một số tạm tính chưa biết");
+  assert.equal(dong(r1cb, B.id).profitShare.eligible, 0, "thưởng đủ điều kiện của B = 0");
+  assert.equal(dong(r1cb, B.id).salary, (dong(r1cb, B.id).fixed ?? 0) + dong(r1cb, B.id).bonusRevenue + 0, "thực nhận = lương cứng + hoa hồng doanh thu + 0 — không phải «—»");
+  assert.equal(dong(r1cb, A.id).salary, 0, "A (chỉ % toàn shop, 0% cá nhân) cũng tính được");
+  await setSettingJson(PAYROLL_CARRYOVER_KEY, { enabled: false, startMonth: null, startNote: "" });
+  clearMemo();
+
   /* ── Tháng 2 khi tháng 1 CHƯA KHOÁ ⇒ mô phỏng, chưa đủ căn cứ chốt ── */
   const r2nhap = await getPayrollReport(T2, "profit1");
   assert.deepEqual(r2nhap.profitGate.simulatedMonths, ["2028-01"], "tháng 1 còn nháp ⇒ được MÔ PHỎNG và nói ra");
@@ -565,8 +578,23 @@ function testResidualPure() {
   assert.equal(khong.allocations.length, cl.length, "không đẻ dòng phần còn lại");
 }
 
+/** Tháng KHÔNG có LN đủ điều kiện: một khoản tạm tính chưa biết không được chặn kết luận «0». */
+function testCertainZeroPure() {
+  const chuaBiet = [claim("a:SHOP", 3 * TR), claim("b:PERSONAL", null)];
+  const lo = run({ periodBase: -5 * TR, claims: chuaBiet });
+  assert.equal(lo.status, "NO_ELIGIBLE_PROFIT", "LN tháng ≤ 0 ⇒ kết luận chắc chắn, dù một số tạm tính chưa biết");
+  assert.deepEqual(lo.allocations.map((a) => a.eligible), [0, 0], "mọi khoản đủ điều kiện = 0");
+  assert.deepEqual(lo.allocations.map((a) => a.withheld), [3 * TR, null], "phần bị giữ của khoản chưa biết là CHƯA BIẾT, không phải 0");
+  assert.equal(lo.provisionalTotal, null, "tổng tạm tính vẫn CHƯA BIẾT");
+  const bu = run({ opening: mo(-10 * TR, 0), periodBase: 4 * TR, claims: chuaBiet });
+  assert.equal(bu.status, "NO_ELIGIBLE_PROFIT", "lãi tháng chưa bù hết lỗ lũy kế ⇒ E = 0 ⇒ cũng kết luận được");
+  const lai = run({ periodBase: 5 * TR, claims: chuaBiet });
+  assert.equal(lai.status, "DATA_INCOMPLETE", "CÓ quỹ để chia mà một khoản chưa biết ⇒ vẫn chặn (không đoán phần của ai)");
+}
+
 export async function testPayrollProfitGate(db: Db) {
   testPure();
+  testCertainZeroPure();
   testResidualPure();
   testSourceFences();
   await testFlow(db);

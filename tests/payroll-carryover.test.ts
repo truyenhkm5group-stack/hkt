@@ -132,6 +132,18 @@ export async function testPayrollCarryover(db: Db) {
    * Tháng 5 mới là NHÁP (chưa ai bấm chốt), nên tháng 6 chỉ MÔ PHỎNG được — xem thì được, chốt thì
    * chưa. Đây là chỗ dễ sai nhất: lấy đại số dư của một tháng chưa chốt rồi trả tiền theo nó.
    */
+  // Người 0% LN cá nhân (chỉ lương cứng / % toàn shop) KHÔNG được thành «—» chỉ vì sổ lỗ chưa có số dư đầu.
+  const KHONG: Employee = { ...MKT, id: "co-mkt-0", name: "Không hoa hồng cá nhân", shortName: "K0", percentPersonal: 0 };
+  await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [MKT, KHONG] });
+  clearMemo();
+  const haiNguoi = await getPayrollReport(THANG6, "profit1");
+  const k0 = haiNguoi.lines.find((l) => l.employee.id === KHONG.id);
+  assert.equal(k0?.carry?.openingBasis, "NONE", "chuẩn bị: sổ lỗ của người 0% cũng chưa có số dư đầu");
+  assert.equal(k0?.bonusPersonal, 0, "0% của số CHƯA BIẾT là ĐÚNG 0");
+  assert.equal(k0?.provisionalSalary, 0, "dòng lương của người 0% vẫn tính được (không phải «—»)");
+  assert.equal(haiNguoi.lines.find((l) => l.employee.id === MKT.id)?.bonusPersonal, null, "người CÓ % cá nhân vẫn CHƯA BIẾT — không đoán");
+  await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [MKT] });
+  clearMemo();
   const thang6Nhap = await getPayrollReport(THANG6, "profit1");
   const d3 = dongLuong(thang6Nhap);
   assert.equal(
