@@ -1,8 +1,8 @@
 {
   "pr": 978,
-  "sha": "58de8a99d8d2b858327381dcca7f6d9081ae1290",
+  "sha": "36f145fe4ba26e87820fb0e402c3e4cb9fb7f556",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-22T16:28:18.134Z",
-  "note": "review lead: CHỈ-SCRIPT, CHỈ ĐO (ERP_READ_ONLY + hỏi lại phiên, --apply bị từ chối ở bước A). GTC qua returnsPageParams + loadReturnsPage (cùng hàm trang) cho 7d và từ 15/10; đơn huỷ theo ngày + phần là đơn gốc của vận đơn tạo lại; cặp gốc ↔ tạo lại cùng rời kho. Mã hoá, tóm tắt chỉ số đếm. Là mốc TRƯỚC cho vtp-reship-relink."
+  "at": "2026-10-22T16:46:45.831Z",
+  "note": "review lead: chỉ gộp main sau #977; ops-vps.yml giữ cả regression-watch-status và vtp-reship-backfill (mỗi tên một lần ở mọi danh sách + hai case), sync-fixtures giữ cả hai; script không đổi so với 58de8a99 (CHỈ ĐO). Khối ops 87.251/125.000 B."
 }
