@@ -129,8 +129,12 @@ export function testPayrollLifecycle() {
   assert.ok(viTriKhoa > 0, "lượt chuyển trạng thái phải cầm một khoá TÊN");
   assert.ok(viTriDocLai > viTriKhoa, "và phải đọc lại trạng thái SAU khi đã cầm khoá");
   assert.ok(cua.includes('can(user, spec.permission)'), "máy chủ phải kiểm quyền — nút ẩn không phải một lớp bảo vệ");
-  assert.ok(cua.includes("guardSecondApproval"), "ba việc nguy hiểm phải đi qua cổng người thứ hai");
-  assert.ok(cua.indexOf("guardSecondApproval") < cua.indexOf("transitionPayrollRunAs("), "cổng người thứ hai phải đứng TRƯỚC lượt ghi");
+  // Từ 22/10/2026 lý do · bảng chuyển · cổng người thứ hai nằm ở `movePayrollRunAs` (lõi dùng chung với
+  // scripts/payroll-owner-apply.ts); cửa của người truyền ĐÚNG `guardSecondApproval` vào lõi.
+  assert.ok(/movePayrollRunAs\([^;]*\{ guard: guardSecondApproval \}\)/.test(cua), "ba việc nguy hiểm phải đi qua cổng người thứ hai");
+  const move = nguon.slice(nguon.indexOf("export async function movePayrollRunAs("));
+  assert.ok(move.indexOf("await opts.guard(") > 0 && move.indexOf("await opts.guard(") < move.indexOf("transitionPayrollRunAs("), "cổng người thứ hai phải đứng TRƯỚC lượt ghi");
+  assert.ok(!cua.includes("transitionPayrollRunAs("), "cửa của người không tự ghi — chỉ đi qua lõi");
   assert.ok(/actor\.id === null && !MACHINE_RUN_ACTIONS\.includes\(action\)/.test(nguon), "lõi phải tự chặn MÁY làm việc của người (duyệt · khoá · mở khoá · đánh dấu trả)");
   assert.ok(!/^"use server"/.test(nguon.trimStart()), "lõi KHÔNG được là server action — nó không kiểm quyền nên không được gọi thẳng từ trình duyệt");
 

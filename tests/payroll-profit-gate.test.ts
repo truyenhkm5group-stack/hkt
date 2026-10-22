@@ -219,7 +219,8 @@ function testPure() {
 
 /* ═══════════════════════ HÀNG RÀO MÃ NGUỒN ═══════════════════════ */
 function testSourceFences() {
-  const pol = readFileSync("lib/actions/payroll-policy.ts", "utf8");
+  // Lược đồ + thân ghi quy chế nằm ở lõi dùng chung (màn hình và `scripts/payroll-owner-apply.ts`) từ 22/10/2026.
+  const pol = readFileSync("lib/actions/payroll-policy.ts", "utf8") + readFileSync("lib/payroll/profit-gate-service.ts", "utf8");
   for (const m of ["Lịch trần có hai mốc trùng tháng", "Mốc trần không được trước tháng mở sổ", "Khai quỹ thưởng tối đa (một con số) hoặc lịch trần theo tháng", "Người nhận phần còn lại không có trong danh sách nhân sự"]) {
     assert.ok(pol.includes(m), `khai quy chế phải chặn: ${m}`);
   }
@@ -237,7 +238,7 @@ function testSourceFences() {
   assert.ok(doc("lib/payroll/payslip-delivery.ts").includes("if (line.profitShare) return line.salary;"), "phiếu lương & chuyển khoản đọc số đã qua cổng");
   assert.ok(doc("lib/payroll/run-service.ts").includes("profitGate: profitGateReadiness(report)"), "chốt kỳ đi qua cổng");
   // Điều chỉnh lũy kế: tháng chứng từ bắt buộc, sớm hơn tháng ghi, đã khoá; tháng ghi chưa khoá; ghi sổ dưới khoá tên.
-  const act = doc("lib/actions/payroll-policy.ts");
+  const act = doc("lib/actions/payroll-policy.ts") + doc("lib/payroll/profit-gate-service.ts");
   assert.ok(act.includes("if (d.aboutMonth >= d.monthKey)") && act.includes("CHƯA khoá — bản tính của chính tháng ấy đã gồm chứng từ này"), "điều chỉnh chỉ cho chứng từ của tháng ĐÃ KHOÁ, sớm hơn tháng ghi");
   assert.ok(act.includes("kỳ đã khoá là bất biến. Ghi điều chỉnh vào tháng đang mở."), "không ghi vào tháng đã khoá");
   assert.ok(act.includes("pg_advisory_xact_lock(hashtext('erp:payroll-profit-gate'))") && (act.match(/await ghiSoCong\(/g) ?? []).length === 2, "cả hai đường ghi sổ quy chế đi qua khoá tên");
