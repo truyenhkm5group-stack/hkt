@@ -38,7 +38,9 @@ import { findOrganization } from "@/lib/platform/organizations";
 import { runningVersion } from "@/lib/version";
 import { claimFactsLoader, guardOutgoing, type ClaimKind } from "@/lib/sales-chatbot/claim-guard";
 import { SALES_TONE_LABEL, type SalesChatbotConfig, salesBotBillingSource } from "@/lib/sales-chatbot/config";
-import { appendBotMessage, conversationView, loadSalesChatbotConfig, salesChatProvider } from "@/lib/sales-chatbot/engine";
+import { appendBotMessage, conversationView, loadSalesChatbotConfig, roundCustomerTextsFor, salesChatProvider } from "@/lib/sales-chatbot/engine";
+import { addressTextGiven, asksAnyAddressPart } from "@/lib/sales-chatbot/address-memory";
+import { sentencesOf } from "@/lib/sales-chatbot/text";
 import { claimConversationEvent, patchConversationEventPayload, recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { settleConfirmedConversation } from "@/lib/sales-chatbot/confirmed-settle";
 import { PAGE_REPLY, type FanpageDeps } from "@/lib/sales-chatbot/fanpage";
@@ -315,6 +317,15 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
         out.stopped += 1;
         out.detail.push(`${row.id.slice(0, 8)}: bỏ lần ${attempt} — ${FOLLOWUP_REASON_LABEL.CLAIM_BLOCKED} (${verdict.claim})`);
         await trace("PRE_SEND", "SUPPRESS", "CLAIM_BLOCKED", { lc: fin.lifecycle, script: fin.script, checks: fin.checks, model, promptHash, claim: verdict.claim });
+        continue;
+      }
+      // ĐỊA CHỈ KHÔNG BAO GIỜ HỎI LẠI (AGENTS 3.12b, chủ shop 22/10/2026): tin nhắc hỏi địa chỉ / phường / tỉnh khi khách đã gửi chữ địa chỉ
+      // trong lượt mua ⇒ BỎ lần nhắc này (như câu lỡ nêu giá), không gửi câu sai.
+      if (sentencesOf(text).some(asksAnyAddressPart) && addressTextGiven(await roundCustomerTextsFor(row.id, freshConv.state).catch(() => ["(không đọc được — coi như đã có)"]))) {
+        await scheduleNext(false);
+        out.stopped += 1;
+        out.detail.push(`${row.id.slice(0, 8)}: bỏ lần ${attempt} — AI hỏi lại địa chỉ khách đã gửi`);
+        await trace("PRE_SEND", "SUPPRESS", "AI_TEXT_REJECTED", { lc: fin.lifecycle, script: fin.script, checks: fin.checks, model, promptHash });
         continue;
       }
       // GIÀNH KHOÁ GỬI: dòng vết GỬI chèn TRƯỚC khi gọi Pancake; chèn thua (lượt khác đã quyết lượt nhắc này) ⇒ không gửi.

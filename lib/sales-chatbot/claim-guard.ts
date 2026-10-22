@@ -700,8 +700,12 @@ export function claimFactsLoader(conv: ClaimConversation, opts: { reference?: ()
     const c = state.confirmed;
     let orderConfirmed: boolean;
     let orderPending: "ADDRESS" | "CHECK" | null;
-    if (c && (c.simulated || c.valid === true)) [orderConfirmed, orderPending] = [true, null];
+    // ĐƠN CHỈ CÒN CHỜ XÁC MINH ĐỊA CHỈ là đơn ĐÃ CHỐT với khách (chủ shop chốt 22/10/2026 — AGENTS 3.12b): kiểm địa chỉ là việc NỘI BỘ
+    // (máy ánh xạ nền · nhân viên · vận đơn giữ lại bằng ADDRESS_REVIEW), không phải lý do để chữ bot đổi giọng. Chỉ cờ CHECK (giá · SĐT ·
+    // cờ cần kiểm khác) mới chặn câu «đã lên đơn».
+    if (c && (c.simulated || c.valid === true || (c.valid === false && c.pending === "ADDRESS"))) [orderConfirmed, orderPending] = [true, null];
     else if (c && c.valid === false) [orderConfirmed, orderPending] = [false, c.pending ?? "CHECK"];
+    else if (!validDb.length && pendingDb === "ADDRESS") [orderConfirmed, orderPending] = [true, null];
     else [orderConfirmed, orderPending] = [validDb.length > 0, validDb.length ? null : pendingDb];
     const allowed = new Set<number>(reference);
     if (state.quote?.verified) for (const n of state.quote.amounts) allowed.add(n);

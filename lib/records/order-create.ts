@@ -138,6 +138,12 @@ export type AgentOrderOptions = {
    */
   adId?: string | null;
   /**
+   * CHỮ ĐỊA CHỈ NGUYÊN VĂN khách gửi trong lượt mua (AGENTS 3.12b, chủ shop chốt 22/10/2026 — `addressTextLines`): lưu vào
+   * `raw.addressText` mỗi lượt ghi của máy, bản mới thay bản cũ. Là NHÁP cho máy ánh xạ nền + người kiểm; không ô nào của đơn đọc nó.
+   * MÁY CHỦ dựng từ tin khách — không bao giờ nhận từ AI.
+   */
+  addressText?: readonly string[] | null;
+  /**
    * BÁO GIÁ MÁY CHỦ mà khách đã nghe (P0 11/10/2026 — `lib/sales-chatbot/quote.ts`). Có ⇒ lõi TÍNH LẠI phần hàng bằng chính hàm báo giá
    * (đơn giá + giảm theo khối lượng của tổ chức), từ chối nếu lệch / chưa xác thực, và lưu mã + phiên bản giá + tổng vào `raw.quote`.
    * Không có ⇒ như cũ: máy không được mang chiết khấu nào.
@@ -431,6 +437,12 @@ function reviewsOnWrite(w: Writer, p: Prepared, raw: Record<string, unknown>, no
   return { raw: b.raw, changed: a.changed || b.changed, settled: a.settled };
 }
 
+/** Gắn chữ địa chỉ nguyên văn của lượt (máy) vào `raw.addressText` — bản mới thay bản cũ; không có ⇒ giữ nguyên. HÀM THUẦN. */
+function withAddressText(raw: Record<string, unknown>, agentOpts: AgentOrderOptions | undefined, now: Date): Record<string, unknown> {
+  const lines = (agentOpts?.addressText ?? []).map((l) => l.trim()).filter(Boolean);
+  return lines.length ? { ...raw, addressText: { lines, at: now.toISOString() } } : raw;
+}
+
 function addressReview(w: Writer, p: Prepared, raw: Record<string, unknown>, now: Date): { raw: Record<string, unknown>; changed: boolean; settled: OrderReviewEntry[] } {
   const ward = (p.recipient.ward ?? "").trim();
   // ĐƠN NAY ĐÃ CÓ PHƯỜNG (P0 22/10/2026, HSLC #8037F35A): máy tự chốt lúc khách chưa cho phường ⇒ cờ «địa chỉ chưa ghép»; khách cho phường
@@ -622,7 +634,7 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
       }
       if (agentOpts && !agentOpts.allowShortStock && p.stage === "CONFIRMED") await assertAgentStock(tx, p, []);
       const cols = orderColumns(p, w, { ...(key ? { agentKey: key } : {}), ...(quote ? { quote } : {}) });
-      const flagged = reviewsOnWrite(w, p, cols.raw, now, agentOpts);
+      const flagged = reviewsOnWrite(w, p, withAddressText(cols.raw, agentOpts, now), now, agentOpts);
       createdReview = flagged.changed ? (orderReviewOf(flagged.raw)?.entries ?? []) : [];
       await tx.insert(schema.orders).values({ id, ...cols, raw: flagged.raw, ...(agentOpts?.adId ? { adId: agentOpts.adId } : {}), insertedAt: now, lastUpdateStatusAt: now, syncedAt: now });
     await tx.insert(schema.orderItems).values(itemRows(id, p));
@@ -756,7 +768,7 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
       // `quotePrev` (vết, không xoá) — tổng đơn không còn là tổng máy đã báo khách, giữ ở `quote` là để `orderValidityOf` báo «lệch» oan.
       const { quote: oldQuote, ...lockedRest } = lockedRaw;
       const baseRaw: Record<string, unknown> = { ...lockedRest, ...(manualOrderRaw(lockedRaw) as ManualOrderRaw), orderDiscount: p.orderDiscount, ...(quote ? { quote } : oldQuote ? { quotePrev: oldQuote } : {}) };
-      flagged = reviewsOnWrite(w, p, baseRaw, now, agentOpts);
+      flagged = reviewsOnWrite(w, p, withAddressText(baseRaw, agentOpts, now), now, agentOpts);
       const r = opts.resolveReview && p.stage === "CONFIRMED" ? withReviewResolved(flagged.raw, { action: "CONFIRMED", at: now.toISOString(), byUserId: w.userId, byName: w.name }) : { raw: flagged.raw, changed: false, resolved: [] as OrderReviewEntry[] };
       resolved = r;
       // Máy chốt / sửa đơn đã chốt ⇒ kiểm phần hàng CẦN THÊM so với phần đơn này đang giữ (đơn đã chốt trước đó).

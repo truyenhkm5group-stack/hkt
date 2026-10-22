@@ -15,7 +15,6 @@
  * Dữ liệu dựng (không PII): SĐT 0961005xxx, số nhà / ngõ hư cấu.
  */
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
@@ -109,13 +108,10 @@ export function testSalesAddressAppliedPure() {
   assert.equal(addressNotApplied({ raw: { review: { entries: [changed] } }, shipAddress: STREET, shipProvince: "", shipCommune: WARD }, []), false, "cờ «khách đổi địa chỉ» là việc của người ⇒ không đếm");
   assert.equal(addressNotApplied({ raw: {}, shipAddress: STREET, shipProvince: "", shipCommune: WARD }, []), false);
 
-  // Ảnh chụp golden DUY NHẤT được phép đổi (Tech Lead 22/10/2026, điều kiện i–iv): `hau-mai-da-nhan-hang` — đổi ĐÚNG câu chờ địa chỉ ở
-  // say_to_customer + chữ khách thấy (2 chỗ). Đổi ngược câu mới về câu cũ ⇒ phải TRÙNG BYTE với bản trước P0 (sha256 dưới) ⇒ chuỗi công
-  // cụ, kết quả, trạng thái đơn của ca KHÔNG đổi. Ca này đổi vì lý do khác ⇒ cập nhật hằng số CÓ CHỦ Ý trong PR đó.
+  // Ảnh chụp golden `hau-mai-da-nhan-hang` (bước 1 đổi đúng câu chờ địa chỉ; PR-A address-resolver-ladder 22/10/2026 đổi tiếp có chủ ý: đơn
+  // chỉ chờ địa chỉ là đơn ĐÃ CHỐT với khách ⇒ câu chốt thường của bot đi qua). Không câu nào của ca còn nhắc «nhân viên xác nhận địa chỉ».
   const snap = readFileSync("tests/sales-agent-golden/snapshots/hau-mai-da-nhan-hang.json", "utf8");
-  assert.equal(snap.split(CLAIM_SAFE_TEXT.ORDER_RECEIVED).length - 1, 2, "câu ghi nhận ở đúng 2 chỗ (say_to_customer + chữ khách thấy)");
-  assert.ok(!snap.includes(BANNED), "câu cũ không còn trong ảnh chụp");
-  assert.equal(createHash("sha256").update(snap.split(CLAIM_SAFE_TEXT.ORDER_RECEIVED).join(BANNED)).digest("hex"), "27d408482787b82f688e764d8e85f57228265643c0030b4ae9b2c8640544bc00", "ngoài câu chờ địa chỉ, ảnh chụp trùng byte với bản trước P0 22/10/2026");
+  assert.ok(!snap.includes(BANNED) && !snap.includes(CLAIM_SAFE_TEXT.ORDER_RECEIVED), "ca hậu mãi: không câu cũ, không câu ghi nhận thay câu chốt");
   console.log("  ✓ thuần: tin chỉ-phường ghép vào địa chỉ có tỉnh đứng trước nó · không ghép tỉnh khác / địa chỉ cũ · gỡ đúng dòng cờ máy, vết ADDRESS_SETTLED");
 }
 
@@ -174,7 +170,8 @@ export async function testSalesAddressAppliedChat() {
       assert.equal(o.stage, "CONFIRMED", `[${c.key}] đơn tự chốt như chính sách`);
       // (4) Không câu «nhân viên sẽ xác nhận lại địa chỉ» dù cờ upsell TẮT.
       assert.ok(!all.some((s) => s.includes(BANNED)), `[${c.key}] câu cũ tới khách: ${all.join(" | ")}`);
-      assert.ok(t.turns[0].shown.includes(CLAIM_SAFE_TEXT.ORDER_RECEIVED), `[${c.key}] lượt chốt ⇒ câu ghi nhận: ${t.turns[0].shown.join(" | ")} · ${results[0].slice(0, 600)}`);
+      // 22/10/2026 (AGENTS 3.12b): đơn chỉ chờ địa chỉ là đơn ĐÃ CHỐT với khách ⇒ câu chốt THƯỜNG của bot đi qua nguyên văn, không câu ghi nhận.
+      assert.ok(t.turns[0].shown.includes("Dạ em lên đơn 1 × Ruốc bông tôm 100% cho mình rồi ạ.") && !t.turns[0].shown.includes(CLAIM_SAFE_TEXT.ORDER_RECEIVED), `[${c.key}] lượt chốt ⇒ câu chốt thường: ${t.turns[0].shown.join(" | ")} · ${results[0].slice(0, 600)}`);
       // (1) Phường vào đơn; lượt gửi lại không bị từ chối.
       assert.equal(o.shipCommune, WARD, `[${c.key}] phường khách đã cho vào đơn: ${results.slice(1).join(" || ").slice(0, 900)}`);
       for (const r of results.slice(1)) assert.doesNotMatch(r, /xã \/ phường chưa xác nhận/, `[${c.key}] gửi lại đúng phường đã lưu bị từ chối: ${r.slice(0, 600)}`);

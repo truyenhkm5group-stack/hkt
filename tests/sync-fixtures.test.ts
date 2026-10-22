@@ -635,6 +635,7 @@ import { testMessengerWebhookRejections } from "./messenger-webhook-rejections.t
 import { testMessengerWebhookAlerts } from "./messenger-webhook-alerts.test";
 import { testSalesQualityDaily } from "./sales-quality-daily.test";
 import { testSalesAddressApplied } from "./sales-address-applied.test";
+import { testAddressNeverReask } from "./address-never-reask.test";
 import { testMessengerConfigReport } from "./messenger-config-report.test";
 import { testConnectorsLegacy } from "./connectors-legacy.test";
 import { testNativeOrderSync } from "./native-order-sync.test";
@@ -3316,6 +3317,8 @@ async function main() {
     await testSalesQualityDaily();
     // P0 22/10/2026 (HSLC #8037F35A): phường khách đã cho vào đơn, cờ địa chỉ của máy tự đóng, xác minh độc lập với upsell.
     await testSalesAddressApplied();
+    // AGENTS 3.12b (chủ shop 22/10/2026): địa chỉ khách không bao giờ hỏi lại — một điểm chặn cuối, chốt + upsell như đơn thường.
+    await testAddressNeverReask();
     testMessengerConfigReport();
     testConnectorsLegacy();
     // Shop CHỈ nối Facebook trực tiếp: ghi đơn từ hội thoại đọc sổ tin ERP (không Pancake) + trọn đường nhận → bot → nhân viên →

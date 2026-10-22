@@ -14,7 +14,7 @@
  *
  * KHÔNG ĐOÁN: hàng rào chỉ BỎ câu hỏi, không bao giờ tự điền một phường. Phường chưa biết và chưa hỏi lần nào ⇒ câu hỏi đầu tiên đi qua.
  */
-import { canAutoFill, customerStatedAddresses, hasStreetDetail, legacyAddressUnmapped, looksLikeDeliveryAddress, looksLikeStreetFragment, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wantsAddressChange, wardFromCustomerWords, type AddressPart } from "@/lib/address/customer-address";
+import { canAutoFill, customerStatedAddresses, hasStreetDetail, legacyAddressUnmapped, looksLikeDeliveryAddress, looksLikeStreetFragment, namesOtherWard, parseCustomerAddress, sameDeliveryPlace, wantsAddressChange, wardFromCustomerWords, withoutPhones, type AddressPart } from "@/lib/address/customer-address";
 
 export { wantsAddressChange };
 import { findProvince, foldVnText, isAdminName } from "@/lib/address/vn-address";
@@ -679,6 +679,110 @@ export function asksForWard(sentence: string): boolean {
   const f = foldVnText(sentence);
   if (WARD_ASK.some((re) => re.test(f))) return true;
   return isQuestion(sentence, f) && WARD_ASK_Q.some((re) => re.test(f));
+}
+
+/**
+ * ═══ ĐỊA CHỈ KHÁCH KHÔNG BAO GIỜ HỎI LẠI (chủ shop chốt 22/10/2026 — AGENTS 3.12b) ═══
+ *
+ * Khách đã gửi BẤT KỲ chữ địa chỉ nào trong lượt mua (dòng địa chỉ · mảnh số nhà / đường · tên phường / xã / tỉnh · địa giới cũ — kể cả
+ * thiếu phường hay mơ hồ) ⇒ bot coi như ĐÃ CÓ địa chỉ: không câu nào trên MỌI đường gửi được hỏi địa chỉ / phường / tỉnh / số nhà nữa;
+ * máy ánh xạ chạy NỀN, không chắc thì nhân viên kiểm nội bộ. BIÊN CHẶT: chữ không mang tín hiệu địa chỉ («gần chợ», tên người, «ở nhà»)
+ * KHÔNG tính; tên tỉnh / phường đứng trong một câu HỎI («ship ra Hà Nội bao nhiêu?») là hỏi phí, chưa phải địa chỉ giao. HÀM THUẦN.
+ */
+export function addressTextGiven(customerTexts: readonly string[]): boolean {
+  return customerTexts.some((t) => t.split(/\n+/).some((raw) => lineCarriesAddress(withoutPhones(raw).trim())));
+}
+
+/** Cả dòng, hoặc MỘT vế giữa dấu phẩy / chấm phẩy («Cho chị 1 hộp ruốc, Lan, Số 5 ngõ 12 xóm Chùa») mang tín hiệu địa chỉ. HÀM THUẦN. */
+function lineCarriesAddress(line: string): boolean {
+  return isAddressTextLine(line) || line.split(/[,;]+/).some((seg) => isAddressTextLine(seg.trim()));
+}
+
+/** Trần dòng chữ địa chỉ nguyên văn lưu lên đơn (`orders.raw.addressText`). */
+export const ADDRESS_TEXT_LIMITS = { lines: 6, chars: 300 } as const;
+
+/**
+ * Các DÒNG chữ địa chỉ khách gửi trong lượt mua (cũ ⇒ mới, đã bỏ SĐT, bỏ trùng, có trần) — lưu NGUYÊN VĂN lên đơn làm nháp cho máy ánh xạ
+ * nền và người kiểm (AGENTS 3.12b). Máy chủ dựng từ tin khách, không bao giờ nhận từ AI. HÀM THUẦN.
+ */
+export function addressTextLines(customerTexts: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const t of customerTexts)
+    for (const raw of t.split(/\n+/)) {
+      const line = withoutPhones(raw).trim();
+      if (lineCarriesAddress(line) && !out.includes(line)) out.push(line.slice(0, ADDRESS_TEXT_LIMITS.chars));
+    }
+  return out.slice(-ADDRESS_TEXT_LIMITS.lines);
+}
+
+/** Một dòng (đã bỏ SĐT) có mang tín hiệu địa chỉ không — biên của `addressTextGiven`. HÀM THUẦN. */
+function isAddressTextLine(line: string): boolean {
+  if (line.length < 3) return false;
+  if (looksLikeDeliveryAddress(line) || looksLikeStreetFragment(line) || legacyAddressUnmapped(line) !== null) return true;
+  const f = foldVnText(line);
+  if (isQuestion(line, f)) return false;
+  const a = parseCustomerAddress(line);
+  if (a.province || a.ward || a.candidates.length || a.provinceHint) return true;
+  // Tên MỘT đơn vị hành chính đứng riêng («Phường Kim Liên», «ở Đống Đa nhé», «giao về Kim Liên») — kể cả tên cũ, không kèm tỉnh.
+  const core = f.replace(/^(?:o|tai|giao (?:ve|toi|den)|ship (?:ve|toi|den)|gui (?:ve|toi|den)|nha (?:o|tai)?)\s+/, "").replace(/\s+(?:nhe|nha|a|em|nhe em|nha em|a em|shop)$/, "").trim();
+  return Boolean(core) && isAdminName(core);
+}
+
+/** Khối lời nhắc khi khách ĐÃ gửi chữ địa chỉ trong lượt mua (AGENTS 3.12b) — máy chủ chặn lần nữa ở điểm gửi cuối (`dropAddressAsks`). */
+export const ADDRESS_GIVEN_PROMPT =
+  "ĐỊA CHỈ KHÁCH ĐÃ GỬI (máy chủ xác nhận — chủ shop chốt 22/10/2026): khách đã gửi chữ địa chỉ trong lượt mua này. KHÔNG hỏi, KHÔNG xin, KHÔNG xác nhận lại bất kỳ phần nào của địa chỉ (phường / xã, tỉnh / thành, số nhà, tên đường, «như lần trước») — kể cả khi công cụ chưa ghép được. Lên đơn với đúng chữ khách gửi và đi tiếp bước kế (chốt · mời mua thêm theo cấu hình shop). Máy tự ánh xạ địa chỉ, nhân viên kiểm nội bộ — không nhắc việc kiểm với khách.";
+
+/**
+ * Trường địa chỉ một câu HỎI có thể xin — đọc trên chữ CÓ DẤU (chữ bot luôn có dấu; bản gập dấu nhầm «tạm tính» với «tỉnh», «xa» với «xã»).
+ * «đường» trần KHÔNG tính («đường phèn» là món); chỉ «tên đường» · «đường nào» · «số nhà».
+ */
+const ADDRESS_FIELD_ASK = /(?:^|[\s,.(/])(?:địa chỉ|tỉnh|thành phố|số nhà|tên đường|đường nào|ngõ|ngách|hẻm|kiệt|quận|huyện|phường|xã|thị trấn|thôn|xóm|nơi nhận|ở đâu|giao về đâu|giao đến đâu|giao tới đâu)(?=[\s,.?!/)…]|$)/u;
+/** Câu hỏi «như lần trước» VỀ ĐỊA CHỈ (known-contact.ts `previousAddressQuestion`) — «lấy như lần trước không ạ?» (mua lại MÓN) không tính. */
+const PREVIOUS_ADDRESS_ASK = /(?:giao|gửi|ship)[^.?!]*như lần trước|địa chỉ (?:cũ|lần trước)/u;
+/** Lời XIN (không cần dấu hỏi) — «xác nhận giúp em» KHÔNG phải lời xin. */
+const ASK_VERB = /(?:^|[\s,])(?:xin|cung cấp|để lại|gửi giúp|gửi lại|cho em biết|cho shop biết)(?=[\s,.]|$)/u;
+
+/** Một câu (đã cắt) có HỎI / XIN bất kỳ phần nào của địa chỉ giao không — rộng hơn `askedFields` (tỉnh · số nhà · đường · «như lần trước»). HÀM THUẦN. */
+export function asksAnyAddressPart(sentence: string): boolean {
+  if (asksForWard(sentence) || asksForFullAddress(sentence)) return true;
+  const raw = sentence.normalize("NFC").toLowerCase();
+  const asking = isQuestion(sentence, foldVnText(sentence)) || ASK_VERB.test(raw);
+  if (!asking) return false;
+  return ADDRESS_FIELD_ASK.test(raw) || PREVIOUS_ADDRESS_ASK.test(raw) || choosesBetweenPlaces(raw);
+}
+
+/** «Nguyễn Trãi bên Thanh Xuân hay Hà Đông ạ?» — câu bắt khách CHỌN giữa hai địa danh hành chính (không chữ «phường / quận» nào). HÀM THUẦN. */
+function choosesBetweenPlaces(raw: string): boolean {
+  const parts = raw.replace(/[?.!…]+$/u, "").split(/\s+hay(?:\s+là)?\s+/u);
+  if (parts.length < 2) return false;
+  const words = (x: string) => foldVnText(x).split(" ").filter((w) => w && !/^(?:a|nhe|nha|em|chi|anh|minh|ben|o|khu|vay|the)$/.test(w));
+  const named = (ws: string[]) => [1, 2, 3].some((n) => ws.length >= n && isAdminName(ws.slice(0, n).join(" ")));
+  const left = words(parts[0]).reverse();
+  const tailNamed = [1, 2, 3].some((n) => left.length >= n && isAdminName(left.slice(0, n).reverse().join(" ")));
+  return tailNamed && named(words(parts[1]));
+}
+
+/**
+ * ĐIỂM CHẶN CUỐI (AGENTS 3.12b): khách đã gửi chữ địa chỉ ⇒ bỏ MỌI câu hỏi / xin địa chỉ khỏi chữ sắp gửi — chữ model, câu mẫu, câu dự
+ * phòng, câu thay của hàng rào, tin theo dõi. Không còn câu nào ⇒ `ADDRESS_KNOWN_TEXT` (ghi nhận, đi tiếp). `dropped` = số câu đã bỏ
+ * (đếm được, không im lặng). Chưa có chữ địa chỉ ⇒ giữ nguyên. HÀM THUẦN.
+ */
+export function dropAddressAsks(text: string, given: boolean): { text: string; dropped: number } {
+  if (!given || !text.trim()) return { text, dropped: 0 };
+  const lines = text.split(/\n/);
+  let dropped = 0;
+  const kept = lines
+    .map((line) => {
+      const ss = sentencesOf(line);
+      if (!ss.length) return line;
+      const keep = ss.filter((x) => !asksAnyAddressPart(x));
+      dropped += ss.length - keep.length;
+      return keep.length === ss.length ? line : keep.join(" ");
+    })
+    .filter((line, i) => line.trim() || !lines[i].trim());
+  if (!dropped) return { text, dropped: 0 };
+  const out = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return { text: out || ADDRESS_KNOWN_TEXT, dropped };
 }
 
 /** Một câu có xin lại CẢ địa chỉ không. HÀM THUẦN. */

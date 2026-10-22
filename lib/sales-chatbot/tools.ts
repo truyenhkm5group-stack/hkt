@@ -44,14 +44,14 @@ import { notifySalesChatBooking, notifySalesChatHandoff } from "@/lib/sales-chat
 import { foldVi } from "@/lib/sales-chatbot/text";
 import { buildQuote, computePriced, loadPricingContext, packChoiceMistake, packingIssues, packingRequestOf, verifiedUnitPrices, type AgentQuoteClaim, type Priced, type PricingContext } from "@/lib/sales-chatbot/quote";
 import { priceUnverifiedReason, QUOTE_UNVERIFIED_INSTRUCTION, quoteSnapshotOf, type PriceDisputeState, type Quote, type QuoteSnapshot } from "@/lib/sales-chatbot/quote-shared";
-import { CLAIM_SAFE_TEXT, orderValidityOf, pendingAddressText } from "@/lib/sales-chatbot/claim-guard";
+import { CLAIM_SAFE_TEXT, orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
 import { usableKnownPhone } from "@/lib/sales-chatbot/known-contact";
 import type { ObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { bindCommitment, cartDraftDiff, commitmentViolation, customerHesitates, declinesAddOnOnly, lineBasisViolation, mentionText, negatedCancel, productName, productsStatedAt, quantityUnitIssue, unrequestedProducts, type CartCommitment, type CartDraftDiff } from "@/lib/sales-chatbot/cart-commitment";
 import { CONFIRMED_EDIT_MAX_GROWTH, ORDER_GUARD_SUMMARY, type OrderGuardCode } from "@/lib/constants/sales-order-guard";
 import { cartQuoteLines, type CatalogLite } from "@/lib/sales-chatbot/cancel-recovery";
 import { acceptCustomerWard, addressQuestion, canAutoFill, legacyAddressUnmapped, namesOtherWard, otherWardNamed, parseCustomerAddress, sameDeliveryPlace, wardFromCustomerWords, type AddressConfidence, type AddressPart } from "@/lib/address/customer-address";
-import { addressKnowledge, addressReaskVerdict, askedBefore, askMemoryFor, askMemoryParts, askParts, deliveryAddressDecision, hasChangeCue, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
+import { addressKnowledge, addressReaskVerdict, addressTextGiven, addressTextLines, askedBefore, askMemoryFor, askMemoryParts, askParts, deliveryAddressDecision, hasChangeCue, type AddressAskMemory } from "@/lib/sales-chatbot/address-memory";
 import { searchCatalog, sellableCatalog, stockFor, type CatalogItem } from "@/lib/sales-chatbot/catalog";
 import { quotedInText } from "@/lib/sales-chatbot/text";
 import { isMessagingChannel, type ChatChannel, type SalesChatbotConfig, type SalesTool } from "@/lib/sales-chatbot/config";
@@ -678,7 +678,9 @@ export function orderIdempotencyKey(conversationId: string, state: Pick<ChatStat
 function agentOrderOpts(ctx: ToolContext, state: ChatState, creating: boolean, quote?: AgentQuoteClaim, holdNew = false): AgentOrderOptions {
   // Bảng giá RIÊNG của khách chỉ khi danh tính đã xác minh — lõi đơn tính lại đúng chế độ này nên báo giá và đơn không lệch nhau.
   const pricing = !ctx.config.wholesalePricing ? "RETAIL" : verifiedCustomerId(state) ? "PRICE_BOOK" : "DEFAULT_BOOK";
-  return { pricing, idempotencyKey: creating ? orderIdempotencyKey(ctx.conversationId, state) : null, allowShortStock: ctx.config.sellWithoutStockCheck, ...(quote ? { quote } : {}), ...(holdNew ? { holdNew: true } : {}) };
+  // Chữ địa chỉ NGUYÊN VĂN của lượt mua (AGENTS 3.12b) — máy chủ dựng từ tin khách, không nhận từ AI.
+  const addressText = addressTextLines(ctx.roundCustomerTexts ?? ctx.customerTexts ?? []);
+  return { pricing, idempotencyKey: creating ? orderIdempotencyKey(ctx.conversationId, state) : null, allowShortStock: ctx.config.sellWithoutStockCheck, ...(quote ? { quote } : {}), ...(holdNew ? { holdNew: true } : {}), ...(addressText.length ? { addressText } : {}) };
 }
 
 /** Đơn `orderId` được tạo TRƯỚC mốc lượt mua hiện tại (`purchaseRoundStart`) — không có mốc ⇒ `false` (cả hội thoại là một lượt). */
@@ -824,8 +826,13 @@ export type AddressCheckOpts = { customerTexts?: readonly string[]; asked?: Addr
 
 const ASKED_ONCE_NOTE = "Phần địa chỉ này ĐÃ hỏi khách ở lượt trước — KHÔNG hỏi lại (kể cả khi chép lại địa chỉ khác đi). Đơn đi tiếp: ô xã để trống, đơn mang cờ cần kiểm địa chỉ, nhân viên xác nhận với khách. KHÔNG tự chọn xã, KHÔNG nói địa chỉ đã đúng.";
 
+/** Khách ĐÃ gửi chữ địa chỉ ⇒ công cụ không bao giờ đưa câu hỏi địa chỉ cho model (AGENTS 3.12b, chủ shop chốt 22/10/2026). */
+export const ADDRESS_GIVEN_NOTE = "Khách ĐÃ gửi chữ địa chỉ — KHÔNG hỏi khách bất kỳ phần nào của địa chỉ (phường / xã / tỉnh / số nhà / «như lần trước»), kể cả khi máy chưa ghép được. Đơn đi tiếp đúng quy trình (chốt · mời mua thêm theo cấu hình shop); máy tự ánh xạ địa chỉ nền, không chắc thì nhân viên kiểm nội bộ.";
+
 export function addressCheckOf(r: Pick<Recipient, "address" | "province" | "ward">, opts: AddressCheckOpts = {}): { key: string; view: AddressCheckView } {
   const out = addressCheckCore(r, opts);
+  // ĐÃ CÓ CHỮ ĐỊA CHỈ (AGENTS 3.12b): không câu hỏi nào — `addressAskPending` (cổng «hỏi rồi DỪNG» của confirm_order) đọc đúng ô này.
+  if (out.view.ask_customer && addressTextGiven([r.address, ...(opts.customerTexts ?? [])])) return { key: out.key, view: { ...out.view, ask_customer: null, note: ADDRESS_GIVEN_NOTE } };
   // HỎI MỘT LẦN (P0 15/10/2026): phần đã hỏi ở lượt trước ⇒ không đưa câu hỏi nữa — một máy chủ chặn, không trông vào lời dặn model.
   if (out.view.ask_customer && askedBefore(askMemoryFor(opts.asked, r.address), askParts(out.view.missing), opts.turn)) return { key: out.key, view: { ...out.view, ask_customer: null, note: ASKED_ONCE_NOTE } };
   return out;
@@ -1140,14 +1147,12 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         if (d.status === "CHANGE_PENDING_VERIFICATION" && d.use) return err("Lưu khách: khác địa chỉ khách vừa gõ", `Địa chỉ này KHÁC địa chỉ khách vừa gõ ở tin mới hơn: «${d.use.raw}». Địa chỉ khách nói MỚI NHẤT luôn thắng địa chỉ cũ / đã lưu — gọi lại create_customer với address = đúng dòng khách đã gõ (giữ nguyên chữ khách), KHÔNG dùng địa chỉ đơn cũ, KHÔNG hỏi lại phần khách đã nói.`, state);
         if (d.status === "CHANGE_INCOMPLETE") {
           // Địa chỉ model định lưu CHÍNH LÀ mảnh nơi giao mới khách vừa gõ (P0 21/10/2026, ca «Ngọc Bích»: «KCN Bắc Thăng Long, cổng công ty
-          // SANTOMAS») — không phải bản cũ. Thiếu tỉnh / xã thì HỎI đúng phần đó một câu (đọc từ danh mục, không đoán xã), không chuyển người.
-          // Model chép một địa chỉ KHÁC chữ khách ⇒ vẫn chuyển người như cũ.
+          // SANTOMAS») — không phải bản cũ ⇒ lưu đúng chữ khách, KHÔNG hỏi phần thiếu (AGENTS 3.12b, 22/10/2026). Model chép một địa chỉ KHÁC
+          // chữ khách ⇒ vẫn chuyển người như cũ.
           const typedNow = foldVi(ctx.lastUserText.normalize("NFC"));
           const savedNow = foldVi(fields.address.normalize("NFC")).trim();
           const isTyped = sameDeliveryPlace(fields.address, ctx.lastUserText) || (savedNow.length > 0 && typedNow.includes(savedNow));
-          const ask = isTyped ? addressQuestion(parseCustomerAddress(fields.address, typeof fields.province === "string" ? fields.province : "")) : null;
-          if (ask) return err("Lưu khách: địa chỉ mới chưa đủ", `Khách vừa gửi nơi giao MỚI «${fields.address.slice(0, 120)}» nhưng chưa đọc ra phần còn thiếu. KHÔNG dùng địa chỉ cũ, KHÔNG tự đoán phường / xã, KHÔNG nói đã lên đơn. Hỏi khách đúng MỘT câu: «${ask}»`, state);
-          return { ...err("Lưu khách: khách đang đổi địa chỉ", "Khách đang đổi nơi giao mà chưa gửi đủ địa chỉ mới — KHÔNG lưu địa chỉ cũ, KHÔNG nói đã cập nhật; máy chủ đã chuyển nhân viên.", state), requireHuman: d.reason };
+          if (!isTyped) return { ...err("Lưu khách: khách đang đổi địa chỉ", "Khách đang đổi nơi giao mà chưa gửi đủ địa chỉ mới — KHÔNG lưu địa chỉ cũ, KHÔNG nói đã cập nhật; máy chủ đã chuyển nhân viên.", state), requireHuman: d.reason };
         }
       }
       // Địa chỉ ĐƠN CŨ (Customer 360) chỉ là gợi ý (AGENTS 3.12): gõ lại nó mà không qua use_saved_address ⇒ bỏ qua kiểm lời xác nhận.
@@ -1446,7 +1451,8 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         state.confirmed = { ...state.confirmed, total: priced.total ?? priced.subtotal, quoteId: priced.quote.quoteId, ...(validity ? { valid: validity.valid, pending: validity.pending } : {}) };
         // Địa chỉ còn chờ xác minh ⇒ nói tổng mới, KHÔNG «nhân viên sẽ xác nhận địa chỉ», KHÔNG «đã lên đơn» — mọi tổ chức (chủ shop 22/10/2026:
         // xác minh địa chỉ độc lập với upsell; việc kiểm nằm ở hàng đợi nội bộ).
-        const pendingText = validity && !validity.valid ? (validity.pending === "ADDRESS" ? orderUpdatedText(cartView(priced).cod_total_text) : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK) : null;
+        // Chỉ chờ ĐỊA CHỈ ⇒ câu sửa đơn THƯỜNG (AGENTS 3.12b, 22/10/2026 — xác minh địa chỉ là việc nội bộ, không đổi câu với khách).
+        const pendingText = validity && !validity.valid && validity.pending !== "ADDRESS" ? CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK : null;
         return ok(`${simulated ? "(Thử) " : ""}Sửa đơn đã chốt · ${formatVND(priced.subtotal)}`, { ...view, status: "Đã chốt — đã cập nhật theo ý khách", auto_confirmed: true, say_to_customer: pendingText ?? `${autoConfirmText(priced.lines)} Tổng đơn mới ${cartView(priced).cod_total_text} ạ.`, instruction: "Đơn ĐÃ CHỐT vừa được cập nhật theo ý khách. Gửi khách ĐÚNG MỘT câu say_to_customer — không hỏi xác nhận lại." }, state);
       }
       // TỰ CHỐT KHI ĐỦ ĐƠN (P0-A): đủ sáu điều kiện ⇒ chốt NGAY bằng chính lượt chốt của confirm_order (cùng kiểm giá · tồn · địa chỉ của lõi),
@@ -1576,12 +1582,13 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // cờ ADDRESS_UNRESOLVED (hàng «Cần người kiểm», tuyến ADDRESS_REVIEW, chưa xác minh thì không vận đơn). CHỈ lời mời mua thêm khi địa
       // chỉ còn chờ là ở sau cờ `upsellAfterContact` (P0 21/10/2026, ca HSLC «Mai Le»). Cờ CHECK (giá · SĐT · cờ cần kiểm khác) KHÔNG đổi:
       // đơn có vấn đề thật thì không mời.
-      const quietAddress = validity?.valid === false && validity.pending === "ADDRESS" && (await quietAddressReviewOn());
-      const pendingText = validity && !validity.valid ? (validity.pending === "ADDRESS" ? pendingAddressText() : CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK) : null;
+      // Chỉ chờ ĐỊA CHỈ ⇒ chốt + mời mua thêm như đơn thường (A2, chủ shop 22/10/2026: ánh xạ địa chỉ không ảnh hưởng chốt / upsell /
+      // cross-sell; cờ `upsellAfterContact` không còn tác dụng). Vận đơn vẫn giữ lại bằng ADDRESS_REVIEW tới khi địa chỉ ghép được.
+      const pendingText = validity && !validity.valid && validity.pending !== "ADDRESS" ? CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK : null;
       // Lời mời SAU CHỐT (P0 19/10/2026): chỉ khi đơn đã ghi hợp lệ — hoặc chỉ còn chờ xác minh địa chỉ khi tổ chức bật cờ trên; câu do
       // máy chủ dựng, engine gửi ngay sau tin xác nhận. (`cancelRequest` đã được xoá ngay trên khi chốt — cửa sổ vẫn xét nó cho lượt
       // chốt có lỗi ghi đơn quay lại.)
-      await notePostConfirmOffer(state, ctx, priced.asked.map((a) => a.productId), priced.asked.map((a) => a.name), !pendingText || quietAddress, now);
+      await notePostConfirmOffer(state, ctx, priced.asked.map((a) => a.productId), priced.asked.map((a) => a.name), !pendingText, now);
       return ok(`${simulated ? "(Thử) " : ""}Đã chốt đơn · ${formatVND(priced.subtotal)}${pendingText ? " · CHƯA qua kiểm" : ""}`, {
         confirmed: true,
         simulated,
@@ -1818,7 +1825,7 @@ export { customerHesitates };
  * (3) số lượng > 0, (4) SĐT hợp lệ, (5) địa chỉ đủ giao (đọc được tỉnh / thành; xã / phường chưa ghép ⇒ vẫn chốt, lõi gắn cờ cần kiểm).
  * Không tự chốt khi: khách đang phản đối giá, đang xin huỷ / đã từ chối, hay vừa nhận lời mời thêm món trong CHÍNH lượt này. HÀM THUẦN.
  */
-export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "lastUserText" | "turn" | "prevTurn">): string | null {
+export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "lastUserText" | "turn" | "prevTurn"> & { roundCustomerTexts?: readonly string[] }): string | null {
   const d = state.draft;
   if (!d || !d.lines.length || d.lines.some((l) => l.quantity <= 0)) return "Chưa có món / số lượng — hỏi khách món và số lượng";
   if (!d.quote) return "Chưa có báo giá máy chủ — gọi lại create_draft_order";
@@ -1833,9 +1840,12 @@ export function autoConfirmBlocker(state: ChatState, ctx: Pick<ToolContext, "las
   if (!declinedAddOn && customerHesitates(ctx.lastUserText, { justInvited })) return "Khách chưa quyết mua (đang hoãn / cân nhắc) — không tự chốt";
   const gaps = manualOrderGaps({ phone: d.recipient.phone, address: d.recipient.address, province: d.recipient.province || resolveRecipientPlace({ address: d.recipient.address, province: d.recipient.province, ward: "" }).province }, d.lines.length);
   if (gaps.includes("SĐT")) return "SĐT chưa hợp lệ — hỏi lại khách SĐT";
-  if (gaps.includes("địa chỉ") || gaps.includes("tỉnh / thành")) return "Địa chỉ chưa đủ để giao (chưa đọc được tỉnh / thành) — hỏi khách đúng phần còn thiếu";
+  // ĐÃ CÓ CHỮ ĐỊA CHỈ mà chưa đọc được tỉnh (A1 — chủ shop chốt 22/10/2026, đổi luật chốt đơn cho MỌI tổ chức): KHÔNG chặn tự chốt; đơn
+  // chốt kèm cờ địa chỉ (lõi đơn), vận đơn giữ lại (ADDRESS_REVIEW), máy ánh xạ nền / nhân viên kiểm. Chỉ chặn khi khách CHƯA gửi chữ địa chỉ nào.
+  const given = addressTextGiven([d.recipient.address, ...(ctx.roundCustomerTexts ?? []), ctx.lastUserText]);
+  if (!given && (gaps.includes("địa chỉ") || gaps.includes("tỉnh / thành"))) return "Địa chỉ chưa đủ để giao (chưa đọc được tỉnh / thành) — hỏi khách đúng phần còn thiếu";
   // Xã / phường chưa ghép (biết tỉnh) KHÔNG chặn tự chốt — luật P0-A: đơn tự chốt kèm cờ ADDRESS_UNRESOLVED, câu ghi nhận
-  // `pendingAddressText` (mọi tổ chức — cờ `upsellAfterContact` chỉ quyết lời mời mua thêm), nhân viên xác minh nội bộ. Tỉnh chỉ suy từ viết tắt («P13 GV») là CHƯA BIẾT TỈNH ⇒ đã dừng ở dòng trên.
+  // câu chốt THƯỜNG với khách (AGENTS 3.12b, 22/10/2026), nhân viên / máy ánh xạ nền xác minh nội bộ. Tỉnh chỉ suy từ viết tắt («P13 GV») là CHƯA BIẾT TỈNH ⇒ đã dừng ở dòng trên.
   return null;
 }
 
@@ -1973,15 +1983,6 @@ export function keptWardOf(stored: Recipient | undefined, next: Recipient, ward:
   return have;
 }
 
-/** Tổ chức bật `upsellAfterContact` (cờ trong cài đặt câu mẫu). Đọc lỗi ⇒ TẮT — nhánh lỗi rơi về câu cũ, không về phía mời. */
-async function quietAddressReviewOn(): Promise<boolean> {
-  return (await loadQuickReplySettings().catch(() => null))?.upsellAfterContact === true;
-}
-
-/** Sửa đơn đã chốt khi địa chỉ còn chờ xác minh (`upsellAfterContact`) — tổng mới theo máy chủ, không «đã lên đơn». */
-export function orderUpdatedText(totalText: string): string {
-  return `Dạ em đã cập nhật đơn của mình, tổng đơn mới ${totalText} ạ.`;
-}
 
 /** Câu chốt ngắn khi máy chủ tự chốt — «Dạ em lên đơn 2 × Chả cá thu (1kg) cho mình rồi ạ, shop giao theo thông tin mình vừa gửi nhé.» */
 export function autoConfirmText(lines: readonly { name: string; quantity: number }[]): string {
