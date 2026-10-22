@@ -1,0 +1,8 @@
+{
+  "pr": 967,
+  "sha": "28a151848fa302df389d21ce19bf96cbf53a230d",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-22T08:04:52.572Z",
+  "note": "review lead (chủ shop ủy quyền tường minh 22/10: «Tôi cấp quyền cho bạn làm. Hãy làm cho đến khi hoàn tất»): tách lõi …As ra lib/payroll/*-service.ts + lib/finance/expense-service.ts, server action chỉ còn quyền + guardSecondApproval rồi gọi lõi; script ops payroll-owner-apply gọi CÙNG lõi, actor = org.owner (isDeclaredOwner), mặc định CHẠY THỬ, --apply mới ghi, idempotent; bước 5 khoá tháng chỉ k"
+}
