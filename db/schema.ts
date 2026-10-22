@@ -7445,7 +7445,8 @@ export const marketerProfitCarryover = pgTable(
     openingBalance: integer("opening_balance").notNull(),
     /**
      * Số dư đầu tháng LẤY TỪ ĐÂU: `PREV_MONTH` (tháng trước đã chốt) · `OPENING_DECLARATION`
-     * (chủ shop khai số dư mở sổ, có nguồn). Không có giá trị nào nghĩa là "đoán".
+     * (chủ shop khai số dư mở sổ, có nguồn) · `FIRST_WORK_MONTH` (0254 — tháng làm việc đầu tiên theo ngày vào
+     * làm trong hồ sơ, chưa có dòng sổ nào trước đó: số dư 0 là sự thật). Không có giá trị nào nghĩa là "đoán".
      */
     openingSource: text("opening_source").notNull(),
     /** LN thực phát sinh của tháng, đã trừ đủ chi phí thuộc tháng. Âm/dương/0 đều hợp lệ. */
@@ -7483,7 +7484,7 @@ export const marketerProfitCarryover = pgTable(
     index("marketer_carryover_month_idx").on(t.monthKey),
     check("marketer_carryover_status_check", sql`${t.status} IN ('DRAFT', 'FINAL')`),
     check("marketer_carryover_month_format", sql`${t.monthKey} ~ '^[0-9]{4}-[0-9]{2}$'`),
-    check("marketer_carryover_source_check", sql`${t.openingSource} IN ('PREV_MONTH', 'OPENING_DECLARATION')`),
+    check("marketer_carryover_source_check", sql`${t.openingSource} IN ('PREV_MONTH', 'OPENING_DECLARATION', 'FIRST_WORK_MONTH')`),
     // Số dư là LỖ chưa bù, theo định nghĩa ≤ 0. Một số dương ở đây nghĩa là "lãi mang sang" — mà
     // lãi đã được trả hoa hồng ở tháng nó phát sinh, chuyển tiếp là trả hai lần.
     check("marketer_carryover_opening_check", sql`${t.openingBalance} <= 0`),

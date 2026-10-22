@@ -1772,6 +1772,13 @@
       "when": 1792487167372,
       "tag": "0253_ai_usage_cache_write",
       "breakpoints": true
+    },
+    {
+      "idx": 254,
+      "version": "7",
+      "when": 1792487227372,
+      "tag": "0254_carryover_first_work_month",
+      "breakpoints": true
     }
   ]
 }

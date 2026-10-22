@@ -15,11 +15,13 @@ import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
-import { PAYROLL_CARRYOVER_KEY, wholeMonthKey } from "@/lib/constants/payroll-carryover";
+import { PAYROLL_CARRYOVER_KEY, startedWithinOrAfter, wholeMonthKey } from "@/lib/constants/payroll-carryover";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
 import { payrollFinalizeBlockers } from "@/lib/constants/payroll-readiness";
 import type { CostEngineWarning } from "@/lib/queries/cost-engine";
 import { getPayrollReport } from "@/lib/queries/payroll";
+import { getCarryoverConfig, resolveOpening } from "@/lib/queries/payroll-carryover";
+import { calculatePayrollPeriodAs } from "@/lib/payroll/run-service";
 import type { Period } from "@/lib/search-params";
 import { setSettingJson } from "@/lib/settings";
 
@@ -156,6 +158,97 @@ export async function testPayrollCarryover(db: Db) {
   assert.equal(d3?.bonusPersonal, null, "3. thưởng theo LN cá nhân cũng CHƯA BIẾT — không được in ra 0 ₫");
   assert.equal(d3?.salary, null, "3. và tổng lương của dòng ấy cũng chưa biết");
   assert.equal(thang6Nhap.totalSalary, null, "3. nên tổng lương của kỳ chưa biết ⇒ chưa đủ điều kiện chốt");
+
+  /* ══ 3b · THÁNG LÀM VIỆC ĐẦU TIÊN ⇒ SỐ DƯ ĐẦU 0 LÀ SỰ THẬT (Tech Lead 22/10/2026) ══
+   *
+   * Production 22/10: ba người vào làm 01/08/2026 bị chặn chốt tháng 08 vì «chưa có dòng sổ nào cho tháng
+   * 2026-07» — trong khi họ CHƯA làm tháng 07 thì không thể có dòng ấy. Chưa làm thì không gánh lỗ ⇒ 0.
+   * Phía bên kia phải giữ nguyên: người đã làm từ trước mà thiếu dòng tháng trước, người không có ngày vào
+   * làm, và người có ngày vào làm "mới" mà sổ lại có dòng cũ (dữ liệu mâu thuẫn) — cả ba vẫn CHƯA BIẾT.
+   */
+  assert.equal(startedWithinOrAfter("2027-06-01", "2027-06"), true);
+  assert.equal(startedWithinOrAfter("2027-06-30", "2027-06"), true, "vào làm cuối tháng vẫn là tháng đầu");
+  assert.equal(startedWithinOrAfter("2027-07-02", "2027-06"), true, "vào làm sau tháng này ⇒ cũng chưa có lỗ cũ");
+  assert.equal(startedWithinOrAfter("2027-05-31", "2027-06"), false, "vào làm tháng trước ⇒ đã làm tháng trước");
+  assert.equal(startedWithinOrAfter(null, "2027-06"), false, "không có ngày vào làm ⇒ không suy ra gì");
+  assert.equal(startedWithinOrAfter("01/06/2027", "2027-06"), false, "sai dạng ⇒ không suy ra gì");
+  const MOI: Employee = { ...MKT, id: "co-moi", name: "Vào làm tháng 6", shortName: "MOI", startedOn: "2027-06-01" };
+  const CU: Employee = { ...MKT, id: "co-cu", name: "Làm từ tháng 5", shortName: "CU", startedOn: "2027-05-03" };
+  const LECH: Employee = { ...MKT, id: "co-lech", name: "Ngày vào làm mâu thuẫn với sổ", shortName: "LECH", startedOn: "2027-06-01" };
+  await db.insert(schema.marketerProfitCarryover).values({
+    id: "co-ledger-lech-t4",
+    employeeId: LECH.id,
+    monthKey: "2027-04",
+    openingBalance: 0,
+    openingSource: "OPENING_DECLARATION",
+    realProfit: -1_000_000,
+    commissionBase: 0,
+    commissionRateBp: 1000,
+    signedCommission: -100_000,
+    payableCommission: 0,
+    closingBalance: -1_000_000,
+    status: "FINAL",
+    snapshot: { nguon: "kiểm thử: dòng cũ của người khai vào làm tháng 6" },
+    finalizedAt: new Date(),
+  });
+  await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [MKT, MOI, CU, LECH] });
+  clearMemo();
+  const bonNguoi = await getPayrollReport(THANG6, "profit1");
+  const dongCua = (id: string) => bonNguoi.lines.find((l) => l.employee.id === id);
+  const moi = dongCua(MOI.id);
+  assert.deepEqual([moi?.carry?.openingBasis, moi?.carry?.openingBalance, moi?.carry?.openingEstablished], ["FIRST_WORK_MONTH", 0, true], "3b. vào làm 01/06, chưa có dòng sổ nào ⇒ số dư đầu tháng 6 = 0, đủ căn cứ");
+  assert.match(moi?.carry?.openingReason ?? "", /Vào làm 01\/06\/2027.*tháng làm việc ĐẦU TIÊN/, "3b. bảng lương nói căn cứ: ngày vào làm trong hồ sơ");
+  assert.equal(moi?.bonusPersonal, 0, "3b. LN cá nhân 0 (không có quảng cáo) ⇒ thưởng cá nhân 0, không «—»");
+  assert.notEqual(moi?.salary, null, "3b. thực nhận tính được");
+  assert.equal(dongCua(MKT.id)?.carry?.openingBasis, "NONE", "3b. không có ngày vào làm ⇒ vẫn CHƯA BIẾT");
+  assert.equal(dongCua(CU.id)?.carry?.openingBasis, "NONE", "3b. đã làm từ tháng 5 mà thiếu dòng tháng 5 ⇒ vẫn CHƯA BIẾT");
+  assert.equal(dongCua(LECH.id)?.carry?.openingBasis, "NONE", "3b. ngày vào làm nói «mới» nhưng sổ có dòng tháng 4 ⇒ mâu thuẫn ⇒ vẫn CHƯA BIẾT");
+  assert.equal(dongCua(CU.id)?.carry?.openingBalance, null);
+  // Đường đọc một người (`resolveOpening`) nói cùng một điều với đường đọc nhiều người.
+  const cfg = await getCarryoverConfig();
+  assert.equal((await resolveOpening(MOI.id, "2027-06", cfg, undefined, MOI.startedOn)).basis, "FIRST_WORK_MONTH");
+  assert.equal((await resolveOpening(LECH.id, "2027-06", cfg, undefined, LECH.startedOn)).basis, "NONE");
+  assert.equal((await resolveOpening(CU.id, "2027-06", cfg, undefined, CU.startedOn)).basis, "NONE");
+  // Chốt kỳ qua ĐÚNG đường ghi (calculatePayrollPeriodAs): dòng sổ của người mới mang căn cứ THẬT ở CỘT (0254) —
+  // dòng này sắp bị khoá, và báo cáo / ops đọc cột chứ không đọc ảnh chụp. Dòng cũ không bị đổi nguồn.
+  await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [MOI] });
+  clearMemo();
+  const tinh = await calculatePayrollPeriodAs({ id: null, email: "kiem-thu@erp" }, { from: "2027-06-01", to: "2027-06-30", basis: "profit1", note: "kiểm thử tháng làm việc đầu tiên" });
+  assert.ok("ok" in tinh, `3b. chốt được tháng 6 cho người mới: ${"error" in tinh ? tinh.error : ""}`);
+  const soMoi = await db.select().from(schema.marketerProfitCarryover).where(sql`${schema.marketerProfitCarryover.employeeId} = ${MOI.id} and ${schema.marketerProfitCarryover.monthKey} = '2027-06'`);
+  assert.deepEqual(soMoi.map((r) => [r.openingSource, r.openingBalance]), [["FIRST_WORK_MONTH", 0]], "3b. dòng sổ ghi opening_source = FIRST_WORK_MONTH — không ghi nhầm thành «chủ shop khai đích danh»");
+  const docLai = await resolveOpening(MOI.id, "2027-06", cfg, undefined, MOI.startedOn);
+  assert.equal(docLai.basis, "FIRST_WORK_MONTH", "3b. đọc lại dòng đã ghi ra đúng căn cứ, từ cột");
+  assert.match(docLai.reason, /tháng làm việc ĐẦU TIÊN/, "3b. và câu giải thích chụp lúc tính");
+  const [cu4] = await db.select({ src: schema.marketerProfitCarryover.openingSource }).from(schema.marketerProfitCarryover).where(eq(schema.marketerProfitCarryover.id, "co-ledger-lech-t4"));
+  assert.equal(cu4?.src, "OPENING_DECLARATION", "3b. dòng cũ giữ nguyên nguồn");
+  await db.delete(schema.payrollPeriods).where(sql`${schema.payrollPeriods.periodKey} like '2027-06-01..%'`);
+  await db.delete(schema.marketerProfitCarryover).where(sql`${schema.marketerProfitCarryover.id} = 'co-ledger-lech-t4' or (${schema.marketerProfitCarryover.employeeId} = ${MOI.id})`);
+
+  /*
+    CHỨNG MINH CHO SỔ PHỤC VỤ BẰNG LƯỢC ĐỒ CŨ (lib/constants/migration-serve-compat.ts · 0254): CSDL chưa áp 0254 thì ràng
+    buộc cũ chỉ nhận hai nguồn. Chốt kỳ có người ở tháng làm việc đầu tiên phải HỎNG SẠCH — giao dịch huỷ, kỳ không được tạo,
+    không dòng sổ nào — chứ không ghi nhầm căn cứ. Dựng lại đúng ràng buộc trước 0254, đo, rồi trả lại ràng buộc của 0254.
+  */
+  const rangBuoc = async (vals: string) => {
+    await db.execute(sql.raw("alter table marketer_profit_carryover drop constraint if exists marketer_carryover_source_check"));
+    await db.execute(sql.raw(`alter table marketer_profit_carryover add constraint marketer_carryover_source_check check (opening_source in (${vals}))`));
+  };
+  await rangBuoc("'PREV_MONTH', 'OPENING_DECLARATION'");
+  try {
+    clearMemo();
+    await assert.rejects(
+      () => calculatePayrollPeriodAs({ id: null, email: "kiem-thu@erp" }, { from: "2027-06-01", to: "2027-06-30", basis: "profit1", note: "lược đồ trước 0254" }),
+      (e: unknown) => /marketer_carryover_source_check/.test(`${String((e as { message?: string })?.message ?? e)} ${String((e as { cause?: { message?: string } })?.cause?.message ?? "")}`),
+      "0254 chưa áp: chốt kỳ có người tháng đầu báo lỗi ràng buộc, không ghi nhầm nguồn",
+    );
+    assert.equal((await db.select({ id: schema.payrollPeriods.id }).from(schema.payrollPeriods).where(sql`${schema.payrollPeriods.periodKey} like '2027-06-01..%'`)).length, 0, "0254 chưa áp: giao dịch huỷ ⇒ kỳ KHÔNG được tạo");
+    assert.equal((await db.select({ id: schema.marketerProfitCarryover.id }).from(schema.marketerProfitCarryover).where(eq(schema.marketerProfitCarryover.employeeId, MOI.id))).length, 0, "0254 chưa áp: không dòng sổ nào được ghi");
+  } finally {
+    await rangBuoc("'PREV_MONTH', 'OPENING_DECLARATION', 'FIRST_WORK_MONTH'");
+  }
+  await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [MKT] });
+  clearMemo();
 
   /* ══ 4 · THÁNG 5 ĐÃ CHỐT ⇒ THÁNG 6 CÓ CĂN CỨ, VÀ LỖ ĐƯỢC BÙ ĐÚNG ══ */
   await db.insert(schema.marketerProfitCarryover).values({

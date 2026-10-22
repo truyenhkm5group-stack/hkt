@@ -115,6 +115,17 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: { platform_ai_usage: ["cache_write_tokens"] },
     proof: "tests/ai-usage-ledger-complete.test.ts",
   },
+  {
+    tag: "0254_carryover_first_work_month",
+    why:
+      "Chỉ NỚI ràng buộc CHECK của marketer_profit_carryover.opening_source (thêm 'FIRST_WORK_MONTH') — không thêm / đổi / xoá cột. " +
+      "Mọi đường ĐỌC chạy y như cũ (cột đã có, dòng cũ mang hai giá trị cũ). Đường GHI duy nhất (`calculatePayrollPeriodAs`) ghi kỳ lương " +
+      "và dòng sổ lỗ trong CÙNG một giao dịch: kỳ có người ở tháng làm việc đầu tiên vi phạm ràng buộc cũ ⇒ cả giao dịch huỷ, kỳ KHÔNG " +
+      "được tạo và không dòng sổ nào được ghi — chốt kỳ báo lỗi cho tới khi 0254 áp, không ghi nhầm căn cứ thành «chủ shop khai đích " +
+      "danh». Kỳ không có ai ở tháng đầu ghi được như trước.",
+    addedColumns: {},
+    proof: "tests/payroll-carryover.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */

@@ -65,6 +65,21 @@ export function compareMonthKey(a: string, b: string): number {
 }
 
 /**
+ * THÁNG ĐẦU TIÊN LÀM VIỆC — số dư lỗ đầu kỳ bằng 0 là SỰ THẬT, không phải đoán (Tech Lead 22/10/2026).
+ *
+ * Người vào làm TRONG tháng `monthKey` (hoặc sau đó) chưa từng làm tháng nào trước, nên không có lỗ cũ nào
+ * để gánh: số dư đầu = 0 đúng như với người mới. Căn cứ là NGÀY VÀO LÀM chủ shop khai ở hồ sơ nhân sự.
+ *
+ * Hàm này CHỈ trả lời câu "ngày vào làm có nằm từ tháng này trở đi không". Chỗ gọi còn phải chắc chắn
+ * người ấy KHÔNG có dòng sổ nào trước tháng này — có dòng thì người ấy đã làm, và thiếu dòng tháng trước
+ * vẫn là CHƯA BIẾT. Không có / sai dạng ngày vào làm ⇒ `false` (không suy ra được gì).
+ */
+export function startedWithinOrAfter(startedOn: string | null | undefined, monthKey: string): boolean {
+  if (!startedOn || !/^\d{4}-\d{2}-\d{2}$/.test(startedOn)) return false;
+  return compareMonthKey(startedOn.slice(0, 7), monthKey) >= 0;
+}
+
+/**
  * MỘT KỲ BÁO CÁO CÓ PHẢI ĐÚNG MỘT THÁNG LỊCH KHÔNG.
  *
  * Sổ lỗ đi theo THÁNG. Kỳ 7 ngày, kỳ tuỳ chọn hay một quý không được tạo hay cộng lại số dư —
