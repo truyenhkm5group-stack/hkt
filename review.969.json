@@ -1,0 +1,8 @@
+{
+  "pr": 969,
+  "sha": "27195b10c24981d18e18cf2b5a8d9bca508b0075",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-22T09:14:07.050Z",
+  "note": "review lead: CHỈ-SCRIPT, chỉ đọc. stuck-conversation-audit in thêm khối 2B từ settings sales-quality.daily của tổ chức (JSON.parse + kiểm kiểu, vắng/hỏng ⇒ CHƯA ĐO ĐƯỢC), số đếm + mẫu số từng mã kể cả 5 mã qty-guard + ADDRESS_RECEIVED_BUT_NOT_APPLIED; kênh tóm tắt chỉ số đếm."
+}
