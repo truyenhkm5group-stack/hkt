@@ -21,7 +21,7 @@ import { parseCustomerAddress, wardFromCustomerWords } from "@/lib/address/custo
 import { MACHINE_ADDRESS_NOTE_PREFIX, orderReviewOf } from "@/lib/constants/order-review";
 import type { SalesQualityCode } from "@/lib/constants/sales-quality";
 import { addressKnowledge, addressReaskVerdict } from "@/lib/sales-chatbot/address-memory";
-import { amountsIn } from "@/lib/sales-chatbot/cart-commitment";
+import { amountsIn, labelsMatch, piecesOf, productName } from "@/lib/sales-chatbot/cart-commitment";
 import { CLAIM_SAFE_TEXT } from "@/lib/sales-chatbot/claim-guard";
 import { classifyDeliveryQuestion } from "@/lib/sales-chatbot/delivery-intent";
 import { EMPTY_REPLY_TEXT, SHOP_SAID } from "@/lib/sales-chatbot/engine";
@@ -54,9 +54,37 @@ export type ThreadQuality = { hits: QualityHit[]; bases: QualityBases };
 /** Băm ngắn mã hội thoại — cùng phép băm `hashConv` của scripts/conv-money-trace.ts. HÀM THUẦN. */
 export const conversationHash = (id: string) => createHash("sha256")["update"](id).digest("hex").slice(0, 8);
 
-type Block = { type?: unknown; text?: unknown; content?: unknown; isError?: unknown; name?: unknown };
+type Block = { type?: unknown; text?: unknown; content?: unknown; isError?: unknown; name?: unknown; id?: unknown; toolUseId?: unknown };
 const ORDER_WRITE_TOOLS = new Set(["create_draft_order", "update_draft_order"]);
 const GUARD_CODES = new Set<string>(ORDER_GUARD_CODES);
+
+/** Dòng hàng trong kết quả công cụ ghi đơn THÀNH CÔNG (`cartView`: tên mẫu mã + số lượng). Không đọc được ⇒ []. HÀM THUẦN. */
+function writtenLinesOf(raw: unknown): { name: string; quantity: number }[] {
+  try {
+    const p = JSON.parse(String(raw)) as { lines?: unknown };
+    if (!Array.isArray(p.lines)) return [];
+    return (p.lines as { name?: unknown; quantity?: unknown }[]).filter((l) => typeof l.name === "string" && typeof l.quantity === "number").map((l) => ({ name: String(l.name), quantity: Number(l.quantity) }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * PACK_MULTIPLIER_LEAKED (P0 22/10/2026 — «lọt tới khách» của sales-qty-unit-guard, ca #8037F35A): đơn ĐÃ GHI có dòng của mẫu mã «Hộp N cái»
+ * (N > 1) mà số HỘP bằng đúng số khách nói KHÔNG kèm đơn vị / đếm bằng CÁI («thêm 10 nem», «10 cái nem»), số đó là bội của N ⇒ số hộp đúng
+ * là số / N. Chỉ món khách GỌI TÊN trong tin của lượt. «10 hộp» (khách nói rõ hộp) không bao giờ bắt. Trả các dòng lọt. HÀM THUẦN.
+ */
+export function packMultiplierLeaks(customerText: string, lines: readonly { name: string; quantity: number }[], catalogNames: readonly string[]): { name: string; quantity: number; perPack: number }[] {
+  if (!customerText.trim() || !lines.length) return [];
+  const said = amountsIn(customerText, catalogNames).filter((a) => a.unit === "pack" && (a.bare || a.pieces) && a.label);
+  const out: { name: string; quantity: number; perPack: number }[] = [];
+  for (const l of lines) {
+    const n = piecesOf(l.name);
+    if (n === null || n <= 1 || l.quantity < n || l.quantity % n !== 0) continue;
+    if (said.some((a) => a.value === l.quantity && labelsMatch(a.label, productName(l.name)))) out.push({ name: productName(l.name), quantity: l.quantity, perPack: n });
+  }
+  return out;
+}
 /** Mã hàng rào giá trị đơn trong một kết quả công cụ bị từ chối (`{ error, guard }`). HÀM THUẦN. */
 function guardOf(raw: unknown): OrderGuardCode | null {
   try {
@@ -143,6 +171,11 @@ export function scanThreadQuality(msgs: readonly QualityMsg[], ctx: QualityConte
   let turn = 0;
   // Lời mời một món đang chờ trả lời (tên món) · lời đồng ý đang chờ dấu vết món vào đơn.
   let offer: string | null = null;
+  // PACK_MULTIPLIER_LEAKED: tin khách của lượt · công cụ ghi đơn theo mã lời gọi · mỗi (món, số) chỉ bắt MỘT lần mỗi hội thoại.
+  let turnCustomerText = "";
+  const writeCalls = new Set<string>();
+  const leaked = new Set<string>();
+  const catalogNames = ctx.products.map((p) => p.name);
   let accept: { name: string; at: Date; counted: boolean; attached: boolean; botSeen: boolean } | null = null;
   const closeAccept = () => {
     if (accept && accept.counted && !accept.attached) hit("UPSELL_ACCEPTED_NOT_ATTACHED", accept.at);
@@ -170,6 +203,7 @@ export function scanThreadQuality(msgs: readonly QualityMsg[], ctx: QualityConte
         userSince = true;
         lines.push({ who: "CUSTOMER", text: said });
         customerTexts.push(said);
+        turnCustomerText = said;
         closeAccept();
         if (offer && isShortAccept(said)) {
           accept = { name: offer, at: m.at, counted, attached: false, botSeen: false };
@@ -184,6 +218,15 @@ export function scanThreadQuality(msgs: readonly QualityMsg[], ctx: QualityConte
           continue;
         }
         if (b.type !== "tool_result") continue;
+        // Đơn đã ghi mang số hộp = số cái / số trần khách nói ⇒ lọt tới khách (mốc = lượt ghi đơn).
+        if (typeof b.toolUseId === "string" && writeCalls.has(b.toolUseId)) {
+          for (const x of packMultiplierLeaks(turnCustomerText, writtenLinesOf(b.content), catalogNames)) {
+            const key = `${x.name}|${x.quantity}`;
+            if (leaked.has(key)) continue;
+            leaked.add(key);
+            if (counted) hit("PACK_MULTIPLIER_LEAKED", m.at);
+          }
+        }
         if (accept && foldVi(String(b.content)).includes(foldVi(accept.name))) accept.attached = true;
         const sent = deliverOf(b.content);
         if (!sent) continue;
@@ -194,7 +237,11 @@ export function scanThreadQuality(msgs: readonly QualityMsg[], ctx: QualityConte
       }
       continue;
     }
-    if (counted) for (const b of blocksOf(m.content)) if (b.type === "tool_use" && ORDER_WRITE_TOOLS.has(String(b.name))) bases.orderWrites += 1;
+    for (const b of blocksOf(m.content)) {
+      if (b.type !== "tool_use" || !ORDER_WRITE_TOOLS.has(String(b.name))) continue;
+      if (typeof b.id === "string") writeCalls.add(b.id);
+      if (counted) bases.orderWrites += 1;
+    }
     const t = textOf(m.content);
     if (!t) continue;
     if (t.startsWith(SHOP_SAID)) {

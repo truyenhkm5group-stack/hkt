@@ -339,6 +339,7 @@ export const QUALITY_BASE_FIELD: Readonly<Record<string, string>> = {
   CART_TOTAL_CONFLICT: "orderWrites",
   STAFF_AI_QUOTE_CONFLICT: "staffTotals",
   ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT: "orderWrites",
+  PACK_MULTIPLIER_LEAKED: "orderWrites",
 };
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
