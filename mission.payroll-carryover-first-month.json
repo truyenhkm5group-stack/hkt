@@ -27,22 +27,24 @@
     "0254": "2026-10-22T09:00:10.687Z"
   },
   "created_at": "2026-10-22T08:57:38.197Z",
-  "updated_at": "2026-10-22T09:00:10.687Z",
-  "last_heartbeat": "2026-10-22T08:58:11.445Z",
+  "updated_at": "2026-10-22T09:17:11.999Z",
+  "last_heartbeat": "2026-10-22T09:17:11.999Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/payroll-carryover-first-month",
-    "sha": "15d7d0b52f558e2c4b32bb89e5784a61dcd9de26",
-    "at": "2026-10-22T08:58:11.445Z",
+    "sha": "e8a7cf5189e1df0178a2c03d479e2e039ac2dd76",
+    "at": "2026-10-22T09:17:11.999Z",
     "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
     "title": "Sổ lỗ cá nhân: tháng làm việc đầu tiên có số dư đầu kỳ 0 (gỡ chặn chốt lương 08/2026)",
-    "summary": "@15d7d0b52. Gỡ chặn chốt tháng 08: người vào làm trong tháng (ngày vào làm ≥ tháng này) và chưa có dòng sổ nào trước đó ⇒ số dư lỗ đầu kỳ 0, căn cứ FIRST_WORK_MONTH + câu giải thích. Vẫn CHƯA BIẾT: làm từ trước mà thiếu dòng tháng trước · không ngày vào làm · ngày vào làm mâu thuẫn với sổ. Không migration (cột ghi OPENING_DECLARATION, căn cứ thật trong ảnh chụp). Chạm lõi lương ⇒ HIGH, deploy riêng; sau deploy chạy lại payroll-owner-apply --apply (06/07 đã khoá sẽ bỏ qua).",
+    "summary": "@e8a7cf518. Như 15d7d0b52 + migration 0254 (viết tay, đã giữ chỗ số): marketer_carryover_source_check nhận thêm FIRST_WORK_MONTH, không UPDATE dòng nào; run-service ghi đúng FIRST_WORK_MONTH vào cột; đọc lại căn cứ từ cột. HIGH (migration + lõi lương), deploy riêng; sau deploy chạy lại payroll-owner-apply --apply (06/07 đã khoá sẽ bỏ qua).",
     "tests": [
       "npm run typecheck: sạch",
       "eslint các tệp đổi: sạch",
-      "TEST_KHOI=K10 (payroll-carryover + payroll-owner-apply + profit-gate): XANH trên 15d7d0b52",
-      "đột biến bỏ điều kiện không-có-dòng-trước: bị bắt",
-      "đột biến bỏ điều kiện ngày vào làm: bị bắt",
+      "TEST_KHOI=K10 (payroll-carryover chốt qua calculatePayrollPeriodAs + payroll-owner-apply): XANH trên e8a7cf518",
+      "TEST_KHOI=K05 (migration-journal): XANH",
+      "TEST_KHOI=K18 (migration-upgrade-path 86 → 254, khối 0254): XANH",
+      "đột biến ghi OPENING_DECLARATION cho FIRST_WORK_MONTH: bị bắt",
+      "2 đột biến luật (không-có-dòng-trước, ngày vào làm): bị bắt",
       "shard 1–4 + build: giao CI gates"
     ]
   }
