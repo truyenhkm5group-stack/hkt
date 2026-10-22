@@ -46,10 +46,18 @@ function testThuan() {
   ]) {
     assert.equal(commitmentViolation(cartOf(...seq), [MUC]), null, `${JSON.stringify(seq)} ⇒ khách không còn lấy ruốc`);
   }
+  // Ca thật dùng chữ «chai»: trước bản sửa «1 chai mắm» không vào giỏ ⇒ hàng rào không có gì để bám.
+  const sauce = (catalog: string[], text: string) => applyCustomerCartMessage(undefined, text, 1, NOW, { catalog })?.selectedItems.map((i) => `${i.label}:${i.quantity}${i.unit}`) ?? [];
+  assert.deepEqual(sauce(["Chả cá thu", "Nước mắm cá cơm"], "Chị lấy 1kg chả cá thu và 1 chai mắm"), ["Chả cá thu:1000g", "Nước mắm cá cơm:1pack"], "«1 chai mắm» vào giỏ");
+  assert.deepEqual(sauce(["Chả cá thu", "Nước mắm cá cơm"], "1 thùng nước mắm"), ["Nước mắm cá cơm:1pack"], "«thùng» là đơn vị");
+  // Luật đối xứng của bộ đọc tên: từ đứng TRƯỚC đoạn khớp mà tên danh mục không có ⇒ món khác — «nước mắm» không phải «Mắm tôm chua»
+  // (nếu không, hàng rào bỏ sót sẽ ép model thêm SAI món).
+  assert.deepEqual(sauce(["Chả cá thu", "Mắm tôm chua"], "Chị lấy 1kg chả cá thu và 1 chai nước mắm"), ["Chả cá thu:1000g"], "«nước mắm» không bị gán vào «Mắm tôm chua»");
+  assert.deepEqual(sauce(["Chả mực giã tay", "Ruốc bông tôm 100%"], "mẹ chị thích ruốc, lấy 1 hũ ruốc"), ["Ruốc bông tôm 100%:1pack"], "câu thường vẫn đọc như cũ");
   // Lượt khách có dấu hiệu sửa mà máy không áp chắc (relaxedTurn) ⇒ không chặn — luật an toàn sẵn có của giỏ.
   const relaxed = both ? { ...both, relaxedTurn: 9 } : both;
   assert.equal(commitmentViolation(relaxed, [MUC], 9), null);
-  console.log("  ✓ thuần: món khách gọi tên vắng mặt hẳn khỏi đơn ⇒ «KHÔNG được bỏ» + lệch «đơn ghi 0» · đủ món / đã bỏ / chỉ hỏi giá / lượt nới ⇒ không chặn");
+  console.log("  ✓ thuần: món khách gọi tên vắng mặt hẳn khỏi đơn ⇒ «KHÔNG được bỏ» + lệch «đơn ghi 0» · đủ món / đã bỏ / chỉ hỏi giá / lượt nới ⇒ không chặn · «chai» / «thùng» là đơn vị · «nước mắm» không thành «Mắm tôm chua»");
 }
 
 const ADDR = "9 Hai Bà Trưng, Phường Hoàn Kiếm, Thành phố Hà Nội";

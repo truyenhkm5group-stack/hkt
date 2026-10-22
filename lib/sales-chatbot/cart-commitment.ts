@@ -86,7 +86,9 @@ export type CartIntent = { kind: CartIntentKind; amounts: CartAmount[]; label: s
 
 const WORD_NUM: Record<string, number> = { mot: 1, hai: 2, ba: 3, bon: 4, nam: 5, sau: 6, bay: 7, tam: 8, chin: 9, muoi: 10 };
 const WEIGHT_UNIT = "kg|kí|ký|ki|ky|cân|can|gram|gr|g";
-const PACK_UNIT = "túi|tui|gói|goi|hộp|hop|set|phần|phan|bịch|bich|khay|combo|suất|suat|hũ|hủ|hu|lọ|lo|cái|cai|chiếc|chiec|đôi|doi|bộ|bo|cây|cay";
+// «chai» / «thùng» (P0 #865, ca thật «1kg chả cá thu và 1 chai mắm»): thiếu hai chữ này thì món bán theo chai không bao giờ vào giỏ và hàng
+// rào «bỏ sót món» không có gì để bám. KHÔNG thêm «lon»: bỏ dấu thì trùng «lớn» (chữ cỡ trong ATTR_WORDS).
+const PACK_UNIT = "túi|tui|gói|goi|hộp|hop|set|phần|phan|bịch|bich|khay|combo|suất|suat|hũ|hủ|hu|lọ|lo|chai|thùng|thung|cái|cai|chiếc|chiec|đôi|doi|bộ|bo|cây|cay";
 const NUM_WORD = "một|mot|hai|ba|bốn|bon|năm|nam|sáu|sau|bảy|bay|tám|tam|chín|chin|mười|muoi";
 /** Nhận nguyên phân số trước số nguyên; chặn nhặt nhầm \"2 kg\" ở đuôi \"1/2 kg\" (#863). */
 const WEIGHT_RE = new RegExp(`(?<![\\p{L}\\d.,/:-])(\\d+\\s*\\/\\s*\\d+|\\d+(?:[.,]\\d+)?|${NUM_WORD}|nửa|nua)\\s*(${WEIGHT_UNIT})(?:\\s*(rưỡi|ruoi))?(?![\\p{L}\\d])`, "giu");
@@ -118,7 +120,7 @@ const STOP = new Set(
   (
     "chi anh em minh toi c a e ban cho lay mua dat gui ship giao them con doi bot giam thoi thui thoii thoiii thoy nhe nha ah voi va la thi nua sua thanh sang lai " +
     "chot len don order de ok oke okie vang u uh roi khong ko k hok hong hem khoi phai chu ma cua loai dt sdt so dien thoai dia gium giup dum luon di hang nay kia do nao " +
-    "the vay duoc dc can cai tong hay hoac moi ngon an truoc trc chiu bao nhieu bn gia sao dung tien het may tui goi hop set phan bich khay combo suat hu lo chiec cay " +
+    "the vay duoc dc can cai tong hay hoac moi ngon an truoc trc chiu bao nhieu bn gia sao dung tien het may tui goi hop set phan bich khay combo suat hu lo chai thung chiec cay " +
     "kg ky ki can gram gr g x da uhm oki shop xuong tru ha mai mot ve du qua lam it lan gio hom ngay toi sang chieu trua dem tuan thang tet mon huy gi vao ra " +
     "nhen nghen nghe ne nhi hen nhaa ak day dau giu vs cung " +
     // «Mình MUỐN mua 1 kg» (#871, ca «Ngọc Nguyễn»): động từ «muốn / thích» không phải tên món — trước đây «muốn» thành nhãn món, số 1kg
@@ -228,6 +230,10 @@ function resolveLabel(raw: { match: string; display: string }, catalog?: readonl
         const nt = labelTokens(hit);
         const second = tokens[1];
         if (s === 0 && second && !nt.includes(second) && !/\d/.test(second) && !ATTR_WORDS.has(second)) return { match: "", display: "" };
+        // Đối xứng (P0 #865): từ đứng NGAY TRƯỚC đoạn khớp mà tên danh mục không có ⇒ đó là DANH TỪ MÓN của khách, đoạn khớp chỉ là phần bổ
+        // nghĩa — «1 chai nước mắm» khi shop chỉ có «Mắm tôm chua» KHÔNG phải mắm tôm. Không gán ⇒ tên ngoài danh mục ⇒ hỏi lại, không đoán.
+        const before = s > 0 ? tokens[s - 1] : null;
+        if (before && !nt.includes(before) && !/\d/.test(before) && !ATTR_WORDS.has(before)) return { match: "", display: "" };
         return { match: foldVi(hit), display: hit };
       }
       if (hits.length > 1 && len === tokens.length) return { match: "", display: "", ambiguous: true, hint: raw.match };
