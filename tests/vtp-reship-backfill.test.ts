@@ -29,6 +29,7 @@ function testPure() {
   assert.ok(main.includes("applyGateProblem(CANONICAL_OUTCOME_VERSION)"), "hàng rào đọc hằng số của lib ĐANG CHẠY");
   assert.ok(main.indexOf("applyGateProblem(") < main.indexOf("getDb()") && main.indexOf("applyGateProblem(") < main.indexOf("applyPlan("), "hàng rào đứng TRƯỚC mọi lần mở CSDL và mọi lượt ghi");
   assert.ok(/if \(parsed\.apply\) \{\s*const chan = applyGateProblem/.test(main), "chỉ chặn --apply — chạy thử không bị chặn");
+  assert.ok(/const chan = applyGateProblem\(CANONICAL_OUTCOME_VERSION\);\s*if \(chan\) \{[\s\S]{0,200}?process\.exit\(3\);\s*\}/.test(main), "bị từ chối ⇒ DỪNG ngay (mã 3), không đi tiếp tới ghi");
   assert.ok(src.includes('if (CHAY_THANG && !process.argv.slice(2).includes("--apply")) process.env.ERP_READ_ONLY = "1";') && src.includes("show transaction_read_only"), "chạy thử chỉ đọc do Postgres ép + hỏi lại phiên");
   for (const cam of [".insert(", ".update(", ".delete(", "insert into", "update shipments", "update orders", "set order_id"]) assert.ok(!src.toLowerCase().includes(cam.toLowerCase()), `không câu ghi trong script: ${cam}`);
   for (const loi of ["reshipCandidates(", "reshipParentOf(", "relinkOrphanShipment("]) assert.ok(src.includes(loi), `dùng đúng lõi ${loi}`);
