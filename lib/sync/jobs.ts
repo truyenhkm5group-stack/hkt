@@ -84,6 +84,7 @@ import { autoLearnQuickReplies } from "@/lib/sales-chatbot/quick-replies-learn";
 import { refreshConversationLevels } from "@/lib/sales-chatbot/levels";
 import { sendNewOrderAlerts } from "@/lib/sales-chatbot/new-order-alert";
 import { runFanpageOrderSync } from "@/lib/sales-chatbot/order-sync";
+import { resolvePendingAddresses, resolvePendingSummary } from "@/lib/address/resolve-job";
 import { runSalesHealthCheck } from "@/lib/sales-chatbot/health";
 import { mirrorSalesOpsHealth } from "@/lib/sales-chatbot/ops-mirror";
 import { alertStaleOrderWriteHandoffs } from "@/lib/sales-chatbot/alerts";
@@ -853,6 +854,9 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         const ms = await sweepStaleMessengerThreads().catch(() => 0);
         // Ghi đơn từ hội thoại do người chốt — công tắc RIÊNG, chạy cả khi bot tắt. Không ném.
         const os = await runFanpageOrderSync();
+        // MÁY ÁNH XẠ ĐỊA CHỈ NỀN (address-resolver-ladder PR-B, chủ shop chốt 22/10/2026): đơn bot đã chốt còn cờ «địa chỉ chưa ghép» ⇒ chữ
+        // khách → địa chỉ đã xác minh → Google Places của tổ chức; KHÔNG BAO GIỜ trên đường trả lời khách. Không ném.
+        const ar = await resolvePendingAddresses().catch((e: unknown) => ({ checked: 0, sure: 0, unsure: 0, none: 0, placesCalls: 0, placesOff: null, placesError: null, error: e instanceof Error ? e.message.slice(0, 120) : "lỗi lạ", off: null }));
         const r = await runSalesFollowups();
         // Tin sáng «khách đến hạn mua lại» vào nhóm vận hành — một lần mỗi ngày, sau 8 giờ (lib/reorder/digest.ts). Không ném.
         const rd = await sendReorderDigest();
@@ -875,7 +879,7 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         const cuText = raText + (rs.checked ? `gửi bù sau 429: xét ${rs.checked} · gửi ${rs.sent} · bỏ ${rs.dropped}${rs.detail.length ? ` (${rs.detail.slice(0, 2).join(" · ")})` : ""} · ` : "") + (rq.detail ? `${rq.detail} · ` : "") + (cu.threads ? `quét lại ${cu.threads} hội thoại (nhận ${cu.queued} · mở lại ${cu.reopened} · trả lời ${cu.replies}) — ${cu.detail.slice(0, 3).join(" · ")} · ` : "") + (ms ? `Messenger: trả lời bù ${ms} hội thoại · ` : "");
         const rdText = (rd.sent ? `tin sáng khách đến hạn mua lại: ${rd.due} khách · ` : "") + (ls.status === "NOT_DUE" ? "" : `tự học: ${ls.note} · `) + (ql.status === "NOT_DUE" ? "" : `câu mẫu: ${ql.note} · `) + (no.sent ? `báo nhóm ${no.sent} đơn mới chưa xác nhận · ` : "") + (lv.refreshed || lv.errors ? `level khách: ${lv.refreshed} hội thoại${lv.errors ? ` · lỗi ${lv.errors}` : ""} · ` : "") + (hs ? `${hs} · ` : "");
         const osText = os.checked ? `ghi đơn: đọc ${os.checked} hội thoại · lên ${os.created} đơn · sửa ${os.changes} · bỏ qua ${os.skipped} · lỗi ${os.errors}${os.detail.length ? ` (${os.detail.slice(0, 3).join(" · ")})` : ""} · ` : "";
-        ctx.summary.detail = `${osText}${rdText}${cuText}${r.due} tới mốc · gửi ${r.sent} · dừng ${r.stopped} · hoãn ${r.deferred} · lỗi ${r.errors}${r.detail.length ? ` — ${r.detail.slice(0, 6).join(" · ")}` : ""}`.slice(0, 900);
+        ctx.summary.detail = `${osText}${rdText}${cuText}${r.due} tới mốc · gửi ${r.sent} · dừng ${r.stopped} · hoãn ${r.deferred} · lỗi ${r.errors}${resolvePendingSummary(ar)}${r.detail.length ? ` — ${r.detail.slice(0, 6).join(" · ")}` : ""}`.slice(0, 900);
         return r;
       }),
   },

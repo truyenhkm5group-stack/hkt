@@ -1525,6 +1525,8 @@ export type OrderReadiness = "CONFIRMED" | "ORDER_READY" | "NEED_ITEMS" | "NEED_
 const PHONE_IN_TEXT_RE = /(?:\+?84|0)(?:[\s.-]?\d){8,10}(?!\d)/;
 
 type ReadinessInput = {
+  /** Khách ĐÃ gửi chữ địa chỉ trong lượt mua (address-memory.ts `addressTextGiven`) ⇒ không bao giờ NEED_ADDRESS (AGENTS 3.12b, 22/10/2026). */
+  addressGiven?: boolean;
   cart?: CartCommitment;
   customer?: { phone: string; address: string; province: string };
   draft?: { lines: readonly unknown[]; recipient: { phone: string; address: string; province: string } };
@@ -1566,7 +1568,8 @@ export function orderReadiness(s: ReadinessInput): { level: OrderReadiness; miss
   const province = s.customer?.province || (s.customer ? "" : s.knownAddress?.province) || resolveRecipientPlace({ address, province: "", ward: "" }).province;
   const gaps = manualOrderGaps({ phone, address, province }, explicit.length);
   if (gaps.includes("SĐT")) return { level: "NEED_PHONE", missing: "Chưa có SĐT hợp lệ" };
-  if (gaps.includes("địa chỉ") || gaps.includes("tỉnh / thành")) return { level: "NEED_ADDRESS", missing: "Chưa có địa chỉ giao đọc được tỉnh / thành" };
+  // Đã có chữ địa chỉ (kể cả chưa đọc ra tỉnh) ⇒ coi như ĐÃ CÓ địa chỉ: máy ánh xạ nền, không hỏi khách (AGENTS 3.12b, 22/10/2026).
+  if (!s.addressGiven && (gaps.includes("địa chỉ") || gaps.includes("tỉnh / thành"))) return { level: "NEED_ADDRESS", missing: "Chưa có địa chỉ giao đọc được tỉnh / thành" };
   return { level: "ORDER_READY", missing: null };
 }
 

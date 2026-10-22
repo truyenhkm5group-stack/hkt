@@ -654,7 +654,8 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     healthRef: "lib/connectors/testers.ts::testGooglePlaces",
     module: "wholesale_leads",
     code: ["lib/connectors/testers.ts", "lib/integrations/google-places/", "lib/wholesale/engine.ts"],
-    consumers: ["lib/wholesale/engine.ts::runLeadHunterTick"],
+    // Máy ánh xạ địa chỉ giao (address-resolver-ladder, 22/10/2026) đọc CÙNG kết nối của tổ chức — trần lượt RIÊNG, không ăn ngân sách Săn khách sỉ.
+    consumers: ["lib/wholesale/engine.ts::runLeadHunterTick", "lib/address/resolve-job.ts::resolvePendingAddresses"],
     why: "Săn khách sỉ (0197): tìm nhà hàng / quán / khách sạn / cửa hàng thực phẩm bằng Places API (New) với khoá của CHÍNH tổ chức. Kiểm tra = một lượt Text Search chỉ xin Place ID (SKU miễn phí), khoá đi trong tiêu đề X-Goog-Api-Key, chỉ tới places.googleapis.com, không theo chuyển hướng. Job «wholesale-leads» mỗi 3 phút chạy chiến dịch đang bật, có trần ngân sách ngày / tháng tự dừng.",
   },
   // ─────────────── GỬI TIN ───────────────

@@ -182,6 +182,7 @@ async function testDaily() {
     assert.ok(r.ran, JSON.stringify(r));
     assert.equal(r.day, "2031-03-01");
     assert.equal(r.state.counts.CLARIFY_FALLBACK, 2, "hai hội thoại cùng lỗi ⇒ đếm 2");
+    assert.equal(typeof r.state.bases.addressFlagged, "number", "mẫu số ADDRESS_RECEIVED_BUT_NOT_APPLIED được lưu vào state.bases");
     const rows = await db.select().from(schema.notifications).where(like(schema.notifications.dedupeKey, "sales-quality:%:2031-03-01"));
     const byCode = new Map(rows.map((n) => [n.entityId as SalesQualityCode, n]));
     assert.equal(rows.length, r.created);

@@ -139,17 +139,13 @@ export function QuickRepliesManager({ manage, settings, rows, autoLearnRun, trig
             <Switch checked={cfg.autoUpsellOffer} disabled={!manage || pending} onCheckedChange={(v) => setCfg({ ...cfg, autoUpsellOffer: v })} aria-label="Bot tự soạn lời mời sau chốt khi chưa có câu upsell" />
             Bot tự soạn lời mời sau chốt khi chưa có câu upsell
           </label>
-          {/* P0 21/10/2026: địa chỉ chưa ghép phường / xã KHÔNG còn là lý do nhắn khách «nhân viên sẽ xác nhận địa chỉ» — đơn vẫn chờ người kiểm. */}
-          <label className="flex items-center gap-2" title="Khách đã gửi đủ món, SĐT và địa chỉ mà máy chưa ghép được phường / xã: bot ghi nhận ngắn rồi mời mua thêm (câu upsell của shop). Đơn vẫn nằm ở «Cần người kiểm» — chưa xác minh địa chỉ thì không tạo vận đơn.">
-            <Switch checked={cfg.upsellAfterContact} disabled={!manage || pending} onCheckedChange={(v) => setCfg({ ...cfg, upsellAfterContact: v })} aria-label="Mời mua thêm khi địa chỉ còn chờ xác minh" />
-            Mời mua thêm khi địa chỉ còn chờ xác minh (không nhắn khách «nhân viên sẽ xác nhận địa chỉ»)
-          </label>
+          {/* 22/10/2026 (chủ shop — AGENTS 3.12b): công tắc «mời mua thêm khi địa chỉ chờ xác minh» đã gỡ — xác minh địa chỉ không còn ảnh hưởng chốt / mời mua thêm, giá trị đã lưu được bỏ qua. */}
           {manage ? (
             <Button
               size="sm"
               variant="outline"
-              disabled={pending || (cfg.enabled === settings.enabled && cfg.aiMatch === settings.aiMatch && cfg.autoUpsellOffer === settings.autoUpsellOffer && cfg.upsellAfterContact === settings.upsellAfterContact)}
-              onClick={() => act(() => saveQuickReplySettingsAction({ enabled: cfg.enabled, aiMatch: cfg.aiMatch, autoUpsellOffer: cfg.autoUpsellOffer, upsellAfterContact: cfg.upsellAfterContact }))}
+              disabled={pending || (cfg.enabled === settings.enabled && cfg.aiMatch === settings.aiMatch && cfg.autoUpsellOffer === settings.autoUpsellOffer)}
+              onClick={() => act(() => saveQuickReplySettingsAction({ enabled: cfg.enabled, aiMatch: cfg.aiMatch, autoUpsellOffer: cfg.autoUpsellOffer }))}
             >
               Lưu
             </Button>

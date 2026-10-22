@@ -167,6 +167,26 @@ export function withReviewResolved(raw: Record<string, unknown>, by: { action: "
   return { raw: { ...raw, review: null, reviewLog: [...prior, entry].slice(-ORDER_REVIEW_LIMITS.log) }, changed: true, resolved: open.entries };
 }
 
+/**
+ * Lượt kiểm gần nhất của NGƯỜI (xác nhận / huỷ đơn) — không bao giờ là lời khách xác nhận lại hay lượt MÁY gỡ cờ địa chỉ: trang đơn in
+ * «Đã kiểm … bởi … — xác nhận đơn», chọn nhầm `ADDRESS_SETTLED` là để nhân viên tưởng đã có người xác nhận (Tech Lead 22/10/2026). HÀM THUẦN.
+ */
+export function lastHumanReviewOf(raw: unknown): OrderReviewResolution | null {
+  return orderReviewLogOf(raw).find((r) => r.action === "CONFIRMED" || r.action === "CANCELLED") ?? null;
+}
+
+/** Lượt MÁY gỡ cờ địa chỉ gần nhất (đơn đã có xã / phường) — hiện bằng nhãn RIÊNG, không như lời người kiểm. HÀM THUẦN. */
+export function lastAddressSettledOf(raw: unknown): OrderReviewResolution | null {
+  return orderReviewLogOf(raw).find((r) => r.action === "ADDRESS_SETTLED") ?? null;
+}
+
+/** Lý do ghi nhật ký kiểm toán cho một lượt GỠ cờ — một chỗ, theo đúng action (máy gỡ cờ địa chỉ KHÔNG phải «người đã kiểm»). HÀM THUẦN. */
+export function reviewResolveReason(action: OrderReviewAction | undefined): string {
+  if (action === "ADDRESS_SETTLED") return "Máy gỡ cờ địa chỉ — đơn đã có xã / phường";
+  if (action === "CUSTOMER_RECONFIRMED") return "Khách xác nhận lại qua bot — cờ giữ nguyên, người quyết";
+  return `Người đã kiểm — ${action === "CANCELLED" ? "huỷ đơn" : "xác nhận đơn"}`;
+}
+
 /** Đầu câu ghi chú của dòng cờ «địa chỉ chưa ghép» do MÁY dựng lúc tự chốt (`addressReview` trong lib/records/order-create.ts). */
 export const MACHINE_ADDRESS_NOTE_PREFIX = "Máy chốt khi địa chỉ chưa ghép được";
 
@@ -183,6 +203,26 @@ export function withAddressSettled(raw: Record<string, unknown>, by: { at: strin
   const prior = Array.isArray(raw.reviewLog) ? (raw.reviewLog as unknown[]) : [];
   const entry: OrderReviewResolution = { entries: settled, action: "ADDRESS_SETTLED", at: by.at, byUserId: null, byName: `${by.byName} · khách đã cho xã / phường «${by.ward}»`.slice(0, ORDER_REVIEW_LIMITS.noteMax) };
   return { raw: { ...raw, review: rest.length ? { entries: rest } : null, reviewLog: [...prior, entry].slice(-ORDER_REVIEW_LIMITS.log) }, changed: true, settled };
+}
+
+/**
+ * Máy ánh xạ địa chỉ nền KHÔNG CHẮC (address-resolver-ladder, 22/10/2026) ⇒ ghi ứng viên + lý do vào ĐÚNG dòng cờ máy «địa chỉ chưa
+ * ghép» (một việc cho nhân viên, không thêm dòng). Đã có cùng ghi chú ⇒ không đổi. HÀM THUẦN.
+ */
+export function withAddressCandidates(raw: Record<string, unknown>, hint: string): { raw: Record<string, unknown>; changed: boolean } {
+  const open = orderReviewOf(raw);
+  if (!open) return { raw, changed: false };
+  const tag = " · Máy ánh xạ: ";
+  let changed = false;
+  const entries = open.entries.map((e) => {
+    if (e.code !== "ADDRESS_UNRESOLVED" || !e.note.startsWith(MACHINE_ADDRESS_NOTE_PREFIX)) return e;
+    const base = e.note.split(tag)[0];
+    const note = `${base}${tag}${hint}`.slice(0, ORDER_REVIEW_LIMITS.noteMax);
+    if (note === e.note) return e;
+    changed = true;
+    return { ...e, note };
+  });
+  return changed ? { raw: { ...raw, review: { entries } }, changed } : { raw, changed: false };
 }
 
 /**

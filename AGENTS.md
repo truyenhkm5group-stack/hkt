@@ -55,8 +55,20 @@ deploy dừng, không phải cảnh báo.
     **SĐT** — nhận diện CHẮC (cùng tổ chức + cùng page + cùng luồng/PSID: SĐT khách tự gõ trong chính luồng · đơn đã chốt của chính
     hội thoại, kể cả đơn nhân viên lên «nối khoá bot» · hồ sơ khớp mã Facebook của chính tổ chức) ⇒ máy chủ tự nạp, không xin lại;
     MỘT nguồn: `lib/sales-chatbot/known-contact.ts`. Nhiều số khác nhau ⇒ một câu chọn số. Khớp qua SĐT người khác gõ, tên Facebook
-    ⇒ KHÔNG BAO GIỜ (chỉ gợi ý đã che như cũ). **Địa chỉ** — lượt mua mới không tự mang địa chỉ cũ vào đơn: hỏi ĐÚNG MỘT câu «giao
-    về <phường/quận> như lần trước không ạ?» (không đọc số nhà), khách đồng ý mới ghi qua `use_saved_address`.
+    ⇒ KHÔNG BAO GIỜ (chỉ gợi ý đã che như cũ). **Địa chỉ** — lượt mua mới không tự mang địa chỉ cũ vào đơn: CHỈ KHI lượt này khách
+    CHƯA gửi chữ địa chỉ nào mới được hỏi ĐÚNG MỘT câu «giao về <phường/quận> như lần trước không ạ?» (không đọc số nhà), khách đồng ý
+    mới ghi qua `use_saved_address`. Khách đã gửi địa chỉ mới ⇒ không hỏi câu này (luật 12b).
+12b. **ĐỊA CHỈ KHÁCH KHÔNG BAO GIỜ HỎI LẠI** (chủ shop chốt 22/10/2026): chỉ được hỏi địa chỉ khi khách CHƯA gửi chữ địa chỉ nào
+    trong lượt mua. Đã có BẤT KỲ chữ địa chỉ nào (dòng địa chỉ · mảnh số nhà / đường · tên phường / xã / tỉnh · địa giới cũ — kể cả
+    thiếu phường hay mơ hồ) ⇒ không câu nào trên MỌI đường gửi (model · câu mẫu · câu dự phòng · câu thay của hàng rào · tin theo dõi)
+    được hỏi / xin / xác nhận lại địa chỉ, phường, tỉnh, số nhà, «như lần trước»; không có ngoại lệ «hỏi một câu xác nhận». MỘT biên:
+    `addressTextGiven` (`lib/sales-chatbot/address-memory.ts`) — chữ không mang tín hiệu địa chỉ («gần chợ», tên người) và tên tỉnh
+    trong câu HỎI phí ship KHÔNG tính; MỘT điểm chặn cuối: `dropAddressAsks` trong `appendMessage` của engine + tin theo dõi. Chữ địa
+    chỉ nguyên văn lưu ở `orders.raw.addressText`. **Ánh xạ địa chỉ không ảnh hưởng chốt / upsell / cross-sell**: đơn chỉ còn chờ xác
+    minh địa chỉ là đơn ĐÃ CHỐT với khách (câu chốt thường, lời mời sau chốt mở như đơn hợp lệ — cờ `upsellAfterContact` không còn
+    tác dụng); đã có chữ địa chỉ mà chưa đọc được tỉnh thì KHÔNG chặn tự chốt (đổi luật chốt đơn cho MỌI tổ chức). Việc kiểm là việc
+    NỘI BỘ: cờ ADDRESS_UNRESOLVED / ADDRESS_REVIEW, máy ánh xạ nền, không chắc ⇒ một việc cho nhân viên; CHỖ DUY NHẤT xác minh được
+    giữ đơn là vận đơn / đẩy ĐVVC (`lib/shipping/route.ts`, `lib/carriers/engine.ts`) — đẩy sai địa chỉ là mất ship và hàng hoàn.
 13. Giá vốn tính "sống": **GIÁ BÁO MKT ĐANG HIỆU LỰC HÔM NAY** của mã (chủ shop chốt 13/10/2026 —
     áp cho MỌI đơn ở MỌI báo cáo, kể cả đơn cũ; giá báo 0 ₫ = chưa định giá) → phiếu nhập ERP gần nhất →
     giá vốn Pancake → giá nhập mẫu mã. Một khối SQL duy nhất: `lib/queries/current-marketer-cost.ts`. Đơn có

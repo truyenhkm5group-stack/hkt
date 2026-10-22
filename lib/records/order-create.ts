@@ -91,7 +91,7 @@ import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { normalizePhone as pancakePhone } from "@/lib/integrations/http";
 import { orderCancellationOf, withCancelOutcome, type CancelActor, type CancelRequester, type RescueResult } from "@/lib/constants/order-cancel";
-import { canFlagOrderForReview, MACHINE_ADDRESS_NOTE_PREFIX, ORDER_REVIEW_HOLD_CODES, orderReviewOf, reviewConflictMessage, unseenReviewEntries, withAddressSettled, withCustomerReconfirm, withReviewEntry, withReviewResolved, type OrderReviewEntry, type OrderReviewResolution, type ReviewSeen } from "@/lib/constants/order-review";
+import { canFlagOrderForReview, MACHINE_ADDRESS_NOTE_PREFIX, ORDER_REVIEW_HOLD_CODES, orderReviewOf, reviewConflictMessage, reviewResolveReason, unseenReviewEntries, withAddressCandidates, withAddressSettled, withCustomerReconfirm, withReviewEntry, withReviewResolved, type OrderReviewEntry, type OrderReviewResolution, type ReviewSeen } from "@/lib/constants/order-review";
 
 export type OrderGate = { allowed: true } | { allowed: false; code: "FORBIDDEN" | "NOT_SUPPORTED" | "MODULE_DISABLED"; reason: string };
 
@@ -137,6 +137,12 @@ export type AgentOrderOptions = {
    * nhận từ client hay từ AI.
    */
   adId?: string | null;
+  /**
+   * CHỮ ĐỊA CHỈ NGUYÊN VĂN khách gửi trong lượt mua (AGENTS 3.12b, chủ shop chốt 22/10/2026 — `addressTextLines`): lưu vào
+   * `raw.addressText` mỗi lượt ghi của máy, bản mới thay bản cũ. Là NHÁP cho máy ánh xạ nền + người kiểm; không ô nào của đơn đọc nó.
+   * MÁY CHỦ dựng từ tin khách — không bao giờ nhận từ AI.
+   */
+  addressText?: readonly string[] | null;
   /**
    * BÁO GIÁ MÁY CHỦ mà khách đã nghe (P0 11/10/2026 — `lib/sales-chatbot/quote.ts`). Có ⇒ lõi TÍNH LẠI phần hàng bằng chính hàm báo giá
    * (đơn giá + giảm theo khối lượng của tổ chức), từ chối nếu lệch / chưa xác thực, và lưu mã + phiên bản giá + tổng vào `raw.quote`.
@@ -431,6 +437,12 @@ function reviewsOnWrite(w: Writer, p: Prepared, raw: Record<string, unknown>, no
   return { raw: b.raw, changed: a.changed || b.changed, settled: a.settled };
 }
 
+/** Gắn chữ địa chỉ nguyên văn của lượt (máy) vào `raw.addressText` — bản mới thay bản cũ; không có ⇒ giữ nguyên. HÀM THUẦN. */
+function withAddressText(raw: Record<string, unknown>, agentOpts: AgentOrderOptions | undefined, now: Date): Record<string, unknown> {
+  const lines = (agentOpts?.addressText ?? []).map((l) => l.trim()).filter(Boolean);
+  return lines.length ? { ...raw, addressText: { lines, at: now.toISOString() } } : raw;
+}
+
 function addressReview(w: Writer, p: Prepared, raw: Record<string, unknown>, now: Date): { raw: Record<string, unknown>; changed: boolean; settled: OrderReviewEntry[] } {
   const ward = (p.recipient.ward ?? "").trim();
   // ĐƠN NAY ĐÃ CÓ PHƯỜNG (P0 22/10/2026, HSLC #8037F35A): máy tự chốt lúc khách chưa cho phường ⇒ cờ «địa chỉ chưa ghép»; khách cho phường
@@ -456,7 +468,7 @@ async function auditReview(w: Writer, orderId: string, kind: "FLAG" | "RESOLVE",
     entityId: orderId,
     before: kind === "FLAG" ? null : { review: detail.entries },
     after: kind === "FLAG" ? { review: detail.entries } : { review: null, action: detail.action ?? null },
-    reason: kind === "FLAG" ? `Cần người kiểm: ${detail.entries.map((e) => e.code).join(", ")}` : `Người đã kiểm — ${detail.action === "CANCELLED" ? "huỷ đơn" : "xác nhận đơn"}`,
+    reason: kind === "FLAG" ? `Cần người kiểm: ${detail.entries.map((e) => e.code).join(", ")}` : reviewResolveReason(detail.action),
   });
 }
 
@@ -622,7 +634,7 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
       }
       if (agentOpts && !agentOpts.allowShortStock && p.stage === "CONFIRMED") await assertAgentStock(tx, p, []);
       const cols = orderColumns(p, w, { ...(key ? { agentKey: key } : {}), ...(quote ? { quote } : {}) });
-      const flagged = reviewsOnWrite(w, p, cols.raw, now, agentOpts);
+      const flagged = reviewsOnWrite(w, p, withAddressText(cols.raw, agentOpts, now), now, agentOpts);
       createdReview = flagged.changed ? (orderReviewOf(flagged.raw)?.entries ?? []) : [];
       await tx.insert(schema.orders).values({ id, ...cols, raw: flagged.raw, ...(agentOpts?.adId ? { adId: agentOpts.adId } : {}), insertedAt: now, lastUpdateStatusAt: now, syncedAt: now });
     await tx.insert(schema.orderItems).values(itemRows(id, p));
@@ -756,7 +768,7 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
       // `quotePrev` (vết, không xoá) — tổng đơn không còn là tổng máy đã báo khách, giữ ở `quote` là để `orderValidityOf` báo «lệch» oan.
       const { quote: oldQuote, ...lockedRest } = lockedRaw;
       const baseRaw: Record<string, unknown> = { ...lockedRest, ...(manualOrderRaw(lockedRaw) as ManualOrderRaw), orderDiscount: p.orderDiscount, ...(quote ? { quote } : oldQuote ? { quotePrev: oldQuote } : {}) };
-      flagged = reviewsOnWrite(w, p, baseRaw, now, agentOpts);
+      flagged = reviewsOnWrite(w, p, withAddressText(baseRaw, agentOpts, now), now, agentOpts);
       const r = opts.resolveReview && p.stage === "CONFIRMED" ? withReviewResolved(flagged.raw, { action: "CONFIRMED", at: now.toISOString(), byUserId: w.userId, byName: w.name }) : { raw: flagged.raw, changed: false, resolved: [] as OrderReviewEntry[] };
       resolved = r;
       // Máy chốt / sửa đơn đã chốt ⇒ kiểm phần hàng CẦN THÊM so với phần đơn này đang giữ (đơn đã chốt trước đó).
@@ -904,6 +916,65 @@ export async function flagOrderForReviewAsAgent(agent: OrderAgent, orderId: stri
     announceOrder(orderId, "updated");
   }
   return { ok: true, id: orderId, flagged: true, stage: out.stage };
+}
+
+/** Kết quả của MỘT lượt máy ánh xạ địa chỉ nền trên một đơn — vết ở `raw.addressResolution` (đo tỷ lệ theo từng bậc). */
+export type AddressResolution = {
+  status: "SURE" | "UNSURE" | "NONE";
+  source: "TEXT" | "C360" | "PLACES" | null;
+  ward: string | null;
+  province: string | null;
+  candidates: string[];
+  reason: string;
+  /** Mốc `raw.addressText.at` đã xét — chữ khách mới hơn ⇒ máy xét lại. */
+  textAt: string | null;
+  /**
+   * Chữ khách máy đã đọc lấy từ đâu: `ORDER_TEXT` = `raw.addressText` lưu lúc chốt · `CONVERSATION` = đơn chốt trước khi có trường đó,
+   * đọc lại tin khách trong hội thoại tới lúc đơn tạo · `NONE` = không có dòng địa chỉ nào của khách (chỉ còn bậc C360 / Google).
+   */
+  textSource?: "ORDER_TEXT" | "CONVERSATION" | "NONE";
+  /** Đã tra Google ở lượt này (đếm chi phí). */
+  places: boolean;
+  /** Lỗi bậc Google (xác thực / hạn mức / mạng) — ghi rõ, máy lùi về bậc (a)(b) + nhân viên. */
+  placesError: string | null;
+  attempts: number;
+  at: string;
+};
+
+/**
+ * MÁY ÁNH XẠ ĐỊA CHỈ NỀN (address-resolver-ladder PR-B, chủ shop chốt 22/10/2026): ghi KẾT QUẢ lên ô địa chỉ của đơn — chỉ khi dòng cờ máy
+ * «địa chỉ chưa ghép» còn mở, ô xã còn trống và dòng địa chỉ chưa đổi kể từ lúc đọc (`expectAddress`). CHẮC ⇒ điền tỉnh / xã + gỡ dòng cờ
+ * (vết ADDRESS_SETTLED, máy). Không chắc / không ra ⇒ không đổi ô nào, ghi ứng viên + lý do vào dòng cờ (một việc cho nhân viên). Không
+ * đổi stage, không đụng tiền / hàng / vận đơn. Không ném.
+ */
+export async function applyAddressResolutionAsAgent(agent: OrderAgent, orderId: string, expectAddress: string, r: AddressResolution, now: Date = new Date()): Promise<{ applied: boolean; settled: boolean }> {
+  if (!isManualOrderId(orderId) || orderId.length > 200) return { applied: false, settled: false };
+  const w = agentWriter(agent);
+  const db = await getDb();
+  const out = await db.transaction(async (tx) => {
+    const o = schema.orders;
+    const [row] = await tx.select({ id: o.id, stage: o.stage, raw: o.raw, address: o.shipAddress, commune: o.shipCommune }).from(o).where(eq(o.id, orderId)).limit(1).for("update");
+    // Phạm vi (Tech Lead 22/10/2026): chỉ đơn còn sửa được và KHÔNG có vận đơn giữ đơn — kiểm lại TRONG giao dịch (vận đơn tạo giữa lúc job
+    // chọn đơn và lúc ghi). Ngoài phạm vi ⇒ không ghi gì, kể cả vết.
+    if (!row || !manualOrderRaw(row.raw) || !(MANUAL_ORDER_STAGES as readonly string[]).includes(row.stage) || row.address !== expectAddress) return { applied: false, settled: [] as OrderReviewEntry[] };
+    const attempts = await tx.select({ stage: schema.shipments.stage, raw: schema.shipments.raw }).from(schema.shipments).where(eq(schema.shipments.orderId, row.id));
+    if (attempts.some((a) => attemptHoldsOrder(a))) return { applied: false, settled: [] as OrderReviewEntry[] };
+    let raw: Record<string, unknown> = { ...(row.raw as Record<string, unknown>), addressResolution: r };
+    if (r.status === "SURE" && r.ward && r.province && !row.commune.trim()) {
+      const s = withAddressSettled(raw, { at: now.toISOString(), byName: `${w.name} · nguồn ${r.source ?? "?"}`, ward: r.ward });
+      raw = s.raw;
+      await tx.update(o).set({ shipProvince: r.province, shipCommune: r.ward, shipFullAddress: fullAddressLine(row.address, r.ward, r.province), raw, updatedAt: now }).where(eq(o.id, row.id));
+      return { applied: true, settled: s.settled };
+    }
+    if (r.candidates.length || r.reason) raw = withAddressCandidates(raw, r.candidates.length ? `ứng viên ${r.candidates.join(" / ")} — ${r.reason}` : r.reason).raw;
+    await tx.update(o).set({ raw, updatedAt: now }).where(eq(o.id, row.id));
+    return { applied: true, settled: [] as OrderReviewEntry[] };
+  });
+  if (out.settled.length) {
+    await auditReview(w, orderId, "RESOLVE", { entries: out.settled, action: "ADDRESS_SETTLED" });
+    announceOrder(orderId, "updated");
+  }
+  return { applied: out.applied, settled: out.settled.length > 0 };
 }
 
 /**

@@ -141,6 +141,7 @@ export const PRIVACY_CONTENT: LegalDocumentContent = {
             ["Pancake, Facebook (fanpage)", "Hội thoại, đơn hàng của fanpage", "Khi Khách thuê kết nối"],
             ["Meta Platforms (Messenger API)", "Tin nhắn trả lời khách, tin riêng trả lời bình luận; đọc nội dung bài viết được bình luận (mục 3a)", "Khi Khách thuê kết nối Facebook Page trực tiếp"],
             ["Viettel Post", "Thông tin giao hàng của đơn", "Khi Khách thuê kết nối"],
+            ["Google (Google Maps Platform — Places API)", "Phần địa chỉ giao hàng khách gửi trong đơn (không kèm họ tên, số điện thoại) — để xác định đúng phường / xã, tỉnh / thành", "Khi máy chưa đọc được phường / xã của địa chỉ và Khách thuê đã kết nối Google Places"],
             ["Ngân hàng / dịch vụ đối soát chuyển khoản (SePay)", "Nội dung và số tiền giao dịch", "Khi đối soát thanh toán"],
           ]}
         />
