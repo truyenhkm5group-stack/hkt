@@ -486,6 +486,9 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
       new Date(),
     );
     const giu = tuyen.kind === "HOLD" && ["NOT_CONFIRMED", "ADDRESS_REVIEW", "ORDER_REVIEW", "NO_PROVINCE", "NO_WARD"].includes(tuyen.code) ? tuyen.code : "không giữ vì địa chỉ / cờ (bước hãng / cân không xét ở đây)";
+    const ar = addressResolutionText(raw, String(r.ward ?? ""));
+    if (ar.chiTiet) console.log(`    máy ánh xạ (chi tiết): ${ar.chiTiet}`);
+    tomTat(`đơn ${shortOrder(r.id)}: ${ar.tom}`);
     tomTat(`đơn ${shortOrder(r.id)}: ${r.stage} · cờ kiểm ${reviewCodesText(raw)} · ô tỉnh ${String(r.province ?? "").trim() ? "có" : "TRỐNG"} · ô xã ${String(r.ward ?? "").trim() ? "có" : "TRỐNG"} · tuyến giao: ${giu}`);
   }
 
@@ -1023,6 +1026,8 @@ async function listAround(db: Db, at: Date, windowMin: number): Promise<void> {
  * Cờ cần kiểm của đơn — chỉ MÃ, không chữ ghi chú, không tên người: cờ ĐANG MỞ (`raw.review.entries`) và các lượt NGƯỜI ĐÃ KIỂM
  * (`raw.reviewLog` — bấm «Xác nhận đơn» / «Huỷ đơn» xoá cờ khỏi `review` và chuyển vào đây, order-review.ts::withReviewResolved). Mã trong
  * danh sách ĐÓNG giữ nguyên, ngoài danh sách ⇒ KHAC. HÀM THUẦN.
+ * Lượt KHÔNG phải người (order-review.ts::ORDER_REVIEW_ACTIONS) in RIÊNG, không vào «người đã kiểm»: `ADDRESS_SETTLED` = máy ghép được
+ * phường / xã nên tự gỡ cờ địa chỉ của máy (address-resolver-ladder, 22/10/2026) · `CUSTOMER_RECONFIRMED` = khách xác nhận lại, cờ vẫn mở.
  */
 export function reviewCodesText(raw: Record<string, unknown>): string {
   const dong = new Set(["CUSTOMER_CANCELLED", "ADDRESS_UNRESOLVED", "CANCEL_BLOCKED", "PRICE_DISPUTED", "PRICE_MISMATCH", "UPSELL_UNCONSENTED", "ROUND_ABANDONED"]);
@@ -1030,8 +1035,30 @@ export function reviewCodesText(raw: Record<string, unknown>): string {
   const review = raw.review && typeof raw.review === "object" ? (raw.review as { entries?: unknown }) : null;
   const mo = ma(review?.entries);
   const log = Array.isArray(raw.reviewLog) ? (raw.reviewLog as Record<string, unknown>[]) : [];
-  const daKiem = log.map((l) => `${l?.action === "CONFIRMED" || l?.action === "CANCELLED" ? String(l.action) : "KHAC"}:${ma(l?.entries).join("+") || "—"}`);
-  return `đang mở ${mo.join("+") || "không"} · người đã kiểm ${daKiem.join(", ") || "chưa"}`;
+  const machine = new Set(["ADDRESS_SETTLED", "CUSTOMER_RECONFIRMED"]);
+  const daKiem = log.filter((l) => !machine.has(String(l?.action ?? ""))).map((l) => `${l?.action === "CONFIRMED" || l?.action === "CANCELLED" ? String(l.action) : "KHAC"}:${ma(l?.entries).join("+") || "—"}`);
+  const mayGhep = log.filter((l) => l?.action === "ADDRESS_SETTLED").map((l) => ma(l?.entries).join("+") || "—");
+  const khachLai = log.filter((l) => l?.action === "CUSTOMER_RECONFIRMED").length;
+  return `đang mở ${mo.join("+") || "không"} · người đã kiểm ${daKiem.join(", ") || "chưa"}${mayGhep.length ? ` · máy ghép phường ${mayGhep.join(", ")}` : ""}${khachLai ? ` · khách xác nhận lại ${khachLai} lần` : ""}`;
+}
+
+/**
+ * Vết MÁY ÁNH XẠ ĐỊA CHỈ của đơn (`raw.addressResolution` — lib/address/resolve-job.ts). `tom` = phần TÓM TẮT, chỉ mã + có / không +
+ * số đếm: trạng thái · bậc (TEXT / C360 / PLACES) · nguồn chữ · số ứng viên · xã máy chọn có khớp ô xã đơn không · Google gọi / loại lỗi ·
+ * số lần. `chiTiet` = tên xã / tỉnh danh mục máy chọn, ứng viên, câu lý do — CHỈ in ở phần MÃ HOÁ (là nơi giao của khách). Không có vết ⇒
+ * «chưa xét». Chữ ngoài danh sách đóng ⇒ KHAC. HÀM THUẦN.
+ */
+export function addressResolutionText(raw: Record<string, unknown>, orderWard: string): { tom: string; chiTiet: string | null } {
+  const r = raw.addressResolution && typeof raw.addressResolution === "object" ? (raw.addressResolution as Record<string, unknown>) : null;
+  if (!r) return { tom: "máy ánh xạ: chưa xét", chiTiet: null };
+  const pick = (v: unknown, ok: readonly string[]) => (ok.includes(String(v)) ? String(v) : v === null || v === undefined ? "—" : "KHAC");
+  const ward = typeof r.ward === "string" ? r.ward : "";
+  const cands = Array.isArray(r.candidates) ? r.candidates.filter((x): x is string => typeof x === "string") : [];
+  const errKind = typeof r.placesError === "string" && r.placesError ? pick(r.placesError.split(":")[0], ["AUTH", "QUOTA", "INVALID", "NOT_FOUND", "NETWORK", "SERVER", "UNKNOWN", "TIMEOUT"]) : null;
+  const khop = ward ? (ward === orderWard.trim() ? "khớp ô xã đơn" : "KHÁC ô xã đơn") : "không chọn xã";
+  const tom = `máy ánh xạ: ${pick(r.status, ["SURE", "UNSURE", "NONE"])} · bậc ${pick(r.source, ["TEXT", "C360", "PLACES"])} · chữ ${pick(r.textSource, ["ORDER_TEXT", "CONVERSATION", "NONE"])} · ${cands.length} ứng viên · ${khop} · Google ${r.places === true ? "có gọi" : "không gọi"}${errKind ? ` (lỗi ${errKind})` : ""} · lần ${Number.isInteger(r.attempts) ? String(r.attempts) : "?"}`;
+  const chiTiet = `máy chọn ${ward || "—"} / ${typeof r.province === "string" && r.province ? r.province : "—"} · ứng viên ${cands.join(" / ") || "—"} · lý do ${typeof r.reason === "string" ? r.reason.slice(0, 200) : "—"} · lúc ${typeof r.at === "string" ? r.at : "?"}`;
+  return { tom, chiTiet };
 }
 
 /** Nhãn đầu tin khách mà `carryCommentTurn` (lib/sales-chatbot/engine.ts) gắn khi chép lượt bình luận sang hộp thư. */
