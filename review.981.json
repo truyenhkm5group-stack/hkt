@@ -3,6 +3,6 @@
   "sha": "818f3604212d1cc896b3f53f68e9d75527a9f1ef",
   "verdict": "FAIL",
   "actor": "DESKTOP-56TH98Y:wt-prompt-cache",
-  "at": "2026-10-22T18:55:17.979Z",
-  "note": "BỔ SUNG (3) CAO — chiều TIỀN THẬT: đơn Pancake «Đã hủy» + lần gửi lại GIAO THÀNH CÔNG, COD thực thu 450.000 ⇒ ORDER_OUTCOME = DELIVERED nhưng ORDER_OUTCOME_VERIFIED = CANCELLED (nhánh đầu «o.stage huỷ ⇒ CANCELLED» vô điều kiện). Lệch này ĐÃ có trên main/production từ #979 (lần gửi lại nay gắn vào đơn) và sẽ phủ ~81 đơn đã giao khi script vá #978 ghi; #981 tuyên bố «chứng từ ĐVVC của lần gửi thay t"
+  "at": "2026-10-22T19:12:27.538Z",
+  "note": "NHÁNH SỬA SẴN: claude/vtp-reship-outcome-review-fix @ 2a81ecb1e4c5 (1 commit trên 818f3604: RESHIP_ALIVE dùng chung ORDER_OUTCOME + ORDER_OUTCOME_VERIFIED, mục 12 ghi đủ bốn vế, 5 ca kiểm mới). tsc + eslint sạch · TEST_KHOI=K01,K13,K19 ĐẠT (contract ORDER_OUTCOME + vtp-reship-outcome) · đột biến bỏ vế đơn tay / bỏ vế VERIFIED ⇒ đỏ. RÀNG BUỘC THỨ TỰ: vtp-reship-backfill-apply (bước GHI gắn ~330 mồ "
 }
