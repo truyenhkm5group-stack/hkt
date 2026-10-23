@@ -64,6 +64,14 @@ const BOC_THEO_HINH_DANG: { tep: string; ham: string; soLan: number }[] = [
   { tep: "lib/queries/fulfillment-buckets.ts", ham: "export async function getFulfillmentBuckets(", soLan: 1 },
   // /data-quality — perf-probe 24/09/2026: 5.389 ms đường thật, 278 ms khi tắt JIT
   { tep: "lib/cs/reconcile-order-created.ts", ham: "export async function reconcileOrderNotCreated(", soLan: 1 },
+  /*
+    Khối danh sách mới #993 (/orders · /shipments) — perf-probe 23/10/2026 ghi cả hai câu «ngoài chayKhongJit»; EXPLAIN xen kẽ:
+    orderSummary JIT bật 10.907 ms ↔ tắt 168,6 ms · shipmentSummary 5.382 ↔ 59,6 ms; smoke /orders 8,9 s. Các hàm cùng khối
+    (listOrders · orderFacets · orderNeedsReviewCount · listShipments · shipmentFacets) đo 4–185 ms nguội ⇒ dưới ngưỡng JIT, KHÔNG bọc
+    (một giao dịch thêm chỉ giữ kết nối lâu hơn).
+  */
+  { tep: "lib/queries/orders.ts", ham: "async function orderSummaryUncached(", soLan: 1 },
+  { tep: "lib/queries/shipments.ts", ham: "async function shipmentSummaryUncached(", soLan: 1 },
 ];
 
 const goc = path.resolve(__dirname, "..");

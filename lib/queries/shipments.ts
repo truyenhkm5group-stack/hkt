@@ -1,7 +1,7 @@
 import { listKey, memo } from "@/lib/cache";
 import { and, count, desc, eq, exists, gte, ilike, inArray, isNotNull, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { HAS_CASH_EVIDENCE, ORDER_OUTCOME, SHIPMENT_DELIVERED, SHIPMENT_RETURNED } from "@/lib/queries/return-rate";
 import type { CodStatus, ShipmentStage } from "@/db/schema";
 import { COD_STATUS_LABEL, SHIPMENT_STAGE_LABEL, SHIPMENT_STAGE_ORDER } from "@/lib/constants/viettelpost";
@@ -347,9 +347,14 @@ async function shipmentSummaryUncached(params: ListParams) {
   const db = await getDb();
   const where = await shipmentListWhere(params);
   const s = schema.shipments;
-  const [row] = await db
-    .select({
-      total: count(),
+  /*
+    TẮT JIT (OD-UX-05, đo production 23/10/2026): câu gộp mang `SHIPMENT_DELIVERED` / `SHIPMENT_RETURNED` (biểu thức kết quả đơn)
+    trên mọi vận đơn của kỳ — EXPLAIN xen kẽ 3 lượt JIT bật trung vị 5.382 ms, JIT tắt 59,6 ms (99 % là biên dịch JIT).
+  */
+  const [row] = await chayKhongJit(db, (tx) =>
+    tx
+      .select({
+        total: count(),
       codPending: sql<number>`coalesce(sum(case when ${s.codStatus} = 'PENDING' then ${s.codAmount} else 0 end), 0)`,
       codPendingCount: sql<number>`coalesce(sum(case when ${s.codStatus} = 'PENDING' then 1 else 0 end), 0)`,
       delivering: sql<number>`coalesce(sum(case when ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY') then 1 else 0 end), 0)`,
@@ -358,10 +363,11 @@ async function shipmentSummaryUncached(params: ListParams) {
       delivered: sql<number>`coalesce(sum(case when ${SHIPMENT_DELIVERED} then 1 else 0 end), 0)`,
       failed: sql<number>`coalesce(sum(case when ${s.stage} = 'DELIVERY_FAILED' then 1 else 0 end), 0)`,
       returning: sql<number>`coalesce(sum(case when ${SHIPMENT_RETURNED} then 1 else 0 end), 0)`,
-    })
-    .from(s)
-    .leftJoin(schema.orders, eq(schema.orders.id, s.orderId))
-    .where(where);
+      })
+      .from(s)
+      .leftJoin(schema.orders, eq(schema.orders.id, s.orderId))
+      .where(where),
+  );
   return {
     total: Number(row?.total ?? 0),
     codPending: Number(row?.codPending ?? 0),
