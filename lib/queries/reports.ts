@@ -11,6 +11,7 @@ import { populationFilter } from "@/lib/queries/metrics";
 import { variantLastCostSubquery } from "@/lib/queries/stock";
 import { previousPeriod, type Period } from "@/lib/search-params";
 import { getOperatingCost, getOperatingCostByDay } from "@/lib/queries/cost-engine";
+import { getRecognizedPayrollCost } from "@/lib/queries/payroll-cost";
 
 export type ReportBasis = "created" | "delivered";
 
@@ -279,7 +280,12 @@ export async function getDailyBreakdown(period: Period, basis: ReportBasis): Pro
     cảnh báo «client.query() when the client is already executing a query» — pg@9 bỏ hẳn cách gọi đó —
     và làm phép đo tính cả thời gian đứng xếp hàng vào từng câu. Nay `await` lần lượt; cùng SQL,
     cùng thứ tự kết quả (`tests/tx-sequential.test.ts`).
+
+    Chi phí lương ghi nhận (`getRecognizedPayrollCost`) đọc `settings` qua bể — tức một kết nối THỨ HAI.
+    Nó phải xong TRƯỚC khi giao dịch mở: gọi bên trong là giữ một kết nối rồi chờ kết nối khác, đúng
+    hình dạng khoá chết bể (xem `getOperatingCostByDay`).
   */
+  const payroll = await getRecognizedPayrollCost(period);
   const [orderRows, adRows, expenseRows] = await chayKhongJit(db, async (tx) => [
     await tx
       .select({
@@ -306,7 +312,7 @@ export async function getDailyBreakdown(period: Period, basis: ReportBasis): Pro
     // Đi qua Profit Engine để các cột ngày cộng lại BẰNG ĐÚNG `pnl().operating` của cùng kỳ: khoản
     // ADS / PURCHASE gõ tay, cước gõ tay không khai điều chỉnh, nhóm Lương khi bảng Lương cầm quyền
     // bị loại Ở CẢ HAI NƠI (AGENTS.md mục 15 + 18) — phần bị loại hiện ở bảng cảnh báo chi phí.
-    await getOperatingCostByDay(period, tx),
+    await getOperatingCostByDay(period, { db: tx, payroll }),
   ] as const);
 
   const map = new Map<string, DailyRow>();

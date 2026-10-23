@@ -1,7 +1,8 @@
 import { and, eq, inArray, sql, sum, type SQL } from "drizzle-orm";
-import { chayKhongJit, getDb, schema, type Db } from "@/db";
+import { chayKhongJit, getDb, schema, theoClient, type Db } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { getOperatingCostByDay, type OperatingCostByDay } from "@/lib/queries/cost-engine";
+import { getRecognizedPayrollCost, type PayrollRecognition } from "@/lib/queries/payroll-cost";
 import { COST_AUTHORITY, COST_SOURCE_LABEL, EXPENSE_CATEGORY_ECONOMIC } from "@/lib/constants/cost-sources";
 import { EXPENSE_CATEGORY_LABEL } from "@/lib/constants/expenses";
 import { lineUnitCost } from "@/lib/queries/cogs";
@@ -387,7 +388,7 @@ async function spendByDay(
   if (f.pageId || f.source) return null;
   if (f.adsetId || f.adId) return adGrainSpendByDay(db, period, f);
   const dimConds = spendDimensionConds(f);
-  const [rows, frontier, dimSeen] = await Promise.all([
+  const [rows, frontier, dimSeen] = await theoClient(db, [
     db
       .select({
         day: vnDayCol(sql`${ads.spendDate}`),
@@ -472,7 +473,7 @@ async function adGrainSpendByDay(db: Db, period: Period, f: MarketingFilters): P
   if (f.adId) indexConds.push(eq(fa.id, f.adId));
   if (f.adsetId) indexConds.push(eq(fa.adsetId, f.adsetId));
 
-  const [fromIndex, fromRows, fromAdsets] = await Promise.all([
+  const [fromIndex, fromRows, fromAdsets] = await theoClient(db, [
     db.selectDistinct({ id: sql<string | null>`${fa.campaignId}` }).from(fa).where(and(...indexConds)),
     db.selectDistinct({ id: sql<string | null>`${ads.campaignId}` }).from(ads).where(and(eq(ads.grain, "AD"), eq(ads.excluded, false), ...adConds)),
     !f.adId && f.adsetId
@@ -485,7 +486,7 @@ async function adGrainSpendByDay(db: Db, period: Period, f: MarketingFilters): P
     const frontier = await frontierQ;
     return { byDay: new Map(), observedThrough: frontier[0]?.day ?? null, dimensionKnown: false, unsplitDays: new Map() };
   }
-  const [rows, unsplit, frontier] = await Promise.all([
+  const [rows, unsplit, frontier] = await theoClient(db, [
     db
       .select({
         day: vnDayCol(sql`${ads.spendDate}`),
@@ -688,7 +689,7 @@ async function buildDays(
   period: Period,
   basis: MarketingBasis,
   filters: MarketingFilters,
-  opts: { skipUnits?: boolean; rates?: ProductDeliveryRates | null } = {},
+  opts: { skipUnits?: boolean; rates?: ProductDeliveryRates | null; payroll?: PayrollRecognition | null } = {},
 ): Promise<{ rows: MarketingDailyRow[]; spendObservedThrough: string | null; spendDimensionKnown: boolean | null; spendCoverage: AdGrainSpendCoverage | null; opex: OperatingCostByDay | null }> {
   const extra = dimensionFilter(filters);
   const filtered = hasDimensionFilter(filters);
@@ -723,13 +724,24 @@ async function buildDays(
     `buildDays` bên trong dùng lại chính `tx` ấy. Không giao dịch lồng nhau, không giao dịch trong
     vòng lặp.
   */
-  const [moneyRows, spend, units, allocated] = await Promise.all([
-    filters.productId ? productDayRows(db, period, basis, filters, extra) : orderDayRows(db, period, basis, extra, rateSql),
-    spendByDay(db, period, filters),
-    filters.productId || opts.skipUnits ? Promise.resolve(null) : unitsByDay(db, period, basis, extra),
+  /*
+    `buildDays` LUÔN chạy trong một giao dịch (`getMarketingDaily`, `getMarketingBreakdown` gọi với `tx`), nên bốn
+    lượt đọc đi qua `theoClient`: nối tiếp trên client giao dịch, cùng thứ tự kết quả. Mỗi lượt là một HÀM — lời
+    gọi không bọc sẽ chạy ngay lúc dựng mảng và lại chồng lên nhau.
+  */
+  const [moneyRows, spend, units, allocated] = await theoClient(db, [
+    () => (filters.productId ? productDayRows(db, period, basis, filters, extra) : orderDayRows(db, period, basis, extra, rateSql)),
+    () => spendByDay(db, period, filters),
+    () => (filters.productId || opts.skipUnits ? Promise.resolve(null) : unitsByDay(db, period, basis, extra)),
     // Chi phí vận hành phân bổ CHỈ có nghĩa ở mức toàn shop. Có bộ lọc ⇒ không đọc, và ô là `—`.
-    // Qua Profit Engine: cùng sổ thẩm quyền với tổng kỳ, nên Σ các ngày = `getOperatingCost()`.
-    filtered ? Promise.resolve(null) : getOperatingCostByDay(period, db),
+    // Qua Profit Engine: cùng sổ thẩm quyền với tổng kỳ, nên Σ các ngày = `getOperatingCost()`. Chi phí lương ghi
+    // nhận phải tính SẴN ngoài giao dịch (`opts.payroll`) — xin nó ở đây là xin kết nối thứ hai (khoá chết bể).
+    (): Promise<OperatingCostByDay | null> =>
+      filtered
+        ? Promise.resolve(null)
+        : opts.payroll
+          ? getOperatingCostByDay(period, { db, payroll: opts.payroll })
+          : Promise.reject(new Error("buildDays không lọc chiều cần `opts.payroll` tính sẵn ngoài giao dịch (getRecognizedPayrollCost) — xin trong giao dịch là xin kết nối thứ hai")),
   ]);
 
   const map = new Map<string, MarketingDailyRow>();
@@ -922,11 +934,18 @@ async function getMarketingDailyUncached(period: Period, basis: MarketingBasis, 
     giữ nó bên trong sẽ chiếm một kết nối của bể 5 chỗ lâu hơn cần thiết mà không được gì.
   */
   const rates = await productDeliveryRates(period);
+  /*
+    CHI PHÍ LƯƠNG GHI NHẬN TÍNH TRƯỚC KHI MỞ GIAO DỊCH, cho đúng hai kỳ `buildDays` sẽ cần. Nó đọc `settings` qua bể;
+    gọi bên trong giao dịch là giữ một kết nối rồi chờ kết nối khác — đúng hình dạng khoá chết bể. Có lọc chiều thì
+    `buildDays` không đọc chi phí vận hành, nên không tính.
+  */
+  const kyTruoc = previous?.from ? { ...period, key: "custom" as const, from: previous.from, to: previous.to } : null;
+  const [luong, luongKyTruoc] = hasDimensionFilter(filters) ? [null, null] : await Promise.all([getRecognizedPayrollCost(period), kyTruoc ? getRecognizedPayrollCost(kyTruoc) : null]);
   // Ba lượt đọc trong CÙNG giao dịch chạy NỐI TIẾP: một client chỉ chạy một câu một lúc (xem reports.ts::orderFacts).
   const [built, freshness, prevBuilt] = await chayKhongJit(db, async (tx) => [
-    await buildDays(tx, period, basis, filters, { rates }),
+    await buildDays(tx, period, basis, filters, { rates, payroll: luong }),
     await marketingFreshness(tx),
-    previous?.from ? await buildDays(tx, { ...period, key: "custom", from: previous.from, to: previous.to }, basis, filters, { rates }) : null,
+    kyTruoc ? await buildDays(tx, kyTruoc, basis, filters, { rates, payroll: luongKyTruoc }) : null,
   ] as const);
   const rows = built.rows;
   const prevRows = prevBuilt?.rows ?? null;
@@ -1100,8 +1119,14 @@ export async function getMarketingBreakdown(
     lẫn bản một-câu-`group by` (khối chú thích ngay trên). Thay đổi ở đây CHỈ là ranh giới giao
     dịch: cùng truy vấn, cùng thứ tự, cùng kết quả.
   */
+  /*
+    BẢNG TÊN TRA TRƯỚC KHI MỞ GIAO DỊCH. Tên marketer (`marketerNames` → `listEmployees` → `getSettingJson`) và tên
+    chiến dịch (`campaignNames`) tự xin kết nối từ bể; tra bên trong giao dịch là giữ một kết nối rồi xin kết nối
+    thứ hai — khoá chết bể (lá chắn lúc chạy trong db/index.ts bắt được đường này ở testMarketingBreakdownConservation).
+  */
+  const nhan = dimension === "marketer" ? await employeeNames() : dimension === "campaign" ? await campaignNames() : new Map<string, string>();
   return chayKhongJit(db, async (tx) => {
-    const keys = await dimensionKeys(tx, period, dimension, filters, limit);
+    const keys = await dimensionKeys(tx, period, dimension, filters, limit, nhan);
     /*
       SỐ LƯỢNG SẢN PHẨM ĐỌC MỘT LẦN CHO MỌI NHÓM.
 
@@ -1218,7 +1243,15 @@ function filterForDimension(dimension: MarketingDimension, key: string): Marketi
 }
 
 /** Các khoá đáng bóc tách — lấy theo doanh số POS giảm dần, cắt ở `limit`, luôn kèm nhóm chưa quy kết. */
-async function dimensionKeys(db: Db, period: Period, dimension: MarketingDimension, filters: MarketingFilters, limit: number): Promise<{ key: string; label: string }[]> {
+async function dimensionKeys(
+  db: Db,
+  period: Period,
+  dimension: MarketingDimension,
+  filters: MarketingFilters,
+  limit: number,
+  /** Bảng tên của chiều đang bóc (marketer / chiến dịch), tra SẴN ngoài giao dịch. Chiều khác: rỗng. */
+  nhan: Map<string, string>,
+): Promise<{ key: string; label: string }[]> {
   const extra = dimensionFilter(filters);
   // Chọn KHOÁ thì chỉ cần population + kỳ + bộ lọc đang bật; tiền của từng nhóm do `buildDays` đọc
   // lại bằng đúng đường của bảng chính, nên ở đây không cần tới bảng dẫn xuất đắt tiền.
@@ -1234,7 +1267,7 @@ async function dimensionKeys(db: Db, period: Period, dimension: MarketingDimensi
       "lỗ ở đâu" — trong khi họ chính là câu trả lời. Nên khoá của bảng chi tiêu được GỘP THÊM,
       không thay thế.
     */
-    const [rows, spendKeys] = await Promise.all([
+    const [rows, spendKeys] = await theoClient(db, [
       db
         .select({ key: sql<string | null>`(select ${oa.marketerId} from ${oa} where ${oa.orderId} = ${o.id} and ${oa.status} = 'ATTRIBUTED' limit 1)`, total: rank })
         .from(o)
@@ -1252,7 +1285,7 @@ async function dimensionKeys(db: Db, period: Period, dimension: MarketingDimensi
             .orderBy(sql`sum(${ads.spend}) desc`)
             .limit(limit),
     ]);
-    const names = await employeeNames();
+    const names = nhan;
     const seen = new Set<string>();
     const out: { key: string; label: string }[] = [];
     for (const r of [...rows.map((r) => r.key), ...spendKeys.map((r) => r.key)]) {
@@ -1288,7 +1321,7 @@ async function dimensionKeys(db: Db, period: Period, dimension: MarketingDimensi
       .groupBy(sql`1`)
       .orderBy(sql`2 desc`)
       .limit(limit + 1);
-    const names = await campaignNames();
+    const names = nhan;
     return rows.map((r) => ({ key: r.key ?? MARKETING_UNATTRIBUTED, label: r.key ? names.get(r.key) ?? r.key : MARKETING_UNATTRIBUTED_LABEL }));
   }
   if (dimension === "page") {

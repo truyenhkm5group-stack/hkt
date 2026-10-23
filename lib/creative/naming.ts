@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, gt, inArray, isNull, max, or, sql } from "drizzle-orm";
-import { schema, type Db } from "@/db";
+import { schema, theoClient, type Db } from "@/db";
 import {
   AGE_MAX_OPEN,
   BID_STRATEGY_LABEL,
@@ -194,7 +194,8 @@ export async function adAccountName(db: Db, adAccountId: string): Promise<string
 
 /** Bối cảnh đặt tên theo cấu hình (của lô — ảnh chụp; hoặc hiện tại cho bài gen tay chưa vào lô). */
 export async function loadNamingContext(db: Db, cfg: Pick<CreativeLoopConfig, "adAccountId" | "pageId" | "templateAdId">): Promise<NamingContext> {
-  const [accountName, pageName, tpl] = await Promise.all([adAccountName(db, cfg.adAccountId), fanpageDisplayName(db, cfg.pageId), readNamingTemplate(db)]);
+  // `db` có thể là client của một giao dịch (lib/creative/manual-gen.ts gọi trong db.transaction) ⇒ theoClient: nối tiếp trên giao dịch, song song trên bể.
+  const [accountName, pageName, tpl] = await theoClient(db, [() => adAccountName(db, cfg.adAccountId), () => fanpageDisplayName(db, cfg.pageId), () => readNamingTemplate(db)]);
   const usable = tpl && tpl.templateAdId === cfg.templateAdId.trim() && (tpl.optimizationGoal || tpl.targeting || tpl.bidStrategy);
   return { accountName, pageName, adset: usable ? adsetDefaultName(tpl) : null };
 }
