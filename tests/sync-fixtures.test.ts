@@ -267,6 +267,7 @@ import { testMultiAttemptMoney } from "./multi-attempt-money.test";
 import { testCashflow } from "./cashflow.test";
 import { testPurchasing } from "./purchasing.test";
 import { testSuppliersPure, testSuppliersQueries } from "./suppliers.test";
+import { testDataAsOf } from "./data-as-of.test";
 import { testWorkshopLedgerPure, testWorkshopLedgerQueries } from "./workshop-ledger.test";
 import { testWorkshopSheetImportDb, testWorkshopSheetImportPure } from "./workshop-sheet-import.test";
 import { testWorkshopBankLink } from "./workshop-bank-link.test";
@@ -2381,6 +2382,8 @@ async function main() {
     await testPurchasing(db);
     testSuppliersPure();
     await testSuppliersQueries(db);
+    // OD-UX-03 (23/10/2026): «tính lúc · nguồn · trễ ĐVVC» — mốc cũ nhất của mục đệm, request song song không rò mốc.
+    await testDataAsOf(db);
   }
   if (khoi.chay("K07")) {
     testWorkshopLedgerPure();

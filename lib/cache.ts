@@ -6,11 +6,55 @@
  * Đây là chỗ duy nhất mọi báo cáo nặng đi qua, nên đo ở đây là đo được tất cả mà không phải rải
  * mã đo khắp nơi. Xem kết quả ở `/api/perf` (chỉ quản trị).
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { record, reportName } from "@/lib/perf/registry";
 import { currentOrganization, withOrganization } from "@/lib/platform/context";
 import { publish } from "@/lib/realtime/bus";
 
-type Entry = { value: unknown; expiresAt: number };
+/** `at` = mốc dữ liệu CŨ NHẤT đứng sau `value` (lúc bắt đầu tính, hoặc sớm hơn nếu nó đọc lại một mục đệm cũ hơn). */
+type Entry = { value: unknown; expiresAt: number; at: number };
+
+/**
+ * ═══════ SỐ TRÊN MÀN HÌNH ĐƯỢC TÍNH LÚC NÀO (OD-UX-03, 23/10/2026) ═══════
+ *
+ * Đệm trả số CŨ tới `NGUONG_QUA_CU` rồi mới làm mới phía sau, và job giữ ấm tính trước cho vài trang — nên «bây giờ» KHÔNG
+ * phải là mốc của con số người đang đọc. `collectAsOf(fn)` chạy `fn` và trả thêm mốc CŨ NHẤT của mọi mục đệm `fn` đã đọc
+ * (trúng đệm, dùng chung lượt đang chạy, hay vừa tính), nên trang không phải chép lại khoá đệm nào.
+ *
+ * Bộ gom đi theo `AsyncLocalStorage`: hai request song song không thấy mốc của nhau. Lượt TÍNH của một mục đệm chạy trong
+ * bộ gom RIÊNG (không cha) để mốc của mục ấy chỉ phụ thuộc chính nó — lượt ấy có thể được người khác dùng chung, hoặc chạy
+ * sau khi request đã trả lời (làm mới phía sau). Ngoài `collectAsOf` thì không có bộ gom nào và `memo` chạy y như cũ.
+ */
+type AsOfCollector = { oldest: number | null; parent: AsOfCollector | null };
+const asOfHolder = globalThis as unknown as { __erpAsOf?: AsyncLocalStorage<AsOfCollector> };
+if (!asOfHolder.__erpAsOf) asOfHolder.__erpAsOf = new AsyncLocalStorage<AsOfCollector>();
+const asOfStore = asOfHolder.__erpAsOf;
+
+/** Ghi một mốc vào bộ gom hiện tại VÀ mọi bộ gom cha (`collectAsOf` lồng nhau). */
+function noteAsOf(at: number) {
+  for (let c = asOfStore.getStore() ?? null; c; c = c.parent) if (c.oldest === null || at < c.oldest) c.oldest = at;
+}
+
+/** Tính `fn` trong bộ gom riêng; mốc = lúc bắt đầu, hoặc mục đệm cũ hơn mà `fn` đã đọc lại. */
+async function tinhKemMoc<T>(fn: () => Promise<T>): Promise<{ value: T; at: number }> {
+  const start = Date.now();
+  const c: AsOfCollector = { oldest: null, parent: null };
+  const value = await asOfStore.run(c, fn);
+  return { value, at: Math.min(start, c.oldest ?? start) };
+}
+
+/**
+ * Chạy `fn` và trả `asOf` = mốc dữ liệu CŨ NHẤT đứng sau kết quả: mục đệm cũ nhất đã đọc, hoặc lúc bắt đầu nếu mọi thứ đọc
+ * thẳng CSDL. `cached` = có ít nhất một mục đệm cũ hơn lúc bắt đầu (trang in «đệm» thay vì «truy vấn trực tiếp»).
+ * Không bao giờ muộn hơn lúc bắt đầu: phần đọc thẳng CSDL đã chạy từ lúc đó — thà nói cũ hơn một chút còn hơn giả «bây giờ».
+ */
+export async function collectAsOf<T>(fn: () => Promise<T>): Promise<{ value: T; asOf: Date; cached: boolean }> {
+  const start = Date.now();
+  const c: AsOfCollector = { oldest: null, parent: asOfStore.getStore() ?? null };
+  const value = await asOfStore.run(c, fn);
+  const oldest = c.oldest;
+  return { value, asOf: new Date(Math.min(start, oldest ?? start)), cached: oldest !== null && oldest < start };
+}
 
 /**
  * ═══════ TRẢ SỐ CŨ NGAY, LÀM MỚI PHÍA SAU (stale-while-revalidate) ═══════
@@ -131,6 +175,7 @@ async function memoFor<T>(org: { code: string; isHome: boolean }, baseKey: strin
   const hit = store.entries.get(key);
   if (hit && hit.expiresAt > now) {
     record(name, performance.now() - started, true);
+    noteAsOf(hit.at);
     return hit.value as T;
   }
 
@@ -148,10 +193,10 @@ async function memoFor<T>(org: { code: string; isHome: boolean }, baseKey: strin
       realtime của nó chắc chắn thuộc đúng tổ chức. Nhà ⇒ đường cũ, không đổi gì.
     */
     const run = org.isHome ? fn : () => withOrganization(org.code, fn);
-    const refresh = run()
-      .then((value) => {
+    const refresh = tinhKemMoc(run)
+      .then(({ value, at }) => {
         if (store.version === version) {
-          store.entries.set(key, { value, expiresAt: Date.now() + ttlMs });
+          store.entries.set(key, { value, expiresAt: Date.now() + ttlMs, at });
           /**
            * NGƯỜI ĐANG XEM SỐ CŨ PHẢI ĐƯỢC KÉO LÊN SỐ MỚI.
            *
@@ -170,20 +215,33 @@ async function memoFor<T>(org: { code: string; isHome: boolean }, baseKey: strin
       .catch(() => hit.value);
     ghiNhanChay(key, refresh as Promise<unknown>);
     record(name, performance.now() - started, true);
+    // Người đọc nhận số CŨ ⇒ mốc là của số cũ, không phải của lượt làm mới đang chạy.
+    noteAsOf(hit.at);
     return hit.value as T;
   }
 
   // Đang có lượt tính CÒN SỐNG cho đúng khoá này → dùng chung, không tính lại (khử trùng lặp).
   const running = luotDangChay(key);
-  if (running) return running as Promise<T>;
+  if (running) {
+    const batDau = store.inflight.get(key)?.at ?? Date.now();
+    // Lượt dùng chung có thể là lượt làm mới đã lỗi (trả lại số cũ) ⇒ đọc mốc của mục đệm thật, không đoán.
+    return (running as Promise<T>).then((value) => {
+      noteAsOf(store.entries.get(key)?.at ?? batDau);
+      return value;
+    });
+  }
   const version = store.version;
-  const p = fn().then((value) => {
-    if (store.version === version) store.entries.set(key, { value, expiresAt: Date.now() + ttlMs });
+  const p = tinhKemMoc(fn).then(({ value, at }) => {
+    if (store.version === version) store.entries.set(key, { value, expiresAt: Date.now() + ttlMs, at });
     record(name, performance.now() - started, false);
+    return { value, at };
+  });
+  const v = p.then((r) => r.value);
+  ghiNhanChay(key, v);
+  return p.then(({ value, at }) => {
+    noteAsOf(at);
     return value;
   });
-  ghiNhanChay(key, p);
-  return p;
 }
 
 /** Hai giá trị đệm có khác nhau không — so bản JSON; không so được thì coi là đã đổi (an toàn hơn im lặng). */
@@ -227,7 +285,7 @@ export async function forgetMemo(key: string): Promise<void> {
  */
 export function staleMemo() {
   const now = Date.now();
-  for (const [k, e] of store.entries) store.entries.set(k, { value: e.value, expiresAt: Math.min(e.expiresAt, now) });
+  for (const [k, e] of store.entries) store.entries.set(k, { value: e.value, expiresAt: Math.min(e.expiresAt, now), at: e.at });
 }
 
 /** Số mục đang giữ trong đệm — chỉ dùng cho trang chẩn đoán */
