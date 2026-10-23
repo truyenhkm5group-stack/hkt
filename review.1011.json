@@ -1,0 +1,8 @@
+{
+  "pr": 1011,
+  "sha": "b8dec8ae5eecd05c17cf690f5efc6d5c09778893",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T18:23:00.400Z",
+  "note": "review lead: route nội bộ khoá HEADER so thời gian hằng, khoá rỗng ⇒ 401, ≤20 mã/đơn, chỉ chặng VTP + cờ + mốc, không tiền/người nhận, CSDL nhà; bot lùi về câu cũ khi route lỗi, tiêu cực Pancake không nói thẳng, đơn huỷ + reship còn sống ⇒ câu gửi lại (cả đơn chưa PUT); sync giữ partner_status khi ghép theo VTP; script audit diff + dừng khi tiền/dòng hàng đổi. Deploy ERP + container bot cùng lượt."
+}
