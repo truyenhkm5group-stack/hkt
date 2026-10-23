@@ -17,6 +17,7 @@ on:
           - docker-prune        # giải phóng ổ đĩa: gỡ ảnh Docker cũ (KHÔNG đụng dữ liệu, KHÔNG dừng dịch vụ)
           - logs                # 200 dòng log gần nhất của app/scheduler/caddy
           - chatbot-status      # bot chat theo TỪNG PAGE: bật/tắt, chạy thử, số trả lời, lỗi gần nhất (đã che số, không in nội dung tin) — CHỈ ĐỌC
+          - bot-order-describe  # CÂU BOT NHÀ SẼ NÓI về ≤ 5 đơn POS (đọc đơn bằng đường của bot + góc nhìn ERP qua cửa nội bộ) — không gửi tin, không ghi; tóm tắt bỏ tên hàng / tiền, câu đủ MÃ HOÁ (CHỈ ĐỌC; arg: "<mã đơn POS> [mã đơn…]")
           - sync-pancake-all    # kho → sản phẩm → đơn (lịch sử) → khách → đổi trả → nhật ký kho
           - sync-pancake-orders # đơn thay đổi gần đây
           - sync-vtp-tracking   # tra cứu trạng thái vận đơn Viettel Post
@@ -187,7 +188,7 @@ permissions:
 # Thao tác trong danh sách mà cần cho người vận hành thấy NGAY một con số ("đã đóng 12 case") thì
 # script tự in dòng ấy với tiền tố `[ops:tom-tat] ` — kênh tóm tắt duy nhất ra log (qua che_log).
 env:
-  OPS_THAO_TAC_MA_HOA: "purchasing-leadtime-probe platform-secrets-verify db-query reason-taxonomy-dryrun vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile payroll-profit-gate-audit payroll-owner-apply regression-watch-status vtp-reship-backfill seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover org-catalog org-offboard org-lifecycle identity-reconcile confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai saas-v1-migration ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit inbox-read-audit inbox-unread-dryrun org-migrate-probe pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause order-cancel-reconcile sales-lifecycle-audit sales-integrity-audit pancake-avatar-shape customer-360-probe saas-value-snapshot-check avatar-proxy-check sender-provenance-probe sales-stale-confirmed-repair price-mismatch-scan conv-money-trace shipment-origin-audit shipping-source-probe upsell-offer-audit cart-intent-audit address-reask-audit stuck-conversation-audit sales-postorder-handoff-release pancake-thread-diff upsell-basis-scan migration-rehearsal org-0245-index-preseed page-auto-skip-audit pos-reship-link"
+  OPS_THAO_TAC_MA_HOA: "purchasing-leadtime-probe platform-secrets-verify db-query reason-taxonomy-dryrun vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile payroll-profit-gate-audit payroll-owner-apply regression-watch-status vtp-reship-backfill seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit stock-wait-summary org-summary org-order-audit org-ai-cutover org-catalog org-offboard org-lifecycle identity-reconcile confirm-funnel-audit company-os-summary velocity-compare org-prepaid-ai saas-v1-migration ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit inbox-read-audit inbox-unread-dryrun org-migrate-probe pitr-status pitr-basebackup pitr-mark pitr-drill pitr-pause order-cancel-reconcile sales-lifecycle-audit sales-integrity-audit pancake-avatar-shape customer-360-probe saas-value-snapshot-check avatar-proxy-check sender-provenance-probe sales-stale-confirmed-repair price-mismatch-scan conv-money-trace shipment-origin-audit shipping-source-probe upsell-offer-audit cart-intent-audit address-reask-audit stuck-conversation-audit sales-postorder-handoff-release pancake-thread-diff upsell-basis-scan migration-rehearsal org-0245-index-preseed page-auto-skip-audit pos-reship-link bot-order-describe"
 
 # ═══════════ HÀNG ĐỢI NẰM TRÊN MÁY CHỦ, KHÔNG NẰM Ở GITHUB ═══════════
 #
@@ -511,7 +512,7 @@ jobs:
             }
 
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
-            DOC_NHE="status perf disk logs chatbot-status db-query backup-status pitr-status"
+            DOC_NHE="status perf disk logs chatbot-status db-query backup-status pitr-status bot-order-describe"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe meta-ad-post-probe vtp-capability ads-level-probe"
             DOC_NANG="purchasing-leadtime-probe platform-secrets-verify verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-taxonomy-dryrun reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile payroll-profit-gate-audit payroll-owner-apply regression-watch-status vtp-reship-backfill fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit stock-wait-summary org-summary company-os-summary velocity-compare confirm-funnel-audit returns-hmt ai-check platform-ai-model-probe platform-ai-bench backup restore-drill restore-drill-org pitr-basebackup pitr-drill org-order-audit org-ai-cutover org-catalog org-offboard org-lifecycle org-prepaid-ai org-volume-discount saas-v1-migration identity-reconcile ban-hang-reply-upgrade saas-acceptance ops-signals-check security-acceptance inbox-perf-probe inbox-avatar-audit inbox-read-audit inbox-unread-dryrun org-migrate-probe order-cancel-reconcile sales-lifecycle-audit sales-integrity-audit pancake-avatar-shape customer-360-probe saas-value-snapshot-check avatar-proxy-check sender-provenance-probe sales-stale-confirmed-repair price-mismatch-scan conv-money-trace shipment-origin-audit shipping-source-probe upsell-offer-audit cart-intent-audit address-reask-audit stuck-conversation-audit sales-postorder-handoff-release pancake-thread-diff upsell-basis-scan migration-rehearsal org-0245-index-preseed page-auto-skip-audit pos-reship-link"
 
@@ -593,6 +594,10 @@ jobs:
               chatbot-status)
                 # CHỈ ĐỌC: bot tự trả trạng thái qua localhost; script đã che số dài / chuỗi trong ngoặc, rồi qua che_log.
                 docker exec erp-chatbot node scripts/ops-status.js 2>&1 | che_log ;;
+              bot-order-describe)
+                # CHỈ ĐỌC: câu describeOrder bot nhà sẽ đưa vào prompt cho ≤ 5 đơn (chatbot/scripts/order-describe.js) — không gửi tin.
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-chatbot node scripts/order-describe.js ;;
               sync-pancake-all)
                 docker exec erp-app npm run --silent sync -- pancake-all --backfill --days="$DAYS" ;;
               sync-pancake-orders)

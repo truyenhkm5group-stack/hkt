@@ -203,6 +203,7 @@ import { testPageAutoSkipAudit } from "./page-auto-skip-audit.test";
 import { testQa0245Index } from "./qa-0245-index.test";
 import { testAiVerifyWorkflow } from "./ai-verify-workflow.test";
 import { testChatbotDeployShape, testChatbotImportGuards, testChatbotNoSecretsInRepo } from "./chatbot.test";
+import { testBotOrderDescribe } from "./bot-order-describe.test";
 import { testChatbotAdBots } from "./chatbot-ad-bots.test";
 import { testChatbotVoice } from "./chatbot-voice.test";
 import { testChatbotOrderBotAlerts } from "./chatbot-orderbot-alerts.test";
@@ -2985,6 +2986,7 @@ async function main() {
     testPlatformNoDb();
     testChatbotNoSecretsInRepo();
     testChatbotDeployShape();
+    await testBotOrderDescribe();
     await testChatbotImportGuards();
     await testChatbotAdBots();
     await testChatbotVoice();
