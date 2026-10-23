@@ -1,8 +1,8 @@
 {
   "pr": 996,
-  "sha": "bf8867a2a71f892cae7776503586645c8a3c54f2",
+  "sha": "f70565f5a7ae4b5ebef451aa8df24701ec094bec",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-23T08:51:52.364Z",
-  "note": "review lead: CHỈ-SCRIPT, chỉ đọc. purchasing-leadtime-probe gọi đúng hàm báo cáo /inventory/purchasing (lib từ image ⇒ trước deploy ra số cũ, sau deploy ra số mới), in p50/p90/lô theo xưởng + độ phủ («—» khi bản cũ không có). Khai đủ 4 chỗ ops-vps.yml + CSDL_CHI_DINH_DUOC_PHEP."
+  "at": "2026-10-23T09:25:07.585Z",
+  "note": "review lead: chỉ gộp main (xung đột ops-vps.yml giải = dòng main + purchasing-leadtime-probe, không rơi pos-reship-link); script không đổi."
 }
