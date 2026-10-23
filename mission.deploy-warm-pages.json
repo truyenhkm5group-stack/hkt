@@ -3,7 +3,7 @@
   "mission_id": "deploy-warm-pages",
   "title": "Deploy làm ấm 8 trang nặng NGAY sau health, TRƯỚC smoke (lượt đầu sau khởi động không rơi vào người dùng thật)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-warm",
@@ -25,7 +25,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T22:40:15.655Z",
-  "updated_at": "2026-10-23T22:40:15.655Z",
-  "last_heartbeat": "2026-10-23T22:40:15.655Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T23:49:34.204Z",
+  "last_heartbeat": "2026-10-23T23:49:34.204Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/deploy-warm-pages",
+    "sha": "f28ec1205eca5f5910cc072045449255349bb489",
+    "at": "2026-10-23T23:49:34.204Z",
+    "actor": "DESKTOP-56TH98Y:wt-warm",
+    "title": "Deploy làm ấm 8 trang nặng NGAY sau health, TRƯỚC smoke (lượt đầu sau khởi động không rơi vào người dùng thật)",
+    "summary": "",
+    "tests": [
+      "tsc · eslint · npm test đủ ĐẠT · tests/deploy-warm.test.ts (tuyến có trang thật · thứ tự health→làm ấm→sao lưu/smoke · không chặn deploy · chỉ đọc)"
+    ]
+  }
 }
