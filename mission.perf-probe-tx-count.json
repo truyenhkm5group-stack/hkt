@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "mission_id": "perf-probe-tx-count",
+  "title": "perf-probe đếm cả câu trong giao dịch (chayKhongJit)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-probetx",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/perf-probe-tx-count",
+  "base_sha": "d143c7143ca4068e7a3c93c3821dbe08cac8927c",
+  "domains": [],
+  "owned_paths": [
+    "scripts/perf-probe.ts",
+    "tests/agent-chi-phi.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-23T20:23:29.171Z",
+  "updated_at": "2026-10-23T20:23:29.171Z",
+  "last_heartbeat": "2026-10-23T20:23:29.171Z",
+  "definition_of_done": []
+}
