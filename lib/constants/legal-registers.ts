@@ -871,6 +871,11 @@ export const VENDOR_SCAN_EXEMPT_HOSTS: Readonly<Record<string, string>> = {
   "get.docker.com": "Script cài VPS một lần tải trình cài Docker — không mang dữ liệu người",
   "ifconfig.me": "Script cài VPS một lần hỏi IP công khai của máy — không mang dữ liệu người",
   "api.ipify.org": "Script cài VPS một lần hỏi IP công khai của máy — không mang dữ liệu người",
+  // Tìm hàng nguồn (SRC-3): ERP chỉ ĐỌC CHỮ của link người dán để ra link chuẩn hoá (lib/sourcing/offer-url.ts) — không gọi mạng.
+  "1688.com": "Link chuẩn hoá sản phẩm nguồn cho NGƯỜI bấm (Tìm hàng nguồn) — máy chủ không gọi, không gửi dữ liệu",
+  "alibaba.com": "Link chuẩn hoá sản phẩm nguồn cho NGƯỜI bấm (Tìm hàng nguồn) — máy chủ không gọi, không gửi dữ liệu",
+  "taobao.com": "Link chuẩn hoá sản phẩm nguồn cho NGƯỜI bấm (Tìm hàng nguồn) — máy chủ không gọi, không gửi dữ liệu",
+  "tmall.com": "Link chuẩn hoá sản phẩm nguồn cho NGƯỜI bấm (Tìm hàng nguồn) — máy chủ không gọi, không gửi dữ liệu",
 };
 
 /** Hostname `host` thuộc mục `entryHost` khi trùng hẳn hoặc là tên miền con. */
