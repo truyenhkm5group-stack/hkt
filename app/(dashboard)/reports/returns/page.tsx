@@ -32,11 +32,13 @@ import { canUseModule } from "@/lib/platform/capabilities";
 import { CONFIDENCE_LABEL, type ProbabilityConfidence } from "@/lib/constants/projected-delivery";
 import { cn } from "@/lib/utils";
 import { requireResource } from "@/lib/auth/scope-guard";
+import { can } from "@/lib/auth/session";
 import { loadReturnsPage, returnsPageParams, withDefaultReturnsBasis } from "@/lib/queries/returns-report-page";
 import { ScopeDenied } from "@/components/scope-denied";
 import { displayVariationText, withDisplayVariation } from "@/lib/constants/experience-profile";
 import { readDisplayProfile } from "@/lib/experience/profile";
 import { VtpSyncCoverageCard } from "@/components/vtp-sync-coverage";
+import { KPI_BUCKET_LABEL, KpiOrdersSection } from "@/app/(dashboard)/reports/returns/kpi-orders-section";
 import { getVtpSyncCoverage } from "@/lib/queries/vtp-sync-coverage";
 import { collectAsOf } from "@/lib/cache";
 import { latencyFromHealth } from "@/lib/constants/data-as-of";
@@ -67,7 +69,7 @@ const MIN_OPTIONS = [
  * Khối G đứng CUỐI theo đúng yêu cầu, và có một đường tắt ở đầu trang cho người chỉ cần nó.
  */
 export default async function ReturnRatePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const { decision } = await requireResource("REPORTS", "reports:returns");
+  const { user, decision } = await requireResource("REPORTS", "reports:returns");
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Tỷ lệ giao thành công" reason={decision.reason} fix={decision.fix} />;
   // Không module vận chuyển ⇒ không vận đơn ⇒ mặc định lọc theo ngày lên đơn (mốc gửi ĐVVC luôn rỗng).
@@ -77,8 +79,8 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
   const thamSo = returnsPageParams(raw);
   // OD-UX-03: mốc dữ liệu CŨ NHẤT đứng sau mọi con số dưới đây (đệm giữ ấm có thể trả số cũ tới 15 phút) — không in «bây giờ».
   const { value: duLieu, asOf: mocTinh, cached: tuDem } = await collectAsOf(() => loadReturnsPage(thamSo));
-  const { params, minShipped, variantKey, giaTriDon, dangLocGiaTri, basis, codes, marketerIds, openReason, openGroup, openProduct, reasonFilter, reasonSelection, reasonFiltered } = thamSo;
-  const { rows, total, pageCount, all, productRows, loiBang, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia, causeBoard } = duLieu;
+  const { params, minShipped, variantKey, giaTriDon, dangLocGiaTri, basis, codes, marketerIds, openReason, openGroup, openProduct, reasonFilter, reasonSelection, reasonFiltered, kpiBucket } = thamSo;
+  const { rows, total, pageCount, all, productRows, loiBang, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia, causeBoard, kpiOrders } = duLieu;
   // Hồ sơ ngành chỉ để đổi NHÃN chữ biến thể (shop thực phẩm: «Size: 1kg» ⇒ «Quy cách: 1kg») — đổi trên DỮ LIỆU trước khi truyền
   // xuống bảng client; KHÔNG đổi trong `loadReturnsPage` vì khoá đệm của nó dùng chung với job giữ ấm.
   const displayProfile = await readDisplayProfile();
@@ -104,6 +106,8 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
     const s = p.toString();
     return `/reports/returns${s ? `?${s}` : ""}`;
   };
+  // KPI BẤM XUỐNG (OD-UX-04): giữ NGUYÊN mọi bộ lọc trên URL, chỉ thêm nhóm; «Đóng» bỏ nhóm là về đúng màn hình cũ.
+  const kpiHref = (b: keyof typeof KPI_BUCKET_LABEL) => `${hrefWith({ kpi: b, kpage: null })}#kpi-don`;
   const exportQuery = new URLSearchParams({
     period: params.period.key,
     q: params.q,
@@ -268,6 +272,7 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
           label="Đơn đã gửi"
           hint="Đơn lên trong kỳ đã bàn giao đơn vị vận chuyển. Đơn chờ xử lý chưa gửi và đơn huỷ không nằm trong tử số lẫn mẫu số của tỷ lệ giao thành công."
           value={formatNumber(summary.shipped)}
+          href={kpiHref("shipped")}
           note={`${formatNumber(summary.inTransit)} chưa kết thúc (trong đó ${formatNumber(summary.failed)} chờ phát lại) · ${formatNumber(summary.pending)} chờ xử lý chưa gửi · ${formatNumber(summary.cancelled)} huỷ (không tính)`}
           icon={Truck}
           tone="blue"
@@ -287,12 +292,14 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
             </>
           }
           value={formatNumber(summary.delivered)}
+          href={kpiHref("delivered")}
           icon={PackageCheck}
           tone="green"
         />
         <MetricCard
           label="Không thành công (hoàn)"
           value={formatNumber(summary.returned)}
+          href={kpiHref("returned")}
           note={`${formatNumber(summary.returnedByRule)} vận đơn “giao thành công” nhưng COD ≤ ${formatVND(RETURN_RULE.maxCodForFakeDelivery, { compact: true })} (khách chỉ trả tiền ship) · mất ${formatVND(summary.lostRevenue, { compact: true })}`}
           icon={Undo2}
           tone="rose"
@@ -321,6 +328,26 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
           tone={summary.successRate !== null && summary.successRate < SUCCESS_RATE_OK ? "rose" : summary.successRate !== null ? "green" : "slate"}
         />
       </section>
+
+      <p className="-mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span>Xem danh sách:</span>
+        {(["inTransit", "failed", "pending", "cancelled", "returnedByRule"] as const).map((b) => (
+          <Link key={b} href={kpiHref(b)} className={cn("underline-offset-2 hover:text-foreground hover:underline", kpiBucket === b && "font-semibold text-foreground")}>
+            {KPI_BUCKET_LABEL[b]} ({formatNumber(summary[b])})
+          </Link>
+        ))}
+      </p>
+
+      {kpiBucket && kpiOrders ? (
+        <KpiOrdersSection
+          bucket={kpiBucket}
+          data={kpiOrders}
+          basisLabel={TIME_BASIS_LABEL[basis]}
+          canSeePhone={can(user, "orders:read")}
+          closeHref={hrefWith({ kpi: null, kpage: null })}
+          pageHref={(n) => `${hrefWith({ kpi: kpiBucket, kpage: n > 1 ? String(n) : null })}#kpi-don`}
+        />
+      ) : null}
 
       {/* ĐỘ PHỦ DỮ LIỆU ĐỨNG NGAY DƯỚI KPI: mọi con số bên dưới chỉ đúng bằng phần dữ liệu đã thu. */}
       <CoverageStrip coverage={intel.coverage} />

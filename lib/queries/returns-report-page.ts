@@ -16,7 +16,7 @@ import { orderValueActive, parseOrderValue } from "@/lib/constants/order-value";
 import { TIME_BASES, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { RETURN_REASONS, type ReturnReason } from "@/lib/constants/return-reason";
 import { isReasonGroupKey } from "@/lib/constants/return-reason-evidence";
-import { getReturnRateBySource, getReturnRateByTier, getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant, RETURN_RATE_SORTABLE } from "@/lib/queries/return-rate";
+import { getReturnRateBySource, getReturnRateByTier, getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant, listReturnSummaryOrders, RETURN_RATE_SORTABLE, RETURN_SUMMARY_BUCKETS, type ReturnSummaryBucket } from "@/lib/queries/return-rate";
 import { logisticsPerformance } from "@/lib/queries/logistics";
 import { getReturnReasonReport } from "@/lib/queries/return-reason-report";
 import { buildCauseBoard } from "@/lib/returns/cause-board";
@@ -101,6 +101,13 @@ export function returnsPageParams(raw: SearchParams) {
   const nhomMo = params.filters.group?.[0] ?? "";
   const openGroup = isReasonGroupKey(nhomMo) ? nhomMo : null;
   const openProduct = (param(raw, "pcode") || "").trim() || null;
+  /*
+    KPI BẤM XUỐNG (OD-UX-04): `kpi` = nhóm đơn của khối KPI, `kpage` = trang của danh sách. Giá trị lạ ⇒ `null`
+    (không mở danh sách), như mọi tham số drilldown khác — URL là đầu vào của người ngoài.
+  */
+  const kpiRaw = param(raw, "kpi") ?? "";
+  const kpiBucket: ReturnSummaryBucket | null = (RETURN_SUMMARY_BUCKETS as readonly string[]).includes(kpiRaw) ? (kpiRaw as ReturnSummaryBucket) : null;
+  const kpiPage = Math.max(1, Math.floor(Number(param(raw, "kpage") ?? "1")) || 1);
 
   /*
     ═══ KỲ TRƯỚC CÙNG ĐỘ DÀI — TÍNH MỘT LẦN, DÙNG CHO MỌI PHÉP SO ═══
@@ -124,14 +131,14 @@ export function returnsPageParams(raw: SearchParams) {
   const reasonSelection = reasonFilterSelectionOf(raw);
   const reasonFilter = { ...reasonFilterBase, ...reasonSelection };
   const reasonFiltered = reasonFiltersActive(reasonSelection);
-  return { params, minShipped, variantKey, giaTriDon, dangLocGiaTri, basis, codes, marketerIds, trendGrain, openReason, openGroup, openProduct, previous, reasonFilter, reasonFilterBase, reasonSelection, reasonFiltered };
+  return { params, minShipped, variantKey, giaTriDon, dangLocGiaTri, basis, codes, marketerIds, trendGrain, openReason, openGroup, openProduct, previous, reasonFilter, reasonFilterBase, reasonSelection, reasonFiltered, kpiBucket, kpiPage };
 }
 
 export type ReturnsPageParams = ReturnType<typeof returnsPageParams>;
 
 /** Mọi truy vấn của trang — một lượt song song. Xem chú thích trong thân về vì sao song song không phải chỗ sửa. */
 export async function loadReturnsPage(p: ReturnsPageParams) {
-  const { params, minShipped, variantKey, giaTriDon, basis, codes, marketerIds, trendGrain, previous, reasonFilter, reasonFilterBase, reasonFiltered } = p;
+  const { params, minShipped, variantKey, giaTriDon, basis, codes, marketerIds, trendGrain, previous, reasonFilter, reasonFilterBase, reasonFiltered, kpiBucket, kpiPage } = p;
 
   /*
     MỘT LƯỢT SONG SONG, KHÔNG PHẢI HAI LƯỢT NỐI ĐUÔI.
@@ -164,7 +171,7 @@ export async function loadReturnsPage(p: ReturnsPageParams) {
     const truoc = previous ? await getReturnReasonReport({ ...reasonFilter, period: { ...params.period, from: previous.from, to: previous.to } }) : null;
     return buildCauseBoard(bc, truoc && truoc.taxonomy === "EVIDENCE" ? truoc : null);
   });
-  const [{ rows, total, pageCount, all, productRows, projectionError: loiBang }, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia, causeBoard] = await Promise.all([
+  const [{ rows, total, pageCount, all, productRows, projectionError: loiBang }, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia, causeBoard, kpiOrders] = await Promise.all([
     getReturnRateByVariant({ period: params.period, basis, value: giaTriDon, q: params.q, minShipped, sort: params.sort, dir: params.dir, page: params.page, pageSize: params.pageSize }),
     getReturnRateSummary(params.period, params.q, basis, giaTriDon),
     variantKey ? listOrdersForVariant(variantKey, params.period) : Promise.resolve([]),
@@ -176,6 +183,8 @@ export async function loadReturnsPage(p: ReturnsPageParams) {
     reasonBaseP.then((baoCaoLyDo) => getReturnIntelligence({ period: params.period, previous, basis, codes, marketerIds, trendGrain, reasonReport: baoCaoLyDo, value: giaTriDon })),
     getReturnRateByTier(params.period, params.q, basis),
     causeP,
+    // CÙNG bốn tham số với `getReturnRateSummary` ngay trên — danh sách ra đúng số trên thẻ (OD-UX-04).
+    kpiBucket ? listReturnSummaryOrders(params.period, params.q, basis, giaTriDon, kpiBucket, kpiPage) : Promise.resolve(null),
   ]);
-  return { rows, total, pageCount, all, productRows, loiBang, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia, causeBoard };
+  return { rows, total, pageCount, all, productRows, loiBang, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia, causeBoard, kpiOrders };
 }
