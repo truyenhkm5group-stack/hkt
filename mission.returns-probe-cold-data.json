@@ -3,7 +3,7 @@
   "mission_id": "returns-probe-cold-data",
   "title": "returns-page-probe: lượt đối chứng ?period=30d (module ấm, dữ liệu nguội)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-rprobe",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T21:39:17.011Z",
-  "updated_at": "2026-10-23T21:39:17.011Z",
-  "last_heartbeat": "2026-10-23T21:39:17.011Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T21:39:53.011Z",
+  "last_heartbeat": "2026-10-23T21:39:53.011Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/returns-probe-cold-data",
+    "sha": "a0702db5c42b14e0d4dbdd8a66773d1e2fe1e6c7",
+    "at": "2026-10-23T21:39:53.011Z",
+    "actor": "DESKTOP-56TH98Y:wt-rprobe",
+    "title": "returns-page-probe: lượt đối chứng ?period=30d (module ấm, dữ liệu nguội)",
+    "summary": "",
+    "tests": [
+      "tsc · eslint · tests/returns-page-probe.test.ts + tests/ops-script-size.test.ts ĐẠT; npm test đủ CHƯA chạy (một lời gọi đo thêm trong script ops, máy đang bận lượt đủ của tx-no-overlap)"
+    ]
+  }
 }
