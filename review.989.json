@@ -1,0 +1,8 @@
+{
+  "pr": 989,
+  "sha": "b807cb349b0912ad546eabec3fa1bd3ea7a535fc",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T03:48:02.285Z",
+  "note": "review lead: carrierSubstate + carrierSubstateSql cùng một vế — mã ánh xạ DELIVERED mà stage = RETURNED ⇒ RETURNED (501 + chặng RETURN = phát thành công chiều hoàn, 3.2); parity care-states; ca dt-hoan-501 ở tháp. Tác động production đo được = 0 (VTP báo hoàn về shop bằng 504 / «Chuyển trả người gửi», run 39890758735) ⇒ chặn trước. Rà 16 nơi gọi: không đụng tiền / ORDER_OUTCOME / tồn kho / kết cục"
+}
