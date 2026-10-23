@@ -3,7 +3,7 @@
   "mission_id": "perf-probe-tx-count",
   "title": "perf-probe đếm cả câu trong giao dịch (chayKhongJit)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-probetx",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T20:23:29.171Z",
-  "updated_at": "2026-10-23T20:42:15.716Z",
+  "updated_at": "2026-10-23T21:04:14.284Z",
   "last_heartbeat": "2026-10-23T20:38:55.208Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1014 → 14244cf63c7570ed62e11da13c5faa8d47aa9722"
+  },
   "handoff": {
     "branch": "claude/perf-probe-tx-count",
     "sha": "d58d64b0a7db82916351dd9a4d812a28a98297db",
