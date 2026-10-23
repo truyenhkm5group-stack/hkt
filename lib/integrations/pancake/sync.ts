@@ -423,7 +423,8 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
       ? existing.vtpOrderNumber === s.vtpOrderNumber
       : !s.trackingCode || !existing.trackingCode || existing.trackingCode === s.trackingCode);
   // Ghép theo mã VTP mà dòng đã có mã tra cứu KHÁC ⇒ giữ mã tra cứu của dòng: mã Pancake ấy là của vận đơn gốc, gán cho lần gửi kế thì
-  // hai dòng mang cùng mã tra cứu và mọi chỗ tra theo `tracking_code` nói sai.
+  // hai dòng mang cùng mã tra cứu và mọi chỗ tra theo `tracking_code` nói sai. Cùng lý do, giữ cả `partner_status` của dòng: khối partner
+  // POS lúc ấy vẫn mô tả vận đơn GỐC (pilot 23/10/2026: kiện mới đã giao, Pancake gửi `canceled` của mã cũ).
   const giuMaTraCuu = Boolean(cungVanDon && existing?.trackingCode && s.trackingCode && existing.trackingCode !== s.trackingCode);
 
   /*
@@ -459,7 +460,7 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
   } else if (existing) {
     await db
       .update(schema.shipments)
-      .set({ ...data, ...(giuMaTraCuu ? { trackingCode: existing.trackingCode } : {}), attemptNo: existing.attemptNo ?? 1, direction: existing.direction ?? "OUTBOUND", updatedAt: new Date() })
+      .set({ ...data, ...(giuMaTraCuu ? { trackingCode: existing.trackingCode, partnerStatus: existing.partnerStatus } : {}), attemptNo: existing.attemptNo ?? 1, direction: existing.direction ?? "OUTBOUND", updatedAt: new Date() })
       .where(eq(schema.shipments.id, existing.id));
     shipmentId = existing.id;
   } else {

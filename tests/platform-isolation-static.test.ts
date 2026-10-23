@@ -526,6 +526,10 @@ const ROUTE_CONG_KHAI: Record<string, { lyDo: string; cong: RegExp | null }> = {
     lyDo: "Webhook máy-gọi-máy: xác thực bằng bí mật trong URL / chữ ký của nhà cung cấp và phân giải tổ chức qua resolveWebhookOrganization (S11) — không có phiên người dùng để đi qua.",
     cong: /\bresolveWebhookOrganization\(/,
   },
+  "app/api/internal/shipment-state/route.ts": {
+    lyDo: "Bot nhà (container erp-chatbot) hỏi chặng vận đơn theo chứng từ VTP (23/10/2026) — không phiên; khoá nội bộ CHATBOT_ADMIN_TOKEN qua header. Rơi về tổ chức NHÀ là ĐÚNG ý đồ: một bot cho cả máy chủ = bot của nhà (lib/integrations/chatbot/client.ts). Chỉ mã + chặng + cờ kết thúc + mốc, không tiền, không người nhận.",
+    cong: /\bsecretEquals\(/,
+  },
   "app/api/health/route.ts": { lyDo: "Tuyến sức khoẻ công khai của lượt deploy: chỉ trả cờ + số đếm của mặt phẳng điều khiển, không một dòng nghiệp vụ nào.", cong: null },
   "app/api/sync/organizations/route.ts": { lyDo: "Bộ lập lịch hỏi danh sách mã tổ chức để phân tán job — chỉ nhận CRON_SECRET, không phiên.", cong: /\bsecretEquals\(/ },
   "app/api/tech/agent-run/route.ts": { lyDo: "Máy chạy agent nộp kết quả — khoá riêng AGENT_INGEST_SECRET hoặc CRON_SECRET, có trần lượt gọi.", cong: /\bsecretEquals\(/ },

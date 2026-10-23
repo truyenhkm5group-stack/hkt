@@ -7,6 +7,7 @@ import { sleep } from "./util.js";
 import { settings } from "./settings.js";
 import fs from "node:fs";
 import path from "node:path";
+import { ORDER_STATUS_VI, describeOrder, erpOrderView as erpOrderViewCore } from "./order-view.js";
 
 /**
  * Ghi don hang bot da chot vao Pancake POS:
@@ -153,36 +154,13 @@ const ADDRESS_SCHEMA = {
   required: ["province", "street"],
 };
 
-/** Ten trang thai don POS (khop audit.js) va trang thai ben van chuyen -> tieng Viet de bot noi voi khach */
-export const ORDER_STATUS_VI = { 0: "Mới (chưa xác nhận)", 1: "Đã xác nhận, đang chuẩn bị hàng", 2: "Đã gửi hàng cho đơn vị vận chuyển", 3: "Đang giao hàng", 4: "Đã nhận hàng", 5: "Đã đối soát", 6: "Đã hủy", 7: "Đang hoàn", 8: "Đã hoàn", 9: "Đã xóa", 11: "Chờ hàng", 12: "Đang đóng hàng", 15: "Đang chuyển hàng", 16: "Giao không thành công", 17: "Đã thu tiền", 20: "Đã đối soát" };
-const PARTNER_STATUS_VI = { on_the_way: "đang trên đường giao", picked_up: "đã lấy hàng", delivering: "đang giao", delivered: "đã giao thành công", waiting_pickup: "chờ lấy hàng", returning: "đang chuyển hoàn", returned: "đã hoàn về shop", delivery_failed: "giao không thành công" };
+export { ORDER_STATUS_VI, describeOrder };
 
-function fmtNgay(s) {
-  const t = Date.parse(String(s || "").replace(/(\.\d+)?Z?$/, "Z"));
-  return Number.isFinite(t) ? new Date(t).toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", day: "2-digit", month: "2-digit" }) : "";
+/** Goc nhin ERP cho cac don POS (chatbot/src/order-view.js) voi khoa noi bo ADMIN_TOKEN va log that cua bot. */
+export function erpOrderView(orders, opts = {}) {
+  return erpOrderViewCore(orders, { token: config.adminToken, warn: (m) => log.warn(m), ...opts });
 }
 
-/** Mo ta 1 don POS thanh 1 dong cho bot doc (trang thai, van don, ngay gui, tien thu ho) */
-export function describeOrder(o) {
-  const st = ORDER_STATUS_VI[Number(o.status)] || o.status_name || `trạng thái ${o.status}`;
-  const items = (o.items || []).map((it) => `${it.quantity || 1} x ${it.variation_info?.display_id || it.variation_info?.name || it.product_name || "sp"}`).join(", ");
-  const parts = [`Đơn #${o.id}: ${st}`];
-  if (items) parts.push(`gồm ${items}`);
-  const p = o.partner;
-  if (p && (p.order_number_vtp || p.extend_code)) {
-    const ma = p.order_number_vtp || p.extend_code;
-    const dvvc = p.order_number_vtp ? "Viettel Post" : "đơn vị vận chuyển";
-    const tt = PARTNER_STATUS_VI[p.partner_status] || "";
-    parts.push(`mã vận đơn ${ma} (${dvvc}${tt ? ", " + tt : ""})`);
-  }
-  if (p?.picked_up_at) parts.push(`bưu tá đã lấy hàng ngày ${fmtNgay(p.picked_up_at)}`);
-  else if (o.time_send_partner) parts.push(`gửi đi ngày ${fmtNgay(o.time_send_partner)}`);
-  else if (o.inserted_at) parts.push(`tạo ngày ${fmtNgay(o.inserted_at)}`);
-  if (o.estimate_delivery_date) parts.push(`dự kiến giao ${fmtNgay(o.estimate_delivery_date)}`);
-  const thu = Number(o.money_to_collect ?? o.cod ?? 0);
-  if (thu > 0) parts.push(`thu hộ ${thu.toLocaleString("vi-VN")}đ`);
-  return parts.join(" – ");
-}
 
 // Page KHONG ban cac ma nay: bo mau chu luc neu dang la ma do (mot lan) va bot len don KHONG BAO GIO ghi ma do cho page.
 // Chu shop 13/10/2026: page AURA (dam nhung) "khong phai Q005, dung len don Q005" — don #5898 bi ghi Q005 Do XL vi mau

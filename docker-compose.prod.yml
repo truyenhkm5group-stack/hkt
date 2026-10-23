@@ -104,6 +104,9 @@ services:
       # Khoá nội bộ ERP ↔ bot, install-vps.sh tự sinh vào .env của ERP. Rỗng ⇒ bot từ chối mọi lượt
       # quản trị từ xa (phía hẹp hơn), không phải mở toang.
       ADMIN_TOKEN: ${CHATBOT_ADMIN_TOKEN:-}
+      # Bot hỏi chặng vận đơn theo chứng từ VTP của ERP (cửa nội bộ /api/internal/shipment-state, cùng khoá ADMIN_TOKEN). Lỗi /
+      # chậm ⇒ bot nói như cũ — ERP sập không làm bot im lặng.
+      ERP_INTERNAL_URL: http://app:3000
       # Đổi khi mã trong ./chatbot đổi ⇒ compose dựng lại container; deploy ERP khác không làm bot khởi động lại.
       CHATBOT_REV: ${CHATBOT_REV:-unknown}
     volumes:

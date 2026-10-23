@@ -81,6 +81,10 @@ const CO_Y_CONG_KHAI: Record<string, string> = {
   // 0180 · Caddy on-demand TLS hỏi trước khi xin chứng chỉ cho `<slug>.<miền gốc>`: KHÔNG có phiên (Caddy gọi), chỉ trả
   // "ok"/"no" cho đúng tổ chức ĐÃ XUẤT BẢN — không đọc / trả dữ liệu nghiệp vụ nào (tests/self-service-journey.test.ts).
   "app/api/platform/domain-allowed/route.ts": "công khai cho Caddy on-demand TLS: chỉ trả 200/404 cho tên miền con của tổ chức đã xuất bản, không dữ liệu nào",
+  // 23/10/2026 · bot nhà (container erp-chatbot) hỏi chặng vận đơn theo chứng từ VTP: máy-gọi-máy, KHÔNG có phiên — tự gác bằng khoá
+  // nội bộ CHATBOT_ADMIN_TOKEN qua header (secretEquals, khoá rỗng ⇒ 401); chỉ trả mã + chặng + cờ kết thúc + mốc, không tiền /
+  // người nhận (lib/constants/shipment-state-api.ts; hình dạng khoá ở tests/shipment-state-api.test.ts).
+  "app/api/internal/shipment-state/route.ts": "bot nhà gọi bằng khoá nội bộ CHATBOT_ADMIN_TOKEN qua header (secretEquals); không có đường phiên; chỉ mã + chặng + cờ kết thúc + mốc",
 };
 
 export function testAccessControl() {
