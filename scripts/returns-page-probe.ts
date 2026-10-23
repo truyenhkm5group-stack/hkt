@@ -132,6 +132,9 @@ async function main() {
   };
   await mo("/operations", "đối chứng /operations");
   await mo("/reports/returns", "/reports/returns · lượt 1");
+  // ĐỐI CHỨNG (Lead 24/10): module ĐÃ nạp ở lượt 1, nhưng kỳ khác ⇒ khoá đệm khác ⇒ dữ liệu NGUỘI. Đầu phản hồi ≈ lượt 2 ⇒ 4 s ở
+  // lượt 1 là nạp module lần đầu; ≈ lượt 1 ⇒ có await dữ liệu TRƯỚC ranh giới loading.
+  await mo("/reports/returns?period=30d", "/reports/returns · kỳ 30 ngày (module ấm, dữ liệu NGUỘI)");
   await mo("/reports/returns", "/reports/returns · lượt 2 (đệm máy chủ ấm)");
   await mo(`/reports/returns?period=${params.period.key}&basis=${basis}`, "/reports/returns · ghi rõ tham số mặc định");
 }
