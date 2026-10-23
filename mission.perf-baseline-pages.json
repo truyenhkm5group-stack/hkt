@@ -3,7 +3,7 @@
   "mission_id": "perf-baseline-pages",
   "title": "perf-probe đo /orders và /shipments (số nền hiệu năng Phase 3)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-perf-base",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T06:13:38.364Z",
-  "updated_at": "2026-10-23T06:13:38.364Z",
-  "last_heartbeat": "2026-10-23T06:13:38.364Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T06:14:39.246Z",
+  "last_heartbeat": "2026-10-23T06:14:39.246Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/perf-baseline-pages",
+    "sha": "a09c6c39547b667fced411b77def7d0db903fb14",
+    "at": "2026-10-23T06:14:39.246Z",
+    "actor": "DESKTOP-56TH98Y:wt-perf-base",
+    "title": "perf-probe đo /orders và /shipments (số nền hiệu năng Phase 3)",
+    "summary": "chỉ-script: perf-probe thêm /orders (4 hàm) + /shipments danh sách (3 hàm), tham số trùng page.tsx; cần gộp TRƯỚC 17:00Z để đo nền đêm nay",
+    "tests": [
+      "tsc --noEmit sạch · eslint 3 tệp sạch · tsx testPerfProbePages() XANH · đột biến kỳ 30d→7d bị bắt · perf-probe chỉ chạy được trên Postgres production (không chạy local) · full suite giao CI gates"
+    ]
+  }
 }
