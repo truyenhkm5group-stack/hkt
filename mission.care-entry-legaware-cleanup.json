@@ -23,10 +23,12 @@
     "carrier-substate-return-501"
   ],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    992
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-23T05:29:56.405Z",
-  "updated_at": "2026-10-23T05:30:37.903Z",
+  "updated_at": "2026-10-23T05:32:05.765Z",
   "last_heartbeat": "2026-10-23T05:30:37.903Z",
   "definition_of_done": [],
   "handoff": {
