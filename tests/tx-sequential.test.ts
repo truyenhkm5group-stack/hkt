@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
 import type { Db } from "@/db";
 import { getOperatingCostByDay } from "@/lib/queries/cost-engine";
+import { getRecognizedPayrollCost } from "@/lib/queries/payroll-cost";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -157,7 +158,7 @@ export async function testTxSequential(db: Db) {
   const ALL: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
   const chuan = (x: unknown): unknown => (x instanceof Map ? [...x.entries()].sort(([a], [b]) => String(a).localeCompare(String(b))).map(([k, v]) => [k, chuan(v)]) : Array.isArray(x) ? x.map(chuan) : x && typeof x === "object" ? Object.fromEntries(Object.entries(x).map(([k, v]) => [k, chuan(v)])) : x);
   const songSong = await getOperatingCostByDay(ALL);
-  const noiTiep = await getOperatingCostByDay(ALL, db);
+  const noiTiep = await getOperatingCostByDay(ALL, { db, payroll: await getRecognizedPayrollCost(ALL) });
   assert.deepEqual(chuan(noiTiep), chuan(songSong), "cùng SQL, cùng thứ tự kết quả: nhận client từ ngoài (nối tiếp) phải ra ĐÚNG như tự mở bể (song song)");
 
   console.log(`✓ Giao dịch chạy câu nối tiếp: máy quét bắt cả hai tầng trên mã giả · mã đã vào kho 0 chỗ song song trên client giao dịch · getOperatingCostByDay nối tiếp = song song`);
