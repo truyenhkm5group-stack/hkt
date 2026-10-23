@@ -1,0 +1,8 @@
+{
+  "pr": 1009,
+  "sha": "dec092d6587d0adbe360d795d0af921b5ecb1851",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T18:04:43.970Z",
+  "note": "review lead: hàm thuần; phí % trên giá mua, thuế trên CIF; thiếu cước ⇒ thuế MISSING không lùi về giá mua; không số mặc định (bài quét); ca vàng tính tay khớp (43.665+7.100+1.310+10.500+6.127+2.000=70.702); 0257 chỉ tạo bảng chỉ-thêm có serve-compat; điểm không trọng số mặc định; kết quả chỉ hiển thị, có rào không ghi vào giá dự tính/giá vốn."
+}
