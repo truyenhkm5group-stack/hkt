@@ -18,14 +18,15 @@
     ".github/workflows/ops-vps.yml",
     "docs/ops-vps-script-notes.md",
     "tests/sync-fixtures.test.ts",
-    "tests/test-hygiene.test.ts"
+    "tests/test-hygiene.test.ts",
+    "tests/ops-log-leak.test.ts"
   ],
   "dependencies": [],
   "blocked_by": [],
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T18:35:50.506Z",
-  "updated_at": "2026-10-23T18:35:50.506Z",
-  "last_heartbeat": "2026-10-23T18:35:50.506Z",
+  "updated_at": "2026-10-23T18:55:53.152Z",
+  "last_heartbeat": "2026-10-23T18:55:53.152Z",
   "definition_of_done": []
 }
