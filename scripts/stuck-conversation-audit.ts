@@ -377,17 +377,59 @@ export function qualityStateSummary(org: string, raw: unknown): string[] {
     if (base < QUALITY_MIN_SAMPLE) return `${code} ${n}/${base} chưa đủ mẫu`;
     return `${code} ${n}/${base} = ${((n / base) * 100).toFixed(1).replace(".", ",")}%`;
   });
+  const cellOf = new Map(SALES_QUALITY_CODES.map((code, i) => [code, cells[i]]));
   const lines = [head];
+  for (const g of QUALITY_GROUP_ORDER) {
+    const mine = SALES_QUALITY_CODES.filter((c) => (QUALITY_GROUP[c] ?? "khác") === g).map((c) => cellOf.get(c)!);
+    lines.push(...packSummaryLines(`${org} 2B ${g}`, mine));
+  }
+  return lines;
+}
+
+/** Nhóm của từng mã trên kênh tóm tắt — mỗi nhóm một dòng (dài quá thì nối dòng cùng tiền tố). Mã chưa khai nhóm rơi vào «khác», KHÔNG mất. */
+const QUALITY_GROUP_ORDER = ["chờ người · trả lời", "địa chỉ", "số lượng · tiền", "upsell", "khác"] as const;
+type QualityGroup = (typeof QUALITY_GROUP_ORDER)[number];
+export const QUALITY_GROUP: Readonly<Partial<Record<string, QualityGroup>>> = {
+  HANDOFF_UNANSWERED: "chờ người · trả lời",
+  SECONDARY_INTENT_UNANSWERED: "chờ người · trả lời",
+  COMPLAINT_WHILE_SELLING: "chờ người · trả lời",
+  CLARIFY_FALLBACK: "chờ người · trả lời",
+  WRONG_PRODUCT_TEMPLATE: "chờ người · trả lời",
+  CLAIM_GUARD_BLOCK: "chờ người · trả lời",
+  ADDRESS_REASK: "địa chỉ",
+  ADDRESS_RECEIVED_BUT_NOT_APPLIED: "địa chỉ",
+  QTY_REASKED: "số lượng · tiền",
+  QUANTITY_UNIT_AMBIGUOUS: "số lượng · tiền",
+  PACK_MULTIPLIER_MISMATCH: "số lượng · tiền",
+  CART_TOTAL_CONFLICT: "số lượng · tiền",
+  STAFF_AI_QUOTE_CONFLICT: "số lượng · tiền",
+  ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT: "số lượng · tiền",
+  PACK_MULTIPLIER_LEAKED: "số lượng · tiền",
+  UPSELL_ACCEPTED_BUT_REASKED: "upsell",
+  UPSELL_ACCEPTED_NOT_ATTACHED: "upsell",
+};
+
+/**
+ * Trần một dòng tóm tắt, tính bằng BYTE UTF-8. ops-vps.yml cắt kênh [ops:tom-tat] bằng `cut -c1-300`, và GNU cut -c đếm BYTE: chữ Việt
+ * 2–3 byte nên dòng 270 ký tự đã cụt (đo 23/10/2026: dòng 2B mất đúng «CART_TOTAL_C…» trở đi). `che_log` chạy TRƯỚC `cut` và có thể
+ * làm dòng DÀI thêm (mỗi «•» 3 byte) ⇒ chừa 20 byte.
+ */
+export const SUMMARY_MAX_BYTES = 280;
+export const utf8Bytes = (s: string) => Buffer.byteLength(s, "utf8");
+
+/** Dồn các ô vào các dòng `<tiền tố> · ô · ô…`, mỗi dòng ≤ SUMMARY_MAX_BYTES byte; một ô tự nó quá dài thì đứng riêng một dòng. HÀM THUẦN. */
+export function packSummaryLines(prefix: string, cells: readonly string[]): string[] {
+  const out: string[] = [];
   let cur = "";
   for (const c of cells) {
-    const next = cur ? `${cur} · ${c}` : `${org} 2B · ${c}`;
-    if (next.length > 300 && cur) {
-      lines.push(cur);
-      cur = `${org} 2B · ${c}`;
+    const next = cur ? `${cur} · ${c}` : `${prefix} · ${c}`;
+    if (utf8Bytes(next) > SUMMARY_MAX_BYTES && cur) {
+      out.push(cur);
+      cur = `${prefix} · ${c}`;
     } else cur = next;
   }
-  if (cur) lines.push(cur);
-  return lines;
+  if (cur) out.push(cur);
+  return out;
 }
 
 // ─────────────────────────── PHẦN CSDL ───────────────────────────
