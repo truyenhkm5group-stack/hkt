@@ -1,4 +1,3 @@
-{"at":"2026-10-18T05:03:42.529Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"comment-carry-outcome","detail":"#891 @ 1487952510e3 → 66c011defc36 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-18T05:04:53.979Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"66c011defc36 · run 39099287335 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39099287335"}
 {"at":"2026-10-18T05:22:52.151Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_FAIL","mission":"comment-carry-outcome","detail":"FAIL 66c011defc3682e8937dc3b2a47b31f188e5f75b 2026-10-18T05:22:35.718Z"}
 {"at":"2026-10-18T06:08:00.145Z","actor":"DESKTOP-56TH98Y:wt-token-budget","kind":"CLAIM","mission":"probe-migrate-locks","detail":"PLANNING · 1 mẫu phạm vi · MEDIUM"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-23T08:02:56.216Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#980 @ e0b295579f5f · review lead: chỉ gộp main vào nhánh (xung đột ops-vps.yml giải = dòng main + pos-reship-link); script không đổi so với 50022459 đã PASS. Đo trước: 330 ứng viên = LINKED 330 của script vá; nhóm pilot 60."}
 {"at":"2026-10-23T08:21:40.009Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"pos-reship-link","detail":"#980 @ e0b295579f5f → ec00525c7e23 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-23T08:35:18.537Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"address-reask-qtyack","detail":"PASS db264b9d3414768e9996ae8fa0e22b42462c16c8 2026-10-23T08:34:34.950Z"}
+{"at":"2026-10-23T08:43:07.428Z","actor":"DESKTOP-56TH98Y:wt-prl2","kind":"CLAIM","mission":"pos-reship-vtp-only","detail":"RUNNING · 3 mẫu phạm vi · MEDIUM"}
