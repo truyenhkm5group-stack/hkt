@@ -9,7 +9,7 @@
 | Chủ shop giao | 23/10/2026 |
 | Integration Lead | phiên `code-erp-11` (mở PR · cổng · gộp · deploy) |
 | Phase 1 (discovery) | sứ mệnh `odoo-upgrade-phase1-audit`. CHỈ TÀI LIỆU, một PR. |
-| Mốc kho lúc khảo sát | `main` = `eedfc7a38` (#992) · production = `6644a3cbc09a` (#989, đo `/api/health` 23/10/2026 06:13Z) |
+| Mốc kho lúc khảo sát | `main` = `eedfc7a38` (#992). Production = `6644a3cbc09a` (#989, đo `/api/health` 23/10/2026 06:13Z), sau đó lên `eedfc7a389a1` lúc 06:40Z. |
 
 ---
 
@@ -75,8 +75,8 @@ Quy ước cột:
 
 ### 5.1 Việc P0 đang chạy / đã xong (đưa sẵn vào chương trình, trạng thái đo 23/10/2026)
 
-Production `6644a3cbc09a` chứa mọi SHA dưới đây có ghi "DEPLOYED". #990 và #992 đã gộp main nhưng chưa
-deploy ở mốc đo.
+Đo lúc 06:13Z, production `6644a3cbc09a` chứa mọi SHA dưới đây có ghi "DEPLOYED". Lead báo 06:40Z:
+production lên `eedfc7a389a1` (#992, run 39911382774, verify PASS), nên #990 cũng đã lên theo.
 
 | Task ID | Module | Mục tiêu | Owner | Ưu tiên | Trạng thái | PR | SHA | Test | Deploy | Xác minh | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -85,7 +85,7 @@ deploy ở mốc đo.
 | P0-VTP-3 | Vận đơn | Script vá 330 vận đơn tạo lại về đơn gốc (chạy thử + `--apply`) | worker VTP | P0 | DEPLOYED | #982 | `6041f7f0d` | trong PR | ✓ | — | Phụ thuộc #981 (phiên bản KQ ≥ 5, #988) | Chạy `--apply` sau #981 |
 | P0-VTP-4 | POS Pancake | Ops `pos-reship-link`: gắn mã vận đơn tạo lại vào khối partner đơn POS | worker VTP | P0 | IN_REVIEW (PR mở) | #980 | — | trong PR | ✗ | — | — | Review + gộp |
 | P0-VTP-5 | Tháp giao vận | 501 trên chặng hoàn vào rổ «hoàn đã về shop» | phiên này | P1 | DEPLOYED · VERIFIED | #989 | `6644a3cbc` | care-states 15 · delivery-tower | ✓ | ✓ verify PASS (run 39898884835) | — | — |
-| P0-VTP-6 | Tháp + care | Chặng RETURNED thắng chữ «đã giao»/«đang hoàn» (TS+SQL), xoá bản vá `entry.ts:97`. Production đo trước = sau: 0 kiện đổi rổ. | phiên này | P2 | MERGED | #992 | `eedfc7a38` | care-states 25 · delivery-tower · đột biến | ✗ | — | — | Deploy + verify |
+| P0-VTP-6 | Tháp + care | Chặng RETURNED thắng chữ «đã giao»/«đang hoàn» (TS+SQL), xoá bản vá `entry.ts:97`. Production đo trước = sau: 0 kiện đổi rổ. | phiên này | P2 | DEPLOYED · VERIFIED | #992 | `eedfc7a38` | care-states 25 · delivery-tower · đột biến | ✓ (run 39911382774, 06:40Z) | ✓ verify PASS | — | — |
 | P0-ADDR-1 | Bot bán hàng | Khách đã cho phường thì đơn nhận phường; bỏ câu «nhân viên sẽ xác nhận lại địa chỉ» | worker sales | P0 | DEPLOYED | #966 | `705f954cf` | trong PR | ✓ | — | — | — |
 | P0-ADDR-2 | Bot bán hàng | AGENTS 3.12b: không hỏi lại địa chỉ đã gửi; đơn chờ xác minh địa chỉ vẫn chốt + mời mua thêm | worker sales | P0 | DEPLOYED | #972 | `f53d1883d` | trong PR | ✓ | — | — | — |
 | P0-ADDR-3 | Bot bán hàng | Máy ánh xạ địa chỉ nền (PR-B) | worker sales | P0 | DEPLOYED | #973 | `15d62efc7` | trong PR | ✓ | — | — | — |
