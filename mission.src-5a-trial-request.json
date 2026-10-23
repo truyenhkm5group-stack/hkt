@@ -3,13 +3,13 @@
   "mission_id": "src-5a-trial-request",
   "title": "SRC-5a: lưu mẫu TEST- + yêu cầu mua thử có duyệt + vòng phản hồi (tìm hàng nguồn)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
   "worker": null,
   "worktree": null,
-  "branch": null,
+  "branch": "claude/src-5a-trial-request",
   "base_sha": null,
   "domains": [],
   "owned_paths": [
@@ -36,7 +36,21 @@
     "0258": "2026-10-23T18:10:06.539Z"
   },
   "created_at": "2026-10-23T18:09:26.521Z",
-  "updated_at": "2026-10-23T18:10:06.539Z",
-  "last_heartbeat": "2026-10-23T18:09:26.521Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T19:46:37.916Z",
+  "last_heartbeat": "2026-10-23T19:46:37.916Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/src-5a-trial-request",
+    "sha": "0994dc216ac95c58dfb2cb433f15c1f5e9bbe52b",
+    "at": "2026-10-23T19:46:37.916Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "Tìm hàng nguồn: lưu mẫu TEST- + yêu cầu mua thử có duyệt + vòng phản hồi (SRC-5a)",
+    "summary": "0258 tạo sourcing_shortlist + sourcing_trial_requests; TEST- qua registerProvisionalModelCore (không products/variants); nhóm duyệt SOURCING_TRIAL luôn phải duyệt qua lõi chung; ảnh chụp bất biến; đã đặt chỉ người xin, tiêu thụ lời duyệt cùng giao dịch; đã về gắn phiếu RECEIPT; phản hồi giá nhập thật vs ước tính",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "npm run lint: sạch",
+      "npm test shard 1/4–4/4: TẤT CẢ ĐẠT (cây đã đặt lại trên main)",
+      "npm run build: Compiled successfully"
+    ]
+  }
 }
