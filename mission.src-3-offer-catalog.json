@@ -3,13 +3,13 @@
   "mission_id": "src-3-offer-catalog",
   "title": "SRC-3: kho mẫu nhập tay + so sánh (tìm hàng nguồn)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
   "worker": null,
   "worktree": null,
-  "branch": null,
+  "branch": "claude/src-3-offer-catalog",
   "base_sha": null,
   "domains": [],
   "owned_paths": [
@@ -31,7 +31,21 @@
     "0256": "2026-10-23T14:25:43.834Z"
   },
   "created_at": "2026-10-23T14:24:55.212Z",
-  "updated_at": "2026-10-23T14:25:43.834Z",
-  "last_heartbeat": "2026-10-23T14:24:55.212Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T16:17:05.276Z",
+  "last_heartbeat": "2026-10-23T16:17:05.276Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/src-3-offer-catalog",
+    "sha": "ac817c15979f4ce7e24628c0469efa0dd73d7c75",
+    "at": "2026-10-23T16:17:05.276Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "Tìm hàng nguồn: kho mẫu nhập tay + so sánh 2–4 mẫu (SRC-3)",
+    "summary": "Migration 0256 tạo 3 bảng ở CSDL tổ chức (NCC · mẫu · ảnh chụp giá chỉ thêm); tiền CNY là fen nguyên; đọc link thuần, chống trùng mã + link chuẩn hoá; «cũ» tính lúc đọc; trang /sourcing Kho mẫu + offers/new + offers/[id] + compare; serve-compat 42P01",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "npm run lint: sạch",
+      "npm test shard 1/4–4/4: TẤT CẢ ĐẠT",
+      "npm run build: Compiled successfully"
+    ]
+  }
 }
