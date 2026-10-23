@@ -3,7 +3,7 @@
   "mission_id": "src-5a-trial-request",
   "title": "SRC-5a: lưu mẫu TEST- + yêu cầu mua thử có duyệt + vòng phản hồi (tìm hàng nguồn)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -38,9 +38,12 @@
     "0258": "2026-10-23T18:10:06.539Z"
   },
   "created_at": "2026-10-23T18:09:26.521Z",
-  "updated_at": "2026-10-23T19:48:51.660Z",
+  "updated_at": "2026-10-23T20:03:56.516Z",
   "last_heartbeat": "2026-10-23T19:46:37.916Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1012 → 39cdcc6015840dc95953e0ce1c6da652307e5e58"
+  },
   "handoff": {
     "branch": "claude/src-5a-trial-request",
     "sha": "0994dc216ac95c58dfb2cb433f15c1f5e9bbe52b",
