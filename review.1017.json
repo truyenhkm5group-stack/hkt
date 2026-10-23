@@ -1,0 +1,8 @@
+{
+  "pr": 1017,
+  "sha": "fcf79ad07966bed5af6dffdd74548b407f81c768",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T21:31:18.911Z",
+  "note": "review lead: nguồn SOURCE SOURCING_TRIAL là phép chiếu (luật 19), hai pha ORDER/RECEIVE, chờ duyệt không chiếu trùng APPROVAL; hạn lấy lại APPROVAL_VALID_HOURS, RECEIVE null có lý do (luật 22); phòng PRODUCTION route WAREHOUSE qua dòng lệch có sẵn (luật 69); không nút đóng việc; không migration."
+}
