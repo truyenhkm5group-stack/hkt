@@ -328,9 +328,10 @@ function testQualityState() {
   assert.equal(qualityStateSummary("demo", state).join("\n"), all, "giá trị đã là object (driver giải JSON) ⇒ cùng kết quả");
   assert.match(qualityStateSummary("demo", { ...state, capped: true, slaHours: null })[0], /CHẠM TRẦN — số là trần dưới · hạn chờ người không đặt/);
   assert.match(qualityStateSummary("demo", { ...state, bases: undefined }).join(" "), /HANDOFF_UNANSWERED 98 \(mẫu số chưa có\)/);
-  // Kênh [ops:tom-tat] cắt ở 300 ký tự: mọi dòng lọt, kể cả mã tổ chức dài và số sáu chữ số.
+  // Kênh [ops:tom-tat] cắt ở 300 BYTE (`cut -c` của GNU): mọi dòng lọt, kể cả mã tổ chức dài và số sáu chữ số — đo bằng byte, không bằng
+  // `length` (bản đo ký tự đã để dòng 2B ngày 22/10 cụt ở «CART_TOTAL_C…»; chi tiết ở tests/stuck-audit-2b-lines.test.ts).
   const big = { ...state, conversations: 999_999, capped: true, counts: Object.fromEntries(SALES_QUALITY_CODES.map((c) => [c, 999_999])), bases: Object.fromEntries(Object.keys(state.bases).map((k) => [k, 999_999])) };
-  for (const l of qualityStateSummary("hslc-hmt-shop", big)) assert.ok(l.length <= 300, `${l.length} ký tự > 300: ${l}`);
+  for (const l of qualityStateSummary("hslc-hmt-shop", big)) assert.ok(Buffer.byteLength(l, "utf8") <= 300, `${Buffer.byteLength(l, "utf8")} byte > 300: ${l}`);
   assert.equal(QUALITY_MIN_SAMPLE, 30);
 
   // Mẫu số của script = ĐÚNG trường `baseOf` của daily.ts in cạnh mã đó (bản sao có lý do: ops lấy lib từ image).
