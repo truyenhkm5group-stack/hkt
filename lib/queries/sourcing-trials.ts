@@ -12,21 +12,9 @@
 import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { approvalStillValid } from "@/lib/approvals/service";
-import { isMissingSourcingTable } from "@/lib/queries/sourcing";
+import { guardSourcingTables as guard, type Unavailable } from "@/lib/queries/sourcing";
 import { getModelSignal, type ModelSignalReport } from "@/lib/queries/model-signal";
 import { deriveTrialState, parseTrialLines, parseTrialSnapshot, snapshotUnitEstimate, type TrialLine, type TrialSnapshot, type TrialState, type TrialStatus } from "@/lib/sourcing/trial";
-
-export type Unavailable = { unavailable: true };
-const UNAVAILABLE: Unavailable = { unavailable: true };
-
-async function guard<T>(fn: () => Promise<T>): Promise<T | Unavailable> {
-  try {
-    return await fn();
-  } catch (e) {
-    if (isMissingSourcingTable(e)) return UNAVAILABLE;
-    throw e;
-  }
-}
 
 const t = schema.sourcingTrialRequests;
 const sl = schema.sourcingShortlist;

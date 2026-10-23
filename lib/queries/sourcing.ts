@@ -25,6 +25,11 @@ export function isMissingSourcingTable(error: unknown): boolean {
 export type Unavailable = { unavailable: true };
 const UNAVAILABLE: Unavailable = { unavailable: true };
 
+/** Chạy một lượt đọc của Tìm hàng nguồn; bảng chưa có (CSDL chưa áp migration) ⇒ `{ unavailable: true }`. Dùng chung cho mọi tệp truy vấn sourcing. */
+export async function guardSourcingTables<T>(fn: () => Promise<T>): Promise<T | Unavailable> {
+  return guard(fn);
+}
+
 async function guard<T>(fn: () => Promise<T>): Promise<T | Unavailable> {
   try {
     return await fn();
