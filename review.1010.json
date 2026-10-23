@@ -1,0 +1,8 @@
+{
+  "pr": 1010,
+  "sha": "86e53d4422968a36e4d606eccd819d4230842bfa",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T18:15:07.375Z",
+  "note": "review lead: một ô SĐT khối variantOrders gác orders:read (server component, không gửi SĐT xuống khi thiếu quyền); THU HẸP theo luật 30; mặc định không vai trò nào mất; bài đột biến bắt."
+}
