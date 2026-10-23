@@ -3,7 +3,7 @@
   "mission_id": "od-ux-03-as-of",
   "title": "OD-UX-03: chỉ báo tính lúc · nguồn · trễ đối tác cho /shipments và /reports/returns",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-asof",
@@ -26,7 +26,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T11:16:49.662Z",
-  "updated_at": "2026-10-23T11:16:49.662Z",
-  "last_heartbeat": "2026-10-23T11:16:49.662Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T12:10:45.146Z",
+  "last_heartbeat": "2026-10-23T12:10:45.146Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/od-ux-03-as-of",
+    "sha": "13d5477889b75cb6df1fd6a970c487b349769040",
+    "at": "2026-10-23T12:10:45.146Z",
+    "actor": "DESKTOP-56TH98Y:wt-asof",
+    "title": "Vận đơn và Tỷ lệ giao thành công nay in số liệu tính lúc nào, các nguồn vào ERP lần cuối khi nào, và Viettel Post đang trễ bao lâu",
+    "summary": "OD-UX-03 theo thiết kế đã duyệt. lib/cache.ts: mục đệm mang at (mốc dữ liệu cũ nhất), collectAsOf qua AsyncLocalStorage (lượt tính của mục chạy trong bộ gom riêng ⇒ request song song không rò mốc; có bài kiểm). asOfCells thuần dùng chung; trễ ĐVVC đọc lại vtpWebhookHealth, thiếu mẫu ⇒ CHƯA BIẾT, không tô xanh. vtp-sync-coverage thêm mốc bảng kê COD (STATEMENT_DETAIL) + Pancake SUCCESS cuối của job đơn, cùng câu SQL. STATEMENT_FILE_SEEN_AT dựng từ cột lược đồ, integration-health dùng lại (cột receivedAt = created_at). /reports/returns: mốc tính của loadReturnsPage + nguồn + trễ; /shipments: care và tab Tất cả in mốc tính của chính khối đó, đầu trang chỉ nguồn + trễ. Ngoài phạm vi khai: lib/queries/integration-health.ts, components/data-as-of-line.tsx, tests/platform-isolation-static.test.ts (khai holder __erpAsOf). Chỉ đọc, không schema.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint 11 tệp: sạch",
+      "TEST_KHOI=K01,K03,K04,K06,K07,K11,K15,K17,K18 npm test: ĐẠT (data-as-of: collectAsOf song song/lồng/dùng chung/đệm cũ · vtp-reship-relink · integration health · test-hygiene · ops-log-leak · platform-isolation-static)",
+      "build: không chạy — chỉ server component, không đổi ranh giới client"
+    ]
+  }
 }
