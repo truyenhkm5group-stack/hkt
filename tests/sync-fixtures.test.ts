@@ -3,6 +3,7 @@
  * Chạy: npm test  (dùng CSDL PGlite tạm trong ./data/pglite-test, không ảnh hưởng dữ liệu thật)
  */
 import { testSourcingShell } from "./sourcing-shell.test";
+import { testSourcingQuery } from "./sourcing-query.test";
 import "./setup-env";
 import { testReturnReasonKhachVangNha } from "./return-reason-vang-nha.test";
 import { testCodReconciliation } from "./cod-reconciliation.test";
@@ -2556,7 +2557,9 @@ async function main() {
     await testPermissions();
     await testPlatformModules();
     // SRC-1 (23/10/2026): khung module Tìm hàng nguồn — module · quyền · hai khoá cấu hình · không gọi nguồn ngoài.
+    // SRC-2: bộ sinh từ khoá tiếng Trung — từ điển tất định, AI chỉ khi thiếu, có trần theo sổ AI.
     testSourcingShell();
+    await testSourcingQuery();
     await testVtpImportTruth(db);
     await testVtpImportRecovery(db);
     await testCostAllocation(db);

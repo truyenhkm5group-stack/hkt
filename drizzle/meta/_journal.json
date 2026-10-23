@@ -1779,6 +1779,13 @@
       "when": 1792487227372,
       "tag": "0254_carryover_first_work_month",
       "breakpoints": true
+    },
+    {
+      "idx": 255,
+      "version": "7",
+      "when": 1792487287372,
+      "tag": "0255_ai_usage_sourcing_workload",
+      "breakpoints": true
     }
   ]
 }

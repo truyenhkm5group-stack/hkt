@@ -1,0 +1,2 @@
+ALTER TABLE "platform_ai_usage" DROP CONSTRAINT IF EXISTS "platform_ai_usage_workload_check";--> statement-breakpoint
+ALTER TABLE "platform_ai_usage" ADD CONSTRAINT "platform_ai_usage_workload_check" CHECK ("platform_ai_usage"."workload" IS NULL OR "platform_ai_usage"."workload" IN ('sales_chatbot','order_sync','quick_extract','vision','followup','lessons','quick_reply_learn','inbox_feedback','playbook','ai_builder','copilot','creative','lead_hunter','sourcing'));
