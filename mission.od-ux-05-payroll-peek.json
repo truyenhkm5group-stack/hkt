@@ -3,7 +3,7 @@
   "mission_id": "od-ux-05-payroll-peek",
   "title": "OD-UX-05 mục 2(a): /work chỉ đọc đệm nguồn đối soát lương; job giữ ấm là đường tính duy nhất",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-od05-payroll",
@@ -25,7 +25,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T22:38:05.037Z",
-  "updated_at": "2026-10-23T22:38:05.037Z",
-  "last_heartbeat": "2026-10-23T22:38:05.037Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T22:44:33.112Z",
+  "last_heartbeat": "2026-10-23T22:44:33.112Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/od-ux-05-payroll-peek",
+    "sha": "668ac5fba80bdd3d8ec052759582b42f386a5d6c",
+    "at": "2026-10-23T22:44:33.112Z",
+    "actor": "DESKTOP-56TH98Y:wt-od05-payroll",
+    "title": "C:/Program Files/Git/work không còn tự tính đối soát lương 22 giây mỗi lần đệm nguội — chỉ đọc số job giữ ấm để lại",
+    "summary": "OD-UX-05 mục 2(a). memoPeek (đọc đệm không tính); peekPayrollRecon cho đường trang — không có số ⇒ «đang tính lại (máy tính lại mỗi 12 phút)» ngay; adaptPayrollRecon (tính) giữ tên cho job + probe; nhịp 12′ một hằng; câu cảnh báo /work không hứa «ít giây» cho nguồn tính theo nhịp. Căn cứ: getReconCenter nguội 22,5 s · 857 câu · giữ 3,1–3,7/5 kết nối. Không đụng bộ máy lương.",
+    "tests": [
+      "tsc --noEmit: sạch (sau gộp main)",
+      "eslint 6 tệp: sạch",
+      "TEST_KHOI=K06,K08,K10,K13,K15 npm test: ĐẠT (payroll-recon-center: đệm nguội ⇒ báo ngay, không sinh khoá tính · company-os-warm · my-work-notice · data-as-of · test-hygiene)"
+    ]
+  }
 }
