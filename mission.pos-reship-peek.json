@@ -3,7 +3,7 @@
   "mission_id": "pos-reship-peek",
   "title": "pos-reship-link --peek: vân tay khoá con đơn POS + so tiền POS↔ERP (chỉ đọc)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-peek",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T14:34:15.768Z",
-  "updated_at": "2026-10-23T14:34:15.768Z",
-  "last_heartbeat": "2026-10-23T14:34:15.768Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T14:34:58.785Z",
+  "last_heartbeat": "2026-10-23T14:34:58.785Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/pos-reship-peek",
+    "sha": "8051bf4a32867c1d51483df06d0d07cb32764d77",
+    "at": "2026-10-23T14:34:58.785Z",
+    "actor": "DESKTOP-56TH98Y:wt-peek",
+    "title": "pos-reship-link --peek: vân tay khoá con đơn POS + so tiền POS↔ERP (chỉ đọc)",
+    "summary": "chỉ-script, CHỈ ĐỌC: --peek --order cho phép đo đối chứng (bước 2 của Tech Lead) — không cần deploy",
+    "tests": [
+      "tsc sạch · eslint sạch · tsx testPosReshipLink() XANH (thêm khẳng định --peek, fingerprintOrder không lộ PII, compareMoney) · phần CSDL không đổi · full suite giao CI gates"
+    ]
+  }
 }
