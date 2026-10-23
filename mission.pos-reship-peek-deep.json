@@ -3,7 +3,7 @@
   "mission_id": "pos-reship-peek-deep",
   "title": "pos-reship-link --peek đọc khoá con sổ địa chỉ khách (chỉ băm chữ) + --orders nhiều đơn",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-peek2",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T23:28:13.955Z",
-  "updated_at": "2026-10-23T23:31:58.655Z",
+  "updated_at": "2026-10-23T23:53:14.573Z",
   "last_heartbeat": "2026-10-23T23:28:55.686Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1022 → e9693a94093f842e54d593bd1c83aab2d709e635"
+  },
   "handoff": {
     "branch": "claude/pos-reship-peek-deep",
     "sha": "162240926bbe607065143e1be2a31359768adb51",

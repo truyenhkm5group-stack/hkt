@@ -1,4 +1,3 @@
-{"at":"2026-10-18T20:22:47.828Z","actor":"DESKTOP-56TH98Y:wt-aibal-clock","kind":"HANDOFF","mission":"ai-balance-test-clock","detail":"claude/ai-balance-test-clock @ ad6d736d30a0 · 1 lệnh kiểm thử"}
 {"at":"2026-10-18T20:23:15.031Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#904 @ ad6d736d30a0 · như bản đã review PASS + merge origin/main (update-branch, mang #905); nội dung nhánh không đổi"}
 {"at":"2026-10-18T21:00:20.341Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ai-balance-test-clock","detail":"#904 @ ad6d736d30a0 → 876b0d8b8fca (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-18T21:01:23.847Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"hslc-shipping-source","detail":"#903 @ 1ae188a7f664 → 1bf09546d635 (MERGE_ISOLATED · HIGH · gates success)"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-23T23:51:07.242Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"deploy-warm-pages","detail":"#1024 cho claude/deploy-warm-pages @ f28ec1205eca"}
 {"at":"2026-10-23T23:51:46.150Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#1024 @ f28ec1205eca · review lead: làm ấm 8 trang nặng ngay sau health, trước sao lưu/smoke, song song 2, hạn 90 s/trang, luôn thoát 0 (không chặn deploy); danh sách một chỗ; chỉ đọc. Bằng chứng nhu cầu: returns-page-probe lượt 1 đầu 5,6 s vs module ấm 1,0 s."}
 {"at":"2026-10-23T23:52:34.757Z","actor":"DESKTOP-56TH98Y:wt-od05-payroll","kind":"HANDOFF","mission":"od-ux-05-stale-on-write","detail":"claude/od-ux-05-stale-on-write @ 3ed74344e8be · 4 lệnh kiểm thử"}
+{"at":"2026-10-23T23:53:14.614Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"pos-reship-peek-deep","detail":"#1022 @ 162240926bbe → e9693a94093f (MERGE_NOW · MEDIUM · gates success)"}
