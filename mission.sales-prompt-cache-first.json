@@ -3,7 +3,7 @@
   "mission_id": "sales-prompt-cache-first",
   "title": "AI Sales GĐ3: lời nhắc xếp tĩnh → ngày → giờ → hội thoại → lượt cho đệm tiền tố (công tắc sales.prompt-layout, mặc định LEGACY)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-prompt-cache",
@@ -30,7 +30,7 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-22T17:58:26.836Z",
-  "updated_at": "2026-10-23T02:42:09.971Z",
+  "updated_at": "2026-10-23T03:22:15.740Z",
   "last_heartbeat": "2026-10-22T20:29:15.119Z",
   "definition_of_done": [],
   "intake": {
@@ -38,7 +38,9 @@
     "evidence": []
   },
   "evidence": {
-    "merged": "#987 → 3cc4b3c99d1fb87cb4fa6016714ae51e6bc359a8"
+    "merged": "#987 → 3cc4b3c99d1fb87cb4fa6016714ae51e6bc359a8",
+    "verify": "PASS 3cc4b3c99d1fb87cb4fa6016714ae51e6bc359a8 2026-10-23T03:21:42.992Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39893372631"
   },
   "handoff": {
     "branch": "claude/sales-prompt-cache-first",
