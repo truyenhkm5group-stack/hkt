@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { inArray, like } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { compareMoney, fingerprintDiff, fingerprintOrder, lastLinkRecord, linkBody, linkPlan, parseReshipArgs, partnerOf, readPairs, rollbackBody, rollbackPlan, unexpectedChanges } from "../scripts/pos-reship-link";
+import { compareMoney, fingerprintDiff, fingerprintOrder, lastLinkRecord, linkedOrderIds, linkBody, linkPlan, parseReshipArgs, partnerOf, readPairs, rollbackBody, rollbackPlan, unexpectedChanges } from "../scripts/pos-reship-link";
 import { readFileSync as readFixture } from "node:fs";
 import path from "node:path";
 import { eq } from "drizzle-orm";
@@ -97,6 +97,7 @@ export function testPosReshipLink() {
   assert.equal((src.match(/pos\("PUT"/g) ?? []).length, 2, "đúng HAI chỗ PUT: gắn và gỡ");
   assert.match(src, /if \(moneyChanged\) \{\n\s+tomTat\("pos-reship-link DỪNG[^"]*"\);\n\s+break;/, "dòng hàng / tiền đổi sau PUT ⇒ DỪNG cả lượt");
   assert.match(src, /changedPaths: paths, moneyCheck: money/, "audit lưu diff theo đường dẫn khoá con + phép so tiền");
+  assert.ok(src.indexOf("!done.has(p.orderId)") > 0 && src.indexOf("!done.has(p.orderId)") < src.indexOf("chon = chon.slice(0, args.limit);"), "bỏ đơn đã gắn xong TRƯỚC khi cắt --limit (lô sau mới tiến lên)");
   const peekSrc = src.slice(src.indexOf("async function runPeek"), src.indexOf("/** Thân PUT của rollback"));
   assert.ok(peekSrc.length > 100 && !peekSrc.includes('pos("PUT"') && !peekSrc.includes("audit("), "--peek không PUT, không ghi nhật ký");
   const putAt = src.indexOf('pos("PUT", p.orderId, linkBody(');
@@ -162,6 +163,15 @@ export async function testPosReshipLinkDb(db: Db) {
     ]);
     assert.deepEqual(await lastLinkRecord(db, "pos-rl-o1"), { oldCode: "PKERL0001", newCode: "823400000001" }, "gỡ theo dòng audit MỚI NHẤT");
     assert.equal(await lastLinkRecord(db, "pos-rl-o2"), null, "không có vết ⇒ null");
+    // Lô sau bỏ qua đơn đã gắn xong; đơn bị GỠ sau đó quay lại tập cần xét; lượt đọc lại hỏng thì chưa tính là xong.
+    await db.insert(schema.auditLogs).values([
+      { userEmail: "script:pos-reship-link", action: "pos.reship_link", entity: "order", entityId: "pos-rl-o1", detail: { newCode: "823400000001", readbackOk: true }, createdAt: new Date("2026-10-22T00:00:00Z") },
+      { userEmail: "script:pos-reship-link", action: "pos.reship_link", entity: "order", entityId: "pos-rl-o2", detail: { newCode: "823400000002", readbackOk: true }, createdAt: new Date("2026-10-22T00:00:00Z") },
+      { userEmail: "script:pos-reship-link", action: "pos.reship_link.rollback", entity: "order", entityId: "pos-rl-o2", detail: { readbackOk: true }, createdAt: new Date("2026-10-22T01:00:00Z") },
+      { userEmail: "script:pos-reship-link", action: "pos.reship_link", entity: "order", entityId: "pos-rl-o3", detail: { newCode: "823400000003", readbackOk: false }, createdAt: new Date("2026-10-22T00:00:00Z") },
+    ]);
+    const xong = await linkedOrderIds(db);
+    assert.deepEqual([xong.has("pos-rl-o1"), xong.has("pos-rl-o2"), xong.has("pos-rl-o3")], [true, false, false], "xong · đã gỡ ⇒ xét lại · đọc lại hỏng ⇒ chưa xong");
     const ids = (await db.select({ id: s.id }).from(s).where(inArray(s.id, ["pos-rl-s5", "pos-rl-s7"]))).length;
     assert.equal(ids, 2, "dòng mồ côi vẫn còn nguyên — script chỉ đọc");
     console.log("  ✓ pos-reship-link (CSDL): lần gửi kế đã gắn + gốc huỷ ⇒ ứng viên · gốc đã giao ⇒ không · chặng hoàn / tạo lại chưa gắn ⇒ không");

@@ -281,6 +281,19 @@ async function pos(method: "GET" | "PUT", orderId: string, body?: unknown): Prom
 }
 
 /** Dòng audit gắn mã gần nhất của một đơn (mã cũ / mã mới). Không có ⇒ `null`. CHỈ ĐỌC. */
+/**
+ * Đơn ĐÃ GẮN XONG: dòng audit MỚI NHẤT của đơn là `pos.reship_link` với `readbackOk = true` (một lượt gỡ sau đó làm đơn quay lại tập
+ * cần xét). Lô sau bỏ qua chúng TRƯỚC khi cắt `--limit` — nếu không, `--limit=20` chọn mãi đúng 20 đơn đầu đã xong và không lô nào
+ * tiến lên. CHỈ ĐỌC.
+ */
+export async function linkedOrderIds(db: Db): Promise<Set<string>> {
+  const rows = rowsOf<{ entity_id: string; action: string; ok: string | null }>(
+    await db.execute(sql`select distinct on (entity_id) entity_id, action, detail ->> 'readbackOk' as ok from audit_logs
+      where action in ('pos.reship_link', 'pos.reship_link.rollback') order by entity_id, created_at desc`),
+  );
+  return new Set(rows.filter((r) => r.action === "pos.reship_link" && r.ok === "true").map((r) => String(r.entity_id)));
+}
+
 export async function lastLinkRecord(db: Db, orderId: string): Promise<{ oldCode: string | null; newCode: string } | null> {
   const a = schema.auditLogs;
   const [row] = await db.select({ detail: a.detail }).from(a).where(and(eq(a.action, "pos.reship_link"), eq(a.entityId, orderId))).orderBy(desc(a.createdAt)).limit(1);
@@ -325,8 +338,10 @@ export async function runReshipLink(args: Exclude<ReshipArgs, { error: string }>
   const viaAudit = all.filter((p) => p.viaAudit).length;
   const pilotSet = all.filter((p) => p.newStage === "DELIVERED" && p.oldStage === "CANCELLED");
   tomTat(`pos-reship-link ${args.apply ? "GHI" : "CHẠY THỬ"} · đơn có lần gửi chính do ERP gắn ${all.length} (có audit vá dòng cũ ${viaAudit}) · lần gửi chính đã giao ${delivered} · gốc đã huỷ ${cancelledOld} · cả hai (nhóm pilot) ${pilotSet.length}`);
-  let chon = args.pilot ? pilotSet : all;
+  const done = await linkedOrderIds(await getDb());
+  let chon = (args.pilot ? pilotSet : all).filter((p) => args.order === p.orderId || !done.has(p.orderId));
   if (args.order) chon = chon.filter((p) => p.orderId === args.order);
+  tomTat(`pos-reship-link · đã gắn xong từ lượt trước (bỏ qua) ${all.filter((p) => done.has(p.orderId)).length} · còn cần xét ${chon.length}`);
   chon = chon.slice(0, args.limit);
   const dem = { ALREADY: 0, LINK: 0, FOREIGN_CODE: 0, READ_FAIL: 0, PUT_OK: 0, PUT_FAIL: 0, READBACK_OK: 0, READBACK_MISMATCH: 0, OTHER_FIELDS_CHANGED: 0, MONEY_CHANGED: 0 };
   for (const p of chon) {
