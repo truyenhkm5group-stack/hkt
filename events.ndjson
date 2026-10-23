@@ -1,4 +1,3 @@
-{"at":"2026-10-17T09:56:36.520Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"org-archive-lifecycle","detail":"#887 cho claude/org-archive-lifecycle @ 83ce65e94ccb"}
 {"at":"2026-10-17T09:57:11.968Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#887 @ 83ce65e94ccb · review độc lập 2 vòng PASS + delta vòng 3 (lead): vnx/HSLC từ chối theo mã; chỉ ACTIVE/SUSPENDED lưu trữ được, kích hoạt lại về đúng trạng thái cũ sau verify OK; tenant ARCHIVED ra khỏi migrate/job/webhook/kiểm deploy; ACTIVE lỗi migration vẫn đỏ; đòi backup OK ≤26h + diễn tập OK ≤72h; không xoá dữ liệu"}
 {"at":"2026-10-17T11:12:03.099Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_FAIL","mission":"deploy-reuse-gates","detail":"FAIL d5173b9ae0e0ef70993937bb8a980b34a89b0941 2026-10-17T11:11:44.867Z"}
 {"at":"2026-10-17T11:13:10.061Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"org-archive-lifecycle","detail":"#887 @ 83ce65e94ccb → eb0f5a49ae91 (MERGE_ISOLATED · HIGH · gates success)"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-23T06:36:48.158Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"perf-baseline-pages","detail":"#993 @ a09c6c39547b → e577f86a6fac (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-23T06:40:42.758Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"care-entry-legaware-cleanup","detail":"PASS eedfc7a389a1ee81f3dcc3197c641c5355f7244e 2026-10-23T06:40:13.078Z"}
 {"at":"2026-10-23T06:43:47.482Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"trace-summary-pack","detail":"#994 @ e05d5e558dac → 1c8b1e3844e3 (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-23T07:33:11.032Z","actor":"DESKTOP-56TH98Y:wt-odoo","kind":"HANDOFF","mission":"odoo-upgrade-phase1-audit","detail":"claude/odoo-upgrade-phase1-audit @ a31e4cb795eb · 1 lệnh kiểm thử"}
