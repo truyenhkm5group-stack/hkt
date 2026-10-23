@@ -33,7 +33,7 @@ import { testPayrollCostPreservation } from "./payroll-cost-preservation.test";
 import { testPayrollCarryover } from "./payroll-carryover.test";
 import { testPayrollProfitGate } from "./payroll-profit-gate.test";
 import { testPayrollOwnerApply } from "./payroll-owner-apply.test";
-import { testPosReshipLink, testPosReshipLinkDb } from "./pos-reship-link.test";
+import { testPosReshipLink, testPosReshipLinkDb, testPosReshipSyncBack } from "./pos-reship-link.test";
 import { testPayrollCodeLedger } from "./payroll-code-ledger.test";
 import { testPayrollReconciliationPure } from "./payroll-reconciliation.test";
 import { testPayrollReconCenter } from "./payroll-recon-center.test";
@@ -2572,6 +2572,7 @@ async function main() {
     await testPayrollOwnerApply(db);
     testPosReshipLink();
     await testPosReshipLinkDb(db);
+    await testPosReshipSyncBack(db);
     testOpsScriptSize();
     testPerfProbePages();
     await testDataTruth(db);
