@@ -3,7 +3,7 @@
   "mission_id": "p0-865-missing-item",
   "title": "P0 #865: món khách nói tường minh mà đơn nháp bỏ sót hẳn ⇒ không lên / không tự chốt đơn thiếu món",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-865b",
@@ -26,7 +26,7 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-22T19:18:54.116Z",
-  "updated_at": "2026-10-23T02:31:12.518Z",
+  "updated_at": "2026-10-23T03:20:55.731Z",
   "last_heartbeat": "2026-10-22T22:12:45.330Z",
   "definition_of_done": [],
   "intake": {
@@ -34,7 +34,9 @@
     "evidence": []
   },
   "evidence": {
-    "merged": "#985 → b2946e8792efc466b51d2d0a318c6d021d7b4533"
+    "merged": "#985 → b2946e8792efc466b51d2d0a318c6d021d7b4533",
+    "verify": "PASS 3cc4b3c99d1fb87cb4fa6016714ae51e6bc359a8 2026-10-23T03:20:22.997Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39893372631"
   },
   "handoff": {
     "branch": "claude/p0-865-missing-item",
