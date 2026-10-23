@@ -54,9 +54,13 @@ export async function ApprovalEnforcePanel() {
                 <span className="ml-2 text-[11.5px] font-normal text-muted-foreground">{nguongChu(s.group)}</span>
               </div>
               <div className="mt-0.5 text-[11.5px] text-muted-foreground">{s.reason}</div>
-              {!s.wired ? <div className="mt-0.5 text-[11.5px] text-muted-foreground">Chưa nối vào thao tác nào — bật lên cũng không chặn được gì, nên không bật được.</div> : null}
+              {s.always ? (
+                <div className="mt-0.5 text-[11.5px] text-muted-foreground">Luôn phải duyệt — không có công tắc: tắt cưỡng chế không được biến việc này thành tự chạy.</div>
+              ) : !s.wired ? (
+                <div className="mt-0.5 text-[11.5px] text-muted-foreground">Chưa nối vào thao tác nào — bật lên cũng không chặn được gì, nên không bật được.</div>
+              ) : null}
             </div>
-            <ApprovalEnforceToggle group={s.group} label={s.label} enforced={s.enforced} disabled={!s.wired} />
+            {s.always ? <span className="rounded-md border px-2 py-0.5 text-xs font-medium">Luôn bật</span> : <ApprovalEnforceToggle group={s.group} label={s.label} enforced={s.enforced} disabled={!s.wired} />}
           </li>
         ))}
       </ul>

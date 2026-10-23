@@ -18,6 +18,7 @@ import {
 import {
   APPROVAL_GROUP_LABEL,
   APPROVAL_GROUP_REASON,
+  ALWAYS_REQUIRE_APPROVAL_GROUPS,
   APPROVAL_GROUPS,
   APPROVAL_GROUPS_WIRED,
   isEnforced,
@@ -97,7 +98,8 @@ export async function decideApproval(id: string, dong_y: boolean, note?: string)
  * `ADS_BUDGET_MUTATION` CỐ Ý không nối (docs/marketing-ai-department.md) nên không bật được ở đây.
  */
 export type ApprovalEnforceState = {
-  groups: { group: ApprovalGroup; label: string; reason: string; enforced: boolean; wired: boolean }[];
+  /** `always` = nhóm luôn phải duyệt (`ALWAYS_REQUIRE_APPROVAL_GROUPS`) — không có công tắc. */
+  groups: { group: ApprovalGroup; label: string; reason: string; enforced: boolean; wired: boolean; always: boolean }[];
   /** Dòng CŨ `approval.enforce` nếu có — chưa từng có hiệu lực, chỉ hiện để quản trị viên quyết. */
   legacy: { raw: string; groups: { group: ApprovalGroup; label: string }[]; ignored: string[] } | null;
 };
@@ -110,7 +112,7 @@ export async function getApprovalEnforceState(): Promise<ApprovalEnforceState | 
   const legacy = await readLegacyEnforce(db);
   const chuyen = legacy ? legacyToV2(legacy) : null;
   return {
-    groups: APPROVAL_GROUPS.map((g) => ({ group: g, label: APPROVAL_GROUP_LABEL[g], reason: APPROVAL_GROUP_REASON[g], enforced: isEnforced(cfg, g), wired: APPROVAL_GROUPS_WIRED.includes(g) })),
+    groups: APPROVAL_GROUPS.map((g) => ({ group: g, label: APPROVAL_GROUP_LABEL[g], reason: APPROVAL_GROUP_REASON[g], enforced: ALWAYS_REQUIRE_APPROVAL_GROUPS.includes(g) || isEnforced(cfg, g), wired: APPROVAL_GROUPS_WIRED.includes(g), always: ALWAYS_REQUIRE_APPROVAL_GROUPS.includes(g) })),
     legacy: legacy && chuyen ? { raw: legacy.raw, groups: legacy.groups.map((g) => ({ group: g, label: APPROVAL_GROUP_LABEL[g] })), ignored: chuyen.ignored } : null,
   };
 }

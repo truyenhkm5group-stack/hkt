@@ -53,6 +53,13 @@ export const APPROVAL_GROUPS = [
     Không ngưỡng tiền (`amount` NULL ⇒ coi như vượt, luôn phải duyệt). Hạn hiệu lực lời duyệt: `APPROVAL_VALID_HOURS`.
   */
   "WORKFLOW",
+  /*
+    SRC-5a (Tech Lead 24/10/2026): YÊU CẦU MUA THỬ của Tìm hàng nguồn. Người xin là NGƯỜI (`sourcing:write`), người duyệt có
+    `approvals:decide`, người xin ≠ người duyệt. LUÔN phải duyệt (`ALWAYS_REQUIRE_APPROVAL_GROUPS`) — không qua công tắc cưỡng
+    chế: mua thử là tiền ra ngoài, và «tắt cưỡng chế» không được biến yêu cầu thành tự đặt hàng. Không ngưỡng tiền. ERP không đặt
+    hàng / không thanh toán / không liên hệ nhà cung cấp — lời duyệt chỉ mở khoá nút «đã đặt» do người bấm.
+  */
+  "SOURCING_TRIAL",
 ] as const;
 export type ApprovalGroup = (typeof APPROVAL_GROUPS)[number];
 
@@ -67,6 +74,7 @@ export const APPROVAL_GROUP_LABEL: Record<ApprovalGroup, string> = {
   BUSINESS_RULE_CHANGE: "Đổi luật nghiệp vụ / ngưỡng",
   ADS_BUDGET_MUTATION: "Thay đổi ngân sách quảng cáo",
   WORKFLOW: "Luật tự động xin chạy",
+  SOURCING_TRIAL: "Mua thử mẫu nguồn",
 };
 
 /**
@@ -84,7 +92,15 @@ export const APPROVAL_GROUP_REASON: Record<ApprovalGroup, string> = {
   BUSINESS_RULE_CHANGE: "Đổi ngưỡng nghiệp vụ là đổi cách ĐỌC mọi số liệu lịch sử cùng lúc.",
   ADS_BUDGET_MUTATION: "Ngân sách quảng cáo đốt tiền theo giờ; một con số gõ nhầm không có phanh.",
   WORKFLOW: "Người khai luật đã chọn để một người gật trước khi máy làm thay — máy không biết bối cảnh mà người duyệt biết.",
+  SOURCING_TRIAL: "Mua thử là bỏ tiền thật cho một nhà cung cấp chưa từng giao hàng; giá về Việt Nam lúc xin chỉ là ước tính và người xin thường là người muốn mẫu đó nhất.",
 };
+
+/**
+ * Nhóm LUÔN phải duyệt, bất kể công tắc cưỡng chế (`approval.enforce.v2`): cổng `guardSecondApprovalCore` coi chúng như đang bật,
+ * và màn hình công tắc không cho tắt. Khác `WORKFLOW` (người xin là máy, đi đường thanh toán riêng): ở đây người xin là người và
+ * tiêu thụ lời duyệt bằng đúng cổng chung.
+ */
+export const ALWAYS_REQUIRE_APPROVAL_GROUPS: readonly ApprovalGroup[] = ["SOURCING_TRIAL"];
 
 /**
  * Nhóm KHÔNG cần người thứ hai, và nói rõ vì sao — để không ai âm thầm thêm chúng vào sau này.

@@ -12533,3 +12533,69 @@ export const sourcingOfferWeights = pgTable(
     check("sourcing_offer_weights_source_check", sql`${t.source} IN ('MANUAL', 'API', 'UNKNOWN')`),
   ],
 );
+
+/**
+ * Mẫu nguồn đã LƯU (SRC-5a, 0258): một mẫu nguồn ↔ một mẫu `TEST-` ở sổ mẫu (`product_models`, cấp bằng
+ * `registerProvisionalModelCore`, productId NULL). Không có dòng products / variants ⇒ không tồn kho, không giá vốn, không báo cáo.
+ */
+export const sourcingShortlist = pgTable(
+  "sourcing_shortlist",
+  {
+    id: id(),
+    offerId: text("offer_id")
+      .notNull()
+      .references(() => sourcingOffers.id, { onDelete: "restrict" }),
+    modelId: text("model_id")
+      .notNull()
+      .references(() => productModels.id, { onDelete: "restrict" }),
+    note: text("note").notNull().default(""),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("sourcing_shortlist_offer_uq").on(t.offerId), uniqueIndex("sourcing_shortlist_model_uq").on(t.modelId)],
+);
+
+/**
+ * Yêu cầu MUA THỬ (SRC-5a, 0258). `snapshot` là ảnh chụp BẤT BIẾN lúc xin (không có đường ghi nào sửa nó). Lời duyệt ở
+ * `approval_requests` (nhóm `SOURCING_TRIAL`); trạng thái duyệt đọc từ đó, bảng này chỉ giữ việc NGƯỜI đã làm ngoài ERP.
+ */
+export const sourcingTrialRequests = pgTable(
+  "sourcing_trial_requests",
+  {
+    id: id(),
+    shortlistId: text("shortlist_id")
+      .notNull()
+      .references(() => sourcingShortlist.id, { onDelete: "restrict" }),
+    /** `[{ color, size, qty }]` — đọc / ghi chỉ qua `lib/sourcing/trial.ts`. */
+    quantities: jsonb("quantities").notNull(),
+    totalQty: integer("total_qty").notNull(),
+    snapshot: jsonb("snapshot").notNull(),
+    approvalRequestId: text("approval_request_id").references(() => approvalRequests.id, { onDelete: "set null" }),
+    status: text("status").notNull().default("REQUESTED"),
+    requestedBy: text("requested_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    requestedAt: ts("requested_at").notNull().defaultNow(),
+    orderedBy: text("ordered_by").references(() => users.id, { onDelete: "set null" }),
+    orderedAt: ts("ordered_at"),
+    orderNote: text("order_note").notNull().default(""),
+    receivedBy: text("received_by").references(() => users.id, { onDelete: "set null" }),
+    receivedAt: ts("received_at"),
+    receiptId: text("receipt_id").references(() => stockReceipts.id, { onDelete: "set null" }),
+    receiveNote: text("receive_note").notNull().default(""),
+    cancelledBy: text("cancelled_by").references(() => users.id, { onDelete: "set null" }),
+    cancelledAt: ts("cancelled_at"),
+    cancelReason: text("cancel_reason").notNull().default(""),
+  },
+  (t) => [
+    index("sourcing_trial_requests_shortlist_idx").on(t.shortlistId, t.requestedAt),
+    index("sourcing_trial_requests_status_idx").on(t.status),
+    check("sourcing_trial_requests_status_check", sql`${t.status} IN ('REQUESTED', 'ORDERED', 'RECEIVED', 'CANCELLED')`),
+    check("sourcing_trial_requests_qty_check", sql`${t.totalQty} BETWEEN 1 AND 1000000`),
+    check("sourcing_trial_requests_quantities_check", sql`jsonb_typeof(${t.quantities}) = 'array' AND jsonb_array_length(${t.quantities}) BETWEEN 1 AND 200`),
+    check("sourcing_trial_requests_snapshot_check", sql`jsonb_typeof(${t.snapshot}) = 'object'`),
+    check("sourcing_trial_requests_ordered_check", sql`${t.status} NOT IN ('ORDERED', 'RECEIVED') OR (${t.orderedAt} IS NOT NULL AND ${t.orderedBy} IS NOT NULL)`),
+    check("sourcing_trial_requests_received_check", sql`${t.status} <> 'RECEIVED' OR (${t.receivedAt} IS NOT NULL AND ${t.receivedBy} IS NOT NULL)`),
+    check("sourcing_trial_requests_cancelled_check", sql`${t.status} <> 'CANCELLED' OR (${t.cancelledAt} IS NOT NULL AND ${t.cancelledBy} IS NOT NULL AND length(trim(${t.cancelReason})) >= 3)`),
+  ],
+);
