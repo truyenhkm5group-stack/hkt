@@ -281,7 +281,7 @@ function testAiSystems() {
     for (const m of src.matchAll(/\bworkload: "([a-z_]+)"/g)) assert.ok(workloads.has(m[1]), `${f}: workload «${m[1]}» không thuộc ${owners.map((o) => o.id).join("/")}`);
   }
   for (const [f, why] of Object.entries(AI_USAGE_SCAN_EXEMPT_FILES)) assert.ok(existsSync(f) && why.trim().length >= 10, `miễn trừ ${f} phải tồn tại và có lý do`);
-  console.log(`✓ Sổ hệ thống AI: AI-01…AI-08, mọi feature / workload có chủ, ${files.length} tệp ghi sổ AI đều thuộc một hệ thống, mức rủi ro UNCLASSIFIED (chờ G-4)`);
+  console.log(`✓ Sổ hệ thống AI: AI-01…AI-09, mọi feature / workload có chủ, ${files.length} tệp ghi sổ AI đều thuộc một hệ thống, mức rủi ro UNCLASSIFIED (chờ G-4)`);
 }
 
 function testRetention() {

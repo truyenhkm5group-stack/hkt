@@ -1,4 +1,5 @@
 import { PackageSearch } from "lucide-react";
+import { SourcingQueryBox } from "@/components/sourcing/sourcing-query-box";
 import { LandedCostForm, SourcingLimitsForm } from "@/components/sourcing/sourcing-settings-forms";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
@@ -20,13 +21,14 @@ import { getSettingJson } from "@/lib/settings";
 export const metadata = { title: "Tìm hàng nguồn" };
 
 /**
- * TÌM HÀNG NGUỒN TRUNG QUỐC (module `sourcing`, SRC-1 · docs/tech/ai-sourcing.md) — KHUNG: chưa có nguồn dữ liệu được duyệt nên
- * khối tìm hàng ở trạng thái trống có giải thích; hai khối cấu hình (trần lượt AI, tham số giá về Việt Nam) đọc / ghi settings.
- * Không gọi nguồn ngoài, không gọi AI.
+ * TÌM HÀNG NGUỒN TRUNG QUỐC (module `sourcing`, docs/tech/ai-sourcing.md). SRC-1: chưa có nguồn dữ liệu được duyệt nên khối tìm
+ * hàng ở trạng thái trống có giải thích; hai khối cấu hình (trần lượt AI, tham số giá về Việt Nam) đọc / ghi settings. SRC-2: bộ
+ * sinh từ khoá tiếng Trung (từ điển cố định, AI chỉ khi từ điển không đủ — qua server action, trang không tự gọi AI).
  */
 export default async function SourcingPage() {
   const user = await requirePermission("sourcing:view");
   const canConfigure = can(user, "sourcing:approve");
+  const canSearch = can(user, "sourcing:search");
   const [limits, landed] = await Promise.all([
     getSettingJson<unknown>(SOURCING_LIMITS_KEY, DEFAULT_SOURCING_LIMITS).then(parseSourcingLimits),
     getSettingJson<unknown>(SOURCING_LANDED_COST_KEY, EMPTY_LANDED_COST).then(parseLandedCost),
@@ -41,11 +43,15 @@ export default async function SourcingPage() {
         description="Gõ tiếng Việt hoặc tải ảnh để tìm sản phẩm thật trên nguồn Trung Quốc, so sánh nhà cung cấp, lưu mẫu và xin mua thử."
       />
 
+      <SectionCard title="Sinh từ khoá tiếng Trung" description="Gõ món hàng bằng tiếng Việt ⇒ 3–5 truy vấn tiếng Trung từ cụ thể tới rộng, bấm «Chép» để tìm trên 1688.">
+        {canSearch ? <SourcingQueryBox /> : <p className="text-sm text-muted-foreground">Cần quyền «Tìm hàng: tìm» để sinh từ khoá.</p>}
+      </SectionCard>
+
       <SectionCard title="Tìm hàng" description="Từ khoá tiếng Việt / ảnh ⇒ sản phẩm nguồn ⇒ so sánh giá theo bậc, MOQ, nhà cung cấp.">
         <EmptyState
           icon={PackageSearch}
           title="Chưa có nguồn dữ liệu được duyệt"
-          description="ERP chỉ dùng nguồn dữ liệu có quyền sử dụng rõ ràng (API chính thức hoặc đối tác có văn bản) — không cào web. Việc này đang chờ chủ shop chọn nguồn (docs/tech/ai-sourcing.md §6, B1 / B2). Bộ sinh từ khoá tiếng Trung và kho mẫu nhập tay sẽ có ở bước kế tiếp."
+          description="ERP chỉ dùng nguồn dữ liệu có quyền sử dụng rõ ràng (API chính thức hoặc đối tác có văn bản) — không cào web. Việc này đang chờ chủ shop chọn nguồn (docs/tech/ai-sourcing.md §6, B1 / B2). Trong lúc chờ: dùng bộ sinh từ khoá ở trên rồi tìm trên 1688 bằng tài khoản của bạn; kho mẫu nhập tay sẽ có ở bước kế tiếp."
         />
       </SectionCard>
 

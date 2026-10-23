@@ -126,6 +126,16 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/payroll-carryover.test.ts",
   },
+  {
+    tag: "0255_ai_usage_sourcing_workload",
+    why:
+      "Chỉ NỚI ràng buộc CHECK của platform_ai_usage.workload (thêm 'sourcing') — không thêm / đổi / xoá cột, y khuôn 0252. Lượt AI của " +
+      "bộ sinh từ khoá tìm hàng ghi lên lược đồ chưa áp mục này thì vi phạm ràng buộc cũ: `recordAiUsage` bắt ĐÚNG vi phạm ấy (23514 + tên " +
+      "ràng buộc) và ghi lại dòng với workload NULL — dòng tiền / hạn mức không mất. Trần lượt / ngày của tìm hàng đếm theo FEATURE " +
+      "'sourcing' (cột feature chỉ có CHECK hình dạng, 0176), không theo workload, nên trần vẫn đếm đúng khi nhãn lùi về NULL.",
+    addedColumns: {},
+    proof: "tests/ai-usage-ledger-complete.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */

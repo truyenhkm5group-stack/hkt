@@ -202,6 +202,7 @@ const MOI = [
   "0252_ai_usage_workloads",
   "0253_ai_usage_cache_write",
   "0254_carryover_first_work_month",
+  "0255_ai_usage_sourcing_workload",
 ] as const;
 
 /*
@@ -1960,6 +1961,20 @@ export async function testMigrationUpgradePath() {
       "0254: giá trị nguồn lạ vẫn bị chặn ở CSDL — mở rộng, không bỏ ràng buộc",
     );
     await client.query(`delete from marketer_profit_carryover where id = 'up-co-fwm'`);
+
+    /*
+      0255 (tìm hàng nguồn · SRC-2): CHỈ MỞ RỘNG tập loại việc của sổ dùng AI thêm 'sourcing'. Dòng mang loại việc mới ghi được, giá trị
+      lạ vẫn bị chặn, tệp không chứa UPDATE nào.
+    */
+    assert.ok(!/update/i.test(readFileSync(path.join(goc, "0255_ai_usage_sourcing_workload.sql"), "utf8").replace(/--.*$/gm, "")), "0255: migration KHÔNG được chứa UPDATE");
+    await client.query(`insert into platform_ai_usage (id, org_code, feature, billing_source, requests, status, workload) values ('up-ai-src', 'up-org', 'sourcing', 'HOME', 1, 'OK', 'sourcing')`);
+    assert.equal(await dem("select count(*)::int as n from platform_ai_usage where org_code = 'up-org' and workload = 'sourcing'"), 1, "0255: lượt tìm hàng ghi được đúng loại việc");
+    await assert.rejects(
+      () => client.query(`insert into platform_ai_usage (id, org_code, feature, billing_source, requests, status, workload) values ('up-ai-la', 'up-org', 'sourcing', 'HOME', 1, 'OK', 'doan_bua')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("platform_ai_usage_workload_check"),
+      "0255: loại việc lạ vẫn bị chặn ở CSDL — mở rộng, không bỏ ràng buộc",
+    );
+    await client.query(`delete from platform_ai_usage where org_code = 'up-org'`);
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });

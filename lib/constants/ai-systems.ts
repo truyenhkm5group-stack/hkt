@@ -1,7 +1,7 @@
 /**
  * ═══════════ SỔ HỆ THỐNG AI (M-AI-REG · Luật AI 134/2025 Điều 15 — giải thích khi cơ quan hỏi) — KHÔNG UI ═══════════
  *
- * AI-01…AI-05 theo `docs/legal/VIETNAM_LEGAL_COMPLIANCE.md` §11. AI-06…AI-08 là phần BỔ SUNG từ kiểm kê mã: mọi giá trị
+ * AI-01…AI-05 theo `docs/legal/VIETNAM_LEGAL_COMPLIANCE.md` §11. AI-06…AI-09 là phần BỔ SUNG từ kiểm kê mã: mọi giá trị
  * `feature` của sổ dùng AI (`AI_USAGE_FEATURES`) phải thuộc một hệ thống, nên ba đường gọi AI §11 chưa kể tới (AI Builder,
  * lời chào khách sỉ, sáng tạo quảng cáo) được khai thay vì bị bỏ ngoài sổ.
  *
@@ -22,7 +22,7 @@ import type { AiUsageFeature, AiUsageWorkload } from "@/lib/ai-usage/types";
 import { MODEL_BY_TIER } from "@/lib/ai/router";
 import { SALES_BOT_CONNECTORS } from "@/lib/sales-chatbot/config";
 
-export const AI_SYSTEM_IDS = ["AI-01", "AI-02", "AI-03", "AI-04", "AI-05", "AI-06", "AI-07", "AI-08"] as const;
+export const AI_SYSTEM_IDS = ["AI-01", "AI-02", "AI-03", "AI-04", "AI-05", "AI-06", "AI-07", "AI-08", "AI-09"] as const;
 export type AiSystemId = (typeof AI_SYSTEM_IDS)[number];
 
 export const AI_RISK_LEVELS = ["HIGH", "MEDIUM", "LOW", "UNCLASSIFIED"] as const;
@@ -210,6 +210,24 @@ export const AI_SYSTEMS: readonly AiSystem[] = [
     humanOversight: ["lib/creative/org-ai.ts"],
     incidentHandling: ["lib/ai-usage/ledger.ts"],
     changeHistory: "Kiểm kê mã 09/10/2026 — §11 chưa kể",
+  },
+  {
+    id: "AI-09",
+    name: "Tìm hàng nguồn (từ khoá tiếng Trung)",
+    origin: "CODE_INVENTORY",
+    purpose: "Dịch phần mô tả món hàng mà từ điển cố định chưa hiểu sang từ khoá tiếng Trung để nhân viên tự tìm trên 1688",
+    facesEndCustomer: false,
+    features: ["sourcing"],
+    workloads: ["sourcing"],
+    callSites: ["lib/sourcing/ai-expand.ts", "lib/sourcing/ai-deps.ts"],
+    providers: ["anthropic-byok", "openai-byok", ...PLATFORM_AI_PROVIDERS.map((p) => `platform:${p}`)],
+    model: { defaults: SALES_DEFAULT_MODELS, runtimeSource: "lib/sourcing/ai-deps.ts → getBuilderAi — kết nối của tổ chức / AI nhà / khoá nền tảng, đọc lúc chạy" },
+    risk: "UNCLASSIFIED",
+    riskEvidence: null,
+    riskNote: `Không dữ liệu cá nhân trong lời gọi (chỉ câu mô tả món hàng); đầu ra là gợi ý nhãn «chưa kiểm», người tự chép đi tìm. ${UNCLASSIFIED_NOTE}`,
+    humanOversight: ["components/sourcing/sourcing-query-box.tsx"],
+    incidentHandling: ["lib/ai-usage/ledger.ts"],
+    changeHistory: "SRC-2 (23/10/2026) — bộ sinh từ khoá tìm hàng nguồn",
   },
 ];
 

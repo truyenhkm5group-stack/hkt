@@ -31,7 +31,10 @@ export async function testAiUsageLedgerComplete() {
   assert.match(ledger, /\n {2}workload: AiUsageWorkload \| null;/, "workload là trường BẮT BUỘC của AiUsageEntry (không `workload?:`)");
   assert.ok(PLATFORM_WORKLOADS.every((w) => (AI_USAGE_WORKLOADS as readonly string[]).includes(w)), "danh sách sổ ⊇ danh sách chính sách model");
   assert.deepEqual(listIn(readFileSync("db/schema.ts", "utf8"), "platform_ai_usage_workload_check").sort(), [...AI_USAGE_WORKLOADS].sort(), "CHECK của lược đồ = AI_USAGE_WORKLOADS");
-  assert.deepEqual(listIn(readFileSync("drizzle/0252_ai_usage_workloads.sql", "utf8"), "ADD CONSTRAINT").sort(), [...AI_USAGE_WORKLOADS].sort(), "migration 0252 = AI_USAGE_WORKLOADS");
+  // 0252 là ẢNH CHỤP danh sách lúc ấy; loại việc thêm sau đi bằng migration riêng (0255 · tìm hàng) — migration MỚI NHẤT = danh sách hiện tại.
+  const WORKLOADS_AFTER_0252 = ["sourcing"];
+  assert.deepEqual(listIn(readFileSync("drizzle/0252_ai_usage_workloads.sql", "utf8"), "ADD CONSTRAINT").sort(), AI_USAGE_WORKLOADS.filter((w) => !WORKLOADS_AFTER_0252.includes(w)).sort(), "migration 0252 = AI_USAGE_WORKLOADS lúc 0252");
+  assert.deepEqual(listIn(readFileSync("drizzle/0255_ai_usage_sourcing_workload.sql", "utf8"), "ADD CONSTRAINT").sort(), [...AI_USAGE_WORKLOADS].sort(), "migration 0255 = AI_USAGE_WORKLOADS");
   const files = execFileSync("git", ["ls-files", "lib", "app", "scripts", "chatbot"], { encoding: "utf8" }).split("\n").filter((f) => /\.tsx?$/.test(f));
   const nullWrites: string[] = [];
   for (const f of files) {
@@ -70,6 +73,10 @@ export async function testAiUsageLedgerComplete() {
       assert.ok(old.length === 1 && old[0].workload === null && old[0].costUsd !== null, `dòng tiền còn, nhãn lùi về NULL: ${JSON.stringify(old)}`);
       assert.deepEqual(await recordAiUsage({ ...base, workload: "sales_chatbot", ref: "cu2" }), { recorded: true }, "loại việc cũ vẫn ghi nhãn");
       assert.equal((await pdb.select().from(t).where(eq(t.ref, "cu2")))[0]?.workload, "sales_chatbot");
+      // SERVE-COMPAT 0255: lượt tìm hàng trên lược đồ chưa mở 'sourcing' ⇒ vẫn MỘT dòng tiền, feature giữ nguyên (trần đếm theo feature).
+      assert.deepEqual(await recordAiUsage({ ...base, feature: "sourcing", workload: "sourcing", ref: "cu-src" }), { recorded: true }, "0255 chưa áp ⇒ không ném");
+      const src = await pdb.select().from(t).where(eq(t.ref, "cu-src"));
+      assert.ok(src.length === 1 && src[0].workload === null && src[0].feature === "sourcing" && src[0].costUsd !== null, `0255: dòng tiền còn, feature giữ, nhãn NULL: ${JSON.stringify(src)}`);
     } finally {
       await pdb.execute(sql.raw(`ALTER TABLE platform_ai_usage DROP CONSTRAINT IF EXISTS platform_ai_usage_workload_check`));
       await pdb.execute(sql.raw(`ALTER TABLE platform_ai_usage ADD CONSTRAINT platform_ai_usage_workload_check CHECK ("workload" IS NULL OR "workload" IN (${AI_USAGE_WORKLOADS.map((w) => `'${w}'`).join(",")}))`));

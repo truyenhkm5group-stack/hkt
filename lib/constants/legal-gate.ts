@@ -275,7 +275,7 @@ export const LEGAL_GATE_ITEMS: readonly LegalGateItem[] = [
     notNeeded: { ACCOUNTING: NN_NO_ACCOUNTING, OWNER: NN_NO_OWNER },
     engineeringEvidence: ["lib/constants/ai-systems.ts", "tests/legal-registers.test.ts"],
     docMark: "PARTIAL",
-    note: "AI-01…AI-08, mọi mức rủi ro UNCLASSIFIED — G-4; thông báo hệ thống AI nếu nghị định đòi — D-5",
+    note: "AI-01…AI-09, mọi mức rủi ro UNCLASSIFIED — G-4; thông báo hệ thống AI nếu nghị định đòi — D-5",
   },
   {
     id: "P1-10",
