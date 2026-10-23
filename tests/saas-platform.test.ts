@@ -198,7 +198,11 @@ function testSource() {
   // Backfill SQL dùng ĐÚNG sổ module + ĐÚNG lõi chung.
   const mig = readFileSync("drizzle/0224_saas_control_plane.sql", "utf8");
   const values = [...mig.matchAll(/\('([a-z_]+)'\)/g)].map((m) => m[1]);
-  assert.deepEqual([...new Set(values)].sort(), [...MODULE_KEYS].sort(), "danh sách module trong backfill SQL phải bằng MODULE_KEYS");
+  // 0224 là backfill MỘT LẦN: danh sách module của nó là ẢNH CHỤP sổ module LÚC ẤY. Module thêm sau (MODULES_AFTER_0224) không
+  // cần — và không được — chèn ngược vào một migration đã áp; chúng thuộc đúng một sản phẩm qua lib/saas/catalog.ts (kiểm ở trên).
+  const MODULES_AFTER_0224 = ["sourcing"];
+  assert.deepEqual([...new Set(values)].sort(), MODULE_KEYS.filter((k) => !MODULES_AFTER_0224.includes(k)).sort(), "danh sách module trong backfill SQL phải bằng MODULE_KEYS lúc 0224");
+  assert.ok(MODULES_AFTER_0224.every((k) => (MODULE_KEYS as readonly string[]).includes(k)), "module thêm sau 0224 phải có thật trong MODULE_KEYS");
   const notIn = mig.match(/module_key NOT IN \(([^)]+)\)/)![1].split(",").map((s) => s.trim().replace(/'/g, ""));
   assert.deepEqual(notIn.sort(), [...SHARED_COMMERCE_CORE, ...PRODUCTS.find((p) => p.key === "chotdon")!.exclusiveModules].sort(), "luật ERP trong SQL = lõi chung + module độc quyền của Chốt Đơn");
 

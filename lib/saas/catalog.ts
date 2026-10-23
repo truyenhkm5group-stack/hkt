@@ -102,7 +102,7 @@ export const PRODUCTS: readonly ProductDef[] = [
     description: "Hệ điều hành kinh doanh: sản phẩm, giá, tồn kho, đơn, giao vận, tài chính, lương, sản xuất, marketing.",
     capabilities: [
       { key: "commerce_core", label: "Khách · sản phẩm · đơn · kho", modules: ["customers", "products", "orders", "inventory"], features: [] },
-      { key: "fulfillment", label: "Giao vận · hoàn · mua hàng · sản xuất", modules: ["logistics", "returns", "purchasing", "production", "lots"], features: [] },
+      { key: "fulfillment", label: "Giao vận · hoàn · mua hàng · sản xuất", modules: ["logistics", "returns", "purchasing", "production", "lots", "sourcing"], features: [] },
       { key: "finance", label: "Tài chính · lương", modules: ["finance", "payroll"], features: [] },
       { key: "marketing", label: "Marketing · kênh bán", modules: ["marketing", "sales_channels", "alerts"], features: [] },
       { key: "customer_care", label: "Chăm sóc khách", modules: ["customer_care", "warranty"], features: [] },
