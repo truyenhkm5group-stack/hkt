@@ -3,7 +3,7 @@
   "mission_id": "od-ux-03-as-of",
   "title": "OD-UX-03: chỉ báo tính lúc · nguồn · trễ đối tác cho /shipments và /reports/returns",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-asof",
@@ -28,11 +28,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T11:16:49.662Z",
-  "updated_at": "2026-10-23T13:14:27.115Z",
+  "updated_at": "2026-10-23T14:00:39.150Z",
   "last_heartbeat": "2026-10-23T12:10:45.146Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1001 → 4f4d098cb1d3bf168e87926af9dead2655dfb260"
+    "merged": "#1001 → 4f4d098cb1d3bf168e87926af9dead2655dfb260",
+    "verify": "PASS d864b3332b2c60ccfca0618ca31b9eec488e4bc0 2026-10-23T13:59:53.780Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39961732491"
   },
   "handoff": {
     "branch": "claude/od-ux-03-as-of",
