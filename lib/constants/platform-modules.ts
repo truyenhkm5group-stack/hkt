@@ -65,6 +65,7 @@ export const MODULE_KEYS = [
   "lots",
   "field_jobs",
   "real_estate",
+  "sourcing",
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -598,6 +599,20 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     permissions: ["real_estate:view", "real_estate:hold", "real_estate:manage"],
     homeOptIn: true,
     why: "Bất động sản bán CĂN, mỗi căn bán đúng một lần, cho nhiều sale cùng lúc — không có kho số lượng, không vận chuyển. Một căn hai sale giữ là mất khách và mất uy tín sàn, nên «nhiều nhất một giữ chỗ / một cọc còn hiệu lực mỗi căn» chặn ở CSDL; trạng thái căn tính lúc đọc. Tắt cho tổ chức nhà (0201)."
+  },
+  {
+    key: "sourcing",
+    label: "Tìm hàng nguồn",
+    description: "Gõ tiếng Việt hoặc tải ảnh để tìm sản phẩm trên nguồn Trung Quốc, so sánh nhà cung cấp (giá theo bậc, MOQ, độ tin cậy), lưu mẫu và xin mua thử có duyệt.",
+    category: "INDUSTRY",
+    version: 1,
+    core: false,
+    // Lưu mẫu ⇒ mã tạm `TEST-` của vòng đời mẫu (module Sản xuất) — docs/tech/ai-sourcing.md §3.1.
+    dependsOn: ["products", "production"],
+    features: [],
+    routes: ["/sourcing"],
+    permissions: ["sourcing:view", "sourcing:search", "sourcing:write", "sourcing:approve"],
+    why: "Tìm hàng là việc TRƯỚC khi có mẫu: dữ liệu nguồn (sản phẩm, nhà cung cấp, bậc giá) là bằng chứng để quyết mẫu nào đáng thử, không phải sổ hàng. Chỉ dùng nguồn có quyền sử dụng rõ ràng — không cào web; mọi hành động ra bên ngoài (liên hệ, đặt mua) cần duyệt. Giá về Việt Nam là số ƯỚC TÍNH từ tham số chủ shop khai, vào giá dự tính chứ không vào giá vốn. BẬT ở tổ chức nhà (dòng thiếu theo moduleDefault ENABLED), TẮT ở tổ chức khách tới khi bật — không cần migration (SRC-1, 23/10/2026).",
   },
 ];
 

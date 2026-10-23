@@ -8,6 +8,7 @@
 |---|---|
 | Chủ shop giao | 23/10/2026 |
 | Integration Lead | phiên `code-erp-11` (mở PR · cổng · gộp · deploy) |
+| Người giữ tệp tiến độ | phiên `cc2379e4` (Lead giao 23/10/2026). Phiên khác KHÔNG mở PR tài liệu riêng cho tệp này: gửi trạng thái cho người giữ tệp. |
 | Phase 1 (discovery) | sứ mệnh `odoo-upgrade-phase1-audit`. CHỈ TÀI LIỆU, một PR. |
 | Mốc kho lúc khảo sát | `main` = `eedfc7a38` (#992). Production = `6644a3cbc09a` (#989, đo `/api/health` 23/10/2026 06:13Z), sau đó lên `eedfc7a389a1` lúc 06:40Z. |
 
@@ -107,16 +108,16 @@ Chi tiết từng hạng mục Phase 2–5 ở mục 7.
 
 | Task ID | Module | Mục tiêu | Owner | Ưu tiên | Trạng thái | PR | SHA | Test | Deploy | Xác minh | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| OD-P1-01 | Toàn chương trình | Tệp tiến độ bền + audit 12 nhóm module + lộ trình | phiên này | P2 | IN_REVIEW | (PR này) | — | chỉ tài liệu | — | — | — | Lead gộp (§7 đã duyệt 23/10) |
+| OD-P1-01 | Toàn chương trình | Tệp tiến độ bền + audit 12 nhóm module + lộ trình | `cc2379e4` | P2 | DONE | #995 | `db264b9d3` | chỉ tài liệu | — (chỉ tài liệu) | — | — | — |
 | OD-P2-01 | Dashboards / Views | Bộ lọc yêu thích (favorites) theo người dùng cho `DataTable` | — | P1 | BACKLOG | — | — | — | — | — | — | Claim được (Phase 2 đã duyệt). Chạm `data-table` nên phối với OD-UX-01. |
 | OD-P2-02 | Purchase | `suppliers` thành khoá thật cho đơn xưởng (thôi ô chữ) | — | P1 | BACKLOG | — | — | — | — | — | — | — |
-| OD-P2-03 | Purchase | Thời gian giao của xưởng đọc `production_orders.received_at` thay vì ghép phiếu nhập | — | P1 | BACKLOG | — | — | — | — | — | — | — |
-| OD-P2-04 | Manufacturing | Định mức vải lên máy chủ (thôi `localStorage`), MM-REC-26 | — | P1 | BACKLOG | — | — | — | — | — | — | — |
+| OD-P2-03 | Purchase | Thời gian giao của xưởng đọc `production_orders.received_at` thay vì ghép phiếu nhập | phiên purchasing | P1 | MERGED | #998 | `cceb5e4bd863` | `tests/purchasing.test.ts` (mốc thật thắng · ước tính có nhãn · mốc mâu thuẫn đếm riêng) · ops `purchasing-leadtime-probe` (#996) | — | — | — | **0 lô dữ liệu, tính năng chưa được dùng** (run 39943865920, db-query 39944299981). VERIFIED ở lượt deploy kế. |
+| OD-P2-04 | Manufacturing | Định mức vải lên máy chủ (thôi `localStorage`), MM-REC-26 | `cc2379e4` | P1 | CANCELLED | — (không mở PR) | `04c30ab7` ở `wip/od-p2-04-fabric-norms` | `tests/fabric-norms.test.ts` · npm test đạt | — | — | — | **DỪNG — 7 lượt/30 ngày, 0 thao tác** (db-query Lead 23/10: `/inventory/shortage` 7 lượt trong 5 ngày; 0 lần `STOCK_SHORTAGE_DECISION`). Mã giữ ở nhánh wip; mở lại khi có người dùng đều. |
 | OD-P2-05 | Activities | Hẹn việc kế tiếp hiện trên trang chi tiết đơn/vận đơn/khách (phép chiếu, không bảng mới) | — | P2 | BACKLOG | — | — | — | — | — | — | — |
-| OD-UX-01 | UI/UX | Design system tối thiểu: token + quy tắc loading/empty/error. Kiểm hiện trạng trước, không đổi đồng loạt. | — | P1 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-42` | Chờ số nền |
+| OD-UX-01 | UI/UX | Design system tối thiểu: token + quy tắc loading/empty/error. Kiểm hiện trạng trước, không đổi đồng loạt. | — | P1 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-42` | Phần **error đã có** (§7.2): không làm PR «error.tsx từng route». Còn token + loading/empty. |
 | OD-UX-02 | UI/UX | Sidebar gom theo nghiệp vụ, đọc `department-modules.ts` | — | P1 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-42` | — |
-| OD-UX-03 | UI/UX | Chỉ báo «cập nhật lúc / nguồn / trễ đối tác» cho màn hình số liệu | — | P1 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-42` | — |
-| OD-UX-04 | UI/UX | KPI bấm được xuống dữ liệu cấu thành (`/reports/returns`, trang chủ) | — | P1 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-42` | — |
+| OD-UX-03 | UI/UX | Chỉ báo «cập nhật lúc / nguồn / trễ đối tác» cho màn hình số liệu | `code-erp-56` | P1 | IN_PROGRESS | — | — | — | — | — | — | Bắt đầu ở `/shipments` + `/reports/returns` (Lead 23/10) |
+| OD-UX-04 | UI/UX | KPI bấm được xuống dữ liệu cấu thành (`/reports/returns`, trang chủ) | `cc2379e4` | P1 | IN_PROGRESS (thiết kế) | — | — | bài so hai đường trên PGlite (đặt trong PR) | — | — | — | Lead chọn 23/10: bắt đầu ở `/reports/returns`, giữ bộ lọc kỳ / mốc / 2b khi bấm |
 | OD-UX-05 | Tốc độ | Tối ưu 2–3 trang chậm nhất theo số nền, có đích đo được | — | P1 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-42` | — |
 | OD-UX-06 | UI/UX | Kiểm mobile cho 5 màn hình dùng nhiều | — | P2 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-42` | — |
 | OD-P3-01 | Inventory | Phiếu kiểm kê (đếm thực tế vs sổ) ⇒ mở được `inventory_accuracy` | — | P1 | BACKLOG | — | — | — | — | — | Chủ shop chốt cách kiểm kê (§7.6) | — |
@@ -365,7 +366,8 @@ Module Enterprise chỉ được học ở mức **khái niệm trong tài liệ
     khảo sát cho thấy định mức vải là nút thắt đặt hàng.
 - **Cách triển khai**
   - OD-P2-04: bảng `fabric_norms` (mẫu, vải, mét/sản phẩm, người đặt, lý do) + màn hình đọc; nhập lại dữ
-    liệu cũ từ `localStorage` bằng tay của người dùng.
+    liệu cũ từ `localStorage` bằng tay của người dùng. **DỪNG 23/10/2026:** `/inventory/shortage` chỉ 7
+    lượt / 30 ngày và 0 thao tác. Mã đã viết xong và kiểm đạt, nằm ở `wip/od-p2-04-fabric-norms`.
   - OD-P3-04: kiểm hàng nhập (sau khảo sát).
   - OD-P5-02: tài liệu khảo sát BOM.
 
@@ -580,7 +582,7 @@ Phase 2 và nhánh UI/UX chạy SONG SONG. Cả hai đi trước Phase 3. Các q
 
 | Thứ tự | Task | PR nhỏ | Vì sao trước | Rủi ro |
 |---|---|---|---|---|
-| 1 | OD-P2-04 | Định mức vải lên máy chủ (bảng + đọc + nhập tay) | Dữ liệu đang có thể MẤT (`localStorage`) | Thấp |
+| 1 | ~~OD-P2-04~~ | ~~Định mức vải lên máy chủ (bảng + đọc + nhập tay)~~ **DỪNG** | Đo 23/10: 7 lượt/30 ngày, 0 thao tác. Dữ liệu «có thể mất» là đúng, nhưng gần như không ai dùng trang. | — |
 | 2 | OD-P2-03 | Lead time xưởng đọc `received_at` (giữ dự phòng có nhãn) | Mốc thật đã ghi từ 23/09 mà không ai đọc | Thấp, chỉ báo cáo |
 | 3 | OD-P2-02a | `production_orders.supplier_id` nullable + ánh xạ chạy thử | Nền cho mọi số theo nhà cung cấp | Thấp (migration cộng thêm) |
 | 4 | OD-P2-02b | Ghi `supplier_id` ở form đơn xưởng, ô chữ thành ảnh chụp tên | Nối tiếp 2a | Thấp |
@@ -592,9 +594,28 @@ Phase 2 và nhánh UI/UX chạy SONG SONG. Cả hai đi trước Phase 3. Các q
 Chủ shop coi UI/UX là trọng tâm: master prompt mục IV, nơi Phase 3 = UI/UX & Performance. Nhánh này
 dùng mã `OD-UX-xx` để không lẫn với số Phase của tệp này.
 
-**Điều kiện bắt đầu:** có SỐ NỀN do phiên `code-erp-42` đo (đêm 23/10/2026). Số nền gồm thời gian tải
-từng trang và tần suất dùng thật. Chưa có số nền thì KHÔNG claim mục nào trong nhánh này. Thứ tự ở bảng
-dưới là tạm thời; khi có số nền thì xếp lại theo **tần suất dùng thật**, ghi số vào cột "Vì sao".
+**Điều kiện bắt đầu.** Số nền có hai phần:
+- **Tần suất dùng thật:** ĐÃ CÓ, bảng dưới.
+- **Thời gian tải từng trang:** do phiên `code-erp-42` đo (đêm 23/10/2026).
+
+UX-05 (tốc độ) chờ phần thời gian tải. UX-03 và UX-04 Lead cho bắt đầu 23/10, vì chúng không đổi tốc độ.
+
+**Số nền tần suất: lượt mở trang 30 ngày** (`page_visit_daily`, #338; db-query Lead 23/10/2026). Bảng này
+không ghi ai mở (chủ ý của #338).
+
+| # | Trang | Lượt | | # | Trang | Lượt |
+|---|---|---|---|---|---|---|
+| 1 | `/products` | 113 | | 9 | `/platform` | 38 |
+| 2 | `/shipments` | 86 | | 10 | `/` | 37 |
+| 3 | `/chatbot` | 83 | | 11 | `/inventory/planning` | 37 |
+| 4 | `/inventory/receipts` | 72 | | 12 | `/ads` | 31 |
+| 5 | `/marketing/creatives` | 71 | | 13 | `/platform/customers` | 31 |
+| 6 | `/reports/returns` | 65 | | 14 | `/payroll` | 29 |
+| 7 | `/tech` | 52 | | 15 | `/orders` | 23 |
+| 8 | `/platform/saas` | 39 | | | | |
+
+`/tech` và `/platform*` là màn hình vận hành nội bộ, không xếp vào ưu tiên UI/UX nghiệp vụ. Đối chiếu:
+`/inventory/shortage` chỉ 7 lượt (lý do DỪNG OD-P2-04).
 
 **Định nghĩa xong của MỌI mục:**
 - MỘT PR;
@@ -606,7 +627,7 @@ dưới là tạm thời; khi có số nền thì xếp lại theo **tần suấ
 
 | Thứ tự (tạm) | Task | PR nhỏ | Dựa trên cái đang có | Ràng buộc |
 |---|---|---|---|---|
-| 1 | OD-UX-01 | Design system tối thiểu: token màu / khoảng cách / kiểu chữ + quy tắc trạng thái loading / empty / error | `components/ui/*` (shadcn), `components/ui-bits.tsx` (có `EmptyState`). Đo 23/10: 161 tệp `loading.tsx` nhưng chỉ 1 `error.tsx` trong `app/(dashboard)`. | KIỂM HIỆN TRẠNG TRƯỚC, viết quy tắc, áp cho màn hình mới và màn hình đang sửa. KHÔNG đổi đồng loạt cả ứng dụng trong một PR. |
+| 1 | OD-UX-01 | Design system tối thiểu: token màu / khoảng cách / kiểu chữ + quy tắc trạng thái loading / empty / error | `components/ui/*` (shadcn), `components/ui-bits.tsx` (có `EmptyState`). Có 161 tệp `loading.tsx`. **Sửa bằng chứng (23/10):** bản đầu ghi «chỉ 1 `error.tsx`» như một lỗ hổng. Không phải lỗ hổng: tệp đó là `app/(dashboard)/error.tsx` ở GỐC nhóm dashboard, bắt lỗi cho MỌI trang nghiệp vụ. Nó đã đạt chuẩn từ 08/10 (câu tiếng Việt · «Thử lại» · chỉ in mã `digest` · không lộ stack), và `tests/smoke-coverage.test.ts` khoá. 13 trang nghiệp vụ top 15 không trang nào có layout riêng, nên `error.tsx` từng route sẽ cho cùng hành vi. | KIỂM HIỆN TRẠNG TRƯỚC, viết quy tắc, áp cho màn hình mới và màn hình đang sửa. KHÔNG đổi đồng loạt cả ứng dụng trong một PR. |
 | 2 | OD-UX-02 | Sidebar gom theo nghiệp vụ | Đọc `lib/constants/department-modules.ts` (AGENTS 69). `components/app-sidebar.tsx` chỉ giữ icon + cách vẽ. | KHÔNG tạo danh sách module thứ hai. `tests/department-map.test.ts` phải xanh. |
 | 3 | OD-UX-03 | Chỉ báo «cập nhật lúc · nguồn · trễ đối tác» cho màn hình số liệu: vận đơn, báo cáo hoàn, GTC, lương | Mốc đồng bộ ở `sync_runs`. Độ tươi logistics ở `lib/constants/logistics-freshness.ts` (AGENTS 54). Cache báo cáo `lib/cache.ts::memo`. | KHÔNG giả realtime: in đúng mốc dữ liệu được tính, không in "bây giờ". Mốc không biết thì in `—` (AGENTS 42). |
 | 4 | OD-UX-04 | KPI bấm được xuống dữ liệu cấu thành, bắt đầu ở `/reports/returns` và trang chủ | Danh sách đích dùng LẠI đúng điều kiện của KPI (`ORDER_OUTCOME`, rổ `fulfillmentBucketSql`). | Danh sách phải ra ĐÚNG số đơn bằng con số trên thẻ. Có bài kiểm so hai đường. Không viết lại điều kiện. |
