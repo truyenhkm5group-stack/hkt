@@ -150,6 +150,8 @@ export function testKhongSoBangMocDocLaiDongHo() {
 
 /** Miễn trừ — mỗi dòng nói RÕ vì sao đọc môi trường ở đó là đo MÃ NGUỒN chứ không đo máy. */
 const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
+  "tests/shipment-state-api.test.ts":
+    "ĐẶT CHATBOT_ADMIN_TOKEN = chuỗi BỊA (rồi khôi phục) để đi qua cả HAI nhánh của route /api/internal/shipment-state: khoá máy chủ RỖNG ⇒ 401 mọi lượt, và khoá khớp / sai / trên URL. Đo mã nguồn của route, không đọc khoá thật nào của máy.",
   "tests/vtp-reship-backfill.test.ts":
     "KHÔNG đọc môi trường: chuỗi «process.env.ERP_READ_ONLY = \"1\"» chỉ xuất hiện như CHỮ CẦN TÌM trong mã nguồn của scripts/vtp-reship-backfill.ts (khẳng định chạy thử chỉ đọc do Postgres ép) — đo MÃ NGUỒN, không đo máy; không khẳng định nào rẽ nhánh theo giá trị của biến.",
   "tests/shell-locale.ts":
