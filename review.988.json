@@ -1,0 +1,8 @@
+{
+  "pr": 988,
+  "sha": "a2f3294a3c043d45747b8e8e93d9c7f22a5e5935",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T02:22:14.863Z",
+  "note": "review lead: CHỈ-SCRIPT. Hàng rào --apply đòi CANONICAL_OUTCOME_VERSION ≥ 5 (chỉ có khi image gồm #981 + bản sửa review ORDER_OUTCOME_VERIFIED), câu từ chối nêu cả trừ tồn hai lần và ~81 đơn thành CANCELLED chiều tiền; planReship orderBy(createdAt, id) + ca hai vận đơn tạo lại chèn ngược; đột biến bị bắt."
+}
