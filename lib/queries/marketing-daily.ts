@@ -922,13 +922,12 @@ async function getMarketingDailyUncached(period: Period, basis: MarketingBasis, 
     giữ nó bên trong sẽ chiếm một kết nối của bể 5 chỗ lâu hơn cần thiết mà không được gì.
   */
   const rates = await productDeliveryRates(period);
-  const [built, freshness, prevBuilt] = await chayKhongJit(db, (tx) =>
-    Promise.all([
-      buildDays(tx, period, basis, filters, { rates }),
-      marketingFreshness(tx),
-      previous?.from ? buildDays(tx, { ...period, key: "custom", from: previous.from, to: previous.to }, basis, filters, { rates }) : Promise.resolve(null),
-    ]),
-  );
+  // Ba lượt đọc trong CÙNG giao dịch chạy NỐI TIẾP: một client chỉ chạy một câu một lúc (xem reports.ts::orderFacts).
+  const [built, freshness, prevBuilt] = await chayKhongJit(db, async (tx) => [
+    await buildDays(tx, period, basis, filters, { rates }),
+    await marketingFreshness(tx),
+    previous?.from ? await buildDays(tx, { ...period, key: "custom", from: previous.from, to: previous.to }, basis, filters, { rates }) : null,
+  ] as const);
   const rows = built.rows;
   const prevRows = prevBuilt?.rows ?? null;
 
