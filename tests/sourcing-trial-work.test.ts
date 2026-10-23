@@ -29,7 +29,8 @@ function testRegistry() {
   const spec = WORK_SOURCE_SPEC.SOURCING_TRIAL;
   assert.deepEqual([spec.statusAuthority, spec.assigneeAuthority, spec.businessEntity, spec.slaHours, spec.outcomeAttributable], ["SOURCE", "WORK", "SOURCING_TRIAL", null, false]);
   assert.ok(PROJECTED_SOURCES.includes("SOURCING_TRIAL"), "phép chiếu, không phải nguồn việc tay");
-  assert.deepEqual(actionsOf("SOURCING_TRIAL"), ["OPEN_SOURCE"], "chỉ nút MỞ — đóng việc là action thật của miền (luật 19)");
+  assert.deepEqual(spec.actions, ["OPEN_SOURCE"], "nút riêng của nguồn chỉ là MỞ — đóng việc là action thật của miền (luật 19)");
+  assert.ok(!actionsOf("SOURCING_TRIAL").some((a) => /DONE|CLOSE|COMPLETE|RESOLVE/.test(a)), "không nút nào «đánh dấu xong» (chỉ thêm nút chung của lớp việc: nhận · ghi chú · hẹn · báo vướng)");
   // Hạn: lấy lại từ hằng số miền, không gõ lại.
   assert.equal(SOURCING_TRIAL_SLA_HOURS.ORDER, APPROVAL_VALID_HOURS, "ORDER = hạn hiệu lực lời duyệt");
   assert.equal(SOURCING_TRIAL_SLA_HOURS.RECEIVE, null, "RECEIVE CỐ Ý bỏ trống");
@@ -77,7 +78,7 @@ async function testProjection() {
   const order = await mine();
   assert.equal(order.length, 1);
   const o = order[0];
-  assert.deepEqual([o.kind, o.sourceType, o.statusAuthority, o.department, o.sourceUrl, o.actions], ["ORDER", "SOURCING_TRIAL", "SOURCE", "WAREHOUSE", `/sourcing/trials/${trialId}`, ["OPEN_SOURCE"]]);
+  assert.deepEqual([o.kind, o.sourceType, o.statusAuthority, o.department, o.sourceUrl, o.actions], ["ORDER", "SOURCING_TRIAL", "SOURCE", "WAREHOUSE", `/sourcing/trials/${trialId}`, actionsOf("SOURCING_TRIAL")]);
   assert.equal(o.createdAt.getTime(), decided.decidedAt!.getTime(), "mốc bắt đầu = lúc duyệt");
   assert.equal(o.slaAt?.getTime(), decided.decidedAt!.getTime() + APPROVAL_VALID_HOURS * H, "hạn = hạn hiệu lực lời duyệt");
   const moved = applyWorkConfig(o, { sla: { "SOURCING_TRIAL:ORDER": 24 }, ownership: { "SOURCING_TRIAL:ORDER": "PRODUCTION" } });
