@@ -117,6 +117,8 @@ const ROUTES = [
   "/inventory/decisions",
   "/models",
   "/production",
+  // SRC-1 (23/10/2026): Tìm hàng nguồn — BẬT ở tổ chức nhà (module `sourcing` không homeOptIn), đọc hai khoá settings.
+  "/sourcing",
   "/cockpit",
   "/inventory/purchasing",
   "/customers",
