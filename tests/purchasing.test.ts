@@ -6,7 +6,7 @@ import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { PURCHASING_RULE, UNKNOWN_SUPPLIER } from "@/lib/constants/purchasing";
-import { getPurchasingReport, matchProductionToReceipts } from "@/lib/queries/purchasing";
+import { getPurchasingReport, lotLeadTimes, matchProductionToReceipts, supplierLeadStats, type LotLead } from "@/lib/queries/purchasing";
 
 /**
  * ───────── MUA HÀNG & XƯỞNG ─────────
@@ -21,7 +21,7 @@ import { getPurchasingReport, matchProductionToReceipts } from "@/lib/queries/pu
 
 const DAY = 86_400_000;
 
-function poFixture(id: string, sentAt: Date, opts: { productId?: string; supplier?: string; dueDate?: Date } = {}) {
+function poFixture(id: string, sentAt: Date, opts: { productId?: string; supplier?: string; dueDate?: Date; receivedAt?: Date } = {}) {
   return {
     id,
     code: id.toUpperCase(),
@@ -29,7 +29,74 @@ function poFixture(id: string, sentAt: Date, opts: { productId?: string; supplie
     supplier: opts.supplier ?? "Xưởng A",
     sentAt,
     dueDate: opts.dueDate ?? null,
+    receivedAt: opts.receivedAt ?? null,
   };
+}
+
+/**
+ * ═══════════ MỐC THẬT TRƯỚC, ƯỚC TÍNH SAU (OD-P2-03, 23/10/2026) ═══════════
+ *
+ * Mốc kho bấm «đã nhận» đã ghi từ 23/09 mà báo cáo vẫn đi đường ghép phiếu. Khoá: mốc thật THẮNG phép ghép;
+ * lô chưa có mốc mới đi đường cũ và mang nhãn ƯỚC TÍNH; mốc mâu thuẫn không được dùng; phép ghép vẫn chạy trên
+ * MỌI lô (bỏ lô có mốc ra là tự nới luật một-một cho lô còn lại); và trung vị không trộn im lặng hai loại lô.
+ */
+function testMocThatTruoc(plus: (days: number) => Date, base: Date) {
+  // ── Mốc thật thắng phiếu nhập dù phiếu ghép được một-một.
+  {
+    const r = lotLeadTimes([poFixture("po-1", base, { receivedAt: plus(9), dueDate: plus(10) })], [receiptFixture("r-1", plus(12))]);
+    assert.equal(r.measured.length, 1);
+    assert.deepEqual([r.measured[0].basis, r.measured[0].leadDays, r.measured[0].onTime], ["ACTUAL", 9, true], "mốc thật 9 ngày, không phải phiếu 12 ngày");
+  }
+  // ── Không có mốc ⇒ đường cũ, nhãn ƯỚC TÍNH.
+  {
+    const r = lotLeadTimes([poFixture("po-1", base)], [receiptFixture("r-1", plus(12))]);
+    assert.deepEqual([r.measured[0].basis, r.measured[0].leadDays], ["ESTIMATED", 12]);
+  }
+  // ── Mốc SỚM HƠN ngày gửi: mâu thuẫn, không dùng, không sửa ⇒ đi đường ước tính và được ĐẾM.
+  {
+    const r = lotLeadTimes([poFixture("po-1", base, { receivedAt: plus(-2) })], [receiptFixture("r-1", plus(12))]);
+    assert.equal(r.contradictory.length, 1, "mốc mâu thuẫn phải được đếm ra");
+    assert.deepEqual([r.measured[0].basis, r.measured[0].leadDays], ["ESTIMATED", 12], "mốc mâu thuẫn không thành thời gian giao âm");
+    const khong = lotLeadTimes([poFixture("po-2", base, { receivedAt: plus(-2) })], []);
+    assert.deepEqual([khong.measured.length, khong.unmatched.length, khong.contradictory.length], [0, 1, 1], "mâu thuẫn + không phiếu ⇒ CHƯA BIẾT, vẫn đếm mâu thuẫn");
+  }
+  // ── Phép ghép vẫn chạy trên mọi lô: lô có mốc vẫn tranh phiếu, lô kia KHÔNG được tự nhận phiếu.
+  {
+    const r = lotLeadTimes(
+      [poFixture("po-1", base, { receivedAt: plus(10) }), poFixture("po-2", plus(1))],
+      [receiptFixture("r-1", plus(10)), receiptFixture("r-2", plus(20))],
+    );
+    assert.deepEqual([r.measured.map((m) => m.po.id), r.ambiguous.map((p) => p.id)], [["po-1"], ["po-2"]], "lô chưa có mốc vẫn NHẬP NHẰNG như trước");
+  }
+  // ── Ba nhóm rời nhau, cộng đúng số lô.
+  {
+    const pos = [poFixture("a", base, { receivedAt: plus(5) }), poFixture("b", base, { productId: "x" }), poFixture("c", base, { productId: "y" })];
+    const r = lotLeadTimes(pos, [receiptFixture("r", plus(7), { productIds: ["x"] })]);
+    assert.equal(r.measured.length + r.ambiguous.length + r.unmatched.length, pos.length);
+    assert.deepEqual(r.measured.map((m) => m.basis), ["ACTUAL", "ESTIMATED"]);
+  }
+
+  // ── Trung vị của một xưởng: đủ lô mốc thật ⇒ CHỈ mốc thật; thiếu thì ước tính vào bù và mang nhãn.
+  const lot = (id: string, leadDays: number, basis: LotLead["basis"], onTime: boolean | null = null): LotLead => ({ po: poFixture(id, base), leadDays, onTime, basis });
+  {
+    const st = supplierLeadStats([lot("a1", 5, "ACTUAL", true), lot("a2", 7, "ACTUAL", true), lot("a3", 9, "ACTUAL", false), lot("e1", 30, "ESTIMATED", false), lot("e2", 40, "ESTIMATED", false)], 3);
+    assert.deepEqual([st.basis, st.samples, st.p50, st.actual, st.estimated], ["ACTUAL", 3, 7, 3, 2], "đủ 3 lô mốc thật ⇒ lô ước tính KHÔNG kéo trung vị");
+    assert.deepEqual([st.onTimeBasis, st.onTimeRate], [3, 66.7], "đúng hạn cùng tập lô với trung vị");
+  }
+  {
+    const st = supplierLeadStats([lot("a1", 5, "ACTUAL"), lot("e1", 9, "ESTIMATED"), lot("e2", 11, "ESTIMATED")], 3);
+    assert.deepEqual([st.basis, st.samples, st.p50], ["MIXED", 3, 9], "thiếu mốc thật ⇒ trộn, và NÓI là trộn");
+  }
+  {
+    const st = supplierLeadStats([lot("e1", 9, "ESTIMATED"), lot("e2", 11, "ESTIMATED"), lot("e3", 13, "ESTIMATED")], 3);
+    assert.deepEqual([st.basis, st.p50], ["ESTIMATED", 11]);
+  }
+  {
+    const it = supplierLeadStats([lot("a1", 5, "ACTUAL", true)], 3);
+    assert.deepEqual([it.basis, it.p50, it.p90, it.onTimeRate, it.onTimeBasis], ["ACTUAL", null, null, null, 1], "một lô lẻ ⇒ để trống, vẫn nói căn cứ");
+    assert.equal(supplierLeadStats([], 3).basis, null, "không lô nào ⇒ căn cứ CHƯA BIẾT, không phải ACTUAL");
+  }
+  console.log("✓ Thời gian giao xưởng (OD-P2-03): mốc thật thắng phiếu · không mốc ⇒ ước tính có nhãn · mốc mâu thuẫn không dùng mà đếm · phép ghép vẫn trên mọi lô · trung vị không trộn im lặng");
 }
 
 function receiptFixture(id: string, receivedAt: Date, opts: { productIds?: string[]; supplier?: string } = {}) {
@@ -84,6 +151,7 @@ export async function testPurchasing(db: Db) {
   testMocKhoNhan();
   const base = new Date("2026-05-01T03:00:00Z");
   const plus = (days: number) => new Date(base.getTime() + days * DAY);
+  testMocThatTruoc(plus, base);
 
   // ───────── 1. Ghép một-một: đúng một lô, đúng một phiếu ─────────
   {
@@ -152,11 +220,12 @@ export async function testPurchasing(db: Db) {
   }
 
   // ───────── 8. Báo cáo thật trên CSDL: cam kết, quá hạn, giá nhập tăng, độ phủ ─────────
-  const poIds = ["pur-po-open", "pur-po-late", "pur-po-done"];
+  const poIds = ["pur-po-open", "pur-po-late", "pur-po-done", "pur-po-real"];
   const receiptIds = ["pur-rc-1", "pur-rc-2"];
   const truoc = await getPurchasingReport(90);
   try {
     await db.insert(schema.products).values({ id: "pur-prod", name: "Áo kiểm thử mua hàng" }).onConflictDoNothing();
+    await db.insert(schema.products).values({ id: "pur-prod-2", name: "Quần kiểm thử mua hàng" }).onConflictDoNothing();
     await db
       .insert(schema.productVariants)
       .values({ id: "pur-var", productId: "pur-prod", sku: "PUR-001", color: "Đen", size: "M", retailPrice: 499000 })
@@ -171,6 +240,8 @@ export async function testPurchasing(db: Db) {
       { id: poIds[1], code: "PUR-LATE", productId: "pur-prod", productName: "Áo kiểm thử mua hàng", status: "SENT", supplier: "Xưởng kiểm thử", totalQty: 50, unitCost: 100_000, sentAt: at(40), dueDate: at(5) },
       // Lô đã nhận, có đúng một phiếu nhập tương ứng → ghép được.
       { id: poIds[2], code: "PUR-DONE", productId: "pur-prod", productName: "Áo kiểm thử mua hàng", status: "RECEIVED", supplier: "Xưởng kiểm thử", totalQty: 30, unitCost: 80_000, sentAt: at(30), dueDate: at(12) },
+      // Lô đã nhận, kho bấm «đã nhận» (mốc thật) sau 7 ngày, KHÔNG có phiếu nhập nào ⇒ trước OD-P2-03 là «chưa thấy phiếu».
+      { id: poIds[3], code: "PUR-REAL", productId: "pur-prod-2", productName: "Quần kiểm thử mua hàng", status: "RECEIVED", supplier: "Xưởng kiểm thử", totalQty: 20, unitCost: 70_000, sentAt: at(25), dueDate: at(15), receivedAt: at(18) },
     ]);
     await db.insert(schema.stockReceipts).values([
       { id: receiptIds[0], kind: "RECEIPT", receivedAt: at(60), supplier: "Xưởng kiểm thử", reference: "PUR-1", totalQuantity: 10, totalCost: 800_000 },
@@ -211,7 +282,11 @@ export async function testPurchasing(db: Db) {
     assert.ok(xuong, "xưởng có phát sinh phải xuất hiện trong bảng");
     assert.equal(xuong?.avgUnitCost, 90_000, "giá nhập bình quân gia quyền của hai phiếu 80K và 100K cùng số lượng là 90K");
     assert.equal(xuong?.committed, camKet, "cam kết theo xưởng phải khớp với tổng cam kết của xưởng đó");
-    assert.equal(xuong?.leadMatched, 1, "lô đã nhận ghép được đúng một phiếu");
+    assert.equal(xuong?.leadMatched, 2, "hai lô đo được: một mốc thật, một ghép đúng một phiếu");
+    assert.deepEqual([xuong?.leadActual, xuong?.leadEstimated, xuong?.leadBasis], [1, 1, "MIXED"], "lô mốc thật và lô ước tính đếm riêng, căn cứ ghi «trộn»");
+    assert.equal(r.coverage.leadActual - truoc.coverage.leadActual, 1, "độ phủ đếm lô mốc thật");
+    assert.equal(r.coverage.leadMatched - truoc.coverage.leadMatched, 2, "lô có mốc thật mà không phiếu nay ĐO ĐƯỢC");
+    assert.equal(r.coverage.leadUnmatched - truoc.coverage.leadUnmatched, 0, "lô mốc thật không còn nằm ở «chưa thấy phiếu»");
     assert.equal(
       xuong?.leadDaysP50,
       null,
@@ -223,7 +298,7 @@ export async function testPurchasing(db: Db) {
       null,
       "một lô đúng hạn KHÔNG được hiện thành 'đúng hạn 100%' — con số đó đọc như một xưởng hoàn hảo",
     );
-    assert.equal(xuong?.onTimeBasis, 1, "vẫn phải nói ra có bao nhiêu lô làm căn cứ, để người đọc biết vì sao còn trống");
+    assert.equal(xuong?.onTimeBasis, 2, "vẫn phải nói ra có bao nhiêu lô làm căn cứ, để người đọc biết vì sao còn trống");
 
     // CHƯA BIẾT ≠ 0.
     for (const s of r.suppliers) {
@@ -236,12 +311,14 @@ export async function testPurchasing(db: Db) {
     const tong = r.coverage.leadMatched + r.coverage.leadAmbiguous + r.coverage.leadUnmatched;
     assert.ok(tong >= 1, "phải có ít nhất lô vừa dựng để xét");
     if (r.coverage.leadCoveragePercent !== null) {
-      assert.equal(r.coverage.leadCoveragePercent, Math.round((r.coverage.leadMatched / tong) * 1000) / 10, "độ phủ ghép phải đúng bằng ghép được / tổng");
+      assert.equal(r.coverage.leadCoveragePercent, Math.round((r.coverage.leadMatched / tong) * 1000) / 10, "độ phủ đo phải đúng bằng đo được / tổng");
+      assert.equal(r.coverage.leadActualPercent, Math.round((r.coverage.leadActual / tong) * 1000) / 10, "độ phủ mốc thật = mốc thật / tổng");
     }
+    assert.equal(r.coverage.leadActual + r.coverage.leadEstimated, r.coverage.leadMatched, "đo được = mốc thật + ước tính");
 
     // Không được im lặng: phải nói rõ cái gì là ước tính và cái gì ERP không biết.
-    assert.ok(r.estimated.some((e) => e.includes("ƯỚC TÍNH")), "phải nói thẳng thời gian giao là ước tính");
-    assert.ok(r.limitations.some((l) => l.includes("KHÔNG có cột ngày nhận hàng")), "phải nói rõ giới hạn gốc của dữ liệu");
+    assert.ok(r.estimated.some((e) => e.includes("ƯỚC TÍNH") && e.includes("mốc thật")), "còn lô ước tính thì phải nói thẳng bao nhiêu lô là ước tính, bao nhiêu là mốc thật");
+    assert.ok(r.limitations.some((l) => l.includes("23/09/2026") && l.includes("ĐẾM XONG")), "phải nói rõ mốc thật có từ khi nào và nghĩa là gì");
     assert.ok(r.limitations.some((l) => l.includes("CHỈ ĐỌC")), "phải khẳng định ranh giới chỉ-đọc");
 
     // Cửa sổ lạ không được làm sập trang, phải rơi về mặc định.
@@ -255,10 +332,11 @@ export async function testPurchasing(db: Db) {
     await db.delete(schema.stockReceiptItems).where(inArray(schema.stockReceiptItems.receiptId, receiptIds));
     await db.delete(schema.stockReceipts).where(inArray(schema.stockReceipts.id, receiptIds));
     await db.delete(schema.productionOrders).where(inArray(schema.productionOrders.id, poIds));
+    await db.delete(schema.products).where(inArray(schema.products.id, ["pur-prod-2"]));
     clearMemo();
   }
 
   console.log(
-    `✓ Mua hàng & xưởng: ghép lô ↔ phiếu nhập một-một (nhập nhằng KHÔNG ghép, 7 ca) · cam kết và quá hạn tính đúng · giá nhập +25% được nêu · CHƯA BIẾT không thành 0`,
+    `✓ Mua hàng & xưởng: ghép lô ↔ phiếu nhập một-một (nhập nhằng KHÔNG ghép, 7 ca) · lô có mốc kho bấm «đã nhận» đo bằng mốc thật · cam kết và quá hạn tính đúng · giá nhập +25% được nêu · CHƯA BIẾT không thành 0`,
   );
 }

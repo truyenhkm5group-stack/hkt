@@ -110,7 +110,7 @@ Chi tiết từng hạng mục Phase 2–5 ở mục 7.
 | OD-P1-01 | Toàn chương trình | Tệp tiến độ bền + audit 12 nhóm module + lộ trình | phiên này | P2 | IN_REVIEW | (PR này) | — | chỉ tài liệu | — | — | — | Lead gộp (§7 đã duyệt 23/10) |
 | OD-P2-01 | Dashboards / Views | Bộ lọc yêu thích (favorites) theo người dùng cho `DataTable` | — | P1 | BACKLOG | — | — | — | — | — | — | Claim được (Phase 2 đã duyệt). Chạm `data-table` nên phối với OD-UX-01. |
 | OD-P2-02 | Purchase | `suppliers` thành khoá thật cho đơn xưởng (thôi ô chữ) | — | P1 | BACKLOG | — | — | — | — | — | — | — |
-| OD-P2-03 | Purchase | Thời gian giao của xưởng đọc `production_orders.received_at` thay vì ghép phiếu nhập | — | P1 | BACKLOG | — | — | — | — | — | — | — |
+| OD-P2-03 | Purchase | Thời gian giao của xưởng đọc `production_orders.received_at` thay vì ghép phiếu nhập | phiên purchasing | P1 | IN_REVIEW | (PR này) | — | `tests/purchasing.test.ts` (mốc thật thắng · ước tính có nhãn · mốc mâu thuẫn đếm riêng) | — | — | — | Đo trước/sau bằng ops `purchasing-leadtime-probe` (PR riêng, vào main trước) |
 | OD-P2-04 | Manufacturing | Định mức vải lên máy chủ (thôi `localStorage`), MM-REC-26 | — | P1 | BACKLOG | — | — | — | — | — | — | — |
 | OD-P2-05 | Activities | Hẹn việc kế tiếp hiện trên trang chi tiết đơn/vận đơn/khách (phép chiếu, không bảng mới) | — | P2 | BACKLOG | — | — | — | — | — | — | — |
 | OD-UX-01 | UI/UX | Design system tối thiểu: token + quy tắc loading/empty/error. Kiểm hiện trạng trước, không đổi đồng loạt. | — | P1 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-42` | Chờ số nền |
