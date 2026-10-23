@@ -3,7 +3,7 @@
   "mission_id": "care-entry-legaware-cleanup",
   "title": "Chặng RETURNED thắng chữ «đã giao»/«đang hoàn» (TS+SQL), xoá bản vá entry.ts:97",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-legaware",
@@ -28,9 +28,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T05:29:56.405Z",
-  "updated_at": "2026-10-23T05:32:05.765Z",
+  "updated_at": "2026-10-23T06:06:26.298Z",
   "last_heartbeat": "2026-10-23T05:30:37.903Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#992 → eedfc7a389a1ee81f3dcc3197c641c5355f7244e"
+  },
   "handoff": {
     "branch": "claude/care-entry-legaware-cleanup",
     "sha": "a0bb3b65dc895f322daf67aa498fa4c0defb2665",
