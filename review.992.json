@@ -1,0 +1,8 @@
+{
+  "pr": 992,
+  "sha": "a0bb3b65dc895f322daf67aa498fa4c0defb2665",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T05:32:09.711Z",
+  "note": "review lead: RETURNED_STAGE_ABSORBS — chặng RETURNED và substate DELIVERED/RETURNING từ bất kỳ căn cứ nào ⇒ RETURNED, một danh sách cho TS + SQL (SQL bọc toàn biểu thức, gộp vế hoanVe của #989); xoá entry.ts:97 (nay thừa thật); care-states bài 25 so cũ/mới trên toàn lưới mã × chữ × chặng, chỉ khác tập đã khai; SQL = TS qua json_to_recordset. Production đo được 0 kiện đổi rổ (481 = mã 504, 645 «Đã "
+}
