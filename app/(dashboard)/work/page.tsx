@@ -6,6 +6,7 @@ import { SectionCard } from "@/components/ui-bits";
 import { ScopeDenied } from "@/components/scope-denied";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { can } from "@/lib/auth/session";
+import { myWorkNotice } from "@/lib/constants/my-work-notice";
 import { MY_WORK_BUCKET_HINT, MY_WORK_BUCKET_LABEL } from "@/lib/constants/work";
 import { formatVND } from "@/lib/format";
 import { departmentsOfUser, getMyWork } from "@/lib/queries/work";
@@ -33,13 +34,15 @@ export default async function MyWorkPage() {
   ]);
   const canAct = can(user, "work:manage");
   const upcoming = my.groups.find((g) => g.bucket === "UPCOMING");
+  // Nguồn chạm hạn / lỗi ⇒ số trên trang là CẬN DƯỚI, không phải số chốt (AGENTS 42) — câu chữ dựng ở một hàm thuần.
+  const notice = myWorkNotice({ total: my.total, overdue: my.overdue, failed: my.failedSources });
 
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Công việc"
         title={`Việc của ${user.name}`}
-        description={my.total ? `${my.total} việc đang cầm · ${my.overdue} việc quá hạn` : "Không còn việc nào được giao cho bạn."}
+        description={notice.description}
         hint="Việc ở đây gom từ mọi hàng đợi của ERP: case CSKH, care vận đơn, kiểm đếm hàng hoàn, dòng tiền chưa phân loại, quyết định quảng cáo, cảnh báo vận hành, và việc quản lý giao tay. Trạng thái nghiệp vụ vẫn thuộc về module gốc — bấm nút ở đây là gọi đúng hành động của module đó, không phải đánh dấu xong."
       />
 
@@ -63,13 +66,13 @@ export default async function MyWorkPage() {
         </div>
       ) : null}
 
-      {my.failedSources.length ? (
+      {notice.banner ? (
         <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <div>
             <p className="font-medium">Danh sách đang thiếu một phần</p>
             {/* Một hàng đợi ngắn hơn thực tế mà không nói gì còn tệ hơn một lỗi hiện rõ. */}
-            <p className="text-xs">Chưa đọc được: {my.failedSources.map((f) => f.source).join(", ")}. Việc thuộc các nguồn này chưa hiện ở đây.</p>
+            <p className="text-xs">{notice.banner}</p>
           </div>
         </div>
       ) : null}
@@ -77,8 +80,8 @@ export default async function MyWorkPage() {
       <StatStrip
         columns={4}
         items={[
-          { label: "Quá hạn", value: my.overdue, tone: my.overdue ? "rose" : "muted", note: "làm trước hết" },
-          { label: "Đang cầm", value: my.total, note: "mọi nguồn cộng lại" },
+          { label: "Quá hạn", value: my.overdue, tone: my.overdue ? "rose" : "muted", note: notice.countNote ?? "làm trước hết" },
+          { label: "Đang cầm", value: my.total, note: notice.countNote ?? "mọi nguồn cộng lại" },
           {
             label: "Tiền đang treo",
             value: my.money.known ? formatVND(my.money.atRisk, { compact: true }) : "—",
@@ -121,7 +124,7 @@ export default async function MyWorkPage() {
         </details>
       ) : null}
 
-      {my.total === 0 ? (
+      {notice.showEmpty ? (
         <SectionCard title="Hàng đợi trống">
           <p className="text-sm text-muted-foreground">
             Không việc nào đang mang tên bạn. Việc chưa ai nhận nằm ở tab <strong>Phòng ban</strong> — mở lên và bấm &ldquo;Nhận việc&rdquo; để kéo về đây.
