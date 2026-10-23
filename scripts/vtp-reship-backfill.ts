@@ -27,7 +27,7 @@ const CHAY_THANG = Boolean(process.argv[1] && process.argv[1].endsWith("vtp-resh
 if (CHAY_THANG && !process.argv.slice(2).includes("--apply")) process.env.ERP_READ_ONLY = "1";
 
 import "dotenv/config";
-import { and, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, gte, inArray, isNull, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
@@ -47,9 +47,14 @@ export const RESHIP_ACTOR = "script:vtp-reship-backfill";
  * nối MỌI lần gửi của đơn ⇒ gắn lần gửi kế cho ~73 đơn 15/10 còn vận đơn gốc PICKED_UP sẽ trừ tồn HAI lần. PR2 nâng
  * `CANONICAL_OUTCOME_VERSION` 3 → 4; script lấy từ main nhưng `lib` lấy từ IMAGE đang chạy, nên hằng số đọc được ở đây là của
  * bản ĐANG CHẠY trên máy chủ — đúng câu cần hỏi. Chạy thử không bị chặn.
+ *
+ * ĐÒI ≥ 5, KHÔNG ≥ 4 (Tech Lead 23/10/2026): #981 bản đầu còn sai vế ORDER_OUTCOME_VERIFIED — gắn vận đơn tạo lại lúc ấy làm ~81 đơn
+ * ĐÃ GIAO thành CANCELLED ở chiều tiền thật. Bản sửa review (vtp-reship-outcome-review-fix, code-erp-06) đổi luật kết quả nên nâng
+ * phiên bản 4 → 5; chỉ ≥ 5 mới phân biệt được «có bản sửa» với «chỉ có #981».
  */
-export const RESHIP_APPLY_MIN_OUTCOME_VERSION = 4;
-export const RESHIP_APPLY_BLOCKED = "#981 chưa lên production — vá bây giờ sẽ trừ tồn hai lần ~73 đơn 15/10";
+export const RESHIP_APPLY_MIN_OUTCOME_VERSION = 5;
+export const RESHIP_APPLY_BLOCKED =
+  "#981 + bản sửa review (ORDER_OUTCOME_VERIFIED) chưa lên production — vá bây giờ sẽ trừ tồn hai lần ~73 đơn 15/10 và làm ~81 đơn đã giao thành CANCELLED ở chiều tiền thật";
 /** `null` = được ghi; còn lại là câu từ chối. HÀM THUẦN. */
 export function applyGateProblem(runningOutcomeVersion: number): string | null {
   return runningOutcomeVersion >= RESHIP_APPLY_MIN_OUTCOME_VERSION ? null : `${RESHIP_APPLY_BLOCKED} (image đang chạy CANONICAL_OUTCOME_VERSION = ${runningOutcomeVersion}, cần ≥ ${RESHIP_APPLY_MIN_OUTCOME_VERSION})`;
@@ -131,7 +136,10 @@ export async function planReship(db: Db): Promise<PlanRow[]> {
   const orphans = await db
     .select({ id: s.id, code: s.vtpOrderNumber, ref: s.orderReference, phone: s.receiverPhone, createdAt: s.createdAt })
     .from(s)
-    .where(and(isNull(s.orderId), sql`${s.carrier} = 'Viettel Post'`, gte(s.createdAt, new Date(`${RESHIP_FROM_DAY}T00:00:00+07:00`))));
+    .where(and(isNull(s.orderId), sql`${s.carrier} = 'Viettel Post'`, gte(s.createdAt, new Date(`${RESHIP_FROM_DAY}T00:00:00+07:00`))))
+    // Theo THỜI GIAN TẠO (rồi id) — `applyPlan` gắn lần lượt và `nextAttemptNo` cấp số tăng dần, nên một đơn có HAI vận đơn tạo lại
+    // phải nhận số lần gửi theo đúng thứ tự thật, không theo thứ tự CSDL trả về (Tech Lead 23/10/2026).
+    .orderBy(asc(s.createdAt), asc(s.id));
   const cands = await reshipCandidates(db, orphans.map((o) => o.ref ?? ""));
   const up = (v: string | null | undefined) => String(v ?? "").trim().toUpperCase();
   return orphans.map((o) => {

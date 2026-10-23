@@ -19,10 +19,11 @@ function testPure() {
   assert.deepEqual(measureWindows(now).map((w) => w.raw), [{ period: "7d" }, { period: "custom", from: RESHIP_FROM_DAY, to: "2026-10-23" }], "đúng tham số URL người dùng mở");
 
   // Hàng rào --apply: image chưa có PR2 #981 (CANONICAL_OUTCOME_VERSION < 4) ⇒ từ chối, kèm câu nói rõ hậu quả.
-  for (const v of [1, 2, 3]) assert.match(applyGateProblem(v) ?? "", /^#981 chưa lên production — vá bây giờ sẽ trừ tồn hai lần ~73 đơn 15\/10/, `phiên bản ${v} ⇒ từ chối`);
-  assert.equal(applyGateProblem(4), null, "image có PR2 ⇒ được ghi");
-  assert.equal(applyGateProblem(5), null, "phiên bản sau PR2 ⇒ vẫn được");
-  assert.ok(RESHIP_APPLY_BLOCKED.includes("trừ tồn hai lần"));
+  // 4 = #981 bản ĐẦU (còn sai vế ORDER_OUTCOME_VERIFIED) ⇒ VẪN từ chối; 5 = có bản sửa review.
+  for (const v of [1, 2, 3, 4]) assert.match(applyGateProblem(v) ?? "", /^#981 \+ bản sửa review \(ORDER_OUTCOME_VERIFIED\) chưa lên production — vá bây giờ sẽ trừ tồn hai lần ~73 đơn 15\/10 và làm ~81 đơn đã giao thành CANCELLED/, `phiên bản ${v} ⇒ từ chối`);
+  assert.equal(applyGateProblem(5), null, "image có bản sửa review ⇒ được ghi");
+  assert.equal(applyGateProblem(6), null, "phiên bản sau ⇒ vẫn được");
+  assert.ok(RESHIP_APPLY_BLOCKED.includes("trừ tồn hai lần") && RESHIP_APPLY_BLOCKED.includes("CANCELLED ở chiều tiền thật"));
 
   const src = readFileSync("scripts/vtp-reship-backfill.ts", "utf8");
   const main = src.slice(src.indexOf("async function main("));
@@ -45,7 +46,7 @@ function testPure() {
 
 async function testFlow(db: Db) {
   const s = schema.shipments;
-  const ids = ["rsb-goc", "rsb-moi", "rsb-tu", "rsb-amb-a", "rsb-amb-b", "rsb-amb-moi"];
+  const ids = ["rsb-goc", "rsb-moi", "rsb-tu", "rsb-amb-a", "rsb-amb-b", "rsb-amb-moi", "rsb-goc2", "rsb-hai-sau", "rsb-hai-truoc"];
   const wipe = async () => {
     await db.delete(s).where(inArray(s.id, ids));
     await db.delete(schema.orders).where(like(schema.orders.id, "rsb-o%"));
@@ -57,6 +58,7 @@ async function testFlow(db: Db) {
     await order("rsb-o1", 993001);
     await order("rsb-o2", 993002);
     await order("rsb-o3", 993003);
+    await order("rsb-o4", 993004);
     await db.insert(s).values([
       // Gốc Pancake (đơn rsb-o1) + vận đơn tạo lại trên web: số VTP 12 chữ, tham chiếu = số vận đơn gốc.
       { id: "rsb-goc", orderId: "rsb-o1", carrier: "Viettel Post", vtpOrderNumber: "PKERSB00001", trackingCode: "PKERSB00001", codAmount: 499000, attemptNo: 1, direction: "OUTBOUND" },
@@ -67,6 +69,10 @@ async function testFlow(db: Db) {
       { id: "rsb-amb-a", orderId: "rsb-o2", carrier: "Viettel Post", trackingCode: "TRKRSBAMB01" },
       { id: "rsb-amb-b", orderId: "rsb-o3", carrier: "Viettel Post", trackingCode: "TRKRSBAMB01" },
       { id: "rsb-amb-moi", carrier: "Viettel Post", vtpOrderNumber: "155000000002", trackingCode: "155000000002", orderReference: "TRKRSBAMB01" },
+      // Một đơn, HAI vận đơn tạo lại cùng trỏ vận đơn gốc. Dòng tạo SAU được chèn TRƯỚC (thứ tự CSDL ≠ thứ tự thật).
+      { id: "rsb-goc2", orderId: "rsb-o4", carrier: "Viettel Post", vtpOrderNumber: "PKERSB00004", trackingCode: "PKERSB00004", attemptNo: 1, direction: "OUTBOUND" },
+      { id: "rsb-hai-sau", carrier: "Viettel Post", vtpOrderNumber: "155000000005", trackingCode: "155000000005", orderReference: "PKERSB00004", createdAt: new Date("2026-10-21T08:00:00Z") },
+      { id: "rsb-hai-truoc", carrier: "Viettel Post", vtpOrderNumber: "155000000004", trackingCode: "155000000004", orderReference: "PKERSB00004", createdAt: new Date("2026-10-19T08:00:00Z") },
     ]);
     const anh = async () => JSON.stringify((await db.select({ id: s.id, orderId: s.orderId, attemptNo: s.attemptNo, direction: s.direction }).from(s).where(inArray(s.id, ids))).sort((a, b) => a.id.localeCompare(b.id)));
 
@@ -79,16 +85,20 @@ async function testFlow(db: Db) {
     assert.deepEqual(mine("rsb-tu").verdict, { kind: "NONE", reason: "SELF_REFERENCE" }, "tự tham chiếu ⇒ không gắn");
     assert.deepEqual(mine("rsb-amb-moi").verdict, { kind: "HOLD", reason: "AMBIGUOUS", candidates: 2 }, "hai đơn ⇒ giữ lại, không đoán");
     assert.ok(!mine("rsb-moi").phoneChecked, "vận đơn mới không có SĐT ⇒ vế SĐT không kiểm được");
+    const mineIds = plan.map((r) => r.shipmentId).filter((x) => ids.includes(x));
+    assert.ok(mineIds.indexOf("rsb-hai-truoc") < mineIds.indexOf("rsb-hai-sau"), "kế hoạch theo THỜI GIAN TẠO, không theo thứ tự chèn");
     const lines = planSummaryLines(plan.filter((r) => ids.includes(r.shipmentId)));
-    assert.ok(lines.some((l) => /gắn được \(ATTEMPT\) 1 \(1 đơn\) · khớp mã VTP cấp 1 · chỉ khớp mã tra cứu của dòng chưa có mã VTP 0/.test(l)), lines.join(" | "));
+    assert.ok(lines.some((l) => /gắn được \(ATTEMPT\) 3 \(2 đơn\) · khớp mã VTP cấp 3 · chỉ khớp mã tra cứu của dòng chưa có mã VTP 0/.test(l)), lines.join(" | "));
     assert.ok(lines.some((l) => l.includes("HOLD/AMBIGUOUS 1") && l.includes("NONE/SELF_REFERENCE 1")));
-    assert.ok(lines.some((l) => l.includes("KHÔNG KIỂM ĐƯỢC ở 3/3 dòng")), "PHONE_MISMATCH «không kiểm được», không in 0 như đã khớp");
+    assert.ok(lines.some((l) => l.includes("KHÔNG KIỂM ĐƯỢC ở 5/5 dòng")), "PHONE_MISMATCH «không kiểm được», không in 0 như đã khớp");
     for (const l of lines) for (const bad of ["PKERSB", "155000000001", "rsb-"]) assert.ok(!l.includes(bad), `tóm tắt không mang mã: ${bad}`);
 
     // ── GHI: chỉ dòng ATTEMPT, qua relinkOrphanShipment ──
     const now = new Date("2026-10-23T02:00:00Z");
     const res = await applyPlan(db, plan.filter((r) => ids.includes(r.shipmentId)), now);
-    assert.deepEqual(res, { LINKED: 1 }, "đúng một dòng được gắn");
+    assert.deepEqual(res, { LINKED: 3 }, "đúng ba dòng ATTEMPT được gắn");
+    const lan = async (id: string) => (await db.select({ n: s.attemptNo }).from(s).where(eq(s.id, id)))[0].n;
+    assert.deepEqual([await lan("rsb-hai-truoc"), await lan("rsb-hai-sau")], [2, 3], "hai vận đơn tạo lại của một đơn nhận lần gửi theo đúng thứ tự tạo (2 rồi 3), không gán ngược");
     const [moi] = await db.select().from(s).where(eq(s.id, "rsb-moi"));
     assert.deepEqual([moi.orderId, moi.attemptNo, moi.direction], ["rsb-o1", 2, "OUTBOUND"], "lần gửi kế của CÙNG đơn");
     for (const id of ["rsb-tu", "rsb-amb-moi"]) assert.equal((await db.select({ o: s.orderId }).from(s).where(eq(s.id, id)))[0].o, null, `${id} vẫn mồ côi`);
