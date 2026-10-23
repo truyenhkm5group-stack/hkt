@@ -278,6 +278,7 @@ const KHONG_MA_HOA_DA_RA: Record<string, string> = {
   "session-verify": "email quản trị ĐÃ CHE; phiếu phiên in 6 + 4 ký tự",
   "session-revoke-e2e": "email tài khoản QA ĐÃ CHE; mã HTTP",
   "perf-probe": "thời gian truy vấn, câu SQL có tham số là ngày / bộ lọc",
+  "returns-page-probe": "thời gian tường · khoảng vòng sự kiện bị chặn · mã HTTP · kB của /reports/returns và /operations — không đọc / in cột nào mang dữ liệu người",
   "perf-audit": "thời gian từng màn hình; marketer ẩn danh MKT#n",
   "outcome-parity": "≤ 10 mã đơn / vận đơn kèm kết quả + giá vốn",
   "returns-parity": "mã hàng + số đếm",
