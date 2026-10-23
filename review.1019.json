@@ -1,0 +1,8 @@
+{
+  "pr": 1019,
+  "sha": "a0702db5c42b14e0d4dbdd8a66773d1e2fe1e6c7",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T21:41:58.344Z",
+  "note": "review lead: chỉ-script đo; thêm lượt ?period=30d (module ấm, dữ liệu nguội) làm đối chứng."
+}

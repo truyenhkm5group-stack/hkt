@@ -1,4 +1,3 @@
-{"at":"2026-10-18T16:14:41.431Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"quick-reply-evidence","detail":"#900 @ b8d0c5038105 → e548e31c4499 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-18T16:26:01.312Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"e548e31c4499 · run 39144930655 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39144930655"}
 {"at":"2026-10-18T16:26:54.872Z","actor":"DESKTOP-56TH98Y:wt-cau-mau-probe","kind":"CLAIM","mission":"quick-reply-probe","detail":"PLANNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-18T16:26:54.872Z","actor":"DESKTOP-56TH98Y:wt-cau-mau-probe","kind":"OVERLAP_ACCEPTED","mission":"quick-reply-probe","detail":"OVERLAP_ACCEPTED với conv-money-trace: phạm vi scripts/conv-money-trace.ts — cách tích hợp: Script-only; mở rộng --apply-probe có sẵn; conv-money-trace chỉ thêm lọc kênh TEST; dựng trên main e548e31c"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-23T21:39:17.127Z","actor":"DESKTOP-56TH98Y:wt-rprobe","kind":"OVERLAP_ACCEPTED","mission":"returns-probe-cold-data","detail":"OVERLAP_ACCEPTED với returns-page-probe: phạm vi scripts/returns-page-probe.ts, docs/ops-vps-script-notes.md — cách tích hợp: Một lời gọi đo thêm trong script đo chỉ đọc + một cụm chữ trong mục docs của chính script này."}
 {"at":"2026-10-23T21:39:53.053Z","actor":"DESKTOP-56TH98Y:wt-rprobe","kind":"HANDOFF","mission":"returns-probe-cold-data","detail":"claude/returns-probe-cold-data @ a0702db5c42b · 1 lệnh kiểm thử"}
 {"at":"2026-10-23T21:41:53.505Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"returns-probe-cold-data","detail":"#1019 cho claude/returns-probe-cold-data @ a0702db5c42b"}
+{"at":"2026-10-23T21:42:28.186Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#1019 @ a0702db5c42b · review lead: chỉ-script đo; thêm lượt ?period=30d (module ấm, dữ liệu nguội) làm đối chứng."}
