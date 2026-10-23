@@ -3,7 +3,7 @@
   "mission_id": "regression-watch-readonly",
   "title": "regression-watch-status đọc được mọi tổ chức (handle chỉ đọc trước withOrganization)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T00:52:23.393Z",
-  "updated_at": "2026-10-23T01:58:42.183Z",
+  "updated_at": "2026-10-23T03:25:38.589Z",
   "last_heartbeat": "2026-10-23T01:58:42.183Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#984 → d6165a7d9dd8605f809a482492ae0b8ebb2f8859"
+  },
   "handoff": {
     "branch": "claude/regression-watch-readonly",
     "sha": "c8c915d5a32d0a55f18fd22a5ee624e1315d915c",
