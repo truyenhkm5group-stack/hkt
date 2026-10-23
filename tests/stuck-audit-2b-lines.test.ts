@@ -52,7 +52,8 @@ export function testStuckAudit2bLines() {
   assert.ok(packed.length > 1 && packed.every((l) => utf8Bytes(l) <= SUMMARY_MAX_BYTES), "chữ Việt ⇒ tách theo byte");
   assert.ok(viet.every((c) => packed.join(" ").includes(c)));
   const long = "Đ".repeat(400);
-  assert.deepEqual(packSummaryLines("p", ["a", long, "b"]), ["p · a", `p · ${long}`, "p · b"], "ô quá trần đứng riêng, không nuốt ô bên cạnh");
+  const pl = packSummaryLines("p", ["a", long, "b"]);
+  assert.ok(pl[0] === "p · a" && pl[pl.length - 1] === "p · b" && pl.every((x) => utf8Bytes(x) <= SUMMARY_MAX_BYTES) && pl.slice(1, -1).map((x) => x.replace(/^p (· )?/, "")).join("") === long, "ô quá trần bị ngắt thành các dòng vừa trần, không nuốt ô bên cạnh, không mất chữ");
 
   // regression-watch-status: định dạng giữ nguyên (ai-tech đọc lại), chỉ khoá trần byte với mọi dòng sổ thật + số lớn.
   const verdicts: RegressionVerdict[] = ["REGRESSION_REOPENED", "LEAK_UNAVAILABLE"];

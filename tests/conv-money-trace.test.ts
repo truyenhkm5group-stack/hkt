@@ -15,6 +15,7 @@ import { inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { CLAIM_SAFE_TEXT } from "@/lib/sales-chatbot/claim-guard";
 import { EMPTY_REPLY_TEXT } from "@/lib/sales-chatbot/engine";
+import { unsplitSummaryLines } from "@/lib/ops/summary-lines";
 import { addressAskAfterText, ADDRESS_ASK_WINDOW_MS, addressResolutionText, COMMENT_ALREADY_NOTE, COMMENT_CARRY_LABEL, fixedAmountsInTemplate, reviewCodesText, fixedTextKind, moneyOfToolResult, parseTraceArgs, QUICK_REPLAY_VARIANTS, quickDecisionAt, quickReplyHead, scanAiPerformance, scanPatterns, totalClaimsIn, traceConversation, wrongProductTemplate } from "../scripts/conv-money-trace";
 
 const PHONE = "0900003106";
@@ -102,6 +103,9 @@ async function capture(fn: () => Promise<unknown>): Promise<string[]> {
 }
 
 const txt = (text: string) => [{ type: "text", text }];
+/** Dòng kênh tóm tắt, đã ghép lại các dòng «(tiếp)» mà bộ tách theo byte sinh ra (lib/ops/summary-lines.ts). */
+const tomTatOf = (printed: string[]) =>
+  unsplitSummaryLines(printed.filter((l) => l.startsWith("[ops:tom-tat] ")).map((l) => l.slice("[ops:tom-tat] ".length))).map((l) => `[ops:tom-tat] ${l}`);
 
 async function testDb() {
   const db = await getDb();
@@ -145,17 +149,17 @@ async function testDb() {
     ]);
     const ctx = { names: new Map([["v-1kg", "Chả cá thu · 1kg"]]), reference: new Set([0, 280000, 540000, 640000]), handoffText: null, aiDownText: null, templates: [] };
     const p1 = await capture(() => traceConversation(db, money, null, ctx));
-    const s1 = p1.filter((l) => l.startsWith("[ops:tom-tat]")).join("\n");
+    const s1 = tomTatOf(p1).join("\n");
     assert.match(s1, /tin bot có số TỔNG lệch báo giá 1/, s1);
     assert.ok(p1.some((l) => /TỔNG 640\.000 ₫ ≠ báo giá 280\.000 ₫ — LỆCH/.test(l) && /640\.000 ₫\[R\]/.test(l)), "640k chỉ thuộc tập THAM CHIẾU, không thuộc báo giá giỏ");
     assert.ok(p1.some((l) => /Chả cá thu · 1kg × 1 @ 280\.000 ₫/.test(l)), "dòng nháp in theo tên danh mục");
     const p2 = await capture(() => traceConversation(db, empty, null, ctx));
-    const s2 = p2.filter((l) => l.startsWith("[ops:tom-tat]")).join("\n");
+    const s2 = tomTatOf(p2).join("\n");
     assert.match(s2, /câu «nói rõ hơn» không có tin khách mới 1/, s2);
     assert.match(s2, /CÂU MẪU qua send_quick_reply 1/, s2);
     assert.ok(p2.some((l) => /NGUỒN CỐ ĐỊNH:EMPTY_REPLY .*KHÔNG có tin khách mới/.test(l)));
     const p3 = await capture(() => scanPatterns(db, 1, new Date()));
-    const s3 = p3.filter((l) => l.startsWith("[ops:tom-tat]")).join("\n");
+    const s3 = tomTatOf(p3).join("\n");
     assert.match(s3, /KHÔNG có tin khách mới kể từ tin bot trước [1-9]\d* tin/, s3);
     assert.match(s3, /≠ tổng giỏ \/ nháp máy chủ ngay trước: [1-9]\d* tin/, s3);
     // F: ca gieo «2kg» ⇒ một tin lặp (câu báo giá gửi lại); lượt «lấy 2» được trả lời đúng ⇒ không tính; cả hai tin khách vào mẫu số.
@@ -168,7 +172,7 @@ async function testDb() {
     assert.ok(p3.some((l) => l.startsWith("  mẫu G băm (≤ 20):") && l.includes(hashQty)), "mẫu G có mã hội thoại băm");
     // E (chủ shop 18/10): tốc độ + chi phí trả lời — chạy thật trên CSDL thử (sổ sự kiện + sổ AI nền tảng), chỉ số đếm.
     const p4 = await capture(() => scanAiPerformance(db, "khong-co-to-chuc", new Date(Date.now() - 86_400_000), new Date()));
-    const s4 = p4.filter((l) => l.startsWith("[ops:tom-tat]")).join(" | ");
+    const s4 = tomTatOf(p4).join(" | ");
     assert.match(s4, /E lượt bot trả lời .* QUICK_REPLY \d+/, s4);
     assert.match(s4, /E lời gọi AI bot bán hàng: /, s4);
     for (const p of [...p1, ...p2, ...p3]) assert.ok(!p.includes(PHONE) && !p.includes("Bình Thạnh") && !p.includes("Quận 12") && !p.includes("chả mực ạ"), `không lọt SĐT / địa chỉ / chữ tin: ${p}`);
