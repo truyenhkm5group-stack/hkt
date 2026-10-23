@@ -613,6 +613,7 @@ import { testP0ShortQtyRound } from "./p0-short-qty-round.test";
 import { testP0RepeatBuyer } from "./p0-repeat-buyer.test";
 import { testP0863CancelFlow } from "./p0-863-cancel-flow.test";
 import { testConvMoneyTrace } from "./conv-money-trace.test";
+import { testConvMoneyTraceAttribution } from "./conv-money-trace-attribution.test";
 import { testSalesQuote640 } from "./sales-quote-640.test";
 import { testSalesNextBestAction } from "./sales-next-best-action.test";
 import { testUpsellOfferAudit } from "./upsell-offer-audit.test";
@@ -3261,6 +3262,7 @@ async function main() {
     // P0 14/10/2026 — ops conv-money-trace: số TỔNG trong tin bot ≠ báo giá giỏ (ca «Châu Dương» 640k cho 1kg 280k) · câu «nói rõ hơn»
     // của engine khi khách không nhắn gì (ca «Viet Nguyen Thi») — thuần + CSDL thật (tự dọn), tóm tắt không lọt PII, chỉ đọc.
     await testConvMoneyTrace();
+    await testConvMoneyTraceAttribution();
     // P0 #868 — ops upsell-offer-audit: phễu + upsell (sổ sự kiện) và lời mời đọc từ chữ đã gửi (mời lặp · sau từ chối · sau khi đã chọn) —
     // thuần + CSDL thật (tự dọn), chỉ đọc, khai đủ bốn chỗ.
     await testUpsellOfferAudit();

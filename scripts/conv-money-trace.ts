@@ -197,6 +197,39 @@ export function quickReplyHead(answer: string): string {
 }
 
 /**
+ * Tin bot do MODEL viết mà mở đầu GIỐNG một câu mẫu ĐANG BẬT ⇒ nhãn «GIỐNG câu mẫu #n» — chỉ là trùng chữ, không phải nguồn thật (nguồn
+ * thật của câu mẫu là công cụ `send_quick_reply` / bước câu mẫu). Câu mẫu TẮT không bao giờ được gán: đo 23/10/2026, tin theo dõi do model
+ * viết («Dạ chả cá thu bên em làm từ 100%…») bị in «CÂU MẪU #93(tắt)» và đẩy người đọc đi tìm lỗi «gửi câu mẫu đã tắt» không tồn tại.
+ * Đầu câu ngắn hơn 12 ký tự không dùng (trùng nhầm). HÀM THUẦN.
+ */
+export function templateAttribution(text: string, templates: readonly { code: string; head: string; active: boolean }[]): string | null {
+  const head = foldVi(text).replace(/\s+/g, " ").trim().slice(0, 40);
+  const t = templates.find((x) => x.active && x.head.length >= 12 && head.startsWith(x.head));
+  return t ? `GIỐNG câu mẫu ${t.code}` : null;
+}
+
+/** Tin theo dõi ghi SAU khi gửi, còn `followup.sent` mang mốc lúc QUYẾT (lib/sales-chatbot/followup.ts) ⇒ cho tin trễ tối đa ngần này. */
+export const FOLLOWUP_MESSAGE_MAX_LAG_MS = 10 * 60_000;
+
+/**
+ * seq của các tin bot là TIN THEO DÕI: với mỗi mốc `followup.sent`, tin bot CÓ CHỮ đầu tiên từ mốc đó trở đi, không có tin khách nào xen
+ * giữa, trễ ≤ `maxLagMs`. Tin theo dõi không mang dấu riêng trên dòng tin nhắn (`appendBotMessage`) nên phải ghép bằng mốc. HÀM THUẦN.
+ */
+export function followupBotSeqs(msgs: readonly { seq: number; role: string; at: Date; hasText: boolean }[], sentAts: readonly Date[], maxLagMs = FOLLOWUP_MESSAGE_MAX_LAG_MS): Set<number> {
+  const out = new Set<number>();
+  const sorted = [...msgs].sort((a, b) => a.seq - b.seq);
+  for (const t of sentAts) {
+    const from = t.getTime();
+    for (const x of sorted) {
+      if (x.at.getTime() < from || !x.hasText) continue;
+      if (x.role === "assistant" && x.at.getTime() - from <= maxLagMs) out.add(x.seq);
+      break;
+    }
+  }
+  return out;
+}
+
+/**
  * D — CÂU MẪU SAI MÓN (P0 18/10/2026, ca «ThanhPhương»): tin bot vừa gửi trùng đầu câu của câu mẫu nào, và mọi câu mẫu trùng đều nói về
  * món KHÁC món khách đang hỏi (cùng luật `quick-reply-focus.ts` của lượt sống) ⇒ trả câu mẫu đó; không trùng / đúng món / chưa rõ món ⇒
  * `null`. Đầu câu ngắn hơn 12 ký tự không dùng (trùng nhầm). HÀM THUẦN.
@@ -314,7 +347,7 @@ async function bindReadOnlyOrgHandle(org: { code: string; isHome: boolean }, db:
   if (!orgs.get(org.code)?.db) orgs.set(org.code, { db });
 }
 
-type Ctx = { names: Map<string, string>; reference: Set<number>; handoffText: string | null; aiDownText: string | null; templates: { code: string; head: string; fixed: number[]; title: string }[] };
+type Ctx = { names: Map<string, string>; reference: Set<number>; handoffText: string | null; aiDownText: string | null; templates: { code: string; head: string; fixed: number[]; title: string; active: boolean }[] };
 
 async function loadCtx(db: Db): Promise<Ctx> {
   const cfg = await loadSalesChatbotConfig();
@@ -324,7 +357,7 @@ async function loadCtx(db: Db): Promise<Ctx> {
   const names = new Map<string, string>();
   for (const r of await db.select({ id: pv.id, name: pr.name, detail: pv.detail, size: pv.size }).from(pv).leftJoin(pr, eq(pr.id, pv.productId)).limit(20_000)) names.set(r.id, `${r.name ?? "?"}${r.detail || r.size ? ` · ${r.detail || r.size}` : ""}`);
   const rows = await listQuickReplies().catch(() => []);
-  const templates = rows.map((r, i) => ({ code: `#${i + 1}${r.active ? "" : "(tắt)"}`, head: quickReplyHead(r.answer), fixed: fixedAmountsInTemplate(r.answer), title: r.title }));
+  const templates = rows.map((r, i) => ({ code: `#${i + 1}`, head: quickReplyHead(r.answer), fixed: fixedAmountsInTemplate(r.answer), title: r.title, active: r.active }));
   const handoffText = typeof (cfg as { handoff?: { message?: unknown } }).handoff?.message === "string" ? String((cfg as { handoff: { message: string } }).handoff.message) : null;
   return { names, reference, handoffText, aiDownText: null, templates };
 }
@@ -367,6 +400,9 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
   // 2 + 3. Lịch sử của bot.
   const m = schema.salesChatMessages;
   const msgs = await db.select({ seq: m.seq, role: m.role, content: m.content, at: m.createdAt }).from(m).where(eq(m.conversationId, conv.id)).orderBy(asc(m.seq)).limit(400);
+  const fuEv = schema.salesConversationEvents;
+  const fuAts = (await db.select({ at: fuEv.occurredAt }).from(fuEv).where(and(eq(fuEv.conversationId, conv.id), eq(fuEv.type, "followup.sent"))).limit(200)).map((r) => r.at);
+  const followups = followupBotSeqs(msgs.map((x) => ({ seq: x.seq, role: x.role, at: x.at, hasText: Boolean(textOf(x.content)) })), fuAts);
   const userHashes = new Map<string, number>();
   const botHashes = new Set<string>([...inbound.filter((r) => r.note === "PAGE_REPLY" || r.note === "BOT_SENT").map((r) => hashText(r.text))]);
   const toolNames = new Map<string, string>();
@@ -383,11 +419,8 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
   const botLine = (seq: number, at: Date, text: string, origin: string) => {
     const fixed = fixedTextKind(text, { handoff: ctx.handoffText, aiDown: ctx.aiDownText });
     let label = fixed ? `CỐ ĐỊNH:${fixed}` : origin;
-    if (!fixed && origin === "MODEL") {
-      const head = foldVi(text).replace(/\s+/g, " ").trim().slice(0, 40);
-      const t = ctx.templates.find((x) => x.head.length >= 12 && head.startsWith(x.head));
-      if (t) label = `CÂU MẪU ${t.code} (khớp chữ)`;
-    }
+    // Chỉ tin MODEL của lượt trả lời mới đem so câu mẫu (đang bật) — tin THEO DÕI cũng do model viết nhưng mang nhãn riêng.
+    if (!fixed && origin === "MODEL") label = templateAttribution(text, ctx.templates) ?? label;
     bump(src, label.split(" (")[0]);
     const amounts = extractVndAmounts(text);
     const totals = totalClaimsIn(text);
@@ -442,7 +475,7 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
       }
     }
     const t = textOf(x.content);
-    if (t) botLine(x.seq, x.at, t, t.startsWith(SHOP_SAID) ? "PAGE (chép)" : "MODEL");
+    if (t) botLine(x.seq, x.at, t, t.startsWith(SHOP_SAID) ? "PAGE (chép)" : followups.has(x.seq) ? "THEO DÕI (model)" : "MODEL");
   }
 
   // 4. Sự kiện.
@@ -505,7 +538,7 @@ export async function traceConversation(db: Db, convId: string, orderShort: stri
     const its = items.filter((i) => i.orderId === r.id);
     tomTat(`Đơn ${shortOrder(r.id)} ${r.stage}: ${its.map((i) => `${i.variantId ? variantLabel(i.variantId) : i.productName} × ${i.quantity} @ ${vnd(Number(i.unitPrice ?? 0))}${Number(i.totalDiscount ?? 0) ? ` − ${vnd(Number(i.totalDiscount))}` : ""}`).join(" | ")} · ship ${vnd(Number(r.fee ?? 0))} · tổng ${vnd(Number(r.total ?? 0) + Number(r.fee ?? 0))}`);
   }
-  tomTat(`Tin fanpage: ${fmt(inbCounts)} · câu mẫu có số tiền cố định ${fixedTpl.length}/${ctx.templates.length}${fixedTpl.length ? ` (${fixedTpl.slice(0, 4).map((tp) => `${tp.code}: ${tp.fixed.map(vnd).join("/")}`).join(" · ")})` : ""}`);
+  tomTat(`Tin fanpage: ${fmt(inbCounts)} · câu mẫu có số tiền cố định ${fixedTpl.length}/${ctx.templates.length}${fixedTpl.length ? ` (${fixedTpl.slice(0, 4).map((tp) => `${tp.code}${tp.active ? "" : "(tắt)"}: ${tp.fixed.map(vnd).join("/")}`).join(" · ")})` : ""}`);
   return true;
 }
 
@@ -578,7 +611,7 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   const m = schema.salesChatMessages;
   const A = { total: 0, noNew: 0, convs: new Set<string>() };
   const B = { msgs: 0, convs: new Set<string>(), noQuote: 0 };
-  const D = { msgs: 0, convs: new Set<string>(), images: 0, byTitle: new Map<string, number>() };
+  const D = { msgs: 0, convs: new Set<string>(), images: 0, byTitle: new Map<string, number>(), followupSkipped: 0 };
   // F (P0 21/10/2026, HSLC «Lan Nguyen»): tin khách CHỈ là câu trả lời số lượng («2kg», «lấy 2» sau «1kg hay 2kg?») mà tin bot NGAY SAU lại
   // hỏi lại số lượng hoặc gửi lại một câu đã gửi trong hội thoại. Cùng định nghĩa với engine (`quantityOnlyAnswer` · `choiceAmountText`).
   // Câu mẫu = 0 token; lượt AI = một lời gọi model thừa. Mẫu số = số tin khách chỉ là câu trả lời số lượng.
@@ -620,7 +653,8 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   }
   const hashConv = (id: string) => createHash("sha256")["update"](id).digest("hex").slice(0, 8);
   const rowsQr = await listQuickReplies().catch(() => []);
-  const tpls = rowsQr.map((r) => ({ title: r.title, answer: r.answer, head: quickReplyHead(r.answer), images: r.images.length }));
+  // Chỉ câu mẫu ĐANG BẬT: câu đã tắt không gửi được qua bước câu mẫu, nên tin trùng đầu chữ với nó là chữ của model, không phải câu mẫu.
+  const tpls = rowsQr.filter((r) => r.active).map((r) => ({ title: r.title, answer: r.answer, head: quickReplyHead(r.answer), images: r.images.length }));
   const products = await loadFocusProducts().catch(() => [] as FocusProduct[]);
   // MẪU SỐ (chủ shop 18/10: «0/39 chưa phải nghiệm thu»): số tin khách mà câu mẫu ĐƯỢC XÉT, cùng câu mẫu đang bật + câu upsell hôm nay.
   const active: QuickReplyEntry[] = rowsQr.filter((r) => r.active).map((r) => ({ id: r.id, title: r.title, triggers: r.triggers, answer: r.answer }));
@@ -648,6 +682,14 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   };
   for (let i = 0; i < ids.length; i += 200) {
     const rows = await db.select({ conv: m.conversationId, seq: m.seq, role: m.role, content: m.content, at: m.createdAt }).from(m).where(and(inArray(m.conversationId, ids.slice(i, i + 200)), gte(m.createdAt, from), lte(m.createdAt, now))).orderBy(asc(m.conversationId), asc(m.seq));
+    // Tin THEO DÕI (model viết, lib/sales-chatbot/followup.ts) không bao giờ là câu mẫu ⇒ không vào dòng D.
+    const fuEv = schema.salesConversationEvents;
+    const fuRows = await db.select({ conv: fuEv.conversationId, at: fuEv.occurredAt }).from(fuEv).where(and(inArray(fuEv.conversationId, ids.slice(i, i + 200)), eq(fuEv.type, "followup.sent"), gte(fuEv.occurredAt, new Date(from.getTime() - FOLLOWUP_MESSAGE_MAX_LAG_MS)), lte(fuEv.occurredAt, now)));
+    const fuKeys = new Set<string>();
+    for (const cid of new Set(fuRows.map((x) => x.conv))) {
+      const own = rows.filter((x) => x.conv === cid).map((x) => ({ seq: x.seq, role: x.role, at: x.at, hasText: Boolean(textOf(x.content)) }));
+      for (const seq of followupBotSeqs(own, fuRows.filter((x) => x.conv === cid).map((x) => x.at))) fuKeys.add(`${cid}:${seq}`);
+    }
     let cur = "";
     let userSince = false;
     let quoteTotal: number | null = null;
@@ -741,7 +783,8 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
       sentHeads.add(headF);
       prevBot = t;
       qtyAnswer = false;
-      checkD(r.conv, t, lines);
+      if (fuKeys.has(`${r.conv}:${r.seq}`)) D.followupSkipped += 1;
+      else checkD(r.conv, t, lines);
       lines.push({ who: "SHOP", text: t });
       if (t === EMPTY_REPLY_TEXT) {
         A.total += 1;
@@ -780,6 +823,7 @@ export async function scanPatterns(db: Db, days: number, now: Date, since?: Date
   tomTat(`A câu «nói rõ hơn» của engine: ${A.total} tin · KHÔNG có tin khách mới kể từ tin bot trước ${A.noNew} tin / ${A.convs.size} hội thoại`);
   tomTat(`B tin bot có số TỔNG ≠ tổng giỏ / nháp máy chủ ngay trước: ${B.msgs} tin / ${B.convs.size} hội thoại · số TỔNG khi chưa có giỏ / nháp nào ${B.noQuote} tin`);
   tomTat(`D câu mẫu nói về món KHÁC món khách đang hỏi: ${D.msgs} tin / ${D.convs.size} hội thoại · kèm ảnh ${D.images} tin · ${D.byTitle.size} câu mẫu khác nhau · ${tpls.length} câu mẫu · ${products.length} sản phẩm`);
+  tomTat(`D nguồn: chỉ so câu mẫu ĐANG BẬT (${tpls.length}/${rowsQr.length}) · tin THEO DÕI (model) không đem so ${D.followupSkipped} tin`);
   tomTat(`D mẫu số: tin khách ${N.customer} · câu mẫu được xét (khớp chữ có ứng viên, trần trên) ${N.eligible} · tin bot là câu mẫu ${N.sends} · luật món đổi quyết định ${N.changed} · khớp trần sẽ sai món ${N.wrongBefore} · sau luật vẫn sai ${N.wrongAfter} (câu mẫu đang bật ${active.length})`);
   const cvq = schema.salesChatConversations;
   const [closed] = await db.select({ n: sql<number>`count(*)::int` }).from(cvq).where(sql`${cvq.state}->'quickGuardClosed'->>'at' >= ${from.toISOString()}`);
