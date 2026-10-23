@@ -3,7 +3,7 @@
   "mission_id": "od-ux-05-summary-nojit",
   "title": "OD-UX-05 mục 1: /orders và /shipments tắt JIT cho dải số tổng",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-nojit",
@@ -22,7 +22,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T17:41:18.153Z",
-  "updated_at": "2026-10-23T17:41:18.153Z",
-  "last_heartbeat": "2026-10-23T17:41:18.153Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T17:52:28.062Z",
+  "last_heartbeat": "2026-10-23T17:52:28.062Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/od-ux-05-summary-nojit",
+    "sha": "e857482c72398bc315b838372a6f09e4d054986a",
+    "at": "2026-10-23T17:52:28.062Z",
+    "actor": "DESKTOP-56TH98Y:wt-nojit",
+    "title": "/orders và /shipments: dải số tổng tắt JIT — 98–99 % thời gian của hai câu là Postgres biên dịch JIT",
+    "summary": "OD-UX-05 mục 1. orderSummaryUncached (2 câu, một giao dịch, chỉ tx) và shipmentSummaryUncached chạy trong chayKhongJit; không đổi SQL. Căn cứ: perf-probe 23/10 ghi «ngoài chayKhongJit»; EXPLAIN xen kẽ orderSummary 10.907 ↔ 168,6 ms, shipmentSummary 5.382 ↔ 59,6 ms; smoke /orders 8,9 s. Các hàm cùng khối 4–185 ms ⇒ không bọc. Chốt mã nguồn: thêm 2 dòng vào bảng của tests/trang-cham-jit.test.ts. Đích sau deploy: nguội < 500 ms trung vị · smoke /orders < 2 s.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint 3 tệp: sạch",
+      "TEST_KHOI=K01,K06,K15,K16 npm test: ĐẠT (consistency · multi-attempt-money · test-hygiene · trang-cham-jit 33 hàm)"
+    ]
+  }
 }
