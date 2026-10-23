@@ -18,12 +18,12 @@ import { upsertOrder } from "@/lib/integrations/pancake/sync";
 
 export function testPosReshipLink() {
   // Đối số: chạy thử mặc định; ghi thì PHẢI có --limit.
-  assert.deepEqual(parseReshipArgs([]), { apply: false, limit: 20, pilot: false, order: null, rollback: false, peek: false });
+  assert.deepEqual(parseReshipArgs([]), { apply: false, limit: 20, pilot: false, order: null, rollback: false, peek: false, orders: [] });
   assert.deepEqual(parseReshipArgs(["--apply"]), { error: "--apply bắt buộc kèm --limit=N (pilot: --limit=1)" }, "không bao giờ ghi hàng loạt vì quên một cờ");
-  assert.deepEqual(parseReshipArgs(["--apply", "--limit=1", "--pilot"]), { apply: true, limit: 1, pilot: true, order: null, rollback: false, peek: false });
-  assert.deepEqual(parseReshipArgs(["--peek", "--order=6457"]), { apply: false, limit: 20, pilot: false, order: "6457", rollback: false, peek: true });
+  assert.deepEqual(parseReshipArgs(["--apply", "--limit=1", "--pilot"]), { apply: true, limit: 1, pilot: true, order: null, rollback: false, peek: false, orders: [] });
+  assert.deepEqual(parseReshipArgs(["--peek", "--order=6457"]), { apply: false, limit: 20, pilot: false, order: "6457", rollback: false, peek: true, orders: [] });
   assert.ok("error" in parseReshipArgs(["--peek"]) && "error" in parseReshipArgs(["--peek", "--order=1", "--apply", "--limit=1"]) && "error" in parseReshipArgs(["--peek", "--order=1", "--rollback"]), "xem chỉ đọc, một đơn, không đi cùng ghi");
-  assert.deepEqual(parseReshipArgs(["--rollback", "--order=1234567"]), { apply: false, limit: 20, pilot: false, order: "1234567", rollback: true, peek: false });
+  assert.deepEqual(parseReshipArgs(["--rollback", "--order=1234567"]), { apply: false, limit: 20, pilot: false, order: "1234567", rollback: true, peek: false, orders: [] });
   assert.ok("error" in parseReshipArgs(["--rollback"]), "gỡ bắt buộc chỉ đích danh MỘT đơn");
   assert.ok("error" in parseReshipArgs(["--rollback", "--order=1", "--apply", "--limit=1"]) && "error" in parseReshipArgs(["--rollback", "--order=1", "--pilot"]), "gỡ không đi cùng ghi hàng loạt");
   assert.ok("error" in parseReshipArgs(["--limit=0"]) && "error" in parseReshipArgs(["--limit=1001"]) && "error" in parseReshipArgs(["--limit=abc"]));
@@ -64,12 +64,21 @@ export function testPosReshipLink() {
   // Vân tay (--peek): khối khách chỉ băm, không bao giờ in giá trị; số của items in được; đổi một khoá ⇒ đúng một đường dẫn đổi băm.
   const don = { customer: { name: "Nguyễn Văn A", phone_number: "0901234567", order_count: 3 }, items: [{ quantity: 1, variation_info: { retail_price: 499000, name: "Chả cá" } }], warehouse_info: { id: "w1" }, partner: { order_number_vtp: OLD } };
   const f1 = fingerprintOrder(don);
-  assert.ok(f1.every((f) => !f.path.startsWith("customer.") || f.v === null), "customer: không in giá trị nào, kể cả số");
+  assert.ok(f1.every((f) => !f.path.startsWith("customer.") || f.path === "customer.order_count" || f.v === null), "customer: chữ / số thường chỉ băm");
+  assert.equal(f1.find((f) => f.path === "customer.order_count")?.v, "3", "số mang tên khoá đếm được lộ");
+  // Sổ địa chỉ khách: đi tới khoá con; mốc / boolean / đếm lộ, SĐT / địa chỉ / tên KHÔNG bao giờ.
+  const so = fingerprintOrder({ customer: { shop_customer_addresses: [{ full_name: "Trần Thị B", phone_number: "0912345678", full_address: "12 Ngõ 5, Hà Nội", is_default: true, updated_at: "2026-10-23T10:00:00", order_count: 2, district_id: 101 }] } });
+  const sv = (k: string) => so.find((f) => f.path === `customer.shop_customer_addresses[0].${k}`);
+  assert.deepEqual([sv("updated_at")?.v, sv("is_default")?.v, sv("order_count")?.v], ["2026-10-23T10:00:00", "true", "2"]);
+  assert.deepEqual([sv("full_name")?.v, sv("phone_number")?.v, sv("full_address")?.v, sv("district_id")?.v], [null, null, null, null], "chữ và số không mang tên đếm ⇒ chỉ băm");
+  assert.ok(!JSON.stringify(so).includes("0912345678") && !JSON.stringify(so).includes("Trần") && !JSON.stringify(so).includes("Ngõ"), "không lộ SĐT / tên / địa chỉ");
+  assert.deepEqual((parseReshipArgs(["--peek", "--orders=1,2,2"]) as { orders: string[] }).orders, ["1", "2"]);
+  assert.ok("error" in parseReshipArgs(["--orders=1"]) && "error" in parseReshipArgs(["--peek", `--orders=${Array.from({ length: 16 }, (_, i) => i + 1).join(",")}`]), "--orders chỉ với --peek, tối đa 15");
   assert.ok(!JSON.stringify(f1).includes("0901234567") && !JSON.stringify(f1).includes("Nguyễn"), "không lộ tên / SĐT");
   assert.equal(f1.find((f) => f.path === "items[0].variation_info.retail_price")?.v, "499000");
   const f2 = fingerprintOrder({ ...don, customer: { ...don.customer, order_count: 4 } });
   assert.deepEqual(f1.filter((x, i) => x.h !== f2[i].h).map((x) => x.path), ["customer.order_count"], "so hai lần đọc ⇒ đúng khoá con đổi");
-  assert.deepEqual(fingerprintDiff(f1, f2), [{ path: "customer.order_count", before: null, after: null }], "diff: đường dẫn đổi, khách chỉ tên khoá");
+  assert.deepEqual(fingerprintDiff(f1, f2), [{ path: "customer.order_count", before: "3", after: "4" }], "diff: đường dẫn đổi; khoá đếm của khách lộ số, chữ thì không");
   const f3 = fingerprintOrder({ ...don, items: [{ ...don.items[0], quantity: 2 }] });
   assert.deepEqual(fingerprintDiff(f1, f3), [{ path: "items[0].quantity", before: "1", after: "2" }], "diff: số của dòng hàng in trước → sau");
   // So tiền POS ↔ ERP.
