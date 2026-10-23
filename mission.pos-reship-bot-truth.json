@@ -3,7 +3,7 @@
   "mission_id": "pos-reship-bot-truth",
   "title": "Bot nhà nói đúng chặng vận đơn theo chứng từ VTP (cửa nội bộ bot→ERP) + sync giữ partner_status + audit diff/rào dừng",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-truth",
@@ -33,7 +33,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T18:20:23.325Z",
-  "updated_at": "2026-10-23T18:20:23.325Z",
-  "last_heartbeat": "2026-10-23T18:20:23.325Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T18:20:57.901Z",
+  "last_heartbeat": "2026-10-23T18:20:57.901Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/pos-reship-bot-truth",
+    "sha": "b8dec8ae5eecd05c17cf690f5efc6d5c09778893",
+    "at": "2026-10-23T18:20:57.901Z",
+    "actor": "DESKTOP-56TH98Y:wt-truth",
+    "title": "Bot nhà nói đúng chặng vận đơn theo chứng từ VTP (cửa nội bộ bot→ERP) + sync giữ partner_status + audit diff/rào dừng",
+    "summary": "HIGH: route nội bộ /api/internal/shipment-state (khoá header, ≤20, chỉ chứng từ VTP, không tiền/PII) + bot nói theo ERP (order-view.js thuần) + sync giữ partner_status + audit diff/dừng. Deploy ERP + container bot cùng lượt, sau 19:30Z",
+    "tests": [
+      "tsc --noEmit sạch · eslint sạch · TEST_KHOI=K10,K17,K22 «TẤT CẢ KIỂM THỬ CỦA chỉ K10,K17,K22 ĐẠT» (shipment-state-api mới, pos-reship-link, platform-isolation-static, platform-modules, chatbot, chat-widget, forgot-password) · đột biến 5/5 bị bắt · full suite giao CI gates"
+    ]
+  }
 }
