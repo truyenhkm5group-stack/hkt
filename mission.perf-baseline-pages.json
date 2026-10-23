@@ -3,7 +3,7 @@
   "mission_id": "perf-baseline-pages",
   "title": "perf-probe đo /orders và /shipments (số nền hiệu năng Phase 3)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-perf-base",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T06:13:38.364Z",
-  "updated_at": "2026-10-23T06:16:27.822Z",
+  "updated_at": "2026-10-23T06:36:48.109Z",
   "last_heartbeat": "2026-10-23T06:14:39.246Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#993 → e577f86a6fac3a7ca605e962f5650f330b14d5a3"
+  },
   "handoff": {
     "branch": "claude/perf-baseline-pages",
     "sha": "a09c6c39547b667fced411b77def7d0db903fb14",
