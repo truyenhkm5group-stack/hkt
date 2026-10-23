@@ -3,7 +3,7 @@
   "mission_id": "src-1-module-shell",
   "title": "SRC-1: khung module Tìm hàng nguồn (module theo tổ chức, quyền, trần AI, tham số giá về)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -26,9 +26,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T11:30:59.223Z",
-  "updated_at": "2026-10-23T11:33:49.427Z",
+  "updated_at": "2026-10-23T11:56:42.130Z",
   "last_heartbeat": "2026-10-23T11:31:44.543Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1000 → eda7121e5299e366f0be0bc74ca53f079353305a"
+  },
   "handoff": {
     "branch": "claude/src-1-module-shell",
     "sha": "134e923c79261bbf10e8690688f17cdf86bb9978",
