@@ -1,0 +1,8 @@
+{
+  "pr": 993,
+  "sha": "a09c6c39547b667fced411b77def7d0db903fb14",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T06:16:32.805Z",
+  "note": "review lead: CHỈ-SCRIPT. perf-probe thêm /orders (listOrders · orderFacets · orderSummary · orderNeedsReviewCount) và danh sách /shipments (listShipments · shipmentFacets · shipmentSummary), tham số = parseListParams của page.tsx (bài kiểm so từng chữ, đột biến bị bắt). Là số nền Phase 3."
+}
