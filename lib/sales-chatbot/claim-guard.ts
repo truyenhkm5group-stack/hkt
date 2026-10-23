@@ -117,6 +117,7 @@ export type ClaimKind = "PAYMENT_RECEIVED" | "ORDER_CONFIRMED" | "ORDER_CANCELLE
 /**
  * `orderEditedThisTurn` (HOTFIX 12/10/2026) = công cụ lên / sửa đơn ĐÃ GHI THÀNH CÔNG trong CHÍNH lượt này (`state.draft.shownTurn` = lượt) —
  * căn cứ duy nhất cho câu «em đã đổi địa chỉ / đã thêm món vào đơn». Vắng ⇒ không có căn cứ.
+ * `orderOnFile` = hội thoại đã có đơn (bot đã chốt, hoặc đơn nháp đã có mã) ⇒ câu «đã sửa» trần (`bareEditClaimIn`) là nói về ĐƠN đó.
  */
 /**
  * `totals` (P0 14/10/2026, ca «Châu Dương» — bot báo TỔNG 640.000 ₫ cho 1kg 280.000 ₫): số TỔNG của REVISION giỏ / nháp / đơn chốt
@@ -137,7 +138,7 @@ export type ServerTotal = { total: number; shipping: number | null | "UNKNOWN" }
  * → bội số giá của nó (câu «nem 120k một hộp, 2 hộp 240k» gọi tên món thì được nói bội số của CHÍNH món đó); `shipFee` / `freeShipFrom` =
  * phí ship cố định và ngưỡng miễn ship của cấu hình (được nói cạnh chữ thanh toán).
  */
-export type ClaimFacts = { paymentVerified: boolean; orderConfirmed: boolean; orderCancelled: boolean; orderPending?: "ADDRESS" | "CHECK" | null; allowedAmounts?: ReadonlySet<number>; orderEditedThisTurn?: boolean; totals?: ClaimTotals; suspicious?: ReadonlySet<number>; unitPrices?: ReadonlySet<number>; seen?: ReadonlySet<number>; namedAmounts?: ReadonlyMap<string, ReadonlySet<number>>; shipFee?: number | null; freeShipFrom?: number | null; rejected?: ReadonlySet<number> };
+export type ClaimFacts = { paymentVerified: boolean; orderConfirmed: boolean; orderCancelled: boolean; orderPending?: "ADDRESS" | "CHECK" | null; allowedAmounts?: ReadonlySet<number>; orderEditedThisTurn?: boolean; orderOnFile?: boolean; totals?: ClaimTotals; suspicious?: ReadonlySet<number>; unitPrices?: ReadonlySet<number>; seen?: ReadonlySet<number>; namedAmounts?: ReadonlyMap<string, ReadonlySet<number>>; shipFee?: number | null; freeShipFrom?: number | null; rejected?: ReadonlySet<number> };
 /** `handoff = false` ⇒ thay câu nhưng KHÔNG chuyển người (câu an toàn vẫn gửi trên mọi kênh). */
 export type ClaimVerdict = { ok: true } | { ok: false; claim: ClaimKind; safeText: string; handoffReason: string; note: string; handoff: boolean; amounts?: number[] };
 
@@ -283,6 +284,31 @@ export function detectClaims(text: string): ClaimKind[] {
   }
   for (const c of clausesOf(text)) if (refundPromiseIn(c)) found.add("REFUND_PROMISE");
   return [...found];
+}
+
+/**
+ * Câu «đã sửa» TRẦN — không gọi tên đơn, món hay ô nào (sự cố 19/10/2026, review vòng 3 của upsell-after-confirm): lượt sửa đơn ĐÃ CHỐT
+ * bị máy chủ từ chối mà model vẫn viết «Dạ em thêm rồi ạ», và câu đó lọt qua vì mọi luật ORDER_EDITED ở trên đòi một tân ngữ («vào đơn»,
+ * «địa chỉ», «ghi chú»). Chủ ngữ là shop («em / shop / bên em») hoặc có «đã / vừa» ngay trước động từ, và mệnh đề có dấu đã xong.
+ * Cụm này KHÔNG đi vào `detectClaims`: trước khi có đơn, «em thêm 1 hộp nem rồi ạ» là nói về GIỎ (calculate_cart không phải lượt ghi),
+ * nên chỉ `claimVerdict` mới biết nó có phải lời khẳng định về đơn không (`facts.orderOnFile`). Đọc trên chữ CÓ DẤU: bỏ dấu thì «đợi»
+ * trùng «đổi» và «sữa» trùng «sửa» («mình đã đợi lâu rồi ạ» không phải lời khẳng định gì). HÀM THUẦN.
+ */
+// Không chủ ngữ thì «đã / vừa» phải đứng ĐẦU mệnh đề («Dạ đã thêm rồi ạ») — «em hiểu là chị đã đổi ý rồi» là việc của khách.
+const BARE_EDIT_SUBJECT_RE = /(^|[^\p{L}\d])(?:em|shop|bên em|bên shop)\s+(?:đã\s+|vừa\s+)?(?:thêm|sửa|đổi|cập nhật)(?![\p{L}\d])/u;
+const BARE_EDIT_LEAD_RE = /^()(?:(?:dạ|vâng)\s+)*(?:đã|vừa)\s+(?:thêm|sửa|đổi|cập nhật)(?![\p{L}\d])/u;
+
+export function bareEditClaimIn(text: string): boolean {
+  for (const m of text.normalize("NFC").matchAll(/[^.!?…;:\n,]+[.!?…;:\n,]*/g)) {
+    const clause = m[0].trim().toLowerCase();
+    const folded = foldClaim(clause);
+    if (!folded || /\?/.test(clause) || QUESTION_TAIL_RE.test(folded)) continue;
+    const e = BARE_EDIT_SUBJECT_RE.exec(clause) ?? BARE_EDIT_LEAD_RE.exec(clause);
+    if (!e) continue;
+    if (foldVi(clause.slice(0, e.index + e[1].length)).trim().split(/\s+/).filter(Boolean).slice(-3).some((w) => BLOCKERS.has(w))) continue;
+    if (DONE_RE.test(folded)) return true;
+  }
+  return false;
 }
 
 // ═══ SỐ TIỀN TRONG CHỮ BOT (P0 authoritative-quote 11/10/2026) ═══
@@ -540,7 +566,7 @@ export function claimVerdict(claims: readonly ClaimKind[], facts: ClaimFacts, am
   if (claims.includes("REFUND_PROMISE")) {
     return { ok: false, claim: "REFUND_PROMISE", safeText: CLAIM_SAFE_TEXT.REFUND, handoffReason: CLAIM_HANDOFF_REASON.REFUND_PROMISE, note: "Đã chặn câu AI hứa hoàn tiền / đổi hàng / gửi bù", handoff: true };
   }
-  if (claims.includes("ORDER_EDITED") && !facts.orderEditedThisTurn) {
+  if ((claims.includes("ORDER_EDITED") || (facts.orderOnFile && bareEditClaimIn(text))) && !facts.orderEditedThisTurn) {
     return { ok: false, claim: "ORDER_EDITED", safeText: CLAIM_SAFE_TEXT.ORDER_EDIT, handoffReason: CLAIM_HANDOFF_REASON.ORDER_EDITED, note: "Đã chặn câu AI khẳng định đã sửa đơn — không công cụ nào ghi trong lượt", handoff: true };
   }
   // TỔNG phải là tổng của REVISION giỏ / nháp hiện tại (P0 14/10/2026). CHỈ khi câu nói về ĐƠN («đơn của mình… tổng …» — `aboutOrder`) mới
@@ -606,8 +632,8 @@ export function guardClaims(text: string, facts: ClaimFacts): ClaimVerdict {
 export async function guardOutgoing(text: string, facts: () => Promise<ClaimFacts>): Promise<ClaimVerdict> {
   const claims = detectClaims(text);
   const amounts = extractVndAmounts(text);
-  if (!claims.length && !amounts.length) return { ok: true };
-  const f = await facts().catch((): ClaimFacts => ({ paymentVerified: false, orderConfirmed: false, orderCancelled: false, allowedAmounts: new Set([0]), orderEditedThisTurn: false }));
+  if (!claims.length && !amounts.length && !bareEditClaimIn(text)) return { ok: true };
+  const f = await facts().catch((): ClaimFacts => ({ paymentVerified: false, orderConfirmed: false, orderCancelled: false, allowedAmounts: new Set([0]), orderEditedThisTurn: false, orderOnFile: true }));
   return claimVerdict(claims, f, amounts, totalClaimsIn(text), talksAboutOrder(text), totalMentionsIn(text), text);
 }
 
@@ -714,7 +740,8 @@ export function claimFactsLoader(conv: ClaimConversation, opts: { reference?: ()
     const totals = totalAllowedOf(state, { turnAt: opts.turnAt });
     const suspicious = totals ? suspiciousTotalsOf(state, totals, breakdown) : undefined;
     const extra = breakdown ? { unitPrices: breakdown.unit, namedAmounts: namedAmountsOf(breakdown), shipFee: breakdown.shippingFee ?? null, freeShipFrom: breakdown.freeShipFrom ?? null } : {};
-    return { paymentVerified: liveOrders.some((o) => r.paidOrderIds.has(o.id)), orderConfirmed, orderPending, orderCancelled: Boolean(state.cancelledOrders?.length), allowedAmounts: allowed, orderEditedThisTurn, ...(totals ? { totals } : {}), ...(suspicious ? { suspicious } : {}), seen: new Set(state.seenTotals ?? []), ...(state.rejectedTotals?.length ? { rejected: new Set(state.rejectedTotals) } : {}), ...extra };
+    const orderOnFile = Boolean(state.confirmed || state.draft?.orderId);
+    return { paymentVerified: liveOrders.some((o) => r.paidOrderIds.has(o.id)), orderConfirmed, orderPending, orderCancelled: Boolean(state.cancelledOrders?.length), allowedAmounts: allowed, orderEditedThisTurn, orderOnFile, ...(totals ? { totals } : {}), ...(suspicious ? { suspicious } : {}), seen: new Set(state.seenTotals ?? []), ...(state.rejectedTotals?.length ? { rejected: new Set(state.rejectedTotals) } : {}), ...extra };
   };
 }
 
