@@ -1,8 +1,8 @@
 {
   "pr": 996,
-  "sha": "f70565f5a7ae4b5ebef451aa8df24701ec094bec",
+  "sha": "ef0f54f5d66d395b5fd95c010ddb50be12ce8994",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-23T09:25:07.585Z",
-  "note": "review lead: chỉ gộp main (xung đột ops-vps.yml giải = dòng main + purchasing-leadtime-probe, không rơi pos-reship-link); script không đổi."
+  "at": "2026-10-23T10:45:15.918Z",
+  "note": "review lead: tomTat qua splitSummaryLine chung (tiền tố đúng), bỏ cắt theo ký tự; khai bài kiểm vào DOC_MOI_TRUONG_DA_KHAI (quét mã nguồn). Script không đổi logic đo."
 }
