@@ -184,8 +184,9 @@ export async function testTxSequential(db: Db) {
   assert.deepEqual(await chayKhongJit(db, (tx) => theoClient(tx, [() => Promise.resolve(1), Promise.resolve(2)])), [1, 2], "theoClient giữ đúng thứ tự");
 
   // ───────── theoClient · CẢ HAI NHÁNH, đo bằng số việc chạy CÙNG LÚC (không tin tên lớp) ─────────
-  // Phân biệt bằng `instanceof PgTransaction` (danh tính lớp của drizzle, không phải chuỗi tên). Nâng drizzle mà
-  // lớp đổi thì hai khẳng định dưới đỏ ngay: giao dịch thật phải ra 1 việc cùng lúc, bể phải ra > 1.
+  // Phân biệt bằng HÀNH VI (client giao dịch có `rollback()`), không bằng `instanceof`: bản đầu dùng `instanceof
+  // PgTransaction` và CHÍNH bài này đỏ trên PGlite (hai bản module drizzle). Nâng drizzle mà API đổi thì hai khẳng
+  // định dưới đỏ ngay: giao dịch thật phải ra 1 việc cùng lúc, bể phải ra > 1.
   const docDongThoi = async (client: Db) => {
     let dang = 0;
     let dinh = 0;

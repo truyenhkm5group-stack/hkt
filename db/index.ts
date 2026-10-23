@@ -1,7 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { sql as sqlRaw } from "drizzle-orm";
 import { drizzle as drizzlePg, type NodePgDatabase } from "drizzle-orm/node-postgres";
-import { PgTransaction } from "drizzle-orm/pg-core";
 import { Pool } from "pg";
 import { probeActive, recordQuery } from "@/lib/perf/probe";
 import { currentOrganization } from "@/lib/platform/context";
@@ -676,9 +675,17 @@ export async function chayKhongJit<T>(db: Db, fn: (tx: Db) => Promise<T>): Promi
   }
 }
 
-/** `db` có phải client của MỘT giao dịch không (`chayKhongJit`, `db.transaction`). */
+/**
+ * `db` có phải client của MỘT giao dịch không (`chayKhongJit`, `db.transaction`).
+ *
+ * KHÔNG dùng `instanceof PgTransaction`: đo trên bộ kiểm thử 24/10/2026, client của `db.transaction` trên PGlite
+ * trả `false`. Nguyên nhân là tệp này import `drizzle-orm/pg-core` tĩnh còn nạp `drizzle-orm/pglite` bằng
+ * `import()` động, nên hai bản module có hai lớp `PgTransaction` khác nhau. Chạy riêng thì ra `true`. Đánh
+ * giá theo HÀNH VI của API công khai: client giao dịch của drizzle có `rollback()`, handle của bể thì không,
+ * ở mọi driver và mọi bản module. `tests/tx-sequential.test.ts` đo cả hai nhánh bằng số việc chạy cùng lúc.
+ */
 export function laGiaoDich(db: Db): boolean {
-  return db instanceof PgTransaction;
+  return typeof (db as unknown as { rollback?: unknown }).rollback === "function";
 }
 
 type ViecDoc = PromiseLike<unknown> | (() => PromiseLike<unknown>);
