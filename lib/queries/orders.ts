@@ -5,6 +5,7 @@ import { and, asc, count, desc, eq, exists, gte, ilike, inArray, lte, or, sql, t
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
+import { handedOffShipmentIds, withHandoff } from "@/lib/queries/shipment-handoff";
 import { liveLineUnitCost, liveOrderCogs } from "@/lib/constants/live-cogs";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { manualPaymentStates } from "@/lib/queries/order-payments";
@@ -155,6 +156,8 @@ export async function listOrders(params: ListParams) {
   */
   const payStates = await manualPaymentStates(rowsRaw);
   const [chats, inboxOn] = await Promise.all([orderChatThreads(rowsRaw.filter((r) => isManualOrderId(r.id)).map((r) => r.id)), salesInboxEnabled()]);
+  // Chứng từ bàn giao của từng lần gửi — để lần gửi đại diện khớp TỪNG BẬC với PRIMARY_ATTEMPT (vtp-reship-outcome 22/10/2026).
+  const handed = await handedOffShipmentIds(db, rowsRaw.flatMap((r) => r.attempts.map((a) => a.id)));
   const rows = rowsRaw.map((r) => {
     const c = r.customer;
     const risk = c ? assessCustomerRisk({ succeed: c.succeedOrderCount ?? 0, returned: c.returnedOrderCount ?? 0, isBlock: Boolean(c.isBlock) }, riskCfg) : null;
@@ -167,7 +170,7 @@ export async function listOrders(params: ListParams) {
     const chat = chatLinkOf(chats.get(r.id), inboxOn, { pageId: r.pageId, conversationId: r.conversationId });
     // Chỗ còn thiếu của đơn tay — nút nhanh «Xác nhận đơn» không chốt đơn thiếu xã / SĐT / địa chỉ, dẫn sang sửa đơn (review #675, L2).
     const gaps = isManualOrderId(r.id) ? manualOrderGaps({ phone: r.shipPhone, address: r.shipAddress, province: r.shipProvince, ward: r.shipCommune }, r.itemsCount) : [];
-    return { ...r, review: reviewFromValue(r.review)?.entries ?? [], gaps, shipment: vanDonDaiDien(r.attempts), risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null, payment: payStates.get(r.id) ?? null, noCodPayment: noCodPaymentState(r), chatUrl: chat?.href ?? null, chatInternal: chat?.internal ?? false };
+    return { ...r, review: reviewFromValue(r.review)?.entries ?? [], gaps, shipment: vanDonDaiDien(withHandoff(r.attempts, handed)), risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null, payment: payStates.get(r.id) ?? null, noCodPayment: noCodPaymentState(r), chatUrl: chat?.href ?? null, chatInternal: chat?.internal ?? false };
   });
 
   return { rows, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };

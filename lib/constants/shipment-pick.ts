@@ -44,8 +44,12 @@ export type VanDonUngVien = {
   createdAt: Date | null;
 };
 
-/** Thêm hai trường mà luật CHỌN LẦN GỬI ĐẠI DIỆN cần — `PRIMARY_ATTEMPT` đọc đúng bấy nhiêu. */
-export type VanDonDaiDienUngVien = VanDonUngVien & { id: string; stage: string | null };
+/**
+ * Thêm các trường mà luật CHỌN LẦN GỬI ĐẠI DIỆN cần — `PRIMARY_ATTEMPT` đọc đúng bấy nhiêu.
+ * `handedOff` = đã có CHỨNG TỪ BÀN GIAO cho ĐVVC (luật 41 — `CARRIER_HANDOFF_KNOWN_SQL`), nạp bằng `handedOffShipmentIds`
+ * (lib/queries/shipment-handoff.ts). KHÔNG suy từ `stage`: Pancake cũng ghi cột đó. Thiếu (`undefined`) ⇒ coi như chưa bàn giao.
+ */
+export type VanDonDaiDienUngVien = VanDonUngVien & { id: string; stage: string | null; handedOff?: boolean };
 
 export type TinPancake = {
   vtpOrderNumber: string | null;
@@ -125,7 +129,7 @@ export function chonVanDonDeGhep<T extends VanDonUngVien>(rows: readonly T[], ti
  * Và nó phải khớp TỪNG BẬC với `PRIMARY_ATTEMPT` trong `lib/queries/return-rate.ts` — điều kiện
  * nối mà MỌI báo cáo tiền đang dùng:
  *
- *     order by (sh.stage = 'DELIVERED') desc, sh.attempt_no desc nulls last, sh.created_at desc, sh.id
+ *     order by (sh.stage = 'DELIVERED') desc, (bàn giao ∧ không huỷ) desc, sh.attempt_no desc nulls last, sh.created_at desc, sh.id
  *
  * Lệch một bậc là màn hình danh sách in mã vận đơn của lần gửi này trong khi cột tiền ngay cạnh
  * tính theo lần gửi kia — cùng lớp bẫy với AGENTS.md mục 41, nơi SQL và TypeScript lặng lẽ nói hai
@@ -140,6 +144,10 @@ export function vanDonDaiDien<T extends VanDonDaiDienUngVien>(rows: readonly T[]
   return [...diTiep].sort((a, b) => {
     const giao = Number(b.stage === "DELIVERED") - Number(a.stage === "DELIVERED");
     if (giao !== 0) return giao;
+    // LẦN GỬI CÒN SỐNG (vtp-reship-outcome 22/10/2026): có chứng từ bàn giao VÀ chưa huỷ — cùng vế `ATTEMPT_ALIVE_SH` của SQL.
+    const song = (r: T) => Number(r.handedOff === true && r.stage !== "CANCELLED");
+    const conSong = song(b) - song(a);
+    if (conSong !== 0) return conSong;
     const lan = (b.attemptNo ?? 0) - (a.attemptNo ?? 0);
     if (lan !== 0) return lan;
     const moc = (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0);

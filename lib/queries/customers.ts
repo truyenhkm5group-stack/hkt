@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, lte, notInAr
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
+import { handedOffShipmentIds, withHandoff } from "@/lib/queries/shipment-handoff";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
 import { OPEN_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
@@ -376,11 +377,12 @@ export async function getCustomerDetail(id: string) {
     pancake: { orders: customer.orderCount, succeed: customer.succeedOrderCount, returned: customer.returnedOrderCount, amount: customer.purchasedAmount },
   };
 
+  const handed = await handedOffShipmentIds(db, orders.flatMap((d) => d.attempts.map((a) => a.id)));
   return {
     ...customer,
     stats,
     // Một đơn có thể nhiều lần gửi — chọn lần ĐẠI DIỆN bằng đúng luật `PRIMARY_ATTEMPT` mà cột tiền dùng.
-    orders: orders.map((d) => ({ ...d, shipment: vanDonDaiDien(d.attempts), noCodPayment: noCodPaymentState(d) })),
+    orders: orders.map((d) => ({ ...d, shipment: vanDonDaiDien(withHandoff(d.attempts, handed)), noCodPayment: noCodPaymentState(d) })),
     topProducts: topProducts.map((p) => ({ ...p, quantity: Number(p.quantity ?? 0), revenue: Number(p.revenue ?? 0), orders: Number(p.orders ?? 0), lastAt: toDate(p.lastAt) })),
   };
 }

@@ -2,6 +2,7 @@ import { asc, desc } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { getDb, schema } from "@/db";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
+import { handedOffShipmentIds, withHandoff } from "@/lib/queries/shipment-handoff";
 import { apiGuard } from "@/lib/auth/api-guard";
 import { can } from "@/lib/auth/session";
 import { ORDER_STAGE_LABEL } from "@/lib/constants/pancake";
@@ -38,13 +39,14 @@ export async function GET(request: NextRequest) {
   });
   const header = ["Mã đơn", "Ngày tạo", "Trạng thái", "Kênh", "Khách hàng", "SĐT", "Địa chỉ", "Tỉnh/TP", "Sản phẩm", "Số lượng", "Tiền hàng", "Giảm giá", "Tổng đơn", "COD", "Giá vốn", "Phí ship khách trả", "Phí ĐVVC", "ĐVVC", "Mã vận đơn", "Trạng thái vận đơn", "Trạng thái COD", "Nhân viên", "Ghi chú", "Thẻ"];
   const lines = [header.map(csvCell).join(",")];
+  const handed = await handedOffShipmentIds(db, rows.flatMap((r) => r.attempts.map((a) => a.id)));
   for (const r of rows) {
     /*
       MỘT ĐƠN CÓ THỂ NHIỀU LẦN GỬI — cột "Mã vận đơn" của tệp xuất phải là lần gửi ĐẠI DIỆN, cùng
       luật với `PRIMARY_ATTEMPT` mà mọi báo cáo tiền dùng. Trước đây quan hệ `one(...)` trả về một
       dòng bất kỳ, nên tệp xuất có thể đưa cho khách mã của lần gửi đã đóng.
     */
-    const o = { ...r, shipment: vanDonDaiDien(r.attempts) };
+    const o = { ...r, shipment: vanDonDaiDien(withHandoff(r.attempts, handed)) };
     lines.push(
       [
         o.systemId ?? o.id,

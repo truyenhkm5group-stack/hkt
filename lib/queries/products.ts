@@ -3,6 +3,7 @@ import { and, asc, count, desc, eq, exists, gte, ilike, inArray, notInArray, or,
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
+import { handedOffShipmentIds, withHandoff } from "@/lib/queries/shipment-handoff";
 import { toDate } from "@/lib/format";
 import { getProductStockPlan, isPlanRowActive } from "@/lib/queries/planning";
 import { ORDER_LEFT_WAREHOUSE, ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
@@ -45,7 +46,9 @@ const ERP_STOCK_SUB = sql<number>`(
   coalesce((select sum(ri.quantity) from stock_receipt_items ri where ri.variant_id = ${pv.id}), 0)
   - coalesce((select sum(${schema.orderItems.quantity}) from ${schema.orderItems}
       join ${schema.orders} on ${schema.orders.id} = ${schema.orderItems.orderId}
-      left join ${schema.shipments} on ${schema.shipments.orderId} = ${schema.orders.id}
+      -- MỘT dòng vận đơn mỗi đơn (PRIMARY_ATTEMPT): nối mọi lần gửi từng trừ tồn HAI lần cho đơn gửi lại có hai lần cùng rời kho
+      -- (vtp-reship-outcome, 22/10/2026). «Đơn đã xuất» do ORDER_LEFT_WAREHOUSE quyết ở độ mịn ĐƠN.
+      left join ${schema.shipments} on ${schema.shipments.orderId} = ${schema.orders.id} and ${PRIMARY_ATTEMPT}
       where ${schema.orderItems.variantId} = ${pv.id}
         and ${ORDER_LEFT_WAREHOUSE}), 0)
 )`;
@@ -681,7 +684,8 @@ export async function getProductDetail(id: string) {
   };
 
   // Một đơn có thể nhiều lần gửi — chọn lần ĐẠI DIỆN bằng đúng luật `PRIMARY_ATTEMPT` mà cột tiền dùng.
-  return { ...product, variants, totals, planning: { assumptions: stockPlan.assumptions, used: stockPlan.used }, daily, receiptLog, recentOrders: recentOrders.map((d) => ({ ...d, shipment: vanDonDaiDien(d.attempts) })), warehouses };
+  const handed = await handedOffShipmentIds(db, recentOrders.flatMap((d) => d.attempts.map((a) => a.id)));
+  return { ...product, variants, totals, planning: { assumptions: stockPlan.assumptions, used: stockPlan.used }, daily, receiptLog, recentOrders: recentOrders.map((d) => ({ ...d, shipment: vanDonDaiDien(withHandoff(d.attempts, handed)) })), warehouses };
 }
 
 export type ProductDetail = NonNullable<Awaited<ReturnType<typeof getProductDetail>>>;
