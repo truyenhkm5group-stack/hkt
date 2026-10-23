@@ -244,6 +244,20 @@ async function memoFor<T>(org: { code: string; isHome: boolean }, baseKey: strin
   });
 }
 
+/**
+ * ĐỌC ĐỆM MÀ KHÔNG TÍNH (OD-UX-05 mục 2, 24/10/2026): mục còn hạn, hoặc đã cũ nhưng chưa quá `NGUONG_QUA_CU` — ĐÚNG luật
+ * `memo()` dùng để trả số cũ — thì trả `{ value }`; không có ⇒ `null`, và KHÔNG khởi động lượt tính nào. Dành cho nguồn mà
+ * đường trang không được tự tính (lượt tính 22 s giữ 3–4/5 kết nối của bể); job giữ ấm là đường tính duy nhất của chúng.
+ * Mốc của mục ghi vào `collectAsOf` như một lượt trúng đệm.
+ */
+export async function memoPeek<T>(key: string): Promise<{ value: T } | null> {
+  const org = await currentOrganization();
+  const hit = store.entries.get(memoStoreKey(org, key));
+  if (!hit || Date.now() - hit.expiresAt >= NGUONG_QUA_CU) return null;
+  noteAsOf(hit.at);
+  return { value: hit.value as T };
+}
+
 /** Hai giá trị đệm có khác nhau không — so bản JSON; không so được thì coi là đã đổi (an toàn hơn im lặng). */
 function daDoi(a: unknown, b: unknown): boolean {
   try {

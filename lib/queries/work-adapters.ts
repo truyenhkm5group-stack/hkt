@@ -33,7 +33,7 @@ import { SAMPLE_STATUS_TO_WORK, TOPIC_OPEN_STATUSES, TOPIC_STATUS_LABEL, TOPIC_S
 import { PAYROLL_EMPLOYEES_KEY } from "@/lib/constants/payroll";
 import { monthKeyOf } from "@/lib/constants/payroll-carryover";
 import { reconCenterDefaultRange, type ApprovalItem } from "@/lib/payroll/recon-center";
-import { memo } from "@/lib/cache";
+import { memo, memoPeek } from "@/lib/cache";
 import { approvalStillValid } from "@/lib/approvals/service";
 import { SOURCING_TRIAL_WORK_LABEL, type SourcingTrialWorkKind } from "@/lib/constants/sourcing";
 import { getSettingJson } from "@/lib/settings";
@@ -1194,17 +1194,46 @@ export function payrollReconWorkItems(approvals: readonly ApprovalItem[], period
  */
 const PAYROLL_RECON_WORK_TTL_MS = 15 * 60_000;
 
+/** Nhịp job giữ ấm tính lại nguồn này (`workWarmTasks`, lib/queries/warm.ts) — phải nhỏ hơn đệm 15 phút. */
+export const PAYROLL_RECON_WARM_EVERY_MINUTES = 12;
+
+const payrollReconKey = (fromMonth: string, toMonth: string) => `work:payroll-recon:${fromMonth}:${toMonth}`;
+
+/** Câu của nguồn khi đệm chưa có số — chứa «đang tính lại» để /work nói đúng là CHƯA BIẾT, không phải 0 việc. */
+export const PAYROLL_RECON_PENDING_TEXT = `đang tính lại (máy tính lại mỗi ${PAYROLL_RECON_WARM_EVERY_MINUTES} phút)`;
+
+/**
+ * TÍNH nguồn đối soát lương — CHỈ job giữ ấm (và bài kiểm / probe) gọi. Đường trang dùng `peekPayrollRecon`.
+ */
 export async function adaptPayrollRecon(now: Date): Promise<WorkItem[]> {
   // Tổ chức chưa khai bảng lương thì danh sách này chỉ là tiếng ồn (mọi mục đều «thiếu»).
   const nhanSu = await getSettingJson<{ list?: unknown[] }>(PAYROLL_EMPLOYEES_KEY, { list: [] });
   if (!Array.isArray(nhanSu?.list) || nhanSu.list.length === 0) return [];
   const { fromMonth, toMonth } = reconCenterDefaultRange(monthKeyOf(now));
-  const approvals = await memo(`work:payroll-recon:${fromMonth}:${toMonth}`, PAYROLL_RECON_WORK_TTL_MS, async () => {
+  const approvals = await memo(payrollReconKey(fromMonth, toMonth), PAYROLL_RECON_WORK_TTL_MS, async () => {
     // Nạp lười: bộ máy lương không vào đường nạp của `/work` cho tới khi nguồn này thật sự chạy.
     const { getReconCenter } = await import("@/lib/queries/payroll-recon-center");
     return (await getReconCenter(fromMonth, toMonth)).approvals;
   });
   return payrollReconWorkItems(approvals, vnStartOfDay(`${toMonth}-01`), now);
+}
+
+/**
+ * ĐƯỜNG TRANG của nguồn đối soát lương: CHỈ ĐỌC ĐỆM (OD-UX-05 mục 2, đo production 24/10/2026).
+ *
+ * getReconCenter nguội 22,5 s · 857 câu, trung bình giữ 3,1–3,7 / 5 kết nối của bể suốt lượt tính. Trước bản này, mỗi
+ * lượt mở /work lúc đệm nguội tự khởi động lượt tính ấy (hạn 2,5 s chỉ CẮT CHỜ, lượt tính chạy tiếp) — vừa làm chính nó
+ * chạm hạn, vừa giành bể của mọi nguồn khác, và vì 22,5 s > trần chờ chung 20 s của memo, người mở /work sau đó còn
+ * khởi động lượt THỨ HAI. Nay: có số trong đệm (kể cả cũ, cùng luật memo trả số cũ) thì dùng; không có thì nguồn báo
+ * «đang tính lại» NGAY (không chờ 2,5 s) — job giữ ấm là đường tính duy nhất.
+ */
+export async function peekPayrollRecon(now: Date): Promise<WorkItem[]> {
+  const nhanSu = await getSettingJson<{ list?: unknown[] }>(PAYROLL_EMPLOYEES_KEY, { list: [] });
+  if (!Array.isArray(nhanSu?.list) || nhanSu.list.length === 0) return [];
+  const { fromMonth, toMonth } = reconCenterDefaultRange(monthKeyOf(now));
+  const hit = await memoPeek<ApprovalItem[]>(payrollReconKey(fromMonth, toMonth));
+  if (!hit) throw new Error(PAYROLL_RECON_PENDING_TEXT);
+  return payrollReconWorkItems(hit.value, vnStartOfDay(`${toMonth}-01`), now);
 }
 
 /* ═══════════════════ 8 · VIỆC TAY & VIỆC ĐỊNH KỲ ═══════════════════ */
@@ -1409,7 +1438,7 @@ export async function collectWorkItems(opts: CollectOptions = {}): Promise<{ ite
     want("PRODUCTION_TOPIC") ? guard("PRODUCTION_TOPIC", () => adaptProductionTopics(now)) : [],
     want("SAMPLE_REVIEW") ? guard("SAMPLE_REVIEW", () => adaptSampleReviews(now)) : [],
     want("SOURCING_TRIAL") ? guard("SOURCING_TRIAL", () => adaptSourcingTrials(now)) : [],
-    want("PAYROLL_RECON") ? guard("PAYROLL_RECON", () => adaptPayrollRecon(now)) : [],
+    want("PAYROLL_RECON") ? guard("PAYROLL_RECON", () => peekPayrollRecon(now)) : [],
     want("MANUAL_TASK") || want("RECURRING_TASK") || want("WORKFLOW_TASK") ? guard("MANUAL_TASK", () => adaptOwnedWork(now, opts.includeClosed ?? false, closedSince)) : [],
   ]);
 

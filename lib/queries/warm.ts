@@ -10,7 +10,7 @@ import { getPurchasingReport } from "@/lib/queries/purchasing";
 import { loadReturnsPage, returnsPageParams } from "@/lib/queries/returns-report-page";
 import { getStockShortage } from "@/lib/queries/stock-shortage";
 import { getWorkConfig } from "@/lib/queries/work-config";
-import { adaptPayrollRecon } from "@/lib/queries/work-adapters";
+import { adaptPayrollRecon, PAYROLL_RECON_WARM_EVERY_MINUTES } from "@/lib/queries/work-adapters";
 import { resolvePeriod } from "@/lib/search-params";
 
 /**
@@ -200,7 +200,8 @@ export function workWarmTasks(): WarmTask[] {
       (PAYROLL_RECON_WORK_TTL_MS) ⇒ nhịp 12 phút giữ nó không bao giờ nguội mà không tính lại mỗi 4 phút trên máy
       2 nhân. Tổ chức chưa khai bảng lương thì hàm trả rỗng ngay, không tốn gì.
     */
-    { key: "work:payroll-recon", run: () => adaptPayrollRecon(new Date()), everyMinutes: 12 },
+    // OD-UX-05 mục 2: đây là đường TÍNH DUY NHẤT của nguồn này — /work chỉ đọc đệm (`peekPayrollRecon`).
+    { key: "work:payroll-recon", run: () => adaptPayrollRecon(new Date()), everyMinutes: PAYROLL_RECON_WARM_EVERY_MINUTES },
   ];
 }
 
