@@ -22,18 +22,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T11:22:32.718Z",
-  "updated_at": "2026-10-23T11:26:44.599Z",
-  "last_heartbeat": "2026-10-23T11:23:16.716Z",
+  "updated_at": "2026-10-23T11:36:52.334Z",
+  "last_heartbeat": "2026-10-23T11:36:52.334Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/od-doc-p2-04-stop",
-    "sha": "ec0a4fdd5ef9844ff2ef67010e6543b3b0fcf740",
-    "at": "2026-10-23T11:23:16.716Z",
+    "sha": "7adf026b978c804b373500e856c912d0c85c0618",
+    "at": "2026-10-23T11:36:52.334Z",
     "actor": "DESKTOP-56TH98Y:wt-oddoc",
     "title": "Tệp tiến độ Odoo: OD-P2-04 DỪNG · sửa bằng chứng UX-01 · top 15 trang · OD-P2-03 MERGED #998 · UX-03/UX-04 nhận việc",
     "summary": "",
     "tests": [
-      "chỉ tài liệu (1 tệp .md)"
+      "chỉ tài liệu (1 tệp .md); gộp main (merge, không force), gỡ xung đột dòng OD-P2-03"
     ]
   }
 }
