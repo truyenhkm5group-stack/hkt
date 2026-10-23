@@ -32,6 +32,7 @@ import { canUseModule } from "@/lib/platform/capabilities";
 import { CONFIDENCE_LABEL, type ProbabilityConfidence } from "@/lib/constants/projected-delivery";
 import { cn } from "@/lib/utils";
 import { requireResource } from "@/lib/auth/scope-guard";
+import { can } from "@/lib/auth/session";
 import { loadReturnsPage, returnsPageParams, withDefaultReturnsBasis } from "@/lib/queries/returns-report-page";
 import { ScopeDenied } from "@/components/scope-denied";
 import { displayVariationText, withDisplayVariation } from "@/lib/constants/experience-profile";
@@ -67,7 +68,7 @@ const MIN_OPTIONS = [
  * Khối G đứng CUỐI theo đúng yêu cầu, và có một đường tắt ở đầu trang cho người chỉ cần nó.
  */
 export default async function ReturnRatePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const { decision } = await requireResource("REPORTS", "reports:returns");
+  const { user, decision } = await requireResource("REPORTS", "reports:returns");
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE") return <ScopeDenied title="Tỷ lệ giao thành công" reason={decision.reason} fix={decision.fix} />;
   // Không module vận chuyển ⇒ không vận đơn ⇒ mặc định lọc theo ngày lên đơn (mốc gửi ĐVVC luôn rỗng).
@@ -426,7 +427,8 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
                         <TableCell>
                           <div className="max-w-[160px] truncate">{r.billFullName || "—"}</div>
                           <div className="text-xs text-muted-foreground">
-                            {r.billPhone}
+                            {/* SĐT chỉ cho người có quyền xem đơn — đúng chuẩn bảng đơn; thiếu quyền thì «—», không mở rộng ai thấy SĐT. */}
+                            {can(user, "orders:read") ? r.billPhone : <span title="Cần quyền xem đơn">— (cần quyền xem đơn)</span>}
                             {r.shipProvince ? ` · ${r.shipProvince}` : ""}
                           </div>
                         </TableCell>
