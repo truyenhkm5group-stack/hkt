@@ -3,7 +3,7 @@
   "mission_id": "purchasing-leadtime-probe",
   "title": "ops purchasing-leadtime-probe: đo trước / sau OD-P2-03 bằng CHÍNH hàm báo cáo /inventory/purchasing",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-probe",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T08:02:06.850Z",
-  "updated_at": "2026-10-23T10:44:35.533Z",
+  "updated_at": "2026-10-23T11:07:12.801Z",
   "last_heartbeat": "2026-10-23T10:44:35.533Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#996 → 73460b03b8d08af5d88210cb10a4b567ba5b8088"
+  },
   "handoff": {
     "branch": "claude/purchasing-leadtime-probe",
     "sha": "ef0f54f5d66d395b5fd95c010ddb50be12ce8994",
