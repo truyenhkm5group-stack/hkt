@@ -1,0 +1,8 @@
+{
+  "pr": 1000,
+  "sha": "134e923c79261bbf10e8690688f17cdf86bb9978",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T11:33:54.296Z",
+  "note": "review lead (AI Sourcing SRC-1): module sourcing (route /sourcing, phòng PRODUCTION, nhà BẬT mặc định / khách TẮT), quyền sourcing:view·search·write·approve (ADMIN đủ theo vai; MANAGER và vai trò khác KHÔNG tự có — 7 vai trò production có mảng ghi đè, chủ shop bật trên màn hình vai trò nếu muốn), settings sourcing.limits {aiCallsPerDay:200} + sourcing.landedCost rỗng (landedCostReady liệt kê thiếu"
+}
