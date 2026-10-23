@@ -37,6 +37,7 @@ const CHAY_THANG = Boolean(process.argv[1] && process.argv[1].endsWith("stuck-co
 if (CHAY_THANG) process.env.ERP_READ_ONLY = "1";
 
 import "dotenv/config";
+import { packSummaryLines, splitSummaryLine, SUMMARY_MAX_BYTES, utf8Bytes } from "@/lib/ops/summary-lines";
 import { sql } from "drizzle-orm";
 import { getDbForInspection, type Db } from "@/db";
 import { withOrganization } from "@/lib/platform/context";
@@ -48,7 +49,10 @@ import { SALES_QUALITY_CODES, SALES_QUALITY_STATE_KEY } from "@/lib/constants/sa
 import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { rowsOf } from "@/lib/sql-rows";
 
-const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s.slice(0, 300)}`);
+// Mọi dòng tóm tắt đi qua bộ tách theo BYTE: kênh công khai cắt 300 byte, dòng dài bị tách chứ không bị cụt (lib/ops/summary-lines.ts).
+const tomTat = (s: string) => {
+  for (const line of splitSummaryLine(s)) console.log(`[ops:tom-tat] ${line}`);
+};
 
 // ─────────────────────────── PHẦN THUẦN ───────────────────────────
 
@@ -409,28 +413,8 @@ export const QUALITY_GROUP: Readonly<Partial<Record<string, QualityGroup>>> = {
   UPSELL_ACCEPTED_NOT_ATTACHED: "upsell",
 };
 
-/**
- * Trần một dòng tóm tắt, tính bằng BYTE UTF-8. ops-vps.yml cắt kênh [ops:tom-tat] bằng `cut -c1-300`, và GNU cut -c đếm BYTE: chữ Việt
- * 2–3 byte nên dòng 270 ký tự đã cụt (đo 23/10/2026: dòng 2B mất đúng «CART_TOTAL_C…» trở đi). `che_log` chạy TRƯỚC `cut` và có thể
- * làm dòng DÀI thêm (mỗi «•» 3 byte) ⇒ chừa 20 byte.
- */
-export const SUMMARY_MAX_BYTES = 280;
-export const utf8Bytes = (s: string) => Buffer.byteLength(s, "utf8");
-
-/** Dồn các ô vào các dòng `<tiền tố> · ô · ô…`, mỗi dòng ≤ SUMMARY_MAX_BYTES byte; một ô tự nó quá dài thì đứng riêng một dòng. HÀM THUẦN. */
-export function packSummaryLines(prefix: string, cells: readonly string[]): string[] {
-  const out: string[] = [];
-  let cur = "";
-  for (const c of cells) {
-    const next = cur ? `${cur} · ${c}` : `${prefix} · ${c}`;
-    if (utf8Bytes(next) > SUMMARY_MAX_BYTES && cur) {
-      out.push(cur);
-      cur = `${prefix} · ${c}`;
-    } else cur = next;
-  }
-  if (cur) out.push(cur);
-  return out;
-}
+// Trần byte + bộ dồn dòng: lib/ops/summary-lines.ts (dùng chung với conv-money-trace). Xuất lại cho bài kiểm cũ.
+export { packSummaryLines, SUMMARY_MAX_BYTES, utf8Bytes };
 
 // ─────────────────────────── PHẦN CSDL ───────────────────────────
 

@@ -41,6 +41,7 @@ const CHAY_THANG = Boolean(process.argv[1] && process.argv[1].endsWith("conv-mon
 if (CHAY_THANG) process.env.ERP_READ_ONLY = "1";
 
 import "dotenv/config";
+import { splitSummaryLine } from "@/lib/ops/summary-lines";
 import { createHash } from "node:crypto";
 import { and, asc, eq, gte, inArray, like, lte, or, sql, type SQL } from "drizzle-orm";
 import { getDbForInspection, getPlatformDb, schema, type Db } from "@/db";
@@ -67,7 +68,10 @@ import { rowsOf } from "@/lib/sql-rows";
 /** Tên lỗi in được ra kênh công khai: CHỈ dạng «<nhóm đã biết>: <lý do>» của tools.ts, không chữ số, không ngoặc trích / @. Tên lỗi sau
  *  này nội suy dữ liệu khách mà không theo dạng ấy thì không lọt (kho PUBLIC). */
 const SAFE_ERROR_TITLE = /^(?:Lưu khách|Đơn nháp|Sửa đơn|Chốt|Khách cũ): [^\d«»"'@:]{1,60}$|^Đơn đã chốt$/u;
-const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s.slice(0, 300)}`);
+// Mọi dòng tóm tắt đi qua bộ tách theo BYTE: kênh công khai cắt 300 byte, dòng dài bị tách chứ không bị cụt (lib/ops/summary-lines.ts).
+const tomTat = (s: string) => {
+  for (const line of splitSummaryLine(s)) console.log(`[ops:tom-tat] ${line}`);
+};
 const vnd = (n: number | null | undefined) => (typeof n === "number" && Number.isFinite(n) ? `${Math.round(n).toLocaleString("vi-VN")} ₫` : "—");
 
 export const TRACE_DEFAULT_SCAN_DAYS = 3;
