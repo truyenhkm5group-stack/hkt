@@ -1,0 +1,8 @@
+{
+  "pr": 986,
+  "sha": "935f122aa4bb52c9c8d740b34d637a2caa072e1a",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T02:02:14.244Z",
+  "note": "review lead: bareEditClaimIn — câu «đã thêm/sửa/đổi» trần (chủ ngữ shop hoặc «đã/vừa» đầu mệnh đề, đọc trên chữ CÓ dấu) bị chặn khi hội thoại đã có đơn mà lượt sửa không ghi gì; không vào detectClaims (giỏ trước khi có đơn không phải lượt ghi)."
+}
