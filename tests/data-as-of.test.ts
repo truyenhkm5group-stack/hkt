@@ -96,7 +96,8 @@ async function testCollectAsOf() {
       });
     const p1 = collectAsOf(tinhCham);
     await nhuong();
-    dongHo = BAY_GIO + 12 * PHUT;
+    // Nhích 1 GIÂY, không phải 1 phút: lượt đang chạy quá TRAN_CHO_CHUNG (20 giây) bị coi là đã bỏ rơi và tính lại — đúng luật.
+    dongHo = BAY_GIO + 11 * PHUT + 1_000;
     const p2 = collectAsOf(tinhCham);
     await nhuong();
     mo();
