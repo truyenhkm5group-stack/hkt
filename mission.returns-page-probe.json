@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "returns-page-probe",
+  "title": "Ops returns-page-probe: vòng sự kiện bị chặn khi dựng /reports/returns + đầu phản hồi thật (chỉ đọc)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-rprobe",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/returns-page-probe",
+  "base_sha": "6dceaa923f2c3b6fa76554c4375944c7a387d932",
+  "domains": [],
+  "owned_paths": [
+    "scripts/returns-page-probe.ts",
+    "tests/returns-page-probe.test.ts",
+    ".github/workflows/ops-vps.yml",
+    "docs/ops-vps-script-notes.md",
+    "tests/sync-fixtures.test.ts",
+    "tests/test-hygiene.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-23T18:35:50.506Z",
+  "updated_at": "2026-10-23T18:35:50.506Z",
+  "last_heartbeat": "2026-10-23T18:35:50.506Z",
+  "definition_of_done": []
+}
