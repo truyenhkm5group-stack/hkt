@@ -3,7 +3,7 @@
   "mission_id": "carrier-substate-return-501",
   "title": "Kiện 501 trên chặng hoàn hiện ở rổ «hoàn đã về shop» của tháp giao vận (carrierSubstate + bản SQL cùng một vế)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-k0112",
@@ -25,7 +25,7 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T02:27:46.465Z",
-  "updated_at": "2026-10-23T04:08:43.344Z",
+  "updated_at": "2026-10-23T04:24:39.123Z",
   "last_heartbeat": "2026-10-23T03:46:24.217Z",
   "definition_of_done": [],
   "intake": {
@@ -33,7 +33,9 @@
     "evidence": []
   },
   "evidence": {
-    "merged": "#989 → 6644a3cbc09a48fa83a90f11bb28d1a06f2fb254"
+    "merged": "#989 → 6644a3cbc09a48fa83a90f11bb28d1a06f2fb254",
+    "verify": "PASS 6644a3cbc09a48fa83a90f11bb28d1a06f2fb254 2026-10-23T04:24:07.407Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39898884835"
   },
   "handoff": {
     "branch": "claude/carrier-substate-return-501",
