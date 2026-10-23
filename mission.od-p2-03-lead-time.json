@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "od-p2-03-lead-time",
+  "title": "OD-P2-03: lead time xưởng đọc production_orders.received_at; dự phòng ghép phiếu nhập có nhãn ước tính + độ phủ",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-leadtime",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/od-p2-03-lead-time",
+  "base_sha": "db264b9d3414768e9996ae8fa0e22b42462c16c8",
+  "domains": [],
+  "owned_paths": [
+    "lib/queries/purchasing.ts",
+    "app/(dashboard)/inventory/purchasing/page.tsx",
+    "tests/purchasing.test.ts",
+    "docs/tech/odoo-inspired-erp-upgrade.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-23T07:58:47.380Z",
+  "updated_at": "2026-10-23T07:58:47.380Z",
+  "last_heartbeat": "2026-10-23T07:58:47.380Z",
+  "definition_of_done": []
+}
