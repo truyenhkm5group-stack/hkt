@@ -3,7 +3,7 @@
   "mission_id": "stuck-audit-2b-lines",
   "title": "Dòng tóm tắt 2B tách nhiều dòng ≤ 300 ký tự để không mã nào bị cắt mất",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-2b-lines",
@@ -20,9 +20,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T00:25:58.485Z",
-  "updated_at": "2026-10-23T00:53:41.752Z",
+  "updated_at": "2026-10-23T01:08:36.043Z",
   "last_heartbeat": "2026-10-23T00:51:39.057Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#983 → 51982c0834194706cb04ab90ed5754df94f4861c"
+  },
   "handoff": {
     "branch": "claude/stuck-audit-2b-lines",
     "sha": "72203d269b879a0e371c8c418b8646913e81d005",
