@@ -112,7 +112,11 @@ export function scoreSalesPoint(point: Pick<ReplayPoint, "customerText" | "histo
   };
 }
 
-export type SalesCallObs = { calls: number; inputTokens: number; outputTokens: number; thinkingTokens: number; latencyMs: number; costUsd: number; unpriced: boolean };
+/**
+ * `inputTokens` = TỔNG token vào (gồm phần đọc từ đệm và phần ghi đệm — cùng cách cộng của engine). `cachedTokens` / `cacheWriteTokens`
+ * (AI Sales GĐ3) = phần đọc từ đệm / phần ghi đệm trong tổng đó — để so A/B cách xếp lời nhắc (prompt-layout.ts).
+ */
+export type SalesCallObs = { calls: number; inputTokens: number; cachedTokens: number; cacheWriteTokens: number; outputTokens: number; thinkingTokens: number; latencyMs: number; costUsd: number; unpriced: boolean };
 export type SalesBenchResult = { config: string; score: SalesPointScore; obs: SalesCallObs };
 
 /** Gộp một cấu hình. HÀM THUẦN. */
@@ -146,6 +150,10 @@ export function summarizeSalesBench(rows: readonly SalesBenchResult[]) {
     replyCharsP50: q(chars, 0.5),
     calls: sum((o) => o.calls),
     inputPerPoint: n ? sum((o) => o.inputTokens) / n : null,
+    cachedPerPoint: n ? sum((o) => o.cachedTokens) / n : null,
+    cacheWritePerPoint: n ? sum((o) => o.cacheWriteTokens) / n : null,
+    // Tỷ lệ token vào đọc từ đệm — mẫu số 0 ⇒ CHƯA BIẾT (`null`), không phải 0%.
+    cachedShare: sum((o) => o.inputTokens) > 0 ? sum((o) => o.cachedTokens) / sum((o) => o.inputTokens) : null,
     outputPerPoint: n ? sum((o) => o.outputTokens) / n : null,
     thinkingPerPoint: n ? sum((o) => o.thinkingTokens) / n : null,
     costPerPointUsd: n && !rows.some((x) => x.obs.unpriced) ? sum((o) => o.costUsd) / n : null,

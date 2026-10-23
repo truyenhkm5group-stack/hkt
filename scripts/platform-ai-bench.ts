@@ -8,9 +8,10 @@
   Hai chế độ:
     sync <mã tổ chức> [--cases=120] [--days=30] [--configs=D35l,C31l,…] [--concurrency=6]
         ghi đơn từ hội thoại — CHỈ ĐỌC theo cấu tạo (chỉ select + gọi model): không khách, không đơn, không chuông, không nhật ký.
-    sales <mã tổ chức> [--points=60] [--days=30] [--configs=S35,S31,F31] [--concurrency=4]
+    sales <mã tổ chức> [--points=60] [--days=30] [--configs=S35,S31,F31] [--concurrency=4] [--layout=LEGACY|CACHE_FIRST]
         Sales Agent — đường «Phát lại hội thoại cũ»: kênh THỬ, công cụ ghi chỉ MÔ PHỎNG, hội thoại tạm bị xoá; lượt AI KHÔNG
-        vào sổ AI thật của shop (bắt riêng để tính tiền của benchmark).
+        vào sổ AI thật của shop (bắt riêng để tính tiền của benchmark). `--layout` (AI Sales GĐ3) ép cách xếp lời nhắc TRONG
+        tiến trình (prompt-layout.ts) — không ghi công tắc của tổ chức; thiếu ⇒ theo công tắc đang lưu.
 
     quick <mã tổ chức> [--cases=80] [--configs=Q35l,Q31n,…]
         AI chọn câu mẫu (quick_extract) trên tin khách THẬT — nhãn = câu mẫu bộ khớp CHỮ (tất định) chọn; ca khớp chữ không ra
@@ -46,6 +47,7 @@ import { extractMoneyAmounts } from "@/lib/sales-chatbot/replay-shared";
 import { pickBenchPoints, scoreSalesPoint, summarizeSalesBench, type SalesBenchResult, type SalesCallObs } from "@/lib/sales-chatbot/sales-bench";
 import { setSalesChatBenchProvider } from "@/lib/sales-chatbot/engine";
 import { shadowTurn } from "@/lib/sales-chatbot/shadow";
+import { PROMPT_LAYOUTS, setPromptLayoutOverride, type PromptLayout } from "@/lib/sales-chatbot/prompt-layout";
 
 const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s.slice(0, 300)}`);
 const M35 = "gemini-3.5-flash-lite";
@@ -153,12 +155,19 @@ async function runSync(orgCode: string, apiKey: string) {
 async function runSales(orgCode: string, apiKey: string) {
   const configs = listFlag("configs", ["S35", "S31", "F31"]).map((k) => SALES_CONFIGS[k]).filter(Boolean);
   const conc = Math.min(flag("concurrency", 4), 6);
+  // Cách xếp lời nhắc (AI Sales GĐ3): ép trong tiến trình, không ghi công tắc của tổ chức. Giá trị lạ ⇒ dừng (A/B sai nhãn còn tệ hơn không chạy).
+  const layoutArg = ARGV.find((a) => a.startsWith("--layout="))?.slice("--layout=".length) ?? null;
+  if (layoutArg !== null && !(PROMPT_LAYOUTS as readonly string[]).includes(layoutArg)) throw new Error(`--layout phải là ${PROMPT_LAYOUTS.join(" | ")}`);
+  const layout = layoutArg as PromptLayout | null;
+  setPromptLayoutOverride(layout);
   const als = new AsyncLocalStorage<SalesCallObs>();
   setAiUsageCaptureForBench((e) => {
     const o = als.getStore();
     if (!o) return;
     o.calls += e.requests;
     o.inputTokens += e.inputTokens ?? 0;
+    o.cachedTokens += e.cachedTokens ?? 0;
+    o.cacheWriteTokens += e.cacheWriteTokens ?? 0;
     o.outputTokens += e.outputTokens ?? 0;
     o.thinkingTokens += e.thinkingTokens ?? 0;
     o.latencyMs += e.latencyMs ?? 0;
@@ -170,13 +179,13 @@ async function runSales(orgCode: string, apiKey: string) {
     const points = pickBenchPoints(sources, Math.min(flag("points", 60), 250));
     const grounded = await groundedPrices();
     const sit = points.flatMap((p) => scoreSalesPoint(p, { ok: true, reply: "", status: null, tools: [], error: null }, grounded).situations).reduce<Record<string, number>>((m, s) => ({ ...m, [s]: (m[s] ?? 0) + 1 }), {});
-    tomTat(`SALES · ${sources.length} hội thoại nguồn · ${points.length} điểm · tình huống ${Object.entries(sit).map(([k, v]) => `${k} ${v}`).join(" · ")} · cấu hình ${configs.map((c) => c.key).join(",")}`);
+    tomTat(`SALES · ${sources.length} hội thoại nguồn · ${points.length} điểm · tình huống ${Object.entries(sit).map(([k, v]) => `${k} ${v}`).join(" · ")} · cấu hình ${configs.map((c) => c.key).join(",")} · lời nhắc ${layout ?? "theo công tắc"}`);
     for (const cfg of configs) {
       const provider = guarded(withRequestOverrides(new ByokGeminiProvider({ apiKey, model: cfg.model, name: "gemini-bench" }), { reasoning: cfg.reasoning, maxTokens: cfg.maxTokens }));
       setSalesChatBenchProvider(provider);
       const t0 = Date.now();
       const rows: SalesBenchResult[] = await pool(points, conc, async (pt) => {
-        const obs: SalesCallObs = { calls: 0, inputTokens: 0, outputTokens: 0, thinkingTokens: 0, latencyMs: 0, costUsd: 0, unpriced: false };
+        const obs: SalesCallObs = { calls: 0, inputTokens: 0, cachedTokens: 0, cacheWriteTokens: 0, outputTokens: 0, thinkingTokens: 0, latencyMs: 0, costUsd: 0, unpriced: false };
         const shadow = await als.run(obs, () => shadowTurn({ tag: `bench:${cfg.key}`, history: pt.history, text: pt.customerText }));
         const g = new Set<number>([...grounded, ...pt.history.filter((m) => m.role === "assistant").flatMap((m) => extractMoneyAmounts(m.text))]);
         return { config: cfg.key, score: scoreSalesPoint(pt, shadow, g), obs };
@@ -185,10 +194,11 @@ async function runSales(orgCode: string, apiKey: string) {
       const s = summarizeSalesBench(rows);
       tomTat(`${cfg.key} ${cfg.model} ${cfg.reasoning}: ${s.points} điểm · lỗi ${s.errors} · rỗng ${s.empty} · đúng giá ${pct(s.priceGrounded)} · bịa tồn ${s.stockFabricated} · đúng công cụ ${s.rightTool.ok}/${s.rightTool.n} · công cụ lỗi ${s.toolErrors} · SĐT/địa chỉ ${s.infoCaptured.ok}/${s.infoCaptured.n}`);
       tomTat(`${cfg.key}: chốt ẩu ${s.confirmWithoutConsent} · chuyển người khi phàn nàn ${s.handoffOnComplaint.ok}/${s.handoffOnComplaint.n} · chuyển thừa ${s.unnecessaryHandoff.k}/${s.unnecessaryHandoff.n} · lộ suy nghĩ ${s.leaks} · mời mua thêm ${pct(s.upsellRate)} · dài p50 ${num(s.replyCharsP50)} ký tự`);
-      tomTat(`${cfg.key} mỗi điểm: ${num(s.calls / Math.max(1, s.points), 2)} lời gọi · vào ${num(s.inputPerPoint)} · ra ${num(s.outputPerPoint)} (suy nghĩ ${num(s.thinkingPerPoint)}) · USD ${num(s.costPerPointUsd, 6)} · lượt p50/p95 ${num(s.turnP50Ms)}/${num(s.turnP95Ms)} ms · ${Math.round((Date.now() - t0) / 1000)} s`);
+      tomTat(`${cfg.key} mỗi điểm: ${num(s.calls / Math.max(1, s.points), 2)} lời gọi · vào ${num(s.inputPerPoint)} (đệm đọc ${num(s.cachedPerPoint)} · ghi ${num(s.cacheWritePerPoint)} · ${pct(s.cachedShare)}) · ra ${num(s.outputPerPoint)} (suy nghĩ ${num(s.thinkingPerPoint)}) · USD ${num(s.costPerPointUsd, 6)} · lượt p50/p95 ${num(s.turnP50Ms)}/${num(s.turnP95Ms)} ms · ${Math.round((Date.now() - t0) / 1000)} s`);
     }
   });
   setAiUsageCaptureForBench(null);
+  setPromptLayoutOverride(null);
 }
 
 /** Cấu hình chọn câu mẫu. Q35l = production hôm nay (quickReplyByAi gọi reasoning "low", trần 1.200). */

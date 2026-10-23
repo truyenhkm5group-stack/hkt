@@ -665,10 +665,13 @@ async function testStickyAndVerdict() {
   const bad = scoreSalesPoint({ customerText: "Chả mực bao nhiêu?", historicalSpeaker: "BOT" }, { ok: true, reply: "Dạ 350.000đ, còn hàng ạ. search_products", status: "OPEN", tools: [], error: null }, new Set([400_000]));
   assert.deepEqual([bad.priceGrounded, bad.rightTool, bad.stockFabricated, bad.leak], [false, false, true, true]);
   const ss = summarizeSalesBench([
-    { config: "x", score: sp, obs: { calls: 2, inputTokens: 8000, outputTokens: 300, thinkingTokens: 200, latencyMs: 3000, costUsd: 0.003, unpriced: false } },
-    { config: "x", score: bad, obs: { calls: 1, inputTokens: 4000, outputTokens: 100, thinkingTokens: 0, latencyMs: 1000, costUsd: 0.001, unpriced: false } },
+    { config: "x", score: sp, obs: { calls: 2, inputTokens: 8000, cachedTokens: 6000, cacheWriteTokens: 0, outputTokens: 300, thinkingTokens: 200, latencyMs: 3000, costUsd: 0.003, unpriced: false } },
+    { config: "x", score: bad, obs: { calls: 1, inputTokens: 4000, cachedTokens: 0, cacheWriteTokens: 1000, outputTokens: 100, thinkingTokens: 0, latencyMs: 1000, costUsd: 0.001, unpriced: false } },
   ]);
   assert.deepEqual([ss.priceGrounded, ss.stockFabricated, ss.rightTool.ok, ss.rightTool.n, ss.leaks, ss.costPerPointUsd], [0.5, 1, 1, 2, 1, 0.002]);
+  // GĐ3: phần đọc / ghi đệm trong tổng token vào — để so A/B cách xếp lời nhắc. Không có token vào ⇒ tỷ lệ CHƯA BIẾT, không phải 0%.
+  assert.deepEqual([ss.cachedPerPoint, ss.cacheWritePerPoint, ss.cachedShare], [3000, 500, 0.5]);
+  assert.equal(summarizeSalesBench([]).cachedShare, null);
 
   // Sổ AI: cột quan sát được ghi; lượt benchmark KHÔNG vào sổ thật.
   const pdb = await getPlatformDb();

@@ -67,6 +67,7 @@ import { knownPhoneOf, knownPhonePrompt, knownPhoneStateOf, phonesInText, phoneT
 import { acceptedOfferPrompt, acceptsOffer, proposalOf, type DirectOffer } from "@/lib/sales-chatbot/short-accept";
 import { freeShipPolicyText } from "@/lib/sales-chatbot/shipping";
 import { knowledgePrompt } from "@/lib/sales-chatbot/knowledge";
+import { assembleSystemPrompt, loadPromptLayout, type PromptPart } from "@/lib/sales-chatbot/prompt-layout";
 import { volumeDiscountPolicyText } from "@/lib/sales-chatbot/volume-discount";
 import { formatVND } from "@/lib/format";
 import { withTurnEvents } from "@/lib/sales-chatbot/events";
@@ -174,6 +175,14 @@ export function messageTimeTag(at: Date): string {
 }
 
 export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile: string, channel: ChatChannel, playbook: string = "", quick: readonly PromptQuickReply[] = [], returning: string = "", booking: string = "", now: Date | null = null, pack: SalesPack = FOOD_PACK, opts: { autoConfirm?: boolean } = {}): string {
+  return assembleSystemPrompt(systemPromptParts(cfg, shopName, profile, channel, playbook, quick, returning, booking, now, pack, opts), "LEGACY").system;
+}
+
+/**
+ * Các khối của `systemPrompt` theo THỨ TỰ CŨ, mỗi khối mang TẦNG độ bền (prompt-layout.ts): khối KHÁCH CŨ là của hội thoại, đặt lịch và
+ * kiến thức đổi theo ngày, dòng THỜI GIAN theo giờ, còn lại tĩnh theo cấu hình. HÀM THUẦN.
+ */
+export function systemPromptParts(cfg: SalesChatbotConfig, shopName: string, profile: string, channel: ChatChannel, playbook: string = "", quick: readonly PromptQuickReply[] = [], returning: string = "", booking: string = "", now: Date | null = null, pack: SalesPack = FOOD_PACK, opts: { autoConfirm?: boolean } = {}): PromptPart[] {
   const upsell = quick.find((q) => q.upsell);
   const freeShip = freeShipPolicyText(cfg.freeShipping, formatVND);
   const volume = volumeDiscountPolicyText(cfg.volumeDiscount, formatVND);
@@ -185,6 +194,7 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
   ]
     .filter(Boolean)
     .join(" ");
+  const S = (text: string): PromptPart => ({ text, tier: "STATIC" });
   return [
     `Bạn là «${cfg.botName}», nhân viên bán hàng qua chat của shop «${shopName}». Trả lời bằng tiếng Việt, giọng: ${SALES_TONE_LABEL[cfg.tone]}. Câu ngắn, rõ, không dùng markdown phức tạp.`,
     profile ? `Về shop: ${profile}` : "",
@@ -237,23 +247,24 @@ export function systemPrompt(cfg: SalesChatbotConfig, shopName: string, profile:
       ? "KHÁCH SỈ — shop ĐÃ BẬT báo giá theo bảng giá sỉ: khách hỏi giá sỉ / lấy về bán / đại lý / số lượng lớn ⇒ get_current_price với variant_id (+ quantity nếu khách đã nói số lượng) rồi trả lời bằng `tiers` — nói rõ từng bậc («sỉ từ 10 trở lên: …, từ 20: …»). `price_source` = RETAIL nghĩa là `price` đang là GIÁ LẺ — KHÔNG BAO GIỜ đưa giá lẻ ra như giá sỉ: khách chưa tới bậc thấp nhất ⇒ nói «giá sỉ áp từ N trở lên». `wholesale.available` = false (mẫu mã chưa có trong bảng giá sỉ) ⇒ KHÔNG báo giá nào, handoff_to_human với reason «Khách sỉ — <món>, chưa có giá sỉ». Chưa biết số lượng mà bảng có nhiều bậc ⇒ nói các bậc rồi hỏi số lượng ĐÚNG MỘT lần. Đơn giá trong đơn do máy chủ tính theo cùng bảng. KHÔNG tự giảm ngoài bảng; khách đòi giá thấp hơn bảng, hay số lượng vượt bậc cao nhất mà muốn giá riêng ⇒ handoff_to_human với reason «Khách sỉ — <số lượng / ý khách>»."
       : `KHÁCH SỈ — khách hỏi giá sỉ / lấy về bán / đại lý / số lượng lớn${pack.bulkHint}: ERP chỉ có giá LẺ — KHÔNG đưa giá lẻ ra như giá sỉ, KHÔNG tự giảm, KHÔNG chê khách. Chưa biết số lượng ⇒ hỏi số lượng ĐÚNG MỘT lần (dùng câu mẫu của shop nếu có). Khách đã nói số lượng, hoặc chê giá cao ⇒ handoff_to_human với reason «Khách sỉ — <số lượng / ý khách>» (nhân viên báo giá sỉ).`,
     "CẦN NGƯỜI XỬ LÝ — gọi handoff_to_human (reason bắt đầu bằng nhóm) khi: «Khách sỉ» (như trên) · «Ngoài chính sách» (điều shop CHƯA khai ở «Về shop» / «Hướng dẫn thêm» / sổ tay: giảm giá riêng, giao gấp chưa hứa…) · «Khiếu nại» · «Không xác định được sản phẩm» (đã hỏi lại 2 lần vẫn không rõ) · «Giá / tồn bất thường» · «Không hiểu ý khách» (ĐÃ hỏi lại 2 lần vẫn không rõ — không đoán). Chuyển người trên fanpage là bot IM LẶNG, khách phải chờ nhân viên: chỉ chuyển khi thật sự không trả lời được.",
-    returning,
-    booking,
-    now
-      ? `THỜI GIAN: bây giờ là ${nowPromptLine(now)} (giờ Việt Nam). «hôm nay», «mai», «tối nay», «cuối tuần» tính theo mốc này. Tin có dấu «[Gửi lúc …]» được gửi từ trước — những chữ đó trong tin ấy tính theo ngày của CHÍNH tin ấy (khách nhắn «mai giao» hôm qua nghĩa là giao HÔM NAY). Không nhắc lại dấu giờ này với khách.`
-      : "",
+    { text: returning, tier: "CONVERSATION" as const },
+    { text: booking, tier: "DAY" as const },
+    {
+      tier: "HOUR" as const,
+      text: now
+        ? `THỜI GIAN: bây giờ là ${nowPromptLine(now)} (giờ Việt Nam). «hôm nay», «mai», «tối nay», «cuối tuần» tính theo mốc này. Tin có dấu «[Gửi lúc …]» được gửi từ trước — những chữ đó trong tin ấy tính theo ngày của CHÍNH tin ấy (khách nhắn «mai giao» hôm qua nghĩa là giao HÔM NAY). Không nhắc lại dấu giờ này với khách.`
+        : "",
+    },
     quick.length
       ? `CÂU MẪU của shop (send_quick_reply gửi NGUYÊN VĂN chữ + ảnh, giá điền từ ERP — ưu tiên dùng khi khớp ý khách, rồi chỉ hỏi thêm ngắn):\n${quick.map((q) => `  ${q.code}: ${q.title}${q.upsell ? " (câu UPSELL)" : ""}`).join("\n")}`
       : "",
     channel === "TEST" ? "(Đây là KHUNG THỬ của chủ shop: công cụ ghi chỉ mô phỏng — vẫn làm đúng quy trình như với khách thật.)" : "",
     cfg.extraInstructions ? `Hướng dẫn thêm của shop (không được trái các luật trên): ${cfg.extraInstructions}` : "",
     // KIẾN THỨC CỦA SHOP (sổ AIS-05): rỗng ⇒ "" ⇒ lời nhắc giống hệt trước. Khuyến mãi hết hạn lọc theo ngày giờ VN của lượt này.
-    knowledgePrompt(cfg, now ?? new Date()),
+    { text: knowledgePrompt(cfg, now ?? new Date()), tier: "DAY" as const },
     playbook ? `SỔ TAY BÁN HÀNG của shop (chủ shop đã duyệt — học giọng điệu và cách xử lý; KHÔNG được trái các luật trên: giá / tồn / phí ship vẫn CHỈ từ công cụ):\n${playbook}` : "",
     `Lời chào mở đầu mẫu: «${cfg.greeting}»`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  ].map((x) => (typeof x === "string" ? S(x) : x));
 }
 
 /** Đơn của lượt mua này ĐÃ CHỐT ⇒ không xin xác nhận lại (P0-A/B/C 11/10/2026). Chỉ có khi đã chốt — lời nhắc lượt khác không đổi. HÀM THUẦN. */
@@ -1652,7 +1663,28 @@ async function chatTurnCore(
     const bookingOn = cfg.booking.enabled && (await canUseModule("appointments"));
     // TỰ CHỐT KHI ĐỦ ĐƠN (P0-A, chủ shop 11/10/2026): theo công tắc «đơn đủ thông tin = đã xác nhận» của tổ chức. Lỗi đọc ⇒ TẮT (luồng xin xác nhận cũ).
     const autoConfirm = await loadAutoConfirmComplete().catch(() => false);
-    const system = [systemPrompt(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }), postSale ? "" : customer360Prompt(c360, reuse), await learnedLessons(), await levelPromptFor(conv.id, now), customerNamePrompt(opts.customerName), priceDisputePrompt(known.priceDispute), confirmedOrderPrompt(known), cartPromptOf(known, text, turnSeq, autoConfirm, prevTurn, { phone: promptPhone, roundTexts: roundCustomerTexts, previousAddress }), postSale ? "" : knownContactPrompt(known, roundCustomerTexts, { phoneKnown: usableKnownPhone(knownPhone) !== null }), postSale || !addressTextGiven(roundCustomerTexts) ? "" : ADDRESS_GIVEN_PROMPT, postSale ? "" : knownPhonePrompt(promptPhone), postSale || reuse.address !== null ? "" : previousAddressPrompt(previousAddress), accepted ? acceptedOfferPrompt(accepted) : "", postSale ? postSalePrompt(phase!, phase!.shortCode) : "", recoveryPrompt(known), opts.context ?? ""].filter(Boolean).join("\n");
+    // THỨ TỰ KHỐI (prompt-layout.ts, AI Sales GĐ3): mảng dưới đây giữ ĐÚNG thứ tự cũ; mỗi khối mang tầng độ bền. Công tắc tổ chức
+    // `sales.prompt-layout` = CACHE_FIRST ⇒ xếp tĩnh → ngày → giờ → hội thoại → lượt (cùng tập dòng) và khối tĩnh thành khối đệm riêng
+    // ở Anthropic; mặc định LEGACY ⇒ chuỗi cũ từng ký tự.
+    const promptParts: PromptPart[] = [
+      ...systemPromptParts(cfg, orgRow?.name ?? org.code, await businessProfile(), opts.channel, await publishedPlaybook(), quickCatalog, returningCustomerPrompt(returning, known.returning), bookingOn ? bookingPrompt(cfg, now) : "", now, salesPackFor(orgRow?.templateKey ?? null), { autoConfirm }),
+      { text: postSale ? "" : customer360Prompt(c360, reuse), tier: "CONVERSATION" },
+      { text: await learnedLessons(), tier: "STATIC" },
+      { text: await levelPromptFor(conv.id, now), tier: "CONVERSATION" },
+      { text: customerNamePrompt(opts.customerName), tier: "CONVERSATION" },
+      { text: priceDisputePrompt(known.priceDispute), tier: "TURN" },
+      { text: confirmedOrderPrompt(known), tier: "CONVERSATION" },
+      { text: cartPromptOf(known, text, turnSeq, autoConfirm, prevTurn, { phone: promptPhone, roundTexts: roundCustomerTexts, previousAddress }), tier: "TURN" },
+      { text: postSale ? "" : knownContactPrompt(known, roundCustomerTexts, { phoneKnown: usableKnownPhone(knownPhone) !== null }), tier: "TURN" },
+      { text: postSale || !addressTextGiven(roundCustomerTexts) ? "" : ADDRESS_GIVEN_PROMPT, tier: "TURN" },
+      { text: postSale ? "" : knownPhonePrompt(promptPhone), tier: "TURN" },
+      { text: postSale || reuse.address !== null ? "" : previousAddressPrompt(previousAddress), tier: "TURN" },
+      { text: accepted ? acceptedOfferPrompt(accepted) : "", tier: "TURN" },
+      { text: postSale ? postSalePrompt(phase!, phase!.shortCode) : "", tier: "TURN" },
+      { text: recoveryPrompt(known), tier: "TURN" },
+      { text: opts.context ?? "", tier: "TURN" },
+    ];
+    const { system, cacheBreak: systemCacheBreak } = assembleSystemPrompt(promptParts, await loadPromptLayout());
     // Chỉ CHỮ MUA (bỏ câu hỏi giá / câu từ chối / giả định — `buyingText`): gọi tên món trong «nem tôm bao nhiêu?» không phải căn cứ.
     // (`customerTexts` — tin KHÁCH thô — và `roundCustomerTexts` dựng ở trên, trước bước câu mẫu: câu mẫu cũng chịu hàng rào thông tin
     // nhận hàng, #871, và hàng rào món khách đang hỏi.)
@@ -1780,7 +1812,7 @@ async function chatTurnCore(
         // trả lời (01/10/2026: suy luận ăn chung `max_output_tokens`).
         // KHÔNG GỬI TRÙNG: `complete` trả về ĐÚNG MỘT kết quả (khoá chính hoặc khoá dự phòng) — chữ chỉ được ghi / gửi SAU dòng
         // này, nên chuyển khoá không bao giờ sinh câu thứ hai cho khách.
-        const res = await prov.provider.complete({ system, messages: history, tools, ...SALES_THINKING_BUDGET[cfg.thinking] });
+        const res = await prov.provider.complete({ system, ...(systemCacheBreak !== undefined ? { systemCacheBreak } : {}), messages: history, tools, ...SALES_THINKING_BUDGET[cfg.thinking] });
         // Đổi MODEL giữa chừng (canary của Platform AI Policy lùi về model dự phòng ở vòng 2) cũng tách dòng: một dòng sổ mang
         // một tên model, nên tiền và tỷ lệ lỗi theo model không bị ghi gộp dưới tên model của vòng cuối.
         if (seg.calls && (seg.name !== prov.provider.name || seg.source !== prov.source || seg.model !== (res.model || prov.provider.model))) {
