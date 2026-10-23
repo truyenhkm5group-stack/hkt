@@ -1,0 +1,8 @@
+{
+  "pr": 1012,
+  "sha": "0994dc216ac95c58dfb2cb433f15c1f5e9bbe52b",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T19:48:57.518Z",
+  "note": "review lead: TEST- qua registerProvisionalModelCore, không products/variants/giá dự tính/Pancake (bài đếm products trước=sau); lõi duyệt chỉ thêm ALWAYS_REQUIRE_APPROVAL_GROUPS=[SOURCING_TRIAL], các nhóm khác không đổi hành vi; người xin ≠ người duyệt; ảnh chụp bất biến; ĐÃ ĐẶT tiêu thụ duyệt trong cùng giao dịch; 0258 chỉ tạo 2 bảng có serve-compat. approvals:decide mặc định ADMIN+MANAGER — lead "
+}
