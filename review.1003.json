@@ -1,0 +1,8 @@
+{
+  "pr": 1003,
+  "sha": "112d047ad2f24f06cc946290175fba17a2292c5d",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T13:33:10.536Z",
+  "note": "review lead: 0255 chỉ DROP/ADD CHECK y khuôn 0252, không UPDATE, có SERVE_COMPAT + đường nâng cấp; buildChineseQueries thuần, tất định; AI chỉ khi từ điển thiếu VÀ người dùng bật, đếm bằng sổ platform_ai_usage, không đếm được ⇒ không gọi, không ném, nhãn «AI gợi ý — chưa kiểm»; action đòi sourcing:search. Vượt trần 1 lượt khi song song: chấp nhận V1."
+}
