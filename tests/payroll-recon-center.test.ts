@@ -15,11 +15,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { clearMemo } from "@/lib/cache";
+import { memoKeys, clearMemo } from "@/lib/cache";
 import { setSettingJson, getSettingJson } from "@/lib/settings";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
 import { APPROVAL_ITEM_KEYS, APPROVAL_ITEM_OWNER, buildApprovalList, personalShareWithoutCode, buildOpeningProposal, codGapCause, historicalSalary, issueOwner, reconCenterDefaultRange, type ApprovalInput, type OpeningMonthInput } from "@/lib/payroll/recon-center";
-import { adaptPayrollRecon, collectWorkItems, payrollReconWorkItems } from "@/lib/queries/work-adapters";
+import { adaptPayrollRecon, collectWorkItems, PAYROLL_RECON_PENDING_TEXT, payrollReconWorkItems } from "@/lib/queries/work-adapters";
 import { departmentFor, SOURCES_WITHOUT_OWNER } from "@/lib/constants/work-ownership";
 import { slaHoursFor, SOURCES_WITHOUT_SLA } from "@/lib/constants/work-sla";
 import { MONEY_UNKNOWN } from "@/lib/constants/work";
@@ -309,6 +309,20 @@ async function testFlow(db: Db) {
     const hang = await collectWorkItems({ sources: ["PAYROLL_RECON"], now: luc });
     assert.deepEqual(hang.failed, [], "nguồn chạy trong hạn giờ");
     assert.deepEqual(hang.items.map((v) => v.key).sort(), tren.map((v) => v.key).sort(), "hàng đợi /work có đủ, không trùng");
+    /*
+      ĐƯỜNG TRANG CHỈ ĐỌC ĐỆM (OD-UX-05 mục 2, 24/10/2026): đệm nguội ⇒ nguồn báo «đang tính lại» NGAY và KHÔNG tự dựng
+      Trung tâm đối soát (lượt tính 22,5 s giữ 3–4/5 kết nối của bể trên production). Job giữ ấm là đường tính duy nhất.
+    */
+    clearMemo();
+    const t0 = Date.now();
+    const nguoi = await collectWorkItems({ sources: ["PAYROLL_RECON"], now: luc });
+    assert.deepEqual(nguoi.items, [], "đệm nguội ⇒ không bịa việc");
+    assert.deepEqual(nguoi.failed.map((f) => [f.source, f.error]), [["PAYROLL_RECON", PAYROLL_RECON_PENDING_TEXT]], "đệm nguội ⇒ NÊU TÊN nguồn, câu «đang tính lại», không phải 0 việc");
+    assert.ok(Date.now() - t0 < 2_500, "không chờ hạn 2,5 s — trả ngay");
+    assert.ok(!memoKeys().some((k) => k.startsWith("payroll-recon-center:") || k.startsWith("work:payroll-recon:")), "đường trang KHÔNG khởi động lượt tính nào");
+    await adaptPayrollRecon(luc);
+    const sauJob = await collectWorkItems({ sources: ["PAYROLL_RECON"], now: luc });
+    assert.deepEqual([sauJob.failed, sauJob.items.map((v) => v.key).sort()], [[], tren.map((v) => v.key).sort()], "job (adaptPayrollRecon) tính xong ⇒ /work đọc đủ từ đệm");
     await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [nv("rc-e1", { startedOn: "2025-01-01" })] });
     clearMemo();
     assert.ok(!(await adaptPayrollRecon(luc)).some((v) => v.sourceKey === "undated-employees"), "khai ngày vào làm xong ⇒ việc tự rời hàng đợi, không ai bấm «xong»");
