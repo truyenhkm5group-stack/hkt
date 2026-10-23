@@ -19,10 +19,12 @@
     "care-entry-legaware-cleanup"
   ],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    995
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-23T06:07:43.819Z",
-  "updated_at": "2026-10-23T07:37:29.474Z",
+  "updated_at": "2026-10-23T07:39:10.289Z",
   "last_heartbeat": "2026-10-23T07:37:29.474Z",
   "definition_of_done": [],
   "handoff": {
