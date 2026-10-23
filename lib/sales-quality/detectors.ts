@@ -20,7 +20,7 @@ import { createHash } from "node:crypto";
 import { parseCustomerAddress, wardFromCustomerWords } from "@/lib/address/customer-address";
 import { MACHINE_ADDRESS_NOTE_PREFIX, orderReviewOf } from "@/lib/constants/order-review";
 import type { SalesQualityCode } from "@/lib/constants/sales-quality";
-import { addressKnowledge, addressReaskVerdict } from "@/lib/sales-chatbot/address-memory";
+import { addressAskAfterText, addressKnowledge, addressReaskVerdict, KNOWN_REASK_CODES } from "@/lib/sales-chatbot/address-memory";
 import { amountsIn, labelsMatch, piecesOf, productName } from "@/lib/sales-chatbot/cart-commitment";
 import { CLAIM_SAFE_TEXT } from "@/lib/sales-chatbot/claim-guard";
 import { classifyDeliveryQuestion } from "@/lib/sales-chatbot/delivery-intent";
@@ -161,6 +161,8 @@ export function scanThreadQuality(msgs: readonly QualityMsg[], ctx: QualityConte
   const hit = (code: SalesQualityCode, at: Date, source?: QualityHit["source"]) => hits.push({ code, at, ...(source ? { source } : {}) });
   const lines: FocusLine[] = [];
   const customerTexts: string[] = [];
+  /** Tin khách kèm mốc — vế 3.12b của ADDRESS_REASK (chữ địa chỉ trong cùng lượt mua, ≤ 3 ngày trước tin bot). */
+  const customerTimed: { text: string; at: number }[] = [];
   const botTexts: string[] = [];
   const sentHeads = new Set<string>();
   let userSince = false;
@@ -203,6 +205,7 @@ export function scanThreadQuality(msgs: readonly QualityMsg[], ctx: QualityConte
         userSince = true;
         lines.push({ who: "CUSTOMER", text: said });
         customerTexts.push(said);
+        customerTimed.push({ text: said, at: m.at.getTime() });
         turnCustomerText = said;
         closeAccept();
         if (offer && isShortAccept(said)) {
@@ -271,7 +274,17 @@ export function scanThreadQuality(msgs: readonly QualityMsg[], ctx: QualityConte
       if (t === EMPTY_REPLY_TEXT) hit("CLARIFY_FALLBACK", m.at);
       if (CLAIM_SAFE.has(t)) hit("CLAIM_GUARD_BLOCK", m.at);
       if (complaint && userSince && splitSentences(t).some((s) => { const k = classifySentence(s); return k === "UPSELL" || k === "CROSS_SELL"; })) hit("COMPLAINT_WHILE_SELLING", m.at);
-      if (customerTexts.length && addressReaskVerdict(t, addressKnowledge({}, customerTexts), turn, { botTexts }) !== null) hit("ADDRESS_REASK", m.at);
+      /*
+        ĐỊNH NGHĨA ĐỔI 23/10/2026 (khoá mã giữ nguyên — SALES_QUALITY_SPEC.ADDRESS_REASK.definitionChangedAt):
+         · ADDRESS_REASK = hỏi lại thứ khách ĐÃ cho — vế 3.12b (`addressAskAfterText`, cùng hàm với điểm chặn engine) HOẶC hàng rào
+           #855 ra một mã «đã biết» (KNOWN_REASK_CODES).
+         · Xin LẶP thứ khách CHƯA từng cho (mã REPEAT_ASK — ca theo dõi tự động 16:24Z 22/10, hslc) là chuyện khác ⇒ REPEAT_ASK_UNANSWERED.
+           Trước đây nó bị đếm dưới nhãn «hỏi lại thứ đã cho» và mở lại sổ tái diễn #972 sai.
+      */
+      const reask = customerTexts.length ? addressReaskVerdict(t, addressKnowledge({}, customerTexts), turn, { botTexts }) : null;
+      const knownReask = Boolean(reask?.codes.some((c) => KNOWN_REASK_CODES.includes(c)));
+      if (addressAskAfterText(customerTimed, t, m.at.getTime()) === true || knownReask) hit("ADDRESS_REASK", m.at);
+      else if (reask?.codes.includes("REPEAT_ASK")) hit("REPEAT_ASK_UNANSWERED", m.at);
     }
     checkD(t, m.at);
     sentHeads.add(foldVi(t).replace(/\s+/g, " ").trim().slice(0, 60));

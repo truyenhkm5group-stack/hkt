@@ -73,7 +73,9 @@ export function testAddressNeverReaskPure() {
   const engine = readFileSync("lib/sales-chatbot/engine.ts", "utf8");
   assert.equal(engine.match(/insert\(schema\.salesChatMessages\)/g)?.length, 3, "ba chỗ chèn: lời chào mở hội thoại · appendMessage · chuyển tin khi gộp hội thoại");
   assert.match(engine, /async function appendMessage[\s\S]{0,400}guardAssistantContent\(content, turnAddressGiven\.get\(conversationId\) === true\)/, "appendMessage đi qua điểm chặn cuối");
-  assert.match(engine, /turnAddressGiven\.set\(conv\.id, addressTextGiven\(roundCustomerTexts\)\)/);
+  // Cờ đặt qua MỘT hàm (markAddressGiven — 23/10/2026: đặt ngay khi lượt có tin khách, không đợi giữa chatTurnCore).
+  assert.match(engine, /function markAddressGiven[\s\S]{0,300}turnAddressGiven\.set\(conversationId, addressTextGiven\(texts\)\)/);
+  assert.match(engine, /const roundCustomerTexts = markAddressGiven\(conv\.id, msgs, st0, text\)/);
   assert.match(engine, /finally \{\n {4}turnAddressGiven\.delete\(args\[0\]\);/, "ô của lượt luôn được dọn");
   assert.match(readFileSync("lib/sales-chatbot/followup.ts", "utf8"), /\n {6}if \(sentencesOf\(text\)\.some\(asksAnyAddressPart\) && addressTextGiven\(await roundCustomerTextsFor\(row\.id, freshConv\.state\)[^\n]*\n(?:[^\n]*\n){3} {8}await trace\("PRE_SEND", "SUPPRESS", "AI_TEXT_REJECTED"[^\n]*\n {8}continue;/, "tin theo dõi: hỏi lại địa chỉ khách đã gửi ⇒ BỎ lần nhắc (điều kiện thật, có continue)");
   console.log("  ✓ thuần: biên addressTextGiven hai phía · điểm chặn cuối bỏ đúng câu hỏi địa chỉ · công cụ / NEED_ADDRESS / tự chốt không hỏi khi đã có chữ địa chỉ · một điểm chặn cho mọi chữ bot");

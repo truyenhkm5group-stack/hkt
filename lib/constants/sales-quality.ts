@@ -32,6 +32,8 @@ export const SALES_QUALITY_CODES = [
   "ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT",
   // «Lọt tới khách» của hàng rào số lượng / đơn vị: đơn ĐÃ GHI số hộp = số cái khách nói (sổ tái diễn regression-reopen-watch đọc mã này).
   "PACK_MULTIPLIER_LEAKED",
+  // Xin LẶP SĐT / địa chỉ / tên khách CHƯA từng cho (tách khỏi ADDRESS_REASK 23/10/2026). KHÔNG nối vào sổ tái diễn.
+  "REPEAT_ASK_UNANSWERED",
 ] as const;
 export type SalesQualityCode = (typeof SALES_QUALITY_CODES)[number];
 
@@ -50,6 +52,12 @@ export type SalesQualitySpec = {
   source: string;
   /** Việc phải làm, đủ cụ thể để người đọc biết mở trang nào. */
   action: string;
+  /**
+   * Ngày (YYYY-MM-DD, giờ VN) định nghĩa của mã ĐỔI mà khoá giữ nguyên. Các ngày từ mốc này trở đi đếm theo định nghĩa mới — KHÔNG so
+   * xu hướng qua mốc (AGENTS 40); tin việc của 7 ngày đầu in `definitionNote`.
+   */
+  definitionChangedAt?: string;
+  definitionNote?: string;
 };
 
 export const SALES_QUALITY_SPEC: Record<SalesQualityCode, SalesQualitySpec> = {
@@ -90,6 +98,9 @@ export const SALES_QUALITY_SPEC: Record<SalesQualityCode, SalesQualitySpec> = {
     delivery: "REACHED_CUSTOMER",
     source: "lib/sales-chatbot/address-memory.ts",
     action: "Câu hỏi lại đã lọt qua hàng rào hỏi-lại — xem câu mẫu / lời dặn xin địa chỉ đang gửi ở bước chốt.",
+    definitionChangedAt: "2026-10-23",
+    definitionNote:
+      "Định nghĩa đổi 23/10/2026: thêm vế AGENTS 3.12b (khách đã gửi chữ địa chỉ mà bot hỏi bất kỳ phần nào); xin lặp thứ khách CHƯA cho tách sang REPEAT_ASK_UNANSWERED — không so xu hướng với các ngày trước mốc này.",
   },
   COMPLAINT_WHILE_SELLING: {
     label: "Khách đang phàn nàn mà bot mời mua thêm",
@@ -176,6 +187,13 @@ export const SALES_QUALITY_SPEC: Record<SalesQualityCode, SalesQualitySpec> = {
     delivery: "REACHED_CUSTOMER",
     source: "lib/sales-quality/detectors.ts",
     action: "Mở đơn của hội thoại NGAY: số hộp có thể gấp N lần ý khách — sửa về đúng số hộp (số cái / quy cách), báo khách tổng mới; báo kỹ thuật vì hàng rào sales-qty-unit-guard đã để lọt.",
+  },
+  REPEAT_ASK_UNANSWERED: {
+    label: "Bot xin lặp SĐT / địa chỉ khách chưa từng cho (khách chưa trả lời lần trước)",
+    unit: "MESSAGE",
+    delivery: "REACHED_CUSTOMER",
+    source: "lib/sales-chatbot/address-memory.ts",
+    action: "Xem tin theo dõi / câu hỏi lặp: khách chưa trả lời lần trước — cân nhắc giãn nhịp theo dõi hoặc chuyển người, KHÔNG phải lỗi hỏi lại thứ đã cho.",
   },
 };
 

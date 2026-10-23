@@ -226,6 +226,13 @@ export async function collectAddressNotApplied(from: Date, to: Date): Promise<{ 
 const dayLabel = (day: string) => `${day.slice(8, 10)}/${day.slice(5, 7)}`;
 
 /** Chữ của một việc — số đếm, mẫu số, mã băm, việc phải làm. Không chữ tin, không tên, không SĐT. HÀM THUẦN. */
+/** Ghi chú ĐỔI ĐỊNH NGHĨA (AGENTS 40) cho tin việc của 7 ngày đầu kể từ `definitionChangedAt` — trước mốc thì không in. HÀM THUẦN. */
+export function definitionNoteFor(spec: { definitionChangedAt?: string; definitionNote?: string }, day: string): string {
+  if (!spec.definitionChangedAt || !spec.definitionNote || day < spec.definitionChangedAt) return "";
+  const days = Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${spec.definitionChangedAt}T00:00:00Z`)) / 86_400_000);
+  return days <= 6 ? ` ${spec.definitionNote}` : "";
+}
+
 export function salesQualityText(code: SalesQualityCode, day: string, n: SalesQualityCount, base: string, now: Date): { title: string; body: string } {
   const spec = SALES_QUALITY_SPEC[code];
   const what = spec.unit === "CONVERSATION" ? `${n.conversations} hội thoại` : `${n.hits} tin / ${n.conversations} hội thoại`;
@@ -234,7 +241,7 @@ export function salesQualityText(code: SalesQualityCode, day: string, n: SalesQu
   const hashes = n.hashes.length ? ` Mã hội thoại băm (≤ ${SALES_QUALITY_SAMPLE_HASHES}): ${n.hashes.join(" ")}.` : "";
   return {
     title: `Chất lượng AI bán hàng · ${spec.label}: ${what} (${when})`,
-    body: `${base}.${hashes} Việc cần làm: ${spec.action}`,
+    body: `${base}.${hashes} Việc cần làm: ${spec.action}${definitionNoteFor(spec, day)}`,
   };
 }
 
@@ -281,6 +288,7 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
       STAFF_AI_QUOTE_CONFLICT: `Mẫu số: ${b.staffTotals} tin nhân viên / page báo tổng · trong đó từ MẪU TỰ ĐỘNG page (Pancake) ${scan.automationQuoteConflicts} lần`,
       ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT: `Mẫu số: ${b.orderWrites} lần bot gọi công cụ ghi đơn`,
       PACK_MULTIPLIER_LEAKED: `Mẫu số: ${b.orderWrites} lần bot gọi công cụ ghi đơn`,
+      REPEAT_ASK_UNANSWERED: `Mẫu số: ${b.botMessages} tin bot (gồm tin theo dõi tự động)`,
     };
     const db = await getDb();
     let created = 0;

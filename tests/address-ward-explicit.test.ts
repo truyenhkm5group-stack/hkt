@@ -153,7 +153,9 @@ export function testAddressWardExplicitPure() {
   assert.deepEqual([knownFromText.ward, knownFromText.province, knownFromText.street], [AN_HOI_TAY, true, true]);
   const v = addressReaskVerdict(sixList, knownFromText, 2);
   assert.ok(v && v.rest === "Mình xác nhận giúp em nhé." && /đã bỏ câu hỏi/.test(v.note), JSON.stringify(v));
-  assert.deepEqual(addressReaskVerdict("Dạ mình ở phường nào ạ?", knownFromText, 2), { rest: "", note: v!.note }, "cả tin là câu hỏi ⇒ rest rỗng, nơi gọi gửi câu ghi nhận");
+  const whole = addressReaskVerdict("Dạ mình ở phường nào ạ?", knownFromText, 2);
+  // Khẳng định theo NGHĨA (23/10/2026 phán quyết mang thêm mã cho bộ dò 2B): rest rỗng + cùng ghi chú + mã «phường đã biết».
+  assert.deepEqual([whole?.rest, whole?.note, whole?.code, whole?.codes], ["", v!.note, "WARD_KNOWN", ["WARD_KNOWN"]], "cả tin là câu hỏi ⇒ rest rỗng, nơi gọi gửi câu ghi nhận");
   assert.ok(ADDRESS_KNOWN_TEXT.length > 0);
   // Câu TÓM TẮT có tên phường (không hỏi) đi qua nguyên vẹn.
   assert.equal(addressReaskVerdict("Dạ em giao tới 230/20 Phan Huy Ích, phường An Hội Tây, TP.HCM nhé. Mình xác nhận giúp em ạ?", knownFromText, 2), null);

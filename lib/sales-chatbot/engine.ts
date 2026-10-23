@@ -523,6 +523,18 @@ export function guardAssistantContent(content: AiBlock[], given: boolean): { con
   return { content: out, dropped };
 }
 
+/**
+ * Đặt cờ «lượt mua đã có chữ địa chỉ» cho điểm chặn của `appendMessage` (AGENTS 3.12b) và trả chữ khách của lượt mua. Gọi NGAY khi lượt có
+ * tin khách, và gọi lại mỗi khi `st0` có thể đổi lượt mua (round-check «đặt thêm»): trước đây cờ chỉ được đặt giữa `chatTurnCore`, nên
+ * mọi câu MÁY CHỦ tự soạn trước đó (qtyAck · round-check · huỷ đơn) đi qua điểm chặn với cờ = false (23/10/2026).
+ * `tests/address-reask-qtyack.test.ts` quét mã nguồn: mọi `reply(` trong `chatTurnCore` đứng SAU lần gọi đầu tiên.
+ */
+function markAddressGiven(conversationId: string, msgs: Parameters<typeof customerMsgsOf>[0], st: ChatState, text: string): string[] {
+  const texts = [...customerTextsSince(customerMsgsOf(msgs), purchaseRoundStart(st)), text];
+  turnAddressGiven.set(conversationId, addressTextGiven(texts));
+  return texts;
+}
+
 async function appendMessage(conversationId: string, seq: number, role: "user" | "assistant", content: AiBlock[]) {
   const db = await getDb();
   if (role === "assistant") {
@@ -1091,6 +1103,8 @@ async function chatTurnCore(
   try {
     const turnSeq = seq;
     await appendMessage(conv.id, seq++, "user", [{ type: "text", text }]);
+    // Điểm chặn hỏi lại địa chỉ có hiệu lực từ câu bot ĐẦU TIÊN của lượt (AGENTS 3.12b) — xem markAddressGiven.
+    markAddressGiven(conv.id, msgs, (conv.state ?? {}) as ChatState, text);
     const bump = (patch: Partial<typeof schema.salesChatConversations.$inferInsert>) => writeConversation(conv.id, patch, now);
     // Đã chuyển nhân viên ⇒ bot IM LẶNG ở MỌI kênh công khai (chủ shop 05/10/2026 — trước đây web nhắn «Nhân viên của shop
     // đang tiếp nhận…» mỗi tin khách gửi thêm). Tin khách vẫn ghi ở trên để nhân viên đọc; khung THỬ vẫn thấy câu báo.
@@ -1347,6 +1361,8 @@ async function chatTurnCore(
         await bump({ state: st as Record<string, unknown> });
         conv.state = st as Record<string, unknown>;
         st0 = st;
+        // «Đặt thêm» mở lượt mua MỚI ⇒ chữ địa chỉ của lượt cũ không còn tính (luật khách cũ 3.12 vẫn cho hỏi «như lần trước»).
+        markAddressGiven(conv.id, msgs, st0, text);
       } else {
         const said = (st0.cart?.selectedItems ?? []).filter((x) => x.customerExplicit && x.sourceMessageId === turnSeq).map((x) => `${amountText(x.quantity, x.unit, x.pieces)}${x.label ? ` ${x.label}` : ""}`);
         const step = roundCheckStep({ confirmed: rcOrder ?? undefined, phase: phase?.phase ?? null, text, turn: turnSeq, now, prior: rc, answersOffer: prevTurn !== undefined && st0.upsellTurn === prevTurn, saidLine: said.length ? said.join(" + ") : null, money: formatVND });
@@ -1380,7 +1396,8 @@ async function chatTurnCore(
     // tin khách của CHÍNH hội thoại (kể cả tin cũ chép từ Pancake); sau khi đọc Customer 360 thì thêm SĐT đơn nối chắc (THREAD / FB_ID).
     const ownCustomerTexts = [...customerTextsSince(customerMsgsOf(msgs), null), text];
     let knownPhone = knownPhoneOf({ customerPhone: st0.customer?.phone, customerTexts: ownCustomerTexts });
-    const roundTextsNow = [...customerTextsSince(customerMsgsOf(msgs), purchaseRoundStart(st0)), text];
+    const roundTextsNow = markAddressGiven(conv.id, msgs, st0, text);
+    const addressGivenNow = addressTextGiven(roundTextsNow);
     // Tin khách của các LƯỢT MUA TRƯỚC trong chính hội thoại (địa chỉ lần trước — chỉ để HỎI xác nhận, không tự điền).
     const earlierRoundTexts = ownCustomerTexts.slice(0, Math.max(0, ownCustomerTexts.length - roundTextsNow.length));
     const upsellDue = Boolean(qrSettings.upsellReplyId) && !st0.upsellSent;
@@ -1389,7 +1406,9 @@ async function chatTurnCore(
       const one = said.length === 1 && said[0].label && (said[0].productId || said[0].match) ? said[0] : null;
       // Tin HAI Ý «Cho chị 2kg. Mấy ngày nhận được hàng?» (ca «Xuân Đoàn»): ghi nhận số lượng VÀ đáp phần hỏi giao — chưa có địa chỉ ⇒ xin
       // địa chỉ để báo thời gian dự kiến, KHÔNG nêu mốc / số ngày (máy chủ chưa có căn cứ). Câu thứ hai là chuyện khác ⇒ để model đọc.
-      if (one && (twoIntents || quantityOnlyAnswer(cartInput, [one.label]))) {
+      // Khách ĐÃ gửi chữ địa chỉ (AGENTS 3.12b) ⇒ tin hai ý không đi nhánh này: câu «mình gửi em địa chỉ, em báo thời gian dự kiến» là xin
+      // lại địa chỉ — để model trả lời phần hỏi giao với ADDRESS_GIVEN_PROMPT (23/10/2026).
+      if (one && ((twoIntents && !addressGivenNow) || quantityOnlyAnswer(cartInput, [one.label]))) {
         const ask = silenceFallbackText(st0, text, turnSeq, false, prevTurn, { phone: knownPhone, roundTexts: roundTextsNow });
         if (/số điện thoại|địa chỉ|phường|tỉnh/.test(ask)) {
           const askTail = ask.replace(/^Dạ,?\s*/, "").replace(/^\p{Ll}/u, (ch) => ch.toUpperCase());
@@ -1469,9 +1488,8 @@ async function chatTurnCore(
     // câu mẫu (P0 18/10/2026). CHỈ lượt mua hiện tại (review PR #873): «Cho chị 1kg chả cá thu» của lượt mua TRƯỚC không phải căn cứ cho
     // chả cá bot tự thêm ở lượt này. Cùng mốc với đường phủ nhận (`purchaseRoundStart`), tính MỘT lần, dùng cho câu mẫu, báo giá
     // (calculate_cart) lẫn lên / sửa / chốt đơn.
-    const roundCustomerTexts = [...customerTextsSince(customerMsgsOf(msgs), purchaseRoundStart(st0)), text];
-    // AGENTS 3.12b (chủ shop 22/10/2026): đã có chữ địa chỉ trong lượt mua ⇒ từ đây không chữ bot nào được hỏi địa chỉ nữa.
-    turnAddressGiven.set(conv.id, addressTextGiven(roundCustomerTexts));
+    // AGENTS 3.12b (chủ shop 22/10/2026): đã có chữ địa chỉ trong lượt mua ⇒ không chữ bot nào được hỏi địa chỉ nữa (đặt lại theo st0 mới nhất).
+    const roundCustomerTexts = markAddressGiven(conv.id, msgs, st0, text);
     // MÓN ĐANG BÀN (P0 18/10/2026, ca «ThanhPhương»): «xin giá chả cá» khớp chữ câu mẫu NEM vì câu nem mang nhầm cách hỏi đó. Câu mẫu
     // nói về món khác món đang bàn không được trả lời — ở bước khớp chữ, AI chọn mã, và công cụ `send_quick_reply`. Món đang bàn = món
     // khách gọi tên + món shop nói tới / mời sau đó; khách chưa gọi tên món ⇒ món của câu shop / page gần nhất (tin tự động của page).
