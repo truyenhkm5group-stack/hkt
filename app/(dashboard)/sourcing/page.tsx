@@ -1,4 +1,8 @@
-import { PackageSearch } from "lucide-react";
+import Link from "next/link";
+import { PackageSearch, Plus } from "lucide-react";
+import { SourcingOffersTable } from "@/app/(dashboard)/sourcing/offers-table";
+import { DataTableToolbar } from "@/components/data-table/toolbar";
+import { Button } from "@/components/ui/button";
 import { SourcingQueryBox } from "@/components/sourcing/sourcing-query-box";
 import { LandedCostForm, SourcingLimitsForm } from "@/components/sourcing/sourcing-settings-forms";
 import { PageHeader } from "@/components/page-header";
@@ -10,12 +14,16 @@ import {
   SOURCING_FX_STALE_DAYS,
   SOURCING_LANDED_COST_KEY,
   SOURCING_LIMITS_KEY,
+  SOURCING_PLATFORMS,
+  SOURCING_PLATFORM_LABEL,
   fxStale,
   landedCostMissing,
   parseLandedCost,
   parseSourcingLimits,
 } from "@/lib/constants/sourcing";
 import { formatDateTime, formatNumber } from "@/lib/format";
+import { SOURCING_OFFER_SORTABLE, listSourcingOffers } from "@/lib/queries/sourcing";
+import { parseListParams, type SearchParams } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 
 export const metadata = { title: "Tìm hàng nguồn" };
@@ -23,18 +31,24 @@ export const metadata = { title: "Tìm hàng nguồn" };
 /**
  * TÌM HÀNG NGUỒN TRUNG QUỐC (module `sourcing`, docs/tech/ai-sourcing.md). SRC-1: chưa có nguồn dữ liệu được duyệt nên khối tìm
  * hàng ở trạng thái trống có giải thích; hai khối cấu hình (trần lượt AI, tham số giá về Việt Nam) đọc / ghi settings. SRC-2: bộ
- * sinh từ khoá tiếng Trung (từ điển cố định, AI chỉ khi từ điển không đủ — qua server action, trang không tự gọi AI).
+ * sinh từ khoá tiếng Trung (từ điển cố định, AI chỉ khi từ điển không đủ — qua server action, trang không tự gọi AI). SRC-3: kho
+ * mẫu nhập tay (bảng 0256) + chọn 2–4 mẫu để so sánh.
  */
-export default async function SourcingPage() {
+export default async function SourcingPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const raw = await searchParams;
   const user = await requirePermission("sourcing:view");
+  const canWrite = can(user, "sourcing:write");
+  const params = parseListParams(raw, { defaultSort: "createdAt", filterKeys: ["platform", "state"], sortable: SOURCING_OFFER_SORTABLE });
   const canConfigure = can(user, "sourcing:approve");
   const canSearch = can(user, "sourcing:search");
-  const [limits, landed] = await Promise.all([
+  const [limits, landed, offers] = await Promise.all([
     getSettingJson<unknown>(SOURCING_LIMITS_KEY, DEFAULT_SOURCING_LIMITS).then(parseSourcingLimits),
     getSettingJson<unknown>(SOURCING_LANDED_COST_KEY, EMPTY_LANDED_COST).then(parseLandedCost),
+    listSourcingOffers(params),
   ]);
+  const now = new Date();
   const missing = landedCostMissing(landed);
-  const stale = fxStale(landed, new Date());
+  const stale = fxStale(landed, now);
   return (
     <div className="space-y-5">
       <PageHeader
@@ -47,11 +61,52 @@ export default async function SourcingPage() {
         {canSearch ? <SourcingQueryBox /> : <p className="text-sm text-muted-foreground">Cần quyền «Tìm hàng: tìm» để sinh từ khoá.</p>}
       </SectionCard>
 
+      <SectionCard
+        id="kho-mau"
+        title="Kho mẫu"
+        description="Mẫu đã tìm thấy và lưu tay: link, bậc giá, MOQ, nhà cung cấp. Chọn 2–4 mẫu để so sánh."
+        actions={
+          canWrite && !offers.unavailable ? (
+            <Button asChild size="sm">
+              <Link href="/sourcing/offers/new">
+                <Plus className="size-4" />
+                Thêm mẫu
+              </Link>
+            </Button>
+          ) : null
+        }
+      >
+        {offers.unavailable ? (
+          <p className="text-sm text-amber-700 dark:text-amber-300" data-sourcing-unavailable>
+            CSDL của tổ chức chưa áp migration 0256 (kho mẫu nguồn) — kho mẫu chưa dùng được, các phần khác của trang vẫn chạy.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <DataTableToolbar
+              searchPlaceholder="Tên mẫu, mã sản phẩm, link, nhà cung cấp…"
+              facets={[
+                { key: "platform", label: "Nguồn", options: SOURCING_PLATFORMS.map((p) => ({ value: p, label: SOURCING_PLATFORM_LABEL[p] })) },
+                {
+                  key: "state",
+                  label: "Trạng thái",
+                  options: [
+                    { value: "ACTIVE", label: "Đang dùng" },
+                    { value: "ARCHIVED", label: "Lưu trữ" },
+                  ],
+                },
+              ]}
+              resultLabel={`${formatNumber(offers.total)} mẫu`}
+            />
+            <SourcingOffersTable rows={offers.rows} pageCount={offers.pageCount} total={offers.total} nowIso={now.toISOString()} />
+          </div>
+        )}
+      </SectionCard>
+
       <SectionCard title="Tìm hàng" description="Từ khoá tiếng Việt / ảnh ⇒ sản phẩm nguồn ⇒ so sánh giá theo bậc, MOQ, nhà cung cấp.">
         <EmptyState
           icon={PackageSearch}
           title="Chưa có nguồn dữ liệu được duyệt"
-          description="ERP chỉ dùng nguồn dữ liệu có quyền sử dụng rõ ràng (API chính thức hoặc đối tác có văn bản) — không cào web. Việc này đang chờ chủ shop chọn nguồn (docs/tech/ai-sourcing.md §6, B1 / B2). Trong lúc chờ: dùng bộ sinh từ khoá ở trên rồi tìm trên 1688 bằng tài khoản của bạn; kho mẫu nhập tay sẽ có ở bước kế tiếp."
+          description="ERP chỉ dùng nguồn dữ liệu có quyền sử dụng rõ ràng (API chính thức hoặc đối tác có văn bản) — không cào web. Việc này đang chờ chủ shop chọn nguồn (docs/tech/ai-sourcing.md §6, B1 / B2). Trong lúc chờ: dùng bộ sinh từ khoá ở trên, tìm trên 1688 bằng tài khoản của bạn, rồi lưu mẫu vào «Kho mẫu» bằng tay."
         />
       </SectionCard>
 

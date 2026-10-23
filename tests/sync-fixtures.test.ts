@@ -4,6 +4,7 @@
  */
 import { testSourcingShell } from "./sourcing-shell.test";
 import { testSourcingQuery } from "./sourcing-query.test";
+import { testSourcingOffers } from "./sourcing-offers.test";
 import "./setup-env";
 import { testReturnReasonKhachVangNha } from "./return-reason-vang-nha.test";
 import { testCodReconciliation } from "./cod-reconciliation.test";
@@ -2563,6 +2564,8 @@ async function main() {
     // SRC-2: bộ sinh từ khoá tiếng Trung — từ điển tất định, AI chỉ khi thiếu, có trần theo sổ AI.
     testSourcingShell();
     await testSourcingQuery();
+    // SRC-3: kho mẫu nguồn nhập tay — fen nguyên, chống trùng hai khoá, ảnh chụp giá chỉ thêm, chưa áp 0256 không sập.
+    await testSourcingOffers();
     await testVtpImportTruth(db);
     await testVtpImportRecovery(db);
     await testCostAllocation(db);

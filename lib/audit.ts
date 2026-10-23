@@ -97,7 +97,7 @@ export type AuditParams = {
   `order.create_failed` / `order.validation_failed` (sứ mệnh saas-ops-signals · lib/sales-chatbot/order-signals.ts): vết của một lượt bot
   ghi đơn KHÔNG thành — theo định nghĩa không có dòng đơn nào đổi; đơn nào đã ghi trước đó thì ghi bằng hành động khác của chính nó.
 */
-const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "PASSWORD_RESET_REQUEST", "META_AD_POST_LOOKUP", "RECOMMENDATION_DECIDED", "OUTREACH_BROADCAST_START", "OUTREACH_BROADCAST_STOP", "OUTREACH_BROADCAST_RESUME", "CUSTOM_FILE_DOWNLOAD", "BLUEPRINT_EXPORT", "DATA_EXPORT", "CHATBOT_AD_BOT_SAVE", "CHATBOT_AD_BOT_SWITCH", "CHATBOT_AD_BOT_SYNC", "ORG_CONNECTION_TOKEN_ROTATE", "order.create_failed", "order.validation_failed"]);
+const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "PASSWORD_RESET_REQUEST", "META_AD_POST_LOOKUP", "RECOMMENDATION_DECIDED", "OUTREACH_BROADCAST_START", "OUTREACH_BROADCAST_STOP", "OUTREACH_BROADCAST_RESUME", "CUSTOM_FILE_DOWNLOAD", "BLUEPRINT_EXPORT", "DATA_EXPORT", "CHATBOT_AD_BOT_SAVE", "CHATBOT_AD_BOT_SWITCH", "CHATBOT_AD_BOT_SYNC", "ORG_CONNECTION_TOKEN_ROTATE", "order.create_failed", "order.validation_failed", "SOURCING_OFFER_CREATE", "SOURCING_OFFER_UPDATE", "SOURCING_OFFER_ARCHIVE", "SOURCING_OFFER_RESTORE", "SOURCING_SNAPSHOT_ADD", "SOURCING_SUPPLIER_UPDATE"]);
 
 /**
  * Loại tác nhân cho cột `audit_logs.actor_kind` (Company OS · Agent G).
