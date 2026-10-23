@@ -1,0 +1,8 @@
+{
+  "pr": 1004,
+  "sha": "10790f9809f97ed28f87d0d165246e2ffd0ba72c",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T14:14:10.307Z",
+  "note": "review lead: hàm thuần; hổ phách theo VTP_ORDER_LIST_MAX_AGE_HOURS đã khai, không ngưỡng mới; tỷ lệ khớp đọc lại vtpWebhookHealth, dưới WEBHOOK_MATCH_MIN_SAMPLE ⇒ chưa đủ mẫu, không tô màu (luật 38); lối bấm /import-vtp."
+}
