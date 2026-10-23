@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "perf-probe-trong-diem-work",
+  "title": "perf-probe: liệt kê từng câu của ba nguồn /work chạm hạn + sổ thiếu hàng + đối soát lương",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-trongdiem",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/perf-probe-trong-diem-work",
+  "base_sha": "14244cf63c7570ed62e11da13c5faa8d47aa9722",
+  "domains": [],
+  "owned_paths": [
+    "scripts/perf-probe.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-23T21:25:21.690Z",
+  "updated_at": "2026-10-23T21:25:21.690Z",
+  "last_heartbeat": "2026-10-23T21:25:21.690Z",
+  "definition_of_done": []
+}
