@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "mission_id": "returns-probe-cold-data",
+  "title": "returns-page-probe: lượt đối chứng ?period=30d (module ấm, dữ liệu nguội)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-rprobe",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/returns-probe-cold-data",
+  "base_sha": "219e916ada1c4ff7a3fcdabf84a0e43ff62bffb4",
+  "domains": [],
+  "owned_paths": [
+    "scripts/returns-page-probe.ts",
+    "docs/ops-vps-script-notes.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-23T21:39:17.011Z",
+  "updated_at": "2026-10-23T21:39:17.011Z",
+  "last_heartbeat": "2026-10-23T21:39:17.011Z",
+  "definition_of_done": []
+}
