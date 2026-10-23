@@ -3,7 +3,7 @@
   "mission_id": "claim-guard-added-claim",
   "title": "Hàng rào khẳng định bắt «Dạ em thêm rồi ạ» / «em sửa rồi» khi lượt sửa đơn không ghi",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tonight",
@@ -24,12 +24,15 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-22T17:30:15.497Z",
-  "updated_at": "2026-10-23T02:02:09.192Z",
+  "updated_at": "2026-10-23T02:33:02.433Z",
   "last_heartbeat": "2026-10-22T20:28:43.861Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "evidence": {
+    "merged": "#986 → ff846b72c72898d7b46689f3c727d060e3a32616"
   },
   "handoff": {
     "branch": "claude/claim-guard-added-claim",
