@@ -131,7 +131,7 @@ const results: {
  * một câu 16 giây che mất hoàn toàn — không biết phải sửa câu nào. Hàm khớp mẫu dưới đây được ghi
  * lại MỌI câu từ 50ms trở lên trong lượt NGUỘI, in thành một mục riêng.
  */
-const TRONG_DIEM = /getPreOrderFunnel|getSalesLeakageQueue|getPreshipRiskBacktest|getNominalProfitReport|getMarketerDailyNominal|getAdsPerformance|getMarketerReport|getAdsDecision|salesByProductPage|dataQualitySummary|getDataQualityIssues|codSettlementSummary|listCodSettlement|customerFacets|getCashflowStatement/;
+const TRONG_DIEM = /getPreOrderFunnel|getSalesLeakageQueue|getPreshipRiskBacktest|getNominalProfitReport|getMarketerDailyNominal|getAdsPerformance|getMarketerReport|getAdsDecision|salesByProductPage|dataQualitySummary|getDataQualityIssues|codSettlementSummary|listCodSettlement|customerFacets|getCashflowStatement|getFulfillmentBottleneckQueue|getActionQueue|getReplenishmentPlan|getStockShortage|getReconCenter/;
 let cauTrongHam: { ms: number; sql: string }[] | null = null;
 const cauTheoHam = new Map<string, { ms: number; sql: string }[]>();
 
@@ -747,6 +747,10 @@ async function main() {
     const plan = await import("@/lib/queries/planning");
     const appr = await import("@/lib/queries/approvals");
     const adsW = await import("@/lib/queries/ads-decision");
+    const ton = await import("@/lib/queries/stock-shortage");
+    const luong = await import("@/lib/queries/payroll-recon-center");
+    // Đúng kỳ adaptPayrollRecon dùng: reconCenterDefaultRange(monthKeyOf(bây giờ)).
+    const kyLuong = (await import("@/lib/payroll/recon-center")).reconCenterDefaultRange((await import("@/lib/constants/payroll-carryover")).monthKeyOf(new Date()));
 
     await timed("/work (nền)", "getCareQueue", () => care.getCareQueue());
     await timed("/work (nền)", "getFulfillmentBottleneckQueue", () => fb.getFulfillmentBottleneckQueue());
@@ -757,6 +761,13 @@ async function main() {
     // Nguồn ALERT: hàng đợi cảnh báo gọi `getReplenishmentPlan` (số ngày còn hàng) khi có cảnh báo gắn mẫu mã.
     await timed("/work (nền)", "getActionQueue 500", () => aq.getActionQueue({ limit: 500 }));
     await timed("/work (nền)", "getReplenishmentPlan", () => plan.getReplenishmentPlan());
+    /*
+      OD-UX-05 mục 2 (24/10/2026): ba nguồn chạm hạn của /work không có câu thủ phạm rõ ràng ở cấp hàm — từng câu ≥ 50 ms của chúng
+      in ở mục «CÂU CHẬM BÊN TRONG TỪNG HÀM TRỌNG ĐIỂM» (TRONG_DIEM). Sổ thiếu hàng (FULFILLMENT_EXCEPTION gọi khi có đơn chưa vận
+      đơn) và trung tâm đối soát lương (PAYROLL_RECON, đúng kỳ mặc định adaptPayrollRecon dùng) đo RIÊNG để thấy phần của chúng.
+    */
+    await timed("/work (nền)", "getStockShortage", () => ton.getStockShortage());
+    await timed("/work (nền)", `getReconCenter ${kyLuong.fromMonth}..${kyLuong.toMonth}`, () => luong.getReconCenter(kyLuong.fromMonth, kyLuong.toMonth));
     await timed("/work (nền)", "listApprovalRequests", () => appr.listApprovalRequests({ includeDecided: false, decidedSince: null }));
 
     const NGUON: [string, WorkSource[]][] = [
