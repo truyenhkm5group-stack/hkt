@@ -3,7 +3,7 @@
   "mission_id": "trace-summary-pack",
   "title": "Mọi dòng tóm tắt ops của conv-money-trace và stuck-conversation-audit vừa 280 byte, không mất chỉ số",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-summary-pack",
@@ -25,9 +25,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T04:17:35.962Z",
-  "updated_at": "2026-10-23T06:25:30.228Z",
+  "updated_at": "2026-10-23T06:43:47.439Z",
   "last_heartbeat": "2026-10-23T06:23:33.782Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#994 → 1c8b1e3844e3cea5e5f5dba2aa65501c9944d55a"
+  },
   "handoff": {
     "branch": "claude/trace-summary-pack",
     "sha": "e05d5e558dac661e492b41609a6e3252a6d37617",
