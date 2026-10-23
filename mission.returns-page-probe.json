@@ -3,7 +3,7 @@
   "mission_id": "returns-page-probe",
   "title": "Ops returns-page-probe: vòng sự kiện bị chặn khi dựng /reports/returns + đầu phản hồi thật (chỉ đọc)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-rprobe",
@@ -28,9 +28,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T18:35:50.506Z",
-  "updated_at": "2026-10-23T21:07:09.714Z",
+  "updated_at": "2026-10-23T21:30:09.589Z",
   "last_heartbeat": "2026-10-23T21:05:17.699Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1015 → 219e916ada1c4ff7a3fcdabf84a0e43ff62bffb4"
+  },
   "handoff": {
     "branch": "claude/returns-page-probe",
     "sha": "5a13e68dfba1b98d4ed8000a0fcca13b55c7d0ba",
