@@ -3,7 +3,7 @@
   "mission_id": "purchasing-leadtime-probe",
   "title": "ops purchasing-leadtime-probe: đo trước / sau OD-P2-03 bằng CHÍNH hàm báo cáo /inventory/purchasing",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-probe",
@@ -21,7 +21,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T08:02:06.850Z",
-  "updated_at": "2026-10-23T08:02:06.850Z",
-  "last_heartbeat": "2026-10-23T08:02:06.850Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T08:49:55.650Z",
+  "last_heartbeat": "2026-10-23T08:49:55.650Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/purchasing-leadtime-probe",
+    "sha": "bf8867a2a71f892cae7776503586645c8a3c54f2",
+    "at": "2026-10-23T08:49:55.650Z",
+    "actor": "DESKTOP-56TH98Y:wt-probe",
+    "title": "Ops purchasing-leadtime-probe: đo lead time xưởng bằng chính hàm báo cáo, trước và sau OD-P2-03",
+    "summary": "Script ops chỉ đọc gọi getPurchasingReport (lib từ image đang chạy), in p50/p90/số lô theo xưởng + độ phủ; trường chỉ bản mới có (leadActual/leadEstimated/leadBasis) in «—». Khai đủ bốn chỗ ops-vps.yml + chú thích docs/ops-vps-script-notes.md + CSDL_CHI_DINH_DUOC_PHEP. Vào main TRƯỚC PR chính OD-P2-03.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint 4 tệp: sạch",
+      "TEST_KHOI=K10,K17,K21 npm test: ĐẠT (ops-script-size 87.672/125.000 byte · platform-isolation-static · purchasing-leadtime-probe)"
+    ]
+  }
 }
