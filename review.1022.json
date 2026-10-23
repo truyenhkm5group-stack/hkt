@@ -1,0 +1,8 @@
+{
+  "pr": 1022,
+  "sha": "162240926bbe607065143e1be2a31359768adb51",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T23:32:06.382Z",
+  "note": "review lead: chỉ-script chỉ đọc; vân tay khối customer sâu 4 tầng, chuỗi chữ chỉ băm, chỉ lộ boolean/mốc ISO/số mang tên đếm-mốc; --orders ≤15 chữ số; đầu ra pos-reship-link đã nằm trong OPS_THAO_TAC_MA_HOA (mã hoá)."
+}
