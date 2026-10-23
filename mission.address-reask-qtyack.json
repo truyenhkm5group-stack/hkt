@@ -3,7 +3,7 @@
   "mission_id": "address-reask-qtyack",
   "title": "Câu máy chủ tự soạn (qtyAck · roundCheck · serverCancel) không còn xin lại địa chỉ đã gửi; 2B ADDRESS_REASK theo luật 3.12b",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-qtyack",
@@ -25,9 +25,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T03:37:32.326Z",
-  "updated_at": "2026-10-23T06:28:45.496Z",
+  "updated_at": "2026-10-23T07:51:23.337Z",
   "last_heartbeat": "2026-10-23T06:28:45.496Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#991 → fb110dc37c83235df8994e21d716dc2cd49a347a"
+  },
   "handoff": {
     "branch": "claude/address-reask-qtyack",
     "sha": "d8276fe60eb1d058f31fbbdee7789fb0e8e4ce0b",
