@@ -3,7 +3,7 @@
   "mission_id": "trace-template-attribution",
   "title": "conv-money-trace thôi gán tin model / tin theo dõi cho câu mẫu (kể cả câu đã tắt)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-trace-tpl",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T03:44:33.490Z",
-  "updated_at": "2026-10-23T03:44:33.490Z",
-  "last_heartbeat": "2026-10-23T03:44:33.490Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T04:15:41.252Z",
+  "last_heartbeat": "2026-10-23T04:15:41.252Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/trace-template-attribution",
+    "sha": "1587e4346d3bbd93dbd19a2f720c7181f172e1ef",
+    "at": "2026-10-23T04:15:41.252Z",
+    "actor": "DESKTOP-56TH98Y:wt-trace-tpl",
+    "title": "conv-money-trace thôi gán tin model / tin theo dõi cho câu mẫu (kể cả câu đã tắt)",
+    "summary": "chỉ-script: chỉ câu mẫu đang bật được so; tin theo dõi (khớp mốc followup.sent) ⇒ THEO DÕI (model), không vào D; nhãn GIỐNG câu mẫu #n. D trước (7 ngày HSLC, run 39896651110): 3 tin/3 hội thoại, tin bot là câu mẫu 2.259 (41/94 câu mẫu bật); sau đo khi gộp (fetch_script ref=main)",
+    "tests": [
+      "tsc --noEmit sạch · eslint 3 tệp sạch · TEST_KHOI=K21 «TẤT CẢ KIỂM THỬ CỦA chỉ K21 ĐẠT» (testConvMoneyTrace + testConvMoneyTraceAttribution, CSDL PGlite) · đột biến 2/2 bị bắt · full suite giao CI gates"
+    ]
+  }
 }
