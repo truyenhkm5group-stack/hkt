@@ -1,0 +1,8 @@
+{
+  "pr": 983,
+  "sha": "72203d269b879a0e371c8c418b8646913e81d005",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T00:53:45.621Z",
+  "note": "review lead: CHỈ-SCRIPT. Dòng 2B chia theo nhóm, packSummaryLines dồn theo BYTE UTF-8 (trần 280, khớp cut -c1-300 đếm byte của workflow sau che_log); mọi mã SALES_QUALITY_CODES có mặt đúng một lần sau khi cắt; bài cũ đếm length đổi sang byte; đột biến dồn theo length bị bắt. Không sửa cut của workflow (hàng rào kênh công khai)."
+}
