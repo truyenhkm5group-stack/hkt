@@ -186,6 +186,7 @@ import { testCanonicalOutcome } from "./canonical-outcome.test";
 import { testCogsRecognition } from "./cogs-recognition.test";
 import { testSlowMoving } from "./slow-moving.test";
 import { testDrilldownContract } from "./drilldown-contract.test";
+import { testReturnsPhoneGate } from "./returns-phone-gate.test";
 import { testBusinessBrief } from "./business-brief.test";
 import { testSearch } from "./search.test";
 import { testEntityTimeline } from "./entity-timeline.test";
@@ -2280,6 +2281,7 @@ async function main() {
   }
   if (khoi.chay("K05")) {
     testDrilldownContract();
+    testReturnsPhoneGate();
     testAlertConfig();
     testMigrationJournal();
     testSchedulerCoverage();
