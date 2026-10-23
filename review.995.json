@@ -1,0 +1,8 @@
+{
+  "pr": 995,
+  "sha": "e9575d96603f4d791f6755ff65ccfc378605e679",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T07:39:14.411Z",
+  "note": "review lead: CHỈ TÀI LIỆU — tệp tiến độ bền của chương trình Odoo-inspired (chủ shop 23/10): mục tiêu, 6 nguyên tắc, scope, bảng nhiệm vụ 13 cột (P0 đang chạy + OD-P1…P5 + OD-UX-01…06), audit 12 nhóm module có tệp:dòng + URL docs Odoo 18 + ấn bản Community/Enterprise theo danh sách addons, thứ tự Phase 2 ∥ UI/UX → 3 → 4 → 5, quyết định cần chủ shop Q1–Q4, hướng dẫn khôi phục."
+}
