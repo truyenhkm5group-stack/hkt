@@ -13,16 +13,21 @@
  *
  * Luật (quyết định Tech Lead + chủ shop duyệt pilot 22/10/2026):
  *  · MẶC ĐỊNH CHẠY THỬ: đếm cặp từ CSDL, đọc tối đa `--limit` (mặc định 20) đơn trên POS để in kế hoạch — không ghi gì;
- *  · `--apply` BẮT BUỘC kèm `--limit=N`; chỉ ghi `partner.extend_code` + `partner.order_number_vtp` — KHÔNG BAO GIỜ đổi `status`
+ *  · `--apply` BẮT BUỘC kèm `--limit=N`; chỉ ghi `partner.order_number_vtp` — KHÔNG BAO GIỜ đổi `status`, KHÔNG đụng `extend_code`
+ *    (`extend_code` là mã DO PANCAKE CẤP, khác mã Viettel Post — lib/constants/viettelpost.ts; chạy thử 23/10/2026: 20/20 đơn mang
+ *    `order_number_vtp` = mã GỐC còn `extend_code` = PKE1094… / PKE9008… — ghi đè nó là đổi định danh của Pancake, không phải gắn mã);
  *    (đổi trạng thái có thể làm Pancake trừ tồn / sinh doanh thu lần nữa — chưa xác minh thì không làm);
- *  · chỉ ghi khi mã hiện có trên POS TRỐNG hoặc ĐÚNG mã gốc — mã lạ (ĐVVC khác, nhân viên đã sửa) ⇒ không đè, đếm riêng;
+ *  · chỉ ghi khi `order_number_vtp` trên POS TRỐNG hoặc ĐÚNG mã gốc — mã lạ (ĐVVC khác, nhân viên đã sửa) ⇒ không đè, đếm riêng;
  *  · đúng mã mới rồi ⇒ không PUT (idempotent); đọc lại NGAY sau PUT, so mọi field khác trước / sau; ghi nhật ký ERP (audit);
  *  · mỗi đơn đúng MỘT lần gửi chính (`PRIMARY_ATTEMPT`), cùng CSDL nhà; không in tên / SĐT.
- * arg: `[--apply] [--limit=1..1000] [--pilot] [--order=<mã đơn POS>]`. `--pilot` = lần gửi chính ĐÃ GIAO + vận đơn gốc ĐÃ HUỶ.
+ *  · audit lưu NGUYÊN khối `partner` trước và sau PUT; `--rollback --order=<id>` PUT lại đúng `order_number_vtp` cũ theo dòng audit gần
+ *    nhất — CHỈ khi POS đang mang đúng mã mới script đã ghi (mã khác ⇒ không đụng), mã cũ trống ⇒ không gửi null.
+ * arg: `[--apply] [--limit=1..1000] [--pilot] [--order=<mã đơn POS>]` hoặc `--rollback --order=<mã đơn POS>`. `--pilot` = lần gửi chính
+ * ĐÃ GIAO + vận đơn gốc ĐÃ HUỶ.
  */
 import "dotenv/config";
-import { sql } from "drizzle-orm";
-import { getDb, type Db } from "@/db";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { getDb, schema, type Db } from "@/db";
 import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { env } from "@/lib/env";
 import { asRecord, fetchJson, sleep } from "@/lib/integrations/http";
@@ -33,14 +38,14 @@ import { rowsOf } from "@/lib/sql-rows";
 
 const CHAY_THANG = Boolean(process.argv[1] && process.argv[1].endsWith("pos-reship-link.ts"));
 // Chạy thử ⇒ phiên CSDL chỉ đọc từ lần mở đầu tiên. `--apply` cần ghi nhật ký (audit) nên không ép.
-if (CHAY_THANG && !process.argv.includes("--apply")) process.env.ERP_READ_ONLY = "1";
+if (CHAY_THANG && !process.argv.includes("--apply") && !process.argv.includes("--rollback")) process.env.ERP_READ_ONLY = "1";
 
 const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s.slice(0, 300)}`);
 const THROTTLE_MS = 400;
 
 // ─────────────────────────── HÀM THUẦN ───────────────────────────
 
-export type ReshipArgs = { apply: boolean; limit: number; pilot: boolean; order: string | null } | { error: string };
+export type ReshipArgs = { apply: boolean; limit: number; pilot: boolean; order: string | null; rollback: boolean } | { error: string };
 
 /** Đối số. `--apply` không kèm `--limit` ⇒ lỗi (không bao giờ ghi hàng loạt vì quên một cờ). HÀM THUẦN. */
 export function parseReshipArgs(argv: readonly string[]): ReshipArgs {
@@ -52,7 +57,10 @@ export function parseReshipArgs(argv: readonly string[]): ReshipArgs {
   if (!Number.isInteger(limit) || limit < 1 || limit > 1000) return { error: "--limit phải là số nguyên 1..1000" };
   const order = val("order");
   if (order !== null && !/^[0-9A-Za-z_-]{1,40}$/.test(order)) return { error: "--order là mã đơn POS (chữ số / chữ, ≤ 40 ký tự)" };
-  return { apply, limit, pilot: argv.includes("--pilot"), order };
+  const rollback = argv.includes("--rollback");
+  if (rollback && (apply || argv.includes("--pilot"))) return { error: "--rollback không đi cùng --apply / --pilot" };
+  if (rollback && order === null) return { error: "--rollback bắt buộc kèm --order=<mã đơn POS> (gỡ từng đơn một)" };
+  return { apply, limit, pilot: argv.includes("--pilot"), order, rollback };
 }
 
 export type PosPartner = { extend_code: string | null; order_number_vtp: string | null };
@@ -67,24 +75,50 @@ export function partnerOf(order: Record<string, unknown>): PosPartner {
 }
 
 /**
- * Việc với một đơn: cả hai mã đã = mã mới ⇒ ALREADY; mỗi mã đang TRỐNG hoặc = mã GỐC ⇒ LINK; có mã nào khác cả hai ⇒ FOREIGN_CODE (không đè —
- * có thể là ĐVVC khác hoặc nhân viên đã sửa tay). Không đọc được mã gốc (`null`) ⇒ chỉ ô TRỐNG mới gắn. HÀM THUẦN.
+ * Việc với một đơn — CHỈ xét `order_number_vtp` (mã Viettel Post; bot nhà đọc ô này trước `extend_code`): đã = mã mới ⇒ ALREADY; TRỐNG
+ * hoặc = mã GỐC ⇒ LINK; mã khác cả hai ⇒ FOREIGN_CODE (không đè — ĐVVC khác hoặc nhân viên đã sửa tay). `extend_code` không tham gia:
+ * đó là mã do Pancake cấp. Không đọc được mã gốc (`null`) ⇒ chỉ ô TRỐNG mới gắn. HÀM THUẦN.
  */
 export function linkPlan(current: PosPartner, oldCode: string | null, newCode: string): LinkPlan {
   const o = clean(oldCode);
   const n = newCode.toUpperCase();
-  const codes = [clean(current.extend_code), clean(current.order_number_vtp)];
-  if (codes.every((c) => c === n)) return "ALREADY";
-  return codes.every((c) => c === null || (o !== null && c === o) || c === n) ? "LINK" : "FOREIGN_CODE";
+  const c = clean(current.order_number_vtp);
+  if (c === n) return "ALREADY";
+  return c === null || (o !== null && c === o) ? "LINK" : "FOREIGN_CODE";
 }
 
-/** Thân PUT: CHỈ khối partner, hai mã. Không status, không field nào khác. HÀM THUẦN. */
-export function linkBody(newCode: string): { partner: { extend_code: string; order_number_vtp: string } } {
-  return { partner: { extend_code: newCode, order_number_vtp: newCode } };
+/** Thân PUT: CHỈ `partner.order_number_vtp`. Không status, không `extend_code`, không field nào khác. HÀM THUẦN. */
+export function linkBody(newCode: string): { partner: { order_number_vtp: string } } {
+  return { partner: { order_number_vtp: newCode } };
 }
 
-/** Field được phép đổi sau PUT (chính hai mã + dấu vết sửa của Pancake). Mọi field KHÁC đổi ⇒ báo. */
-const EXPECTED_CHANGE = new Set(["partner.extend_code", "partner.order_number_vtp", "partner.updated_at", "updated_at", "last_editor", "last_editor_id", "histories", "status_history", "viewing"]);
+/** Thân PUT của rollback: CHỈ `partner.order_number_vtp` = mã cũ ghi trong audit. HÀM THUẦN. */
+export function rollbackBody(oldCode: string): { partner: { order_number_vtp: string } } {
+  return { partner: { order_number_vtp: oldCode } };
+}
+
+export type RollbackPlan = "ROLLBACK" | "ALREADY" | "NO_RECORD" | "NO_OLD_CODE" | "FOREIGN_CODE";
+
+/**
+ * Gỡ một lượt gắn theo dòng audit gần nhất: POS đang = mã MỚI script đã ghi ⇒ ROLLBACK; đã = mã cũ ⇒ ALREADY; không có dòng audit ⇒
+ * NO_RECORD; mã cũ trống ⇒ NO_OLD_CODE (không gửi null — chưa xác minh Pancake xử lý null ở ô này ra sao); mã khác cả hai ⇒ FOREIGN_CODE
+ * (có người / lượt khác đã sửa sau script — không đè). HÀM THUẦN.
+ */
+export function rollbackPlan(current: PosPartner, rec: { oldCode: string | null; newCode: string } | null): RollbackPlan {
+  if (!rec) return "NO_RECORD";
+  const o = clean(rec.oldCode);
+  const n = clean(rec.newCode);
+  const c = clean(current.order_number_vtp);
+  if (o === null) return "NO_OLD_CODE";
+  if (c === o) return "ALREADY";
+  return c === n ? "ROLLBACK" : "FOREIGN_CODE";
+}
+
+/**
+ * Field được phép đổi sau PUT (mã VTP + dấu vết sửa của Pancake). Mọi field KHÁC đổi ⇒ báo — kể cả `partner.extend_code`: spec nói field
+ * không gửi giữ nguyên, nhưng với khối lồng `partner` thì chưa xác minh, và pilot 1 đơn phải lộ ra nếu PUT xoá mất nó.
+ */
+const EXPECTED_CHANGE = new Set(["partner.order_number_vtp", "partner.updated_at", "updated_at", "last_editor", "last_editor_id", "histories", "status_history", "viewing"]);
 
 /** Khoá (dạng a.b) có giá trị khác nhau giữa hai ảnh chụp đơn, trừ các field được phép đổi. Chỉ TÊN khoá — không in giá trị. HÀM THUẦN. */
 export function unexpectedChanges(before: Record<string, unknown>, after: Record<string, unknown>): string[] {
@@ -151,7 +185,44 @@ async function pos(method: "GET" | "PUT", orderId: string, body?: unknown): Prom
   }
 }
 
+/** Dòng audit gắn mã gần nhất của một đơn (mã cũ / mã mới). Không có ⇒ `null`. CHỈ ĐỌC. */
+export async function lastLinkRecord(db: Db, orderId: string): Promise<{ oldCode: string | null; newCode: string } | null> {
+  const a = schema.auditLogs;
+  const [row] = await db.select({ detail: a.detail }).from(a).where(and(eq(a.action, "pos.reship_link"), eq(a.entityId, orderId))).orderBy(desc(a.createdAt)).limit(1);
+  const d = asRecord(row?.detail);
+  return typeof d.newCode === "string" ? { oldCode: typeof d.oldCode === "string" ? d.oldCode : null, newCode: d.newCode } : null;
+}
+
+/** `--rollback --order=<id>`: PUT lại mã cũ theo audit, đọc lại, so field, ghi audit riêng. */
+async function runRollback(orderId: string, runId: string): Promise<boolean> {
+  const rec = await lastLinkRecord(await getDb(), orderId);
+  const before = await pos("GET", orderId);
+  const plan = rollbackPlan(partnerOf(before), rec);
+  tomTat(`pos-reship-link GỠ · kế hoạch ${plan}`);
+  console.log(`đơn ${orderId}: ${plan} · POS hiện ${partnerOf(before).order_number_vtp ?? "—"} · audit cũ ${rec?.oldCode ?? "—"} → mới ${rec?.newCode ?? "—"}`);
+  if (plan !== "ROLLBACK" || !rec?.oldCode) return plan === "ALREADY";
+  await pos("PUT", orderId, rollbackBody(rec.oldCode));
+  const after = await pos("GET", orderId).catch(() => null);
+  const ok = Boolean(after && partnerOf(after).order_number_vtp === clean(rec.oldCode));
+  const other = after ? unexpectedChanges(before, after) : ["(không đọc lại được)"];
+  console.log(`đơn ${orderId}: gỡ ${ok ? "ĐÚNG mã cũ" : "CHƯA đúng mã cũ"} · field khác đổi: ${other.length ? other.join(", ") : "không"}`);
+  tomTat(`pos-reship-link GỠ · đọc lại ${ok ? "đúng" : "CHƯA đúng"} mã cũ · số field khác bị đổi ${other.length}`);
+  await audit({
+    userEmail: "script:pos-reship-link",
+    action: "pos.reship_link.rollback",
+    entity: "order",
+    entityId: orderId,
+    before: { partner: asRecord(before.partner) },
+    after: after ? { partner: asRecord(after.partner) } : null,
+    reason: "Gỡ lượt gắn mã vận đơn tạo lại — PUT lại order_number_vtp cũ theo dòng audit pos.reship_link gần nhất",
+    correlationId: runId,
+    detail: { oldCode: rec.oldCode, newCode: rec.newCode, readbackOk: ok, otherFieldsChanged: other },
+  }).catch((e: unknown) => console.log(`đơn ${orderId}: ghi nhật ký lỗi — ${e instanceof Error ? e.message : e}`));
+  return ok;
+}
+
 export async function runReshipLink(args: Exclude<ReshipArgs, { error: string }>, runId: string): Promise<boolean> {
+  if (args.rollback && args.order) return runRollback(args.order, runId);
   const { pairs: all } = await readPairs(await getDb());
   const delivered = all.filter((p) => p.newStage === "DELIVERED").length;
   const cancelledOld = all.filter((p) => p.oldStage === "CANCELLED").length;
@@ -187,7 +258,7 @@ export async function runReshipLink(args: Exclude<ReshipArgs, { error: string }>
     // Đọc lại NGAY: đúng mã chưa, và field nào KHÁC đã đổi (chỉ tên khoá).
     const after = await pos("GET", p.orderId).catch(() => null);
     const now = after ? partnerOf(after) : null;
-    const ok = Boolean(now && now.extend_code === p.newCode.toUpperCase() && now.order_number_vtp === p.newCode.toUpperCase());
+    const ok = Boolean(now && now.order_number_vtp === p.newCode.toUpperCase());
     if (ok) dem.READBACK_OK += 1;
     else dem.READBACK_MISMATCH += 1;
     const other = after ? unexpectedChanges(before, after) : ["(không đọc lại được)"];
@@ -198,8 +269,9 @@ export async function runReshipLink(args: Exclude<ReshipArgs, { error: string }>
       action: "pos.reship_link",
       entity: "order",
       entityId: p.orderId,
-      before: cur,
-      after: now ?? null,
+      // NGUYÊN khối partner trước / sau (mã, trạng thái ĐVVC, phí…) — căn cứ để gỡ và để so khi có tranh cãi.
+      before: { partner: asRecord(before.partner) },
+      after: after ? { partner: asRecord(after.partner) } : null,
       reason: "Vận đơn tạo lại trên web Viettel Post cho chính đơn Pancake — gắn mã MỚI vào khối partner của đơn POS (chủ shop duyệt pilot 22/10/2026)",
       correlationId: runId,
       detail: { oldCode: p.oldCode, newCode: p.newCode, readbackOk: ok, otherFieldsChanged: other },

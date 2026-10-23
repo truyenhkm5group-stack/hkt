@@ -411,11 +411,20 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
    * gửi đó cũng biến mất khỏi sổ.
    *
    * Nay chỉ cập nhật khi ĐÚNG là cùng một vận đơn; mã khác thì mở lần gửi mới.
+   *
+   * MÃ VTP QUYẾT ĐỊNH KHI CẢ HAI PHÍA CÓ (23/10/2026): mã do ĐVVC cấp là bậc 1 của `chonVanDonDeGhep`, mã tra cứu yếu hơn — chỉ xét khi
+   * một phía chưa có mã VTP. Bản cũ đòi CẢ HAI cùng khớp: lần gửi kế do webhook tạo mang `tracking_code` = mã VTP, còn Pancake gửi
+   * `extend_code` (mã do Pancake cấp, thuộc vận đơn GỐC) ⇒ khi POS được gắn mã mới (ops pos-reship-link), mỗi lượt đồng bộ chọn đúng
+   * lần gửi kế rồi lại đi nhánh «lần gửi mới» và INSERT trùng mã VTP (23505). Đo production: 330/330 đơn vận đơn tạo lại đúng dạng ấy.
    */
   const cungVanDon =
     existing &&
-    (!s.vtpOrderNumber || !existing.vtpOrderNumber || existing.vtpOrderNumber === s.vtpOrderNumber) &&
-    (!s.trackingCode || !existing.trackingCode || existing.trackingCode === s.trackingCode);
+    (s.vtpOrderNumber && existing.vtpOrderNumber
+      ? existing.vtpOrderNumber === s.vtpOrderNumber
+      : !s.trackingCode || !existing.trackingCode || existing.trackingCode === s.trackingCode);
+  // Ghép theo mã VTP mà dòng đã có mã tra cứu KHÁC ⇒ giữ mã tra cứu của dòng: mã Pancake ấy là của vận đơn gốc, gán cho lần gửi kế thì
+  // hai dòng mang cùng mã tra cứu và mọi chỗ tra theo `tracking_code` nói sai.
+  const giuMaTraCuu = Boolean(cungVanDon && existing?.trackingCode && s.trackingCode && existing.trackingCode !== s.trackingCode);
 
   /*
     MÃ VẬN ĐƠN ĐÃ THUỘC VỀ MỘT ĐƠN KHÁC ⇒ NÓI RA, ĐỪNG ĐỂ KHOÁ DUY NHẤT TRẢ LỜI HỘ.
@@ -450,7 +459,7 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
   } else if (existing) {
     await db
       .update(schema.shipments)
-      .set({ ...data, attemptNo: existing.attemptNo ?? 1, direction: existing.direction ?? "OUTBOUND", updatedAt: new Date() })
+      .set({ ...data, ...(giuMaTraCuu ? { trackingCode: existing.trackingCode } : {}), attemptNo: existing.attemptNo ?? 1, direction: existing.direction ?? "OUTBOUND", updatedAt: new Date() })
       .where(eq(schema.shipments.id, existing.id));
     shipmentId = existing.id;
   } else {
