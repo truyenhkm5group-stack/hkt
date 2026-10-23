@@ -1,0 +1,8 @@
+{
+  "pr": 1001,
+  "sha": "13d5477889b75cb6df1fd6a970c487b349769040",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T12:59:07.548Z",
+  "note": "review lead: đệm mang mốc cũ nhất; ALS tách request; lượt tính có bộ gom riêng; từ chối của lượt dùng chung đã có go() bắt; không client nào nạp lib/cache; asOfCells thuần, chưa biết in «—», không câu «khoẻ»; sửa cột receivedAt=created_at dùng lại ở integration-health."
+}
