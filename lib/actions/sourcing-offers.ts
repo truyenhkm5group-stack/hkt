@@ -12,7 +12,6 @@ import {
   setSourcingOfferArchived,
   updateSourcingOffer,
   updateSourcingSupplier,
-  type SourcingActor,
   type SourcingOfferResult,
 } from "@/lib/sourcing/offer-service";
 
@@ -20,30 +19,39 @@ export type { SourcingOfferResult };
 
 const NO_RIGHT: SourcingOfferResult = { ok: false, errors: [{ message: "Bạn chưa có quyền «Tìm hàng: lưu & sửa mẫu»." }] };
 
-async function withWriter(fn: (actor: SourcingActor) => Promise<SourcingOfferResult>, paths: (r: Extract<SourcingOfferResult, { ok: true }>) => string[]): Promise<SourcingOfferResult> {
-  const user = await requireUser();
-  if (!can(user, "sourcing:write")) return NO_RIGHT;
-  const r = await fn({ id: user.id, email: user.email });
-  if (r.ok) for (const p of ["/sourcing", ...paths(r)]) revalidatePath(p);
+function refresh(r: SourcingOfferResult, offerId: string | null): SourcingOfferResult {
+  if (!r.ok) return r;
+  revalidatePath("/sourcing");
+  if (offerId) revalidatePath(`/sourcing/offers/${offerId}`);
   return r;
 }
 
 export async function createSourcingOfferAction(input: Parameters<typeof createSourcingOffer>[1]): Promise<SourcingOfferResult> {
-  return withWriter((a) => createSourcingOffer(a, input), () => []);
+  const user = await requireUser();
+  if (!can(user, "sourcing:write")) return NO_RIGHT;
+  return refresh(await createSourcingOffer({ id: user.id, email: user.email }, input), null);
 }
 
 export async function addSourcingSnapshotAction(input: Parameters<typeof addSourcingSnapshot>[1]): Promise<SourcingOfferResult> {
-  return withWriter((a) => addSourcingSnapshot(a, input), () => [`/sourcing/offers/${input.offerId}`]);
+  const user = await requireUser();
+  if (!can(user, "sourcing:write")) return NO_RIGHT;
+  return refresh(await addSourcingSnapshot({ id: user.id, email: user.email }, input), input.offerId);
 }
 
 export async function updateSourcingOfferAction(input: Parameters<typeof updateSourcingOffer>[1]): Promise<SourcingOfferResult> {
-  return withWriter((a) => updateSourcingOffer(a, input), () => [`/sourcing/offers/${input.offerId}`]);
+  const user = await requireUser();
+  if (!can(user, "sourcing:write")) return NO_RIGHT;
+  return refresh(await updateSourcingOffer({ id: user.id, email: user.email }, input), input.offerId);
 }
 
 export async function updateSourcingSupplierAction(input: Parameters<typeof updateSourcingSupplier>[1]): Promise<SourcingOfferResult> {
-  return withWriter((a) => updateSourcingSupplier(a, input), () => [`/sourcing/offers/${input.offerId}`]);
+  const user = await requireUser();
+  if (!can(user, "sourcing:write")) return NO_RIGHT;
+  return refresh(await updateSourcingSupplier({ id: user.id, email: user.email }, input), input.offerId);
 }
 
 export async function setSourcingOfferArchivedAction(input: Parameters<typeof setSourcingOfferArchived>[1]): Promise<SourcingOfferResult> {
-  return withWriter((a) => setSourcingOfferArchived(a, input), () => [`/sourcing/offers/${input.offerId}`]);
+  const user = await requireUser();
+  if (!can(user, "sourcing:write")) return NO_RIGHT;
+  return refresh(await setSourcingOfferArchived({ id: user.id, email: user.email }, input), input.offerId);
 }
