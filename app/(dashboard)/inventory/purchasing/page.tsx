@@ -40,7 +40,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         hint={
           <>
             <p>Tiền đang cam kết với xưởng, lô nào trễ, xưởng nào giao nhanh, giá nhập đang tăng ở đâu.</p>
-            <p className="mt-1.5">Hai chiều tách bạch: CAM KẾT là đơn đặt xưởng (tiền dự kiến phải trả), HÀNG THẬT là phiếu nhập kho. Đặt 500 cái không có nghĩa là đã nhận 500 cái. Đơn sản xuất không có cột ngày nhận hàng, nên thời gian giao là ƯỚC TÍNH suy từ việc ghép lô đặt với phiếu nhập — chỉ ghép khi một-một, còn lại để CHƯA BIẾT.</p>
+            <p className="mt-1.5">Hai chiều tách bạch: CAM KẾT là đơn đặt xưởng (tiền dự kiến phải trả), HÀNG THẬT là phiếu nhập kho. Đặt 500 cái không có nghĩa là đã nhận 500 cái. Thời gian giao đo bằng MỐC THẬT kho bấm «đã nhận» (có từ 23/09/2026); lô chưa có mốc mới ƯỚC TÍNH bằng ghép lô đặt với phiếu nhập — chỉ ghép khi một-một, còn lại để CHƯA BIẾT.</p>
           </>
         }
         actions={
@@ -78,10 +78,10 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
           tone={r.open.overdueCount > 0 ? "rose" : "green"}
         />
         <MetricCard
-          label="Ghép được lô ↔ phiếu nhập"
+          label="Đo được thời gian giao"
           value={cov.leadCoveragePercent === null ? "—" : `${cov.leadCoveragePercent}%`}
-          note={`${formatNumber(cov.leadMatched)} ghép được · ${formatNumber(cov.leadAmbiguous)} nhập nhằng · ${formatNumber(cov.leadUnmatched)} chưa thấy phiếu`}
-          hint="Đây là TRẦN độ tin của mọi con số về thời gian giao. Phủ thấp thì thời gian giao chỉ nói về một phần nhỏ số lô."
+          note={`${formatNumber(cov.leadActual)} mốc thật · ${formatNumber(cov.leadEstimated)} ước tính · ${formatNumber(cov.leadAmbiguous)} nhập nhằng · ${formatNumber(cov.leadUnmatched)} chưa thấy phiếu`}
+          hint="Đây là TRẦN độ tin của mọi con số về thời gian giao. Mốc thật = kho bấm «đã nhận» lúc đếm xong; ước tính = lô chưa có mốc, ghép một-một với phiếu nhập. Phủ thấp thì thời gian giao chỉ nói về một phần nhỏ số lô."
           icon={CalendarClock}
           tone={lowLeadCoverage ? "amber" : cov.leadCoveragePercent === null ? "slate" : "green"}
         />
@@ -154,7 +154,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
 
       <SectionCard
         title="Xưởng"
-        hint={`Hàng thật đã nhập trong ${days} ngày, cam kết đang mở, và thời gian giao ước tính. Thời gian giao chỉ tính trên lô ghép được một-một với phiếu nhập, và chỉ hiện khi xưởng có ít nhất ${PURCHASING_RULE.minLeadSamples} lô ghép được — vài lô lẻ không đủ để nói xưởng nào nhanh hơn.`}
+        hint={`Hàng thật đã nhập trong ${days} ngày, cam kết đang mở, và thời gian giao. Thời gian giao đo bằng mốc kho bấm «đã nhận»; xưởng chưa đủ ${PURCHASING_RULE.minLeadSamples} lô mốc thật thì lô ghép một-một với phiếu nhập vào bù và ô mang nhãn «ước tính». Chỉ hiện khi đủ ${PURCHASING_RULE.minLeadSamples} lô — vài lô lẻ không đủ để nói xưởng nào nhanh hơn.`}
         padded={false}
       >
         {r.suppliers.length ? (
@@ -203,9 +203,14 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
                       {s.leadDaysP50 === null ? (
                         <span className="text-muted-foreground">Chưa đủ lô</span>
                       ) : (
-                        <span title={`p90 ${s.leadDaysP90} ngày · ${s.leadMatched} lô ghép được`}>
+                        <span title={`p90 ${s.leadDaysP90} ngày · ${s.leadSamples} lô làm căn cứ (${s.leadActual} mốc thật · ${s.leadEstimated} ước tính)`}>
                           {s.leadDaysP50}
                           {s.leadDaysP90 !== null ? <span className="text-muted-foreground"> / {s.leadDaysP90}</span> : null}
+                          {s.leadBasis === "ESTIMATED" || s.leadBasis === "MIXED" ? (
+                            <span className="ml-1 block text-[11px] font-normal text-amber-600 dark:text-amber-400">
+                              {s.leadBasis === "ESTIMATED" ? "ước tính" : "trộn ước tính"}
+                            </span>
+                          ) : null}
                         </span>
                       )}
                     </TableCell>
