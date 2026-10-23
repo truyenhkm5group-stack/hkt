@@ -378,8 +378,9 @@ async function productEconomics(period: Period) {
     Luật rút ra: giao dịch chỉ được ôm những câu lệnh chạy TRÊN CHÍNH nó.
   */
   const [[sales, receipts], exp, assumptions] = await Promise.all([
-    chayKhongJit(db, (tx) => Promise.all([
-    tx
+    // Hai câu trong CÙNG giao dịch chạy NỐI TIẾP: một client chỉ chạy một câu một lúc (xem reports.ts::orderFacts).
+    chayKhongJit(db, async (tx) => [
+    await tx
       .select({
         productId: productKey,
         productName: sql<string>`max(coalesce(${p.name}, ${i.productName}))`,
@@ -427,14 +428,14 @@ async function productEconomics(period: Period) {
       // luôn cả giá vốn của nó.
       .where(and(...periodConds(o.insertedAt, period)))
       .groupBy(sql`1`),
-    tx
+    await tx
       .select({ productId: pv.productId, cost: sql<number>`coalesce(sum(${schema.stockReceiptItems.quantity} * ${schema.stockReceiptItems.unitCost}), 0)` })
       .from(schema.stockReceiptItems)
       .innerJoin(schema.stockReceipts, eq(schema.stockReceipts.id, schema.stockReceiptItems.receiptId))
       .innerJoin(pv, eq(pv.id, schema.stockReceiptItems.variantId))
       .where(and(eq(schema.stockReceipts.kind, "RECEIPT"), sql`${schema.stockReceiptItems.quantity} > 0`, ...periodConds(schema.stockReceipts.receivedAt, period)))
       .groupBy(pv.productId),
-    ])),
+    ] as const),
     /*
       ═══ NỀN CHI PHÍ CỦA CƠ SỞ TÍNH LƯƠNG ĐÃ TRỪ HOA HỒNG RA ═══
 

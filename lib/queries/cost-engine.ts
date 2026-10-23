@@ -591,8 +591,7 @@ export type OperatingCostByDay = {
 export async function getOperatingCostByDay(period: Period, db?: Db): Promise<OperatingCostByDay> {
   const conn = db ?? (await getDb());
   const inRange = expenseInRange(period.from, period.to);
-  const [payroll, rows, adjustments, others] = await Promise.all([
-    getRecognizedPayrollCost(period),
+  const vanHanh = () =>
     conn
       .select({
         category: e.category,
@@ -603,8 +602,9 @@ export async function getOperatingCostByDay(period: Period, db?: Db): Promise<Op
         periodEnd: e.periodEnd,
       })
       .from(e)
-      .where(and(inArray(e.category, OPERATING_EXPENSE_CATEGORIES), inRange)),
-    // Cước / phí hoàn ĐIỀU CHỈNH có lý do — CÙNG mệnh đề với tổng kỳ, đọc từng khoản để rải theo ngày.
+      .where(and(inArray(e.category, OPERATING_EXPENSE_CATEGORIES), inRange));
+  // Cước / phí hoàn ĐIỀU CHỈNH có lý do — CÙNG mệnh đề với tổng kỳ, đọc từng khoản để rải theo ngày.
+  const dieuChinh = () =>
     conn
       .select({
         category: e.category,
@@ -615,13 +615,23 @@ export async function getOperatingCostByDay(period: Period, db?: Db): Promise<Op
         periodEnd: e.periodEnd,
       })
       .from(e)
-      .where(and(LOGISTICS_ADJUSTMENT_ANY, inRange)),
-    // Phần KHÔNG vào khối vận hành, cũng KHÔNG phải điều chỉnh cước — đọc ra để NÓI, không để cộng.
+      .where(and(LOGISTICS_ADJUSTMENT_ANY, inRange));
+  // Phần KHÔNG vào khối vận hành, cũng KHÔNG phải điều chỉnh cước — đọc ra để NÓI, không để cộng.
+  const khac = () =>
     conn
       .select({ category: e.category, costSource: e.costSource, amount: allocatedExpenseSum(period.from, period.to), n: count() })
       .from(e)
       .where(and(notInArray(e.category, OPERATING_EXPENSE_CATEGORIES), sql`not ${LOGISTICS_ADJUSTMENT_ANY}`, inRange))
-      .groupBy(e.category, e.costSource),
+      .groupBy(e.category, e.costSource);
+  /*
+    `db` TRUYỀN VÀO có thể là client của MỘT giao dịch (`reports.ts::orderFacts` gọi hàm này bên trong
+    `chayKhongJit`) — một client chỉ chạy một câu một lúc, nên trên nó ba câu chạy NỐI TIẾP. Tự mở bể
+    thì ba câu đi ba kết nối, chạy song song như trước. Cùng SQL, cùng thứ tự kết quả.
+    `getRecognizedPayrollCost` tự mở kết nối riêng nên vẫn chạy song song với khối này.
+  */
+  const [payroll, [rows, adjustments, others]] = await Promise.all([
+    getRecognizedPayrollCost(period),
+    db ? (async () => [await vanHanh(), await dieuChinh(), await khac()] as const)() : Promise.all([vanHanh(), dieuChinh(), khac()]),
   ]);
 
   const payrollCovered = payroll.coverage === "COMPLETE";

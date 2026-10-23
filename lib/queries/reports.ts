@@ -271,10 +271,17 @@ export async function getDailyBreakdown(period: Period, basis: ReportBasis): Pro
     (3.730,452 → 3.734,794).
 
     Báo cáo lợi nhuận và báo cáo marketing dùng CHUNG `orderFacts`, nên cùng trả một cái giá và
-    cùng được sửa bằng một cách. MỘT giao dịch cho cả ba truy vấn — bể kết nối chỉ có 5 chỗ.
+    cùng được sửa bằng một cách.
+
+    MỘT giao dịch cho cả ba truy vấn để TIẾT KIỆM KẾT NỐI (bể chỉ có 5 chỗ) — và trong một giao dịch
+    các câu CHẠY NỐI TIẾP: một client Postgres chỉ chạy một câu một lúc. Bản trước viết `Promise.all`
+    ở đây; nó không đem lại song song nào (pg@8 tự xếp hàng các câu trên cùng client), chỉ đổi được
+    cảnh báo «client.query() when the client is already executing a query» — pg@9 bỏ hẳn cách gọi đó —
+    và làm phép đo tính cả thời gian đứng xếp hàng vào từng câu. Nay `await` lần lượt; cùng SQL,
+    cùng thứ tự kết quả (`tests/tx-sequential.test.ts`).
   */
-  const [orderRows, adRows, expenseRows] = await chayKhongJit(db, (tx) => Promise.all([
-    tx
+  const [orderRows, adRows, expenseRows] = await chayKhongJit(db, async (tx) => [
+    await tx
       .select({
         day: base.day,
         orders: sql<number>`count(*) filter (where ${f.notCancelled})`,
@@ -288,7 +295,7 @@ export async function getDailyBreakdown(period: Period, basis: ReportBasis): Pro
       .from(base)
       .groupBy(base.day)
       .orderBy(base.day),
-    tx
+    await tx
       .select({ day: dayOf(schema.adSpends.spendDate), spend: sum(schema.adSpends.spend) })
       .from(schema.adSpends)
       .where(and(eq(schema.adSpends.excluded, false), between(schema.adSpends.spendDate, period.from, period.to)))
@@ -299,8 +306,8 @@ export async function getDailyBreakdown(period: Period, basis: ReportBasis): Pro
     // Đi qua Profit Engine để các cột ngày cộng lại BẰNG ĐÚNG `pnl().operating` của cùng kỳ: khoản
     // ADS / PURCHASE gõ tay, cước gõ tay không khai điều chỉnh, nhóm Lương khi bảng Lương cầm quyền
     // bị loại Ở CẢ HAI NƠI (AGENTS.md mục 15 + 18) — phần bị loại hiện ở bảng cảnh báo chi phí.
-    getOperatingCostByDay(period, tx),
-  ]));
+    await getOperatingCostByDay(period, tx),
+  ] as const);
 
   const map = new Map<string, DailyRow>();
   const get = (day: string) => {

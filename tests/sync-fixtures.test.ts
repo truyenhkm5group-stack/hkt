@@ -27,6 +27,7 @@ import { testUnknownCost } from "./unknown-cost.test";
 import { testProductionUnpricedApproval } from "./production-unpriced-approval.test";
 import { testVtpImportRecovery } from "./vtp-import-recovery.test";
 import { testCostAllocation } from "./cost-allocation.test";
+import { testTxSequential } from "./tx-sequential.test";
 import { testBankLedger } from "./bank-ledger.test";
 import { testSepayWebhook } from "./sepay-webhook.test";
 import { testSepayApi } from "./sepay-api.test";
@@ -2577,6 +2578,7 @@ async function main() {
     await testVtpImportTruth(db);
     await testVtpImportRecovery(db);
     await testCostAllocation(db);
+    await testTxSequential(db);
     await testBankLedger(db);
     await testSepayWebhook(db);
     await testSepayApi(db);
