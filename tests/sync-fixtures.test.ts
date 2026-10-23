@@ -616,6 +616,7 @@ import { testP0ShortQtyRound } from "./p0-short-qty-round.test";
 import { testP0RepeatBuyer } from "./p0-repeat-buyer.test";
 import { testP0863CancelFlow } from "./p0-863-cancel-flow.test";
 import { testConvMoneyTrace } from "./conv-money-trace.test";
+import { testPurchasingLeadtimeProbe } from "./purchasing-leadtime-probe.test";
 import { testConvMoneyTraceAttribution } from "./conv-money-trace-attribution.test";
 import { testSalesQuote640 } from "./sales-quote-640.test";
 import { testSalesNextBestAction } from "./sales-next-best-action.test";
@@ -3267,6 +3268,8 @@ async function main() {
     // P0 12/10/2026 — ops cart-intent-audit: bot tự hạ số lượng khách đã nói / đơn đủ ORDER_READY vẫn bị hỏi · mời — thuần + CSDL thật
     // (hội thoại dựng theo ca HSLC, tự dọn), tóm tắt không lọt PII, chỉ đọc, ops khai đủ bốn chỗ.
     await testCartIntentAudit();
+    // OD-P2-03 (23/10/2026) — ops purchasing-leadtime-probe: lead time xưởng đo bằng chính hàm báo cáo, đọc được bản cũ lẫn mới.
+    testPurchasingLeadtimeProbe();
     // P0 14/10/2026 — ops conv-money-trace: số TỔNG trong tin bot ≠ báo giá giỏ (ca «Châu Dương» 640k cho 1kg 280k) · câu «nói rõ hơn»
     // của engine khi khách không nhắn gì (ca «Viet Nguyen Thi») — thuần + CSDL thật (tự dọn), tóm tắt không lọt PII, chỉ đọc.
     await testConvMoneyTrace();

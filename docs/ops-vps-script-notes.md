@@ -774,3 +774,10 @@ Mọi cụm chú thích từ 4 dòng liền nhau trở lên chuyển NGUYÊN VĂ
 #
 # `arg` ở đây là SỐ PHÚT, không phải bí mật — in ra log là đúng và cần thiết.
 ```
+
+### `purchasing-leadtime-probe)`
+
+Lead time xưởng (OD-P2-03, 23/10/2026). arg `<mã tổ chức> [--days=N]`. Gọi đúng `getPurchasingReport` của trang
+/inventory/purchasing — không viết lại phép tính — nên chạy TRƯỚC deploy ra số của luật cũ (ghép lô ↔ phiếu nhập), chạy SAU deploy ra
+số của luật mới (mốc thật `production_orders.received_at`, phần còn lại «ước tính»). Trường chỉ bản mới có in «—». Chỉ đọc do Postgres
+ép (`ERP_READ_ONLY=1` + kiểm `default_transaction_read_only`, thoát 70 nếu không). Tóm tắt: kỳ · độ phủ · một dòng mỗi xưởng.
