@@ -3,7 +3,7 @@
   "mission_id": "sourcing-p0-research",
   "title": "AI China Fashion Sourcing — P0 nghiên cứu (chỉ tài liệu): audit ERP tái dùng, nguồn dữ liệu hợp lệ, thiết kế, lộ trình, blocker",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T09:07:52.211Z",
-  "updated_at": "2026-10-23T09:21:19.008Z",
+  "updated_at": "2026-10-23T09:45:54.773Z",
   "last_heartbeat": "2026-10-23T09:18:47.374Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#997 → 3f89e379a712482fc4060a758e9215e6831a54c6"
+  },
   "handoff": {
     "branch": "claude/sourcing-p0-research",
     "sha": "c245437dfd608852216633b4ba8bdce3cffb1b50",
