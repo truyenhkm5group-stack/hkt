@@ -781,3 +781,14 @@ Lead time xưởng (OD-P2-03, 23/10/2026). arg `<mã tổ chức> [--days=N]`. G
 /inventory/purchasing — không viết lại phép tính — nên chạy TRƯỚC deploy ra số của luật cũ (ghép lô ↔ phiếu nhập), chạy SAU deploy ra
 số của luật mới (mốc thật `production_orders.received_at`, phần còn lại «ước tính»). Trường chỉ bản mới có in «—». Chỉ đọc do Postgres
 ép (`ERP_READ_ONLY=1` + kiểm `default_transaction_read_only`, thoát 70 nếu không). Tóm tắt: kỳ · độ phủ · một dòng mỗi xưởng.
+
+### `returns-page-probe)`
+
+/reports/returns (Lead 23/10/2026, docs/tech/odoo-inspired-erp-upgrade.md §7.2). Không arg. Trả lời hai câu mà perf-probe không tách
+được: smoke đo ĐẦU PHẢN HỒI 3,8 s cho riêng trang này (trang khác 0,1–0,5 s), và câu `settings` tra khoá chính mất 2,7 s trong
+getReturnIntelligence trong khi bể chỉ chờ 37 ms. (1) Gọi ĐÚNG `loadReturnsPage(returnsPageParams(withDefaultReturnsBasis(…)))` của
+trang, nguội rồi ấm, và in mọi khoảng vòng sự kiện đứng yên ≥ 50 ms + `monitorEventLoopDelay` p99 / max. (2) Từng nhánh nặng của
+intelligence nguội riêng, đi ĐÚNG đường trang (báo cáo lý do kỳ này truyền sẵn; kỳ trước intelligence tự dựng). (3) HTTP tới
+127.0.0.1:3000: đầu phản hồi + thân của /reports/returns (lượt 1, lượt 2, URL ghi rõ tham số mặc định) và /operations đối chứng.
+Số (1)–(2) là của tiến trình script — cùng mã, cùng dữ liệu, không phải tiến trình Next. Chỉ đọc do Postgres ép (`ERP_READ_ONLY=1`
+đặt trước lần mở kết nối đầu). Không in dữ liệu người, nên không mã hoá.
