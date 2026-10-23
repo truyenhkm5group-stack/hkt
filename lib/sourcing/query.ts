@@ -46,7 +46,7 @@ export function normalizeVi(text: string): string {
 }
 
 export function foldVi(text: string): string {
-  return text.normalize("NFD").replace(/\p{M}/gu, "").replace(/đ/g, "d").normalize("NFC");
+  return text.normalize("NFD").replace(/\p{M}/gu, "").replace(/đ/g, "d").replace(/Đ/g, "D").normalize("NFC");
 }
 
 type Index = { exact: Map<string, GlossaryEntry>; folded: Map<string, GlossaryEntry | null>; maxLen: number; fillers: Set<string>; foldedFillers: Set<string> };
