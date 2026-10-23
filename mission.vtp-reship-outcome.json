@@ -26,22 +26,21 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-22T16:50:54.629Z",
-  "updated_at": "2026-10-22T18:03:04.445Z",
-  "last_heartbeat": "2026-10-22T18:00:53.658Z",
+  "updated_at": "2026-10-23T02:39:49.535Z",
+  "last_heartbeat": "2026-10-23T02:39:49.535Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/vtp-reship-outcome",
-    "sha": "818f3604212d1cc896b3f53f68e9d75527a9f1ef",
-    "at": "2026-10-22T18:00:53.658Z",
+    "sha": "98704701682b7f63a20cc5149bf8ac58406461c6",
+    "at": "2026-10-23T02:39:49.535Z",
     "actor": "DESKTOP-56TH98Y:wt-outcome",
     "title": "Kết quả đơn đọc lần gửi còn sống; đơn Pancake huỷ mà lần gửi thay thế đang đi không thành CANCELLED; sổ kho đã xuất theo đơn",
-    "summary": "P0 22/10 — gửi lại trên web VTP (ORDER_OUTCOME.md mục 12). 3b: PRIMARY_ATTEMPT + vanDonDaiDien (khớp từng bậc) chọn lần gửi CÒN SỐNG = chứng từ bàn giao (luật 41) ∧ chưa huỷ, trước attempt_no; thứ tự (đã giao) · (còn sống) · attempt_no · created_at · id. Q1 đo production: 27 đơn (vế cũ «stage <> CANCELLED», toàn CANCELLED→PENDING chưa từng lấy) → 0 (vế bàn giao, run 39821568950). TS lấy cờ bàn giao bằng handedOffShipmentIds (CHÍNH CARRIER_HANDOFF_KNOWN_SQL, câu một bảng) ở 5 nơi gọi. 3a: ORDER_OUTCOME — ba nhánh AWAITING_PICKUP / IN_TRANSIT dùng ORDER_ALIVE_OR_RESHIP (đơn chưa huỷ HOẶC attempt_no > 1): chứng từ ĐVVC lần gửi thay thế thắng «Đã hủy» Pancake; mã huỷ 101/107/201 vẫn CANCELLED; Q2 = 1 trước vá. 4: ORDER_LEFT_WAREHOUSE = lần chính rời kho HOẶC tồn tại lần gửi chiều đi rời kho (một lần mỗi đơn); products.ts ERP_STOCK_SUB nối qua PRIMARY_ATTEMPT (trước nối MỌI lần gửi ⇒ trừ tồn hai lần); luật đối soát mới ORDER_DOUBLE_LEFT_WAREHOUSE; Q3 = 0 trước vá. CANONICAL_OUTCOME_VERSION 3 → 4: job outcome-materialize tự chạy 5′, ≤ 2.000 dòng/lượt; 5.688 dòng ⇒ ~15′ tính trực tiếp (Tech Lead bấm thêm 2 lượt sau deploy; đo /reports/returns sau deploy). PHẢI lên TRƯỚC --apply script vá 330 dòng (73 đơn 15/10 gốc PICKED_UP + lần mới sẽ bị trừ tồn hai lần nếu thiếu). Không đụng AGENTS.md.",
+    "summary": "",
     "tests": [
       "tsc --noEmit: sạch",
-      "npm run lint: sạch",
-      "TEST_SHARD=1/4 (K01 hợp đồng ORDER_OUTCOME · K07 kho · K11 đối soát · K12 canonical-outcome · …): ĐẠT trên e2673aae8",
-      "TEST_SHARD=2/4 (K13: vtp-reship-outcome · shipment-pick parity · stock …): ĐẠT",
-      "rebase sạch lên main f87db2e0b (có #979) ⇒ 818f36042, tsc lại sạch",
+      "eslint tệp đổi: sạch",
+      "TEST_SHARD=1/4 (K01 hợp đồng ORDER_OUTCOME · K07 · K11 · K12 canonical): ĐẠT trên 987047016",
+      "TEST_SHARD=2/4 (K13: vtp-reship-outcome gồm ca review 06 — đơn tay người huỷ · lần gửi lại PENDING · VERIFIED khớp logistics khi giao có COD): ĐẠT",
       "shard 3–4 giao cho CI gates"
     ]
   }
