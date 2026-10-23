@@ -3,7 +3,7 @@
   "mission_id": "test-shards-k01-k12",
   "title": "TEST_KHOI=K01,K12 đỏ giả ở delivery-tower: rổ «hoàn đã về shop» ≠ khâu CARRIER_RETURN_DELIVERED khi dữ liệu K01 có mặt",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "CANCELLED",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-k0112",
@@ -21,11 +21,14 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T02:11:22.187Z",
-  "updated_at": "2026-10-23T02:11:22.187Z",
-  "last_heartbeat": "2026-10-23T02:11:22.187Z",
+  "updated_at": "2026-10-23T02:27:12.666Z",
+  "last_heartbeat": "2026-10-23T02:27:12.666Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "evidence": {
+    "done": "không phải phụ thuộc ẩn — lỗi thật, chuyển sang carrier-substate-return-501 (TEST_KHOI=K01,K12: tháp 28 · đường ống 30, lệch đúng hai fixture 501 + leg RETURN của K01)"
   }
 }
