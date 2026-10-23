@@ -37,6 +37,7 @@ import { testPayrollCodeLedger } from "./payroll-code-ledger.test";
 import { testPayrollReconciliationPure } from "./payroll-reconciliation.test";
 import { testPayrollReconCenter } from "./payroll-recon-center.test";
 import { testOpsScriptSize } from "./ops-script-size.test";
+import { testPerfProbePages } from "./perf-probe-pages.test";
 import { testDataTruth } from "./data-truth.test";
 import { testPayrollCogsCutoff } from "./payroll-cogs-cutoff.test";
 import { testProfitCarryover } from "./profit-carryover.test";
@@ -2566,6 +2567,7 @@ async function main() {
     await testPayrollReconCenter(db);
     await testPayrollOwnerApply(db);
     testOpsScriptSize();
+    testPerfProbePages();
     await testDataTruth(db);
     await testPayrollCogsCutoff(db);
     await testProfitCarryover();
