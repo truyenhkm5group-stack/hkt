@@ -3,7 +3,7 @@
   "mission_id": "vtp-reship-backfill-gate5",
   "title": "vtp-reship-backfill: --apply đòi phiên bản kết quả ≥ 5 (bản sửa review #981) + gắn theo thứ tự tạo",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -21,7 +21,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T02:18:36.431Z",
-  "updated_at": "2026-10-23T02:18:36.431Z",
-  "last_heartbeat": "2026-10-23T02:18:36.431Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T02:19:18.672Z",
+  "last_heartbeat": "2026-10-23T02:19:18.672Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/vtp-reship-backfill-gate5",
+    "sha": "a2f3294a3c043d45747b8e8e93d9c7f22a5e5935",
+    "at": "2026-10-23T02:19:18.672Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "vtp-reship-backfill: --apply đòi phiên bản kết quả ≥ 5 (bản sửa review #981) + gắn theo thứ tự tạo",
+    "summary": "@a2f3294a3 CHỈ-SCRIPT: hàng rào --apply đòi CANONICAL_OUTCOME_VERSION ≥ 5 (56 nâng 3 → 5 trong #981 kèm bản sửa review của 06 — số 4 chưa từng lên production), câu từ chối nói cả trừ tồn hai lần lẫn ~81 đơn đã giao thành CANCELLED; planReship orderBy(createdAt, id) để lần gửi không gán ngược.",
+    "tests": [
+      "npm run typecheck: sạch",
+      "eslint: sạch",
+      "TEST_KHOI=K22: XANH trên a2f3294a3",
+      "đột biến bỏ orderBy: bị bắt (kế hoạch theo thời gian tạo)",
+      "phiên bản 4 từ chối, 5 được: trong bài kiểm",
+      "shard 1–4 + build: CI gates"
+    ]
+  }
 }
