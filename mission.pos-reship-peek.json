@@ -3,7 +3,7 @@
   "mission_id": "pos-reship-peek",
   "title": "pos-reship-link --peek: vân tay khoá con đơn POS + so tiền POS↔ERP (chỉ đọc)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-peek",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T14:34:15.768Z",
-  "updated_at": "2026-10-23T14:38:22.089Z",
+  "updated_at": "2026-10-23T15:00:20.750Z",
   "last_heartbeat": "2026-10-23T14:34:58.785Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1005 → 1bdb497ddc734bac2ff130790e0e7ad587a15489"
+  },
   "handoff": {
     "branch": "claude/pos-reship-peek",
     "sha": "8051bf4a32867c1d51483df06d0d07cb32764d77",
