@@ -25,6 +25,7 @@ import "dotenv/config";
 import { applyPlatformAiPolicyAsScript, probeWithPlatformKey, rollbackPlatformAiPolicyAsScript, SCRIPT_WRITER_LABEL } from "@/lib/ai-usage/platform-ai-admin";
 import { PLATFORM_AI_REASONINGS, readPlatformAiPolicies, type PlatformAiPolicy, type PlatformAiReasoning } from "@/lib/ai-usage/platform-ai-policy";
 import { PLATFORM_WORKLOADS, type PlatformWorkload } from "@/lib/ai-usage/types";
+import { benchGuardNow } from "@/lib/ai-usage/credit-incidents";
 import { AB_DECISION_LABEL, readPlatformModelAbForScript, type AbVerdict, type TokenArm } from "@/lib/ai-usage/platform-ai-ab";
 
 const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s.slice(0, 300)}`);
@@ -112,6 +113,14 @@ async function main() {
     await printPolicy();
     process.exit("error" in r ? 1 : 0);
   }
+  // RÀO (P0 23/10/2026): hai nhánh dưới GỌI AI bằng khoá nền tảng (áp dụng = kiểm khả dụng ngay trước khi ghi; còn lại = probe).
+  // Đang có sự cố hết tiền ⇒ KHÔNG chạy. --report / --rollback ở trên chỉ đọc / ghi chính sách, không gọi AI.
+  const guard = await benchGuardNow();
+  if (!guard.ok) {
+    tomTat(guard.message);
+    process.exit(3);
+  }
+  tomTat(guard.note);
   if (apply) {
     const pct = Number(apply.slice("--apply=".length));
     if (!Number.isInteger(pct) || pct < 1 || pct > 100 || models.length !== 1) {

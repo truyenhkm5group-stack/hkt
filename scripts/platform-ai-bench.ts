@@ -34,6 +34,7 @@ import { ByokGeminiProvider } from "@/lib/ai-builder/providers";
 import { withRequestOverrides } from "@/lib/ai-builder/provider";
 import { estimateCostUsd, type AiProvider, type AiRequest } from "@/lib/ai/provider";
 import { classifyAiFailure } from "@/lib/constants/ai-incidents";
+import { benchGuardNow } from "@/lib/ai-usage/credit-incidents";
 import { listQuickReplies, quickReplyByAi, quickReplyByKeyword } from "@/lib/sales-chatbot/quick-replies";
 import type { QuickReplyEntry } from "@/lib/sales-chatbot/quick-replies-shared";
 import { loadSalesChatbotConfig } from "@/lib/sales-chatbot/engine";
@@ -263,6 +264,13 @@ async function main() {
     tomTat("arg: sync|sales|quick <mã tổ chức> [--cases=N|--points=N] [--days=N] [--configs=…] [--concurrency=N] [--max-usd=0.2]");
     process.exit(64);
   }
+  // RÀO (P0 23/10/2026 — lượt bench GĐ3 tiêu cạn tài khoản trả trước đang nuôi bot của khách): đang có sự cố hết tiền ⇒ KHÔNG chạy.
+  const guard = await benchGuardNow();
+  if (!guard.ok) {
+    tomTat(guard.message);
+    process.exit(3);
+  }
+  tomTat(guard.note);
   const cfg = platformAiConfig();
   if (!cfg.ready || cfg.provider !== "gemini") {
     tomTat(`KHOÁ NỀN TẢNG CHƯA SẴN SÀNG / không phải Gemini: ${cfg.ready ? cfg.provider : cfg.reason}`);

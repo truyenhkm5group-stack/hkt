@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AiProviderIncidentBanner } from "@/components/platform/ai-provider-incident-banner";
 import { notFound, redirect } from "next/navigation";
 import { OrgAiControlForm } from "@/components/ai-usage/ai-controls";
 import { AiLimitsTable, AiUsageDailyTable, AiUsageTotalsTable } from "@/components/ai-usage/ai-usage-tables";
@@ -138,6 +139,7 @@ export default async function PlatformOrgPage({ params }: { params: Promise<{ co
           </div>
         }
       />
+      <AiProviderIncidentBanner orgCode={o.code} />
 
       {!d.connected ? (
         <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-2.5 text-sm">

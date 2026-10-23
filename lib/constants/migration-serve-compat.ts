@@ -166,6 +166,15 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/sourcing-trials.test.ts",
   },
+  {
+    tag: "0259_platform_operator_alerts",
+    why:
+      "Chỉ TẠO một bảng mới ở CSDL nhà (platform_operator_alerts) — không thêm / đổi / xoá cột nào. Đường ĐỌC và GHI duy nhất " +
+      "(`lib/platform/operator-alerts.ts`) bắt lỗi bảng chưa có (42P01): đọc ⇒ «chưa có vết», ghi ⇒ bỏ qua. Tin báo người vận hành " +
+      "vẫn đi qua chuỗi lùi kênh như thường — chỉ thiếu vết và thiếu lượt thử lại tin FAILED, đúng như trước bản này.",
+    addedColumns: {},
+    proof: "tests/operator-alert-chain.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */
