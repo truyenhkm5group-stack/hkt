@@ -1,0 +1,8 @@
+{
+  "pr": 1013,
+  "sha": "9707187013949a70be127832229796cb5ea57b35",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T19:55:33.215Z",
+  "note": "review lead: chỉ đổi Promise.all trên client giao dịch thành await nối tiếp (orderFacts, productEconomics, getMarketingDaily, getOperatingCostByDay khi nhận db); SQL và thứ tự kết quả không đổi; kỳ vọng các bài tiền không sửa; bài quét hai tầng trên mã đã vào kho, miễn trừ rỗng."
+}
