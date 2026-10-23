@@ -17,13 +17,6 @@ import type { WebhookHealth } from "@/lib/queries/vtp-webhook-health";
 /** Job đồng bộ ĐƠN Pancake (`runSyncJob` trong lib/integrations/pancake/sync.ts). Mốc nguồn = lượt SUCCESS cuối của một trong số này. */
 export const PANCAKE_ORDER_SYNC_JOBS = ["orders_incremental", "orders_reconcile", "orders_backfill"] as const;
 
-/**
- * Mốc một tệp bảng kê VTP thật sự được ERP ĐỌC (không phải lần đầu thấy tên tệp): khoá tự nhiên của `vtp_statement_files` là
- * TÊN TỆP, gửi lại đúng tệp cũ chỉ đổi `last_imported_at` còn `received_at` đứng im. MỘT định nghĩa cho cả thẻ Kết nối dữ liệu
- * (lib/queries/integration-health.ts) lẫn chỉ báo này. `t` = tên bảng hoặc bí danh trong câu SQL.
- */
-export const statementFileSeenAtSql = (t: string) => `greatest(${t}.received_at, coalesce(${t}.last_imported_at, ${t}.received_at))`;
-
 export type AsOfTone = "muted" | "warn";
 export type AsOfCell = { key: "asOf" | "codStatement" | "pancake" | "latency"; text: string; tone: AsOfTone; title?: string };
 

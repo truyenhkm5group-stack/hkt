@@ -14,9 +14,9 @@
  * Mã thử của ĐVVC (`VTP_TEST_TRACKING_CODES`) đứng ngoài mọi nhóm.
  */
 import { sql } from "drizzle-orm";
-import { getDb } from "@/db";
+import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
-import { PANCAKE_ORDER_SYNC_JOBS, statementFileSeenAtSql } from "@/lib/constants/data-as-of";
+import { PANCAKE_ORDER_SYNC_JOBS } from "@/lib/constants/data-as-of";
 import { sqlIsTestTracking } from "@/lib/constants/truth";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -41,6 +41,14 @@ export type VtpSyncCoverage = {
   carrierTotal: null;
   carrierTotalNote: string;
 };
+
+/**
+ * Mốc một tệp bảng kê VTP thật sự được ERP ĐỌC (không phải lần đầu thấy tên tệp): khoá tự nhiên của `vtp_statement_files` là
+ * TÊN TỆP, gửi lại đúng tệp cũ chỉ đổi `last_imported_at` còn mốc nhận đứng im. MỘT định nghĩa cho cả thẻ Kết nối dữ liệu
+ * (lib/queries/integration-health.ts) lẫn chỉ báo «nguồn» (OD-UX-03). Dựng từ CỘT của lược đồ, không gõ tên cột: trường
+ * `receivedAt` nằm ở cột `created_at`, và chép tay tên cột đã từng sai đúng chỗ này.
+ */
+export const STATEMENT_FILE_SEEN_AT = sql`greatest(${schema.vtpStatementFiles.receivedAt}, coalesce(${schema.vtpStatementFiles.lastImportedAt}, ${schema.vtpStatementFiles.receivedAt}))`;
 
 export const VTP_CARRIER_TOTAL_UNKNOWN = "chưa đo được — cần tệp «Danh sách vận đơn» xuất từ viettelpost.vn";
 
@@ -67,7 +75,7 @@ async function getVtpSyncCoverageUncached(period: { from: Date | null; to: Date 
         count(*) filter (where s.order_id is null and not (${sql.raw(RETURN_LEG_SQL)}) and not (coalesce(s.order_reference, '') = '' and ${sql.raw(CANCELLED_BY_CARRIER_SQL)}))::int as orphan_unmatched,
         (select max(w.received_at) from webhook_events w where w.source = 'VIETTELPOST') as last_webhook_at,
         (select max(b.created_at) from vtp_import_batches b where b.mode = 'APPLY' and b.kind = 'ORDER_LIST') as last_import_at,
-        (select max(${sql.raw(statementFileSeenAtSql("f"))}) from vtp_statement_files f where f.kind = 'STATEMENT_DETAIL') as last_cod_statement_at,
+        (select max(${STATEMENT_FILE_SEEN_AT}) from ${schema.vtpStatementFiles} where ${schema.vtpStatementFiles.kind} = 'STATEMENT_DETAIL') as last_cod_statement_at,
         (select max(r.finished_at) from sync_runs r where r.source = 'PANCAKE' and r.status = 'SUCCESS' and r.finished_at is not null
            and r.job in (${sql.join(PANCAKE_ORDER_SYNC_JOBS.map((j) => sql`${j}`), sql`, `)})) as last_pancake_sync_at,
         (select count(*)::int from webhook_events w where w.source = 'VIETTELPOST' and w.status = 'FAILED' and w.received_at between ${from} and ${to}) as sync_errors
