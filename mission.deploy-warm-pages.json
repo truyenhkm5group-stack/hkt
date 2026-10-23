@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "deploy-warm-pages",
+  "title": "Deploy làm ấm 8 trang nặng NGAY sau health, TRƯỚC smoke (lượt đầu sau khởi động không rơi vào người dùng thật)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-warm",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/deploy-warm-pages",
+  "base_sha": "0002422cf0bb7fccc431f94b598e2c91f0d88a12",
+  "domains": [],
+  "owned_paths": [
+    "lib/constants/deploy-warm.ts",
+    "scripts/warm-pages.ts",
+    "scripts/install-vps.sh",
+    "tests/deploy-warm.test.ts",
+    "tests/sync-fixtures.test.ts",
+    "tests/test-hygiene.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-23T22:40:15.655Z",
+  "updated_at": "2026-10-23T22:40:15.655Z",
+  "last_heartbeat": "2026-10-23T22:40:15.655Z",
+  "definition_of_done": []
+}
