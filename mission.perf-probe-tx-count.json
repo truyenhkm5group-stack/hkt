@@ -3,7 +3,7 @@
   "mission_id": "perf-probe-tx-count",
   "title": "perf-probe đếm cả câu trong giao dịch (chayKhongJit)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-probetx",
@@ -21,7 +21,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T20:23:29.171Z",
-  "updated_at": "2026-10-23T20:23:29.171Z",
-  "last_heartbeat": "2026-10-23T20:23:29.171Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T20:38:55.208Z",
+  "last_heartbeat": "2026-10-23T20:38:55.208Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/perf-probe-tx-count",
+    "sha": "d58d64b0a7db82916351dd9a4d812a28a98297db",
+    "at": "2026-10-23T20:38:55.208Z",
+    "actor": "DESKTOP-56TH98Y:wt-probetx",
+    "title": "perf-probe nay đếm cả câu chạy trong giao dịch, nên hàm đã tắt JIT không còn in «csdl 0ms · 0 lượt»",
+    "summary": "Chỉ-script. Lớp bọc Client.query sẵn có của perf-probe nay ghi vào cùng dbMs/dbCalls/dbRows + câu chậm + câu chạy lại; không đếm trùng (Pool.query gọi client ở dạng callback); chỉ trong cửa sổ dangDo của timed() (mục EXPLAIN phát set local/rollback trên client riêng); bỏ câu điều khiển giao dịch. Chốt mã nguồn ở testPhepDoJit.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint 2 tệp: sạch",
+      "TEST_KHOI=K15,K16,K18 npm test: ĐẠT (test-hygiene · testPhepDoJit có 3 chốt mới · ops-log-leak 73 script)"
+    ]
+  }
 }
