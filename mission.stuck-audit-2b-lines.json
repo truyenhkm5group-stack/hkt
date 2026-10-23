@@ -3,13 +3,13 @@
   "mission_id": "stuck-audit-2b-lines",
   "title": "Dòng tóm tắt 2B tách nhiều dòng ≤ 300 ký tự để không mã nào bị cắt mất",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-2b-lines",
   "worker": null,
   "worktree": null,
-  "branch": null,
+  "branch": "claude/stuck-audit-2b-lines",
   "base_sha": null,
   "domains": [],
   "owned_paths": [],
@@ -18,7 +18,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T00:25:58.485Z",
-  "updated_at": "2026-10-23T00:25:58.485Z",
-  "last_heartbeat": "2026-10-23T00:25:58.485Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T00:51:39.057Z",
+  "last_heartbeat": "2026-10-23T00:51:39.057Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/stuck-audit-2b-lines",
+    "sha": "72203d269b879a0e371c8c418b8646913e81d005",
+    "at": "2026-10-23T00:51:39.057Z",
+    "actor": "DESKTOP-56TH98Y:wt-2b-lines",
+    "title": "Dòng tóm tắt 2B tách nhiều dòng ≤ 300 ký tự để không mã nào bị cắt mất",
+    "summary": "chỉ-script: dòng 2B mỗi nhóm một dòng, dồn theo byte UTF-8 ≤ 280 (workflow cut -c1-300 đếm byte); regression-watch đã ≤ 300 byte, giữ định dạng",
+    "tests": [
+      "tsc --noEmit sạch · eslint 4 tệp sạch · TEST_KHOI=K20,K22 «TẤT CẢ KIỂM THỬ CỦA chỉ K20,K22 ĐẠT» (testStuckAudit2bLines + testStuckConversationAudit + testRegressionWatch) · đột biến dồn theo length bị bắt (340 byte > 280) · full suite giao CI gates"
+    ]
+  }
 }
