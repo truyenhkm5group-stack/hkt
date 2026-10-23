@@ -3,7 +3,7 @@
   "mission_id": "pos-reship-bot-truth",
   "title": "Bot nhà nói đúng chặng vận đơn theo chứng từ VTP (cửa nội bộ bot→ERP) + sync giữ partner_status + audit diff/rào dừng",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-truth",
@@ -35,9 +35,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T18:20:23.325Z",
-  "updated_at": "2026-10-23T22:25:31.832Z",
+  "updated_at": "2026-10-23T22:48:52.211Z",
   "last_heartbeat": "2026-10-23T22:25:31.832Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1011 → 0a1b8b30d55fe9da62656dc0d50876abce1e14a7"
+  },
   "handoff": {
     "branch": "claude/pos-reship-bot-truth",
     "sha": "ee5b412e25af06f4ae2365f40908fb11a19b9cac",
