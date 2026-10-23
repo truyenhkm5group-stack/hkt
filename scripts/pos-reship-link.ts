@@ -123,6 +123,30 @@ export function fingerprintOrder(order: Record<string, unknown>): Fingerprint[] 
   return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
+export type PathChange = { path: string; before: string | null; after: string | null };
+
+/**
+ * Đường dẫn khoá con ĐỔI giữa hai vân tay (băm khác, hoặc chỉ có ở một bên). `before` / `after` = giá trị SỐ / boolean khi vân tay có in
+ * (khối customer luôn `null` — chỉ tên khoá). Trần 200 dòng. HÀM THUẦN.
+ */
+export function fingerprintDiff(a: readonly Fingerprint[], b: readonly Fingerprint[]): PathChange[] {
+  const A = new Map(a.map((f) => [f.path, f]));
+  const B = new Map(b.map((f) => [f.path, f]));
+  const out: PathChange[] = [];
+  for (const path of [...new Set([...A.keys(), ...B.keys()])].sort()) {
+    const x = A.get(path);
+    const y = B.get(path);
+    if (x?.h !== y?.h) out.push({ path, before: x?.v ?? null, after: y?.v ?? null });
+  }
+  return out.slice(0, 200);
+}
+
+/** Dòng hàng + tổng tiền + COD của một đơn POS qua CHÍNH `mapOrder` của đường đồng bộ (null nếu không đọc được). HÀM THUẦN. */
+export function moneyOf(order: Record<string, unknown>): { lines: LineSummary[]; totalPrice: number; cod: number } | null {
+  const m = mapOrder(order);
+  return m ? { lines: m.items.map((i) => ({ variantId: i.variantId, quantity: i.quantity, unitPrice: i.unitPrice, lineTotal: i.lineTotal })), totalPrice: m.totalPrice, cod: m.cod } : null;
+}
+
 export type LineSummary = { variantId: string | null; quantity: number; unitPrice: number; lineTotal: number };
 export type MoneyCheck = { linesMatch: boolean; totalsMatch: boolean; diffs: string[] };
 
@@ -304,7 +328,7 @@ export async function runReshipLink(args: Exclude<ReshipArgs, { error: string }>
   let chon = args.pilot ? pilotSet : all;
   if (args.order) chon = chon.filter((p) => p.orderId === args.order);
   chon = chon.slice(0, args.limit);
-  const dem = { ALREADY: 0, LINK: 0, FOREIGN_CODE: 0, READ_FAIL: 0, PUT_OK: 0, PUT_FAIL: 0, READBACK_OK: 0, READBACK_MISMATCH: 0, OTHER_FIELDS_CHANGED: 0 };
+  const dem = { ALREADY: 0, LINK: 0, FOREIGN_CODE: 0, READ_FAIL: 0, PUT_OK: 0, PUT_FAIL: 0, READBACK_OK: 0, READBACK_MISMATCH: 0, OTHER_FIELDS_CHANGED: 0, MONEY_CHANGED: 0 };
   for (const p of chon) {
     let before: Record<string, unknown>;
     try {
@@ -335,7 +359,16 @@ export async function runReshipLink(args: Exclude<ReshipArgs, { error: string }>
     else dem.READBACK_MISMATCH += 1;
     const other = after ? unexpectedChanges(before, after) : ["(không đọc lại được)"];
     if (other.length) dem.OTHER_FIELDS_CHANGED += 1;
-    console.log(`đơn ${p.orderId}: đọc lại ${ok ? "ĐÚNG mã mới" : "CHƯA đúng mã mới"} · field khác đổi: ${other.length ? other.join(", ") : "không"}`);
+    // Đổi theo ĐƯỜNG DẪN khoá con (không chỉ tên khoá cấp cao — pilot 23/10/2026 chỉ biết «customer, items, warehouse_info» đổi mà không
+    // biết vì sao), và dòng hàng / tổng tiền / COD trước-sau qua chính mapOrder: đổi ⇒ PUT đã đụng vào ĐƠN, dừng cả lượt.
+    const paths = after ? fingerprintDiff(fingerprintOrder(before), fingerprintOrder(after)) : [];
+    const mb = moneyOf(before);
+    const ma = after ? moneyOf(after) : null;
+    const money = mb && ma ? compareMoney(ma, { lines: mb.lines, totalPrice: mb.totalPrice, cod: mb.cod }) : { linesMatch: false, totalsMatch: false, diffs: ["không đọc được dòng hàng / tiền trước hoặc sau PUT"] };
+    const moneyChanged = !money.linesMatch || !money.totalsMatch;
+    if (moneyChanged) dem.MONEY_CHANGED += 1;
+    console.log(`đơn ${p.orderId}: đọc lại ${ok ? "ĐÚNG mã mới" : "CHƯA đúng mã mới"} · field khác đổi: ${other.length ? other.join(", ") : "không"} · khoá con đổi ${paths.length} · dòng hàng / tiền ${moneyChanged ? `ĐỔI (${money.diffs.join(", ")})` : "giữ nguyên"}`);
+    for (const c of paths) console.log(`đơn ${p.orderId}: đổi ${c.path}${c.before !== null || c.after !== null ? ` ${c.before ?? "—"} → ${c.after ?? "—"}` : ""}`);
     await audit({
       userEmail: "script:pos-reship-link",
       action: "pos.reship_link",
@@ -346,12 +379,17 @@ export async function runReshipLink(args: Exclude<ReshipArgs, { error: string }>
       after: after ? { partner: asRecord(after.partner) } : null,
       reason: "Vận đơn tạo lại trên web Viettel Post cho chính đơn Pancake — gắn mã MỚI vào khối partner của đơn POS (chủ shop duyệt pilot 22/10/2026)",
       correlationId: runId,
-      detail: { oldCode: p.oldCode, newCode: p.newCode, readbackOk: ok, otherFieldsChanged: other },
+      detail: { oldCode: p.oldCode, newCode: p.newCode, readbackOk: ok, otherFieldsChanged: other, changedPaths: paths, moneyCheck: money },
     }).catch((e: unknown) => console.log(`đơn ${p.orderId}: ghi nhật ký lỗi — ${e instanceof Error ? e.message : e}`));
+    if (moneyChanged) {
+      tomTat("pos-reship-link DỪNG · dòng hàng / tổng tiền / COD của đơn vừa ghi ĐỔI sau PUT — không ghi thêm đơn nào; xem phần mã hoá, cân nhắc --rollback");
+      break;
+    }
   }
   tomTat(`pos-reship-link · đã xét ${chon.length}: đã đúng ${dem.ALREADY} · cần gắn ${dem.LINK} · mã lạ (không đè) ${dem.FOREIGN_CODE} · đọc POS lỗi ${dem.READ_FAIL}`);
   if (args.apply) tomTat(`pos-reship-link GHI · PUT thành công ${dem.PUT_OK} · lỗi ${dem.PUT_FAIL} · đọc lại đúng ${dem.READBACK_OK} · chưa đúng ${dem.READBACK_MISMATCH} · đơn có field KHÁC bị đổi ${dem.OTHER_FIELDS_CHANGED}`);
-  return dem.PUT_FAIL === 0 && dem.READBACK_MISMATCH === 0;
+  if (args.apply && dem.MONEY_CHANGED) tomTat(`pos-reship-link GHI · đơn có dòng hàng / tiền ĐỔI sau PUT ${dem.MONEY_CHANGED} ⇒ đã DỪNG`);
+  return dem.PUT_FAIL === 0 && dem.READBACK_MISMATCH === 0 && dem.MONEY_CHANGED === 0;
 }
 
 if (CHAY_THANG) {

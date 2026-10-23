@@ -3,6 +3,7 @@ import { jwtVerify, SignJWT } from "jose";
 import { hostSlug } from "@/lib/platform/host";
 import { BRAND_ASSET_PREFIX, BRAND_HINT_PARAM, brandAppOrigin, brandIconPath, brandOfRequest, ERP_SITE_BRAND_HEADER, matchSite, SITE_LEGAL_PATHS, SITE_PAGE_PATH, siteEnvFromProcess, siteRoute, type SiteEnv } from "@/lib/platform/site-host";
 import { WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH } from "@/lib/sales-chatbot/widget";
+import { SHIPMENT_STATE_PATH } from "@/lib/constants/shipment-state-api";
 import {
   ERP_HEADER_PREFIX,
   ERP_HOST_SLUG_HEADER,
@@ -70,8 +71,11 @@ const PUBLIC_PREFIXES = ["/login", "/start", SITE_PAGE_PATH, ...SITE_LEGAL_PATHS
  *  · `/api/platform/domain-allowed` — Caddy on-demand TLS hỏi "có cấp chứng chỉ cho host này không": chỉ trả 200 cho tên
  *    miền con của tổ chức đã xuất bản, không lộ gì khác.
  *  · `/pricing` — trang giá công khai (0222): chỉ đọc gói cước ở `platform_plans` + chế độ đăng ký, không dữ liệu khách nào.
+ *  · `/api/internal/shipment-state` — bot nhà hỏi chặng vận đơn theo chứng từ VTP (lib/constants/shipment-state-api.ts). Không có
+ *    phiên vì bot không đăng nhập; route tự gác bằng khoá nội bộ `CHATBOT_ADMIN_TOKEN` qua HEADER (so thời gian hằng), khoá rỗng ⇒
+ *    401 mọi lượt; chỉ trả mã + chặng + cờ kết thúc + mốc, không tiền, không người nhận.
  */
-const PUBLIC_EXACT = ["/chat", WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH, "/api/platform/domain-allowed", "/sw.js", "/pricing", "/forgot"];
+const PUBLIC_EXACT = ["/chat", WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH, "/api/platform/domain-allowed", "/sw.js", "/pricing", "/forgot", SHIPMENT_STATE_PATH];
 const COOKIE = SESSION_COOKIE;
 
 /**

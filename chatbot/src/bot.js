@@ -10,7 +10,7 @@ import { renderSystemPrompt } from "./prompt.js";
 import { settings } from "./settings.js";
 import { adBots } from "./adbots.js";
 import { extractAdIds, adBotPromptBlock, testImageRefs } from "./adpersona.js";
-import { orderSync, describeOrder, phonesInText, norm, blockedCodesFor, offCatalogPage, onlyCodeFor } from "./orders.js";
+import { orderSync, describeOrder, erpOrderView, phonesInText, norm, blockedCodesFor, offCatalogPage, onlyCodeFor } from "./orders.js";
 import { OrderBot } from "./orderbot.js";
 import { identifyProduct } from "./vision.js";
 import { transcribeVoiceMessages, voiceLabel, isAudioAttachment, hasCustomerVoice, VOICE_PROMPT_HINT } from "./voice.js";
@@ -2081,7 +2081,9 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
       const phones = [...(data.conv_phone_numbers || []), ...(data.recent_phone_numbers || []), ...(sdtKhach.match(/(?<!\d)0\d{9}(?!\d)/g) || [])];
       const orders = await this.recentOrdersCached(conversationId, phones);
       if (orders.length) {
-        systemPrompt += `\n\n## ĐƠN HÀNG CỦA KHÁCH TRÊN HỆ THỐNG POS (dữ liệu thật, hãy dùng để trả lời)\n${orders.map((o) => "- " + describeOrder(o)).join("\n")}\n- Khách hỏi đã gửi chưa / bao giờ nhận / đơn tới đâu: trả lời ĐÚNG theo trạng thái trên (nêu trạng thái, đơn vị vận chuyển, mã vận đơn, ngày gửi), TUYỆT ĐỐI không nói chung chung "giao toàn quốc ${settings.deliveryDays()} ngày". Trả lời 1–2 câu, không hỏi lại, không mời mua thêm.\n- Đơn "Đã gửi hàng"/"Đang giao": nhắc khách để ý điện thoại, bưu tá sẽ gọi. Đơn "Giao không thành công"/"Đang hoàn": xin lỗi, thêm [[HANDOFF]] để nhân viên xử lý.`;
+        // Chặng theo chứng từ VTP của ERP (lỗi / chậm ⇒ rỗng ⇒ câu như cũ) — chatbot/src/orders.js erpOrderView.
+        const erpView = await erpOrderView(orders);
+        systemPrompt += `\n\n## ĐƠN HÀNG CỦA KHÁCH TRÊN HỆ THỐNG POS (dữ liệu thật, hãy dùng để trả lời)\n${orders.map((o) => "- " + describeOrder(o, erpView)).join("\n")}\n- Khách hỏi đã gửi chưa / bao giờ nhận / đơn tới đâu: trả lời ĐÚNG theo trạng thái trên (nêu trạng thái, đơn vị vận chuyển, mã vận đơn, ngày gửi), TUYỆT ĐỐI không nói chung chung "giao toàn quốc ${settings.deliveryDays()} ngày". Trả lời 1–2 câu, không hỏi lại, không mời mua thêm.\n- Đơn "Đã gửi hàng"/"Đang giao": nhắc khách để ý điện thoại, bưu tá sẽ gọi. Đơn "Giao không thành công"/"Đang hoàn": xin lỗi, thêm [[HANDOFF]] để nhân viên xử lý.`;
         log.info(`[${pageId}] ${conversationId}: kem ${orders.length} don POS vao prompt (${orders.map((o) => "#" + o.id + " st" + o.status).join(", ")})`);
       }
     }

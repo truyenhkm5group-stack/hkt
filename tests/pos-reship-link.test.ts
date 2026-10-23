@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { inArray, like } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { compareMoney, fingerprintOrder, lastLinkRecord, linkBody, linkPlan, parseReshipArgs, partnerOf, readPairs, rollbackBody, rollbackPlan, unexpectedChanges } from "../scripts/pos-reship-link";
+import { compareMoney, fingerprintDiff, fingerprintOrder, lastLinkRecord, linkBody, linkPlan, parseReshipArgs, partnerOf, readPairs, rollbackBody, rollbackPlan, unexpectedChanges } from "../scripts/pos-reship-link";
 import { readFileSync as readFixture } from "node:fs";
 import path from "node:path";
 import { eq } from "drizzle-orm";
@@ -69,6 +69,9 @@ export function testPosReshipLink() {
   assert.equal(f1.find((f) => f.path === "items[0].variation_info.retail_price")?.v, "499000");
   const f2 = fingerprintOrder({ ...don, customer: { ...don.customer, order_count: 4 } });
   assert.deepEqual(f1.filter((x, i) => x.h !== f2[i].h).map((x) => x.path), ["customer.order_count"], "so hai lần đọc ⇒ đúng khoá con đổi");
+  assert.deepEqual(fingerprintDiff(f1, f2), [{ path: "customer.order_count", before: null, after: null }], "diff: đường dẫn đổi, khách chỉ tên khoá");
+  const f3 = fingerprintOrder({ ...don, items: [{ ...don.items[0], quantity: 2 }] });
+  assert.deepEqual(fingerprintDiff(f1, f3), [{ path: "items[0].quantity", before: "1", after: "2" }], "diff: số của dòng hàng in trước → sau");
   // So tiền POS ↔ ERP.
   const ln = { variantId: "v1", quantity: 1, unitPrice: 499000, lineTotal: 499000 };
   assert.deepEqual(compareMoney({ lines: [ln], totalPrice: 499000, cod: 524000 }, { lines: [ln], totalPrice: 499000, cod: 524000 }), { linesMatch: true, totalsMatch: true, diffs: [] });
@@ -92,6 +95,8 @@ export function testPosReshipLink() {
   assert.match(code, /!~ '\[0-9\]P\[0-9\]\+\$'/, "mã chặng hoàn …P… không bao giờ lên POS");
   assert.match(src, /if \(CHAY_THANG && !process\.argv\.includes\("--apply"\) && !process\.argv\.includes\("--rollback"\)\) process\.env\.ERP_READ_ONLY = "1";/, "chạy thử ⇒ CSDL chỉ đọc");
   assert.equal((src.match(/pos\("PUT"/g) ?? []).length, 2, "đúng HAI chỗ PUT: gắn và gỡ");
+  assert.match(src, /if \(moneyChanged\) \{\n\s+tomTat\("pos-reship-link DỪNG[^"]*"\);\n\s+break;/, "dòng hàng / tiền đổi sau PUT ⇒ DỪNG cả lượt");
+  assert.match(src, /changedPaths: paths, moneyCheck: money/, "audit lưu diff theo đường dẫn khoá con + phép so tiền");
   const peekSrc = src.slice(src.indexOf("async function runPeek"), src.indexOf("/** Thân PUT của rollback"));
   assert.ok(peekSrc.length > 100 && !peekSrc.includes('pos("PUT"') && !peekSrc.includes("audit("), "--peek không PUT, không ghi nhật ký");
   const putAt = src.indexOf('pos("PUT", p.orderId, linkBody(');
@@ -197,7 +202,7 @@ export async function testPosReshipSyncBack(db: Db) {
     // Chứng từ ĐVVC: gốc huỷ; lần gửi kế do webhook tạo rồi được luật gắn (như 330 đơn đã vá).
     await db.update(s).set({ stage: "CANCELLED", vtpStatusDate: new Date("2026-10-15T05:00:00Z"), isFinal: true }).where(eq(s.id, lan1.id));
     await db.insert(s).values({ orderId: DON_SB, carrier: "Viettel Post", vtpOrderNumber: NEW_SB, trackingCode: NEW_SB, attemptNo: 2, direction: "OUTBOUND", stage: "DELIVERED", vtpStatusDate: new Date("2026-10-17T05:00:00Z"), isFinal: true, raw: { reship: { of: lan1.id, by: "VTP_WEBHOOK", at: "2026-10-16T00:00:00Z" } } });
-    const snap = async () => (await db.select({ id: s.id, vtp: s.vtpOrderNumber, tracking: s.trackingCode, attemptNo: s.attemptNo, stage: s.stage, isFinal: s.isFinal, orderId: s.orderId, createdAt: s.createdAt, direction: s.direction }).from(s).where(eq(s.orderId, DON_SB))).sort((a, b) => (a.attemptNo ?? 0) - (b.attemptNo ?? 0));
+    const snap = async () => (await db.select({ id: s.id, vtp: s.vtpOrderNumber, tracking: s.trackingCode, partnerStatus: s.partnerStatus, attemptNo: s.attemptNo, stage: s.stage, isFinal: s.isFinal, orderId: s.orderId, createdAt: s.createdAt, direction: s.direction }).from(s).where(eq(s.orderId, DON_SB))).sort((a, b) => (a.attemptNo ?? 0) - (b.attemptNo ?? 0));
     const truoc = await snap();
 
     // Sau PUT: Pancake trả mã MỚI.
@@ -210,6 +215,7 @@ export async function testPosReshipSyncBack(db: Db) {
     assert.equal(sau[1].vtp, NEW_SB);
     assert.equal(sau[1].tracking, NEW_SB, "lần 2 GIỮ mã tra cứu của nó — mã Pancake là của vận đơn gốc");
     assert.equal(sau[1].stage, "DELIVERED", "chặng theo chứng từ ĐVVC, Pancake không đè");
+    assert.equal(sau[1].partnerStatus, truoc[1].partnerStatus, "partner_status Pancake (mô tả vận đơn GỐC) không chép lên lần 2");
     assert.equal(vanDonDaiDien(sau.map((x) => ({ ...x, vtpOrderNumber: x.vtp, trackingCode: x.tracking })))?.id, sau[1].id, "lần 2 vẫn là lần gửi CHÍNH");
 
     // Gỡ về mã cũ: cập nhật lần gốc, không dòng mới, lần 2 không đổi.
