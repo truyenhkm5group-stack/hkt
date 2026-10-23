@@ -1,0 +1,8 @@
+{
+  "pr": 1020,
+  "sha": "2c4478bed4d09b8fbc743a0c40e000c1a0672ce8",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T22:11:08.352Z",
+  "note": "review lead: lá chắn lúc chạy (ALS, chỉ khi ERP_TX_GUARD=1 của bộ kiểm thử) bắt 3 đường xin kết nối thứ hai trong giao dịch trên main (orderFacts, buildDays, getMarketingBreakdown→marketerNames/campaignNames); payroll + bảng tên tính TRƯỚC giao dịch; theoClient nhận diện giao dịch bằng rollback() (instanceof hỏng thật trên PGlite, có bài đo đồng thời hai nhánh); máy quét lan truyền thay bài #1013 "
+}
