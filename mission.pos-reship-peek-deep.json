@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "mission_id": "pos-reship-peek-deep",
+  "title": "pos-reship-link --peek đọc khoá con sổ địa chỉ khách (chỉ băm chữ) + --orders nhiều đơn",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-peek2",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/pos-reship-peek-deep",
+  "base_sha": "7c081caeaf920283a828a6f8931e3e283b1eac2f",
+  "domains": [],
+  "owned_paths": [
+    "scripts/pos-reship-link.ts",
+    "tests/pos-reship-link.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-23T23:28:13.955Z",
+  "updated_at": "2026-10-23T23:28:13.955Z",
+  "last_heartbeat": "2026-10-23T23:28:13.955Z",
+  "definition_of_done": []
+}
