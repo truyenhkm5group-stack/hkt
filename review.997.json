@@ -1,0 +1,8 @@
+{
+  "pr": 997,
+  "sha": "c245437dfd608852216633b4ba8bdce3cffb1b50",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T09:21:26.140Z",
+  "note": "review lead: CHỈ TÀI LIỆU. AI Sourcing P0: audit tái dùng có tệp:dòng; nguồn dữ liệu ghi đúng mức kiểm chứng (1688/Alibaba Open chưa đọc được ⇒ CHƯA KIỂM CHỨNG; bên thứ ba không chứng minh quyền ⇒ không khuyến nghị; không cào); thiết kế dữ liệu/truy vấn/giá về VN «ước tính»/chấm điểm tách/job có trần/duyệt/multi-tenant; lộ trình P1 không cần API trước; blocker B1–B5."
+}
