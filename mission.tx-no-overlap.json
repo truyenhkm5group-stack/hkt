@@ -3,7 +3,7 @@
   "mission_id": "tx-no-overlap",
   "title": "Một giao dịch = một client: theoClient + lá chắn lúc chạy (getDb trong chayKhongJit) + payroll/bảng tên tính trước giao dịch + máy quét lan truyền",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-txseq",
@@ -28,7 +28,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T21:06:07.405Z",
-  "updated_at": "2026-10-23T21:06:07.405Z",
-  "last_heartbeat": "2026-10-23T21:06:07.405Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T22:09:03.684Z",
+  "last_heartbeat": "2026-10-23T22:09:03.684Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/tx-no-overlap",
+    "sha": "2c4478bed4d09b8fbc743a0c40e000c1a0672ce8",
+    "at": "2026-10-23T22:09:03.684Z",
+    "actor": "DESKTOP-56TH98Y:wt-txseq",
+    "title": "Một giao dịch = một client: theoClient + lá chắn lúc chạy (getDb trong chayKhongJit) + payroll/bảng tên tính trước giao dịch + máy quét lan truyền",
+    "summary": "",
+    "tests": [
+      "tsc · eslint · npm test đủ ĐẠT (không sửa kỳ vọng nào; cost-allocation / tx-sequential chỉ đổi cách gọi) · lá chắn ĐỎ trên main #1013 ở 3 chuỗi: (1) getSettingJson←getRecognizedPayrollCost←getOperatingCostByDay←reports.ts:309←getDailyBreakdown; (2) cùng chuỗi←marketing-daily.ts:732 buildDays←:927 getMarketingDaily; (3) getSettingJson←listEmployees←marketerNames←dimensionKeys←getMarketingBreakdown (+campaignNames→getDb) · máy quét lan truyền: main trước sửa 10 chỗ, sau 0 · theoClient hai nhánh đo đồng thời (bể>1, giao dịch=1)"
+    ]
+  }
 }
