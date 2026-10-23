@@ -34,6 +34,10 @@ import { productCodesOfShipments, variantIdsOfCodes } from "@/lib/queries/produc
 import { getVtpReconcileQueue } from "@/lib/queries/vtp-reconcile-queue";
 import { getVtpSyncCoverage } from "@/lib/queries/vtp-sync-coverage";
 import { VtpSyncCoverageCard } from "@/components/vtp-sync-coverage";
+import { DataAsOfLine } from "@/components/data-as-of-line";
+import { collectAsOf } from "@/lib/cache";
+import { latencyFromHealth } from "@/lib/constants/data-as-of";
+import { vtpWebhookHealth } from "@/lib/queries/vtp-webhook-health";
 import { getFreshnessConfig } from "@/lib/queries/logistics-config";
 import { effectiveThresholdFor, FRESHNESS_BY_STAGE } from "@/lib/constants/logistics-freshness";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
@@ -71,9 +75,11 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
   const basisRaw = typeof raw.basis === "string" ? raw.basis : "";
   const basis: PeriodBasis = (PERIOD_BASES as readonly string[]).includes(basisRaw) ? (basisRaw as PeriodBasis) : "CASE_OPENED_AT";
 
-  const [wb, staff, presets, resolutionPresets]: [Awaited<ReturnType<typeof getCareWorkbench>> | null, { id: string; name: string }[], CareNotePreset[], Record<CareDecision, string[]>] = ngoaiCare
-    ? [null, [], [], RESOLUTION_NOTES_DEFAULT]
-    : await Promise.all([getCareWorkbench(), assignableUsers(), getCareNotePresets(), getResolutionNotePresets()]);
+  // OD-UX-03: hàng đợi care đọc qua đệm 30 giây (`care-queue`) ⇒ in mốc thật của số đang hiện, không in «bây giờ».
+  const care = ngoaiCare ? null : await collectAsOf(() => Promise.all([getCareWorkbench(), assignableUsers(), getCareNotePresets(), getResolutionNotePresets()]));
+  const [wb, staff, presets, resolutionPresets]: [Awaited<ReturnType<typeof getCareWorkbench>> | null, { id: string; name: string }[], CareNotePreset[], Record<CareDecision, string[]>] = care
+    ? care.value
+    : [null, [], [], RESOLUTION_NOTES_DEFAULT];
   const counts = wb?.counts ?? (ngoaiCare ? (await getCareWorkbench()).counts : { care: 0, waiting: 0, escalated: 0, done: 0 });
   /*
     CHIA CASE CHƯA AI NHẬN — đi qua máy phân việc của phòng Giao vận (`SHIPMENT_CARE` thuộc
@@ -154,12 +160,16 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
           ]}
         />
       ) : null}
+      {care ? (
+        <DataAsOfLine input={{ asOf: { asOf: care.asOf, cached: care.cached }, now: new Date(), latency: latencyFromHealth(await vtpWebhookHealth()) }} />
+      ) : null}
       <Suspense fallback={null}>
         <DataFreshnessStrip />
       </Suspense>
       {/* Độ phủ đồng bộ Viettel Post (P0 22/10/2026) — chỉ ở các tab đọc toàn bộ kho vận đơn, không chen vào hàng đợi care. */}
       {ngoaiCare ? (
-        <VtpSyncCoverageCard c={await getVtpSyncCoverage(resolvePeriod({ period: "7d" }, "7d"))} periodLabel="7 ngày qua" />
+        // Đầu trang KHÔNG in «tính lúc»: các khối bên dưới tự tải số riêng, không một mốc nào đúng cho tất cả.
+        <VtpSyncCoverageCard c={await getVtpSyncCoverage(resolvePeriod({ period: "7d" }, "7d"))} periodLabel="7 ngày qua" latency={latencyFromHealth(await vtpWebhookHealth())} />
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -281,12 +291,17 @@ async function AllShipments({ raw, user }: { raw: SearchParams; user: SessionUse
     sortable: SHIPMENT_SORTABLE,
     defaultPeriod: "30d",
   });
-  const [{ rows, total, pageCount }, facets, summary, staff] = await Promise.all([listShipments(params), shipmentFacets(params), shipmentSummary(params), assignableUsers()]);
+  const {
+    value: [{ rows, total, pageCount }, facets, summary, staff],
+    asOf,
+    cached,
+  } = await collectAsOf(() => Promise.all([listShipments(params), shipmentFacets(params), shipmentSummary(params), assignableUsers()]));
   const productCodes = await productCodesOfShipments(rows.map((r) => r.id));
   const maKhongTonTai = params.filters.product?.length ? (await variantIdsOfCodes(params.filters.product)).unknown : [];
 
   return (
     <>
+      <DataAsOfLine input={{ asOf: { asOf, cached }, now: new Date() }} />
       <DataTableToolbar
         searchPlaceholder="Mã vận đơn, mã VTP, SĐT, tên người nhận, mã đơn…"
         period={{ defaultKey: "30d" }}
