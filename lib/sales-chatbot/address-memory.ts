@@ -758,11 +758,19 @@ const ADDRESS_FIELD_ASK = /(?:^|[\s,.(/])(?:địa chỉ|tỉnh|thành phố|s�
 const PREVIOUS_ADDRESS_ASK = /(?:giao|gửi|ship)[^.?!]*như lần trước|địa chỉ (?:cũ|lần trước)/u;
 /** Lời XIN (không cần dấu hỏi) — «xác nhận giúp em» KHÔNG phải lời xin. */
 const ASK_VERB = /(?:^|[\s,])(?:xin|cung cấp|để lại|gửi giúp|gửi lại|cho em biết|cho shop biết)(?=[\s,.]|$)/u;
+/**
+ * Lời xin viết dạng CÂU KỂ, không dấu hỏi: KHÁCH gửi / nhắn / báo / cho SHOP («em», «shop», «bên em») một PHẦN của địa chỉ —
+ * «mình gửi em địa chỉ, em báo thời gian…» (DELIVERY_ASK_NEEDS_ADDRESS từng lọt cả điểm chặn vì không thuộc ASK_VERB, 23/10/2026).
+ * Người nhận phải là shop VÀ tân ngữ phải là một phần địa chỉ: «em gửi hàng về địa chỉ…», «em gửi chị mã vận đơn», «shop sẽ báo chị
+ * khi hàng tới» KHÔNG phải lời xin.
+ */
+const CUSTOMER_SENDS_ADDRESS = /(?:^|[\s,])(?:gửi|nhắn|báo|cho)\s+(?:giúp\s+)?(?:em|shop|bên em)(?:\s+giúp(?:\s+em)?)?\s+(?:lại\s+)?(?:cái\s+)?(?:địa chỉ|số nhà|tên đường|(?:tên\s+)?(?:phường|xã|tỉnh|thành phố|quận|huyện))(?=[\s,.!?…]|$)/u;
 
 /** Một câu (đã cắt) có HỎI / XIN bất kỳ phần nào của địa chỉ giao không — rộng hơn `askedFields` (tỉnh · số nhà · đường · «như lần trước»). HÀM THUẦN. */
 export function asksAnyAddressPart(sentence: string): boolean {
   if (asksForWard(sentence) || asksForFullAddress(sentence)) return true;
   const raw = sentence.normalize("NFC").toLowerCase();
+  if (CUSTOMER_SENDS_ADDRESS.test(raw)) return true;
   const asking = isQuestion(sentence, foldVnText(sentence)) || ASK_VERB.test(raw);
   if (!asking) return false;
   return ADDRESS_FIELD_ASK.test(raw) || PREVIOUS_ADDRESS_ASK.test(raw) || choosesBetweenPlaces(raw);
@@ -844,7 +852,11 @@ export const ADDRESS_HANDOFF_REASON = {
 
 /** Mã lý do của một lần chặn — đếm `address_reask` · `address_source_mismatch` · … trên bảng vận hành. */
 export type AddressReaskCode = "WARD_KNOWN" | "WARD_ASKED" | "LEGACY_UNMAPPED" | "FULL_KNOWN" | "REUSE_UNVERIFIED" | "PHONE_KNOWN" | "NAME_KNOWN" | "REPEAT_ASK" | "COMPLAINT";
-export type AddressReaskVerdict = { rest: string; note: string; handoff?: string };
+/** `code` = lý do chính (ưu tiên lý do «thiếu»); `codes` = MỌI lý do của câu — bộ dò 2B đọc để tách «hỏi lại thứ đã biết» khỏi «xin lặp thứ chưa có». */
+export type AddressReaskVerdict = { rest: string; note: string; handoff?: string; code: AddressReaskCode; codes: AddressReaskCode[] };
+
+/** Mã «đã biết» — câu hỏi lại thứ khách ĐÃ cho / đã hỏi (2B ADDRESS_REASK). `REPEAT_ASK` (xin lặp thứ CHƯA có) đứng riêng (REPEAT_ASK_UNANSWERED). */
+export const KNOWN_REASK_CODES: readonly AddressReaskCode[] = ["WARD_KNOWN", "WARD_ASKED", "LEGACY_UNMAPPED", "FULL_KNOWN", "REUSE_UNVERIFIED", "PHONE_KNOWN", "NAME_KNOWN", "COMPLAINT"];
 
 /** Ghi chú cho người vận hành theo mã lý do — một chỗ khai (đếm `address_reask` theo đúng câu này). */
 export const ADDRESS_REASK_NOTE: Record<AddressReaskCode, string> = {
@@ -958,7 +970,22 @@ export function addressReaskVerdict(botText: string, k: AddressKnowledge, turn: 
   const note = k.draftMismatch ? `${ADDRESS_REASK_NOTE[code]} · địa chỉ khách vừa gửi KHÁC đơn nháp (cần sửa đơn + người xác minh)` : ADDRESS_REASK_NOTE[code];
   // Không chuyển người mà không còn câu nào: chưa có địa chỉ thì KHÔNG để nơi gọi nói «đã ghi nhận địa chỉ».
   const addressRecorded = addressHeld || (k.province && k.street);
-  if (!missing) return { rest: rest || (addressRecorded ? "" : CONTACT_KNOWN_TEXT), note };
+  const codes = [...new Set(reasons.map((r) => r.code))];
+  if (!missing) return { rest: rest || (addressRecorded ? "" : CONTACT_KNOWN_TEXT), note, code, codes };
   const handoff = code === "REUSE_UNVERIFIED" ? ADDRESS_HANDOFF_REASON.REUSE_UNVERIFIED : code === "COMPLAINT" ? ADDRESS_HANDOFF_REASON.COMPLAINT : ADDRESS_HANDOFF_REASON.REPEAT_ASK;
-  return { rest: [rest, ADDRESS_STAFF_TEXT].filter(Boolean).join(" "), note, handoff };
+  return { rest: [rest, ADDRESS_STAFF_TEXT].filter(Boolean).join(" "), note, handoff, code, codes };
+}
+
+/** Cửa sổ «cùng lượt mua» của phép đo 3.12b: chữ địa chỉ khách gửi quá chừng này trước tin bot không tính (bằng hạn lượt mua của bot — 3 ngày). */
+export const ADDRESS_ASK_WINDOW_MS = 3 * 24 * 3_600_000;
+
+/**
+ * AGENTS 3.12b (chủ shop chốt 22/10/2026) ở ĐỘ MỊN ĐO: tin bot `botText` lúc `botAt` có hỏi / xin bất kỳ phần nào của địa chỉ trong khi khách
+ * ĐÃ gửi chữ địa chỉ trong `ADDRESS_ASK_WINDOW_MS` trước đó. Cùng hai hàm với điểm chặn của engine (`addressTextGiven` · `asksAnyAddressPart`);
+ * 2B ADDRESS_REASK và dòng O của scripts/conv-money-trace.ts đo đúng định nghĩa này. `null` = khách chưa gửi chữ địa chỉ. HÀM THUẦN.
+ */
+export function addressAskAfterText(customer: readonly { text: string; at: number }[], botText: string, botAt: number): boolean | null {
+  const texts = customer.filter((c) => c.at <= botAt && botAt - c.at <= ADDRESS_ASK_WINDOW_MS).map((c) => c.text);
+  if (!addressTextGiven(texts)) return null;
+  return sentencesOf(botText).some(asksAnyAddressPart);
 }
