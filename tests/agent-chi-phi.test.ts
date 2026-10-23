@@ -300,6 +300,16 @@ export function testPhepDoJit() {
   const iVong = probe.lastIndexOf("for (let k = 0; k < LUOT; k += 1)", iBat);
   assert.ok(iVong > 0 && iVong < iBat && iBat < iTat, "hai điều kiện phải chạy XEN KẼ trong CÙNG một vòng — chạy hết một bên rồi mới sang bên kia thì độ trôi của tải dồn lên một phía");
   assert.ok(probe.includes('c.query("rollback")'), "mỗi lượt phải rollback để `set local` không rò sang lượt sau");
+  /*
+    CÂU TRONG GIAO DỊCH PHẢI VÀO BỘ ĐẾM (OD-UX-05, 23/10/2026): sau khi bọc chayKhongJit, probe in «csdl 0ms · 0 lượt» cho đúng hai
+    hàm vừa sửa. Lớp bọc `Client.query` ghi vào `dbMs` — CHỈ trong cửa sổ `dangDo` (mục EXPLAIN phía sau phát `set local jit = off`
+    / `rollback` trên client riêng) và bỏ câu điều khiển giao dịch.
+  */
+  const boc = probe.slice(probe.indexOf("client.query = function boc("), probe.indexOf("return out;", probe.indexOf("client.query = function boc(")));
+  assert.ok(boc.includes("dangDo &&") && boc.includes("dbMs += ms") && boc.includes("DIEU_KHIEN_GIAO_DICH.test(text)"), "lớp bọc Client.query phải đếm câu giao dịch vào dbMs, chỉ trong cửa sổ đo, bỏ câu điều khiển");
+  const than = probe.slice(probe.indexOf("async function timed("), probe.indexOf("\n}\n", probe.indexOf("async function timed(")));
+  assert.ok(than.indexOf("dangDo = true") > 0 && than.indexOf("dangDo = true") < than.indexOf("await run()"), "cửa sổ đo mở TRƯỚC lượt nguội");
+  assert.equal((than.match(/dangDo = false/g) ?? []).length, 2, "cửa sổ đo đóng ở cả nhánh xong lẫn nhánh lỗi");
 
   console.log("✓ Phép đo JIT bật / JIT tắt: trung vị đúng cả chẵn lẫn lẻ, không sắp mảng gốc · thiếu thời gian ⇒ null, không 0 · probe đo CẢ HAI điều kiện XEN KẼ, bằng đúng câu chayKhongJit phát ra, mỗi lượt rollback");
 }
