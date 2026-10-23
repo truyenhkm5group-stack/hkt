@@ -3,7 +3,7 @@
   "mission_id": "pos-reship-vtp-only",
   "title": "POS chỉ gắn order_number_vtp + gỡ được; đồng bộ Pancake ghép theo mã VTP (không vỡ UNIQUE khi đơn có lần gửi kế)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-prl2",
@@ -22,7 +22,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T08:43:07.299Z",
-  "updated_at": "2026-10-23T08:43:07.299Z",
-  "last_heartbeat": "2026-10-23T08:43:07.299Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T13:07:01.383Z",
+  "last_heartbeat": "2026-10-23T13:07:01.383Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/pos-reship-vtp-only",
+    "sha": "65f8a045805b55951071de687444e3f798f2497f",
+    "at": "2026-10-23T13:07:01.383Z",
+    "actor": "DESKTOP-56TH98Y:wt-prl2",
+    "title": "POS chỉ gắn order_number_vtp + gỡ được; đồng bộ Pancake ghép theo mã VTP (không vỡ UNIQUE khi đơn có lần gửi kế)",
+    "summary": "HIGH (chạm lib/integrations/pancake/sync.ts) — deploy TRƯỚC pilot. cungVanDon: mã VTP quyết định khi hai phía đều có; giữ tracking_code của dòng khi ghép theo VTP. Script chỉ ghi order_number_vtp, audit lưu nguyên khối partner, --rollback --order",
+    "tests": [
+      "tsc sạch · eslint 4 tệp sạch · ba bài pos-reship-link (thuần + CSDL + đồng bộ ngược testPosReshipSyncBack) chạy riêng trên PGlite XANH · đột biến: cungVanDon bản cũ ⇒ tái hiện đúng duplicate key shipments_vtp_order_number_unique, bỏ giữ mã tra cứu ⇒ bị bắt · npm test đầy đủ chạy 90′ rồi bị ngắt (timeout, máy chậm): 997 bài ✓, 0 đỏ, gồm 'Một đơn nhiều lần gửi' và 'Gửi lại trên web VTP'; phần còn lại giao CI gates 4 shard"
+    ]
+  }
 }
