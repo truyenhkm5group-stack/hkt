@@ -1,8 +1,8 @@
 {
   "pr": 981,
-  "sha": "818f3604212d1cc896b3f53f68e9d75527a9f1ef",
-  "verdict": "FAIL",
-  "actor": "DESKTOP-56TH98Y:wt-prompt-cache",
-  "at": "2026-10-22T19:12:27.538Z",
-  "note": "NHÁNH SỬA SẴN: claude/vtp-reship-outcome-review-fix @ 2a81ecb1e4c5 (1 commit trên 818f3604: RESHIP_ALIVE dùng chung ORDER_OUTCOME + ORDER_OUTCOME_VERIFIED, mục 12 ghi đủ bốn vế, 5 ca kiểm mới). tsc + eslint sạch · TEST_KHOI=K01,K13,K19 ĐẠT (contract ORDER_OUTCOME + vtp-reship-outcome) · đột biến bỏ vế đơn tay / bỏ vế VERIFIED ⇒ đỏ. RÀNG BUỘC THỨ TỰ: vtp-reship-backfill-apply (bước GHI gắn ~330 mồ "
+  "sha": "98704701682b7f63a20cc5149bf8ac58406461c6",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T02:40:34.923Z",
+  "note": "review lead: thay FAIL của code-erp-06 @818f3604 — RESHIP_ALIVE = attempt_no > 1 ∧ không phải đơn tay ERP (11.5 giữ người huỷ ⇒ CANCELLED) ∧ ĐVVC đã cầm hàng (luật 41; nhánh chờ lấy KHÔNG nhận) ∧ lần gửi chưa huỷ; dùng chung cho ORDER_OUTCOME (hai nhánh đang đi) và ORDER_OUTCOME_VERIFIED (chặn nhánh huỷ đầu) ⇒ giao có COD không còn vừa DELIVERED vừa CANCELLED. CANONICAL_OUTCOME_VERSION 3→5; hàng r"
 }
