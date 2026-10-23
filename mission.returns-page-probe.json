@@ -3,7 +3,7 @@
   "mission_id": "returns-page-probe",
   "title": "Ops returns-page-probe: vòng sự kiện bị chặn khi dựng /reports/returns + đầu phản hồi thật (chỉ đọc)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-rprobe",
@@ -26,7 +26,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T18:35:50.506Z",
-  "updated_at": "2026-10-23T18:55:53.152Z",
-  "last_heartbeat": "2026-10-23T18:55:53.152Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T21:05:17.699Z",
+  "last_heartbeat": "2026-10-23T21:05:17.699Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/returns-page-probe",
+    "sha": "5a13e68dfba1b98d4ed8000a0fcca13b55c7d0ba",
+    "at": "2026-10-23T21:05:17.699Z",
+    "actor": "DESKTOP-56TH98Y:wt-rprobe",
+    "title": "Ops returns-page-probe: vòng sự kiện bị chặn khi dựng /reports/returns + đầu phản hồi thật (chỉ đọc)",
+    "summary": "",
+    "tests": [
+      "tsc · eslint · npm test đủ ĐẠT · tests/returns-page-probe.test.ts · ops-script-size 88.434/125.000 B · khai KHONG_MA_HOA_DA_RA (ops-log-leak)"
+    ]
+  }
 }
