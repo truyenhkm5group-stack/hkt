@@ -39,7 +39,7 @@ import { readDisplayProfile } from "@/lib/experience/profile";
 import { VtpSyncCoverageCard } from "@/components/vtp-sync-coverage";
 import { getVtpSyncCoverage } from "@/lib/queries/vtp-sync-coverage";
 import { collectAsOf } from "@/lib/cache";
-import { latencyFromHealth } from "@/lib/constants/data-as-of";
+import { latencyFromHealth, webhookMatchFromHealth } from "@/lib/constants/data-as-of";
 import { vtpWebhookHealth } from "@/lib/queries/vtp-webhook-health";
 
 export const metadata = { title: "Tỷ lệ giao thành công theo mã hàng" };
@@ -184,6 +184,7 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
         periodLabel={params.period.label}
         asOf={{ asOf: mocTinh, cached: tuDem }}
         latency={latencyFromHealth(await vtpWebhookHealth())}
+        webhookMatch={webhookMatchFromHealth(await vtpWebhookHealth())}
         formula={`GTC = giao thành công ÷ đã gửi = ${formatNumber(summary.delivered)} ÷ ${formatNumber(summary.shipped)} đơn · ${ELIGIBLE_SENT_HINT} · Kỳ: ${params.period.label}, lọc theo ${TIME_BASIS_LABEL[basis].toLowerCase()}, giờ Việt Nam · Độ mịn ĐƠN (đơn Pancake / ERP); vận đơn chưa có đơn KHÔNG nằm trong tử hay mẫu số.`}
       />
 

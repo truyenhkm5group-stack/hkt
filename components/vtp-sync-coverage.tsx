@@ -17,13 +17,15 @@ export function VtpSyncCoverageCard({
   formula,
   asOf,
   latency,
+  webhookMatch,
 }: {
   c: VtpSyncCoverage;
   periodLabel: string;
   formula?: string;
   asOf?: AsOfInput["asOf"];
   latency?: AsOfInput["latency"];
-
+  /** OD-UX-03b: tỷ lệ khớp webhook ↔ tệp 30 ngày (`webhookMatchFromHealth`). Ô «chỗ hụt webhook» luôn in, từ mốc tệp của thẻ. */
+  webhookMatch?: AsOfInput["webhookMatch"];
 }) {
   const orphans = c.orphanCancelledBatch + c.orphanUnmatched;
   return (
@@ -55,7 +57,7 @@ export function VtpSyncCoverageCard({
       </div>
       <DataAsOfLine
         className="mt-1 text-[12.5px]"
-        input={{ asOf, now: new Date(), lastCodStatementAt: c.lastCodStatementAt, lastPancakeSyncAt: c.lastPancakeSyncAt, latency }}
+        input={{ asOf, now: new Date(), lastCodStatementAt: c.lastCodStatementAt, lastPancakeSyncAt: c.lastPancakeSyncAt, orderListImportAt: c.lastFileImportAt, webhookMatch, latency }}
       />
       {formula ? <div className="mt-1">{formula}</div> : null}
     </div>

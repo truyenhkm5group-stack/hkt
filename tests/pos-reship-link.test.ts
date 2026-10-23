@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { inArray, like } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { lastLinkRecord, linkBody, linkPlan, parseReshipArgs, partnerOf, readPairs, rollbackBody, rollbackPlan, unexpectedChanges } from "../scripts/pos-reship-link";
+import { compareMoney, fingerprintOrder, lastLinkRecord, linkBody, linkPlan, parseReshipArgs, partnerOf, readPairs, rollbackBody, rollbackPlan, unexpectedChanges } from "../scripts/pos-reship-link";
 import { readFileSync as readFixture } from "node:fs";
 import path from "node:path";
 import { eq } from "drizzle-orm";
@@ -18,10 +18,12 @@ import { upsertOrder } from "@/lib/integrations/pancake/sync";
 
 export function testPosReshipLink() {
   // Đối số: chạy thử mặc định; ghi thì PHẢI có --limit.
-  assert.deepEqual(parseReshipArgs([]), { apply: false, limit: 20, pilot: false, order: null, rollback: false });
+  assert.deepEqual(parseReshipArgs([]), { apply: false, limit: 20, pilot: false, order: null, rollback: false, peek: false });
   assert.deepEqual(parseReshipArgs(["--apply"]), { error: "--apply bắt buộc kèm --limit=N (pilot: --limit=1)" }, "không bao giờ ghi hàng loạt vì quên một cờ");
-  assert.deepEqual(parseReshipArgs(["--apply", "--limit=1", "--pilot"]), { apply: true, limit: 1, pilot: true, order: null, rollback: false });
-  assert.deepEqual(parseReshipArgs(["--rollback", "--order=1234567"]), { apply: false, limit: 20, pilot: false, order: "1234567", rollback: true });
+  assert.deepEqual(parseReshipArgs(["--apply", "--limit=1", "--pilot"]), { apply: true, limit: 1, pilot: true, order: null, rollback: false, peek: false });
+  assert.deepEqual(parseReshipArgs(["--peek", "--order=6457"]), { apply: false, limit: 20, pilot: false, order: "6457", rollback: false, peek: true });
+  assert.ok("error" in parseReshipArgs(["--peek"]) && "error" in parseReshipArgs(["--peek", "--order=1", "--apply", "--limit=1"]) && "error" in parseReshipArgs(["--peek", "--order=1", "--rollback"]), "xem chỉ đọc, một đơn, không đi cùng ghi");
+  assert.deepEqual(parseReshipArgs(["--rollback", "--order=1234567"]), { apply: false, limit: 20, pilot: false, order: "1234567", rollback: true, peek: false });
   assert.ok("error" in parseReshipArgs(["--rollback"]), "gỡ bắt buộc chỉ đích danh MỘT đơn");
   assert.ok("error" in parseReshipArgs(["--rollback", "--order=1", "--apply", "--limit=1"]) && "error" in parseReshipArgs(["--rollback", "--order=1", "--pilot"]), "gỡ không đi cùng ghi hàng loạt");
   assert.ok("error" in parseReshipArgs(["--limit=0"]) && "error" in parseReshipArgs(["--limit=1001"]) && "error" in parseReshipArgs(["--limit=abc"]));
@@ -59,6 +61,20 @@ export function testPosReshipLink() {
   assert.equal(rollbackPlan({ extend_code: null, order_number_vtp: NEW }, null), "NO_RECORD");
   assert.deepEqual(rollbackBody(OLD), { partner: { order_number_vtp: OLD } });
 
+  // Vân tay (--peek): khối khách chỉ băm, không bao giờ in giá trị; số của items in được; đổi một khoá ⇒ đúng một đường dẫn đổi băm.
+  const don = { customer: { name: "Nguyễn Văn A", phone_number: "0901234567", order_count: 3 }, items: [{ quantity: 1, variation_info: { retail_price: 499000, name: "Chả cá" } }], warehouse_info: { id: "w1" }, partner: { order_number_vtp: OLD } };
+  const f1 = fingerprintOrder(don);
+  assert.ok(f1.every((f) => !f.path.startsWith("customer.") || f.v === null), "customer: không in giá trị nào, kể cả số");
+  assert.ok(!JSON.stringify(f1).includes("0901234567") && !JSON.stringify(f1).includes("Nguyễn"), "không lộ tên / SĐT");
+  assert.equal(f1.find((f) => f.path === "items[0].variation_info.retail_price")?.v, "499000");
+  const f2 = fingerprintOrder({ ...don, customer: { ...don.customer, order_count: 4 } });
+  assert.deepEqual(f1.filter((x, i) => x.h !== f2[i].h).map((x) => x.path), ["customer.order_count"], "so hai lần đọc ⇒ đúng khoá con đổi");
+  // So tiền POS ↔ ERP.
+  const ln = { variantId: "v1", quantity: 1, unitPrice: 499000, lineTotal: 499000 };
+  assert.deepEqual(compareMoney({ lines: [ln], totalPrice: 499000, cod: 524000 }, { lines: [ln], totalPrice: 499000, cod: 524000 }), { linesMatch: true, totalsMatch: true, diffs: [] });
+  const lech = compareMoney({ lines: [{ ...ln, quantity: 2, lineTotal: 998000 }], totalPrice: 998000, cod: 524000 }, { lines: [ln], totalPrice: 499000, cod: 524000 });
+  assert.ok(!lech.linesMatch && !lech.totalsMatch && lech.diffs.includes("total_price"), "SL / tổng đổi ⇒ LỆCH");
+
   // So trước / sau: chỉ hai mã + dấu vết sửa được đổi; field khác đổi ⇒ liệt kê TÊN.
   const before = { status: 2, total_price: 400_000, note: "x", partner: { extend_code: OLD, order_number_vtp: OLD, partner_status: "delivered", total_fee: 30_000 }, updated_at: "a", last_editor: { id: "1" } };
   const ok = { ...before, partner: { ...before.partner, order_number_vtp: NEW }, updated_at: "b", last_editor: { id: "2" } };
@@ -76,6 +92,8 @@ export function testPosReshipLink() {
   assert.match(code, /!~ '\[0-9\]P\[0-9\]\+\$'/, "mã chặng hoàn …P… không bao giờ lên POS");
   assert.match(src, /if \(CHAY_THANG && !process\.argv\.includes\("--apply"\) && !process\.argv\.includes\("--rollback"\)\) process\.env\.ERP_READ_ONLY = "1";/, "chạy thử ⇒ CSDL chỉ đọc");
   assert.equal((src.match(/pos\("PUT"/g) ?? []).length, 2, "đúng HAI chỗ PUT: gắn và gỡ");
+  const peekSrc = src.slice(src.indexOf("async function runPeek"), src.indexOf("/** Thân PUT của rollback"));
+  assert.ok(peekSrc.length > 100 && !peekSrc.includes('pos("PUT"') && !peekSrc.includes("audit("), "--peek không PUT, không ghi nhật ký");
   const putAt = src.indexOf('pos("PUT", p.orderId, linkBody(');
   const undoAt = src.indexOf('pos("PUT", orderId, rollbackBody(');
   assert.ok(undoAt > 0 && src.lastIndexOf('if (plan !== "ROLLBACK" || !rec?.oldCode) return', undoAt) > 0, "PUT gỡ chỉ chạy khi kế hoạch là ROLLBACK");
