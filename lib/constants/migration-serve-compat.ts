@@ -146,6 +146,16 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/sourcing-offers.test.ts",
   },
+  {
+    tag: "0257_sourcing_offer_weights",
+    why:
+      "Chỉ TẠO một bảng mới ở CSDL tổ chức (sourcing_offer_weights) — không thêm / đổi / xoá cột nào. Đường ĐỌC duy nhất " +
+      "(`latestOfferWeights` trong lib/queries/sourcing.ts) là truy vấn RIÊNG bắt lỗi bảng chưa có (42P01) ⇒ mọi mẫu «chưa khai cân " +
+      "nặng · CSDL chưa áp 0257», giá về VN in «—» kèm lý do, phần còn lại của kho mẫu chạy như cũ. Đường GHI duy nhất " +
+      "(`addSourcingWeight`) bắt cùng lỗi và trả câu lỗi, không ghi gì.",
+    addedColumns: {},
+    proof: "tests/sourcing-landed-cost.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */

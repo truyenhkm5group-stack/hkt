@@ -98,3 +98,8 @@ export function parseHundredthsInput(raw: string, max: number): number | null | 
   const n = Number(m[1]) * 100 + Number((m[2] ?? "").padEnd(2, "0"));
   return n <= max ? n : "INVALID";
 }
+
+/** fen × tỷ giá (₫ / 1 CNY) ⇒ đồng, CHƯA làm tròn (người gọi làm tròn một lần). Mọi phép quy đổi CNY → VND đi qua đây. */
+export function fenToVnd(fen: number, cnyToVnd: number): number {
+  return (fen * cnyToVnd) / 100;
+}

@@ -46,6 +46,7 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   SOURCING_OFFER_RESTORE: "Tìm hàng: khôi phục mẫu nguồn",
   SOURCING_SNAPSHOT_ADD: "Tìm hàng: chụp giá mới",
   SOURCING_SUPPLIER_UPDATE: "Tìm hàng: sửa thông tin nhà cung cấp",
+  SOURCING_WEIGHT_ADD: "Tìm hàng: khai cân nặng một cái",
   "reconcile.repair": "Đối soát tự sửa dữ liệu",
   "backfill.canonical-state": "Dựng lại trạng thái từ lịch sử",
   "webhook.replay": "Xử lý lại gói tin",

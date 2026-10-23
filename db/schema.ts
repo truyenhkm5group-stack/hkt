@@ -12513,3 +12513,23 @@ export const sourcingOfferSnapshots = pgTable(
     check("sourcing_offer_snapshots_moq_check", sql`${t.moq} IS NULL OR ${t.moq} >= 1`),
   ],
 );
+
+/** Cân nặng MỘT cái của mẫu nguồn (SRC-4, 0257) — CHỈ THÊM DÒNG, lần mới nhất là số đang dùng cho cước TQ → VN. */
+export const sourcingOfferWeights = pgTable(
+  "sourcing_offer_weights",
+  {
+    id: id(),
+    offerId: text("offer_id")
+      .notNull()
+      .references(() => sourcingOffers.id, { onDelete: "restrict" }),
+    grams: integer("grams").notNull(),
+    source: text("source").notNull().default("MANUAL"),
+    capturedAt: ts("captured_at").notNull().defaultNow(),
+    capturedBy: text("captured_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => [
+    index("sourcing_offer_weights_offer_idx").on(t.offerId, t.capturedAt),
+    check("sourcing_offer_weights_grams_check", sql`${t.grams} BETWEEN 1 AND 100000`),
+    check("sourcing_offer_weights_source_check", sql`${t.source} IN ('MANUAL', 'API', 'UNKNOWN')`),
+  ],
+);

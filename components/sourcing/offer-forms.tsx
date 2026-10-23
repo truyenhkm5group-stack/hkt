@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   addSourcingSnapshotAction,
+  addSourcingWeightAction,
   createSourcingOfferAction,
   setSourcingOfferArchivedAction,
   updateSourcingOfferAction,
@@ -304,6 +305,23 @@ export function ArchiveOfferForm({ offerId, archived }: { offerId: string; archi
       <Button variant={archived ? "default" : "outline"} disabled={pending} onClick={() => run(() => setSourcingOfferArchivedAction({ offerId, archived: !archived, reason }))}>
         {pending ? <Loader2 className="size-4 animate-spin" /> : null}
         {archived ? "Khôi phục mẫu" : "Lưu trữ mẫu"}
+      </Button>
+    </div>
+  );
+}
+
+export function AddWeightForm({ offerId, initialGrams }: { offerId: string; initialGrams: number | null }) {
+  const [grams, setGrams] = useState(initialGrams === null ? "" : String(initialGrams));
+  const { pending, run } = useAction();
+  return (
+    <div className="grid gap-3 text-sm md:grid-cols-[12rem_auto] md:items-end" data-add-weight-form>
+      <div className="space-y-1">
+        <Label htmlFor="src-weight">Cân nặng một cái (gam)</Label>
+        <Input id="src-weight" inputMode="numeric" placeholder="chưa khai" value={grams} onChange={(e) => setGrams(e.target.value)} />
+      </div>
+      <Button disabled={pending || intOrNull(grams) === null} onClick={() => run(() => addSourcingWeightAction({ offerId, grams: intOrNull(grams) ?? 0 }))}>
+        {pending ? <Loader2 className="size-4 animate-spin" /> : null}
+        Lưu cân nặng
       </Button>
     </div>
   );
