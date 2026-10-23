@@ -1,0 +1,8 @@
+{
+  "pr": 998,
+  "sha": "46c4866752eed9cdd912527f4b265c4500552096",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T11:09:22.081Z",
+  "note": "review lead (OD-P2-03): lead time xưởng đọc received_at — mốc thật thắng phép ghép phiếu; đủ 3 lô mốc thật ⇒ trung vị chỉ mốc thật, thiếu ⇒ bù ước tính có nhãn; mốc mâu thuẫn đếm riêng; phép ghép giữ một-một; độ phủ trên trang. Chỉ báo cáo."
+}
