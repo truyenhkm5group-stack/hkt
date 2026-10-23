@@ -36,7 +36,7 @@ import { getVtpSyncCoverage } from "@/lib/queries/vtp-sync-coverage";
 import { VtpSyncCoverageCard } from "@/components/vtp-sync-coverage";
 import { DataAsOfLine } from "@/components/data-as-of-line";
 import { collectAsOf } from "@/lib/cache";
-import { latencyFromHealth } from "@/lib/constants/data-as-of";
+import { latencyFromHealth, webhookMatchFromHealth } from "@/lib/constants/data-as-of";
 import { vtpWebhookHealth } from "@/lib/queries/vtp-webhook-health";
 import { getFreshnessConfig } from "@/lib/queries/logistics-config";
 import { effectiveThresholdFor, FRESHNESS_BY_STAGE } from "@/lib/constants/logistics-freshness";
@@ -169,7 +169,7 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
       {/* Độ phủ đồng bộ Viettel Post (P0 22/10/2026) — chỉ ở các tab đọc toàn bộ kho vận đơn, không chen vào hàng đợi care. */}
       {ngoaiCare ? (
         // Đầu trang KHÔNG in «tính lúc»: các khối bên dưới tự tải số riêng, không một mốc nào đúng cho tất cả.
-        <VtpSyncCoverageCard c={await getVtpSyncCoverage(resolvePeriod({ period: "7d" }, "7d"))} periodLabel="7 ngày qua" latency={latencyFromHealth(await vtpWebhookHealth())} />
+        <VtpSyncCoverageCard c={await getVtpSyncCoverage(resolvePeriod({ period: "7d" }, "7d"))} periodLabel="7 ngày qua" latency={latencyFromHealth(await vtpWebhookHealth())} webhookMatch={webhookMatchFromHealth(await vtpWebhookHealth())} />
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
