@@ -3,7 +3,7 @@
   "mission_id": "od-ux-05-work",
   "title": "OD-UX-05 mục 2: /work không thiếu việc lúc đệm nguội, và nói rõ khi thiếu",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-work",
@@ -24,7 +24,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T20:47:40.904Z",
-  "updated_at": "2026-10-23T20:47:40.904Z",
-  "last_heartbeat": "2026-10-23T20:47:40.904Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T21:26:22.656Z",
+  "last_heartbeat": "2026-10-23T21:26:22.656Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/od-ux-05-work",
+    "sha": "37dfcdd14ef9db1194aead0973b5db48d46eede9",
+    "at": "2026-10-23T21:26:22.656Z",
+    "actor": "DESKTOP-56TH98Y:wt-work",
+    "title": "C:/Program Files/Git/work không còn nói «Không còn việc nào» khi một phần nguồn chưa có số",
+    "summary": "OD-UX-05 mục 2 phần màn hình (tách PR theo Lead): hàm thuần myWorkNotice dựng câu chữ khi thiếu nguồn — «Chưa biết bạn còn việc hay không» / «Ít nhất N việc…», ô đếm «thiếu N nguồn — có thể nhiều hơn», không thẻ «Hàng đợi trống», khung cảnh báo in NHÃN nguồn và chỉ hứa «mở lại sau ít giây» khi đang tính lại. Căn cứ: probe 23–24/10 lượt nguội 3–4/14 nguồn chạm hạn 2,5 s và trả 0 việc. Phần tốc độ làm ở nhánh sau.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint 4 tệp: sạch",
+      "TEST_KHOI=K13,K15 npm test: ĐẠT (my-work-notice · work-os · test-hygiene)",
+      "build: không chạy — server component"
+    ]
+  }
 }
