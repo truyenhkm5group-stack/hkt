@@ -345,6 +345,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "Không đọc biến nào: nó QUÉT MÃ NGUỒN của lib/env.ts để đòi chốt ngoài cùng đọc THẲNG process.env và chỉ nhận đúng chuỗi \"true\". Chuỗi `process.env.ADS_WRITE_ENABLED` nằm trong dấu nháy của một phép so chuỗi, không phải một lời đọc môi trường — bộ gác không tách được nên khai ở đây.",
   "tests/payroll-reconcile-script.test.ts":
     "`src.indexOf('process.env.ERP_READ_ONLY = \"1\"')` là quét MÃ NGUỒN để đòi script bật cờ chỉ-đọc, không phải đọc môi trường. Bộ gác không tách được chuỗi trong dấu nháy nên khai ở đây.",
+  "tests/purchasing-leadtime-probe.test.ts":
+    "`src.indexOf('process.env.ERP_READ_ONLY = \"1\"')` là quét MÃ NGUỒN để đòi ops purchasing-leadtime-probe bật cờ chỉ-đọc TRƯỚC khi nạp @/db, không phải đọc môi trường. Bộ gác không tách được chuỗi trong dấu nháy nên khai ở đây.",
   "tests/customer-360.test.ts":
     "`probe.indexOf('process.env.ERP_READ_ONLY = \"1\"')` là quét MÃ NGUỒN để đòi ops customer-360-probe bật cờ chỉ-đọc TRƯỚC khi nạp @/db, không phải đọc môi trường. Bộ gác không tách được chuỗi trong dấu nháy nên khai ở đây.",
   "tests/ops-log-leak.test.ts":

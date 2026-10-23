@@ -9,7 +9,7 @@
   Trường chỉ bản mới có (độ phủ mốc thật / ước tính, căn cứ trung vị) đọc mềm: vắng ⇒ in «—», không đoán, không 0.
 
   arg: `<mã tổ chức> [--days=30|60|90|…]` (kỳ đúng như trang; ngoài danh sách ⇒ hàm báo cáo tự về mặc định).
-  [ops:tom-tat]: kỳ · độ phủ · MỘT dòng mỗi xưởng (tên xưởng là đối tác của shop, không phải dữ liệu khách) — p50 / p90 · số lô ·
+  Kênh tóm tắt: kỳ · độ phủ · MỘT dòng mỗi xưởng (tên xưởng là đối tác của shop, không phải dữ liệu khách) — p50 / p90 · số lô ·
   căn cứ. Không tên khách, SĐT, địa chỉ. CHỈ ĐỌC do Postgres ép (`ERP_READ_ONLY=1` trước lần mở kết nối đầu, kiểm lại
   `default_transaction_read_only`); CSDL tổ chức mở bằng getDbForInspection (không migrate, không tạo) rồi gắn handle chỉ đọc đó để
   hàm lib đọc cùng CSDL.
@@ -22,10 +22,14 @@ import { sql } from "drizzle-orm";
 import { getDbForInspection, type Db } from "@/db";
 import { withOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
+import { splitSummaryLine } from "@/lib/ops/summary-lines";
 import { getPurchasingReport } from "@/lib/queries/purchasing";
 import { rowsOf } from "@/lib/sql-rows";
 
-const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s.slice(0, 300)}`);
+// Mọi dòng tóm tắt đi qua bộ tách theo BYTE: kênh công khai cắt 300 byte, dòng dài bị tách chứ không bị cụt (lib/ops/summary-lines.ts).
+const tomTat = (s: string) => {
+  for (const line of splitSummaryLine(s)) console.log(`[ops:tom-tat] ${line}`);
+};
 
 type DbHolder = { __erpDb?: { orgs?: Map<string, { db?: Db }> } };
 /** Handle CHỈ ĐỌC cho tổ chức (cùng cách scripts/conv-money-trace.ts) — `getPurchasingReport` dùng `getDb()` đọc qua handle này. */

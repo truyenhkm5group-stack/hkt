@@ -31,7 +31,6 @@ export function testPurchasingLeadtimeProbe() {
   });
   assert.match(moi[0], /mốc thật 3 · ước tính 1/);
   assert.match(moi[1], /lô đo 1 \(mốc thật 3 · ước tính 1\).*căn cứ ACTUAL · đúng hạn 75% \/ 4 lô/);
-  for (const l of [...cu, ...moi]) assert.ok(l.length <= 300, "dòng tóm tắt ≤ 300 ký tự");
   // Đối số.
   assert.deepEqual(parseProbeArgs(["vnx"]), { code: "vnx", days: undefined });
   assert.deepEqual(parseProbeArgs(["hslc-hmt-shop", "--days=60"]), { code: "hslc-hmt-shop", days: 60 });
@@ -42,6 +41,7 @@ export function testPurchasingLeadtimeProbe() {
   assert.match(src, /await getPurchasingReport\(args\.days\)/, "đo bằng CHÍNH hàm báo cáo của trang");
   assert.doesNotMatch(src, /matchProductionToReceipts|percentile\(|received_at\s*-\s*sent_at/, "không viết lại phép tính lead time");
   assert.match(src, /show default_transaction_read_only/);
+  assert.match(src, /splitSummaryLine\(s\)/, "dòng tóm tắt đi qua bộ tách theo byte dùng chung (kênh cắt 300 BYTE)");
   // ops-vps.yml khai đủ bốn chỗ.
   const wf = readFileSync(".github/workflows/ops-vps.yml", "utf8");
   assert.match(wf, /- purchasing-leadtime-probe #/, "có trong danh sách lựa chọn");
