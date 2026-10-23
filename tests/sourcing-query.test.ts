@@ -229,11 +229,11 @@ async function testAiExpansion() {
 }
 
 function testSourceFences() {
-  const deps = readFileSync("lib/sourcing/ai-deps.ts", "utf8");
-  assert.ok(deps.includes('feature: "sourcing"') && deps.includes('workload: "sourcing"'), "dòng sổ mang feature + workload 'sourcing'");
-  assert.ok(deps.includes('aiUsageByRef(org.code, ["sourcing"]'), "trần đếm bằng CHÍNH sổ AI theo feature 'sourcing'");
-  assert.ok(deps.includes("parseSourcingLimits") && deps.includes("SOURCING_LIMITS_KEY"), "trần đọc từ sourcing.limits");
-  assert.ok(/costUsd: r\.usage && r\.model \? estimateCostUsd\(r\.model, r\.usage\) : null/.test(deps), "không có token / model ⇒ chi phí null, không 0");
+  const wiring = readFileSync("lib/sourcing/ai-deps.ts", "utf8");
+  assert.ok(wiring.includes('feature: "sourcing"') && wiring.includes('workload: "sourcing"'), "dòng sổ mang feature + workload 'sourcing'");
+  assert.ok(wiring.includes('aiUsageByRef(org.code, ["sourcing"]'), "trần đếm bằng CHÍNH sổ AI theo feature 'sourcing'");
+  assert.ok(wiring.includes("parseSourcingLimits") && wiring.includes("SOURCING_LIMITS_KEY"), "trần đọc từ sourcing.limits");
+  assert.ok(/costUsd: r\.usage && r\.model \? estimateCostUsd\(r\.model, r\.usage\) : null/.test(wiring), "không có token / model ⇒ chi phí null, không 0");
   const act = readFileSync("lib/actions/sourcing-query.ts", "utf8");
   assert.ok(act.startsWith('"use server";') && act.includes('can(user, "sourcing:search")'), "server action đòi quyền tìm");
   for (const f of ["lib/sourcing/query.ts", "lib/constants/sourcing-glossary.ts", "lib/sourcing/ai-expand.ts"]) {

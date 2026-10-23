@@ -148,7 +148,7 @@ export async function expandWithAi(build: QueryBuild, allow: boolean, deps: Sour
       .map((b) => b.text)
       .join("");
     const parsed = parseAiReply(text, build);
-    if (!parsed) return { ...empty("UNREADABLE", "AI trả lời không đọc được — chỉ có phần từ điển.", used + 1, limit) };
+    if (!parsed) return empty("UNREADABLE", "AI trả lời không đọc được — chỉ có phần từ điển.", used + 1, limit);
     const missed = build.unmatched.filter((u) => !parsed.terms.some((t) => t.vi === u.toLowerCase()));
     const note = missed.length ? `AI cũng chưa dịch được: ${missed.join(", ")}.` : null;
     return { status: "OK", queries: parsed.queries, terms: parsed.terms, note, usedToday: used + 1, limit };
