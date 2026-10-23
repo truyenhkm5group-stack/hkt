@@ -1,0 +1,8 @@
+{
+  "pr": 1006,
+  "sha": "00d06695766868d3c9e405b8b43b1c9282d9419a",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T16:19:06.597Z",
+  "note": "review lead: tách phạm vi + vị từ nhóm của getReturnRateSummary thành returnSummaryScope/returnSummaryBucketWhere dùng chung cho đếm và danh sách; ORDER_OUTCOME/outcomeColumn/PRIMARY_ATTEMPT không đổi; 144 phép so số thẻ = câu đếm cũ nguyên văn; danh sách không nhớ đệm, phân trang máy chủ; SĐT gác orders:read. CRITICAL theo đường dẫn tệp ⇒ chủ shop gộp."
+}
