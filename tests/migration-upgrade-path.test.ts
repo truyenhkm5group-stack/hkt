@@ -204,6 +204,7 @@ const MOI = [
   "0254_carryover_first_work_month",
   "0255_ai_usage_sourcing_workload",
   "0256_sourcing_offer_catalog",
+  "0257_sourcing_offer_weights",
 ] as const;
 
 /*
@@ -2001,6 +2002,18 @@ export async function testMigrationUpgradePath() {
     );
     await client.query(`insert into sourcing_offer_snapshots (id, offer_id, tiers) values ('up-ss2', 'up-so1', '[{"fromQty":2,"priceFen":1230}]'::jsonb)`);
     await client.query(`delete from sourcing_offer_snapshots where id = 'up-ss2'`);
+
+    /*
+      0257 (tìm hàng nguồn · cân nặng một cái): CHỈ TẠO một bảng, không gieo dòng nào; cân nặng ngoài 1–100.000 g bị chặn.
+    */
+    assert.ok(!/^\s*(update|insert)\b/im.test(readFileSync(path.join(goc, "0257_sourcing_offer_weights.sql"), "utf8").replace(/--.*$/gm, "")), "0257: migration KHÔNG được có câu UPDATE / INSERT");
+    await client.query(`insert into sourcing_offer_weights (id, offer_id, grams) values ('up-sw1', 'up-so1', 350)`);
+    await assert.rejects(
+      () => client.query(`insert into sourcing_offer_weights (id, offer_id, grams) values ('up-sw2', 'up-so1', 0)`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("sourcing_offer_weights_grams_check"),
+      "0257: cân nặng 0 g bị chặn",
+    );
+    await client.query(`delete from sourcing_offer_weights where id like 'up-sw%'`);
     await client.query(`delete from sourcing_offers where id like 'up-so%'`);
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══

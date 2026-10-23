@@ -40,9 +40,10 @@ export type LandedCostConfig = {
   cnDomesticShipCny: number | null;
   /** Cước Trung Quốc → Việt Nam theo kg (VND). */
   intlFreightVndPerKg: number | null;
-  /** Phí mua hộ (% giá hàng quy đổi). */
+  /** Phí mua hộ (% GIÁ MUA = giá bậc × tỷ giá). */
   agentFeePercent: number | null;
-  /** Thuế / phí nhập (% giá khai). */
+  /** Thuế / phí nhập — MỘT tỷ lệ gộp, % TRỊ GIÁ TÍNH THUẾ kiểu CIF (giá mua + cước nội địa + cước TQ → VN). Đơn vị vận chuyển
+   *  báo giá «bao thuế theo kg» ⇒ khai 0 và cước / kg đã gồm thuế. */
   dutyVatPercent: number | null;
   /** Khoản khác cho MỘT cái (VND). */
   otherVndPerUnit: number | null;
@@ -73,8 +74,8 @@ export const LANDED_COST_FIELDS: readonly { key: LandedCostNumberKey | "fxAsOf";
   { key: "fxAsOf", label: "Ngày áp tỷ giá", unit: "ngày" },
   { key: "cnDomesticShipCny", label: "Cước nội địa Trung Quốc mỗi lượt mua", unit: "CNY" },
   { key: "intlFreightVndPerKg", label: "Cước Trung Quốc → Việt Nam", unit: "₫ / kg" },
-  { key: "agentFeePercent", label: "Phí mua hộ", unit: "%" },
-  { key: "dutyVatPercent", label: "Thuế / phí nhập", unit: "%" },
+  { key: "agentFeePercent", label: "Phí mua hộ", unit: "% giá mua" },
+  { key: "dutyVatPercent", label: "Thuế / phí nhập", unit: "% trị giá CIF" },
   { key: "otherVndPerUnit", label: "Khoản khác mỗi cái", unit: "₫" },
 ];
 
@@ -148,3 +149,46 @@ export const SOURCING_COMPARE_QUANTITIES = [10, 50, 100, 300] as const;
 export const SOURCING_COMPARE_MAX = 4;
 /** Số bậc giá tối đa của một lần chụp. */
 export const SOURCING_PRICE_TIERS_MAX = 8;
+
+// ─────────────────────────── TRỌNG SỐ ĐIỂM NHÀ CUNG CẤP (SRC-4) ───────────────────────────
+
+/**
+ * Trọng số điểm nhà cung cấp — KHÔNG có bộ mặc định (cùng tinh thần AGENTS 27): chưa khai ⇒ màn hình chỉ hiện TỪNG thành phần kèm
+ * độ phủ, không có điểm tổng. Trọng số `null` = thành phần không tính vào tổng. Số năm cần TRẦN (`yearsCap`) để quy về 0–1 — trần
+ * cũng là quyết định của chủ shop, không gõ sẵn.
+ */
+export const SOURCING_SCORE_WEIGHTS_KEY = "sourcing.scoreWeights";
+export const SUPPLIER_SCORE_COMPONENTS = ["rating", "responseRate", "verified", "years"] as const;
+export type SupplierScoreComponent = (typeof SUPPLIER_SCORE_COMPONENTS)[number];
+export const SUPPLIER_SCORE_LABEL: Record<SupplierScoreComponent, string> = { rating: "Điểm đánh giá", responseRate: "Tỷ lệ phản hồi", verified: "Đã xác minh", years: "Số năm trên nền tảng" };
+
+export type SourcingScoreWeights = {
+  supplier: Record<SupplierScoreComponent, number | null>;
+  /** Số năm coi là «đủ» (điểm thành phần = 1). */
+  yearsCap: number | null;
+  setByEmail: string | null;
+  setAt: string | null;
+  reason: string;
+};
+
+export const EMPTY_SCORE_WEIGHTS: SourcingScoreWeights = { supplier: { rating: null, responseRate: null, verified: null, years: null }, yearsCap: null, setByEmail: null, setAt: null, reason: "" };
+
+/** Chuẩn hoá cấu hình đã lưu: số hỏng / âm ⇒ `null`. HÀM THUẦN. */
+export function parseScoreWeights(raw: unknown): SourcingScoreWeights {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return EMPTY_SCORE_WEIGHTS;
+  const r = raw as Record<string, unknown>;
+  const w = (r.supplier && typeof r.supplier === "object" && !Array.isArray(r.supplier) ? r.supplier : {}) as Record<string, unknown>;
+  const weight = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100 ? v : null);
+  return {
+    supplier: { rating: weight(w.rating), responseRate: weight(w.responseRate), verified: weight(w.verified), years: weight(w.years) },
+    yearsCap: typeof r.yearsCap === "number" && Number.isInteger(r.yearsCap) && r.yearsCap >= 1 && r.yearsCap <= 100 ? r.yearsCap : null,
+    setByEmail: typeof r.setByEmail === "string" ? r.setByEmail : null,
+    setAt: typeof r.setAt === "string" ? r.setAt : null,
+    reason: typeof r.reason === "string" ? r.reason.slice(0, 500) : "",
+  };
+}
+
+/** Có ít nhất một trọng số dương ⇒ chủ shop đã khai cách tính điểm tổng. */
+export function scoreWeightsDeclared(w: SourcingScoreWeights): boolean {
+  return SUPPLIER_SCORE_COMPONENTS.some((k) => (w.supplier[k] ?? 0) > 0);
+}

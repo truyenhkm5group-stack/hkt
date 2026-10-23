@@ -220,7 +220,7 @@ function testSourceFences() {
   const act = readFileSync("lib/actions/sourcing-offers.ts", "utf8");
   assert.ok(act.startsWith('"use server";') && act.includes('can(user, "sourcing:write")') && !act.includes("getDb"), "server action mỏng: phiên + quyền, không chạm CSDL");
   const svc = readFileSync("lib/sourcing/offer-service.ts", "utf8");
-  assert.equal((svc.match(/await audit\(\{/g) ?? []).length, 5, "năm đường ghi đều có nhật ký");
+  assert.equal((svc.match(/await audit\(\{/g) ?? []).length, 6, "sáu đường ghi (tạo · chụp giá · sửa · NCC · lưu trữ · cân nặng SRC-4) đều có nhật ký");
   const ui = ["components/sourcing/offer-bits.tsx", "components/sourcing/offer-forms.tsx", "app/(dashboard)/sourcing/offers-columns.tsx", "app/(dashboard)/sourcing/compare/page.tsx", "app/(dashboard)/sourcing/offers/[id]/page.tsx"];
   for (const f of [...ui, "lib/sourcing/offer-url.ts", "lib/sourcing/price.ts", "lib/queries/sourcing.ts", "lib/sourcing/offer-service.ts"]) {
     const s = readFileSync(f, "utf8");

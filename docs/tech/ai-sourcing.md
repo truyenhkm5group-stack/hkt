@@ -101,19 +101,38 @@
 
 ### 3.3 Công thức giá về Việt Nam (luôn nhãn «ƯỚC TÍNH»)
 
+Bản đã cài (SRC-4, `lib/sourcing/landed-cost.ts`, Tech Lead chốt căn cứ 23/10/2026):
+
 ```
-giá_một_cái_VND = (giá_bậc_CNY(sl) + cước_nội_địa_TQ_CNY / sl) × tỷ_giá_CNY_VND × (1 + phí_mua_hộ_%)
-                + cước_TQ→VN_VND_kg × kg_một_cái
-                + thuế_phí_% × giá_khai_một_cái_VND
-                + phí_khác_một_cái_VND
+giá_mua          = giá_bậc_CNY(sl) × tỷ_giá_CNY_VND
+cước_nội_địa     = cước_nội_địa_TQ_CNY_một_lượt / sl × tỷ_giá_CNY_VND
+phí_mua_hộ       = phí_mua_hộ_% × giá_mua                                   ← căn cứ: GIÁ MUA
+cước_TQ→VN       = cước_TQ→VN_VND_kg × kg_một_cái
+trị_giá_CIF      = giá_mua + cước_nội_địa + cước_TQ→VN                      ← căn cứ thuế, như hải quan VN tính trị giá tính thuế
+thuế_phí_nhập    = thuế_phí_% × trị_giá_CIF
+giá_một_cái_VND  = giá_mua + cước_nội_địa + phí_mua_hộ + cước_TQ→VN + thuế_phí_nhập + phí_khác_một_cái_VND
 ```
 
+- Tham số hiện có MỘT tỷ lệ thuế / phí gộp. Khi tách thuế nhập khẩu và VAT: VAT tính trên (CIF + thuế nhập khẩu).
+- Thiếu một khoản cước cấu thành CIF ⇒ thuế là «thiếu cước … nên chưa tính được căn cứ thuế», KHÔNG lùi về giá mua.
+- Nhiều đơn vị vận chuyển báo giá «bao thuế theo kg»: khi đó chủ shop khai thuế 0% và cước / kg đã gồm thuế. Màn hình nói điều đó
+  cạnh ô thuế = 0.
+- Mỗi khoản làm tròn tới đồng; tổng là cộng các khoản ĐÃ làm tròn, để người đọc cộng lại đúng số in ra. Cân nặng một cái ở bảng
+  `sourcing_offer_weights` (0257, chỉ thêm dòng).
+- Không có số mặc định: thiếu tham số / cân nặng ⇒ ô in «—» kèm lý do.
 - `giá_bậc_CNY(sl)` lấy đúng bậc theo số lượng dự định; `sl < MOQ` ⇒ cờ «dưới MOQ», không tính.
 - Mọi tham số nằm ở settings `sourcing.landed-cost` (có người đặt, ngày, lý do, phiên bản), KHÔNG hard-code (AGENTS 38). Tỷ giá CNY→VND nhập tay theo nguồn chủ shop chọn, kèm ngày; quá N ngày ⇒ cảnh báo «tỷ giá cũ».
 - Kết quả đi vào **giá dự tính** (`setEstimatedCost`) khi mẫu thành sản phẩm — KHÔNG vào giá vốn; giá vốn thật chỉ đến từ phiếu kho khi hàng về (AGENTS 3.13–3.15). Màn hình so sánh hai số khi đã có hàng.
 - Ảnh chụp công thức + tham số được lưu vào `sourcing_trial_requests` lúc xin duyệt, để người duyệt thấy đúng con số đã xin.
 
 ### 3.4 Chấm điểm — ba điểm tách rời, không gộp
+
+Bản đã cài (SRC-4, `lib/sourcing/score.ts`):
+- **Nhà cung cấp**: từng thành phần + độ phủ. Điểm tổng (thang 100) chỉ khi chủ shop khai `sourcing.scoreWeights` (trọng số + trần
+  số năm, có người / ngày / lý do). Thiếu một thành phần có trọng số ⇒ không có tổng.
+- **Khớp yêu cầu**: ✓ / ✗ từng từ khoá Trung của câu yêu cầu trong tên Trung của mẫu, không ra con số.
+- **Tiềm năng**: «chưa đo được» tới khi mẫu gắn nhóm hàng của shop (SRC-5).
+
 
 | Điểm | Căn cứ | Thiếu dữ liệu |
 |---|---|---|
@@ -160,6 +179,10 @@ Mỗi PR nhỏ, có bài kiểm, theo AGENTS §6; P1 có thể chạy ngay khi c
 ---
 
 ## 5. Rủi ro đã biết
+
+- **Miễn quét vendor 1688 / alibaba / taobao / tmall** (`VENDOR_SCAN_EXEMPT_HOSTS`, SRC-3) chỉ đúng khi máy chủ KHÔNG gọi các tên miền
+  đó: ERP chỉ đọc chữ của link người dán, ảnh do trình duyệt người xem tải. Ngày nối API thật (B1) PHẢI gỡ miễn trừ và khai nhà cung
+  cấp dữ liệu vào sổ bên xử lý phụ (`lib/constants/legal-registers.ts` + `docs/legal/SUBPROCESSOR_REGISTER.md`).
 
 - **Pháp lý dữ liệu:** dùng dữ liệu 1688 / Taobao không có quyền là rủi ro của SHOP (điều khoản TMAPI nói rõ như vậy). Không phương án nào ở đây cào hay vượt chống bot.
 - **Mua thật:** 1688 bán nội địa Trung Quốc; mua cho Việt Nam phải qua đơn vị mua hộ — ERP không tự đặt và không trả tiền.

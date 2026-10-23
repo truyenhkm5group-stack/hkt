@@ -266,3 +266,33 @@ export async function getSourcingCompare(ids: readonly string[]): Promise<{ unav
     return { unavailable: false as const, items, missing };
   });
 }
+
+export type OfferWeight = { grams: number; source: SourcingDataStatus; capturedAt: Date; capturedByName: string | null };
+
+/**
+ * Cân nặng MỚI NHẤT của từng mẫu (0257). Truy vấn RIÊNG, có bắt bảng chưa có: CSDL chưa áp 0257 ⇒ `unavailable: true` và mọi mẫu
+ * «chưa khai cân nặng» — kho mẫu và bảng giá vẫn chạy (MIGRATION_SERVE_COMPAT).
+ */
+export async function latestOfferWeights(offerIds: readonly string[], historyLimit = 1): Promise<{ unavailable: boolean; byOffer: Map<string, OfferWeight[]> }> {
+  const byOffer = new Map<string, OfferWeight[]>();
+  if (!offerIds.length) return { unavailable: false, byOffer };
+  const w = schema.sourcingOfferWeights;
+  try {
+    const db = await getDb();
+    const rows = await db
+      .select({ offerId: w.offerId, grams: w.grams, source: w.source, capturedAt: w.capturedAt, capturedByName: schema.users.name })
+      .from(w)
+      .leftJoin(schema.users, eq(schema.users.id, w.capturedBy))
+      .where(inArray(w.offerId, [...offerIds]))
+      .orderBy(asc(w.offerId), desc(w.capturedAt), desc(w.id));
+    for (const r of rows) {
+      const list = byOffer.get(r.offerId) ?? [];
+      if (list.length < historyLimit) list.push({ grams: r.grams, source: r.source as SourcingDataStatus, capturedAt: r.capturedAt, capturedByName: r.capturedByName });
+      byOffer.set(r.offerId, list);
+    }
+    return { unavailable: false, byOffer };
+  } catch (e) {
+    if (isMissingSourcingTable(e)) return { unavailable: true, byOffer };
+    throw e;
+  }
+}

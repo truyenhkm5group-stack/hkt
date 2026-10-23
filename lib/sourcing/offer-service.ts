@@ -279,3 +279,23 @@ export async function setSourcingOfferArchived(user: SourcingActor, input: z.inp
     return { ok: true, id: d.offerId, message: d.archived ? "Đã lưu trữ mẫu." : "Đã khôi phục mẫu." };
   });
 }
+
+const weightSchema = z.object({ offerId: z.string().min(1).max(100), grams: z.number().int("Cân nặng là số gam nguyên").min(1, "Cân nặng ít nhất 1 g").max(100_000, "Tối đa 100.000 g") });
+
+/** Khai cân nặng MỘT cái (0257) — chỉ thêm dòng, lần mới nhất dùng cho cước Trung Quốc → Việt Nam. */
+export async function addSourcingWeight(user: SourcingActor, input: z.input<typeof weightSchema>): Promise<SourcingOfferResult> {
+  const parsed = weightSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, errors: parsed.error.issues.map((i) => ({ message: i.message })) };
+  const d = parsed.data;
+  try {
+    const db = await getDb();
+    const [offer] = await db.select({ id: schema.sourcingOffers.id }).from(schema.sourcingOffers).where(eq(schema.sourcingOffers.id, d.offerId)).limit(1);
+    if (!offer) return fail("Không thấy mẫu.");
+    const [row] = await db.insert(schema.sourcingOfferWeights).values({ offerId: d.offerId, grams: d.grams, source: "MANUAL", capturedBy: user.id }).returning({ id: schema.sourcingOfferWeights.id });
+    await audit({ userId: user.id, userEmail: user.email, action: "SOURCING_WEIGHT_ADD", entity: "SOURCING_OFFER", entityId: d.offerId, after: { weightId: row.id, grams: d.grams } });
+    return { ok: true, id: d.offerId, message: "Đã lưu cân nặng — lần khai cũ vẫn giữ trong lịch sử." };
+  } catch (e) {
+    if (isMissingSourcingTable(e)) return fail("CSDL của tổ chức chưa áp migration 0257 (cân nặng mẫu nguồn) — báo người vận hành, chưa ghi được.");
+    throw e;
+  }
+}

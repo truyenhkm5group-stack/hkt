@@ -77,7 +77,7 @@ function testSourceFences() {
   const act = readFileSync("lib/actions/sourcing-settings.ts", "utf8");
   assert.ok(act.startsWith('"use server";'), "server action");
   assert.ok(act.includes('can(user, "sourcing:approve")'), "ghi cấu hình đòi quyền duyệt & cấu hình");
-  assert.equal((act.match(/await audit\(\{[^}]*reason: parsed\.data\.reason/g) ?? []).length, 2, "hai đường ghi đều có nhật ký kèm lý do");
+  assert.equal((act.match(/await audit\(\{[^}]*reason: parsed\.data\.reason/g) ?? []).length, 3, "ba đường ghi cấu hình (trần AI · tham số giá về · trọng số điểm) đều có nhật ký kèm lý do");
   const page = readFileSync("app/(dashboard)/sourcing/page.tsx", "utf8");
   assert.ok(page.includes('requirePermission("sourcing:view")'), "trang đòi quyền xem");
   assert.ok(page.includes("Chưa có nguồn dữ liệu được duyệt") && page.includes("không cào web"), "trạng thái trống nói rõ vì sao chưa tìm được");

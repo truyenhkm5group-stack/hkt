@@ -4,13 +4,19 @@ import { SourcingOffersTable } from "@/app/(dashboard)/sourcing/offers-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { Button } from "@/components/ui/button";
 import { SourcingQueryBox } from "@/components/sourcing/sourcing-query-box";
-import { LandedCostForm, SourcingLimitsForm } from "@/components/sourcing/sourcing-settings-forms";
+import { LandedCostForm, ScoreWeightsForm, SourcingLimitsForm } from "@/components/sourcing/sourcing-settings-forms";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
 import {
   DEFAULT_SOURCING_LIMITS,
   EMPTY_LANDED_COST,
+  EMPTY_SCORE_WEIGHTS,
+  SOURCING_SCORE_WEIGHTS_KEY,
+  SUPPLIER_SCORE_COMPONENTS,
+  SUPPLIER_SCORE_LABEL,
+  parseScoreWeights,
+  scoreWeightsDeclared,
   SOURCING_FX_STALE_DAYS,
   SOURCING_LANDED_COST_KEY,
   SOURCING_LIMITS_KEY,
@@ -41,9 +47,10 @@ export default async function SourcingPage({ searchParams }: { searchParams: Pro
   const params = parseListParams(raw, { defaultSort: "createdAt", filterKeys: ["platform", "state"], sortable: SOURCING_OFFER_SORTABLE });
   const canConfigure = can(user, "sourcing:approve");
   const canSearch = can(user, "sourcing:search");
-  const [limits, landed, offers] = await Promise.all([
+  const [limits, landed, weights, offers] = await Promise.all([
     getSettingJson<unknown>(SOURCING_LIMITS_KEY, DEFAULT_SOURCING_LIMITS).then(parseSourcingLimits),
     getSettingJson<unknown>(SOURCING_LANDED_COST_KEY, EMPTY_LANDED_COST).then(parseLandedCost),
+    getSettingJson<unknown>(SOURCING_SCORE_WEIGHTS_KEY, EMPTY_SCORE_WEIGHTS).then(parseScoreWeights),
     listSourcingOffers(params),
   ]);
   const now = new Date();
@@ -139,6 +146,26 @@ export default async function SourcingPage({ searchParams }: { searchParams: Pro
             </p>
           ) : null}
           {canConfigure ? <LandedCostForm initial={landed} /> : <p className="text-muted-foreground">Chỉ người có quyền «Tìm hàng: duyệt & cấu hình» đổi được tham số.</p>}
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Trọng số điểm nhà cung cấp" description="Không có bộ mặc định: chưa khai thì màn so sánh chỉ hiện từng thành phần (đánh giá, phản hồi, xác minh, số năm) kèm độ phủ, không có điểm tổng.">
+        <div className="space-y-3 text-sm" data-score-weights-status>
+          <p>
+            {scoreWeightsDeclared(weights)
+              ? `Đang tính điểm tổng theo: ${SUPPLIER_SCORE_COMPONENTS.filter((k) => (weights.supplier[k] ?? 0) > 0)
+                  .map((k) => `${SUPPLIER_SCORE_LABEL[k]} ${weights.supplier[k]}`)
+                  .join(" · ")}${weights.yearsCap !== null ? ` · trần số năm ${weights.yearsCap}` : ""}.`
+              : "Chưa khai trọng số — không có điểm tổng."}
+          </p>
+          {weights.setAt ? (
+            <p className="text-xs text-muted-foreground">
+              Lưu lần cuối {formatDateTime(weights.setAt)}
+              {weights.setByEmail ? ` bởi ${weights.setByEmail}` : ""}
+              {weights.reason ? ` — ${weights.reason}` : ""}.
+            </p>
+          ) : null}
+          {canConfigure ? <ScoreWeightsForm initial={weights} /> : <p className="text-muted-foreground">Chỉ người có quyền «Tìm hàng: duyệt & cấu hình» đổi được trọng số.</p>}
         </div>
       </SectionCard>
     </div>

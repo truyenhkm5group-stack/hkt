@@ -8,6 +8,7 @@ import { revalidatePath } from "next/cache";
 import { can, requireUser } from "@/lib/auth/session";
 import {
   addSourcingSnapshot,
+  addSourcingWeight,
   createSourcingOffer,
   setSourcingOfferArchived,
   updateSourcingOffer,
@@ -54,4 +55,10 @@ export async function setSourcingOfferArchivedAction(input: Parameters<typeof se
   const user = await requireUser();
   if (!can(user, "sourcing:write")) return NO_RIGHT;
   return refresh(await setSourcingOfferArchived({ id: user.id, email: user.email }, input), input.offerId);
+}
+
+export async function addSourcingWeightAction(input: Parameters<typeof addSourcingWeight>[1]): Promise<SourcingOfferResult> {
+  const user = await requireUser();
+  if (!can(user, "sourcing:write")) return NO_RIGHT;
+  return refresh(await addSourcingWeight({ id: user.id, email: user.email }, input), input.offerId);
 }

@@ -1,14 +1,27 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ExternalLink } from "lucide-react";
-import { ArchiveOfferForm, AddSnapshotForm, EditOfferForm, SupplierFactsForm } from "@/components/sourcing/offer-forms";
+import { LandedCostCell } from "@/components/sourcing/landed-cost-view";
+import { AddWeightForm, ArchiveOfferForm, AddSnapshotForm, EditOfferForm, SupplierFactsForm } from "@/components/sourcing/offer-forms";
 import { DataAge, OfferImage, TiersText } from "@/components/sourcing/offer-bits";
 import { PageHeader } from "@/components/page-header";
 import { DescriptionList, SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
-import { SOURCING_PLATFORM_LABEL } from "@/lib/constants/sourcing";
-import { formatDateTime, vnDateKey } from "@/lib/format";
-import { getSourcingOffer } from "@/lib/queries/sourcing";
+import {
+  EMPTY_LANDED_COST,
+  EMPTY_SCORE_WEIGHTS,
+  SOURCING_COMPARE_QUANTITIES,
+  SOURCING_LANDED_COST_KEY,
+  SOURCING_PLATFORM_LABEL,
+  SOURCING_SCORE_WEIGHTS_KEY,
+  parseLandedCost,
+  parseScoreWeights,
+} from "@/lib/constants/sourcing";
+import { formatDateTime, formatNumber, vnDateKey } from "@/lib/format";
+import { getSourcingOffer, latestOfferWeights } from "@/lib/queries/sourcing";
+import { getSettingJson } from "@/lib/settings";
+import { landedConfigEmpty, landedCostAtQty } from "@/lib/sourcing/landed-cost";
+import { supplierScore } from "@/lib/sourcing/score";
 import { safeHttpUrl } from "@/lib/sourcing/offer-url";
 import { formatCny, formatHundredths } from "@/lib/sourcing/price";
 
@@ -19,7 +32,11 @@ export default async function SourcingOfferPage({ params }: { params: Promise<{ 
   const { id } = await params;
   const user = await requirePermission("sourcing:view");
   const canWrite = can(user, "sourcing:write");
-  const detail = await getSourcingOffer(id);
+  const [detail, landed, weights] = await Promise.all([
+    getSourcingOffer(id),
+    getSettingJson<unknown>(SOURCING_LANDED_COST_KEY, EMPTY_LANDED_COST).then(parseLandedCost),
+    getSettingJson<unknown>(SOURCING_SCORE_WEIGHTS_KEY, EMPTY_SCORE_WEIGHTS).then(parseScoreWeights),
+  ]);
   if (detail && "unavailable" in detail) {
     return (
       <div className="space-y-5">
@@ -33,6 +50,10 @@ export default async function SourcingOfferPage({ params }: { params: Promise<{ 
   const now = new Date();
   const latest = snapshots[0] ?? null;
   const link = safeHttpUrl(offer.canonicalUrl);
+  const weightRows = await latestOfferWeights([offer.id], 10);
+  const weightHistory = weightRows.byOffer.get(offer.id) ?? [];
+  const grams = weightHistory[0]?.grams ?? null;
+  const score = supplierScore(supplier, weights);
   return (
     <div className="space-y-5">
       <PageHeader
@@ -143,6 +164,35 @@ export default async function SourcingOfferPage({ params }: { params: Promise<{ 
         ) : null}
       </SectionCard>
 
+      <SectionCard title="Giá về Việt Nam (ước tính)" description="Theo tham số giá về đã khai và lần chụp giá mới nhất. Chỉ để so sánh — không vào giá vốn, không vào giá dự tính.">
+        <div className="space-y-4 text-sm">
+          {landedConfigEmpty(landed) ? (
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              Tham số giá về Việt Nam chưa khai — mọi ô in «—». Khai ở <Link className="underline" href="/sourcing">trang Tìm hàng nguồn</Link>.
+            </p>
+          ) : null}
+          <div className="grid gap-3 md:grid-cols-4" data-landed-grid>
+            {SOURCING_COMPARE_QUANTITIES.map((q) => (
+              <div key={q} className="rounded-lg border p-2">
+                <div className="mb-1 text-xs text-muted-foreground">Mỗi cái khi mua {q}</div>
+                <LandedCostCell value={landedCostAtQty({ tiers: latest?.tiers ?? null, moq: latest?.moq ?? null, weightG: grams, qty: q, cfg: landed, now })} />
+              </div>
+            ))}
+          </div>
+          <div className="space-y-2 border-t pt-3">
+            <p>
+              Cân nặng một cái: <strong>{grams === null ? "chưa khai" : `${formatNumber(grams)} g`}</strong>
+              {weightHistory[0] ? <span className="ml-1 text-xs text-muted-foreground">({formatDateTime(weightHistory[0].capturedAt)}{weightHistory[0].capturedByName ? ` · ${weightHistory[0].capturedByName}` : ""})</span> : null}
+            </p>
+            {weightRows.unavailable ? <p className="text-xs text-amber-700 dark:text-amber-300">CSDL của tổ chức chưa áp migration 0257 — chưa lưu được cân nặng.</p> : null}
+            {weightHistory.length > 1 ? (
+              <p className="text-xs text-muted-foreground">Lần khai trước: {weightHistory.slice(1).map((w) => `${formatNumber(w.grams)} g (${formatDateTime(w.capturedAt)})`).join(" · ")}</p>
+            ) : null}
+            {canWrite && !weightRows.unavailable ? <AddWeightForm offerId={offer.id} initialGrams={grams} /> : null}
+          </div>
+        </div>
+      </SectionCard>
+
       <SectionCard title="Nhà cung cấp" description="Số trên trang nguồn, gõ tay. Ô trống là CHƯA BIẾT — không chấm điểm khi chưa đủ căn cứ.">
         {supplier ? (
           <div className="space-y-4">
@@ -166,6 +216,7 @@ export default async function SourcingOfferPage({ params }: { params: Promise<{ 
                 { label: "Đã xác minh", value: supplier.verified === null ? "—" : supplier.verified ? "có" : "không" },
                 { label: "Gửi hàng từ", value: supplier.shipFrom ?? "—" },
                 { label: "Số liệu", value: <DataAge source={supplier.factsSource} asOf={supplier.factsAsOf} now={now} /> },
+                { label: "Điểm nhà cung cấp", value: `${score.total === null ? "—" : `${score.total} điểm (thang 100)`} · có số ${score.coverage.have}/${score.coverage.of} thành phần. ${score.totalNote}`, span: true },
               ]}
             />
             {canWrite ? (
