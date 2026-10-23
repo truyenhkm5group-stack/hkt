@@ -50,7 +50,7 @@ const THROTTLE_MS = 400;
 
 // ─────────────────────────── HÀM THUẦN ───────────────────────────
 
-export type ReshipArgs = { apply: boolean; limit: number; pilot: boolean; order: string | null; rollback: boolean; peek: boolean } | { error: string };
+export type ReshipArgs = { apply: boolean; limit: number; pilot: boolean; order: string | null; rollback: boolean; peek: boolean; orders: string[] } | { error: string };
 
 /** Đối số. `--apply` không kèm `--limit` ⇒ lỗi (không bao giờ ghi hàng loạt vì quên một cờ). HÀM THUẦN. */
 export function parseReshipArgs(argv: readonly string[]): ReshipArgs {
@@ -67,8 +67,12 @@ export function parseReshipArgs(argv: readonly string[]): ReshipArgs {
   if (rollback && order === null) return { error: "--rollback bắt buộc kèm --order=<mã đơn POS> (gỡ từng đơn một)" };
   const peek = argv.includes("--peek");
   if (peek && (apply || rollback || argv.includes("--pilot"))) return { error: "--peek là CHỈ ĐỌC — không đi cùng --apply / --rollback / --pilot" };
-  if (peek && order === null) return { error: "--peek bắt buộc kèm --order=<mã đơn POS>" };
-  return { apply, limit, pilot: argv.includes("--pilot"), order, rollback, peek };
+  const ordersRaw = val("orders");
+  const orders = ordersRaw === null ? [] : [...new Set(ordersRaw.split(",").map((x) => x.trim()).filter(Boolean))];
+  if (orders.length > PEEK_MAX_ORDERS || orders.some((x) => !/^[0-9]{1,24}$/.test(x))) return { error: `--orders là tối đa ${PEEK_MAX_ORDERS} mã đơn POS (chữ số), cách nhau dấu phẩy` };
+  if (orders.length && !peek) return { error: "--orders chỉ dùng với --peek (chỉ đọc)" };
+  if (peek && order === null && !orders.length) return { error: "--peek bắt buộc kèm --order=<mã đơn POS> hoặc --orders=a,b,…" };
+  return { apply, limit, pilot: argv.includes("--pilot"), order, rollback, peek, orders };
 }
 
 export type PosPartner = { extend_code: string | null; order_number_vtp: string | null };
@@ -100,6 +104,9 @@ export function linkBody(newCode: string): { partner: { order_number_vtp: string
   return { partner: { order_number_vtp: newCode } };
 }
 
+/** Trần số đơn của một lượt `--peek --orders` (đọc đối chứng nhiều đơn trong MỘT run). */
+export const PEEK_MAX_ORDERS = 15;
+
 /** Khối của đơn POS được lấy vân tay (đúng ba khoá đổi sau pilot 23/10/2026 + khối partner). */
 const PEEK_BLOCKS = ["customer", "items", "warehouse_info", "partner"] as const;
 
@@ -107,20 +114,34 @@ export type Fingerprint = { path: string; h: string; v: string | null };
 
 /**
  * Vân tay từng khoá con của các khối trong PEEK_BLOCKS: `path` (vd `items[0].variation_info.retail_price`) · `h` = băm 12 ký tự của giá trị ·
- * `v` = giá trị CHỈ khi là số / boolean và KHÔNG thuộc `customer` (khối khách chỉ băm — không in tên / SĐT / địa chỉ dưới bất kỳ dạng nào).
- * Sâu tối đa hai tầng (items[i].x.y). So hai lần đọc theo `path` + `h` là biết khoá NÀO đổi mà không lộ giá trị. HÀM THUẦN.
+ * `v` = giá trị CHỈ khi là số / boolean. Khối `customer` đi sâu tới khoá con của từng địa chỉ trong sổ (lô 1 ngày 24/10/2026:
+ * `customer.shop_customer_addresses[i]` đổi ở 10/20 đơn — phải biết khoá NÀO), nhưng chỉ lộ boolean, mốc thời gian ISO và số có tên khoá
+ * dạng đếm / mốc / cấp (`*_count`, `*_at`, `level`, `point`…); MỌI chuỗi chữ (tên, SĐT, địa chỉ) chỉ băm. So hai lần đọc theo `path` + `h`
+ * là biết khoá NÀO đổi mà không lộ giá trị. HÀM THUẦN.
  */
 export function fingerprintOrder(order: Record<string, unknown>): Fingerprint[] {
   const out: Fingerprint[] = [];
   const h = (x: unknown) => createHash("sha256").update(JSON.stringify(x ?? null)).digest("hex").slice(0, 12);
-  const put = (path: string, x: unknown, showable: boolean) => out.push({ path, h: h(x), v: showable && (typeof x === "number" || typeof x === "boolean") ? String(x) : null });
+  const put = (path: string, x: unknown, showable: boolean) => out.push({ path, h: h(x), v: showable ? showValue(path, x) : customerSafeValue(path, x) });
   const walk = (prefix: string, x: unknown, depth: number, showable: boolean) => {
     if (depth > 0 && Array.isArray(x)) return x.forEach((e, i) => walk(`${prefix}[${i}]`, e, depth - 1, showable));
     if (depth > 0 && x && typeof x === "object") return Object.entries(x as Record<string, unknown>).forEach(([k, e]) => walk(`${prefix}.${k}`, e, depth - 1, showable));
     put(prefix, x, showable);
   };
-  for (const b of PEEK_BLOCKS) walk(b, order[b], b === "items" ? 3 : 2, b !== "customer");
+  for (const b of PEEK_BLOCKS) walk(b, order[b], b === "items" ? 3 : b === "customer" ? 4 : 2, b !== "customer");
   return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+const showValue = (_path: string, x: unknown) => (typeof x === "number" || typeof x === "boolean" ? String(x) : null);
+const ISO_AT = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/;
+const CUSTOMER_COUNTER_KEY = /(^|_)(count|times|level|point|points|rank)$|_at$/i;
+/** Khối khách: chỉ boolean · mốc ISO · số có tên khoá dạng đếm / mốc / cấp. Chuỗi chữ khác và số không mang tên ấy ⇒ `null` (chỉ băm). */
+function customerSafeValue(path: string, x: unknown): string | null {
+  const key = path.slice(path.lastIndexOf(".") + 1);
+  if (typeof x === "boolean") return String(x);
+  if (typeof x === "string" && ISO_AT.test(x)) return x;
+  if (typeof x === "number" && CUSTOMER_COUNTER_KEY.test(key)) return String(x);
+  return null;
 }
 
 export type PathChange = { path: string; before: string | null; after: string | null };
@@ -331,7 +352,11 @@ async function runRollback(orderId: string, runId: string): Promise<boolean> {
 
 export async function runReshipLink(args: Exclude<ReshipArgs, { error: string }>, runId: string): Promise<boolean> {
   if (args.rollback && args.order) return runRollback(args.order, runId);
-  if (args.peek && args.order) return runPeek(args.order);
+  if (args.peek && (args.order || args.orders.length)) {
+    let ok = true;
+    for (const id of args.order ? [args.order] : args.orders) ok = (await runPeek(id).catch((e: unknown) => (console.log(`peek ${id}: LỖI — ${e instanceof Error ? e.message.slice(0, 160) : e}`), false))) && ok;
+    return ok;
+  }
   const { pairs: all } = await readPairs(await getDb());
   const delivered = all.filter((p) => p.newStage === "DELIVERED").length;
   const cancelledOld = all.filter((p) => p.oldStage === "CANCELLED").length;
