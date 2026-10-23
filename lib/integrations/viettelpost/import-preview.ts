@@ -4,7 +4,8 @@ import { getDb, schema } from "@/db";
 import { vnStartOfDay } from "@/lib/format";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { detectVtpFile, mergeDetectedOrderLists, VtpFileError, type DetectedVtpFile } from "@/lib/integrations/viettelpost/import-files";
-import { matchVtpOrderList, type OrderListMatch } from "@/lib/integrations/viettelpost/statement-db";
+import { matchVtpOrderList, orderListRowCreatable, type OrderListMatch } from "@/lib/integrations/viettelpost/statement-db";
+import { RESHIP_HOLD_TEXT } from "@/lib/integrations/viettelpost/reship";
 import type { ShipmentStage } from "@/db/schema";
 import { PREVIEW_VERDICTS, type PreviewVerdict } from "@/lib/constants/vtp-import";
 import { measureWebhookGap, webhookMatchRate, type GapSeverity } from "@/lib/constants/webhook-gap";
@@ -161,7 +162,15 @@ function verdictOf(
   const at = rowOccurredAt(m);
   if (!at) return { verdict: "INVALID", note: "Không đọc được ngày trạng thái — dòng này sẽ bị bỏ qua" };
   if (m.matchIssue) return { verdict: "AMBIGUOUS", note: m.matchIssue };
-  if (!m.shipmentId) return { verdict: "UNMATCHED", note: "ERP chưa có vận đơn mang mã này" };
+  if (!m.shipmentId) {
+    // CÙNG điều kiện với đường ghi (`orderListRowCreatable`) — hai bước không lệch nhau vì hai luật (AGENTS 49).
+    if (orderListRowCreatable(m)) {
+      if (m.matchKind === "reship") return { verdict: "RESHIP_ATTEMPT", note: `Vận đơn tạo lại trên web VTP — sẽ tạo lần gửi kế của đơn có vận đơn gốc ${m.orderCode}` };
+      const hold = m.reship?.kind === "HOLD" ? ` (${RESHIP_HOLD_TEXT[m.reship.reason]})` : "";
+      return { verdict: "NEW_ORPHAN", note: `Chưa gắn được đơn nào — sẽ tạo vận đơn không đơn từ dòng tệp${hold}` };
+    }
+    return { verdict: "UNMATCHED", note: m.matchKind === "reship" || m.matchKind === "new" ? "ERP chưa có vận đơn mang mã này — dòng thiếu thu hộ / cước / mốc nên không tạo" : "ERP chưa có vận đơn mang mã này" };
+  }
   if (m.mapped.stage === "UNKNOWN") {
     return { verdict: "UNKNOWN_STATUS", note: `Chữ của ĐVVC được ghi vào sổ trạng thái để bổ sung bảng mã; trạng thái vận đơn giữ nguyên` };
   }

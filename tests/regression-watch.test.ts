@@ -203,6 +203,11 @@ function testStatusTable() {
     assert.ok([...new Set(REGRESSION_WATCH.map((r) => r.mission))].every((m) => u.get(m) === "UNKNOWN"), `ran=${ran} unreadable=${unreadable} ⇒ UNKNOWN`);
   }
   assert.ok(regressionStatusTable([]).every((x) => x.status === "NOT_RUN"));
+  // Mở CSDL tổ chức trong phiên chỉ đọc phải đi qua handle CHẨN ĐOÁN (không migrate, không dọn platform_*) — production 23/10
+  // (run 39879228607) thiếu bước này nên 5/6 tổ chức «không đọc được».
+  const st = readFileSync("scripts/regression-watch-status.ts", "utf8");
+  const vong = st.slice(st.indexOf("for (const org of orgList)"));
+  assert.ok(st.includes("getDbForInspection(org)") && vong.indexOf("bindReadOnlyOrgHandle(org)") >= 0 && vong.indexOf("bindReadOnlyOrgHandle(org)") < vong.indexOf("withOrganization("), "gắn handle chỉ đọc TRƯỚC withOrganization cho mọi tổ chức");
 }
 
 async function testDoneGate() {

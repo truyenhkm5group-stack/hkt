@@ -13,7 +13,7 @@ import { InfoHint } from "@/components/info-hint";
 import { DataWarnings } from "@/components/data-warnings";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { RETURN_RULE, SUCCESS_RATE_OK, successTone } from "@/lib/constants/returns";
+import { ELIGIBLE_SENT_HINT, RETURN_RULE, SUCCESS_RATE_OK, successTone } from "@/lib/constants/returns";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { OrderValueFilterControl } from "@/components/order-value-filter";
 import { ValueTierSection } from "@/app/(dashboard)/reports/returns/value-tier-section";
@@ -36,6 +36,8 @@ import { loadReturnsPage, returnsPageParams, withDefaultReturnsBasis } from "@/l
 import { ScopeDenied } from "@/components/scope-denied";
 import { displayVariationText, withDisplayVariation } from "@/lib/constants/experience-profile";
 import { readDisplayProfile } from "@/lib/experience/profile";
+import { VtpSyncCoverageCard } from "@/components/vtp-sync-coverage";
+import { getVtpSyncCoverage } from "@/lib/queries/vtp-sync-coverage";
 
 export const metadata = { title: "Tỷ lệ giao thành công theo mã hàng" };
 
@@ -165,6 +167,17 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
             </Button>
           </div>
         }
+      />
+
+      {/*
+        ĐỘ PHỦ ĐỒNG BỘ VIETTEL POST + CÔNG THỨC (P0 22/10/2026): GTC đếm theo ĐƠN; vận đơn không đơn (gửi thẳng trên web
+        VTP mà chưa ghép được) đứng ngoài mẫu số — thẻ này nói ra ERP đang đứng trên tập nào, và lần đồng bộ cuối của
+        từng nguồn. Không có «tổng vận đơn trên VTP» (không API).
+      */}
+      <VtpSyncCoverageCard
+        c={await getVtpSyncCoverage({ from: params.period.from, to: params.period.to })}
+        periodLabel={params.period.label}
+        formula={`GTC = giao thành công ÷ đã gửi = ${formatNumber(summary.delivered)} ÷ ${formatNumber(summary.shipped)} đơn · ${ELIGIBLE_SENT_HINT} · Kỳ: ${params.period.label}, lọc theo ${TIME_BASIS_LABEL[basis].toLowerCase()}, giờ Việt Nam · Độ mịn ĐƠN (đơn Pancake / ERP); vận đơn chưa có đơn KHÔNG nằm trong tử hay mẫu số.`}
       />
 
       {/* ═════════ BỘ LỌC CHUNG — MỘT CHỖ, ÁP CHO MỌI KHỐI BÊN DƯỚI ═════════ */}

@@ -14,7 +14,7 @@ import { getDb, schema } from "@/db";
 import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
 import { amountsIn, applyCustomerCartMessage, bareResolution, cartDraftDiff, commitmentViolation, packQuestion, quantityUnitIssue, type AskedLine } from "@/lib/sales-chatbot/cart-commitment";
 import { staffTotalConflict, totalClauses } from "@/lib/sales-chatbot/cancel-recovery";
-import { extractVndAmounts } from "@/lib/sales-chatbot/claim-guard";
+import { CLAIM_HANDOFF_REASON, CLAIM_SAFE_TEXT, extractVndAmounts } from "@/lib/sales-chatbot/claim-guard";
 import { QUICK_REPLY_SETTING_KEY } from "@/lib/sales-chatbot/quick-replies-shared";
 import { SHOP_SAID } from "@/lib/sales-chatbot/engine";
 import { createProductCore } from "@/lib/records/product-create";
@@ -198,6 +198,8 @@ const CASES: GoldenCase[] = [
   { key: "qg-sai-boi", title: "«10 nem» mà model ghi thẳng 10 hộp trên đơn đã chốt ⇒ không ghi, chuyển người", shop: "food", channel: "WEB", turns: turn(16, "Thêm 10 nem hải sản tôm bề bề", once(10, "Dạ em thêm rồi ạ.")) },
   { key: "qg-10-hop", title: "«10 hộp» khách nói RÕ đơn vị ⇒ 10 hộp, kể cả khi tổng gấp > 2 lần (lời khách là căn cứ)", shop: "food", channel: "WEB", turns: turn(17, "Thêm 10 hộp nem hải sản tôm bề bề", once(10, "Dạ em thêm 10 hộp rồi ạ.")) },
   { key: "qg-50-nem", title: "«50 nem» (suy ra 5 hộp) trên đơn đã chốt, tổng gấp 2,7 lần ⇒ không ghi tự động, chuyển người", shop: "food", channel: "WEB", turns: turn(19, "Thêm 50 nem hải sản tôm bề bề", once(5, "Dạ em thêm 5 hộp rồi ạ.")) },
+  // Lượt sửa đơn ĐÃ CHỐT bị từ chối mà model vẫn nói «Dạ em thêm rồi ạ» (claim-guard-added-claim, 19/10/2026) — câu không tân ngữ từng lọt.
+  { key: "qg-noi-da-them", title: "Sửa đơn đã chốt bị từ chối, model nói «Dạ em thêm rồi ạ» ⇒ câu bị chặn, chuyển người, đơn giữ nguyên", shop: "food", channel: "WEB", turns: turn(20, "Thêm 5 nem hải sản tôm bề bề", [({ v }) => [tool("update_draft_order", items(v, 1))], () => [say("Dạ em thêm rồi ạ.")]]) },
   {
     key: "qg-khong-loi",
     title: "Khách không nói số lượng mà model tăng đơn đã chốt ⇒ không ghi, chuyển người",
@@ -255,6 +257,13 @@ async function testChatTurn() {
         assert.deepEqual(lines, ["RUOC-TOM×1"], `[qg-5-nem] không ghi: ${lines.join(", ")}`);
         assert.match(results, /QUANTITY_UNIT_AMBIGUOUS/, "[qg-5-nem] mã chặn trong kết quả công cụ");
         assert.match(shown, /mình lấy mấy hộp ạ\?/, `[qg-5-nem] hỏi đúng một câu: ${shown}`);
+      }
+      if (c.key === "qg-noi-da-them") {
+        assert.deepEqual(lines, ["RUOC-TOM×1"], `[qg-noi-da-them] đơn đã chốt giữ nguyên: ${lines.join(", ")} · ${results.slice(0, 400)}`);
+        assert.doesNotMatch(shown, /em thêm rồi/, `[qg-noi-da-them] câu «đã thêm» không tới khách: ${shown}`);
+        assert.ok(shown.includes(CLAIM_SAFE_TEXT.ORDER_EDIT), `[qg-noi-da-them] câu an toàn của ORDER_EDITED: ${shown}`);
+        assert.equal(t.final.status, "HANDOFF", `[qg-noi-da-them] chuyển người: ${JSON.stringify(t.final).slice(0, 300)}`);
+        assert.equal(t.final.handoffReason, CLAIM_HANDOFF_REASON.ORDER_EDITED, "[qg-noi-da-them] lý do = hàng rào khẳng định đã sửa đơn");
       }
       if (c.key === "qg-sai-boi" || c.key === "qg-50-nem" || c.key === "qg-khong-loi") {
         assert.deepEqual(lines, ["RUOC-TOM×1"], `[${c.key}] đơn đã chốt giữ nguyên: ${lines.join(", ")} · ${results.slice(0, 400)}`);

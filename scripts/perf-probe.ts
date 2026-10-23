@@ -360,6 +360,29 @@ async function main() {
   await timed("/shipments (công cụ AI)", "getLogisticsFreshness", () => fresh.getLogisticsFreshness());
 
   /*
+    DANH SÁCH /orders VÀ /shipments (số NỀN Phase 3, 23/10/2026): hai trang dùng nhiều nhất mà probe chưa đo. Tham số = đúng
+    `parseListParams` của page.tsx khi mở trang không bộ lọc (30 ngày, sắp mặc định) — bài kiểm so từng chữ với page.tsx để hai bên
+    không trôi. Chỉ các hàm DỮ LIỆU của Promise.all chính; metadata cột / quyền / người giao không đo ở đây.
+  */
+  const lp = await import("@/lib/search-params");
+  const ord = await import("@/lib/queries/orders");
+  const orderParams = lp.parseListParams({}, { defaultSort: "insertedAt", filterKeys: ["stage", "source", "carrier", "seller", "payment", "tag", "address", "fulfillment", "review"], sortable: ord.ORDER_SORTABLE, defaultPeriod: "30d" });
+  await timed("/orders", "listOrders", () => ord.listOrders(orderParams));
+  await timed("/orders", "orderFacets", () => ord.orderFacets(orderParams));
+  await timed("/orders", "orderSummary", () => ord.orderSummary(orderParams));
+  await timed("/orders", "orderNeedsReviewCount", () => ord.orderNeedsReviewCount(orderParams));
+  const shp = await import("@/lib/queries/shipments");
+  const shipmentParams = lp.parseListParams({}, {
+    defaultSort: "createdAt",
+    filterKeys: ["product", "stage", "carrierState", "care", "carrier", "cod", "owner", "source", "final", "linked"],
+    sortable: shp.SHIPMENT_SORTABLE,
+    defaultPeriod: "30d",
+  });
+  await timed("/shipments", "listShipments", () => shp.listShipments(shipmentParams));
+  await timed("/shipments", "shipmentFacets", () => shp.shipmentFacets(shipmentParams));
+  await timed("/shipments", "shipmentSummary", () => shp.shipmentSummary(shipmentParams));
+
+  /*
     PHỄU BÁN HÀNG — 34,4 giây lúc máy RẢNH, và là trang duy nhất ĐỔ khi máy bận (deploy #392:
     hết kết nối CSDL). Bốn hàm này từng KHÔNG có `memo()` ở bất cứ tầng nào; từ vòng vá 24/09/2026
     chúng đệm 120 giây (docs/perf/vong-va-2026-09-24.md) — cột ẤM của chúng phải về gần 0, còn cột

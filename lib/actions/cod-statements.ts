@@ -78,7 +78,8 @@ export async function previewVtpDataFiles(input: unknown): Promise<Result<{ prev
         uploadedBy: user.email,
         uploadedById: user.id,
         rows: p.rows,
-        matched: p.counts.NEWER + p.counts.SAME + p.counts.OLDER + p.counts.DUPLICATE_ROW,
+        // Dòng sẽ TẠO (lần gửi kế / không đơn) cũng là dòng có vận đơn sau đường ghi — cùng mẫu với `matched` của nó.
+        matched: p.counts.NEWER + p.counts.SAME + p.counts.OLDER + p.counts.DUPLICATE_ROW + p.counts.RESHIP_ATTEMPT + p.counts.NEW_ORPHAN,
         stale: p.counts.OLDER,
         duplicates: p.counts.DUPLICATE_ROW,
         // Cùng tập phán quyết mà đường GHI đếm vào cột này — hai lượt trên một tệp không được ghi

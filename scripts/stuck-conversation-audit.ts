@@ -37,6 +37,7 @@ const CHAY_THANG = Boolean(process.argv[1] && process.argv[1].endsWith("stuck-co
 if (CHAY_THANG) process.env.ERP_READ_ONLY = "1";
 
 import "dotenv/config";
+import { packSummaryLines, splitSummaryLine, SUMMARY_MAX_BYTES, utf8Bytes } from "@/lib/ops/summary-lines";
 import { sql } from "drizzle-orm";
 import { getDbForInspection, type Db } from "@/db";
 import { withOrganization } from "@/lib/platform/context";
@@ -48,7 +49,10 @@ import { SALES_QUALITY_CODES, SALES_QUALITY_STATE_KEY } from "@/lib/constants/sa
 import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { rowsOf } from "@/lib/sql-rows";
 
-const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s.slice(0, 300)}`);
+// Mọi dòng tóm tắt đi qua bộ tách theo BYTE: kênh công khai cắt 300 byte, dòng dài bị tách chứ không bị cụt (lib/ops/summary-lines.ts).
+const tomTat = (s: string) => {
+  for (const line of splitSummaryLine(s)) console.log(`[ops:tom-tat] ${line}`);
+};
 
 // ─────────────────────────── PHẦN THUẦN ───────────────────────────
 
@@ -326,6 +330,7 @@ export const QUALITY_BASE_FIELD: Readonly<Record<string, string>> = {
   SECONDARY_INTENT_UNANSWERED: "deliverySecondAsks",
   WRONG_PRODUCT_TEMPLATE: "botMessages",
   ADDRESS_REASK: "botMessages",
+  REPEAT_ASK_UNANSWERED: "botMessages",
   COMPLAINT_WHILE_SELLING: "complaints",
   CLARIFY_FALLBACK: "botMessages",
   CLAIM_GUARD_BLOCK: "botMessages",
@@ -377,18 +382,41 @@ export function qualityStateSummary(org: string, raw: unknown): string[] {
     if (base < QUALITY_MIN_SAMPLE) return `${code} ${n}/${base} chưa đủ mẫu`;
     return `${code} ${n}/${base} = ${((n / base) * 100).toFixed(1).replace(".", ",")}%`;
   });
+  const cellOf = new Map(SALES_QUALITY_CODES.map((code, i) => [code, cells[i]]));
   const lines = [head];
-  let cur = "";
-  for (const c of cells) {
-    const next = cur ? `${cur} · ${c}` : `${org} 2B · ${c}`;
-    if (next.length > 300 && cur) {
-      lines.push(cur);
-      cur = `${org} 2B · ${c}`;
-    } else cur = next;
+  for (const g of QUALITY_GROUP_ORDER) {
+    const mine = SALES_QUALITY_CODES.filter((c) => (QUALITY_GROUP[c] ?? "khác") === g).map((c) => cellOf.get(c)!);
+    lines.push(...packSummaryLines(`${org} 2B ${g}`, mine));
   }
-  if (cur) lines.push(cur);
   return lines;
 }
+
+/** Nhóm của từng mã trên kênh tóm tắt — mỗi nhóm một dòng (dài quá thì nối dòng cùng tiền tố). Mã chưa khai nhóm rơi vào «khác», KHÔNG mất. */
+const QUALITY_GROUP_ORDER = ["chờ người · trả lời", "địa chỉ", "số lượng · tiền", "upsell", "khác"] as const;
+type QualityGroup = (typeof QUALITY_GROUP_ORDER)[number];
+export const QUALITY_GROUP: Readonly<Partial<Record<string, QualityGroup>>> = {
+  HANDOFF_UNANSWERED: "chờ người · trả lời",
+  SECONDARY_INTENT_UNANSWERED: "chờ người · trả lời",
+  COMPLAINT_WHILE_SELLING: "chờ người · trả lời",
+  CLARIFY_FALLBACK: "chờ người · trả lời",
+  WRONG_PRODUCT_TEMPLATE: "chờ người · trả lời",
+  CLAIM_GUARD_BLOCK: "chờ người · trả lời",
+  ADDRESS_REASK: "địa chỉ",
+  REPEAT_ASK_UNANSWERED: "địa chỉ",
+  ADDRESS_RECEIVED_BUT_NOT_APPLIED: "địa chỉ",
+  QTY_REASKED: "số lượng · tiền",
+  QUANTITY_UNIT_AMBIGUOUS: "số lượng · tiền",
+  PACK_MULTIPLIER_MISMATCH: "số lượng · tiền",
+  CART_TOTAL_CONFLICT: "số lượng · tiền",
+  STAFF_AI_QUOTE_CONFLICT: "số lượng · tiền",
+  ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT: "số lượng · tiền",
+  PACK_MULTIPLIER_LEAKED: "số lượng · tiền",
+  UPSELL_ACCEPTED_BUT_REASKED: "upsell",
+  UPSELL_ACCEPTED_NOT_ATTACHED: "upsell",
+};
+
+// Trần byte + bộ dồn dòng: lib/ops/summary-lines.ts (dùng chung với conv-money-trace). Xuất lại cho bài kiểm cũ.
+export { packSummaryLines, SUMMARY_MAX_BYTES, utf8Bytes };
 
 // ─────────────────────────── PHẦN CSDL ───────────────────────────
 

@@ -203,12 +203,22 @@ export const CARRIER_HANDOFF_AT_SQL = `(select least(ev.doc_at, ev.manual_at, "s
  * `picked_up_at` nằm trong phép hoặc vì nó là mốc lấy hàng của ĐVVC được chuyển tiếp qua khâu đồng
  * bộ — cùng tập chứng cứ mà `least()` ở trên dùng.
  */
-export const CARRIER_HANDOFF_KNOWN_SQL = `("shipments"."picked_up_at" is not null or exists (
+export const CARRIER_HANDOFF_KNOWN_SQL = carrierHandoffKnownSqlFor(`"shipments"."id"`, `"shipments"."picked_up_at"`);
+
+/**
+ * CÙNG câu hỏi «đã có chứng từ bàn giao chưa», cho một dòng vận đơn mang BÍ DANH khác `"shipments"` — câu con chọn lần
+ * gửi chính (`PRIMARY_ATTEMPT`, bí danh `sh`) cần nó (vtp-reship-outcome, 22/10/2026). Hai tham số là tham chiếu cột ĐÃ
+ * VIẾT ĐỦ bí danh (`sh.id`, `sh.picked_up_at`) — không truyền tên trần: trong câu con `id` trần sẽ hiểu là
+ * `shipment_events.id` và điều kiện sai im lặng.
+ */
+export function carrierHandoffKnownSqlFor(idRef: string, pickedUpAtRef: string): string {
+  return `(${pickedUpAtRef} is not null or exists (
   select 1 from shipment_events e
-  where e.shipment_id = "shipments"."id"
+  where e.shipment_id = ${idRef}
     and e.source in (${ALL_SOURCES})
     and e.normalized_stage::text in (${STAGE_LIST})
 ))`;
+}
 
 /**
  * Nguồn nào ĐẠT mốc sớm nhất. Bằng nhau thì chứng từ máy thắng — nó giải thích được, còn ảnh chụp

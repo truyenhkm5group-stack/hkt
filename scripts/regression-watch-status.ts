@@ -17,7 +17,7 @@ if (CHAY_THANG) process.env.ERP_READ_ONLY = "1";
 
 import "dotenv/config";
 import { like, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { getDb, getDbForInspection, schema, type Db } from "@/db";
 import { REGRESSION_WATCH, regressionDedupeKey, regressionSummaryLine, type RegressionWatchRow } from "@/lib/constants/regression-watch";
 import { SALES_QUALITY_STATE_KEY } from "@/lib/constants/sales-quality";
 import { withOrganization } from "@/lib/platform/context";
@@ -93,6 +93,24 @@ export function regressionStatusLines(table: readonly RegressionStatusRow[], org
   return lines;
 }
 
+type DbHolder = { __erpDb?: { orgs?: Map<string, { db?: Db }> } };
+
+/**
+ * Gắn handle CHẨN ĐOÁN (chỉ đọc, KHÔNG migrate, KHÔNG dọn `platform_*`) vào chỗ `getDb()` tìm handle tổ chức — cùng cách
+ * scripts/stuck-conversation-audit.ts và scripts/inbox-perf-probe.ts (ops lấy MỘT tệp script nên không import chéo script).
+ * Đo production 23/10/2026 (run 39879228607): thiếu bước này thì mở CSDL tổ chức chạy lượt dọn `delete from platform_audit_log`,
+ * phiên chỉ đọc chặn nó, và 5/6 tổ chức «không đọc được» ⇒ reopened=UNKNOWN cho mọi sứ mệnh.
+ */
+async function bindReadOnlyOrgHandle(org: { code: string; isHome: boolean }): Promise<void> {
+  if (org.isHome) return;
+  const holder = (globalThis as unknown as DbHolder).__erpDb;
+  if (!holder || typeof holder !== "object") throw new Error("Không thấy sổ handle CSDL của db/index.ts — không gắn được handle chỉ đọc; dừng.");
+  const orgs = (holder.orgs ??= new Map());
+  if (!(orgs instanceof Map)) throw new Error("Sổ handle CSDL tổ chức đổi cấu trúc — không gắn được handle chỉ đọc; dừng.");
+  if (orgs.get(org.code)?.db) return;
+  orgs.set(org.code, { db: await getDbForInspection(org) });
+}
+
 async function snapshotOf(): Promise<OrgRegressionSnapshot> {
   const db = await getDb();
   const [ro] = rowsOf<{ transaction_read_only?: string }>(await db.execute(sql`show transaction_read_only`));
@@ -112,14 +130,18 @@ async function main() {
     console.error("regression-watch-status: không nhận tham số");
     process.exit(2);
   }
-  const orgs = (await listOrganizations()).filter((o) => o.status === "ACTIVE").map((o) => o.code);
+  const orgList = (await listOrganizations()).filter((o) => o.status === "ACTIVE");
+  const orgs = orgList.map((o) => o.code);
   const snaps: OrgRegressionSnapshot[] = [];
   let unreadable = 0;
-  for (const code of orgs) {
-    const s = await withOrganization(code, snapshotOf).catch((e: unknown) => {
-      console.log(`  ${code}: không đọc được (${e instanceof Error ? e.message.slice(0, 120) : String(e)})`);
-      return null;
-    });
+  for (const org of orgList) {
+    const code = org.code;
+    const s = await bindReadOnlyOrgHandle(org)
+      .then(() => withOrganization(code, snapshotOf))
+      .catch((e: unknown) => {
+        console.log(`  ${code}: không đọc được (${e instanceof Error ? e.message.slice(0, 120) : String(e)})`);
+        return null;
+      });
     if (!s) {
       unreadable += 1;
       continue;

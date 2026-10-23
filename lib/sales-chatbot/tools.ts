@@ -26,6 +26,7 @@ import { freeSlots, slotBookable, vnDayOffset, vnInstant, WEEKDAY_LABEL } from "
 import { isManualOrderId, manualOrderGaps, manualOrderShortCode, manualOrderTotals } from "@/lib/constants/manual-orders";
 import { foldVnText, resolveRecipientPlace } from "@/lib/address/vn-address";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
+import { handedOffShipmentIds, withHandoff } from "@/lib/queries/shipment-handoff";
 import { CARRIER_EVENT_SOURCES } from "@/lib/constants/truth";
 import { formatVND } from "@/lib/format";
 import type { OrderValidationReason } from "@/lib/constants/ops-signals";
@@ -720,13 +721,13 @@ function quoteClaimOf(q: Quote): AgentQuoteClaim {
 /** Câu lý do của báo giá chưa xác thực — một chỗ cho ba công cụ. */
 const quoteReasons = (q: Quote) => q.unverifiedReasons.map((r) => r.detail).join(" · ") || "báo giá chưa xác thực";
 
-/** Mọi khối lượng khách nói trong câu, quy ra gram («2kg», «0,5 kg», «2 ký», «500g»). HÀM THUẦN. */
+/** Mọi khối lượng khách nói trong câu, quy ra gram («2kg», «0,5 kg», «2 ký», «500g», «5 lạng» — chỉ dạng có dấu, xem WEIGHT_UNIT). HÀM THUẦN. */
 export function gramsMentioned(text: string): number[] {
   const out: number[] = [];
-  for (const m of text.matchAll(/(\d+(?:[.,]\d+)?)\s*(kg|kí|ký|ki|ky|cân|can|gram|gr|g)(?![\p{L}])/giu)) {
+  for (const m of text.matchAll(/(\d+(?:[.,]\d+)?)\s*(kilogram|kilo|ký lô|kí lô|ki lô|ky lo|ki lo|kg|kí|ký|ki|ky|cân|can|lạng|gram|gr|g)(?![\p{L}])/giu)) {
     const n = Number(m[1].replace(",", "."));
     if (!Number.isFinite(n) || n <= 0) continue;
-    out.push(Math.round(/^(?:gram|gr|g)$/i.test(m[2]) ? n : n * 1000));
+    out.push(Math.round(/^(?:gram|gr|g)$/i.test(m[2]) ? n : /^lạng$/i.test(m[2]) ? n * 100 : n * 1000));
   }
   return out;
 }
@@ -2108,9 +2109,10 @@ async function orderStatusFor(conversationId: string, state: ChatState, commentT
     .select({ id: sh.id, orderId: sh.orderId, stage: sh.stage, statusName: sh.vtpStatusName, statusCode: sh.vtpStatus, statusAt: sh.vtpStatusDate, vtpOrderNumber: sh.vtpOrderNumber, trackingCode: sh.trackingCode, direction: sh.direction, attemptNo: sh.attemptNo, createdAt: sh.createdAt, syncSource: sh.vtpSyncSource, expectedDelivery: sh.expectedDelivery })
     .from(sh)
     .where(inArray(sh.orderId, rows.map((r) => r.id)));
+  const handed = await handedOffShipmentIds(db, ships.map((x) => x.id));
   const view = rows.map((r) => {
     // Lần gửi ĐẠI DIỆN — cùng luật `PRIMARY_ATTEMPT` của mọi báo cáo, bỏ chiều hoàn (không tự đặt luật chọn vận đơn thứ hai).
-    const s = vanDonDaiDien(ships.filter((x) => x.orderId === r.id));
+    const s = vanDonDaiDien(withHandoff(ships.filter((x) => x.orderId === r.id), handed));
     const carrierEvidence = Boolean(s?.syncSource && (CARRIER_EVENT_SOURCES as readonly string[]).includes(s.syncSource));
     const st = customerOrderStatus({ orderStage: r.stage, manual: isManualOrderId(r.id), shipment: s ? { stage: s.stage, carrierEvidence, statusCode: s.statusCode, statusName: s.statusName } : null });
     return {

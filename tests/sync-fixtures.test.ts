@@ -38,6 +38,7 @@ import { testPayrollCodeLedger } from "./payroll-code-ledger.test";
 import { testPayrollReconciliationPure } from "./payroll-reconciliation.test";
 import { testPayrollReconCenter } from "./payroll-recon-center.test";
 import { testOpsScriptSize } from "./ops-script-size.test";
+import { testPerfProbePages } from "./perf-probe-pages.test";
 import { testDataTruth } from "./data-truth.test";
 import { testPayrollCogsCutoff } from "./payroll-cogs-cutoff.test";
 import { testProfitCarryover } from "./profit-carryover.test";
@@ -68,6 +69,7 @@ import { testOrderValueFilter } from "./order-value-filter.test";
 import { testCanonicalTruth } from "./canonical-truth.test";
 import { testVtpIngestion } from "./vtp-ingestion.test";
 import { testVtpSourceOfTruth } from "./vtp-source-of-truth.test";
+import { testVtpReshipRelink } from "./vtp-reship-relink.test";
 import { testWebhookLatency } from "./webhook-latency.test";
 import { testReconciliation } from "./reconciliation.test";
 import { testMetricsContract } from "./metrics-contract.test";
@@ -117,6 +119,7 @@ import { testSuaCongTrongLuot } from "./sua-cong-trong-luot.test";
 import { testLoiGoiHongVanGiuTien, testNganSachDocTep } from "./agent-read-budget.test";
 import { cleanupViecDiTiepFixtures, testDispatchKemMaViec, testGiaoLaiSuaTuErp, testIngestGhiNhanhViec, testNhanhVeToiViecPure, testViecDiTiepGuards } from "./viec-di-tiep.test";
 import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa, testHaiLuatKhongTroiXaNhau, testKhongCoOneTrenKhoaNgoaiKhongDuyNhat } from "./shipment-pick.test";
+import { testVtpReshipOutcome } from "./vtp-reship-outcome.test";
 import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, testTaskAdvancePure } from "./task-advance.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
 import { testCtoProposal } from "./tech-cto-proposal.test";
@@ -546,6 +549,8 @@ import { testInboxUnreadDryrun } from "./inbox-unread-dryrun.test";
 import { testOrgMigrateIsolation } from "./org-migrate-isolation.test";
 import { testMigrationServeCompat } from "./migration-serve-compat.test";
 import { testStuckConversationAudit } from "./stuck-conversation-audit.test";
+import { testStuckAudit2bLines } from "./stuck-audit-2b-lines.test";
+import { testOpsSummaryLines } from "./ops-summary-lines.test";
 import { testAvatarProxy } from "./avatar-proxy.test";
 import { testInboxSemanticsV3 } from "./inbox-semantics-v3.test";
 import { testHandoffOwnership } from "./handoff-ownership.test";
@@ -586,6 +591,7 @@ import { testQuickStart } from "./quick-start.test";
 import { testPhoneOtp } from "./phone-otp.test";
 import { testSalesPacks } from "./sales-packs.test";
 import { testSalesAgentGolden } from "./sales-agent-golden/golden.test";
+import { testSalesPromptLayout } from "./sales-prompt-layout.test";
 import { testOrderGolden } from "./order-golden/order-golden.test";
 import { testOrderReview } from "./order-review.test";
 import { testOrderCancelConsistency } from "./order-cancel-consistency.test";
@@ -605,11 +611,13 @@ import { testP0UpsellAfterContact } from "./p0-upsell-after-contact.test";
 import { testP0KnownCustomerContact } from "./p0-known-customer-contact.test";
 import { testP0UpsellShortAccept } from "./p0-upsell-short-accept.test";
 import { testP0QtyUnitGuard } from "./p0-qty-unit-guard.test";
+import { testP0865MissingItem } from "./p0-865-missing-item.test";
 import { testP0ComplaintDeliveryDelay } from "./p0-complaint-delivery-delay.test";
 import { testP0ShortQtyRound } from "./p0-short-qty-round.test";
 import { testP0RepeatBuyer } from "./p0-repeat-buyer.test";
 import { testP0863CancelFlow } from "./p0-863-cancel-flow.test";
 import { testConvMoneyTrace } from "./conv-money-trace.test";
+import { testConvMoneyTraceAttribution } from "./conv-money-trace-attribution.test";
 import { testSalesQuote640 } from "./sales-quote-640.test";
 import { testSalesNextBestAction } from "./sales-next-best-action.test";
 import { testUpsellOfferAudit } from "./upsell-offer-audit.test";
@@ -636,8 +644,10 @@ import { testMessengerWebhookRejections } from "./messenger-webhook-rejections.t
 import { testMessengerWebhookAlerts } from "./messenger-webhook-alerts.test";
 import { testSalesQualityDaily } from "./sales-quality-daily.test";
 import { testRegressionWatch } from "./regression-watch.test";
+import { testVtpReshipBackfill } from "./vtp-reship-backfill.test";
 import { testSalesAddressApplied } from "./sales-address-applied.test";
 import { testAddressNeverReask } from "./address-never-reask.test";
+import { testAddressReaskQtyAck } from "./address-reask-qtyack.test";
 import { testAddressResolver } from "./address-resolver.test";
 import { testMessengerConfigReport } from "./messenger-config-report.test";
 import { testConnectorsLegacy } from "./connectors-legacy.test";
@@ -2563,6 +2573,7 @@ async function main() {
     testPosReshipLink();
     await testPosReshipLinkDb(db);
     testOpsScriptSize();
+    testPerfProbePages();
     await testDataTruth(db);
     await testPayrollCogsCutoff(db);
     await testProfitCarryover();
@@ -2581,6 +2592,8 @@ async function main() {
     await testVtpState(db);
     await testVtpIngestion(db);
     await testVtpSourceOfTruth(db);
+    // P0 22/10/2026: vận đơn tạo lại trên web VTP ⇒ lần gửi kế của đơn gốc (webhook + nhập tệp, một luật). Tự dọn dữ liệu gieo.
+    await testVtpReshipRelink(db);
     // Độ trễ webhook: hàm thuần + một lượt đọc truy vấn thật. KHÔNG gieo dòng nào vào
     // `webhook_events`, nên nó không đổi tổng của bài nào khác.
     await testWebhookLatency();
@@ -2767,6 +2780,8 @@ async function main() {
     await testGuiLaiKhongDamKhoa();
     await testHaiLuatKhongTroiXaNhau();
     await cleanupShipmentPickFixtures();
+    // P0 22/10/2026 — gửi lại trên web VTP: lần gửi chính còn sống · Pancake huỷ + lần thay thế đang đi · sổ kho theo đơn. Tự dọn `vro-`.
+    await testVtpReshipOutcome();
     await testTaskAdvanceDb();
     await testNhacFinishDungMotLan();
     await testDemTienLuotChay();
@@ -3138,6 +3153,8 @@ async function main() {
     await testMigrationServeCompat();
     // Ops stuck-conversation-audit (HOTFIX P0 12/10/2026, ca «Khanh Nhung»): hội thoại AI kẹt theo nhóm lý do · không chủ · SLA · nhắn lại sau đơn · đơn chưa đồng bộ — CHỈ ĐỌC. Thuần + quét mã nguồn + PGlite.
     await testStuckConversationAudit();
+    testStuckAudit2bLines();
+    await testOpsSummaryLines();
     // Ảnh khách qua proxy ERP (11/10/2026): URL Pancake mang khoá ⇒ cất bản KHÔNG khoá, máy chủ gắn token lúc tải; chặn SSRF, đệm LRU, quyền theo tổ chức — tổ chức `anh-dai-dien-proxy`, fetch giả.
     await testAvatarProxy();
     // INBOX-SEMANTICS-V3 (chủ shop 10/10/2026): bốn khái niệm tách riêng — chưa đọc (AI trả lời không xoá) · chờ trả lời · cần người thật · người đang xử lý; ma trận 20 hội thoại × mọi bộ lọc — tổ chức `hop-thu-sem-v3`.
@@ -3194,6 +3211,8 @@ async function main() {
     await testSalesPacks();
     // Bộ hội thoại vàng (M1): phát lại hội thoại kịch bản qua chatTurn, so ảnh chụp — tổ chức THẬT `gd-food` / `gd-fashion`.
     await testSalesAgentGolden();
+    // AI Sales GĐ3: thứ tự khối lời nhắc cho đệm tiền tố (công tắc sales.prompt-layout) — thuần; bài hoán vị nằm trong hội thoại vàng.
+    testSalesPromptLayout();
     // Bộ đo đơn vàng v2 (sứ mệnh saas-order-accuracy): dataset hội thoại có nhãn × 2 biến thể công tắc tự xác nhận qua chatTurn
     // thật, bộ đo thuần, số đo hiện trạng khớp tests/order-golden/BASELINE.md — tổ chức THẬT `og-food-off` / `og-food-on`.
     await testOrderGolden();
@@ -3237,6 +3256,8 @@ async function main() {
     // nhiều món · nhân viên xen giữa · giá đổi / đơn khoá ⇒ người · «Ok» chốt đơn chính không thêm — thuần + chatTurn thật (`gd-food-sa`).
     await testP0UpsellShortAccept();
     await testP0QtyUnitGuard();
+    // P0 #865 (HSLC 16/10/2026) — món khách nói tường minh bị bỏ sót hẳn khỏi đơn (kể cả đơn tự chốt) — thuần + chatTurn thật (`gd-food-865`).
+    await testP0865MissingItem();
     // P0 21/10/2026 (ca HSLC #BD31267C) — khách than GIAO CHẬM: chuyển người trước + một câu xin lỗi không mốc, ca CSKH URGE_DELIVERY một
     // ca mỗi đơn, «đơn đâu rồi» chỉ khi quá 48 giờ, «Ok» không đóng việc, câu hỏi thường không bị nhận nhầm — thuần + chatTurn thật (`gd-food-dly`).
     await testP0ComplaintDeliveryDelay();
@@ -3252,6 +3273,7 @@ async function main() {
     // P0 14/10/2026 — ops conv-money-trace: số TỔNG trong tin bot ≠ báo giá giỏ (ca «Châu Dương» 640k cho 1kg 280k) · câu «nói rõ hơn»
     // của engine khi khách không nhắn gì (ca «Viet Nguyen Thi») — thuần + CSDL thật (tự dọn), tóm tắt không lọt PII, chỉ đọc.
     await testConvMoneyTrace();
+    await testConvMoneyTraceAttribution();
     // P0 #868 — ops upsell-offer-audit: phễu + upsell (sổ sự kiện) và lời mời đọc từ chữ đã gửi (mời lặp · sau từ chối · sau khi đã chọn) —
     // thuần + CSDL thật (tự dọn), chỉ đọc, khai đủ bốn chỗ.
     await testUpsellOfferAudit();
@@ -3322,10 +3344,14 @@ async function main() {
     await testSalesQualityDaily();
     // Sổ theo dõi tái diễn (22/10/2026): lỗi 2B đã sửa mà lọt lại tới khách sau mốc lên production ⇒ tự MỞ LẠI, ai-tech không DONE.
     await testRegressionWatch(db);
+    // P0 22/10/2026: vận đơn tạo lại trên web VTP — bản chỉ đo mốc trước / sau.
+    await testVtpReshipBackfill(db);
     // P0 22/10/2026 (HSLC #8037F35A): phường khách đã cho vào đơn, cờ địa chỉ của máy tự đóng, xác minh độc lập với upsell.
     await testSalesAddressApplied();
     // AGENTS 3.12b (chủ shop 22/10/2026): địa chỉ khách không bao giờ hỏi lại — một điểm chặn cuối, chốt + upsell như đơn thường.
     await testAddressNeverReask();
+    // 23/10/2026: câu máy chủ tự soạn qua điểm chặn · lời xin dạng kể · 2B ADDRESS_REASK theo 3.12b, REPEAT_ASK tách mã. Thuần, không gieo dữ liệu.
+    testAddressReaskQtyAck();
     // address-resolver-ladder PR-B: máy ánh xạ địa chỉ nền (chữ khách → C360 → Google của tổ chức), không chạm lượt chat.
     await testAddressResolver();
     testMessengerConfigReport();

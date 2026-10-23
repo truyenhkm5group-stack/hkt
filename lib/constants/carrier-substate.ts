@@ -222,6 +222,34 @@ export function eventStatusCode(status: string | null | undefined): number | nul
 }
 
 /**
+ * CHẶNG `RETURNED` ĐÃ LÀ KẾT LUẬN — mã hay chữ «đã giao» / «đang hoàn» không kéo nó lùi lại.
+ *
+ * Chặng ERP `RETURNED` chỉ dựng được từ chứng từ chiều hoàn ĐÃ KẾT THÚC (504, hoặc 501 + `leg_type =
+ * RETURN` — AGENTS 3.2). Trên chặng ấy:
+ *
+ *   · «phát / giao thành công» (mã 501 hoặc chữ Pancake chuyển tiếp) là phát thành công CHIỀU HOÀN —
+ *     hàng về tới SHOP, không phải tới khách;
+ *   · «Thành công - Chuyển trả người gửi» khớp luật chữ «chuyen tra» ⇒ `RETURNING`, nhưng câu ấy là
+ *     dòng CUỐI của chiều hoàn, không phải hàng còn trên đường. Thiếu vế này, kiện như vậy mà KHÔNG
+ *     mang mã thì tháp xếp «đang chuyển hoàn» trong khi đường ống hàng hoàn
+ *     (`lib/queries/return-pipeline.ts`) xếp «ĐVVC đã trả · kho chưa nhận».
+ *
+ * Đo production 23/10/2026 (kiện RETURNED có đơn, kho chưa nhận): 645 «Đã trả» không mã · 481 «Thành
+ * công - Chuyển trả người gửi» mang mã 504 · 4 chữ rỗng — cả ba nhóm vốn đã ra `RETURNED` (mã 504,
+ * hoặc lưới chặng), nên hôm nay 0 kiện đổi rổ. Vế này đóng lỗ cho kiện chỉ có CHỮ, và nhờ nó
+ * `legAwareSubstate` (`lib/care/entry.ts`) bỏ được bản vá riêng của care.
+ *
+ * Bản SQL (`carrierSubstateSql`) đọc CÙNG danh sách này. Lời khai thô (`vtp_status_name`) không đổi
+ * (AGENTS 47); chỉ phép dịch đổi. Không đụng tiền / `ORDER_OUTCOME` / tồn kho: hàng vẫn chỉ vào tồn
+ * khi kho lập phiếu RETURN.
+ */
+export const RETURNED_STAGE_ABSORBS: readonly CarrierSubstate[] = ["DELIVERED", "RETURNING"];
+
+function theoChangHoan(substate: CarrierSubstate, stage: ShipmentStage | null | undefined): CarrierSubstate {
+  return stage === "RETURNED" && RETURNED_STAGE_ABSORBS.includes(substate) ? "RETURNED" : substate;
+}
+
+/**
  * TRẠNG THÁI CON CỦA MỘT KIỆN — mã trước, chữ sau, không rõ thì nói là không rõ.
  *
  * `stage` chỉ dùng làm lưới an toàn CUỐI CÙNG khi không có cả mã lẫn chữ: một kiện đã `DELIVERED`
@@ -233,12 +261,12 @@ export function eventStatusCode(status: string | null | undefined): number | nul
  */
 export function carrierSubstate(input: { code?: number | null; text?: string | null; stage?: ShipmentStage | null }): { substate: CarrierSubstate; basis: "code" | "text" | "stage" | "unknown" } {
   const code = input.code ?? null;
-  if (code !== null && VTP_CODE_TO_SUBSTATE[code]) return { substate: VTP_CODE_TO_SUBSTATE[code], basis: "code" };
+  if (code !== null && VTP_CODE_TO_SUBSTATE[code]) return { substate: theoChangHoan(VTP_CODE_TO_SUBSTATE[code], input.stage), basis: "code" };
 
   const text = boDau(String(input.text ?? ""));
   if (text) {
     for (const luat of SUBSTATE_TEXT_RULES) {
-      if (luat.match.some((m) => text.includes(m))) return { substate: luat.substate, basis: "text" };
+      if (luat.match.some((m) => text.includes(m))) return { substate: theoChangHoan(luat.substate, input.stage), basis: "text" };
     }
   }
 

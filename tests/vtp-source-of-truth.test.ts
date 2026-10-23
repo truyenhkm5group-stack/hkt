@@ -169,7 +169,7 @@ export async function testVtpSourceOfTruth(db: Db) {
     `1,${KHOP},REF1,01/09/2026 12:00:00,Giao thành công,499000,17000,12/09/2026 15:00:00`,
     // Dòng CŨ HƠN ⇒ không được hạ trạng thái.
     `2,${LA},REF2,01/09/2026 12:00:00,Đang vận chuyển,499000,17000,10/09/2026 09:00:00`,
-    // Mã ERP không có ⇒ không tìm thấy, và KHÔNG tự tạo vận đơn.
+    // Mã ERP không có, không gắn được đơn ⇒ từ P0 22/10/2026 đường ghi TẠO dòng không đơn từ chứng từ ĐVVC (NEW_ORPHAN).
     `3,PKE-TRUTH-NOEXIST,REF3,01/09/2026 12:00:00,Giao thành công,499000,17000,12/09/2026 15:00:00`,
     // Trạng thái ERP chưa dịch được ⇒ vẫn vào sổ, không đổi chặng.
     // Cố ý dùng một mã KHÁC: `mergeVtpOrderLists` gộp các dòng cùng mã vận đơn, nên đặt dòng này
@@ -183,7 +183,8 @@ export async function testVtpSourceOfTruth(db: Db) {
   assert.equal(xem.rows, 4);
   assert.equal(xem.counts.NEWER, 1, "đúng một dòng mang chứng từ muộn hơn thứ ERP đang giữ");
   assert.equal(xem.counts.OLDER, 1, "dòng cũ hơn phải được gọi tên, không lẫn vào 'bỏ qua'");
-  assert.equal(xem.counts.UNMATCHED, 1);
+  assert.equal(xem.counts.NEW_ORPHAN, 1, "mã chưa có, đủ thu hộ + cước ⇒ sẽ tạo dòng không đơn (P0 22/10/2026), không còn bỏ qua");
+  assert.equal(xem.counts.UNMATCHED, 0);
   assert.equal(xem.counts.UNKNOWN_STATUS, 1);
   assert.equal(xem.previouslyAppliedAt, null, "tệp chưa từng được ghi");
   assert.ok(
@@ -290,8 +291,8 @@ export async function testVtpSourceOfTruth(db: Db) {
       · sự việc quá mới so với lúc đo  ⇒ gói tin có thể đang trên đường;
       · ERP lẽ ra phải biết mà chưa    ⇒ NGHI hụt.
 
-    Và dòng ERP KHÔNG có vận đơn (`UNMATCHED`) tuyệt đối không được đếm vào đây: nó chứng minh ERP
-    chưa từng có kiện đó, không chứng minh một gói tin đã rơi.
+    Và dòng ERP KHÔNG có vận đơn (`UNMATCHED` / `NEW_ORPHAN` — từ 22/10/2026 đường ghi tạo dòng cho nó) tuyệt đối
+    không được đếm vào đây: nó chứng minh ERP chưa từng có kiện đó, không chứng minh một gói tin đã rơi.
   */
   const GAP_CU = "PKE-TRUTH-GAP-OLD";
   const GAP_MOI = "PKE-TRUTH-GAP-FRESH";
@@ -314,15 +315,15 @@ export async function testVtpSourceOfTruth(db: Db) {
     `1,${GAP_CU},REF-G1,01/09/2026 12:00:00,Giao thành công,499000,17000,${gioVN(new Date(nay - 3 * 24 * 3600_000))}`,
     // 10 phút trước ⇒ dưới ngưỡng ⇒ QUÁ MỚI, không được kết tội webhook.
     `2,${GAP_MOI},REF-G2,01/09/2026 12:00:00,Giao thành công,499000,17000,${gioVN(new Date(nay - 10 * 60_000))}`,
-    // Mã ERP không có ⇒ UNMATCHED, phải nằm NGOÀI cả ba nhóm của phép đo.
+    // Mã ERP không có ⇒ NEW_ORPHAN (sẽ tạo), vẫn phải nằm NGOÀI cả ba nhóm của phép đo.
     `3,PKE-TRUTH-GAP-NONE,REF-G3,01/09/2026 12:00:00,Giao thành công,499000,17000,${gioVN(new Date(nay - 5 * 24 * 3600_000))}`,
   ].join("\n");
   const xemGap = await previewVtpOrderListFile({ filename: "VTP_do_hut.csv", base64: Buffer.from(csvGap, "utf8").toString("base64") });
   const g = xemGap.webhookGap;
-  assert.equal(xemGap.counts.UNMATCHED, 1, "dòng mang mã ERP không có phải được gọi tên là 'không có trong ERP'");
+  assert.equal(xemGap.counts.NEW_ORPHAN, 1, "dòng mang mã ERP không có phải được gọi tên — 'chưa có đơn, sẽ tạo vận đơn'");
   assert.equal(g.suspectedGaps, 1, `đúng MỘT dòng là nghi hụt (được ${g.suspectedGaps}) — dòng quá mới và dòng không ghép được đều không phải`);
   assert.equal(g.tooFresh, 1, "sự việc 10 phút trước là QUÁ MỚI, không phải webhook rơi");
-  assert.equal(g.erpAlreadyAhead + g.tooFresh + g.suspectedGaps, 2, "chỉ dòng ghép được vận đơn mới vào phép đo — UNMATCHED nằm ngoài");
+  assert.equal(g.erpAlreadyAhead + g.tooFresh + g.suspectedGaps, 2, "chỉ dòng ghép được vận đơn mới vào phép đo — dòng sẽ tạo nằm ngoài");
   assert.equal(g.matchRate, null, `mẫu ${g.erpAlreadyAhead + g.suspectedGaps} < 30 ⇒ KHÔNG phát biểu một tỷ lệ (mục 51)`);
   assert.ok(g.medianMinutes !== null && g.medianMinutes >= 2 * 24 * 60, `khoảng hụt phải tính bằng ngày, không phải phút (được ${g.medianMinutes})`);
   assert.equal(g.medianMinutes, g.maxMinutes, "một quan sát thì trung vị và lớn nhất là cùng một con số");

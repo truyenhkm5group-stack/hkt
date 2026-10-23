@@ -21,6 +21,7 @@
  * Không gọi mạng (luật 65): model giả của bộ hội thoại vàng. Không ghim ngày (luật 50).
  */
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { and, asc, eq } from "drizzle-orm";
@@ -28,6 +29,7 @@ import { getDb, schema } from "@/db";
 import { manualOrderAmountDue } from "@/lib/constants/order-payments";
 import { recordManualPaymentCore } from "@/lib/records/order-payments";
 import {
+  bareEditClaimIn,
   CLAIM_HANDOFF_REASON,
   CLAIM_SAFE_TEXT,
   claimFactsLoader,
@@ -502,9 +504,46 @@ async function testIntegration() {
   assert.deepEqual([...seen].sort(), INTEGRATION_CASES.map((c) => c.key).sort(), "mọi hội thoại tích hợp đã chạy tới cuối");
 }
 
+/**
+ * Câu «đã sửa» TRẦN (19/10/2026, review vòng 3 upsell-after-confirm): sửa đơn ĐÃ CHỐT bị máy chủ từ chối mà model viết «Dạ em thêm rồi ạ» —
+ * không tân ngữ nên mọi luật ORDER_EDITED bỏ qua. Chỉ là lời khẳng định về ĐƠN khi hội thoại đã có đơn (`orderOnFile`); trước đó là nói về giỏ.
+ */
+async function testBareEdit() {
+  const bare = ["Dạ em thêm rồi ạ.", "Dạ em đã sửa lại cho mình rồi ạ", "Em cập nhật xong rồi chị nhé", "Dạ đã thêm rồi ạ", "shop đổi cho chị rồi nha", "Dạ em thêm 1 hộp nem cho mình rồi ạ"];
+  for (const t of bare) {
+    assert.deepEqual(detectClaims(t), [], `«${t}» không vào detectClaims (bộ đếm ops giữ nghĩa cũ)`);
+    assert.equal(bareEditClaimIn(t), true, `«${t}» là câu «đã sửa» trần`);
+    const v = guardClaims(t, { ...ALL, orderOnFile: true });
+    assert.ok(!v.ok && v.claim === "ORDER_EDITED" && v.handoff && v.safeText === CLAIM_SAFE_TEXT.ORDER_EDIT, `«${t}» có đơn, không công cụ ghi ⇒ chặn + chuyển người`);
+    assert.equal(guardClaims(t, { ...ALL, orderOnFile: true, orderEditedThisTurn: true }).ok, true, `«${t}» công cụ đã ghi trong lượt ⇒ qua`);
+    assert.equal(guardClaims(t, ALL).ok, true, `«${t}» chưa có đơn ⇒ nói về GIỎ, không chặn`);
+  }
+  for (const t of [
+    "Em thêm cho chị 1 hộp nem nhé?",
+    "Em thêm 1 hộp nem cho chị nhé",
+    "Dạ em chưa thêm được ạ",
+    "Em sẽ sửa lại cho chị",
+    "Chị muốn em đổi sang 2 hộp không ạ",
+    "Dạ mình đã đợi lâu rồi ạ, em xin lỗi",
+    "Dạ em hiểu là chị đã đổi ý rồi ạ",
+    "Sữa hạt shop vừa về rồi ạ",
+    "Dạ em gửi thêm ảnh rồi ạ",
+    "Dạ em thêm 1 hộp nem, tổng mới 470.000 ₫, chị xác nhận giúp em nhé",
+  ]) {
+    assert.equal(bareEditClaimIn(t), false, `«${t}» không phải lời khẳng định đã sửa (câu hỏi · đề nghị · phủ định · tương lai · việc của khách · «đợi» / «sữa»)`);
+  }
+  assert.equal((await guardOutgoing("Dạ em thêm rồi ạ.", async () => ({ ...ALL, orderOnFile: true }))).ok, false, "guardOutgoing đọc căn cứ cho câu «đã sửa» trần (không số tiền, không khẳng định cũ)");
+  assert.equal((await guardOutgoing("Dạ em thêm rồi ạ.", () => Promise.reject(new Error("CSDL")))).ok, false, "đọc căn cứ lỗi ⇒ phía HẸP: coi như có đơn, chặn");
+  const loaded = (s: ChatState) => claimFactsLoader({ id: randomUUID(), orderId: null, pageId: null, threadId: null }, { turn: 7 })(s);
+  const confirmed: ChatState = { confirmed: { orderId: null, simulated: true, total: 280_000, at: new Date().toISOString() } };
+  assert.equal((await loaded(confirmed)).orderOnFile, true, "đơn đã chốt ⇒ có đơn");
+  assert.equal((await loaded({})).orderOnFile, false, "chưa giỏ / chưa đơn ⇒ không");
+}
+
 export async function testSalesClaimGuard() {
   testTruthTable();
   testDetect();
+  await testBareEdit();
   await testCustomerSignal();
   const uncovered = testSourceScan();
   testAuditScript();

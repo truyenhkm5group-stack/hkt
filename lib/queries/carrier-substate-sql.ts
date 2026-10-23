@@ -10,7 +10,7 @@
  * chạy cùng một bộ dữ liệu qua cả hai đường và bắt buộc chúng ra cùng kết quả.
  */
 import { sql, type SQL } from "drizzle-orm";
-import { SUBSTATE_TEXT_RULES, VTP_CODE_TO_SUBSTATE, type CarrierSubstate } from "@/lib/constants/carrier-substate";
+import { RETURNED_STAGE_ABSORBS, SUBSTATE_TEXT_RULES, VTP_CODE_TO_SUBSTATE, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { FULFILLMENT_BUCKETS, type FulfillmentBucket } from "@/lib/constants/fulfillment-bucket";
 
 /**
@@ -64,13 +64,16 @@ export function carrierSubstateSql(ma: SQL | SQL.Aliased, chu: SQL | SQL.Aliased
     ["CANCELLED", "CANCELLED"],
   ];
   const chang2 = theoChang.map(([st, s]) => sql`when ${chang} = ${st} then ${s}`);
+  // CHẶNG RETURNED ĐÃ LÀ KẾT LUẬN — cùng danh sách với bản TypeScript (`RETURNED_STAGE_ABSORBS`), áp lên kết quả của CẢ mã lẫn chữ.
+  const biNuot = sql.join(RETURNED_STAGE_ABSORBS.map((s) => sql`${s}`), sql`, `);
 
-  return sql`(select case
-    ${sql.join(theoMa, sql` `)}
-    ${sql.join(theoChu, sql` `)}
-    ${sql.join(chang2, sql` `)}
-    else 'UNKNOWN' end
-    from (select ${boDauSql(chu)} as chu) v)`;
+  return sql`(select case when ${chang} = 'RETURNED' and x.con in (${biNuot}) then 'RETURNED' else x.con end
+    from (select case
+      ${sql.join(theoMa, sql` `)}
+      ${sql.join(theoChu, sql` `)}
+      ${sql.join(chang2, sql` `)}
+      else 'UNKNOWN' end as con
+      from (select ${boDauSql(chu)} as chu) v) x)`;
 }
 
 /**
