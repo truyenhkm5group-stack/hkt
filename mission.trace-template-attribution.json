@@ -3,7 +3,7 @@
   "mission_id": "trace-template-attribution",
   "title": "conv-money-trace thôi gán tin model / tin theo dõi cho câu mẫu (kể cả câu đã tắt)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-trace-tpl",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T03:44:33.490Z",
-  "updated_at": "2026-10-23T04:18:16.555Z",
+  "updated_at": "2026-10-23T04:37:04.392Z",
   "last_heartbeat": "2026-10-23T04:15:41.252Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#990 → c5b6d7ce48d95855f5ad955b7a8970faa67c5733"
+  },
   "handoff": {
     "branch": "claude/trace-template-attribution",
     "sha": "1587e4346d3bbd93dbd19a2f720c7181f172e1ef",
