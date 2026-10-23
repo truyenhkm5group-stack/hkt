@@ -3,7 +3,7 @@
   "mission_id": "src-5a-trial-request",
   "title": "SRC-5a: lưu mẫu TEST- + yêu cầu mua thử có duyệt + vòng phản hồi (tìm hàng nguồn)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -38,11 +38,13 @@
     "0258": "2026-10-23T18:10:06.539Z"
   },
   "created_at": "2026-10-23T18:09:26.521Z",
-  "updated_at": "2026-10-23T20:03:56.516Z",
+  "updated_at": "2026-10-23T22:32:35.665Z",
   "last_heartbeat": "2026-10-23T19:46:37.916Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1012 → 39cdcc6015840dc95953e0ce1c6da652307e5e58"
+    "merged": "#1012 → 39cdcc6015840dc95953e0ce1c6da652307e5e58",
+    "verify": "PASS 61caebe24ada3860f5f2d8911adad44c540df14e 2026-10-23T22:31:58.237Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40030683715"
   },
   "handoff": {
     "branch": "claude/src-5a-trial-request",
