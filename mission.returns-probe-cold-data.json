@@ -3,7 +3,7 @@
   "mission_id": "returns-probe-cold-data",
   "title": "returns-page-probe: lượt đối chứng ?period=30d (module ấm, dữ liệu nguội)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-rprobe",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T21:39:17.011Z",
-  "updated_at": "2026-10-23T21:41:53.441Z",
+  "updated_at": "2026-10-23T22:07:24.189Z",
   "last_heartbeat": "2026-10-23T21:39:53.011Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1019 → 89d931e5745e426f976d48a8e8b47ceaf1d13341"
+  },
   "handoff": {
     "branch": "claude/returns-probe-cold-data",
     "sha": "a0702db5c42b14e0d4dbdd8a66773d1e2fe1e6c7",
