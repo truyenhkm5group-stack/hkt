@@ -35,18 +35,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T18:20:23.325Z",
-  "updated_at": "2026-10-23T18:22:55.237Z",
-  "last_heartbeat": "2026-10-23T18:20:57.901Z",
+  "updated_at": "2026-10-23T22:25:31.832Z",
+  "last_heartbeat": "2026-10-23T22:25:31.832Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/pos-reship-bot-truth",
-    "sha": "b8dec8ae5eecd05c17cf690f5efc6d5c09778893",
-    "at": "2026-10-23T18:20:57.901Z",
+    "sha": "ee5b412e25af06f4ae2365f40908fb11a19b9cac",
+    "at": "2026-10-23T22:25:31.832Z",
     "actor": "DESKTOP-56TH98Y:wt-truth",
     "title": "Bot nhà nói đúng chặng vận đơn theo chứng từ VTP (cửa nội bộ bot→ERP) + sync giữ partner_status + audit diff/rào dừng",
-    "summary": "HIGH: route nội bộ /api/internal/shipment-state (khoá header, ≤20, chỉ chứng từ VTP, không tiền/PII) + bot nói theo ERP (order-view.js thuần) + sync giữ partner_status + audit diff/dừng. Deploy ERP + container bot cùng lượt, sau 19:30Z",
+    "summary": "Sửa 2 lỗi gates #1011 (khai CO_Y_CONG_KHAI + DOC_MOI_TRUONG_DA_KHAI kèm lý do, không nới bài) + gộp ops bot-order-describe + sửa lô pos-reship-link (bỏ đơn đã gắn trước khi cắt --limit). Deploy ERP + container bot cùng lượt.",
     "tests": [
-      "tsc --noEmit sạch · eslint sạch · TEST_KHOI=K10,K17,K22 «TẤT CẢ KIỂM THỬ CỦA chỉ K10,K17,K22 ĐẠT» (shipment-state-api mới, pos-reship-link, platform-isolation-static, platform-modules, chatbot, chat-widget, forgot-password) · đột biến 5/5 bị bắt · full suite giao CI gates"
+      "tsc · eslint sạch · TEST_KHOI=K01,K07,K10,K17,K22 «TẤT CẢ KIỂM THỬ CỦA chỉ K01,K07,K10,K17,K22 ĐẠT» (access-control 37 route + 23 đường công khai có lý do; shipment-state-api; pos-reship-link; bot-order-describe; chatbot; platform-isolation; platform-modules) · test-hygiene testKhongReNhanhTheoMoiTruong chạy trực tiếp ĐẠT · full suite giao CI gates"
     ]
   }
 }
