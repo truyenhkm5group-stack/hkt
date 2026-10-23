@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "od-ux-05-work",
+  "title": "OD-UX-05 mục 2: /work không thiếu việc lúc đệm nguội, và nói rõ khi thiếu",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-work",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/od-ux-05-work",
+  "base_sha": "d143c7143ca4068e7a3c93c3821dbe08cac8927c",
+  "domains": [],
+  "owned_paths": [
+    "app/(dashboard)/work/page.tsx",
+    "lib/constants/my-work-notice.ts",
+    "tests/my-work-notice.test.ts",
+    "lib/queries/work-adapters.ts",
+    "lib/queries/work.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-23T20:47:40.904Z",
+  "updated_at": "2026-10-23T20:47:40.904Z",
+  "last_heartbeat": "2026-10-23T20:47:40.904Z",
+  "definition_of_done": []
+}
