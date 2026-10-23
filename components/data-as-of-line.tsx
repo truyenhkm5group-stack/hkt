@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { asOfCells, type AsOfInput } from "@/lib/constants/data-as-of";
 import { cn } from "@/lib/utils";
 
@@ -10,7 +11,13 @@ export function DataAsOfLine({ input, className }: { input: AsOfInput; className
     <div className={cn("flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-muted-foreground", className)}>
       {asOfCells(input).map((c) => (
         <span key={c.key} title={c.title} className={c.tone === "warn" ? "font-medium text-amber-700 dark:text-amber-300" : undefined}>
-          {c.text}
+          {c.href ? (
+            <Link href={c.href} className="underline-offset-2 hover:underline">
+              {c.text}
+            </Link>
+          ) : (
+            c.text
+          )}
         </span>
       ))}
     </div>

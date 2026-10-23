@@ -14,7 +14,9 @@ import { inArray } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo, collectAsOf, memo } from "@/lib/cache";
-import { asOfCells, latencyFromHealth, PANCAKE_ORDER_SYNC_JOBS } from "@/lib/constants/data-as-of";
+import { asOfCells, latencyFromHealth, PANCAKE_ORDER_SYNC_JOBS, VTP_ORDER_LIST_IMPORT_HREF, webhookGapCell, webhookMatchCell, webhookMatchFromHealth } from "@/lib/constants/data-as-of";
+import { VTP_ORDER_LIST_MAX_AGE_HOURS } from "@/lib/constants/feed-freshness";
+import { WEBHOOK_MATCH_MIN_SAMPLE } from "@/lib/constants/webhook-gap";
 import { WEBHOOK_LATENCY_MIN_SAMPLE } from "@/lib/constants/webhook-latency";
 import { getVtpSyncCoverage } from "@/lib/queries/vtp-sync-coverage";
 
@@ -136,6 +138,45 @@ function testAsOfCells() {
   for (const c of [...trong, tre({})]) assert.doesNotMatch(c.text, /khoẻ|ổn định|OK\b/i, "không câu nào kết luận «khoẻ»");
 }
 
+/**
+ * OD-UX-03b (23/10/2026): đo production cùng ngày — tệp «Danh sách vận đơn» APPLY cuối 02/10, tức 3 tuần không có phép đo chỗ
+ * hụt webhook, mà thẻ chỉ in một cái mốc. Nay thẻ NÓI RA điều đó và chỉ chỗ bấm. Ngưỡng hổ phách = nhịp nhập đã khai
+ * (`VTP_ORDER_LIST_MAX_AGE_HOURS`), không phải một con số mới; tỷ lệ khớp không có đích khai nên không bao giờ đổi màu.
+ */
+function testWebhookGapCells() {
+  const BAY_GIO = new Date();
+  const truocGio = (h: number) => new Date(BAY_GIO.getTime() - h * 3_600_000);
+  // Chưa từng nhập = đến hạn (cùng luật với máy nhắc `vtpOrderListDue`), không phải «không biết».
+  const chua = webhookGapCell(null, BAY_GIO);
+  assert.deepEqual([chua.text, chua.tone, chua.href], ["Chỗ hụt webhook: CHƯA TỪNG đo — nhập tệp Danh sách vận đơn để đo", "warn", VTP_ORDER_LIST_IMPORT_HREF]);
+  // Cũ: ca thật 02/10 → 23/10 = 21 ngày.
+  const cu = webhookGapCell(truocGio(21 * 24 + 6), BAY_GIO);
+  assert.match(cu.text, /^Chỗ hụt webhook: chưa đo từ .+ \(21 ngày\) — nhập tệp Danh sách vận đơn để đo$/);
+  assert.deepEqual([cu.tone, cu.href], ["warn", VTP_ORDER_LIST_IMPORT_HREF]);
+  // Biên: ĐÚNG bằng nhịp đã khai là đến hạn; dưới một giờ thì chưa.
+  assert.equal(webhookGapCell(truocGio(VTP_ORDER_LIST_MAX_AGE_HOURS), BAY_GIO).tone, "warn", "đúng bằng nhịp nhập đã khai ⇒ đến hạn");
+  const moi = webhookGapCell(truocGio(VTP_ORDER_LIST_MAX_AGE_HOURS - 1), BAY_GIO);
+  assert.deepEqual([moi.tone, moi.href], ["muted", undefined]);
+  assert.match(moi.text, /^Chỗ hụt webhook: đo lần cuối /);
+
+  // Tỷ lệ khớp: không lần nhập nào · mẫu thiếu · đủ mẫu — và KHÔNG ô nào đổi màu.
+  const khongDo = webhookMatchCell(webhookMatchFromHealth({ matchRate: null, matchSample: 0 }));
+  const thieu = webhookMatchCell(webhookMatchFromHealth({ matchRate: null, matchSample: 12 }));
+  const du = webhookMatchCell(webhookMatchFromHealth({ matchRate: 0.9721, matchSample: 412 }));
+  assert.deepEqual(
+    [khongDo.text, thieu.text, du.text],
+    [
+      "Webhook khớp tệp (30 ngày): chưa đo — không lần nhập tệp nào trong 30 ngày",
+      `Webhook khớp tệp (30 ngày): chưa đủ mẫu (12 dòng, cần ${WEBHOOK_MATCH_MIN_SAMPLE})`,
+      "Webhook khớp tệp (30 ngày): 97.2% · 412 dòng",
+    ],
+  );
+  assert.ok([khongDo, thieu, du, webhookMatchCell(null)].every((c) => c.tone === "muted"), "tỷ lệ khớp không có đích khai ⇒ không tô màu (AGENTS 38)");
+  // Trong asOfCells: chỉ in khi trang truyền vào; đứng sau nguồn, trước trễ.
+  const keys = asOfCells({ now: BAY_GIO, lastCodStatementAt: null, orderListImportAt: null, webhookMatch: null, latency: null }).map((c) => c.key);
+  assert.deepEqual(keys, ["codStatement", "webhookGap", "webhookMatch", "latency"]);
+}
+
 async function testNguonMoi(db: Db) {
   const BAY_GIO = Date.now();
   const sau = (ngay: number) => new Date(BAY_GIO + ngay * 86_400_000);
@@ -166,6 +207,7 @@ async function testNguonMoi(db: Db) {
 export async function testDataAsOf(db: Db) {
   await testCollectAsOf();
   testAsOfCells();
+  testWebhookGapCells();
   await testNguonMoi(db);
-  console.log("✓ Tính lúc · nguồn · trễ ĐVVC (OD-UX-03): mốc CŨ NHẤT của mọi mục đệm (đệm cũ, mục lồng, lượt dùng chung) · request song song không rò mốc · chưa biết ⇒ «—» · trễ thiếu mẫu ⇒ CHƯA BIẾT, không tô xanh · bảng kê = STATEMENT_DETAIL · Pancake = SUCCESS cuối của job đơn");
+  console.log("✓ Tính lúc · nguồn · trễ ĐVVC (OD-UX-03): mốc CŨ NHẤT của mọi mục đệm (đệm cũ, mục lồng, lượt dùng chung) · request song song không rò mốc · chưa biết ⇒ «—» · trễ thiếu mẫu ⇒ CHƯA BIẾT, không tô xanh · bảng kê = STATEMENT_DETAIL · Pancake = SUCCESS cuối của job đơn · chỗ hụt webhook: chưa từng / cũ (≥ nhịp nhập đã khai) / mới, tỷ lệ khớp không tô màu");
 }
