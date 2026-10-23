@@ -3,7 +3,7 @@
   "mission_id": "od-ux-05-work",
   "title": "OD-UX-05 mục 2: /work không thiếu việc lúc đệm nguội, và nói rõ khi thiếu",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-work",
@@ -26,11 +26,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T20:47:40.904Z",
-  "updated_at": "2026-10-23T21:51:26.449Z",
+  "updated_at": "2026-10-23T22:34:58.383Z",
   "last_heartbeat": "2026-10-23T21:26:22.656Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1016 → bfc3e4a9fca7bbe3a85f52650f93a51694d7846d"
+    "merged": "#1016 → bfc3e4a9fca7bbe3a85f52650f93a51694d7846d",
+    "verify": "PASS 61caebe24ada3860f5f2d8911adad44c540df14e 2026-10-23T22:33:34.633Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40030683715"
   },
   "handoff": {
     "branch": "claude/od-ux-05-work",
