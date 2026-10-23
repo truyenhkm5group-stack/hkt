@@ -22,11 +22,16 @@
  *  · mỗi đơn đúng MỘT lần gửi chính (`PRIMARY_ATTEMPT`), cùng CSDL nhà; không in tên / SĐT.
  *  · audit lưu NGUYÊN khối `partner` trước và sau PUT; `--rollback --order=<id>` PUT lại đúng `order_number_vtp` cũ theo dòng audit gần
  *    nhất — CHỈ khi POS đang mang đúng mã mới script đã ghi (mã khác ⇒ không đụng), mã cũ trống ⇒ không gửi null.
- * arg: `[--apply] [--limit=1..1000] [--pilot] [--order=<mã đơn POS>]` hoặc `--rollback --order=<mã đơn POS>`. `--pilot` = lần gửi chính
+ *  · `--peek --order=<id>` (CHỈ ĐỌC, 23/10/2026 — sau pilot ba khoá customer / items / warehouse_info đổi mà không biết vì sao): in VÂN
+ *    TAY từng khoá con (băm; chỉ in giá trị số / boolean, customer chỉ băm) để so hai lần đọc cách nhau, và so dòng hàng / tổng tiền POS
+ *    (qua CHÍNH `mapOrder` của đường đồng bộ) với `order_items` / `orders` của ERP.
+ * arg: `[--apply] [--limit=1..1000] [--pilot] [--order=<mã đơn POS>]` · `--rollback --order=<mã đơn POS>` · `--peek --order=<mã đơn POS>`. `--pilot` = lần gửi chính
  * ĐÃ GIAO + vận đơn gốc ĐÃ HUỶ.
  */
 import "dotenv/config";
+import { createHash } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
+import { mapOrder } from "@/lib/integrations/pancake/mapper";
 import { getDb, schema, type Db } from "@/db";
 import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { env } from "@/lib/env";
@@ -45,7 +50,7 @@ const THROTTLE_MS = 400;
 
 // ─────────────────────────── HÀM THUẦN ───────────────────────────
 
-export type ReshipArgs = { apply: boolean; limit: number; pilot: boolean; order: string | null; rollback: boolean } | { error: string };
+export type ReshipArgs = { apply: boolean; limit: number; pilot: boolean; order: string | null; rollback: boolean; peek: boolean } | { error: string };
 
 /** Đối số. `--apply` không kèm `--limit` ⇒ lỗi (không bao giờ ghi hàng loạt vì quên một cờ). HÀM THUẦN. */
 export function parseReshipArgs(argv: readonly string[]): ReshipArgs {
@@ -60,7 +65,10 @@ export function parseReshipArgs(argv: readonly string[]): ReshipArgs {
   const rollback = argv.includes("--rollback");
   if (rollback && (apply || argv.includes("--pilot"))) return { error: "--rollback không đi cùng --apply / --pilot" };
   if (rollback && order === null) return { error: "--rollback bắt buộc kèm --order=<mã đơn POS> (gỡ từng đơn một)" };
-  return { apply, limit, pilot: argv.includes("--pilot"), order, rollback };
+  const peek = argv.includes("--peek");
+  if (peek && (apply || rollback || argv.includes("--pilot"))) return { error: "--peek là CHỈ ĐỌC — không đi cùng --apply / --rollback / --pilot" };
+  if (peek && order === null) return { error: "--peek bắt buộc kèm --order=<mã đơn POS>" };
+  return { apply, limit, pilot: argv.includes("--pilot"), order, rollback, peek };
 }
 
 export type PosPartner = { extend_code: string | null; order_number_vtp: string | null };
@@ -90,6 +98,69 @@ export function linkPlan(current: PosPartner, oldCode: string | null, newCode: s
 /** Thân PUT: CHỈ `partner.order_number_vtp`. Không status, không `extend_code`, không field nào khác. HÀM THUẦN. */
 export function linkBody(newCode: string): { partner: { order_number_vtp: string } } {
   return { partner: { order_number_vtp: newCode } };
+}
+
+/** Khối của đơn POS được lấy vân tay (đúng ba khoá đổi sau pilot 23/10/2026 + khối partner). */
+const PEEK_BLOCKS = ["customer", "items", "warehouse_info", "partner"] as const;
+
+export type Fingerprint = { path: string; h: string; v: string | null };
+
+/**
+ * Vân tay từng khoá con của các khối trong PEEK_BLOCKS: `path` (vd `items[0].variation_info.retail_price`) · `h` = băm 12 ký tự của giá trị ·
+ * `v` = giá trị CHỈ khi là số / boolean và KHÔNG thuộc `customer` (khối khách chỉ băm — không in tên / SĐT / địa chỉ dưới bất kỳ dạng nào).
+ * Sâu tối đa hai tầng (items[i].x.y). So hai lần đọc theo `path` + `h` là biết khoá NÀO đổi mà không lộ giá trị. HÀM THUẦN.
+ */
+export function fingerprintOrder(order: Record<string, unknown>): Fingerprint[] {
+  const out: Fingerprint[] = [];
+  const h = (x: unknown) => createHash("sha256").update(JSON.stringify(x ?? null)).digest("hex").slice(0, 12);
+  const put = (path: string, x: unknown, showable: boolean) => out.push({ path, h: h(x), v: showable && (typeof x === "number" || typeof x === "boolean") ? String(x) : null });
+  const walk = (prefix: string, x: unknown, depth: number, showable: boolean) => {
+    if (depth > 0 && Array.isArray(x)) return x.forEach((e, i) => walk(`${prefix}[${i}]`, e, depth - 1, showable));
+    if (depth > 0 && x && typeof x === "object") return Object.entries(x as Record<string, unknown>).forEach(([k, e]) => walk(`${prefix}.${k}`, e, depth - 1, showable));
+    put(prefix, x, showable);
+  };
+  for (const b of PEEK_BLOCKS) walk(b, order[b], b === "items" ? 3 : 2, b !== "customer");
+  return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+export type LineSummary = { variantId: string | null; quantity: number; unitPrice: number; lineTotal: number };
+export type MoneyCheck = { linesMatch: boolean; totalsMatch: boolean; diffs: string[] };
+
+/** Dòng hàng + tổng tiền POS (qua `mapOrder`) so với ERP. Lệch SL / đơn giá / mẫu mã / tổng ⇒ liệt kê TÊN chỗ lệch. HÀM THUẦN. */
+export function compareMoney(pos: { lines: LineSummary[]; totalPrice: number; cod: number }, erp: { lines: LineSummary[]; totalPrice: number | null; cod: number | null }): MoneyCheck {
+  const key = (l: LineSummary) => `${l.variantId ?? "?"}|${l.quantity}|${l.unitPrice}|${l.lineTotal}`;
+  const a = pos.lines.map(key).sort();
+  const b = erp.lines.map(key).sort();
+  const diffs: string[] = [];
+  if (a.length !== b.length) diffs.push(`số dòng ${a.length}≠${b.length}`);
+  a.forEach((k, i) => {
+    if (k !== b[i]) diffs.push(`dòng ${i + 1}`);
+  });
+  if (erp.totalPrice !== pos.totalPrice) diffs.push("total_price");
+  if (erp.cod !== pos.cod) diffs.push("cod");
+  return { linesMatch: !diffs.some((d) => d.startsWith("dòng") || d.startsWith("số dòng")), totalsMatch: !diffs.includes("total_price") && !diffs.includes("cod"), diffs };
+}
+
+/** `--peek --order=<id>`: CHỈ ĐỌC — vân tay khoá con + so tiền / dòng hàng POS ↔ ERP. Không PUT, không audit. */
+async function runPeek(orderId: string): Promise<boolean> {
+  const order = await pos("GET", orderId);
+  const fp = fingerprintOrder(order);
+  for (const f of fp) console.log(`peek ${orderId} ${f.path} ${f.h}${f.v !== null ? ` ${f.v}` : ""}`);
+  const m = mapOrder(order);
+  const db = await getDb();
+  const erpLines = rowsOf<{ variant_id: string | null; quantity: number | string; unit_price: number | string; line_total: number | string }>(
+    await db.execute(sql`select variant_id, quantity, unit_price, line_total from order_items where order_id = ${orderId}`),
+  ).map((r) => ({ variantId: r.variant_id, quantity: Number(r.quantity), unitPrice: Number(r.unit_price), lineTotal: Number(r.line_total) }));
+  const [o] = rowsOf<{ total_price: number | string | null; cod: number | string | null }>(await db.execute(sql`select total_price, cod from orders where id = ${orderId}`));
+  const chk = m
+    ? compareMoney(
+        { lines: m.items.map((i) => ({ variantId: i.variantId, quantity: i.quantity, unitPrice: i.unitPrice, lineTotal: i.lineTotal })), totalPrice: m.totalPrice, cod: m.cod },
+        { lines: erpLines, totalPrice: o?.total_price == null ? null : Number(o.total_price), cod: o?.cod == null ? null : Number(o.cod) },
+      )
+    : { linesMatch: false, totalsMatch: false, diffs: ["mapOrder không đọc được đơn"] };
+  console.log(`peek ${orderId} so-ERP dòng ${chk.linesMatch ? "khớp" : "LỆCH"} · tổng ${chk.totalsMatch ? "khớp" : "LỆCH"}${chk.diffs.length ? ` · ${chk.diffs.join(", ")}` : ""}`);
+  tomTat(`pos-reship-link XEM (chỉ đọc) · ${fp.length} khoá con · dòng hàng POS↔ERP ${chk.linesMatch ? "khớp" : "LỆCH"} · tổng tiền ${chk.totalsMatch ? "khớp" : "LỆCH"}`);
+  return true;
 }
 
 /** Thân PUT của rollback: CHỈ `partner.order_number_vtp` = mã cũ ghi trong audit. HÀM THUẦN. */
@@ -223,6 +294,7 @@ async function runRollback(orderId: string, runId: string): Promise<boolean> {
 
 export async function runReshipLink(args: Exclude<ReshipArgs, { error: string }>, runId: string): Promise<boolean> {
   if (args.rollback && args.order) return runRollback(args.order, runId);
+  if (args.peek && args.order) return runPeek(args.order);
   const { pairs: all } = await readPairs(await getDb());
   const delivered = all.filter((p) => p.newStage === "DELIVERED").length;
   const cancelledOld = all.filter((p) => p.oldStage === "CANCELLED").length;
