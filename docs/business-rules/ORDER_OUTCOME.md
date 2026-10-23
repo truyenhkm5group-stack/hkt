@@ -327,6 +327,6 @@ Shop tạo LẠI vận đơn cho chính đơn của mình thẳng trên viettelp
   (`ORDER_LEFT_WAREHOUSE`). Đếm MỘT lần mỗi đơn, không bao giờ trừ tồn theo từng lần gửi.
   - Đơn có hai lần gửi chiều đi cùng rời kho ⇒ cảnh báo đối soát `ORDER_DOUBLE_LEFT_WAREHOUSE` cho người. Máy không biết đó là
     một gói hay hai gói.
-- **Bảng vật chất hoá:** đổi luật ⇒ `CANONICAL_OUTCOME_VERSION` 3 → 4. Báo cáo tính trực tiếp tới khi job
+- **Bảng vật chất hoá:** đổi luật ⇒ `CANONICAL_OUTCOME_VERSION` 3 → 5 (số 4 chỉ có trên nhánh trước bản sửa review). Báo cáo tính trực tiếp tới khi job
   `outcome-materialize` dựng xong (đo 23/10: 5.688 dòng ≈ 15 phút).
 - Đơn không có vận đơn chiều đi nào bàn giao, chỉ có vận đơn PENDING / CANCELLED ⇒ thứ tự cũ: lần `attempt_no` lớn nhất quyết.

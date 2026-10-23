@@ -46,7 +46,10 @@
  * đơn của ĐÚNG kiện đó thành cũ theo điều kiện tươi mới. Tăng số chỉ làm mọi dòng của nhà thành cũ cùng lúc vô ích.
  */
 /*
- * ─── 4 (vtp-reship-outcome, P0 22/10/2026 — ORDER_OUTCOME.md mục 12): TĂNG SỐ, có chủ ý ───
+ * ─── 5 (vtp-reship-outcome + bản sửa review #981, P0 22/10/2026 — ORDER_OUTCOME.md mục 12): TĂNG SỐ, có chủ ý ───
+ *
+ * Nhảy thẳng 3 → 5: số 4 chỉ từng tồn tại trên nhánh #981 TRƯỚC bản sửa review (RESHIP_ALIVE cho cả ORDER_OUTCOME_VERIFIED),
+ * chưa lên production. Script vá vtp-reship-backfill chặn `--apply` khi phiên bản < 5 — dấu duy nhất rằng luật đã gồm bản sửa.
  *
  * Khác hai lần trên: kết luận của dòng ĐÃ CÓ đổi. (a) Lần gửi chính chọn lần CÒN SỐNG (có chứng từ bàn giao ∧ chưa huỷ) trước
  * `attempt_no`; (b) đơn Pancake «Đã hủy» mà lần gửi thay thế (`attempt_no > 1`) đang đi / chờ lấy thôi rơi về `CANCELLED`. Không
@@ -54,4 +57,4 @@
  * cũ cùng lúc ⇒ báo cáo tính trực tiếp tới khi job `outcome-materialize` (5 phút, ≤ 2.000 dòng / lượt) dựng xong — đo 23/10:
  * 5.688 dòng ⇒ 3 lượt ≈ 15 phút.
  */
-export const CANONICAL_OUTCOME_VERSION = 4;
+export const CANONICAL_OUTCOME_VERSION = 5;
