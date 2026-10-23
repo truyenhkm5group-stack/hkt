@@ -24,9 +24,14 @@
   "dependencies": [],
   "blocked_by": [],
   "related_prs": [],
-  "migration_reservations": [],
+  "migration_reservations": [
+    "0256"
+  ],
+  "migration_reserved_at": {
+    "0256": "2026-10-23T14:25:43.834Z"
+  },
   "created_at": "2026-10-23T14:24:55.212Z",
-  "updated_at": "2026-10-23T14:24:55.212Z",
+  "updated_at": "2026-10-23T14:25:43.834Z",
   "last_heartbeat": "2026-10-23T14:24:55.212Z",
   "definition_of_done": []
 }
