@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "src-2-query-gen",
+  "title": "SRC-2: bộ sinh truy vấn tiếng Trung từ tiếng Việt (từ điển tất định + AI có trần)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/src-2-query-gen",
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/constants/sourcing-glossary.ts",
+    "lib/sourcing/",
+    "tests/sourcing-query.test.ts",
+    "drizzle/0255_ai_usage_sourcing_workload.sql"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-23T11:35:18.000Z",
+  "updated_at": "2026-10-23T11:35:18.000Z",
+  "last_heartbeat": "2026-10-23T11:35:18.000Z",
+  "definition_of_done": []
+}
