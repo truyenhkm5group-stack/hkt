@@ -23,19 +23,21 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T08:02:06.850Z",
-  "updated_at": "2026-10-23T09:24:33.750Z",
-  "last_heartbeat": "2026-10-23T09:24:33.750Z",
+  "updated_at": "2026-10-23T10:44:35.533Z",
+  "last_heartbeat": "2026-10-23T10:44:35.533Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/purchasing-leadtime-probe",
-    "sha": "f70565f5a7ae4b5ebef451aa8df24701ec094bec",
-    "at": "2026-10-23T09:24:33.750Z",
+    "sha": "ef0f54f5d66d395b5fd95c010ddb50be12ce8994",
+    "at": "2026-10-23T10:44:35.533Z",
     "actor": "DESKTOP-56TH98Y:wt-probe",
     "title": "ops purchasing-leadtime-probe: đo trước / sau OD-P2-03 bằng CHÍNH hàm báo cáo /inventory/purchasing",
-    "summary": "Gộp main mới (merge, không force): xung đột ở OPS_THAO_TAC_MA_HOA và DOC_NANG của ops-vps.yml do #980 — giữ cả pos-reship-link lẫn purchasing-leadtime-probe; sync-fixtures tự gộp sạch.",
+    "summary": "Sửa hai lỗi cổng: tomTat qua splitSummaryLine (lib/ops/summary-lines.ts), bỏ chữ tiền tố khỏi chú thích; khai DOC_MOI_TRUONG_DA_KHAI cho chuỗi quét mã nguồn. Đã gộp main mới nhất (merge, không force).",
     "tests": [
       "tsc --noEmit: sạch",
-      "TEST_KHOI=K10,K17,K21 npm test sau khi gộp main (#980): ĐẠT (ops-script-size 88.096/125.000 B · pos-reship-link · purchasing-leadtime-probe)"
+      "eslint 3 tệp: sạch",
+      "TEST_KHOI=K15,K18,K21 npm test: ĐẠT (test-hygiene mục 65 · ops-log-leak tiền tố/tóm tắt 73 script · purchasing-leadtime-probe)",
+      "trước đó K10,K17,K21: ĐẠT"
     ]
   }
 }
