@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "od-doc-p2-04-stop",
+  "title": "Tệp tiến độ Odoo: OD-P2-04 DỪNG · sửa bằng chứng UX-01 · top 15 trang · OD-P2-03 MERGED #998 · UX-03/UX-04 nhận việc",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-oddoc",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/od-doc-p2-04-stop",
+  "base_sha": "73460b03b8d08af5d88210cb10a4b567ba5b8088",
+  "domains": [],
+  "owned_paths": [
+    "docs/tech/odoo-inspired-erp-upgrade.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-23T11:22:32.718Z",
+  "updated_at": "2026-10-23T11:22:32.718Z",
+  "last_heartbeat": "2026-10-23T11:22:32.718Z",
+  "definition_of_done": []
+}
