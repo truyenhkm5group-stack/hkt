@@ -1,0 +1,8 @@
+{
+  "pr": 1025,
+  "sha": "3ed74344e8be54bdc4089a9f4abf3bde5fb7419e",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T23:54:13.246Z",
+  "note": "review lead: stale-on-write CHỈ 3 khoá riêng /work (đăng ký từ lib/constants/work-cache.ts, cache.ts không phụ thuộc miền); ghi xen lúc tính ⇒ lưu trạng thái cũ; khoá tồn kho/tiền/cấu hình vẫn xoá hẳn (bài iii); nút «Làm mới số liệu» dùng clearMemoAll; bài kiểm payroll-recon-center chuyển khẳng định sang lượt đọc sau làm mới — đúng hành vi đã duyệt, không phải bài hợp đồng."
+}
