@@ -23,9 +23,14 @@ export type MyWorkNotice = {
 /** Lỗi do chạm hạn thời gian của /work (đang tính lại phía sau) — khác lỗi thật của nguồn. */
 const DANG_TINH_LAI = /đang tính lại/;
 
+/** Nguồn có nhịp tính riêng (vd. đối soát lương: job mỗi 12 phút) tự khai «mỗi N phút» trong câu lỗi — in đúng nhịp đó. */
+const NHIP = /mỗi (\d+) phút/;
+
 function nhanNguon(f: FailedSource): string {
   const ten = WORK_SOURCE_SPEC[f.source]?.label ?? f.source;
-  return DANG_TINH_LAI.test(f.error) ? `${ten} (đang tính lại)` : `${ten} (lỗi)`;
+  if (!DANG_TINH_LAI.test(f.error)) return `${ten} (lỗi)`;
+  const nhip = NHIP.exec(f.error);
+  return nhip ? `${ten} (máy tính lại mỗi ${nhip[1]} phút)` : `${ten} (đang tính lại)`;
 }
 
 export function myWorkNotice(input: { total: number; overdue: number; failed: readonly FailedSource[] }): MyWorkNotice {
@@ -38,7 +43,8 @@ export function myWorkNotice(input: { total: number; overdue: number; failed: re
       showEmpty: input.total === 0,
     };
   }
-  const dangTinh = input.failed.every((f) => DANG_TINH_LAI.test(f.error));
+  // Chỉ hứa «sau ít giây» khi MỌI nguồn thiếu đang tính lại ngay (hạn 2,5 s) — nguồn tính theo nhịp job không có trong lời hứa ấy.
+  const dangTinh = input.failed.every((f) => DANG_TINH_LAI.test(f.error) && !NHIP.test(f.error));
   return {
     description: input.total
       ? `Ít nhất ${input.total} việc đang cầm · ${input.overdue} việc quá hạn — ${n} nguồn chưa có số`

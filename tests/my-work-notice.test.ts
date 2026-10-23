@@ -26,6 +26,13 @@ export function testMyWorkNotice() {
   assert.match(it.banner ?? "", /\(lỗi\)\./);
   assert.doesNotMatch(it.banner ?? "", /đang tính lại phía sau/, "lỗi thật thì không hứa «mở lại sau ít giây»");
 
+  // Nguồn tính theo NHỊP job (đối soát lương, mỗi 12 phút): in đúng nhịp, và KHÔNG hứa «sau ít giây» (OD-UX-05 mục 2).
+  const luong = myWorkNotice({ total: 3, overdue: 0, failed: [{ source: "PAYROLL_RECON", error: "đang tính lại (máy tính lại mỗi 12 phút)" }] });
+  assert.match(luong.banner ?? "", /\(máy tính lại mỗi 12 phút\)\./);
+  assert.doesNotMatch(luong.banner ?? "", /ít giây/, "nguồn tính theo nhịp job không có lời hứa «sau ít giây»");
+  const tron = myWorkNotice({ total: 0, overdue: 0, failed: [{ source: "ALERT", error: QUA_HAN }, { source: "PAYROLL_RECON", error: "đang tính lại (máy tính lại mỗi 12 phút)" }] });
+  assert.doesNotMatch(tron.banner ?? "", /ít giây/, "chỉ hứa «sau ít giây» khi MỌI nguồn thiếu đang tính lại ngay");
+
   // Trang dùng ĐÚNG hàm này cho mọi câu phụ thuộc độ đủ — không tự viết lại.
   const trang = readFileSync("app/(dashboard)/work/page.tsx", "utf8");
   for (const s of ["description={notice.description}", "notice.banner ?", "notice.countNote ??", "notice.showEmpty ?"]) assert.ok(trang.includes(s), `/work dùng ${s}`);
