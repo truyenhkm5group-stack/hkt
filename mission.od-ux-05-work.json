@@ -3,7 +3,7 @@
   "mission_id": "od-ux-05-work",
   "title": "OD-UX-05 mục 2: /work không thiếu việc lúc đệm nguội, và nói rõ khi thiếu",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-work",
@@ -26,9 +26,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T20:47:40.904Z",
-  "updated_at": "2026-10-23T21:27:54.833Z",
+  "updated_at": "2026-10-23T21:51:26.449Z",
   "last_heartbeat": "2026-10-23T21:26:22.656Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1016 → bfc3e4a9fca7bbe3a85f52650f93a51694d7846d"
+  },
   "handoff": {
     "branch": "claude/od-ux-05-work",
     "sha": "37dfcdd14ef9db1194aead0973b5db48d46eede9",
