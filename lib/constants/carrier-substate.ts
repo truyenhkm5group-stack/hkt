@@ -233,7 +233,13 @@ export function eventStatusCode(status: string | null | undefined): number | nul
  */
 export function carrierSubstate(input: { code?: number | null; text?: string | null; stage?: ShipmentStage | null }): { substate: CarrierSubstate; basis: "code" | "text" | "stage" | "unknown" } {
   const code = input.code ?? null;
-  if (code !== null && VTP_CODE_TO_SUBSTATE[code]) return { substate: VTP_CODE_TO_SUBSTATE[code], basis: "code" };
+  if (code !== null && VTP_CODE_TO_SUBSTATE[code]) {
+    // 501 TRÊN CHẶNG HOÀN (AGENTS 3.2): mã một mình nói «phát thành công», nhưng chặng ERP `RETURNED` chỉ dựng được từ 501 + `leg_type =
+    // RETURN` — hàng đã về tới SHOP, không phải tới khách. Thiếu vế này tháp giao vận làm mất kiện khỏi rổ «hoàn đã về shop» trong khi
+    // đường ống hàng hoàn vẫn đếm nó (lộ ra ở tests/delivery-tower.test.ts khi chạy tách K01 → K12, 23/10/2026). Lời khai thô vẫn giữ nguyên.
+    const byCode = VTP_CODE_TO_SUBSTATE[code];
+    return { substate: byCode === "DELIVERED" && input.stage === "RETURNED" ? "RETURNED" : byCode, basis: "code" };
+  }
 
   const text = boDau(String(input.text ?? ""));
   if (text) {
