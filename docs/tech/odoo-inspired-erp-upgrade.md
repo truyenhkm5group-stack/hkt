@@ -49,7 +49,7 @@ thao tác tay ở kho và mua hàng giảm, và không có luật nào trong `AG
 | Trong scope | Ngoài scope (không làm, trừ khi chủ shop mở) |
 |---|---|
 | Phase 1: tệp này. Audit 12 nhóm module, đưa sẵn các việc P0 vào bảng, đề xuất thứ tự Phase 2–5. | Chuyển dữ liệu sang Odoo, dùng Odoo song song, hay cài Odoo Community làm hệ phụ. |
-| Phase 2–5: từng PR nhỏ theo mục 7. **Mỗi phase cần Lead duyệt trước khi claim.** | Sổ cái kế toán kép, hoá đơn VAT, kế toán pháp định. ERP là kế toán QUẢN TRỊ (mục 6.4). |
+| Phase 2–5 + nhánh UI/UX & tốc độ: từng PR nhỏ theo §7 (Lead đã duyệt thứ tự 23/10/2026). Thay đổi thứ tự hay thêm mục phải qua Lead. | Sổ cái kế toán kép, hoá đơn VAT, kế toán pháp định. ERP là kế toán QUẢN TRỊ (mục 6.4). |
 | | Sản xuất nội bộ (work order, routing). Shop thuê xưởng ngoài, xem mục 6.5. |
 | | Bất kỳ đổi ngưỡng, quyền hay lịch scheduler nào chưa qua chủ shop (AGENTS mục 7). |
 
@@ -58,7 +58,7 @@ thao tác tay ở kho và mua hàng giảm, và không có luật nào trong `AG
 | Bước | Trạng thái | Ghi chú |
 |---|---|---|
 | Phase 1: discovery | `IN_REVIEW` khi PR này mở | Tệp này. |
-| Phase 2–5 | `BACKLOG` | Chờ Lead duyệt thứ tự ở mục 7. |
+| Phase 2–5 + nhánh UI/UX | `BACKLOG` (thứ tự ĐÃ DUYỆT) | Lead duyệt §7 ngày 23/10/2026: Phase 2 rủi ro thấp trước, không chạm `ORDER_OUTCOME` / tiền, SKIP có lý do. Thêm nhánh «UI/UX & tốc độ» (§7.2) chạy song song Phase 2 và đi TRƯỚC Phase 3. |
 
 Vòng đời một nhiệm vụ: `BACKLOG → READY → IN_PROGRESS → IN_REVIEW → MERGED → DEPLOYED → VERIFIED → DONE`.
 Thêm hai nhánh rẽ: `BLOCKED` (ghi blocker) và `CANCELLED` (ghi lý do). `DONE` chỉ khi đã xác minh trên
@@ -107,13 +107,19 @@ Chi tiết từng hạng mục Phase 2–5 ở mục 7.
 
 | Task ID | Module | Mục tiêu | Owner | Ưu tiên | Trạng thái | PR | SHA | Test | Deploy | Xác minh | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| OD-P1-01 | Toàn chương trình | Tệp tiến độ bền + audit 12 nhóm module + lộ trình | phiên này | P2 | IN_REVIEW | (PR này) | — | chỉ tài liệu | — | — | — | Lead gộp. Duyệt mục 7. |
-| OD-P2-01 | Dashboards / Views | Bộ lọc yêu thích (favorites) theo người dùng cho `DataTable` | — | P1 | BACKLOG | — | — | — | — | — | — | Lead duyệt Phase 2 |
+| OD-P1-01 | Toàn chương trình | Tệp tiến độ bền + audit 12 nhóm module + lộ trình | phiên này | P2 | IN_REVIEW | (PR này) | — | chỉ tài liệu | — | — | — | Lead gộp (§7 đã duyệt 23/10) |
+| OD-P2-01 | Dashboards / Views | Bộ lọc yêu thích (favorites) theo người dùng cho `DataTable` | — | P1 | BACKLOG | — | — | — | — | — | — | Claim được (Phase 2 đã duyệt). Chạm `data-table` nên phối với OD-UX-01. |
 | OD-P2-02 | Purchase | `suppliers` thành khoá thật cho đơn xưởng (thôi ô chữ) | — | P1 | BACKLOG | — | — | — | — | — | — | — |
 | OD-P2-03 | Purchase | Thời gian giao của xưởng đọc `production_orders.received_at` thay vì ghép phiếu nhập | — | P1 | BACKLOG | — | — | — | — | — | — | — |
 | OD-P2-04 | Manufacturing | Định mức vải lên máy chủ (thôi `localStorage`), MM-REC-26 | — | P1 | BACKLOG | — | — | — | — | — | — | — |
 | OD-P2-05 | Activities | Hẹn việc kế tiếp hiện trên trang chi tiết đơn/vận đơn/khách (phép chiếu, không bảng mới) | — | P2 | BACKLOG | — | — | — | — | — | — | — |
-| OD-P3-01 | Inventory | Phiếu kiểm kê (đếm thực tế vs sổ) ⇒ mở được `inventory_accuracy` | — | P1 | BACKLOG | — | — | — | — | — | Chủ shop chốt cách kiểm kê | — |
+| OD-UX-01 | UI/UX | Design system tối thiểu: token + quy tắc loading/empty/error. Kiểm hiện trạng trước, không đổi đồng loạt. | — | P1 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-42` | Chờ số nền |
+| OD-UX-02 | UI/UX | Sidebar gom theo nghiệp vụ, đọc `department-modules.ts` | — | P1 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-42` | — |
+| OD-UX-03 | UI/UX | Chỉ báo «cập nhật lúc / nguồn / trễ đối tác» cho màn hình số liệu | — | P1 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-42` | — |
+| OD-UX-04 | UI/UX | KPI bấm được xuống dữ liệu cấu thành (`/reports/returns`, trang chủ) | — | P1 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-42` | — |
+| OD-UX-05 | Tốc độ | Tối ưu 2–3 trang chậm nhất theo số nền, có đích đo được | — | P1 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-42` | — |
+| OD-UX-06 | UI/UX | Kiểm mobile cho 5 màn hình dùng nhiều | — | P2 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-42` | — |
+| OD-P3-01 | Inventory | Phiếu kiểm kê (đếm thực tế vs sổ) ⇒ mở được `inventory_accuracy` | — | P1 | BACKLOG | — | — | — | — | — | Chủ shop chốt cách kiểm kê (§7.6) | — |
 | OD-P3-02 | Inventory | Kiểm kê xoay vòng (cycle count) theo nhóm mẫu mã | — | P2 | BACKLOG | — | — | — | — | — | Phụ thuộc OD-P3-01 | — |
 | OD-P3-03 | Purchase | Trạng thái thanh toán của đơn xưởng (chưa / chờ / đủ), đối chiếu đặt – nhận – trả | — | P1 | BACKLOG | — | — | — | — | — | — | — |
 | OD-P3-04 | Purchase / QC | Kiểm hàng nhập từ xưởng (đạt/lỗi) trước khi vào tồn | — | P2 | BACKLOG | — | — | — | — | — | Khảo sát quy trình kho | — |
@@ -122,6 +128,12 @@ Chi tiết từng hạng mục Phase 2–5 ở mục 7.
 | OD-P4-03 | Payroll | Kế hoạch hoa hồng có vòng đời Nháp → Duyệt (đã duyệt không sửa) | — | P2 | BLOCKED | — | — | — | — | — | `COMMISSION_BASIS_NEEDS_REVIEW`: chủ shop chốt cơ sở | — |
 | OD-P5-01 | Subscriptions | MRR · churn · gia hạn cho nền tảng SaaS | — | P3 | BACKLOG | — | — | — | — | — | — | — |
 | OD-P5-02 | Manufacturing | Khảo sát BOM / định mức đầy đủ (chỉ tài liệu) | — | P3 | BACKLOG | — | — | — | — | — | — | — |
+
+### 5.3 Bảng làm việc nhỏ (việc vặt phát hiện trong lúc khảo sát, không thuộc phase nào)
+
+| Task ID | Việc | Bằng chứng | Trạng thái | Ghi chú |
+|---|---|---|---|---|
+| OD-MISC-01 | `AGENTS.md` dùng số mục **70 hai lần**: «đơn chờ hàng là kết quả phân bổ» và «thưởng % lợi nhuận đi qua cổng lỗ lũy kế». | `AGENTS.md:573` và `AGENTS.md:672` | BACKLOG | Lead 23/10: KHÔNG sửa AGENTS lượt này. Đánh số lại phải giữ nguyên MỌI chỗ đang trích "AGENTS 70" (grep cả `lib/`, `docs/`, `tests/`). |
 
 ## 6. Audit theo module
 
@@ -407,8 +419,8 @@ Module Enterprise chỉ được học ở mức **khái niệm trong tài liệ
 - **Cách triển khai**
   - OD-P4-03 (BLOCKED tới khi có quyết định).
   - OD-P4-02 (BLOCKED tới khi có tài khoản thứ hai thật).
-  - Việc vặt ngoài chương trình: đánh số lại mục 70 trùng trong AGENTS (chỉ khi chủ shop đồng ý sửa
-    AGENTS).
+  - Việc vặt ngoài chương trình: đánh số lại mục 70 trùng trong AGENTS (OD-MISC-01, §5.3). Lead
+    23/10: không sửa lượt này.
 
 ### 6.9 Marketing automation: **SKIP (tạm) · —**
 
@@ -513,6 +525,8 @@ Module Enterprise chỉ được học ở mức **khái niệm trong tài liệ
   - Favorites = lưu CHUỖI truy vấn URL mà nuqs đã giữ, theo người dùng, có tên, tuỳ chọn chia sẻ.
     Rẻ, vì trạng thái đã nằm trên URL.
   - Group by nhiều tầng / pivot: **SKIP** tới khi có màn hình cần.
+  - Phần còn lại của chế độ xem (thiết kế, sidebar, độ tươi dữ liệu, KPI bấm xuống, tốc độ, mobile) nằm ở
+    nhánh UI/UX (§7.2). Odoo không phải nguồn của nhánh đó; nguồn là số nền đo trên chính ERP.
 - **Cách triển khai**
   - OD-P2-01: bảng `saved_views` (user, đường dẫn, tên, chuỗi query, `shared`) + menu trong thanh công
     cụ `DataTable`. Chạm `components/data-table` thì phải `npm run build` (AGENTS 6.4).
@@ -550,10 +564,18 @@ Module Enterprise chỉ được học ở mức **khái niệm trong tài liệ
 
 ## 7. Đề xuất thứ tự Phase 2–5 (theo ROI / rủi ro)
 
-Thứ tự đi từ **rẻ + an toàn + có bằng chứng** tới **đắt + cần quyết định**. Không phase nào chạm
-`ORDER_OUTCOME`, tiền thật hay ngưỡng nghiệp vụ. Mỗi dòng là MỘT PR.
+**Lead duyệt 23/10/2026.** Thứ tự đi từ **rẻ + an toàn + có bằng chứng** tới **đắt + cần quyết định**.
+Không phase nào chạm `ORDER_OUTCOME`, tiền thật hay ngưỡng nghiệp vụ. Mỗi dòng là MỘT PR.
 
-### Phase 2: hoàn thiện cái đang có, rủi ro thấp (không đổi số liệu tiền)
+```
+Phase 2 (rủi ro thấp) ─────────────┐
+                                   ├──▶ Phase 3 (kho & mua hàng) ──▶ Phase 4 ──▶ Phase 5
+Nhánh UI/UX & tốc độ (sau số nền) ─┘
+```
+
+Phase 2 và nhánh UI/UX chạy SONG SONG. Cả hai đi trước Phase 3. Các quyết định cần chủ shop gom ở §7.6.
+
+### 7.1 Phase 2: hoàn thiện cái đang có, rủi ro thấp (không đổi số liệu tiền)
 
 | Thứ tự | Task | PR nhỏ | Vì sao trước | Rủi ro |
 |---|---|---|---|---|
@@ -564,7 +586,33 @@ Thứ tự đi từ **rẻ + an toàn + có bằng chứng** tới **đắt + c�
 | 5 | OD-P2-01 | `saved_views` + menu favorites trong `DataTable` | Dùng hằng ngày, trạng thái đã có trên URL | Trung bình (đụng `data-table`, phải build) |
 | 6 | OD-P2-05 | Khối "việc kế tiếp" trên trang chi tiết (phép chiếu) | Gom hẹn đang rời rạc | Thấp, chỉ đọc |
 
-### Phase 3: kho và mua hàng đúng chuẩn
+### 7.2 Nhánh UI/UX & tốc độ (song song Phase 2, TRƯỚC Phase 3)
+
+Chủ shop coi UI/UX là trọng tâm: master prompt mục IV, nơi Phase 3 = UI/UX & Performance. Nhánh này
+dùng mã `OD-UX-xx` để không lẫn với số Phase của tệp này.
+
+**Điều kiện bắt đầu:** có SỐ NỀN do phiên `code-erp-42` đo (đêm 23/10/2026). Số nền gồm thời gian tải
+từng trang và tần suất dùng thật. Chưa có số nền thì KHÔNG claim mục nào trong nhánh này. Thứ tự ở bảng
+dưới là tạm thời; khi có số nền thì xếp lại theo **tần suất dùng thật**, ghi số vào cột "Vì sao".
+
+**Định nghĩa xong của MỌI mục:**
+- MỘT PR;
+- ảnh production TRƯỚC và SAU, cùng màn hình, cùng cỡ cửa sổ;
+- mục tốc độ thì kèm số đo trước/sau trên production;
+- chạm `components/data-table`, ranh giới client/server hoặc import `lib/*` vào client component thì
+  phải `npm run build` (AGENTS 6.4);
+- không lookbehind regex trong mã tới trình duyệt.
+
+| Thứ tự (tạm) | Task | PR nhỏ | Dựa trên cái đang có | Ràng buộc |
+|---|---|---|---|---|
+| 1 | OD-UX-01 | Design system tối thiểu: token màu / khoảng cách / kiểu chữ + quy tắc trạng thái loading / empty / error | `components/ui/*` (shadcn), `components/ui-bits.tsx` (có `EmptyState`). Đo 23/10: 161 tệp `loading.tsx` nhưng chỉ 1 `error.tsx` trong `app/(dashboard)`. | KIỂM HIỆN TRẠNG TRƯỚC, viết quy tắc, áp cho màn hình mới và màn hình đang sửa. KHÔNG đổi đồng loạt cả ứng dụng trong một PR. |
+| 2 | OD-UX-02 | Sidebar gom theo nghiệp vụ | Đọc `lib/constants/department-modules.ts` (AGENTS 69). `components/app-sidebar.tsx` chỉ giữ icon + cách vẽ. | KHÔNG tạo danh sách module thứ hai. `tests/department-map.test.ts` phải xanh. |
+| 3 | OD-UX-03 | Chỉ báo «cập nhật lúc · nguồn · trễ đối tác» cho màn hình số liệu: vận đơn, báo cáo hoàn, GTC, lương | Mốc đồng bộ ở `sync_runs`. Độ tươi logistics ở `lib/constants/logistics-freshness.ts` (AGENTS 54). Cache báo cáo `lib/cache.ts::memo`. | KHÔNG giả realtime: in đúng mốc dữ liệu được tính, không in "bây giờ". Mốc không biết thì in `—` (AGENTS 42). |
+| 4 | OD-UX-04 | KPI bấm được xuống dữ liệu cấu thành, bắt đầu ở `/reports/returns` và trang chủ | Danh sách đích dùng LẠI đúng điều kiện của KPI (`ORDER_OUTCOME`, rổ `fulfillmentBucketSql`). | Danh sách phải ra ĐÚNG số đơn bằng con số trên thẻ. Có bài kiểm so hai đường. Không viết lại điều kiện. |
+| 5 | OD-UX-05 | Tối ưu 2–3 trang chậm nhất theo số nền | Kinh nghiệm cũ: trang chậm chưa chắc do SQL; JIT và VPS bão hoà là hai bẫy đo. | Đích đo được, ghi TRƯỚC khi sửa. Đo trước/sau trên production. Không đổi số liệu (so từng cột). |
+| 6 | OD-UX-06 | Kiểm mobile cho 5 màn hình dùng nhiều (chọn theo số nền) | Bảng phải vừa một màn hình; ô hai tầng. | Ghi tap target < 32px và cuộn ngang. Mỗi màn hình sửa là một PR riêng nếu lớn. |
+
+### 7.3 Phase 3: kho và mua hàng đúng chuẩn
 
 | Thứ tự | Task | PR nhỏ | Vì sao | Rủi ro |
 |---|---|---|---|---|
@@ -576,10 +624,9 @@ Thứ tự đi từ **rẻ + an toàn + có bằng chứng** tới **đắt + c�
 | 6 | OD-P3-02 | Kiểm kê xoay vòng | Sau khi 3.1 chạy ổn | Thấp |
 | 7 | OD-P3-04 | Kiểm hàng nhập xưởng (sau khảo sát kho) | Lỗi xưởng có chứng cứ | Trung bình |
 
-**Quyết định cần chủ shop trước Phase 3:** quy trình kiểm kê (ai đếm, bao lâu một lần). Chênh lệch có cần
-người thứ hai ký không.
+Phase 3 chỉ bắt đầu sau khi chủ shop trả lời quyết định Q1 ở §7.6.
 
-### Phase 4: tự động hoá và quy trình duyệt
+### 7.4 Phase 4: tự động hoá và quy trình duyệt
 
 | Thứ tự | Task | PR nhỏ | Blocker |
 |---|---|---|---|
@@ -588,7 +635,7 @@ người thứ hai ký không.
 | 3 | OD-P4-02 | Nối duyệt cho sửa COD · ghi đè ĐVVC · ngân sách QC | Cần tài khoản thứ hai thật (enforcement OFF) |
 | 4 | OD-P4-03 | Kế hoạch hoa hồng Nháp → Duyệt → bất biến | Chủ shop chốt cơ sở hoa hồng (`COMMISSION_BASIS_NEEDS_REVIEW`) |
 
-### Phase 5: SaaS và khảo sát
+### 7.5 Phase 5: SaaS và khảo sát
 
 | Thứ tự | Task | PR nhỏ | Ghi chú |
 |---|---|---|---|
@@ -604,6 +651,18 @@ người thứ hai ký không.
 - Studio kéo-thả;
 - work order / routing.
 
+### 7.6 Quyết định cần chủ shop
+
+Không mục nào dưới đây được máy hay phiên làm việc tự quyết (AGENTS mục 7). Có câu trả lời thì ghi ngày +
+nội dung vào cột "Trả lời", rồi gỡ blocker ở §5.2.
+
+| Mã | Câu hỏi | Chặn task | Vì sao cần người quyết | Trả lời |
+|---|---|---|---|---|
+| Q1 | **Quy trình kiểm kê:** ai đếm, bao lâu một lần (toàn bộ hay xoay vòng theo nhóm), và chênh lệch có cần người thứ hai ký trước khi thành phiếu ADJUSTMENT không? | OD-P3-01, OD-P3-02 | Chênh lệch kiểm kê ĐỔI TỒN KHO. Ai ký là quyết định kiểm soát nội bộ, không phải quyết định kỹ thuật. | — |
+| Q2 | **Cơ sở hoa hồng:** theo đơn chốt (POS) hay theo đơn giao thành công? | OD-P4-03 | `COMMISSION_BASIS_NEEDS_REVIEW` (AGENTS 16, 18). Đoán là đổi lương. | — |
+| Q3 | **Duyệt hai người:** khi nào có tài khoản thứ hai thật để bật enforcement cho sửa COD · ghi đè ĐVVC · ngân sách QC? | OD-P4-02 | Production có 2 tài khoản (`docs/second-approval-policy.md:47-70`). Bật lúc này là tự khoá mình. | — |
+| Q4 | **Sáu nguyên tắc ở §2:** có khớp bản giao việc gốc không? | (cả chương trình) | §2 dựng từ bản giao của Lead và AGENTS, chưa đối chiếu nguyên văn bản gốc. | — |
+
 ## 8. Hướng dẫn khôi phục cho phiên sau
 
 1. **Đọc theo thứ tự:**
@@ -612,8 +671,10 @@ người thứ hai ký không.
    3. tệp này;
    4. sổ `/tech` (`npm run ai -- board`, hoặc `docs/tech/MASTER_MISSION_REGISTRY.md` + `CURRENT_CHECKPOINT.md`
       trên nhánh `ai-control/registry`).
-2. **Tìm việc kế tiếp:** dòng đầu tiên ở mục 7 mà mục 5.2 còn `BACKLOG` hoặc `READY` và không `BLOCKED`.
-   Chưa có Lead duyệt phase thì KHÔNG claim.
+2. **Tìm việc kế tiếp:** dòng đầu tiên ở §7.1 hoặc §7.2 (song song) mà §5.2 còn `BACKLOG` hoặc `READY`
+   và không `BLOCKED`.
+   - Nhánh UI/UX (§7.2) chỉ mở khi đã có số nền của `code-erp-42`.
+   - Phase 3 trở đi chỉ mở khi Phase 2 và nhánh UI/UX xong, VÀ quyết định §7.6 tương ứng đã có câu trả lời.
 3. **Nhận việc:**
    - dựng cây làm việc riêng:
      `git worktree add -b claude/<task-id-thường> ../wt-<tên> origin/main` (AGENTS 9);
