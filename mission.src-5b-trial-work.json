@@ -3,7 +3,7 @@
   "mission_id": "src-5b-trial-work",
   "title": "SRC-5b: việc mua thử trên /work (đã duyệt chưa đặt · đã đặt chưa về)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -27,11 +27,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T19:50:24.182Z",
-  "updated_at": "2026-10-23T21:59:47.100Z",
+  "updated_at": "2026-10-23T22:35:43.474Z",
   "last_heartbeat": "2026-10-23T21:29:21.158Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1017 → 61caebe24ada3860f5f2d8911adad44c540df14e"
+    "merged": "#1017 → 61caebe24ada3860f5f2d8911adad44c540df14e",
+    "verify": "PASS 61caebe24ada3860f5f2d8911adad44c540df14e 2026-10-23T22:35:06.215Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40030683715"
   },
   "handoff": {
     "branch": "claude/src-5b-trial-work",
