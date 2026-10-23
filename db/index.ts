@@ -1,5 +1,6 @@
 import { sql as sqlRaw } from "drizzle-orm";
 import { drizzle as drizzlePg, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import { PgTransaction } from "drizzle-orm/pg-core";
 import { Pool } from "pg";
 import { probeActive, recordQuery } from "@/lib/perf/probe";
 import { currentOrganization } from "@/lib/platform/context";
@@ -636,4 +637,32 @@ export async function chayKhongJit<T>(db: Db, fn: (tx: Db) => Promise<T>): Promi
     if (!(error instanceof Error) || !/jit/i.test(error.message)) throw error;
     return fn(db);
   }
+}
+
+/** `db` có phải client của MỘT giao dịch không (`chayKhongJit`, `db.transaction`). */
+export function laGiaoDich(db: Db): boolean {
+  return db instanceof PgTransaction;
+}
+
+type ViecDoc = PromiseLike<unknown> | (() => PromiseLike<unknown>);
+type KetQuaViec<T> = T extends () => PromiseLike<infer R> ? R : Awaited<T>;
+
+/**
+ * ═══════ NHIỀU LƯỢT ĐỌC TRÊN CÙNG `db`: BỂ ⇒ SONG SONG · GIAO DỊCH ⇒ NỐI TIẾP ═══════
+ *
+ * Một client Postgres chỉ chạy một câu một lúc. `Promise.all` trên client của một giao dịch không song
+ * song gì: pg@8 tự xếp hàng các câu và cảnh báo «client.query() when the client is already executing a
+ * query» (pg@9 bỏ hẳn cách gọi đó), còn phép đo tính cả thời gian đứng xếp hàng vào từng câu. Hàm nhận
+ * `db` từ ngoài thì không biết mình đang được gọi bằng bể hay bằng giao dịch — nên hỏi đúng chỗ này.
+ *
+ * Mỗi việc là một QUERY BUILDER của drizzle (lười: chỉ chạy khi bị `await`) HOẶC một hàm trả lời hứa.
+ * KHÔNG truyền lời hứa ĐÃ chạy (vd. `f(db)` không bọc): nó bắt đầu ngay lúc dựng mảng và lại chồng lên
+ * nhau. Thứ tự kết quả = thứ tự việc, ở cả hai đường. `tests/tx-sequential.test.ts` quét mã nguồn.
+ */
+export async function theoClient<const T extends readonly ViecDoc[]>(db: Db, viec: T): Promise<{ -readonly [K in keyof T]: KetQuaViec<T[K]> }> {
+  const chay = (v: ViecDoc) => (typeof v === "function" ? v() : v);
+  if (!laGiaoDich(db)) return (await Promise.all(viec.map(chay))) as { -readonly [K in keyof T]: KetQuaViec<T[K]> };
+  const ra: unknown[] = [];
+  for (const v of viec) ra.push(await chay(v));
+  return ra as { -readonly [K in keyof T]: KetQuaViec<T[K]> };
 }
