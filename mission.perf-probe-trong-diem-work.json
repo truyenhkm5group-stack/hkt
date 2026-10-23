@@ -3,7 +3,7 @@
   "mission_id": "perf-probe-trong-diem-work",
   "title": "perf-probe: liệt kê từng câu của ba nguồn /work chạm hạn + sổ thiếu hàng + đối soát lương",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-trongdiem",
@@ -20,7 +20,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T21:25:21.690Z",
-  "updated_at": "2026-10-23T21:25:21.690Z",
-  "last_heartbeat": "2026-10-23T21:25:21.690Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T21:32:41.539Z",
+  "last_heartbeat": "2026-10-23T21:32:41.539Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/perf-probe-trong-diem-work",
+    "sha": "d675c218744c60732f966b7a2c351e935fa1de9a",
+    "at": "2026-10-23T21:32:41.539Z",
+    "actor": "DESKTOP-56TH98Y:wt-trongdiem",
+    "title": "perf-probe: liệt kê từng câu của ba nguồn /work chạm hạn, đo riêng sổ thiếu hàng và trung tâm đối soát lương",
+    "summary": "Chỉ-script (OD-UX-05 mục 2 bước A). TRONG_DIEM thêm getFulfillmentBottleneckQueue · getActionQueue · getReplenishmentPlan · getStockShortage · getReconCenter; khối /work (nền) đo riêng getStockShortage và getReconCenter đúng kỳ adaptPayrollRecon dùng.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint: sạch",
+      "TEST_KHOI=K15,K16,K18 npm test: ĐẠT"
+    ]
+  }
 }
