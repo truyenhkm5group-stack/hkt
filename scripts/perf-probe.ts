@@ -39,6 +39,12 @@ const chamNhat: { ms: number; sql: string; full: string; params: unknown[]; ham:
  * `from` / `where` / `group by` ngoài cùng) là đủ để lần đo sau trỏ thẳng vào dòng mã.
  */
 let hamDangDo: string | null = null;
+/**
+ * ĐANG TRONG CỬA SỔ ĐO của `timed()` (lượt nguội + lượt ấm). Câu đi đường GIAO DỊCH (`Client.query`) chỉ được đếm khi cờ này bật:
+ * mục EXPLAIN phía sau tự mở client riêng và phát `set local jit = off` / `rollback` / `explain analyze …` — đếm chúng là cộng vào
+ * hàm đo cuối cùng (hamDangDo không bao giờ về null) và đẩy câu EXPLAIN vào «tám câu chậm nhất».
+ */
+let dangDo = false;
 let dbCalls = 0;
 let dbRows = 0;
 
@@ -141,6 +147,7 @@ async function timed(page: string, fn: string, run: () => Promise<unknown>) {
   poolWaitPeak = 0;
   poolQueuePeak = 0;
   const t0 = Date.now();
+  dangDo = true;
   try {
     const out = await run();
     const ms = Date.now() - t0;
@@ -159,6 +166,7 @@ async function timed(page: string, fn: string, run: () => Promise<unknown>) {
     const t1 = Date.now();
     await run().catch(() => undefined);
     const warmMs = Date.now() - t1;
+    dangDo = false;
 
     const lap = [...lapHienTai.values()].filter((v) => v.lan > 1).sort((a, b) => b.ms - a.ms)[0] ?? null;
     const size = out === undefined ? 0 : JSON.stringify(out).length;
@@ -178,6 +186,7 @@ async function timed(page: string, fn: string, run: () => Promise<unknown>) {
       note: `${Math.round(size / 1024)}kB`,
     });
   } catch (error) {
+    dangDo = false;
     results.push({
       page,
       fn,
@@ -212,26 +221,42 @@ async function main() {
       CÂU TRONG GIAO DỊCH KHÔNG ĐI QUA `Pool.query`.
 
       `chayKhongJit` mở giao dịch trên một kết nối riêng rồi gọi `client.query` — nên mọi câu đã
-      được tắt JIT đều VÔ HÌNH với bộ đếm bên dưới. Mục "câu chậm bên trong hàm trọng điểm" cần
-      thấy cả hai đường, nên nó bọc `Client.query` (đường chung của cả pool lẫn giao dịch). Chỉ
-      mục ấy đọc lớp bọc này: `Pool.query` gọi xuống `Client.query`, đếm cả hai vào `dbMs` là đếm
-      trùng.
+      được tắt JIT từng VÔ HÌNH với bộ đếm `dbMs` / `dbCalls`: đo production 23/10/2026 sau OD-UX-05,
+      orderSummary / shipmentSummary in «csdl 0ms · 0 lượt» dù tổng là thật (134–249 ms). Nay lớp bọc
+      `Client.query` ghi VÀO CÙNG bộ đếm, cùng «câu chậm» và «câu chạy lại», như đường pool.
+
+      KHÔNG ĐẾM TRÙNG: `Pool.query` gọi xuống `Client.query` ở dạng CALLBACK (trả `undefined`), nên chỉ
+      lời gọi trả Promise — tức đường giao dịch / client dùng thẳng — đi vào nhánh dưới. Câu điều khiển
+      giao dịch (begin · commit · rollback · set local) bỏ qua: là chi phí của chính `chayKhongJit`,
+      đã nằm trong TỔNG của hàm, đếm chúng là làm cột «lượt» không so được với đường pool.
+      Chỉ đếm trong cửa sổ `dangDo` — xem chú thích ở khai báo.
     */
     {
       const client = (pg as unknown as { Client: { prototype: { query: (...args: unknown[]) => unknown } } }).Client.prototype;
       const goc = client.query;
+      const DIEU_KHIEN_GIAO_DICH = /^\s*(begin|commit|rollback|set\s+local)\b/i;
       client.query = function boc(...args: unknown[]) {
         const out = goc.apply(this, args as never);
-        const cau = cauTrongHam;
         const text = typeof args[0] === "string" ? args[0] : String((args[0] as { text?: string } | undefined)?.text ?? "");
-        if (cau && text && out && typeof (out as Promise<unknown>).then === "function") {
+        if (dangDo && text && !DIEU_KHIEN_GIAO_DICH.test(text) && out && typeof (out as Promise<unknown>).then === "function") {
           const t0 = Date.now();
           (out as Promise<unknown>).then(
+            (kq) => {
+              const ms = Date.now() - t0;
+              const rows = Number((kq as { rowCount?: number } | null)?.rowCount ?? 0);
+              dbMs += ms;
+              dbCalls += 1;
+              dbRows += rows;
+              ghiCham(text, ms, layThamSo(args));
+              ghiLap(text, ms, rows);
+            },
             () => {
               const ms = Date.now() - t0;
-              if (ms >= 50) cau.push({ ms, sql: text.replace(/\s+/g, " ").trim().slice(0, 180) });
+              dbMs += ms;
+              dbCalls += 1;
+              ghiCham(text, ms);
+              ghiLap(text, ms, 0);
             },
-            () => undefined,
           );
         }
         return out;
@@ -279,7 +304,7 @@ async function main() {
      * chẩn đoán trước đều phải đoán, và đoán sai hai lần. Bộ đo phải tự trả lời câu đó.
      */
     const ghiCham = (sqlText: string, ms: number, params: unknown[] = []) => {
-      // Đường POOL (không giao dịch). Đường giao dịch do lớp bọc `Client.query` ở trên ghi — `Pool.query`
+      // Cả hai đường gọi vào đây: POOL (lớp bọc `Pool.query`) và GIAO DỊCH (lớp bọc `Client.query`) — `Pool.query`
       // gọi xuống client ở dạng callback nên lớp bọc kia không thấy nó, hai nguồn không trùng nhau.
       if (cauTrongHam && ms >= 50) cauTrongHam.push({ ms, sql: sqlText.replace(/\s+/g, " ").trim().slice(0, 180) });
       if (ms < 200) return;
