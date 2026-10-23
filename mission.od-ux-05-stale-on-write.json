@@ -28,21 +28,21 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T22:53:01.235Z",
-  "updated_at": "2026-10-23T23:54:08.697Z",
-  "last_heartbeat": "2026-10-23T23:52:34.715Z",
+  "updated_at": "2026-10-23T23:55:22.948Z",
+  "last_heartbeat": "2026-10-23T23:55:22.948Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/od-ux-05-stale-on-write",
     "sha": "3ed74344e8be54bdc4089a9f4abf3bde5fb7419e",
-    "at": "2026-10-23T23:52:34.715Z",
+    "at": "2026-10-23T23:55:22.948Z",
     "actor": "DESKTOP-56TH98Y:wt-od05-payroll",
-    "title": "C:/Program Files/Git/work giữ danh sách trước lượt ghi thay vì mất 2–3 nguồn mỗi khi ai đó bấm lưu ở bất cứ đâu",
-    "summary": "OD-UX-05 mục 2(c) theo phạm vi Lead duyệt: 3 khoá RIÊNG /work (work:payroll-recon:* · work:fulfillment:* · work:alerts:*) khai MỘT chỗ ở lib/constants/work-cache.ts, cache.ts nhận qua registerStaleOnWrite. clearMemo ⇒ 3 khoá thành CŨ, mọi khoá khác xoá hẳn; ghi xen lúc tính ⇒ lưu ở trạng thái CŨ (expiresAt = now). Hai khoá bọc mới fulfillmentQueueForWork / actionQueueForWork, job /work giữ ấm. clearMemoAll cho nút «Làm mới số liệu» + bài kiểm cần đặt lại sạch. Bài kiểm (i)–(v) gồm phát sự kiện khi số đổi và đơn huỷ biến khỏi /work sau lượt làm mới; khoá tồn kho/cấu hình không giữ cũ.",
+    "title": "/work giữ danh sách trước lượt ghi thay vì mất 2–3 nguồn mỗi khi ai đó bấm lưu ở bất cứ đâu",
+    "summary": "OD-UX-05 mục 2(c): 3 khoá RIÊNG /work giữ CŨ khi người dùng ghi (lib/constants/work-cache.ts, registerStaleOnWrite); ghi xen lúc tính ⇒ lưu ở trạng thái CŨ; clearMemoAll cho nút «Làm mới số liệu» + bài kiểm cần đặt lại sạch.",
     "tests": [
       "tsc --noEmit: sạch",
       "eslint 10 tệp: sạch",
-      "nền cũ: TEST_KHOI=K01,K03,K04,K07,K10,K11,K12,K13 ĐẠT + K15..K20 ĐẠT (isolation · hygiene · ops-log-leak) + K06,K08 ĐẠT",
-      "nền main mới (một commit 3ed74344): TEST_KHOI=K06,K08,K10,K13 ĐẠT"
+      "nền cũ: TEST_KHOI=K01,K03,K04,K07,K10,K11,K12,K13 ĐẠT + K15..K20 ĐẠT + K06,K08 ĐẠT",
+      "nền main mới (3ed74344): TEST_KHOI=K06,K08,K10,K13 ĐẠT"
     ]
   }
 }
