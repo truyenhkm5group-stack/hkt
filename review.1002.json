@@ -1,0 +1,8 @@
+{
+  "pr": 1002,
+  "sha": "65f8a045805b55951071de687444e3f798f2497f",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T13:08:58.416Z",
+  "note": "review lead: cungVanDon — cả hai có mã VTP ⇒ mã VTP quyết; chỉ đổi đúng ca trước đây luôn 23505 (trùng VTP, khác mã tra cứu); giữ tracking_code dòng cũ; các ca còn lại tương đương bản cũ. Script chỉ PUT order_number_vtp, extend_code thuộc nhóm không được đổi, rollback có rào FOREIGN_CODE/NO_OLD_CODE. Bài đột biến tái hiện đúng 23505."
+}
