@@ -3,7 +3,7 @@ import { currentMarketerCost } from "@/lib/queries/current-marketer-cost";
 import { rowsOf } from "@/lib/sql-rows";
 import { and, asc, count, desc, eq, exists, gte, ilike, inArray, lte, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { handedOffShipmentIds, withHandoff } from "@/lib/queries/shipment-handoff";
 import { liveLineUnitCost, liveOrderCogs } from "@/lib/constants/live-cogs";
@@ -278,27 +278,34 @@ export async function orderSummary(params: ListParams) {
 async function orderSummaryUncached(params: ListParams) {
   const db = await getDb();
   const where = orderListWhere(params);
-  const [row] = await db
-    .select({
-      // Đếm đơn KHÔNG huỷ — cùng định nghĩa với «Doanh số POS» ở Báo cáo lợi nhuận danh nghĩa (HSLC 08/10/2026: hai trang phải ra một số).
-      orders: sql<number>`count(*) filter (where ${schema.orders.stage} not in ('CANCELLED','DELETED'))`,
-      cancelled: sql<number>`count(*) filter (where ${schema.orders.stage} in ('CANCELLED','DELETED'))`,
-      revenue: sql<number>`coalesce(sum(case when ${schema.orders.stage} not in ('CANCELLED','DELETED') then ${schema.orders.totalPriceAfterDiscount} else 0 end), 0)`,
-      cod: sql<number>`coalesce(sum(case when ${schema.orders.stage} not in ('CANCELLED','DELETED') then ${schema.orders.moneyToCollect} else 0 end), 0)`,
-      success: sql<number>`sum(case when ${ORDER_OUTCOME_FAST} = 'DELIVERED' then 1 else 0 end)`,
-      quantity: sql<number>`coalesce(sum(case when ${schema.orders.stage} not in ('CANCELLED','DELETED') then ${schema.orders.totalQuantity} else 0 end), 0)`,
-    })
-    .from(schema.orders)
-    // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
-    .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, schema.orders.id), PRIMARY_ATTEMPT))
-    .where(where);
-  // Đếm đơn chưa chuẩn hoá địa chỉ BỎ QUA chính bộ lọc địa chỉ, để con số trên nhãn bộ lọc không
-  // đổi theo lựa chọn của chính nó (chọn "Đã chuẩn hoá" mà nhãn kia hiện 0 thì gây hiểu nhầm).
-  const [unnormalized] = await db
-    .select({ n: count() })
-    .from(schema.orders)
-    .where(and(orderListWhere(params, { ignoreAddressFilter: true }), sql`coalesce(${schema.orders.shipProvince}, '') = ''`, sql`${schema.orders.stage} not in ('CANCELLED','DELETED')`));
-  return { orders: Number(row?.orders ?? 0), cancelled: Number(row?.cancelled ?? 0), revenue: Number(row?.revenue ?? 0), cod: Number(row?.cod ?? 0), success: Number(row?.success ?? 0), quantity: Number(row?.quantity ?? 0), unnormalizedAddress: Number(unnormalized?.n ?? 0) };
+  /*
+    TẮT JIT (OD-UX-05, đo production 23/10/2026): câu gộp mang `ORDER_OUTCOME_FAST` trên mọi đơn của kỳ — EXPLAIN xen kẽ 3 lượt
+    JIT bật trung vị 10.907 ms, JIT tắt 168,6 ms (98 % là biên dịch JIT); /orders chờ 8,9 s ở thân trang. Hai câu chung MỘT giao
+    dịch và chỉ dùng `tx` — mượn thêm `db` bên trong là xin kết nối thứ hai từ bể 5 chỗ.
+  */
+  return chayKhongJit(db, async (tx) => {
+    const [row] = await tx
+      .select({
+        // Đếm đơn KHÔNG huỷ — cùng định nghĩa với «Doanh số POS» ở Báo cáo lợi nhuận danh nghĩa (HSLC 08/10/2026: hai trang phải ra một số).
+        orders: sql<number>`count(*) filter (where ${schema.orders.stage} not in ('CANCELLED','DELETED'))`,
+        cancelled: sql<number>`count(*) filter (where ${schema.orders.stage} in ('CANCELLED','DELETED'))`,
+        revenue: sql<number>`coalesce(sum(case when ${schema.orders.stage} not in ('CANCELLED','DELETED') then ${schema.orders.totalPriceAfterDiscount} else 0 end), 0)`,
+        cod: sql<number>`coalesce(sum(case when ${schema.orders.stage} not in ('CANCELLED','DELETED') then ${schema.orders.moneyToCollect} else 0 end), 0)`,
+        success: sql<number>`sum(case when ${ORDER_OUTCOME_FAST} = 'DELIVERED' then 1 else 0 end)`,
+        quantity: sql<number>`coalesce(sum(case when ${schema.orders.stage} not in ('CANCELLED','DELETED') then ${schema.orders.totalQuantity} else 0 end), 0)`,
+      })
+      .from(schema.orders)
+      // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
+      .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, schema.orders.id), PRIMARY_ATTEMPT))
+      .where(where);
+    // Đếm đơn chưa chuẩn hoá địa chỉ BỎ QUA chính bộ lọc địa chỉ, để con số trên nhãn bộ lọc không
+    // đổi theo lựa chọn của chính nó (chọn "Đã chuẩn hoá" mà nhãn kia hiện 0 thì gây hiểu nhầm).
+    const [unnormalized] = await tx
+      .select({ n: count() })
+      .from(schema.orders)
+      .where(and(orderListWhere(params, { ignoreAddressFilter: true }), sql`coalesce(${schema.orders.shipProvince}, '') = ''`, sql`${schema.orders.stage} not in ('CANCELLED','DELETED')`));
+    return { orders: Number(row?.orders ?? 0), cancelled: Number(row?.cancelled ?? 0), revenue: Number(row?.revenue ?? 0), cod: Number(row?.cod ?? 0), success: Number(row?.success ?? 0), quantity: Number(row?.quantity ?? 0), unnormalizedAddress: Number(unnormalized?.n ?? 0) };
+  });
 }
 
 /**
