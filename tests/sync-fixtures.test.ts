@@ -766,6 +766,8 @@ import { testAiSalesKnowledge } from "./ai-sales-knowledge.test";
 import { testSalesModelFallbackTenant } from "./sales-model-fallback-tenant.test";
 
 async function main() {
+  // Lá chắn lúc chạy (db/index.ts): getDb() bên trong chayKhongJit ⇒ ném — xin kết nối thứ hai khi đang giữ một giao dịch.
+  process.env.ERP_TX_GUARD = "1";
   /*
     ═══ ĐO THỜI GIAN TỪNG NHÓM — SỐ ĐỂ CHIA JOB, KHÔNG PHẢI ĐỂ NÂNG TRẦN ═══
     Trần job kiểm thử đã phải nâng một lần (35′ → 45′, #830) và vẫn bị cắt (#842: 45,5′ ở nhánh có token,
