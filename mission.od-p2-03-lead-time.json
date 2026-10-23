@@ -3,7 +3,7 @@
   "mission_id": "od-p2-03-lead-time",
   "title": "OD-P2-03: lead time xưởng đọc production_orders.received_at; dự phòng ghép phiếu nhập có nhãn ước tính + độ phủ",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-leadtime",
@@ -23,7 +23,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T07:58:47.380Z",
-  "updated_at": "2026-10-23T07:58:47.380Z",
-  "last_heartbeat": "2026-10-23T07:58:47.380Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T08:51:08.449Z",
+  "last_heartbeat": "2026-10-23T08:51:08.449Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/od-p2-03-lead-time",
+    "sha": "46c4866752eed9cdd912527f4b265c4500552096",
+    "at": "2026-10-23T08:51:08.449Z",
+    "actor": "DESKTOP-56TH98Y:wt-leadtime",
+    "title": "Thời gian giao của xưởng nay đo bằng mốc kho bấm «đã nhận»; lô chưa có mốc mới ước tính, và ô nói rõ",
+    "summary": "OD-P2-03. purchasing.ts đọc production_orders.received_at: mốc thật thắng phiếu; lô không mốc đi đường ghép một-một cũ, nhãn ESTIMATED; mốc sớm hơn ngày gửi = mâu thuẫn, không dùng, đếm leadContradictory; phép ghép vẫn chạy trên mọi lô. Đủ 3 lô mốc thật ⇒ trung vị CHỈ mốc thật, thiếu ⇒ MIXED/ESTIMATED và trang in nhãn. Thêm leadActual/leadEstimated/leadSamples/leadBasis/leadActualPercent. Chỉ báo cáo. Gộp SAU purchasing-leadtime-probe; số trước/sau đo bằng probe.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint 3 tệp: sạch",
+      "TEST_KHOI=K06 npm test: ĐẠT (purchasing: 5 ca hàm thuần mốc thật + CSDL thật · suppliers)"
+    ]
+  }
 }
