@@ -1,0 +1,8 @@
+{
+  "pr": 1016,
+  "sha": "37dfcdd14ef9db1194aead0973b5db48d46eede9",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T21:28:00.092Z",
+  "note": "review lead: hàm thuần myWorkNotice — thiếu nguồn ⇒ «Ít nhất N việc» / «Chưa biết bạn còn việc hay không», ô đếm ghi cận dưới, không «Hàng đợi trống» (luật 42); nhãn nguồn thay mã; bài kiểm các nhánh."
+}
