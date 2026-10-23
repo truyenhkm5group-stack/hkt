@@ -1,8 +1,8 @@
 {
   "pr": 999,
-  "sha": "ec0a4fdd5ef9844ff2ef67010e6543b3b0fcf740",
+  "sha": "7adf026b978c804b373500e856c912d0c85c0618",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-23T11:26:49.624Z",
-  "note": "review lead: CHỈ TÀI LIỆU — OD-P2-04 DỪNG (7 lượt/30 ngày, 0 thao tác, wip giữ), OD-P2-03 MERGED #998 (0 lô dữ liệu), sửa bằng chứng UX-01 (error.tsx gốc dashboard đã phủ), top 15 trang 30 ngày, phân công UX-03/UX-04, người giữ tệp."
+  "at": "2026-10-23T11:37:19.143Z",
+  "note": "review lead: CHỈ TÀI LIỆU, chỉ gộp main (dòng OD-P2-03 giữ bản ghi MERGED #998 cceb5e4b, 0 lô dữ liệu)."
 }
