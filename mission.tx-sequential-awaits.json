@@ -3,7 +3,7 @@
   "mission_id": "tx-sequential-awaits",
   "title": "Trong một giao dịch các câu chạy nối tiếp: bỏ Promise.all trên client của chayKhongJit (reports · payroll · marketing-daily · cost-engine) + bài quét",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-txseq",
@@ -27,9 +27,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T18:50:12.444Z",
-  "updated_at": "2026-10-23T19:55:27.878Z",
+  "updated_at": "2026-10-23T20:12:57.810Z",
   "last_heartbeat": "2026-10-23T19:53:13.045Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1013 → d143c7143ca4068e7a3c93c3821dbe08cac8927c"
+  },
   "handoff": {
     "branch": "claude/tx-sequential-awaits",
     "sha": "9707187013949a70be127832229796cb5ea57b35",
