@@ -33,7 +33,8 @@ import { SAMPLE_STATUS_TO_WORK, TOPIC_OPEN_STATUSES, TOPIC_STATUS_LABEL, TOPIC_S
 import { PAYROLL_EMPLOYEES_KEY } from "@/lib/constants/payroll";
 import { monthKeyOf } from "@/lib/constants/payroll-carryover";
 import { reconCenterDefaultRange, type ApprovalItem } from "@/lib/payroll/recon-center";
-import { memo, memoPeek } from "@/lib/cache";
+import { memo, memoPeek, registerStaleOnWrite } from "@/lib/cache";
+import { WORK_ALERTS_KEY, WORK_FULFILLMENT_KEY, WORK_PAYROLL_RECON_PREFIX, WORK_STALE_ON_WRITE_PREFIXES, WORK_WRAPPER_TTL_MS } from "@/lib/constants/work-cache";
 import { approvalStillValid } from "@/lib/approvals/service";
 import { SOURCING_TRIAL_WORK_LABEL, type SourcingTrialWorkKind } from "@/lib/constants/sourcing";
 import { getSettingJson } from "@/lib/settings";
@@ -353,8 +354,21 @@ export async function adaptShipmentCare(now: Date, closedSince: Date | null = nu
 
 /* ═══════════════════ 3 · NÚT THẮT FULFILLMENT ═══════════════════ */
 
+// OD-UX-05 mục 2(c): ba khoá riêng của /work giữ số cũ khi người dùng ghi (danh sách duy nhất: lib/constants/work-cache.ts).
+registerStaleOnWrite(WORK_STALE_ON_WRITE_PREFIXES);
+
+/** Hàng đợi nút thắt fulfillment qua đệm RIÊNG của /work — job /work giữ ấm đúng khoá này. */
+export function fulfillmentQueueForWork() {
+  return memo(WORK_FULFILLMENT_KEY, WORK_WRAPPER_TTL_MS, () => getFulfillmentBottleneckQueue());
+}
+
+/** Hàng đợi cảnh báo qua đệm RIÊNG của /work — job /work giữ ấm đúng khoá này. */
+export function actionQueueForWork() {
+  return memo(WORK_ALERTS_KEY, WORK_WRAPPER_TTL_MS, () => getActionQueue({ limit: 500 }));
+}
+
 export async function adaptFulfillment(): Promise<WorkItem[]> {
-  const queue = await getFulfillmentBottleneckQueue();
+  const queue = await fulfillmentQueueForWork();
   return queue.cases.map((c) => {
     const score = caseScore({ severity: c.sla.breached ? "critical" : "warning", ageHours: c.ageHours, amount: c.moneyAtRisk, type: "ORDER_CONFIRMATION_STALE" });
     return {
@@ -718,7 +732,7 @@ export async function adaptAdsDecisions(now: Date): Promise<WorkItem[]> {
 /* ═══════════════════ 6 · CẢNH BÁO (và ba nguồn tách ra từ nó) ═══════════════════ */
 
 export async function adaptAlerts(now: Date): Promise<WorkItem[]> {
-  const queue = await getActionQueue({ limit: 500 });
+  const queue = await actionQueueForWork();
   const items: WorkItem[] = [];
   for (const c of queue.cases) {
     if (ALERT_KINDS_OWNED_ELSEWHERE.includes(c.type)) continue;
@@ -1197,7 +1211,7 @@ const PAYROLL_RECON_WORK_TTL_MS = 15 * 60_000;
 /** Nhịp job giữ ấm tính lại nguồn này (`workWarmTasks`, lib/queries/warm.ts) — phải nhỏ hơn đệm 15 phút. */
 export const PAYROLL_RECON_WARM_EVERY_MINUTES = 12;
 
-const payrollReconKey = (fromMonth: string, toMonth: string) => `work:payroll-recon:${fromMonth}:${toMonth}`;
+const payrollReconKey = (fromMonth: string, toMonth: string) => `${WORK_PAYROLL_RECON_PREFIX}${fromMonth}:${toMonth}`;
 
 /** Câu của nguồn khi đệm chưa có số — chứa «đang tính lại» để /work nói đúng là CHƯA BIẾT, không phải 0 việc. */
 export const PAYROLL_RECON_PENDING_TEXT = `đang tính lại (máy tính lại mỗi ${PAYROLL_RECON_WARM_EVERY_MINUTES} phút)`;

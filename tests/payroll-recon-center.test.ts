@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { memoKeys, clearMemo } from "@/lib/cache";
+import { clearMemoAll, memoKeys, clearMemo } from "@/lib/cache";
 import { setSettingJson, getSettingJson } from "@/lib/settings";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
 import { APPROVAL_ITEM_KEYS, APPROVAL_ITEM_OWNER, buildApprovalList, personalShareWithoutCode, buildOpeningProposal, codGapCause, historicalSalary, issueOwner, reconCenterDefaultRange, type ApprovalInput, type OpeningMonthInput } from "@/lib/payroll/recon-center";
@@ -312,8 +312,9 @@ async function testFlow(db: Db) {
     /*
       ĐƯỜNG TRANG CHỈ ĐỌC ĐỆM (OD-UX-05 mục 2, 24/10/2026): đệm nguội ⇒ nguồn báo «đang tính lại» NGAY và KHÔNG tự dựng
       Trung tâm đối soát (lượt tính 22,5 s giữ 3–4/5 kết nối của bể trên production). Job giữ ấm là đường tính duy nhất.
+      NGUỘI THẬT ⇒ clearMemoAll: clearMemo sau lượt ghi cố ý giữ cũ khoá riêng /work (OD-UX-05 2c).
     */
-    clearMemo();
+    clearMemoAll();
     const t0 = Date.now();
     const nguoi = await collectWorkItems({ sources: ["PAYROLL_RECON"], now: luc });
     assert.deepEqual(nguoi.items, [], "đệm nguội ⇒ không bịa việc");
@@ -325,7 +326,10 @@ async function testFlow(db: Db) {
     assert.deepEqual([sauJob.failed, sauJob.items.map((v) => v.key).sort()], [[], tren.map((v) => v.key).sort()], "job (adaptPayrollRecon) tính xong ⇒ /work đọc đủ từ đệm");
     await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [nv("rc-e1", { startedOn: "2025-01-01" })] });
     clearMemo();
-    assert.ok(!(await adaptPayrollRecon(luc)).some((v) => v.sourceKey === "undated-employees"), "khai ngày vào làm xong ⇒ việc tự rời hàng đợi, không ai bấm «xong»");
+    // OD-UX-05 2c: khoá riêng /work giữ CŨ sau lượt ghi — lượt đọc ngay sau ghi nhận số trước (làm mới chạy phía sau),
+    // lượt kế tiếp dùng chung lượt làm mới đó.
+    await adaptPayrollRecon(luc);
+    assert.ok(!(await adaptPayrollRecon(luc)).some((v) => v.sourceKey === "undated-employees"), "khai ngày vào làm xong ⇒ việc tự rời hàng đợi sau lượt làm mới, không ai bấm «xong»");
     await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [] });
     clearMemo();
 

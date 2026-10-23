@@ -89,6 +89,7 @@ import { testFinanceTruth } from "./finance-truth.test";
 import { testFinanceInvariants } from "./finance-invariants.test";
 import { testWorkOs } from "./work-os.test";
 import { testMyWorkNotice } from "./my-work-notice.test";
+import { testMemoStaleOnWrite } from "./memo-stale-on-write.test";
 import { testTechControlPlaneDb, testTechHealthParsing, testTechLifecycle, testTechPermissions, testTechRiskEngine } from "./tech-control-plane.test";
 import { testTechControlPlaneGoalsDb, testTechControlPlaneVocabulary } from "./tech-control-plane-goals.test";
 import { testTechWorkerDb, testTechWorkerPure } from "./tech-worker.test";
@@ -2754,6 +2755,8 @@ async function main() {
     await testWorkOs(db);
     // OD-UX-05 mục 2 (24/10/2026): /work thiếu nguồn ⇒ CHƯA BIẾT, không «hết việc» (AGENTS 42).
     testMyWorkNotice();
+    // OD-UX-05 mục 2(c) (24/10/2026): đệm riêng /work giữ số cũ khi người dùng ghi.
+    await testMemoStaleOnWrite(db);
     /*
       MẶT PHẲNG ĐIỀU KHIỂN PHÒNG TECH AI. Chạy SAU `testWorkOs` và tự dọn bằng tiền tố `tech-t-`:
       nó gieo một tài khoản, hai việc Tech, sổ agent, một lượt chạy, hai lượt deploy và một sự cố —

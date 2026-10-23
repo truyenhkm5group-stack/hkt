@@ -111,9 +111,38 @@ function tranChoChung(): number {
 
 type DangChay = { p: Promise<unknown>; at: number };
 
-const holder = globalThis as unknown as { __erpMemo?: { entries: Map<string, Entry>; inflight: Map<string, DangChay>; version: number } };
-if (!holder.__erpMemo) holder.__erpMemo = { entries: new Map(), inflight: new Map(), version: 0 };
+const holder = globalThis as unknown as { __erpMemo?: { entries: Map<string, Entry>; inflight: Map<string, DangChay>; version: number; giuCu: string[] } };
+if (!holder.__erpMemo) holder.__erpMemo = { entries: new Map(), inflight: new Map(), version: 0, giuCu: [] };
 const store = holder.__erpMemo;
+// Holder dựng bởi bản trước (chưa có trường này) trong cùng tiến trình — `giuCu` là tiền tố khoá, không chứa dữ liệu nghiệp vụ.
+if (!Array.isArray(store.giuCu)) store.giuCu = [];
+
+/**
+ * KHOÁ GIỮ SỐ CŨ KHI NGƯỜI DÙNG GHI (OD-UX-05 mục 2(c)). Miền đăng ký tiền tố khoá GỐC (không mang `org:<mã>:`) — danh sách
+ * duy nhất ở lib/constants/work-cache.ts. `clearMemo()` đánh dấu chúng CŨ thay vì xoá, và lượt tính xong sau một lượt ghi
+ * được lưu ở trạng thái CŨ thay vì vứt. Mọi khoá khác giữ nguyên ngữ nghĩa «xoá hẳn».
+ */
+export function registerStaleOnWrite(prefixes: readonly string[]) {
+  for (const p of prefixes) if (p && !store.giuCu.includes(p)) store.giuCu.push(p);
+}
+
+/** Khoá thật ⇒ khoá gốc: bỏ tiền tố tổ chức `org:<mã>:` (memoStoreKey). */
+const khoaGoc = (k: string) => (k.startsWith("org:") ? k.slice(k.indexOf(":", 4) + 1) : k);
+const giuCuKhiGhi = (baseKey: string) => store.giuCu.some((p) => baseKey.startsWith(p));
+
+/**
+ * Ghi kết quả một lượt tính. Không có lượt ghi xen vào ⇒ số tươi. Có lượt ghi xen vào: khoá giữ-cũ ⇒ LƯU nhưng ở trạng thái
+ * CŨ (tính trên dữ liệu TRƯỚC lượt ghi — người đọc kế tiếp nhận ngay và lượt làm mới chạy sau); khoá khác ⇒ vứt như trước.
+ * Trả về `true` khi đã ghi số TƯƠI.
+ */
+function luuKetQua(key: string, baseKey: string, version: number, value: unknown, at: number, ttlMs: number): boolean {
+  if (store.version === version) {
+    store.entries.set(key, { value, expiresAt: Date.now() + ttlMs, at });
+    return true;
+  }
+  if (giuCuKhiGhi(baseKey)) store.entries.set(key, { value, expiresAt: Date.now(), at });
+  return false;
+}
 
 /** Lượt tính đang chạy cho khoá này, NẾU nó còn sống. Quá trần thì coi như đã bị bỏ rơi. */
 function luotDangChay(key: string): Promise<unknown> | null {
@@ -195,8 +224,7 @@ async function memoFor<T>(org: { code: string; isHome: boolean }, baseKey: strin
     const run = org.isHome ? fn : () => withOrganization(org.code, fn);
     const refresh = tinhKemMoc(run)
       .then(({ value, at }) => {
-        if (store.version === version) {
-          store.entries.set(key, { value, expiresAt: Date.now() + ttlMs, at });
+        if (luuKetQua(key, baseKey, version, value, at, ttlMs)) {
           /**
            * NGƯỜI ĐANG XEM SỐ CŨ PHẢI ĐƯỢC KÉO LÊN SỐ MỚI.
            *
@@ -232,7 +260,7 @@ async function memoFor<T>(org: { code: string; isHome: boolean }, baseKey: strin
   }
   const version = store.version;
   const p = tinhKemMoc(fn).then(({ value, at }) => {
-    if (store.version === version) store.entries.set(key, { value, expiresAt: Date.now() + ttlMs, at });
+    luuKetQua(key, baseKey, version, value, at, ttlMs);
     record(name, performance.now() - started, false);
     return { value, at };
   });
@@ -276,6 +304,21 @@ function daDoi(a: unknown, b: unknown): boolean {
  * tổ chức kia tính lại một lần, không bao giờ làm ai thấy số của người khác.
  */
 export function clearMemo() {
+  // Khoá giữ-cũ (registerStaleOnWrite) chỉ bị ĐÁNH DẤU CŨ — đúng ngữ nghĩa staleMemo; mọi khoá khác xoá hẳn như trước.
+  const now = Date.now();
+  for (const [k, e] of store.entries) {
+    if (giuCuKhiGhi(khoaGoc(k))) store.entries.set(k, { value: e.value, expiresAt: Math.min(e.expiresAt, now), at: e.at });
+    else store.entries.delete(k);
+  }
+  store.version += 1;
+}
+
+/**
+ * XOÁ HẲN TOÀN BỘ, KỂ CẢ khoá giữ-cũ — khi chính người dùng HỎI số mới (nút «Làm mới số liệu») và khi bài kiểm cần đặt lại
+ * sạch giữa hai bước. `clearMemo()` (sau một lượt GHI) cố ý giữ cũ các khoá riêng của /work; nút làm mới thì không: người vừa
+ * bấm đang nhìn màn hình và hỏi đúng câu «số bây giờ là bao nhiêu».
+ */
+export function clearMemoAll() {
   store.entries.clear();
   store.version += 1;
 }
