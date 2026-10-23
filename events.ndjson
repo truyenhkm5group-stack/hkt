@@ -1,4 +1,3 @@
-{"at":"2026-10-18T19:24:35.917Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"ci-tsc-heap","detail":"#905 cho claude/ci-tsc-heap @ 6c7cfde6fe1b"}
 {"at":"2026-10-18T19:25:02.967Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#905 @ 6c7cfde6fe1b · lead: chỉ thêm NODE_OPTIONS=--max-old-space-size=6144 cho bước tsc (cùng mức bước dựng) — #903/#904 đỏ heap OOM ở tsc khi hai nhánh kiểm thử xanh"}
 {"at":"2026-10-18T20:05:00.255Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"ci-tsc-heap","detail":"#905 @ 6c7cfde6fe1b → 1a130391546c (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-18T20:06:28.648Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"1a130391546c · run 39161759994 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39161759994"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-23T23:28:55.765Z","actor":"DESKTOP-56TH98Y:wt-peek2","kind":"HANDOFF","mission":"pos-reship-peek-deep","detail":"claude/pos-reship-peek-deep @ 162240926bbe · 1 lệnh kiểm thử"}
 {"at":"2026-10-23T23:31:58.841Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"pos-reship-peek-deep","detail":"#1022 cho claude/pos-reship-peek-deep @ 162240926bbe"}
 {"at":"2026-10-23T23:32:44.153Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#1022 @ 162240926bbe · review lead: chỉ-script chỉ đọc; vân tay khối customer sâu 4 tầng, chuỗi chữ chỉ băm, chỉ lộ boolean/mốc ISO/số mang tên đếm-mốc; --orders ≤15 chữ số; đầu ra pos-reship-link đã nằm trong OPS_THAO_TAC_MA_HOA (mã hoá)."}
+{"at":"2026-10-23T23:37:48.573Z","actor":"DESKTOP-56TH98Y:wt-payroll-gate","kind":"HANDOFF","mission":"ai-credit-alert","detail":"claude/ai-credit-alert @ e575b1e8d6e4 · 4 lệnh kiểm thử"}
