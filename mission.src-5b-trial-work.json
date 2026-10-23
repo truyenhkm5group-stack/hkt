@@ -3,13 +3,13 @@
   "mission_id": "src-5b-trial-work",
   "title": "SRC-5b: việc mua thử trên /work (đã duyệt chưa đặt · đã đặt chưa về)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
   "worker": null,
   "worktree": null,
-  "branch": null,
+  "branch": "claude/src-5b-trial-work",
   "base_sha": null,
   "domains": [],
   "owned_paths": [
@@ -25,7 +25,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T19:50:24.182Z",
-  "updated_at": "2026-10-23T19:50:24.182Z",
-  "last_heartbeat": "2026-10-23T19:50:24.182Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T21:29:21.158Z",
+  "last_heartbeat": "2026-10-23T21:29:21.158Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/src-5b-trial-work",
+    "sha": "fcf79ad07966bed5af6dffdd74548b407f81c768",
+    "at": "2026-10-23T21:29:21.158Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "Việc mua thử trên /work: đã duyệt chưa đặt · đã đặt chưa về (SRC-5b)",
+    "summary": "Nguồn SOURCE SOURCING_TRIAL, hai loại ORDER/RECEIVE; hạn lấy lại từ lib/constants/sourcing.ts (ORDER = APPROVAL_VALID_HOURS, RECEIVE null); phòng TEAM_DEPARTMENT.PRODUCTION (về Kho theo divergence có sẵn); chỉ OPEN_SOURCE; không migration",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "npm run lint: sạch",
+      "npm test shard 1/4–4/4: TẤT CẢ ĐẠT (cây đã đặt lại trên main d143c7143)",
+      "npm run build: Compiled successfully"
+    ]
+  }
 }
