@@ -3,7 +3,7 @@
   "mission_id": "address-reask-qtyack",
   "title": "Câu máy chủ tự soạn (qtyAck · roundCheck · serverCancel) không còn xin lại địa chỉ đã gửi; 2B ADDRESS_REASK theo luật 3.12b",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-qtyack",
@@ -23,7 +23,24 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T03:37:32.326Z",
-  "updated_at": "2026-10-23T03:37:32.326Z",
-  "last_heartbeat": "2026-10-23T03:37:32.326Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T05:15:01.092Z",
+  "last_heartbeat": "2026-10-23T05:15:01.092Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/address-reask-qtyack",
+    "sha": "df9304c9e550e6efd35020ba74c3a08e26200acd",
+    "at": "2026-10-23T05:15:01.092Z",
+    "actor": "DESKTOP-56TH98Y:wt-qtyack",
+    "title": "Câu máy chủ tự soạn (qtyAck · roundCheck · serverCancel) không còn xin lại địa chỉ đã gửi; 2B ADDRESS_REASK theo luật 3.12b",
+    "summary": "Rà sau #972. (1) Điểm chặn hỏi-lại địa chỉ đặt cờ quá muộn (giữa chatTurnCore) ⇒ câu máy chủ tự soạn (qtyAck · round-check · huỷ đơn) qua với cờ false; nay markAddressGiven đặt cờ ngay khi lượt có tin khách + sau round-check «đặt thêm»; quét mã nguồn: mọi reply() sau lần đặt đầu, cờ chỉ đặt một chỗ. (2) qtyAck tin hai ý chèn DELIVERY_ASK_NEEDS_ADDRESS («mình gửi em địa chỉ, em báo thời gian…») vô điều kiện và câu đó lọt cả bộ phát hiện; nay CUSTOMER_SENDS_ADDRESS bắt lời xin dạng kể (khách gửi/nhắn/báo/cho SHOP một phần địa chỉ), bài kiểm hai phía (không bắt «gửi hàng về địa chỉ…», «gửi chị mã vận đơn», «báo chị khi hàng tới», «gửi em đường link»); đã có chữ địa chỉ ⇒ tin hai ý không đi nhánh qtyAck. (3) 2B ADDRESS_REASK đếm cả REPEAT_ASK (xin lặp thứ chưa có — ca theo dõi 16:24Z 22/10, trace code-erp-42) ⇒ mở lại sổ tái diễn #972 sai; nay ADDRESS_REASK = vế 3.12b (addressAskAfterText, cùng hàm engine; lib ≡ dòng O conv-money-trace) ∨ mã «đã biết»; REPEAT_ASK ⇒ mã mới REPEAT_ASK_UNANSWERED (cuối danh sách, không nối sổ tái diễn); khoá ADDRESS_REASK giữ, spec definitionChangedAt 2026-10-23, tin việc 7 ngày đầu in ghi chú đổi định nghĩa (AGENTS 40); stuck-conversation-audit khai nhóm + mẫu số cho mã mới.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "npm run lint: sạch",
+      "TEST_KHOI=K22 (address-reask-qtyack · address-never-reask · sales-quality-daily · regression-watch): ĐẠT",
+      "TEST_KHOI=K21 (p0-short-qty-round gồm hai ca hồi quy địa chỉ → hỏi giá → «2kg» / «2kg, mấy ngày nhận» ⇒ 0 câu xin địa chỉ · golden): ĐẠT",
+      "TEST_KHOI=K20 (stuck-conversation-audit · stuck-audit-2b-lines): ĐẠT",
+      "rebase sạch lên main c5b6d7ce4, tsc lại sạch",
+      "full suite giao cho CI gates"
+    ]
+  }
 }
