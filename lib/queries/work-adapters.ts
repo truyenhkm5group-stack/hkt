@@ -34,6 +34,8 @@ import { PAYROLL_EMPLOYEES_KEY } from "@/lib/constants/payroll";
 import { monthKeyOf } from "@/lib/constants/payroll-carryover";
 import { reconCenterDefaultRange, type ApprovalItem } from "@/lib/payroll/recon-center";
 import { memo } from "@/lib/cache";
+import { approvalStillValid } from "@/lib/approvals/service";
+import { SOURCING_TRIAL_WORK_LABEL, type SourcingTrialWorkKind } from "@/lib/constants/sourcing";
 import { getSettingJson } from "@/lib/settings";
 import { vnStartOfDay } from "@/lib/format";
 
@@ -1056,6 +1058,84 @@ export async function adaptSampleReviews(now: Date): Promise<WorkItem[]> {
   });
 }
 
+/* ═══════════════════ MUA THỬ MẪU NGUỒN (SRC-5b) ═══════════════════
+ *
+ * PHÉP CHIẾU lên `sourcing_trial_requests` (luật 19) — hai loại việc:
+ *  · `ORDER`   — lời duyệt (`approval_requests`, nhóm SOURCING_TRIAL) ĐÃ DUYỆT, còn hiệu lực (`approvalStillValid` của lõi), mà bảng
+ *    chưa ghi «đã đặt». Mốc bắt đầu = lúc duyệt. Quá hạn hiệu lực ⇒ rời hàng đợi (lời duyệt đã mất, người xin phải xin lại).
+ *  · `RECEIVE` — đã đặt (ngoài ERP) mà chưa ghi «đã về». Mốc bắt đầu = lúc người bấm «đã đặt».
+ * Chờ DUYỆT không ở đây: nó là việc của nguồn `APPROVAL`. Việc rời hàng đợi khi người bấm đúng action của miền ở
+ * /sourcing/trials/[id] — nút trên /work chỉ MỞ trang đó.
+ */
+export async function adaptSourcingTrials(now: Date): Promise<WorkItem[]> {
+  const db = await getDb();
+  const t = schema.sourcingTrialRequests;
+  const ap = schema.approvalRequests;
+  const rows = await db
+    .select({
+      id: t.id,
+      status: t.status,
+      totalQty: t.totalQty,
+      orderedAt: t.orderedAt,
+      requestedAt: t.requestedAt,
+      approval: { status: ap.status, decidedAt: ap.decidedAt, executedAt: ap.executedAt },
+      modelCode: schema.productModels.code,
+      titleVi: schema.sourcingOffers.titleVi,
+    })
+    .from(t)
+    .innerJoin(schema.sourcingShortlist, eq(schema.sourcingShortlist.id, t.shortlistId))
+    .innerJoin(schema.sourcingOffers, eq(schema.sourcingOffers.id, schema.sourcingShortlist.offerId))
+    .innerJoin(schema.productModels, eq(schema.productModels.id, schema.sourcingShortlist.modelId))
+    .leftJoin(ap, eq(ap.id, t.approvalRequestId))
+    .where(or(eq(t.status, "ORDERED"), and(eq(t.status, "REQUESTED"), eq(ap.status, "APPROVED"))))
+    .limit(500);
+  const ms = now.getTime();
+  const items: WorkItem[] = [];
+  for (const r of rows) {
+    let kind: SourcingTrialWorkKind;
+    let from: Date;
+    if (r.status === "ORDERED" && r.orderedAt) {
+      kind = "RECEIVE";
+      from = r.orderedAt;
+    } else if (r.status === "REQUESTED" && r.approval?.decidedAt && approvalStillValid({ status: r.approval.status ?? "", decidedAt: r.approval.decidedAt, executedAt: r.approval.executedAt ?? null }, now)) {
+      kind = "ORDER";
+      from = r.approval.decidedAt;
+    } else continue;
+    items.push({
+      key: workKey("SOURCING_TRIAL", `${kind}:${r.id}`),
+      sourceType: "SOURCING_TRIAL",
+      sourceKey: `${kind}:${r.id}`,
+      kind,
+      title: `${r.modelCode} · mua thử ${r.totalQty} cái — ${kind === "ORDER" ? "đã duyệt, chưa đặt" : "đã đặt, chưa về"}`,
+      summary: kind === "ORDER" ? `«${r.titleVi}»: lời duyệt còn hạn — người xin đặt ngoài ERP rồi bấm «đã đặt».` : `«${r.titleVi}»: đã đặt ngoài ERP — hàng về thì bấm «đã về» và gắn phiếu nhập.`,
+      department: WORK_SOURCE_SPEC.SOURCING_TRIAL.department!,
+      assignee: null,
+      status: "NEW",
+      statusAuthority: "SOURCE" as const,
+      priority: kind === "ORDER" ? "HIGH" : "NORMAL",
+      score: caseScore({ severity: kind === "ORDER" ? "warning" : "info", ageHours: hoursSince(from, ms), amount: 0, type: "OTHER" }),
+      createdAt: from,
+      startedAt: null,
+      dueAt: null,
+      slaAt: slaDueAt("SOURCING_TRIAL", kind, from, null),
+      completedAt: null,
+      snoozedUntil: null,
+      businessEntity: "SOURCING_TRIAL",
+      businessEntityId: r.id,
+      sourceUrl: `/sourcing/trials/${r.id}`,
+      // Giá về VN trong ảnh chụp là ƯỚC TÍNH, không phải tiền đang mắc — không đưa vào cột tiền của hàng đợi.
+      money: MONEY_UNKNOWN,
+      tags: [SOURCING_TRIAL_WORK_LABEL[kind]],
+      evidence: { source: "Tìm hàng nguồn · Mua thử", detail: `${kind === "ORDER" ? "duyệt" : "đặt"} lúc ${formatDateTime(from)}` },
+      blockedReason: "",
+      creationSource: "AUTO" as WorkItem["creationSource"],
+      actions: actionsOf("SOURCING_TRIAL"),
+      recommendedAction: kind === "ORDER" ? "Mở yêu cầu, đặt hàng ngoài ERP rồi bấm «đã đặt»" : "Mở yêu cầu, khi hàng về bấm «đã về» kèm phiếu nhập",
+    });
+  }
+  return items;
+}
+
 /* ═══════════════════ 7b · DỮ LIỆU LƯƠNG CHỜ BỔ SUNG (Trung tâm đối soát) ═══════════════════ */
 
 /**
@@ -1328,6 +1408,7 @@ export async function collectWorkItems(opts: CollectOptions = {}): Promise<{ ite
     want("APPROVAL") ? guard("APPROVAL", () => adaptApprovals(now, opts.includeClosed ?? false, closedSince)) : [],
     want("PRODUCTION_TOPIC") ? guard("PRODUCTION_TOPIC", () => adaptProductionTopics(now)) : [],
     want("SAMPLE_REVIEW") ? guard("SAMPLE_REVIEW", () => adaptSampleReviews(now)) : [],
+    want("SOURCING_TRIAL") ? guard("SOURCING_TRIAL", () => adaptSourcingTrials(now)) : [],
     want("PAYROLL_RECON") ? guard("PAYROLL_RECON", () => adaptPayrollRecon(now)) : [],
     want("MANUAL_TASK") || want("RECURRING_TASK") || want("WORKFLOW_TASK") ? guard("MANUAL_TASK", () => adaptOwnedWork(now, opts.includeClosed ?? false, closedSince)) : [],
   ]);

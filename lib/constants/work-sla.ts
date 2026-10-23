@@ -1,3 +1,4 @@
+import { SOURCING_TRIAL_SLA_HOURS, SOURCING_TRIAL_SLA_WHY, SOURCING_TRIAL_WORK_KINDS, SOURCING_TRIAL_WORK_LABEL } from "@/lib/constants/sourcing";
 import { CASE_SLA_HOURS, CASE_TYPE_LABEL, CASE_TYPES, type CaseType } from "@/lib/constants/action-queue";
 import { CARE_SLA } from "@/lib/constants/care";
 import {
@@ -313,6 +314,16 @@ const SOURCE_RULES: SlaRule[] = [
       "đây là bịa một ngưỡng nghiệp vụ (luật 22). Chủ shop đặt được ngay trên màn hình cấu hình, không cần deploy.",
     department: APPROVAL_ITEM_OWNER[k] as DepartmentCode,
     alsoShownOn: "Lương · Trung tâm đối soát",
+  })),
+
+  /* ───── Mua thử mẫu nguồn (SRC-5b) — số giờ LẤY LẠI từ lib/constants/sourcing.ts, không gõ lại ───── */
+  ...SOURCING_TRIAL_WORK_KINDS.map((kind) => ({
+    key: `SOURCING_TRIAL:${kind}`,
+    label: SOURCING_TRIAL_WORK_LABEL[kind],
+    hours: SOURCING_TRIAL_SLA_HOURS[kind],
+    why: SOURCING_TRIAL_SLA_WHY[kind],
+    department: WORK_SOURCE_SPEC.SOURCING_TRIAL.department,
+    alsoShownOn: "Tìm hàng nguồn · Mua thử",
   })),
 
   /* ───── Việc tay & định kỳ ───── */

@@ -53,6 +53,8 @@ export const WORK_SOURCES = [
   "SAMPLE_REVIEW",
   // Payroll V2 21/10/2026 — phép chiếu DANH SÁCH PHÊ DUYỆT của Trung tâm đối soát lương (lib/payroll/recon-center.ts).
   "PAYROLL_RECON",
+  // SRC-5b 24/10/2026 — mua thử mẫu nguồn đã duyệt chưa đặt / đã đặt chưa về (lib/queries/work-adapters.ts::adaptSourcingTrials).
+  "SOURCING_TRIAL",
   "MANUAL_TASK",
   "RECURRING_TASK",
   // Phase 3 · W9 — việc do LUẬT TỰ ĐỘNG tạo (hành động `create_task`).
@@ -457,6 +459,22 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     // Không có hằng số đang chạy nào cho hạn này (luật 22: không gõ số mới) — chủ shop đặt ở `work.sla`.
     slaHours: null,
     outcomeAttributable: true,
+    actions: ["OPEN_SOURCE"],
+  },
+  SOURCING_TRIAL: {
+    key: "SOURCING_TRIAL",
+    label: "Mua thử mẫu nguồn: chờ đặt / chờ hàng về",
+    why: "Lời duyệt mua thử có hạn — người xin không đặt kịp thì lời duyệt mất và phải xin lại; hàng đã đặt mà không ai theo dõi thì mẫu thắng nằm chờ mà không ai biết nó đang ở đâu.",
+    statusAuthority: "SOURCE",
+    assigneeAuthority: "WORK",
+    // Nhóm Sản xuất — hôm nay route về Kho theo TEAM_DEPARTMENT_DIVERGENCE (phòng Sản xuất chưa có thành viên, luật 69).
+    department: TEAM_DEPARTMENT.PRODUCTION,
+    businessEntity: "SOURCING_TRIAL",
+    // Hạn đặt THEO LOẠI (`SOURCING_TRIAL:ORDER` / `:RECEIVE`) ở lib/constants/sourcing.ts — không có hạn mức nguồn.
+    slaHours: null,
+    // Hàng về sớm hay muộn do nhà cung cấp / vận chuyển quyết, không do người trong shop (mục 24).
+    outcomeAttributable: false,
+    // CHỈ NÚT MỞ: «đã đặt» / «đã về» là action thật của miền ở /sourcing/trials/[id] — không nhánh nào «đánh dấu xong» (luật 19).
     actions: ["OPEN_SOURCE"],
   },
   MANUAL_TASK: {
