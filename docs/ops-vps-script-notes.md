@@ -789,6 +789,6 @@ số của luật mới (mốc thật `production_orders.received_at`, phần c�
 getReturnIntelligence trong khi bể chỉ chờ 37 ms. (1) Gọi ĐÚNG `loadReturnsPage(returnsPageParams(withDefaultReturnsBasis(…)))` của
 trang, nguội rồi ấm, và in mọi khoảng vòng sự kiện đứng yên ≥ 50 ms + `monitorEventLoopDelay` p99 / max. (2) Từng nhánh nặng của
 intelligence nguội riêng, đi ĐÚNG đường trang (báo cáo lý do kỳ này truyền sẵn; kỳ trước intelligence tự dựng). (3) HTTP tới
-127.0.0.1:3000: đầu phản hồi + thân của /reports/returns (lượt 1, lượt 2, URL ghi rõ tham số mặc định) và /operations đối chứng.
+127.0.0.1:3000: đầu phản hồi + thân của /reports/returns (lượt 1, `?period=30d` = module ấm + dữ liệu nguội, lượt 2, URL ghi rõ tham số mặc định) và /operations đối chứng.
 Số (1)–(2) là của tiến trình script — cùng mã, cùng dữ liệu, không phải tiến trình Next. Chỉ đọc do Postgres ép (`ERP_READ_ONLY=1`
 đặt trước lần mở kết nối đầu). Không in dữ liệu người, nên không mã hoá.
