@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "trace-summary-pack",
+  "title": "Mọi dòng tóm tắt ops của conv-money-trace và stuck-conversation-audit vừa 280 byte, không mất chỉ số",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-summary-pack",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/trace-summary-pack",
+  "base_sha": "6644a3cbc09a48fa83a90f11bb28d1a06f2fb254",
+  "domains": [],
+  "owned_paths": [
+    "lib/ops/summary-lines.ts",
+    "scripts/conv-money-trace.ts",
+    "scripts/stuck-conversation-audit.ts",
+    "tests/ops-summary-lines.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-23T04:17:35.962Z",
+  "updated_at": "2026-10-23T04:17:35.962Z",
+  "last_heartbeat": "2026-10-23T04:17:35.962Z",
+  "definition_of_done": []
+}
