@@ -19,12 +19,14 @@ import { supplierCatalog } from "@/lib/queries/suppliers";
  *   · HÀNG THẬT = `stock_receipts` + `stock_receipt_items` (phiếu nhập kho, có ngày và có giá).
  * Hai chiều này KHÔNG suy ra lẫn nhau. Đặt 500 cái không có nghĩa là nhận 500 cái.
  *
- * ĐIỀU ERP KHÔNG BIẾT, NÓI TRƯỚC: **đơn sản xuất không có cột "ngày nhận hàng".** Trạng thái
- * `RECEIVED` do người bấm, và `updated_at` đổi theo mọi lần sửa ghi chú — dùng nó làm mốc nhận là
- * tạo ra thời gian giao bịa. Nên thời gian giao ở đây được SUY bằng cách ghép đơn sản xuất với
- * phiếu nhập kho thật, và **chỉ ghép khi một-một**: một đơn ứng với đúng một phiếu, phiếu đó cũng
- * chỉ ứng với đúng đơn ấy. Mọi trường hợp còn lại là NHẬP NHẰNG hoặc CHƯA THẤY PHIẾU — được đếm
- * riêng và hiện ra, không bị làm tròn thành 0 và cũng không bị đoán bừa.
+ * THỜI GIAN GIAO CỦA XƯỞNG — MỐC THẬT TRƯỚC, ƯỚC TÍNH SAU (OD-P2-03, 23/10/2026):
+ *   · MỐC THẬT = `production_orders.received_at`, kho bấm «đã nhận» lúc ĐẾM XONG, ghi đúng một lần
+ *     (`shouldStampReceipt`, từ 23/09/2026). Đây là lời khai trực tiếp, không phải phép suy.
+ *   · Lô CHƯA có mốc thật (nhận trước 23/09/2026) mới rơi về đường cũ: ghép đơn sản xuất với phiếu
+ *     nhập kho, **chỉ khi một-một** — một đơn ứng với đúng một phiếu, phiếu đó cũng chỉ ứng với đúng
+ *     đơn ấy. Kết quả đó là ƯỚC TÍNH và mang nhãn tới tận ô trên màn hình (`leadBasis`), không trộn im lặng.
+ *   · Còn lại là NHẬP NHẰNG hoặc CHƯA THẤY PHIẾU — đếm riêng và hiện ra, không làm tròn thành 0, không đoán.
+ * `updated_at` KHÔNG BAO GIỜ là mốc nhận: nó đổi theo mọi lần sửa ghi chú.
  *
  * Module này CHỈ ĐỌC. Không tự tạo đơn sản xuất, không tự sửa tồn kho, không tự ghép phiếu.
  */
@@ -105,13 +107,22 @@ export type SupplierRow = {
   ordersReceived: number;
   /** Tiền đang cam kết: lô đã gửi, chưa đánh dấu nhận. */
   committed: number;
-  /** ƯỚC TÍNH — chỉ tính trên lô ghép được một-một với phiếu nhập. `null` = chưa đủ căn cứ. */
+  /** Trung vị / p90 ngày giao trên các lô làm căn cứ (`leadSamples`), căn cứ ghi ở `leadBasis`. `null` = chưa đủ lô. */
   leadDaysP50: number | null;
   leadDaysP90: number | null;
+  /** Lô đã nhận ĐO ĐƯỢC thời gian giao = `leadActual` + `leadEstimated`. */
   leadMatched: number;
+  /** Lô đo bằng mốc thật kho bấm «đã nhận». */
+  leadActual: number;
+  /** Lô chưa có mốc thật, ƯỚC TÍNH bằng ghép một-một với phiếu nhập. */
+  leadEstimated: number;
+  /** Số lô thực sự vào trung vị / tỷ lệ đúng hạn (đủ lô mốc thật thì CHỈ lô mốc thật). */
+  leadSamples: number;
+  /** Căn cứ của trung vị: `ACTUAL` chỉ mốc thật · `MIXED` có lô ước tính · `ESTIMATED` toàn ước tính. `null` = không lô nào. */
+  leadBasis: LeadBasis | null;
   leadAmbiguous: number;
   leadUnmatched: number;
-  /** ƯỚC TÍNH — tỷ lệ lô ghép được về đúng hạn hẹn. `null` = chưa đủ số lô để nói, xem `onTimeBasis`. */
+  /** Tỷ lệ lô về đúng hạn hẹn, cùng tập lô và cùng căn cứ với trung vị. `null` = chưa đủ số lô để nói, xem `onTimeBasis`. */
   onTimeRate: number | null;
   /** Số lô đủ căn cứ xét đúng hạn (mẫu số của `onTimeRate`). */
   onTimeBasis: number;
@@ -149,12 +160,18 @@ export type PurchasingCoverage = {
   /** Dòng phiếu nhập trong kỳ và số dòng có khai đơn giá. */
   receiptLines: number;
   receiptLinesWithCost: number;
-  /** Kết quả ghép lô ↔ phiếu nhập, ba nhóm rời nhau. */
+  /** Lô đã nhận trong kỳ, ba nhóm rời nhau: đo được (`leadMatched` = `leadActual` + `leadEstimated`) · nhập nhằng · chưa thấy phiếu. */
   leadMatched: number;
+  leadActual: number;
+  leadEstimated: number;
   leadAmbiguous: number;
   leadUnmatched: number;
-  /** % lô đủ căn cứ tính thời gian giao. `null` khi không có lô nào để xét. */
+  /** Lô có mốc nhận SỚM HƠN ngày gửi — mâu thuẫn, mốc ấy không dùng (lô đi đường ước tính). Nằm trong ba nhóm trên, không phải nhóm thứ tư. */
+  leadContradictory: number;
+  /** % lô đo được thời gian giao. `null` khi không có lô nào để xét. */
   leadCoveragePercent: number | null;
+  /** % lô đo bằng MỐC THẬT. `null` khi không có lô nào để xét. */
+  leadActualPercent: number | null;
 };
 
 export type PurchasingReport = {
@@ -188,6 +205,8 @@ type PoRow = {
   group?: string;
   sentAt: Date;
   dueDate: Date | null;
+  /** Mốc thật kho bấm «đã nhận» (`production_orders.received_at`). Vắng / `null` = lô nhận trước khi có mốc ⇒ ước tính. */
+  receivedAt?: Date | null;
 };
 
 type ReceiptRow = {
@@ -263,6 +282,71 @@ export function matchProductionToReceipts(pos: PoRow[], receipts: ReceiptRow[]) 
   return { matched, ambiguous, unmatched };
 }
 
+export type LeadBasis = "ACTUAL" | "MIXED" | "ESTIMATED";
+export type LotLead = { po: PoRow; leadDays: number; onTime: boolean | null; basis: "ACTUAL" | "ESTIMATED" };
+
+/**
+ * Thời gian giao của từng lô đã nhận: MỐC THẬT trước, ghép phiếu sau. HÀM THUẦN.
+ *
+ * Phép ghép vẫn chạy trên MỌI lô như trước — một lô đã có mốc thật vẫn có thể là ứng viên tranh phiếu với
+ * lô khác, và bỏ nó ra khỏi phép ghép là tự nới luật một-một cho lô còn lại.
+ * Mốc nhận SỚM HƠN ngày gửi là mâu thuẫn: không dùng, không sửa, đếm ở `contradictory`, lô đi đường ước tính.
+ */
+export function lotLeadTimes(pos: PoRow[], receipts: ReceiptRow[]) {
+  const link = matchProductionToReceipts(pos, receipts);
+  const matchedOf = new Map(link.matched.map((m) => [m.po.id, m]));
+  const ambiguousIds = new Set(link.ambiguous.map((p) => p.id));
+  const measured: LotLead[] = [];
+  const ambiguous: PoRow[] = [];
+  const unmatched: PoRow[] = [];
+  const contradictory: PoRow[] = [];
+  for (const po of pos) {
+    const real = po.receivedAt ?? null;
+    if (real && real.getTime() >= po.sentAt.getTime()) {
+      measured.push({
+        po,
+        leadDays: Math.round((real.getTime() - po.sentAt.getTime()) / DAY_MS),
+        onTime: po.dueDate ? real.getTime() <= po.dueDate.getTime() : null,
+        basis: "ACTUAL",
+      });
+      continue;
+    }
+    if (real) contradictory.push(po);
+    const m = matchedOf.get(po.id);
+    if (m) measured.push({ po, leadDays: m.leadDays, onTime: m.onTime, basis: "ESTIMATED" });
+    else if (ambiguousIds.has(po.id)) ambiguous.push(po);
+    else unmatched.push(po);
+  }
+  return { measured, ambiguous, unmatched, contradictory };
+}
+
+/**
+ * Trung vị / p90 / đúng hạn của MỘT xưởng. Đủ `minSamples` lô mốc thật ⇒ CHỈ dùng lô mốc thật (`ACTUAL`);
+ * chưa đủ thì lô ước tính mới vào bù, và căn cứ ghi `MIXED` / `ESTIMATED` để màn hình in nhãn. HÀM THUẦN.
+ */
+export function supplierLeadStats(lots: readonly LotLead[], minSamples: number = PURCHASING_RULE.minLeadSamples) {
+  const actual = lots.filter((l) => l.basis === "ACTUAL");
+  const used = actual.length >= minSamples ? actual : [...lots];
+  const hasActual = used.some((l) => l.basis === "ACTUAL");
+  const hasEstimated = used.some((l) => l.basis === "ESTIMATED");
+  const basis: LeadBasis | null = hasActual && hasEstimated ? "MIXED" : hasActual ? "ACTUAL" : hasEstimated ? "ESTIMATED" : null;
+  const days = used.map((l) => l.leadDays);
+  const enough = days.length >= minSamples;
+  const due = used.filter((l) => l.onTime !== null);
+  const ok = due.filter((l) => l.onTime === true).length;
+  return {
+    actual: actual.length,
+    estimated: lots.length - actual.length,
+    samples: used.length,
+    basis,
+    p50: enough ? percentile(days, 0.5) : null,
+    p90: enough ? percentile(days, 0.9) : null,
+    onTimeBasis: due.length,
+    // "Đúng hạn 100%" dựng trên MỘT lô đọc như một xưởng hoàn hảo — cùng ngưỡng với thời gian giao.
+    onTimeRate: due.length >= minSamples ? Math.round((ok / due.length) * 1000) / 10 : null,
+  };
+}
+
 async function purchasingUncached(windowDays: number): Promise<PurchasingReport> {
   const db = await getDb();
   const from = new Date(Date.now() - windowDays * DAY_MS);
@@ -317,7 +401,7 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
   // ───────── 2. Ghép lô ↔ phiếu nhập để suy thời gian giao ─────────
   const pos = rowsOf(
     await db.execute(sql`
-      select id, code, product_id, supplier, supplier_id, sent_at, due_date
+      select id, code, product_id, supplier, supplier_id, sent_at, due_date, received_at
       from production_orders
       where status = 'RECEIVED' and sent_at is not null and product_id is not null and sent_at >= ${from}
     `),
@@ -331,6 +415,7 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
       group: grp(r.supplier_id, r.supplier).key,
       sentAt: date(r.sent_at),
       dueDate: date(r.due_date),
+      receivedAt: date(r.received_at),
     }))
     .filter((p): p is PoRow => p.sentAt !== null);
 
@@ -354,7 +439,7 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
     }))
     .filter((r): r is ReceiptRow => r.receivedAt !== null);
 
-  const link = matchProductionToReceipts(pos, receipts);
+  const link = lotLeadTimes(pos, receipts);
 
   // ───────── 3. Hàng thật đã nhập, theo xưởng, kỳ này và kỳ trước ─────────
   const receiptAgg = async (start: Date, end: Date) =>
@@ -402,6 +487,10 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
     leadDaysP50: null,
     leadDaysP90: null,
     leadMatched: 0,
+    leadActual: 0,
+    leadEstimated: 0,
+    leadSamples: 0,
+    leadBasis: null,
     leadAmbiguous: 0,
     leadUnmatched: 0,
     onTimeRate: null,
@@ -460,35 +549,27 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
     if (b && b.qty > 0) row.prevAvgUnitCost = Math.round(b.cost / b.qty);
   }
 
-  const leadsBySupplier = new Map<string, number[]>();
-  const onTimeBySupplier = new Map<string, { ok: number; total: number }>();
-  for (const m of link.matched) {
-    const row = at(m.po.supplierId, m.po.supplier);
-    row.leadMatched += 1;
+  const lotsBySupplier = new Map<string, LotLead[]>();
+  for (const m of link.measured) {
+    at(m.po.supplierId, m.po.supplier);
     const key = keyOf(m.po.supplierId, m.po.supplier);
-    leadsBySupplier.set(key, [...(leadsBySupplier.get(key) ?? []), m.leadDays]);
-    if (m.onTime !== null) {
-      const acc = onTimeBySupplier.get(key) ?? { ok: 0, total: 0 };
-      onTimeBySupplier.set(key, { ok: acc.ok + (m.onTime ? 1 : 0), total: acc.total + 1 });
-    }
+    lotsBySupplier.set(key, [...(lotsBySupplier.get(key) ?? []), m]);
   }
   for (const po of link.ambiguous) at(po.supplierId, po.supplier).leadAmbiguous += 1;
   for (const po of link.unmatched) at(po.supplierId, po.supplier).leadUnmatched += 1;
 
   for (const [key, row] of rows) {
-    const leads = leadsBySupplier.get(key) ?? [];
-    // Vài lô lẻ không đủ để nói xưởng nào nhanh hơn xưởng nào — để trống còn hơn xếp hạng nhiễu.
-    if (leads.length >= PURCHASING_RULE.minLeadSamples) {
-      row.leadDaysP50 = percentile(leads, 0.5);
-      row.leadDaysP90 = percentile(leads, 0.9);
-    }
-    const ot = onTimeBySupplier.get(key);
-    if (ot && ot.total > 0) {
-      row.onTimeBasis = ot.total;
-      // Cùng một ngưỡng với thời gian giao: "đúng hạn 100%" dựng trên MỘT lô là con số gây hiểu
-      // lầm mạnh hơn cả việc để trống — nó đọc như một xưởng hoàn hảo.
-      if (ot.total >= PURCHASING_RULE.minLeadSamples) row.onTimeRate = Math.round((ot.ok / ot.total) * 1000) / 10;
-    }
+    // Vài lô lẻ không đủ để nói xưởng nào nhanh hơn xưởng nào — `supplierLeadStats` để trống còn hơn xếp hạng nhiễu.
+    const st = supplierLeadStats(lotsBySupplier.get(key) ?? []);
+    row.leadMatched = st.actual + st.estimated;
+    row.leadActual = st.actual;
+    row.leadEstimated = st.estimated;
+    row.leadSamples = st.samples;
+    row.leadBasis = st.basis;
+    row.leadDaysP50 = st.p50;
+    row.leadDaysP90 = st.p90;
+    row.onTimeBasis = st.onTimeBasis;
+    row.onTimeRate = st.onTimeRate;
     if (row.avgUnitCost !== null && row.prevAvgUnitCost !== null && row.prevAvgUnitCost > 0) {
       row.unitCostChangePercent = Math.round(((row.avgUnitCost - row.prevAvgUnitCost) / row.prevAvgUnitCost) * 1000) / 10;
     }
@@ -560,7 +641,10 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
     `),
   );
 
-  const leadTotal = link.matched.length + link.ambiguous.length + link.unmatched.length;
+  const leadTotal = link.measured.length + link.ambiguous.length + link.unmatched.length;
+  const leadActual = link.measured.filter((m) => m.basis === "ACTUAL").length;
+  const leadEstimated = link.measured.length - leadActual;
+  const pctOf = (n: number) => (leadTotal > 0 ? Math.round((n / leadTotal) * 1000) / 10 : null);
   const coverage: PurchasingCoverage = {
     productionOrders: num(poCov?.n),
     withSupplier: num(poCov?.with_supplier),
@@ -568,18 +652,30 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
     withSentAt: num(poCov?.with_sent),
     receiptLines: num(lineCov?.n),
     receiptLinesWithCost: num(lineCov?.with_cost),
-    leadMatched: link.matched.length,
+    leadMatched: link.measured.length,
+    leadActual,
+    leadEstimated,
     leadAmbiguous: link.ambiguous.length,
     leadUnmatched: link.unmatched.length,
-    leadCoveragePercent: leadTotal > 0 ? Math.round((link.matched.length / leadTotal) * 1000) / 10 : null,
+    leadContradictory: link.contradictory.length,
+    leadCoveragePercent: pctOf(link.measured.length),
+    leadActualPercent: pctOf(leadActual),
   };
 
-  const estimated = [
-    `Thời gian giao và tỷ lệ đúng hạn là ƯỚC TÍNH: suy từ việc ghép lô đặt với phiếu nhập kho, chỉ khi ghép được một-một. Kỳ này ghép được ${coverage.leadMatched}/${leadTotal} lô.`,
-  ];
+  const estimated: string[] = [];
+  if (leadEstimated > 0) {
+    estimated.push(
+      `Thời gian giao của ${leadEstimated}/${leadTotal} lô là ƯỚC TÍNH: lô chưa có mốc kho bấm «đã nhận» nên suy từ việc ghép lô đặt với phiếu nhập kho, chỉ khi ghép được một-một. ${leadActual}/${leadTotal} lô đo bằng mốc thật. Ô mang nhãn «ước tính» / «trộn ước tính» là trung vị có lô ước tính.`,
+    );
+  }
+  if (link.contradictory.length > 0) {
+    estimated.push(
+      `${link.contradictory.length} lô có mốc «đã nhận» SỚM HƠN ngày gửi xưởng — mâu thuẫn nên mốc ấy KHÔNG được dùng; lô đó đo bằng ghép phiếu nếu ghép được. Sửa ở Lệnh sản xuất, ERP không tự sửa.`,
+    );
+  }
   if (coverage.leadCoveragePercent !== null && coverage.leadCoveragePercent < PURCHASING_RULE.minLeadCoveragePercent) {
     estimated.push(
-      `Độ phủ ghép ${coverage.leadCoveragePercent}% — dưới ngưỡng ${PURCHASING_RULE.minLeadCoveragePercent}%. ĐỪNG xếp hạng xưởng theo thời gian giao ở mức phủ này.`,
+      `Độ phủ đo ${coverage.leadCoveragePercent}% — dưới ngưỡng ${PURCHASING_RULE.minLeadCoveragePercent}%. ĐỪNG xếp hạng xưởng theo thời gian giao ở mức phủ này.`,
     );
   }
 
@@ -599,7 +695,7 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
     coverage,
     estimated,
     limitations: [
-      "Đơn sản xuất KHÔNG có cột ngày nhận hàng — thời gian giao phải suy bằng cách ghép với phiếu nhập kho, và lô nào không ghép được một-một thì để CHƯA BIẾT chứ không đoán.",
+      "Mốc «đã nhận» là lúc kho ĐẾM XONG (không phải lúc xe tới cổng) và chỉ có từ 23/09/2026 — lô nhận trước đó phải ƯỚC TÍNH bằng cách ghép với phiếu nhập kho, và lô nào không ghép được một-một thì để CHƯA BIẾT chứ không đoán.",
       "Cùng một mẫu đặt nhiều lô rồi nhận nhiều phiếu là NHẬP NHẰNG: ERP đếm riêng chứ không bốc đại một cặp để có con số đẹp.",
       "Tiền cam kết lấy theo đơn giá ghi trên đơn sản xuất — đó là dự kiến phải trả, KHÔNG phải tiền đã trả. ERP không có sổ công nợ xưởng.",
       "Giá nhập bình quân chỉ tính trên dòng phiếu CÓ khai đơn giá; dòng không khai giá bị bỏ khỏi mẫu số chứ không được coi là 0đ.",
