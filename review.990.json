@@ -1,0 +1,8 @@
+{
+  "pr": 990,
+  "sha": "1587e4346d3bbd93dbd19a2f720c7181f172e1ef",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T04:18:20.846Z",
+  "note": "review lead: CHỈ-SCRIPT. conv-money-trace: gán nguồn câu mẫu chỉ với câu mẫu ĐANG BẬT, nhãn «GIỐNG câu mẫu #n» (không còn «nguồn … (tắt)»); tin bot ngay sau followup.sent (không tin khách xen, ≤10′) ⇒ «THEO DÕI (model)», không vào dòng D; dòng D nguồn mới ≤300 byte. Bài CSDL + đột biến. Số D trước 3/3 (run 39896651110), sau đo ngay sau gộp."
+}
