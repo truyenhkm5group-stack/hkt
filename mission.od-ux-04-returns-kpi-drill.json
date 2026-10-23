@@ -3,7 +3,7 @@
   "mission_id": "od-ux-04-returns-kpi-drill",
   "title": "OD-UX-04 KPI /reports/returns bấm xuống danh sách đơn cấu thành (một map nhóm cho đếm + danh sách)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "CRITICAL",
   "owner": "DESKTOP-56TH98Y:wt-ux04",
@@ -26,7 +26,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T11:39:42.438Z",
-  "updated_at": "2026-10-23T11:39:42.438Z",
-  "last_heartbeat": "2026-10-23T11:39:42.438Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T16:09:39.266Z",
+  "last_heartbeat": "2026-10-23T16:09:39.266Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/od-ux-04-returns-kpi-drill",
+    "sha": "00d06695766868d3c9e405b8b43b1c9282d9419a",
+    "at": "2026-10-23T16:09:39.266Z",
+    "actor": "DESKTOP-56TH98Y:wt-ux04",
+    "title": "OD-UX-04 KPI /reports/returns bấm xuống danh sách đơn cấu thành (một map nhóm cho đếm + danh sách)",
+    "summary": "",
+    "tests": [
+      "tsc · eslint · npm test đủ ĐẠT · build xanh (trên b8ef6f43; commit cuối chỉ thêm sửa .md tệp tiến độ) · tests/returns-kpi-drill.test.ts 144 phép so · đột biến vị từ failed ⇒ đỏ"
+    ]
+  }
 }
