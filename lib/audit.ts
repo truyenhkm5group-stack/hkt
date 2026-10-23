@@ -96,8 +96,12 @@ export type AuditParams = {
 
   `order.create_failed` / `order.validation_failed` (sứ mệnh saas-ops-signals · lib/sales-chatbot/order-signals.ts): vết của một lượt bot
   ghi đơn KHÔNG thành — theo định nghĩa không có dòng đơn nào đổi; đơn nào đã ghi trước đó thì ghi bằng hành động khác của chính nó.
+
+  `FABRIC_NORM_SAVE` / `FABRIC_NORM_IMPORT` (OD-P2-04 · lib/inventory/fabric-norms.ts): định mức vải chỉ là đầu vào của phép tính vải
+  trên /inventory/shortage, đọc thẳng không qua đệm — không báo cáo nào dùng nó (tests/fabric-norms.test.ts quét mã nguồn). Ô lưu MỖI
+  LẦN rời ô: để ngoài danh sách thì gõ định mức cho một mã 6 size là xoá đệm báo cáo sáu lần.
 */
-const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "PASSWORD_RESET_REQUEST", "META_AD_POST_LOOKUP", "RECOMMENDATION_DECIDED", "OUTREACH_BROADCAST_START", "OUTREACH_BROADCAST_STOP", "OUTREACH_BROADCAST_RESUME", "CUSTOM_FILE_DOWNLOAD", "BLUEPRINT_EXPORT", "DATA_EXPORT", "CHATBOT_AD_BOT_SAVE", "CHATBOT_AD_BOT_SWITCH", "CHATBOT_AD_BOT_SYNC", "ORG_CONNECTION_TOKEN_ROTATE", "order.create_failed", "order.validation_failed"]);
+const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "PASSWORD_RESET_REQUEST", "META_AD_POST_LOOKUP", "RECOMMENDATION_DECIDED", "OUTREACH_BROADCAST_START", "OUTREACH_BROADCAST_STOP", "OUTREACH_BROADCAST_RESUME", "CUSTOM_FILE_DOWNLOAD", "BLUEPRINT_EXPORT", "DATA_EXPORT", "CHATBOT_AD_BOT_SAVE", "CHATBOT_AD_BOT_SWITCH", "CHATBOT_AD_BOT_SYNC", "ORG_CONNECTION_TOKEN_ROTATE", "order.create_failed", "order.validation_failed", "FABRIC_NORM_SAVE", "FABRIC_NORM_IMPORT"]);
 
 /**
  * Loại tác nhân cho cột `audit_logs.actor_kind` (Company OS · Agent G).

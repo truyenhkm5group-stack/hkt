@@ -2,54 +2,77 @@
 
 import { Copy, Search } from "lucide-react";
 import { parseAsStringLiteral, useQueryState } from "nuqs";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { InfoHint } from "@/components/info-hint";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { importFabricNorms, saveFabricNorm } from "@/lib/actions/fabric-norms";
 import {
   EMPTY_FABRIC_NORM,
+  FABRIC_UNITS,
+  LEGACY_FABRIC_NORMS_KEY,
   PENDING_MEASURES,
   PENDING_MEASURE_HINT,
   PENDING_MEASURE_LABEL,
   fabricPlan,
+  hasFabricQty,
   measureOf,
   measureText,
   pendingMatrixAsText,
+  sameFabricNorm,
   type FabricNorm,
   type PendingMatrix,
   type PendingMeasure,
+  type StoredFabricNorm,
 } from "@/lib/constants/pending-matrix";
 import { cellKey, colorSwatch } from "@/lib/constants/production";
-import { formatNumber } from "@/lib/format";
+import { formatDateTime, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /**
- * Định mức vải là số người đặt vải gõ để TÍNH TRÊN MÀN HÌNH — ERP chưa có bảng định mức nguyên liệu,
- * và con số này không đi vào báo cáo / giá vốn nào. Nên nó chỉ nằm ở trình duyệt của người gõ
- * (localStorage), đọc/ghi trong try/catch: không có thì trang vẫn chạy, chỉ là phải gõ lại.
+ * Định mức vải là số người đặt vải gõ để TÍNH TRÊN MÀN HÌNH — không đi vào báo cáo / giá vốn nào.
+ *
+ * Từ OD-P2-04 nó lưu ở ERP (bảng `fabric_norms`), nên mọi người thấy cùng một số. Bản cũ lưu trong
+ * `localStorage` của từng trình duyệt: màn hình chỉ ĐỌC khoá cũ để mời người có quyền bấm nhập MỘT
+ * LẦN — không tự đẩy, không ghi lại, không xoá (bản dự phòng của người gõ).
  */
-const NORMS_KEY = "erp.inventory.fabric-norms.v1";
-const FABRIC_UNITS = ["m", "kg", "yard", "cây"] as const;
+const DISMISS_KEY = `${LEGACY_FABRIC_NORMS_KEY}.dismissed`;
 
-function loadNorms(): Record<string, FabricNorm> {
+function readLegacy(): { raw: string; norms: Record<string, FabricNorm> } | null {
   try {
-    const raw = window.localStorage.getItem(NORMS_KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, FabricNorm>) : {};
+    const raw = window.localStorage.getItem(LEGACY_FABRIC_NORMS_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    const norms: Record<string, FabricNorm> = {};
+    for (const [id, n] of Object.entries(parsed as Record<string, unknown>)) {
+      if (n && typeof n === "object") norms[id] = { ...EMPTY_FABRIC_NORM, ...(n as Partial<FabricNorm>), bySize: { ...((n as Partial<FabricNorm>).bySize ?? {}) } };
+    }
+    return { raw, norms };
   } catch {
-    return {};
+    return null;
   }
 }
 
-function saveNorms(norms: Record<string, FabricNorm>) {
+function readDismissed(): string | null {
   try {
-    window.localStorage.setItem(NORMS_KEY, JSON.stringify(norms));
+    return window.localStorage.getItem(DISMISS_KEY);
   } catch {
-    // Trình duyệt chặn lưu (chế độ riêng tư): vẫn tính được trong phiên này.
+    return null;
   }
 }
+
+function writeDismissed(raw: string) {
+  try {
+    window.localStorage.setItem(DISMISS_KEY, raw);
+  } catch {
+    // Trình duyệt chặn lưu: lần sau lời mời hiện lại, không sao.
+  }
+}
+
+const normsOf = (stored: Record<string, StoredFabricNorm>) => Object.fromEntries(Object.entries(stored).map(([id, s]) => [id, s.norm]));
 
 /** Ô trống = chưa khai (null), không phải 0. Nhận cả dấu phẩy thập phân kiểu Việt. */
 function parseNum(s: string): number | null {
@@ -58,6 +81,12 @@ function parseNum(s: string): number | null {
   const n = Number(t);
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
+
+/** Lượng vải: 0 mét / cái là ô chưa khai (phép tính vẫn coi vậy), không gửi lên như một con số. */
+const parseQty = (s: string) => {
+  const n = parseNum(s);
+  return n === 0 ? null : n;
+};
 
 const numText = (n: number | null | undefined) => (typeof n === "number" && Number.isFinite(n) ? String(n) : "");
 const fmtFabric = (n: number) => new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1 }).format(n);
@@ -71,19 +100,36 @@ async function copy(text: string, what: string) {
   }
 }
 
-export function PendingMatrixSection({ matrices, orphanUnits, orphanVariants }: { matrices: PendingMatrix[]; orphanUnits: number; orphanVariants: number }) {
+export function PendingMatrixSection({
+  matrices,
+  orphanUnits,
+  orphanVariants,
+  storedNorms,
+  canWrite,
+}: {
+  matrices: PendingMatrix[];
+  orphanUnits: number;
+  orphanVariants: number;
+  storedNorms: Record<string, StoredFabricNorm>;
+  canWrite: boolean;
+}) {
   const [measure, setMeasure] = useQueryState("m", parseAsStringLiteral(PENDING_MEASURES).withDefault("pending").withOptions({ history: "replace", clearOnDefault: true, scroll: false }));
   const [q, setQ] = useState("");
-  const [norms, setNorms] = useState<Record<string, FabricNorm>>({});
-  // Đọc sau khi gắn vào trang, không đọc lúc dựng: máy chủ không có localStorage, đọc sớm là lệch HTML.
-  useEffect(() => setNorms(loadNorms()), []);
+  const [norms, setNorms] = useState<Record<string, FabricNorm>>(() => normsOf(storedNorms));
+  // Máy chủ dựng lại trang sau mỗi lượt lưu (`revalidatePath`) — số của ERP là số đúng.
+  useEffect(() => setNorms(normsOf(storedNorms)), [storedNorms]);
 
-  const setNorm = (productId: string, patch: Partial<FabricNorm>) =>
-    setNorms((cur) => {
-      const next = { ...cur, [productId]: { ...EMPTY_FABRIC_NORM, ...cur[productId], ...patch } };
-      saveNorms(next);
-      return next;
+  const setNorm = (productId: string, patch: Partial<FabricNorm>) => {
+    const truoc = norms[productId] ?? EMPTY_FABRIC_NORM;
+    const sau = { ...truoc, ...patch };
+    setNorms((cur) => ({ ...cur, [productId]: sau }));
+    void saveFabricNorm({ productId, ...sau }).then((r) => {
+      if ("error" in r) {
+        toast.error(r.error);
+        setNorms((cur) => ({ ...cur, [productId]: truoc }));
+      }
     });
+  };
 
   const shown = useMemo(() => {
     const k = q.trim().toLowerCase();
@@ -101,6 +147,7 @@ export function PendingMatrixSection({ matrices, orphanUnits, orphanVariants }: 
   }, { qty: 0, unknown: 0 });
 
   const copyAll = () => copy(shown.map((m) => pendingMatrixAsText(m, measure, norms[m.productId])).join("\n\n"), `${formatNumber(shown.length)} bảng`);
+  const codeOf = useMemo(() => new Map(matrices.map((m) => [m.productId, m.productCode || m.productName])), [matrices]);
 
   return (
     <SectionCard
@@ -114,7 +161,7 @@ export function PendingMatrixSection({ matrices, orphanUnits, orphanVariants }: 
           </p>
           <p className="mt-1.5">Mua vải theo <b>Cần đặt thêm</b>; tính theo <b>Chờ xuất</b> là mua vải cho cả những chiếc kho đang có sẵn.</p>
           <p className="mt-1.5">
-            &ldquo;+?&rdquo; = có mẫu chưa có phiếu nhập nên không biết thiếu bao nhiêu — phần đó KHÔNG được tính vào vải. Định mức vải chỉ lưu trên trình duyệt này, không lưu vào ERP.
+            &ldquo;+?&rdquo; = có mẫu chưa có phiếu nhập nên không biết thiếu bao nhiêu — phần đó KHÔNG được tính vào vải. Định mức vải lưu trên ERP: ai xem được trang này đều thấy cùng một số, chỉ người có quyền lập kế hoạch sửa được. Định mức chỉ dùng để tính vải ở đây, không vào giá vốn hay báo cáo nào.
           </p>
         </>
       }
@@ -144,12 +191,13 @@ export function PendingMatrixSection({ matrices, orphanUnits, orphanVariants }: 
       }
       padded={false}
     >
+      {canWrite ? <LegacyImportBanner storedNorms={storedNorms} codeOf={codeOf} /> : null}
       {shown.length === 0 ? (
         <EmptyState title={matrices.length ? `Không mã nào có số "${PENDING_MEASURE_LABEL[measure]}"` : "Không có hàng chờ xuất"} description={matrices.length ? "Đổi sang con số khác hoặc xoá ô tìm kiếm." : "Mọi đơn đã chốt đều đã rời kho."} className="m-4" />
       ) : (
         <div className="divide-y">
           {shown.map((m) => (
-            <ProductMatrix key={m.productId} m={m} measure={measure} norm={norms[m.productId] ?? EMPTY_FABRIC_NORM} onNorm={(patch) => setNorm(m.productId, patch)} />
+            <ProductMatrix key={m.productId} m={m} measure={measure} norm={norms[m.productId] ?? EMPTY_FABRIC_NORM} stored={storedNorms[m.productId]} canWrite={canWrite} onNorm={(patch) => setNorm(m.productId, patch)} />
           ))}
         </div>
       )}
@@ -162,9 +210,24 @@ export function PendingMatrixSection({ matrices, orphanUnits, orphanVariants }: 
   );
 }
 
-function ProductMatrix({ m, measure, norm, onNorm }: { m: PendingMatrix; measure: PendingMeasure; norm: FabricNorm; onNorm: (patch: Partial<FabricNorm>) => void }) {
+function ProductMatrix({
+  m,
+  measure,
+  norm,
+  stored,
+  canWrite,
+  onNorm,
+}: {
+  m: PendingMatrix;
+  measure: PendingMeasure;
+  norm: FabricNorm;
+  stored: StoredFabricNorm | undefined;
+  canWrite: boolean;
+  onNorm: (patch: Partial<FabricNorm>) => void;
+}) {
   const plan = fabricPlan(m, measure, norm);
   const hasNorm = norm.common !== null || Object.values(norm.bySize).some((x) => x !== null && x !== undefined);
+  const khoa = !canWrite;
   const unit = norm.unit || "m";
   const cell = (v: { qty: number; unknown: number }, strong = false) => (
     <span className={cn(v.qty === 0 && v.unknown === 0 && "text-muted-foreground/50", strong && "font-bold", v.unknown > 0 && "text-amber-700 dark:text-amber-300")} title={v.unknown > 0 ? `${formatNumber(v.unknown)} cái chưa biết tồn (mẫu chưa có phiếu nhập)` : undefined}>
@@ -181,13 +244,19 @@ function ProductMatrix({ m, measure, norm, onNorm }: { m: PendingMatrix; measure
           <span className="ml-2 text-xs text-muted-foreground">
             {PENDING_MEASURE_LABEL[measure]} <b className="text-foreground">{measureText(measureOf(m.total, measure), formatNumber)}</b> cái
           </span>
+          {stored?.updatedAt ? (
+            <span className="ml-2 text-[11px] text-muted-foreground">
+              · định mức sửa lúc {formatDateTime(stored.updatedAt)}
+              {stored.updatedByName ? ` bởi ${stored.updatedByName}` : ""}
+            </span>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
           <label className="flex items-center gap-1 text-muted-foreground">
             Định mức chung
-            <Input inputMode="decimal" defaultValue={numText(norm.common)} key={`c-${numText(norm.common)}`} onBlur={(e) => onNorm({ common: parseNum(e.target.value) })} className="h-7 w-16 px-2 text-right text-xs" placeholder="—" aria-label={`Định mức vải chung / cái của ${m.productCode}`} />
+            <Input inputMode="decimal" defaultValue={numText(norm.common)} key={`c-${numText(norm.common)}`} onBlur={(e) => onNorm({ common: parseQty(e.target.value) })} disabled={khoa} className="h-7 w-16 px-2 text-right text-xs" placeholder="—" aria-label={`Định mức vải chung / cái của ${m.productCode}`} />
           </label>
-          <select value={unit} onChange={(e) => onNorm({ unit: e.target.value })} className="h-7 rounded-md border bg-transparent px-1 text-xs" aria-label="Đơn vị vải">
+          <select value={unit} onChange={(e) => onNorm({ unit: e.target.value })} disabled={khoa} className="h-7 rounded-md border bg-transparent px-1 text-xs" aria-label="Đơn vị vải">
             {FABRIC_UNITS.map((u) => (
               <option key={u} value={u}>
                 {u}/cái
@@ -196,7 +265,7 @@ function ProductMatrix({ m, measure, norm, onNorm }: { m: PendingMatrix; measure
           </select>
           <label className="flex items-center gap-1 text-muted-foreground">
             Hao hụt
-            <Input inputMode="decimal" defaultValue={numText(norm.wastePct)} key={`w-${numText(norm.wastePct)}`} onBlur={(e) => onNorm({ wastePct: parseNum(e.target.value) })} className="h-7 w-12 px-2 text-right text-xs" placeholder="0" aria-label="Hao hụt phần trăm" />%
+            <Input inputMode="decimal" defaultValue={numText(norm.wastePct)} key={`w-${numText(norm.wastePct)}`} onBlur={(e) => onNorm({ wastePct: parseNum(e.target.value) })} disabled={khoa} className="h-7 w-12 px-2 text-right text-xs" placeholder="0" aria-label="Hao hụt phần trăm" />%
           </label>
           <Button variant="ghost" size="sm" className="h-7 px-2" aria-label={`Sao chép bảng ${m.productCode || m.productName}`} title="Sao chép bảng" onClick={() => copy(pendingMatrixAsText(m, measure, norm), `bảng ${m.productCode || m.productName}`)}>
             <Copy className="size-3.5" aria-hidden />
@@ -258,7 +327,8 @@ function ProductMatrix({ m, measure, norm, onNorm }: { m: PendingMatrix; measure
                     inputMode="decimal"
                     defaultValue={numText(norm.bySize[s])}
                     key={`${s}-${numText(norm.bySize[s])}`}
-                    onBlur={(e) => onNorm({ bySize: { ...norm.bySize, [s]: parseNum(e.target.value) } })}
+                    onBlur={(e) => onNorm({ bySize: { ...norm.bySize, [s]: parseQty(e.target.value) } })}
+                    disabled={khoa}
                     placeholder={numText(norm.common) || "—"}
                     className="h-7 w-14 px-1.5 text-right text-xs"
                     aria-label={`Định mức vải size ${s}`}
@@ -274,6 +344,83 @@ function ProductMatrix({ m, measure, norm, onNorm }: { m: PendingMatrix; measure
       </div>
       {hasNorm && plan.missingSizes.length ? <p className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-300">Chưa khai định mức cho size {plan.missingSizes.join(", ")} — màu có size đó chưa tính được vải.</p> : null}
       {plan.unknown > 0 ? <p className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-300">+? = {formatNumber(plan.unknown)} cái thuộc mẫu chưa có phiếu nhập — không biết thiếu bao nhiêu nên KHÔNG tính vào vải; kho lập phiếu nhập thì ERP mới tính được.</p> : null}
+    </div>
+  );
+}
+
+/**
+ * LỜI MỜI NHẬP MỘT LẦN — chỉ người có `planning:write` thấy (trang chỉ dựng khối này khi có quyền).
+ *
+ * Đếm hai nhóm, khác việc phải làm:
+ *   · CHƯA CÓ trên ERP  → bấm "Nhập vào ERP" (máy chủ chỉ chèn sản phẩm ERP chưa có dòng);
+ *   · KHÁC SỐ với ERP   → ERP thắng, không ghi đè; in mã để người xem lại và sửa tay nếu cần.
+ * "Ẩn" chỉ nhớ trên trình duyệt này và chỉ cho ĐÚNG bản `localStorage` đang có.
+ */
+function LegacyImportBanner({ storedNorms, codeOf }: { storedNorms: Record<string, StoredFabricNorm>; codeOf: Map<string, string> }) {
+  const [legacy, setLegacy] = useState<{ raw: string; norms: Record<string, FabricNorm> } | null>(null);
+  const [hidden, setHidden] = useState(false);
+  const [pending, startTransition] = useTransition();
+  // Đọc sau khi gắn vào trang: máy chủ không có localStorage, đọc lúc dựng là lệch HTML.
+  useEffect(() => {
+    const l = readLegacy();
+    setLegacy(l);
+    setHidden(Boolean(l && readDismissed() === l.raw));
+  }, []);
+
+  const { missing, differs } = useMemo(() => {
+    const out = { missing: [] as string[], differs: [] as string[] };
+    for (const [id, n] of Object.entries(legacy?.norms ?? {})) {
+      if (!hasFabricQty(n)) continue;
+      const tren = storedNorms[id];
+      if (!tren) out.missing.push(id);
+      else if (!sameFabricNorm(tren.norm, n)) out.differs.push(id);
+    }
+    return out;
+  }, [legacy, storedNorms]);
+
+  if (!legacy || hidden || (!missing.length && !differs.length)) return null;
+
+  const nhap = () =>
+    startTransition(async () => {
+      const r = await importFabricNorms({ entries: missing.map((productId) => ({ productId, norm: legacy.norms[productId] })) });
+      if ("error" in r) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success(`Đã nhập ${formatNumber(r.imported.length)} định mức · ${formatNumber(r.skippedExisting.length)} ERP đã có (ERP thắng) · ${formatNumber(r.invalid.length)} không hợp lệ`);
+      if (r.invalid.length) toast.warning(r.invalid.slice(0, 3).map((x) => `${codeOf.get(x.productId) ?? x.productId}: ${x.reason}`).join(" · "));
+    });
+  const ma = (ids: string[]) => ids.map((id) => codeOf.get(id) ?? "(mã không hiện ở đây)").slice(0, 8).join(", ") + (ids.length > 8 ? ` +${formatNumber(ids.length - 8)}` : "");
+
+  return (
+    <div className="m-4 rounded-lg border border-amber-300/60 bg-amber-50 px-4 py-3 text-xs dark:border-amber-700/60 dark:bg-amber-950/30">
+      {missing.length ? (
+        <p>
+          Trình duyệt này còn <b>{formatNumber(missing.length)}</b> định mức vải gõ từ trước, CHƯA có trên ERP. Nhập lên để mọi người cùng thấy một số — ERP chỉ thêm mã chưa có, không ghi đè.
+        </p>
+      ) : null}
+      {differs.length ? (
+        <p className={cn(missing.length && "mt-1.5")}>
+          <b>{formatNumber(differs.length)}</b> mã có số trên trình duyệt KHÁC số trên ERP — ERP thắng, không tự ghi đè: {ma(differs)}.
+        </p>
+      ) : null}
+      <div className="mt-2 flex flex-wrap gap-2">
+        {missing.length ? (
+          <Button size="sm" onClick={nhap} disabled={pending}>
+            {pending ? "Đang nhập…" : `Nhập ${formatNumber(missing.length)} định mức vào ERP`}
+          </Button>
+        ) : null}
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            writeDismissed(legacy.raw);
+            setHidden(true);
+          }}
+        >
+          Ẩn
+        </Button>
+      </div>
     </div>
   );
 }

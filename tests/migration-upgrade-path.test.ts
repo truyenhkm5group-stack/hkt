@@ -202,6 +202,7 @@ const MOI = [
   "0252_ai_usage_workloads",
   "0253_ai_usage_cache_write",
   "0254_carryover_first_work_month",
+  "0255_fabric_norms",
 ] as const;
 
 /*

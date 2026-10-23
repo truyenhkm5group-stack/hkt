@@ -111,7 +111,7 @@ Chi tiết từng hạng mục Phase 2–5 ở mục 7.
 | OD-P2-01 | Dashboards / Views | Bộ lọc yêu thích (favorites) theo người dùng cho `DataTable` | — | P1 | BACKLOG | — | — | — | — | — | — | Claim được (Phase 2 đã duyệt). Chạm `data-table` nên phối với OD-UX-01. |
 | OD-P2-02 | Purchase | `suppliers` thành khoá thật cho đơn xưởng (thôi ô chữ) | — | P1 | BACKLOG | — | — | — | — | — | — | — |
 | OD-P2-03 | Purchase | Thời gian giao của xưởng đọc `production_orders.received_at` thay vì ghép phiếu nhập | — | P1 | BACKLOG | — | — | — | — | — | — | — |
-| OD-P2-04 | Manufacturing | Định mức vải lên máy chủ (thôi `localStorage`), MM-REC-26 | — | P1 | BACKLOG | — | — | — | — | — | — | — |
+| OD-P2-04 | Manufacturing | Định mức vải lên máy chủ (thôi `localStorage`), MM-REC-26 | sứ mệnh `od-p2-04-fabric-norms` | P1 | IN_REVIEW | (PR của nhánh `claude/od-p2-04-fabric-norms`) | — | `tests/fabric-norms.test.ts` (K04) · tsc · lint · npm test · build | — | — | — | Lead gộp + deploy. Đo `count(*) from fabric_norms`: 0 trước, sau khi người bấm nhập = N. Ảnh `/inventory/shortage` trước/sau. |
 | OD-P2-05 | Activities | Hẹn việc kế tiếp hiện trên trang chi tiết đơn/vận đơn/khách (phép chiếu, không bảng mới) | — | P2 | BACKLOG | — | — | — | — | — | — | — |
 | OD-UX-01 | UI/UX | Design system tối thiểu: token + quy tắc loading/empty/error. Kiểm hiện trạng trước, không đổi đồng loạt. | — | P1 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-42` | Chờ số nền |
 | OD-UX-02 | UI/UX | Sidebar gom theo nghiệp vụ, đọc `department-modules.ts` | — | P1 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-42` | — |
@@ -363,8 +363,16 @@ Module Enterprise chỉ được học ở mức **khái niệm trong tài liệ
   - BOM / work order / routing: **khảo sát trước**. Shop thuê xưởng may, không tự sản xuất. Chỉ dựng khi
     khảo sát cho thấy định mức vải là nút thắt đặt hàng.
 - **Cách triển khai**
-  - OD-P2-04: bảng `fabric_norms` (mẫu, vải, mét/sản phẩm, người đặt, lý do) + màn hình đọc; nhập lại dữ
-    liệu cũ từ `localStorage` bằng tay của người dùng.
+  - OD-P2-04 (Lead duyệt thiết kế 23/10):
+    - Bảng `fabric_norms`, grain SẢN PHẨM như phép tính `fabricPlan` đang dùng. Cột: định mức chung, theo
+      size, hao hụt %, đơn vị (danh sách đóng), người ghi. NULL = chưa khai.
+    - Ghi qua `lib/inventory/fabric-norms.ts`: quyền `planning:write` + `audit()` trước/sau.
+    - Nút «Nhập vào ERP» một lần từ `localStorage`:
+      - chỉ người có `planning:write` thấy;
+      - không ghi đè ERP; idempotent;
+      - báo ba số: nhập / ERP đã có / không hợp lệ, kèm danh sách khác số «ERP thắng»;
+      - không xoá `localStorage`.
+    - Bài quét mã nguồn chặn báo cáo / giá vốn đọc bảng.
   - OD-P3-04: kiểm hàng nhập (sau khảo sát).
   - OD-P5-02: tài liệu khảo sát BOM.
 

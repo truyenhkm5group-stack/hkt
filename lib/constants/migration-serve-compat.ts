@@ -126,6 +126,15 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/payroll-carryover.test.ts",
   },
+  {
+    tag: "0255_fabric_norms",
+    why:
+      "Chỉ TẠO một bảng mới (fabric_norms) — không thêm / đổi / xoá cột của bảng nào mã đang đọc. Đường ĐỌC duy nhất " +
+      "(`getFabricNorms`) bắt lỗi bảng chưa có và trả rỗng — /inventory/shortage vẫn dựng, chỉ là chưa có định mức nào (in «—», " +
+      "không in 0). Đường GHI (`saveFabricNormAs` / `importFabricNormsAs`) trả lỗi nghiệp vụ, không làm sập trang.",
+    addedColumns: {},
+    proof: "tests/fabric-norms.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */

@@ -124,8 +124,8 @@ export function measureText(v: { qty: number; unknown: number }, fmt: (n: number
 /* ═══════════════════ TÍNH VẢI ═══════════════════ */
 
 /**
- * Định mức vải do người đặt vải gõ — ERP KHÔNG có định mức (chưa có bảng định mức nguyên liệu), nên
- * không đoán hộ. Định mức theo size ghi đè định mức chung; hao hụt cộng thêm theo phần trăm.
+ * Định mức vải do người đặt vải gõ — ERP không đoán hộ. Định mức theo size ghi đè định mức chung; hao
+ * hụt cộng thêm theo phần trăm. Lưu ở bảng `fabric_norms` (OD-P2-04); trước đó chỉ ở `localStorage`.
  */
 export type FabricNorm = {
   /** Lượng vải / cái áp cho size chưa khai riêng. */
@@ -138,7 +138,40 @@ export type FabricNorm = {
 
 export const EMPTY_FABRIC_NORM: FabricNorm = { common: null, bySize: {}, wastePct: null, unit: "m" };
 
+/** Danh sách ĐÓNG — cùng tập với ràng buộc `fabric_norms_unit_check`. */
+export const FABRIC_UNITS = ["m", "kg", "yard", "cây"] as const;
+export type FabricUnit = (typeof FABRIC_UNITS)[number];
+
+/** Định mức đọc từ ERP kèm ai ghi lần cuối — dữ liệu thuần, đi được từ Server sang Client Component. */
+export type StoredFabricNorm = { norm: FabricNorm; updatedAt: string | null; updatedByName: string };
+
+/** Dòng `fabric_norms` → định mức. Đơn vị rỗng rơi về mét, như màn hình vẫn làm. */
+export function normFromRow(r: { commonQty: number | null; bySize: Record<string, number | null> | null; wastePct: number | null; unit: string }): FabricNorm {
+  return { common: r.commonQty, bySize: r.bySize ?? {}, wastePct: r.wastePct, unit: r.unit || "m" };
+}
+
+/** Khoá `localStorage` của bản cũ. ERP chỉ ĐỌC nó để mời nhập một lần; không ghi, không xoá. */
+export const LEGACY_FABRIC_NORMS_KEY = "erp.inventory.fabric-norms.v1";
+
 const positive = (n: number | null | undefined): number | null => (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null);
+
+/** Có ít nhất một con số đã khai (chung hoặc theo size). Chỉ có đơn vị / hao hụt thì chưa tính được vải. */
+export function hasFabricQty(n: FabricNorm): boolean {
+  return positive(n.common) !== null || Object.values(n.bySize).some((x) => positive(x) !== null);
+}
+
+/**
+ * Hai định mức có nói CÙNG một điều không. So theo NGHĨA, không theo chuỗi JSON: size khai `null` và
+ * size không có khoá là như nhau (cùng rơi về định mức chung), hao hụt `null` và 0 cũng như nhau.
+ */
+export function sameFabricNorm(a: FabricNorm, b: FabricNorm): boolean {
+  if (positive(a.common) !== positive(b.common)) return false;
+  if ((positive(a.wastePct) ?? 0) !== (positive(b.wastePct) ?? 0)) return false;
+  if ((a.unit || "m") !== (b.unit || "m")) return false;
+  const sizes = new Set([...Object.keys(a.bySize), ...Object.keys(b.bySize)]);
+  for (const s of sizes) if (positive(a.bySize[s]) !== positive(b.bySize[s])) return false;
+  return true;
+}
 
 export function normForSize(norm: FabricNorm, size: string): number | null {
   return positive(norm.bySize[size]) ?? positive(norm.common);

@@ -1134,6 +1134,43 @@ export const productNotes = pgTable(
   ],
 );
 
+/**
+ * ĐỊNH MỨC VẢI CỦA MỘT SẢN PHẨM (OD-P2-04, `docs/tech/odoo-inspired-erp-upgrade.md` §6.6).
+ *
+ * Trước bảng này con số chỉ nằm trong `localStorage` của trình duyệt người gõ: mất trình duyệt là
+ * mất số, hai người hai số. Grain giữ ĐÚNG như màn hình đang tính (`fabricPlan`, theo sản phẩm).
+ *
+ * `NULL` = CHƯA KHAI, không phải 0 (AGENTS 42). Chỉ phép tính vải trên `/inventory/shortage` đọc
+ * bảng này — KHÔNG báo cáo, giá vốn hay lợi nhuận nào (`tests/fabric-norms.test.ts` quét mã nguồn).
+ */
+export const fabricNorms = pgTable(
+  "fabric_norms",
+  {
+    productId: text("product_id")
+      .primaryKey()
+      .references(() => products.id, { onDelete: "cascade" }),
+    /** Lượng vải / cái áp cho size chưa khai riêng. */
+    commonQty: doublePrecision("common_qty"),
+    /** `{ size: lượng | null }` — size không có khoá = dùng `common_qty`. */
+    bySize: jsonb("by_size").$type<Record<string, number | null>>().notNull().default({}),
+    /** Hao hụt %, ví dụ 5 = cộng thêm 5%. */
+    wastePct: doublePrecision("waste_pct"),
+    unit: text("unit").notNull().default("m"),
+    /** `users.id` của lần ghi gần nhất. `NULL` = máy / dòng không còn tài khoản (AGENTS 34). */
+    updatedByUserId: text("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** ẢNH CHỤP TÊN để người đọc. Do MÁY CHỦ đọc từ phiên, không nhận từ client. */
+    updatedByName: text("updated_by_name").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check("fabric_norms_common_check", sql`${t.commonQty} IS NULL OR ${t.commonQty} > 0`),
+    check("fabric_norms_waste_check", sql`${t.wastePct} IS NULL OR (${t.wastePct} >= 0 AND ${t.wastePct} <= 100)`),
+    // Danh sách ĐÓNG, đúng bốn đơn vị màn hình đang cho chọn — ô gõ tự do sinh "m", "mét", "M".
+    check("fabric_norms_unit_check", sql`${t.unit} IN ('m', 'kg', 'yard', 'cây')`),
+  ],
+);
+
 export const productVariants = pgTable(
   "product_variants",
   {

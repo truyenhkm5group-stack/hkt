@@ -353,6 +353,7 @@ import { testCareDateFilters } from "./care-date-filters.test";
 import { testPhraseFilter } from "./phrase-filter.test";
 import { testSizeMatrix } from "./size-matrix.test";
 import { testProductNotes } from "./product-notes.test";
+import { testFabricNorms } from "./fabric-norms.test";
 import { testSmokeTiming } from "./smoke-timing.test";
 import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test";
 import { testDepartmentMap } from "./department-map.test";
@@ -2270,6 +2271,7 @@ async function main() {
     testPhraseFilter();
     testSizeMatrix();
     await testProductNotes(db);
+    await testFabricNorms(db);
     testSmokeTiming();
     testUiConsistency();
     testNavigationCoverage();

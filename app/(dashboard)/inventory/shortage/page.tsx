@@ -12,6 +12,7 @@ import { ShortageDecisionButtons } from "@/app/(dashboard)/inventory/shortage/de
 import { PendingMatrixSection } from "@/app/(dashboard)/inventory/shortage/pending-matrix-section";
 import { buildPendingMatrices } from "@/lib/constants/pending-matrix";
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
+import { getFabricNorms } from "@/lib/queries/fabric-norms";
 import { getStockShortage } from "@/lib/queries/stock-shortage";
 import { cn } from "@/lib/utils";
 
@@ -53,6 +54,7 @@ export default async function StockShortagePage({ searchParams }: { searchParams
   const waiting = [...s.orders.values()].filter((o) => o.state === "WAITING_STOCK").sort((a, b) => a.insertedAt.getTime() - b.insertedAt.getTime());
   const oldest = s.variants.reduce((m, r) => Math.max(m, r.oldestWaitHours), 0);
   const pendingMatrices = buildPendingMatrices(s.pending.variants);
+  const fabricNorms = await getFabricNorms(pendingMatrices.map((m) => m.productId));
 
   return (
     <div className="space-y-5">
@@ -244,7 +246,7 @@ export default async function StockShortagePage({ searchParams }: { searchParams
         ) : null}
       </SectionCard>
 
-      <PendingMatrixSection matrices={pendingMatrices} orphanUnits={s.pending.orphanUnits} orphanVariants={s.pending.orphanVariants} />
+      <PendingMatrixSection matrices={pendingMatrices} orphanUnits={s.pending.orphanUnits} orphanVariants={s.pending.orphanVariants} storedNorms={fabricNorms} canWrite={canWrite} />
 
       {waiting.length ? (
         <SectionCard
