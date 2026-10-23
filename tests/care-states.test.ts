@@ -208,7 +208,11 @@ export async function test15TsVaSqlNoiCungMotDieu(db: Db) {
     // Vận đơn chiều hoàn: Pancake chuyển tiếp chữ "Giao thành công" khi chặng đã là RETURNED.
     { ma: null, chu: "Giao thành công", chang: "RETURNED" },
     { ma: null, chu: "Chờ xử lý", chang: "RETURNING" },
+    // 501 trên CHẶNG HOÀN (AGENTS 3.2): mã nói «phát thành công» nhưng hàng đã về tới shop — RETURNED, không phải DELIVERED.
+    { ma: 501, chu: "Phát thành công", chang: "RETURNED" },
   ];
+  assert.equal(carrierSubstate({ code: 501, text: "Phát thành công", stage: "RETURNED" }).substate, "RETURNED", "501 + chặng RETURNED = hoàn đã về shop");
+  assert.equal(carrierSubstate({ code: 501, text: "Phát thành công", stage: "DELIVERED" }).substate, "DELIVERED", "501 chiều đi vẫn là giao tới khách");
   // Báo cáo dịch trạng thái con ở tầng ứng dụng bằng hàm nhớ theo bộ ba (`shipmentSubstateCache`) —
   // nó phải nói ĐÚNG điều bản SQL nói, kể cả khi cùng một bộ ba được hỏi lại lần hai (đi qua bộ nhớ).
   const conCua = shipmentSubstateCache();

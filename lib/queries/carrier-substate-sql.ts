@@ -64,8 +64,12 @@ export function carrierSubstateSql(ma: SQL | SQL.Aliased, chu: SQL | SQL.Aliased
     ["CANCELLED", "CANCELLED"],
   ];
   const chang2 = theoChang.map(([st, s]) => sql`when ${chang} = ${st} then ${s}`);
+  // 501 TRÊN CHẶNG HOÀN — cùng vế với bản TypeScript `carrierSubstate`: mã dịch ra «đã giao» mà chặng ERP là RETURNED ⇒ đã hoàn về shop.
+  const maGiao = Object.entries(VTP_CODE_TO_SUBSTATE).filter(([, s]) => s === "DELIVERED").map(([code]) => sql`${Number(code)}`);
+  const hoanVe = maGiao.length ? sql`when ${chang} = 'RETURNED' and ${ma} in (${sql.join(maGiao, sql`, `)}) then 'RETURNED'` : sql``;
 
   return sql`(select case
+    ${hoanVe}
     ${sql.join(theoMa, sql` `)}
     ${sql.join(theoChu, sql` `)}
     ${sql.join(chang2, sql` `)}

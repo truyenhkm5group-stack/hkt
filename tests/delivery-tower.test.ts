@@ -44,7 +44,7 @@ export async function testDeliveryTower(db: Db) {
       .values({ id, systemId: sysId, billFullName: `Khách ${sysId}`, billPhone: `090000${sysId}`, totalPriceAfterDiscount: 500000, insertedAt: gio(200), stage: "CONFIRMED" })
       .onConflictDoNothing();
   };
-  type Kien = { id: string; stage: "PENDING" | "IN_TRANSIT" | "OUT_FOR_DELIVERY" | "DELIVERY_FAILED" | "RETURNING" | "RETURNED"; reason?: number; note?: string; tuoi: number | null; final?: boolean; cod?: number; tuoiTao?: number };
+  type Kien = { id: string; stage: "PENDING" | "IN_TRANSIT" | "OUT_FOR_DELIVERY" | "DELIVERY_FAILED" | "RETURNING" | "RETURNED"; reason?: number; note?: string; tuoi: number | null; final?: boolean; cod?: number; tuoiTao?: number; code?: number };
   const kien: Kien[] = [
     { id: "dt-nocontact", stage: "DELIVERY_FAILED", reason: 36, tuoi: 5, cod: 700000 },
     { id: "dt-hen", stage: "DELIVERY_FAILED", reason: 35, tuoi: 5, cod: 300000 },
@@ -55,6 +55,9 @@ export async function testDeliveryTower(db: Db) {
     { id: "dt-chom-cu", stage: "OUT_FOR_DELIVERY", tuoi: 30, cod: 600000 },
     { id: "dt-hoan-di", stage: "RETURNING", tuoi: 10, cod: 100000 },
     { id: "dt-hoan-ve", stage: "RETURNED", tuoi: 10, final: true, cod: 100000 },
+    // 501 trên CHẶNG HOÀN (AGENTS 3.2): VTP báo «phát thành công» cho chiều về shop — trước 23/10/2026 tháp dịch mã thành «đã giao» và làm
+    // mất kiện khỏi rổ «hoàn đã về shop», trong khi đường ống hàng hoàn vẫn đếm nó (lộ ra khi chạy tách K12 sau fixture vtp-501r của K01).
+    { id: "dt-hoan-501", stage: "RETURNED", tuoi: 10, final: true, cod: 100000, code: 501 },
     { id: "dt-mu", stage: "IN_TRANSIT", tuoi: null, cod: 800000 },
     /*
       ĐVVC CHƯA TỚI LẤY — hai kiện, chỉ khác TUỔI TỪ LÚC TẠO VẬN ĐƠN.
@@ -82,7 +85,8 @@ export async function testDeliveryTower(db: Db) {
         isFinal: k.final ?? false,
         vtpReasonCode: k.reason ?? null,
         vtpNote: k.note ?? "",
-        vtpStatusName: "Trạng thái thử",
+        vtpStatus: k.code ?? null,
+        vtpStatusName: k.code === 501 ? "Phát thành công" : "Trạng thái thử",
         codAmount: k.cod ?? 0,
         receiverName: `Khách ${9000 + i}`,
         receiverPhone: `090000${i}`,
@@ -139,6 +143,7 @@ export async function testDeliveryTower(db: Db) {
   assert.notEqual(roCua("dt-hoan-di"), "AWAITING_PICKUP", "hàng đang trên đường về shop thì đã từng rời kho");
   assert.equal(roCua("dt-hoan-di"), "RETURNING");
   assert.equal(roCua("dt-hoan-ve"), "RETURN_AT_SHOP", "hoàn đã về shop mà kho chưa đếm vẫn phải thấy, dù ĐVVC coi là xong");
+  assert.equal(roCua("dt-hoan-501"), "RETURN_AT_SHOP", "501 trên chặng hoàn = hàng đã về shop, KHÔNG phải «đã giao» — phải nằm rổ hoàn đã về shop");
   assert.equal(roCua("dt-mu"), "DATA_GAP", "chưa từng có sự kiện nào ⇒ lỗ hổng dữ liệu, KHÔNG phải kiện khoẻ");
 
   /*
