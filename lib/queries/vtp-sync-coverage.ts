@@ -16,6 +16,7 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
+import { PANCAKE_ORDER_SYNC_JOBS, statementFileSeenAtSql } from "@/lib/constants/data-as-of";
 import { sqlIsTestTracking } from "@/lib/constants/truth";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -24,6 +25,10 @@ export type VtpSyncCoverage = {
   lastWebhookAt: Date | null;
   /** Lần NHẬP THẬT (không phải chạy thử) tệp «Danh sách vận đơn» gần nhất. */
   lastFileImportAt: Date | null;
+  /** Bảng kê COD (tệp `STATEMENT_DETAIL`) ERP đọc gần nhất — vế TIỀN của ORDER_OUTCOME đứng trên nó. `null` = chưa từng có. */
+  lastCodStatementAt: Date | null;
+  /** Lượt đồng bộ ĐƠN Pancake THÀNH CÔNG cuối (`sync_runs`, `PANCAKE_ORDER_SYNC_JOBS`). Lượt lỗi / dở dang không tính. */
+  lastPancakeSyncAt: Date | null;
   /** Vận đơn VTP ERP ghi nhận lần đầu trong kỳ (theo `shipments.created_at`), trừ mã thử. */
   known: number;
   linked: number;
@@ -62,6 +67,9 @@ async function getVtpSyncCoverageUncached(period: { from: Date | null; to: Date 
         count(*) filter (where s.order_id is null and not (${sql.raw(RETURN_LEG_SQL)}) and not (coalesce(s.order_reference, '') = '' and ${sql.raw(CANCELLED_BY_CARRIER_SQL)}))::int as orphan_unmatched,
         (select max(w.received_at) from webhook_events w where w.source = 'VIETTELPOST') as last_webhook_at,
         (select max(b.created_at) from vtp_import_batches b where b.mode = 'APPLY' and b.kind = 'ORDER_LIST') as last_import_at,
+        (select max(${sql.raw(statementFileSeenAtSql("f"))}) from vtp_statement_files f where f.kind = 'STATEMENT_DETAIL') as last_cod_statement_at,
+        (select max(r.finished_at) from sync_runs r where r.source = 'PANCAKE' and r.status = 'SUCCESS' and r.finished_at is not null
+           and r.job in (${sql.join(PANCAKE_ORDER_SYNC_JOBS.map((j) => sql`${j}`), sql`, `)})) as last_pancake_sync_at,
         (select count(*)::int from webhook_events w where w.source = 'VIETTELPOST' and w.status = 'FAILED' and w.received_at between ${from} and ${to}) as sync_errors
       from shipments s
       where s.vtp_order_number is not null
@@ -73,6 +81,8 @@ async function getVtpSyncCoverageUncached(period: { from: Date | null; to: Date 
   return {
     lastWebhookAt: d(row?.last_webhook_at),
     lastFileImportAt: d(row?.last_import_at),
+    lastCodStatementAt: d(row?.last_cod_statement_at),
+    lastPancakeSyncAt: d(row?.last_pancake_sync_at),
     known: n(row?.known),
     linked: n(row?.linked),
     returnLegs: n(row?.return_legs),

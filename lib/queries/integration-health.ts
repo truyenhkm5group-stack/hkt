@@ -1,4 +1,5 @@
 import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { statementFileSeenAtSql } from "@/lib/constants/data-as-of";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { VTP_DOCUMENT_SOURCES_SQL } from "@/lib/constants/truth";
@@ -224,7 +225,7 @@ async function connectorsUncached(): Promise<ConnectorHealth[]> {
     nhiên của `vtp_statement_files` là TÊN TỆP, nên gửi lại đúng tệp cũ chỉ cập nhật nội dung còn
     `received_at` đứng im — đường dẫn vẫn chảy mà bảng báo "không nhận được gì".
   */
-  const mocBangKe = sql`greatest(${schema.vtpStatementFiles.receivedAt}, coalesce(${schema.vtpStatementFiles.lastImportedAt}, ${schema.vtpStatementFiles.receivedAt}))`;
+  const mocBangKe = sql.raw(statementFileSeenAtSql('"vtp_statement_files"'));
   const [bangKeRow] = await db
     .select({
       lastAt: sql<Date | null>`max(${mocBangKe})`,

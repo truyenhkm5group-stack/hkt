@@ -1,13 +1,30 @@
 import Link from "next/link";
 import { formatDateTime, formatNumber } from "@/lib/format";
+import { DataAsOfLine } from "@/components/data-as-of-line";
+import type { AsOfInput } from "@/lib/constants/data-as-of";
 import type { VtpSyncCoverage } from "@/lib/queries/vtp-sync-coverage";
 
 /**
  * ĐỘ PHỦ ĐỒNG BỘ VIETTEL POST (P0 22/10/2026) — đặt cạnh GTC và trên /shipments để người đọc biết con số đứng trên tập
  * vận đơn nào. Chỉ số đếm của chính ERP; «tổng trên Viettel Post» KHÔNG có (không API) nên in câu «chưa đo được».
  * `formula` (tuỳ chọn) = câu công thức + mẫu số + kỳ của chỉ số đang hiện bên cạnh.
+ * `asOf` / `latency` (OD-UX-03, tuỳ chọn) = hàng «số liệu tính lúc · bảng kê COD · Pancake · trễ ĐVVC» — truyền thì in, cùng
+ * hai mốc nguồn đọc trong CHÍNH câu SQL của thẻ này.
  */
-export function VtpSyncCoverageCard({ c, periodLabel, formula }: { c: VtpSyncCoverage; periodLabel: string; formula?: string }) {
+export function VtpSyncCoverageCard({
+  c,
+  periodLabel,
+  formula,
+  asOf,
+  latency,
+}: {
+  c: VtpSyncCoverage;
+  periodLabel: string;
+  formula?: string;
+  asOf?: AsOfInput["asOf"];
+  latency?: AsOfInput["latency"];
+
+}) {
   const orphans = c.orphanCancelledBatch + c.orphanUnmatched;
   return (
     <div className="rounded-xl border border-hairline bg-card px-4 py-3 text-[12.5px] leading-relaxed text-muted-foreground">
@@ -36,6 +53,10 @@ export function VtpSyncCoverageCard({ c, periodLabel, formula }: { c: VtpSyncCov
         </span>
         <span>Tổng vận đơn trên Viettel Post: {c.carrierTotalNote}</span>
       </div>
+      <DataAsOfLine
+        className="mt-1 text-[12.5px]"
+        input={{ asOf, now: new Date(), lastCodStatementAt: c.lastCodStatementAt, lastPancakeSyncAt: c.lastPancakeSyncAt, latency }}
+      />
       {formula ? <div className="mt-1">{formula}</div> : null}
     </div>
   );

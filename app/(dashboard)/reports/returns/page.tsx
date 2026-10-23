@@ -38,6 +38,9 @@ import { displayVariationText, withDisplayVariation } from "@/lib/constants/expe
 import { readDisplayProfile } from "@/lib/experience/profile";
 import { VtpSyncCoverageCard } from "@/components/vtp-sync-coverage";
 import { getVtpSyncCoverage } from "@/lib/queries/vtp-sync-coverage";
+import { collectAsOf } from "@/lib/cache";
+import { latencyFromHealth } from "@/lib/constants/data-as-of";
+import { vtpWebhookHealth } from "@/lib/queries/vtp-webhook-health";
 
 export const metadata = { title: "Tỷ lệ giao thành công theo mã hàng" };
 
@@ -72,8 +75,10 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
   // Dựng tham số và gọi truy vấn qua CÙNG hai hàm mà job giữ ấm gọi (`lib/queries/returns-report-page.ts`),
   // để khoá đệm trang đọc trùng khoá job làm ấm theo cấu trúc, không theo trí nhớ.
   const thamSo = returnsPageParams(raw);
+  // OD-UX-03: mốc dữ liệu CŨ NHẤT đứng sau mọi con số dưới đây (đệm giữ ấm có thể trả số cũ tới 15 phút) — không in «bây giờ».
+  const { value: duLieu, asOf: mocTinh, cached: tuDem } = await collectAsOf(() => loadReturnsPage(thamSo));
   const { params, minShipped, variantKey, giaTriDon, dangLocGiaTri, basis, codes, marketerIds, openReason, openGroup, openProduct, reasonFilter, reasonSelection, reasonFiltered } = thamSo;
-  const { rows, total, pageCount, all, productRows, loiBang, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia, causeBoard } = await loadReturnsPage(thamSo);
+  const { rows, total, pageCount, all, productRows, loiBang, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia, causeBoard } = duLieu;
   // Hồ sơ ngành chỉ để đổi NHÃN chữ biến thể (shop thực phẩm: «Size: 1kg» ⇒ «Quy cách: 1kg») — đổi trên DỮ LIỆU trước khi truyền
   // xuống bảng client; KHÔNG đổi trong `loadReturnsPage` vì khoá đệm của nó dùng chung với job giữ ấm.
   const displayProfile = await readDisplayProfile();
@@ -177,6 +182,8 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
       <VtpSyncCoverageCard
         c={await getVtpSyncCoverage({ from: params.period.from, to: params.period.to })}
         periodLabel={params.period.label}
+        asOf={{ asOf: mocTinh, cached: tuDem }}
+        latency={latencyFromHealth(await vtpWebhookHealth())}
         formula={`GTC = giao thành công ÷ đã gửi = ${formatNumber(summary.delivered)} ÷ ${formatNumber(summary.shipped)} đơn · ${ELIGIBLE_SENT_HINT} · Kỳ: ${params.period.label}, lọc theo ${TIME_BASIS_LABEL[basis].toLowerCase()}, giờ Việt Nam · Độ mịn ĐƠN (đơn Pancake / ERP); vận đơn chưa có đơn KHÔNG nằm trong tử hay mẫu số.`}
       />
 
