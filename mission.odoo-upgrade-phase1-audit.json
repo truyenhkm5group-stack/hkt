@@ -3,7 +3,7 @@
   "mission_id": "odoo-upgrade-phase1-audit",
   "title": "ODOO-INSPIRED ERP TRANSFORMATION — Phase 1 discovery: tệp tiến độ bền + bảng audit module + lộ trình Phase 2–5 (chỉ tài liệu)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-odoo",
@@ -24,9 +24,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T06:07:43.819Z",
-  "updated_at": "2026-10-23T07:39:10.289Z",
+  "updated_at": "2026-10-23T07:54:40.938Z",
   "last_heartbeat": "2026-10-23T07:37:29.474Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#995 → db264b9d3414768e9996ae8fa0e22b42462c16c8"
+  },
   "handoff": {
     "branch": "claude/odoo-upgrade-phase1-audit",
     "sha": "e9575d96603f4d791f6755ff65ccfc378605e679",
