@@ -3,7 +3,7 @@
   "mission_id": "p0-865-missing-item",
   "title": "P0 #865: món khách nói tường minh mà đơn nháp bỏ sót hẳn ⇒ không lên / không tự chốt đơn thiếu món",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-865b",
@@ -26,12 +26,15 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-22T19:18:54.116Z",
-  "updated_at": "2026-10-23T02:00:22.963Z",
+  "updated_at": "2026-10-23T02:31:12.518Z",
   "last_heartbeat": "2026-10-22T22:12:45.330Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "evidence": {
+    "merged": "#985 → b2946e8792efc466b51d2d0a318c6d021d7b4533"
   },
   "handoff": {
     "branch": "claude/p0-865-missing-item",
