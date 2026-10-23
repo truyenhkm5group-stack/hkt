@@ -1,0 +1,8 @@
+{
+  "pr": 987,
+  "sha": "32f0d354ba055a788df8ef7222bd3267433b5949",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T02:03:56.308Z",
+  "note": "review lead (GĐ3 (a)+(b)): systemPromptParts gắn tầng độ bền (STATIC/DAY/HOUR/CONVERSATION); assembleSystemPrompt LEGACY = đúng thứ tự cũ, CACHE_FIRST = tĩnh trước; công tắc sales.prompt-layout object, mặc định LEGACY ⇒ deploy không đổi hành vi; Anthropic tách khối cache_control; bench nhận --layout; bài hoán vị multiset dòng trên golden. Bench + canary là bước sau deploy."
+}
