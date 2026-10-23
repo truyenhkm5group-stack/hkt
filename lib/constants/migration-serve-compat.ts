@@ -156,6 +156,16 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/sourcing-landed-cost.test.ts",
   },
+  {
+    tag: "0258_sourcing_trials",
+    why:
+      "Chỉ TẠO hai bảng mới ở CSDL tổ chức (sourcing_shortlist · sourcing_trial_requests) — không thêm / đổi / xoá cột nào. Mọi " +
+      "đường ĐỌC của hai bảng (`lib/queries/sourcing-trials.ts`) bắt lỗi bảng chưa có (42P01) ⇒ trang mẫu nguồn in «CSDL chưa áp " +
+      "0258», kho mẫu / giá về chạy như cũ. Mọi đường GHI (`lib/sourcing/trial-service.ts`) kiểm bảng TRƯỚC khi cấp mã TEST- hay xin " +
+      "duyệt, nên chưa áp thì trả câu lỗi và không để lại mẫu TEST- / yêu cầu duyệt mồ côi.",
+    addedColumns: {},
+    proof: "tests/sourcing-trials.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */

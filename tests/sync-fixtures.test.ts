@@ -6,6 +6,7 @@ import { testSourcingShell } from "./sourcing-shell.test";
 import { testSourcingQuery } from "./sourcing-query.test";
 import { testSourcingOffers } from "./sourcing-offers.test";
 import { testSourcingLandedCost } from "./sourcing-landed-cost.test";
+import { testSourcingTrials } from "./sourcing-trials.test";
 import "./setup-env";
 import { testReturnReasonKhachVangNha } from "./return-reason-vang-nha.test";
 import { testCodReconciliation } from "./cod-reconciliation.test";
@@ -2571,6 +2572,8 @@ async function main() {
     await testSourcingOffers();
     // SRC-4: giá về VN ước tính (CIF, không số mặc định) + điểm thành phần (không trọng số mặc định).
     await testSourcingLandedCost();
+    // SRC-5a: lưu mẫu TEST- + mua thử luôn phải duyệt (lõi duyệt chung) + vòng phản hồi bằng số thật.
+    await testSourcingTrials();
     await testVtpImportTruth(db);
     await testVtpImportRecovery(db);
     await testCostAllocation(db);

@@ -205,6 +205,7 @@ const MOI = [
   "0255_ai_usage_sourcing_workload",
   "0256_sourcing_offer_catalog",
   "0257_sourcing_offer_weights",
+  "0258_sourcing_trials",
 ] as const;
 
 /*
@@ -2014,6 +2015,13 @@ export async function testMigrationUpgradePath() {
       "0257: cân nặng 0 g bị chặn",
     );
     await client.query(`delete from sourcing_offer_weights where id like 'up-sw%'`);
+
+    /*
+      0258 (tìm hàng nguồn · lưu mẫu + mua thử): CHỈ TẠO hai bảng, không gieo dòng nào; trạng thái lạ bị chặn, «đã huỷ» phải có lý do.
+    */
+    assert.ok(!/^\s*(update|insert)\b/im.test(readFileSync(path.join(goc, "0258_sourcing_trials.sql"), "utf8").replace(/--.*$/gm, "")), "0258: migration KHÔNG được có câu UPDATE / INSERT");
+    assert.equal(await dem("select count(*)::int as n from sourcing_trial_requests"), 0, "0258: bảng mới rỗng");
+    assert.equal(await dem("select count(*)::int as n from information_schema.table_constraints where table_name = 'sourcing_trial_requests' and constraint_name in ('sourcing_trial_requests_status_check','sourcing_trial_requests_cancelled_check','sourcing_trial_requests_ordered_check')"), 3, "0258: ràng buộc trạng thái có mặt");
     await client.query(`delete from sourcing_offers where id like 'up-so%'`);
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══

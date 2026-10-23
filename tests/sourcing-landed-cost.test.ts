@@ -171,8 +171,14 @@ function testSourceFences() {
   assert.ok(lc.includes("fenToVnd(") && !/priceFen\s*[*/]/.test(lc), "quy đổi CNY → VND chỉ qua lib/sourcing/price.ts");
   const files = execFileSync("git", ["ls-files", "lib", "app", "components", "scripts"], { encoding: "utf8" }).split("\n").filter((f) => /\.tsx?$/.test(f));
   const users = files.filter((f) => readFileSync(f, "utf8").includes("landedCostAtQty("));
-  assert.deepEqual(users.filter((f) => !f.startsWith("app/(dashboard)/sourcing/") && f !== "lib/sourcing/landed-cost.ts"), [], "giá về VN chỉ để HIỂN THỊ — không action / job / truy vấn nào dùng nó");
-  for (const f of users) assert.ok(!/setEstimatedCost|unitCost|insert\(/.test(readFileSync(f, "utf8")), `${f}: không ghi giá về VN vào giá dự tính / giá vốn`);
+  // Ngoại lệ DUY NHẤT: yêu cầu mua thử (SRC-5a) CHỤP kết quả vào ảnh chụp của chính nó — vẫn không ghi vào giá dự tính / giá vốn / phiếu kho.
+  const SNAPSHOT_ONLY = ["lib/sourcing/trial-service.ts"];
+  assert.deepEqual(users.filter((f) => !f.startsWith("app/(dashboard)/sourcing/") && f !== "lib/sourcing/landed-cost.ts" && !SNAPSHOT_ONLY.includes(f)), [], "giá về VN chỉ để HIỂN THỊ (và chụp vào yêu cầu mua thử) — không action / job / truy vấn nào khác dùng nó");
+  for (const f of users) {
+    const src = readFileSync(f, "utf8");
+    assert.ok(!/setEstimatedCost|estimatedCost|insert\(schema\.(stockReceipts|stockReceiptItems|products|productVariants)\)/.test(src), `${f}: không ghi giá về VN vào giá dự tính / giá vốn / phiếu kho`);
+    if (!SNAPSHOT_ONLY.includes(f)) assert.ok(!/unitCost|insert\(/.test(src), `${f}: trang hiển thị không ghi gì`);
+  }
   const svc = readFileSync("lib/sourcing/offer-service.ts", "utf8");
   assert.ok(!/update\(schema\.sourcingOfferWeights\)|delete\(schema\.sourcingOfferWeights\)/.test(svc), "cân nặng chỉ thêm dòng");
 }

@@ -7,6 +7,7 @@ import { isOrgOwner } from "@/lib/auth/org-owner";
 import { OWNER_SELF_APPROVAL_GROUPS, OWNER_SELF_APPROVAL_REASON } from "@/lib/constants/org-owner";
 import { emitDomainEvent } from "@/lib/events/emit";
 import {
+  ALWAYS_REQUIRE_APPROVAL_GROUPS,
   APPROVAL_ENFORCE_KEY,
   APPROVAL_ENFORCE_LEGACY_KEY,
   APPROVAL_GROUP_LABEL,
@@ -509,7 +510,8 @@ export async function guardSecondApprovalCore(db: DbOrTx, user: ApprovalUser, in
     if (opts.auditSink) opts.auditSink.push(p);
     else await audit(p);
   };
-  const enforce = isEnforced(await readEnforceConfig(db), input.group);
+  // Nhóm luôn-phải-duyệt (mua thử nguồn) không đọc công tắc: tắt cưỡng chế không được biến nó thành tự chạy.
+  const enforce = ALWAYS_REQUIRE_APPROVAL_GROUPS.includes(input.group) || isEnforced(await readEnforceConfig(db), input.group);
   const vuotNguong = overThreshold(input.group, input.amount);
 
   // ── Chưa bật cưỡng chế, hoặc dưới ngưỡng: LÀM LUÔN nhưng vẫn để lại dấu vết ──

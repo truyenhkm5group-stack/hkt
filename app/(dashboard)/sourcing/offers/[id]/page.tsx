@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ExternalLink } from "lucide-react";
 import { LandedCostCell } from "@/components/sourcing/landed-cost-view";
 import { AddWeightForm, ArchiveOfferForm, AddSnapshotForm, EditOfferForm, SupplierFactsForm } from "@/components/sourcing/offer-forms";
+import { SaveShortlistButton, TrialRequestForm } from "@/components/sourcing/trial-forms";
 import { DataAge, OfferImage, TiersText } from "@/components/sourcing/offer-bits";
 import { PageHeader } from "@/components/page-header";
 import { DescriptionList, SectionCard } from "@/components/ui-bits";
@@ -19,6 +20,8 @@ import {
 } from "@/lib/constants/sourcing";
 import { formatDateTime, formatNumber, vnDateKey } from "@/lib/format";
 import { getSourcingOffer, latestOfferWeights } from "@/lib/queries/sourcing";
+import { getOfferShortlist } from "@/lib/queries/sourcing-trials";
+import { TRIAL_STATE_LABEL } from "@/lib/sourcing/trial";
 import { getSettingJson } from "@/lib/settings";
 import { landedConfigEmpty, landedCostAtQty } from "@/lib/sourcing/landed-cost";
 import { supplierScore } from "@/lib/sourcing/score";
@@ -50,7 +53,7 @@ export default async function SourcingOfferPage({ params }: { params: Promise<{ 
   const now = new Date();
   const latest = snapshots[0] ?? null;
   const link = safeHttpUrl(offer.canonicalUrl);
-  const weightRows = await latestOfferWeights([offer.id], 10);
+  const [weightRows, saved] = await Promise.all([latestOfferWeights([offer.id], 10), getOfferShortlist(offer.id)]);
   const weightHistory = weightRows.byOffer.get(offer.id) ?? [];
   const grams = weightHistory[0]?.grams ?? null;
   const score = supplierScore(supplier, weights);
@@ -239,6 +242,49 @@ export default async function SourcingOfferPage({ params }: { params: Promise<{ 
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">Chưa gắn nhà cung cấp — thêm link shop ở «Sửa mẫu».</p>
+        )}
+      </SectionCard>
+
+      <SectionCard title="Lưu mẫu & mua thử" description="Lưu mẫu cấp một mã tạm TEST- ở sổ mẫu (chưa có sản phẩm, không tồn kho, không giá vốn). Mua thử là YÊU CẦU có duyệt — ERP không đặt hàng.">
+        {saved.unavailable ? (
+          <p className="text-sm text-amber-700 dark:text-amber-300">CSDL của tổ chức chưa áp migration 0258 (lưu mẫu / mua thử).</p>
+        ) : !saved.shortlist ? (
+          canWrite && !offer.archivedAt ? (
+            <SaveShortlistButton offerId={offer.id} />
+          ) : (
+            <p className="text-sm text-muted-foreground">Chưa lưu mẫu.</p>
+          )
+        ) : (
+          <div className="space-y-4 text-sm" data-shortlist>
+            <p>
+              Đã lưu — mẫu{" "}
+              <Link className="font-medium text-primary underline" href={`/models/${saved.shortlist.modelId}`}>
+                {saved.shortlist.modelCode}
+              </Link>
+              {saved.shortlist.productId ? " (đã nối sản phẩm)" : " (chưa có mã chính thức)"}.
+            </p>
+            {saved.trials.length ? (
+              <ul className="space-y-1" data-trial-list>
+                {saved.trials.map((t) => (
+                  <li key={t.id}>
+                    <Link className="text-primary underline" href={`/sourcing/trials/${t.id}`}>
+                      {formatDateTime(t.requestedAt)} · {formatNumber(t.totalQty)} cái
+                    </Link>{" "}
+                    — {TRIAL_STATE_LABEL[t.state]}
+                    {t.requestedByName ? ` · ${t.requestedByName}` : ""}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-muted-foreground">Chưa có yêu cầu mua thử nào.</p>
+            )}
+            {canWrite && !offer.archivedAt ? (
+              <div className="border-t pt-3">
+                <div className="mb-2 font-medium">Xin mua thử</div>
+                <TrialRequestForm offerId={offer.id} colors={latest?.skus?.colors ?? []} sizes={latest?.skus?.sizes ?? []} />
+              </div>
+            ) : null}
+          </div>
         )}
       </SectionCard>
 

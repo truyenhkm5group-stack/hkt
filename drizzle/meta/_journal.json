@@ -1800,6 +1800,13 @@
       "when": 1792487407372,
       "tag": "0257_sourcing_offer_weights",
       "breakpoints": true
+    },
+    {
+      "idx": 258,
+      "version": "7",
+      "when": 1792487467372,
+      "tag": "0258_sourcing_trials",
+      "breakpoints": true
     }
   ]
 }

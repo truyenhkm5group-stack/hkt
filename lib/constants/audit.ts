@@ -47,6 +47,11 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   SOURCING_SNAPSHOT_ADD: "Tìm hàng: chụp giá mới",
   SOURCING_SUPPLIER_UPDATE: "Tìm hàng: sửa thông tin nhà cung cấp",
   SOURCING_WEIGHT_ADD: "Tìm hàng: khai cân nặng một cái",
+  SOURCING_SHORTLIST_ADD: "Tìm hàng: lưu mẫu (cấp mã TEST-)",
+  SOURCING_TRIAL_REQUEST: "Tìm hàng: xin mua thử",
+  SOURCING_TRIAL_ORDER: "Tìm hàng: đánh dấu đã đặt mua thử (ngoài ERP)",
+  SOURCING_TRIAL_RECEIVE: "Tìm hàng: đánh dấu hàng mua thử đã về",
+  SOURCING_TRIAL_CANCEL: "Tìm hàng: huỷ yêu cầu mua thử",
   "reconcile.repair": "Đối soát tự sửa dữ liệu",
   "backfill.canonical-state": "Dựng lại trạng thái từ lịch sử",
   "webhook.replay": "Xử lý lại gói tin",
@@ -157,6 +162,7 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {
   SOURCING_OFFER: "Mẫu nguồn (tìm hàng)",
   SOURCING_SUPPLIER: "Nhà cung cấp nguồn",
+  SOURCING_TRIAL: "Yêu cầu mua thử (tìm hàng)",
   RECOMMENDATION: "Đề xuất trên buồng lái",
   PRODUCTION_TOPIC: "Topic sản xuất",
   COST_SHEET: "Bảng giá thành",
@@ -228,6 +234,10 @@ export function auditEntityHref(entity: string, entityId: string): string | null
       return `/models/${entityId}`;
     case "PRODUCTION_ORDER":
       return `/inventory/planning/orders/${entityId}`;
+    case "SOURCING_OFFER":
+      return `/sourcing/offers/${entityId}`;
+    case "SOURCING_TRIAL":
+      return `/sourcing/trials/${entityId}`;
     default:
       return null;
   }
