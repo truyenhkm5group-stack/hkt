@@ -3,7 +3,7 @@
   "mission_id": "carrier-substate-return-501",
   "title": "Kiện 501 trên chặng hoàn hiện ở rổ «hoàn đã về shop» của tháp giao vận (carrierSubstate + bản SQL cùng một vế)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-k0112",
@@ -23,11 +23,26 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T02:27:46.465Z",
-  "updated_at": "2026-10-23T02:27:46.465Z",
-  "last_heartbeat": "2026-10-23T02:27:46.465Z",
+  "updated_at": "2026-10-23T03:46:24.217Z",
+  "last_heartbeat": "2026-10-23T03:46:24.217Z",
   "definition_of_done": [],
   "intake": {
     "verdict": "MISSING",
     "evidence": []
+  },
+  "handoff": {
+    "branch": "claude/carrier-substate-return-501",
+    "sha": "b807cb349b0912ad546eabec3fa1bd3ea7a535fc",
+    "at": "2026-10-23T03:46:24.217Z",
+    "actor": "DESKTOP-56TH98Y:wt-k0112",
+    "title": "Kiện 501 trên chặng hoàn hiện ở rổ «hoàn đã về shop» của tháp giao vận (carrierSubstate + bản SQL cùng một vế)",
+    "summary": "carrierSubstate + carrierSubstateSql cùng một vế: mã → DELIVERED (501) mà stage = RETURNED ⇒ RETURNED (AGENTS 3.2: 501 + chặng hoàn = hàng về shop). Lời khai thô VTP giữ nguyên (47). TÁC ĐỘNG PRODUCTION ĐO 23/10 (db-query lead, run 39890758735): 0 kiện RETURNED có đơn mang 501 — VTP báo hoàn về shop bằng «Thành công - Chuyển trả người gửi» (vtp_status null, 1.036), 504 (447 + 52) và dòng chiều hoàn riêng (358 + 22) ⇒ bản sửa là CHẶN TRƯỚC, không sửa sai lệch đang có. Rà 16 nơi gọi (agent): không đụng tiền / ORDER_OUTCOME / tồn kho / kết cục care; khi có kiện 501 chiều hoàn thì đổi có chủ ý ở tháp (RETURN_AT_SHOP thay vì mất / STALE / DATA_GAP), rổ fulfillment dashboard + bộ lọc đơn (Đã giao → Đã hoàn), facet trạng thái con danh sách vận đơn, bớt việc care giả. Ghi chú: ảnh chụp lịch sử care_decisions.carrier_substate_at_decision / shipment_care.entry_carrier_state sẽ có hai nhãn (DELIVERED cũ, RETURNED mới) — chấp nhận, KHÔNG backfill. Dọn được sau: lib/care/entry.ts:97 (legAwareSubstate) nay thừa.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint 4 tệp: sạch",
+      "npm test đủ (không TEST_KHOI): TẤT CẢ KIỂM THỬ ĐẠT trên commit trước rebase",
+      "TEST_KHOI=K01,K12 trước bản sửa: tháp 28 ≠ đường ống 30 (hai fixture 501 + leg RETURN của K01)",
+      "rebase lên main mới: tsc lại sạch"
+    ]
   }
 }
