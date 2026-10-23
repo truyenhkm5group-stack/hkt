@@ -1,0 +1,8 @@
+{
+  "pr": 1008,
+  "sha": "e857482c72398bc315b838372a6f09e4d054986a",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T17:55:05.443Z",
+  "note": "review lead: chỉ bọc orderSummary (2 câu, một giao dịch, chỉ dùng tx) + shipmentSummary trong chayKhongJit, SQL không đổi; bằng chứng EXPLAIN xen kẽ JIT bật/tắt 10.907→169 ms và 5.382→60 ms; rào mở rộng tests/trang-cham-jit (33 hàm)."
+}
