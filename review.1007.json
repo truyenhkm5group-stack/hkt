@@ -1,0 +1,8 @@
+{
+  "pr": 1007,
+  "sha": "ac817c15979f4ce7e24628c0469efa0dd73d7c75",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T16:21:27.313Z",
+  "note": "review lead: 0256 chỉ CREATE 3 bảng tổ chức, idempotent, không gieo; CHECK không có STALE (cũ tính lúc đọc); CNY = fen nguyên qua một mô-đun; UNIQUE trong CSDL tổ chức; ảnh chỉ link no-referrer một chỗ vẽ. Miễn quét vendor 1688/alibaba/taobao/tmall đúng vì máy chủ không gọi — PHẢI gỡ khi SRC nối API thật (B1)."
+}
