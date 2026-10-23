@@ -115,7 +115,7 @@ export async function testCostAllocation(db: Db) {
   // ══ Rải theo NGÀY: biểu đồ theo ngày không được có một cột dựng đứng ở ngày ghi sổ ══
   clearMemo();
   const thang9: Period = { key: "custom", from: d("2026-09-01"), to: dEnd("2026-09-30"), label: "Tháng 9/2026", fromKey: "2026-09-01", toKey: "2026-09-30" };
-  const { byDay } = await getOperatingCostByDay(thang9, db);
+  const { byDay } = await getOperatingCostByDay(thang9);
   const ngay01 = byDay.get("2026-09-01") ?? 0;
   const ngay20 = byDay.get("2026-09-20") ?? 0;
   assert.ok(ngay01 > 0 && ngay20 > 0, "theo ngày: mọi ngày trong kỳ thuê đều có chi phí, không chỉ ngày ghi sổ");
@@ -302,7 +302,7 @@ async function testOperatingCostByDayAuthority(db: Db) {
   const tong = (m: Map<string, number>) => [...m.values()].reduce((t, v) => t + v, 0);
   const doiChieu = async (ky: Period, nhan: string) => {
     clearMemo();
-    const [theoNgay, engine, recognized] = await Promise.all([getOperatingCostByDay(ky, db), getOperatingCost(ky), getRecognizedCosts(ky)]);
+    const [theoNgay, engine, recognized] = await Promise.all([getOperatingCostByDay(ky), getOperatingCost(ky), getRecognizedCosts(ky)]);
     assert.equal(tong(theoNgay.byDay), engine.amount, `${nhan}: Σ các ngày phải BẰNG getOperatingCost() của cùng kỳ, tới từng đồng`);
     assert.equal(theoNgay.total, engine.amount, `${nhan}: tổng khai kèm phải bằng Σ các ngày`);
     assert.equal(engine.amount, recognized.operatingTotal, `${nhan}: hai cửa của engine nói cùng một con số`);
@@ -405,7 +405,7 @@ async function testLogisticsAdjustmentOnePath(db: Db) {
   const chup = async (ky: Period) => {
     clearMemo();
     const engine = await getRecognizedCosts(ky);
-    const theoNgay = await getOperatingCostByDay(ky, db);
+    const theoNgay = await getOperatingCostByDay(ky);
     const bc = await getProfitReport(ky, "created");
     const cash = await getCashProfitReport(ky);
     const truth = await getFinancialTruth(ky);

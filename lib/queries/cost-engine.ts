@@ -21,7 +21,7 @@
  */
 import { and, count, eq, inArray, isNotNull, isNull, notInArray, sql, type SQL } from "drizzle-orm";
 import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
-import { chayKhongJit, getDb, schema, type Db } from "@/db";
+import { chayKhongJit, getDb, schema, theoClient, type Db } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import type { ExpenseCategory } from "@/db/schema";
 import { distributeProportionally, type AllocatableExpense } from "@/lib/constants/cost-allocation";
@@ -586,10 +586,18 @@ export type OperatingCostByDay = {
  * bằng đúng cột ấy của tổng kỳ. Trước đây cả `pnl()` lẫn bảng theo ngày đều bỏ sót khoản này trong
  * khi engine tính nó vào thành phần Cước — hai báo cáo khớp nhau vì CÙNG thiếu.
  *
- * `db` là tuỳ chọn để nơi gọi đang ở trong một giao dịch (tắt JIT) dùng lại chính kết nối ấy.
+ * ─── GỌI TỪ TRONG MỘT GIAO DỊCH: PHẢI MANG SẴN `payroll` ───
+ *
+ * Nơi gọi đang ở trong một giao dịch (tắt JIT) truyền `{ db: tx, payroll }` để dùng lại chính kết nối ấy.
+ * `payroll` BẮT BUỘC đi kèm: `getRecognizedPayrollCost` đọc `settings` qua `getSettingJson`, tức tự xin
+ * một kết nối THỨ HAI từ bể trong lúc giao dịch đang giữ kết nối thứ nhất — đúng hình dạng khoá chết bể
+ * (5 lượt mở trang cùng lúc ⇒ 5 giao dịch giữ cả 5 chỗ, cả 5 chờ chỗ thứ 6). Nơi gọi tính nó TRƯỚC khi
+ * mở giao dịch, `await` xong hẳn rồi mới mở; chữ ký này khiến quên truyền là lỗi biên dịch.
  */
-export async function getOperatingCostByDay(period: Period, db?: Db): Promise<OperatingCostByDay> {
-  const conn = db ?? (await getDb());
+export async function getOperatingCostByDay(period: Period): Promise<OperatingCostByDay>;
+export async function getOperatingCostByDay(period: Period, trongGiaoDich: { db: Db; payroll: PayrollRecognition }): Promise<OperatingCostByDay>;
+export async function getOperatingCostByDay(period: Period, trongGiaoDich?: { db: Db; payroll: PayrollRecognition }): Promise<OperatingCostByDay> {
+  const conn = trongGiaoDich ? trongGiaoDich.db : await getDb();
   const inRange = expenseInRange(period.from, period.to);
   const vanHanh = () =>
     conn
@@ -624,15 +632,13 @@ export async function getOperatingCostByDay(period: Period, db?: Db): Promise<Op
       .where(and(notInArray(e.category, OPERATING_EXPENSE_CATEGORIES), sql`not ${LOGISTICS_ADJUSTMENT_ANY}`, inRange))
       .groupBy(e.category, e.costSource);
   /*
-    `db` TRUYỀN VÀO có thể là client của MỘT giao dịch (`reports.ts::orderFacts` gọi hàm này bên trong
-    `chayKhongJit`) — một client chỉ chạy một câu một lúc, nên trên nó ba câu chạy NỐI TIẾP. Tự mở bể
-    thì ba câu đi ba kết nối, chạy song song như trước. Cùng SQL, cùng thứ tự kết quả.
-    `getRecognizedPayrollCost` tự mở kết nối riêng nên vẫn chạy song song với khối này.
+    Ba câu đi qua `theoClient`: client của MỘT giao dịch ⇒ nối tiếp (một client chỉ chạy một câu một
+    lúc); bể ⇒ song song như trước. Cùng SQL, cùng thứ tự kết quả. Trong giao dịch, `payroll` đã tính sẵn
+    ngoài giao dịch nên KHÔNG xin kết nối thứ hai; tự mở bể thì nó chạy song song với khối này như cũ.
   */
-  const [payroll, [rows, adjustments, others]] = await Promise.all([
-    getRecognizedPayrollCost(period),
-    db ? (async () => [await vanHanh(), await dieuChinh(), await khac()] as const)() : Promise.all([vanHanh(), dieuChinh(), khac()]),
-  ]);
+  const [payroll, [rows, adjustments, others]] = trongGiaoDich
+    ? [trongGiaoDich.payroll, await theoClient(conn, [vanHanh, dieuChinh, khac])]
+    : await Promise.all([getRecognizedPayrollCost(period), theoClient(conn, [vanHanh, dieuChinh, khac])]);
 
   const payrollCovered = payroll.coverage === "COMPLETE";
   const byDay = new Map<string, number>();
