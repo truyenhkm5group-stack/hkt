@@ -1119,8 +1119,14 @@ export async function getMarketingBreakdown(
     lẫn bản một-câu-`group by` (khối chú thích ngay trên). Thay đổi ở đây CHỈ là ranh giới giao
     dịch: cùng truy vấn, cùng thứ tự, cùng kết quả.
   */
+  /*
+    BẢNG TÊN TRA TRƯỚC KHI MỞ GIAO DỊCH. Tên marketer (`marketerNames` → `listEmployees` → `getSettingJson`) và tên
+    chiến dịch (`campaignNames`) tự xin kết nối từ bể; tra bên trong giao dịch là giữ một kết nối rồi xin kết nối
+    thứ hai — khoá chết bể (lá chắn lúc chạy trong db/index.ts bắt được đường này ở testMarketingBreakdownConservation).
+  */
+  const nhan = dimension === "marketer" ? await employeeNames() : dimension === "campaign" ? await campaignNames() : new Map<string, string>();
   return chayKhongJit(db, async (tx) => {
-    const keys = await dimensionKeys(tx, period, dimension, filters, limit);
+    const keys = await dimensionKeys(tx, period, dimension, filters, limit, nhan);
     /*
       SỐ LƯỢNG SẢN PHẨM ĐỌC MỘT LẦN CHO MỌI NHÓM.
 
@@ -1237,7 +1243,15 @@ function filterForDimension(dimension: MarketingDimension, key: string): Marketi
 }
 
 /** Các khoá đáng bóc tách — lấy theo doanh số POS giảm dần, cắt ở `limit`, luôn kèm nhóm chưa quy kết. */
-async function dimensionKeys(db: Db, period: Period, dimension: MarketingDimension, filters: MarketingFilters, limit: number): Promise<{ key: string; label: string }[]> {
+async function dimensionKeys(
+  db: Db,
+  period: Period,
+  dimension: MarketingDimension,
+  filters: MarketingFilters,
+  limit: number,
+  /** Bảng tên của chiều đang bóc (marketer / chiến dịch), tra SẴN ngoài giao dịch. Chiều khác: rỗng. */
+  nhan: Map<string, string>,
+): Promise<{ key: string; label: string }[]> {
   const extra = dimensionFilter(filters);
   // Chọn KHOÁ thì chỉ cần population + kỳ + bộ lọc đang bật; tiền của từng nhóm do `buildDays` đọc
   // lại bằng đúng đường của bảng chính, nên ở đây không cần tới bảng dẫn xuất đắt tiền.
@@ -1271,7 +1285,7 @@ async function dimensionKeys(db: Db, period: Period, dimension: MarketingDimensi
             .orderBy(sql`sum(${ads.spend}) desc`)
             .limit(limit),
     ]);
-    const names = await employeeNames();
+    const names = nhan;
     const seen = new Set<string>();
     const out: { key: string; label: string }[] = [];
     for (const r of [...rows.map((r) => r.key), ...spendKeys.map((r) => r.key)]) {
@@ -1307,7 +1321,7 @@ async function dimensionKeys(db: Db, period: Period, dimension: MarketingDimensi
       .groupBy(sql`1`)
       .orderBy(sql`2 desc`)
       .limit(limit + 1);
-    const names = await campaignNames();
+    const names = nhan;
     return rows.map((r) => ({ key: r.key ?? MARKETING_UNATTRIBUTED, label: r.key ? names.get(r.key) ?? r.key : MARKETING_UNATTRIBUTED_LABEL }));
   }
   if (dimension === "page") {
