@@ -1,0 +1,8 @@
+{
+  "pr": 984,
+  "sha": "cd2e0c71e4f37a9f192358365e426daef5474d4a",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T01:10:25.496Z",
+  "note": "review lead: CHỈ-SCRIPT. regression-watch-status mở CSDL tổ chức bằng getDbForInspection trước withOrganization (chỉ đọc, không chạy lượt dọn platform_audit_log) — đúng mẫu stuck-conversation-audit; trước đó 5/6 tổ chức không đọc được."
+}
