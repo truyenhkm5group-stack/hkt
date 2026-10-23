@@ -128,6 +128,7 @@ Chi tiết từng hạng mục Phase 2–5 ở mục 7.
 | OD-P4-03 | Payroll | Kế hoạch hoa hồng có vòng đời Nháp → Duyệt (đã duyệt không sửa) | — | P2 | BLOCKED | — | — | — | — | — | `COMMISSION_BASIS_NEEDS_REVIEW`: chủ shop chốt cơ sở | — |
 | OD-P5-01 | Subscriptions | MRR · churn · gia hạn cho nền tảng SaaS | — | P3 | BACKLOG | — | — | — | — | — | — | — |
 | OD-P5-02 | Manufacturing | Khảo sát BOM / định mức đầy đủ (chỉ tài liệu) | — | P3 | BACKLOG | — | — | — | — | — | — | — |
+| SRC-P0 | Sourcing (AI China Fashion Sourcing) | P0 nghiên cứu: audit ERP tái dùng · nguồn dữ liệu hợp lệ có bằng chứng · thiết kế dữ liệu / truy vấn tiếng Trung / giá về VN / chấm điểm / duyệt · lộ trình P1–P4 (SRC-1…SRC-8) · blocker B1–B5 — chi tiết `docs/tech/ai-sourcing.md` | `code-erp-95` | P1 | IN_REVIEW | (PR này) | — | chỉ tài liệu | — | — | B1/B2 (quyền dùng dữ liệu 1688 / bên thứ ba) chặn P2–P3; P1 cần B3–B5 | Lead gộp; chủ shop trả lời B1–B5 |
 
 ### 5.3 Bảng làm việc nhỏ (việc vặt phát hiện trong lúc khảo sát, không thuộc phase nào)
 
