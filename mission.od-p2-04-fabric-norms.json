@@ -3,7 +3,7 @@
   "mission_id": "od-p2-04-fabric-norms",
   "title": "OD-P2-04 Định mức vải lên máy chủ (bảng fabric_norms + đọc + ghi tay + nút nhập một lần từ localStorage)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "CANCELLED",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-odoo",
@@ -40,7 +40,10 @@
     "0255": "2026-10-23T07:42:07.448Z"
   },
   "created_at": "2026-10-23T07:41:26.968Z",
-  "updated_at": "2026-10-23T07:42:07.448Z",
-  "last_heartbeat": "2026-10-23T07:41:26.968Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T11:17:31.267Z",
+  "last_heartbeat": "2026-10-23T11:17:31.267Z",
+  "definition_of_done": [],
+  "evidence": {
+    "done": "DỪNG theo số đo nhu cầu (db-query lead 23/10): /inventory/shortage 7 lượt/30 ngày (5 ngày), 0 thao tác STOCK_SHORTAGE_DECISION. Mã xong ở wip/od-p2-04-fabric-norms @ 04c30ab7 (npm test đạt), không mở PR."
+  }
 }
