@@ -40,6 +40,12 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   SHIPMENT_REPUSH: "Yêu cầu VTP gửi lại webhook",
   SYNC_RUN: "Chạy đồng bộ",
   SETTINGS_UPDATE: "Cập nhật cấu hình",
+  SOURCING_OFFER_CREATE: "Tìm hàng: lưu mẫu nguồn",
+  SOURCING_OFFER_UPDATE: "Tìm hàng: sửa mẫu nguồn",
+  SOURCING_OFFER_ARCHIVE: "Tìm hàng: lưu trữ mẫu nguồn",
+  SOURCING_OFFER_RESTORE: "Tìm hàng: khôi phục mẫu nguồn",
+  SOURCING_SNAPSHOT_ADD: "Tìm hàng: chụp giá mới",
+  SOURCING_SUPPLIER_UPDATE: "Tìm hàng: sửa thông tin nhà cung cấp",
   "reconcile.repair": "Đối soát tự sửa dữ liệu",
   "backfill.canonical-state": "Dựng lại trạng thái từ lịch sử",
   "webhook.replay": "Xử lý lại gói tin",
@@ -148,6 +154,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
 };
 
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {
+  SOURCING_OFFER: "Mẫu nguồn (tìm hàng)",
+  SOURCING_SUPPLIER: "Nhà cung cấp nguồn",
   RECOMMENDATION: "Đề xuất trên buồng lái",
   PRODUCTION_TOPIC: "Topic sản xuất",
   COST_SHEET: "Bảng giá thành",

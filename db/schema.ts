@@ -12417,3 +12417,99 @@ export const platformWebhookRejections = pgTable(
     check("platform_webhook_rejections_count_check", sql`${t.count} >= 1`),
   ],
 );
+
+// ───────────────────────── Tìm hàng nguồn — kho mẫu nhập tay (SRC-3, 0256 · docs/tech/ai-sourcing.md §3.1) ─────────────────────────
+// CSDL CỦA TỔ CHỨC (như mọi module): link chuẩn hoá UNIQUE trong CSDL tổ chức, không ở CSDL nền tảng — hai tổ chức lưu cùng một
+// sản phẩm 1688 là hai dòng ở hai CSDL, không bên nào thấy bên kia. Số liệu nhà cung cấp / giá: thiếu là NULL (CHƯA BIẾT), không 0.
+
+export const sourcingSuppliers = pgTable(
+  "sourcing_suppliers",
+  {
+    id: id(),
+    platform: text("platform").notNull(),
+    /** Link shop CHUẨN HOÁ (`canonicalShopUrl`) — khoá chống trùng. */
+    shopUrl: text("shop_url").notNull(),
+    name: text("name").notNull().default(""),
+    yearsOnPlatform: integer("years_on_platform"),
+    /** Điểm đánh giá ×100 (4,8 / 5 ⇒ 480). */
+    ratingX100: integer("rating_x100"),
+    /** Tỷ lệ phản hồi ×100 (%) — 95,5% ⇒ 9550. */
+    responseRateBp: integer("response_rate_bp"),
+    verified: boolean("verified"),
+    shipFrom: text("ship_from"),
+    /** Nguồn của bộ số trên. «Cũ» tính lúc đọc từ `facts_as_of`, không lưu. */
+    factsSource: text("facts_source").notNull().default("MANUAL"),
+    factsAsOf: ts("facts_as_of"),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("sourcing_suppliers_shop_url_uq").on(t.shopUrl),
+    check("sourcing_suppliers_platform_check", sql`${t.platform} IN ('1688', 'ALIBABA', 'TAOBAO', 'OTHER')`),
+    check("sourcing_suppliers_facts_source_check", sql`${t.factsSource} IN ('MANUAL', 'API', 'UNKNOWN')`),
+    check("sourcing_suppliers_years_check", sql`${t.yearsOnPlatform} IS NULL OR ${t.yearsOnPlatform} BETWEEN 0 AND 100`),
+    check("sourcing_suppliers_rating_check", sql`${t.ratingX100} IS NULL OR ${t.ratingX100} BETWEEN 0 AND 500`),
+    check("sourcing_suppliers_response_check", sql`${t.responseRateBp} IS NULL OR ${t.responseRateBp} BETWEEN 0 AND 10000`),
+  ],
+);
+
+export const sourcingOffers = pgTable(
+  "sourcing_offers",
+  {
+    id: id(),
+    platform: text("platform").notNull(),
+    /** Mã sản phẩm trên nền tảng — `NULL` khi link không đọc ra mã (nền tảng khác / link lạ). */
+    offerId: text("offer_id"),
+    /** Link CHUẨN HOÁ (`parseOfferUrl`) — khoá chống trùng thứ hai. */
+    canonicalUrl: text("canonical_url").notNull(),
+    /** Link đúng như người dán (để tra lại khi cần). */
+    sourceUrl: text("source_url").notNull(),
+    titleZh: text("title_zh").notNull().default(""),
+    titleVi: text("title_vi").notNull().default(""),
+    /** Chỉ LINK ảnh — không tải, không lưu tệp (SRC-7). */
+    imageUrl: text("image_url"),
+    /** Khoá «có thể trùng ảnh» (`imageKey`) — chỉ để GẮN CỜ, không gộp. */
+    imageKey: text("image_key"),
+    supplierId: text("supplier_id").references(() => sourcingSuppliers.id, { onDelete: "set null" }),
+    dataStatus: text("data_status").notNull().default("MANUAL"),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    /** Lưu trữ thay vì xoá — mẫu đã lưu vẫn tra được. */
+    archivedAt: ts("archived_at"),
+  },
+  (t) => [
+    uniqueIndex("sourcing_offers_canonical_url_uq").on(t.canonicalUrl),
+    uniqueIndex("sourcing_offers_platform_offer_uq").on(t.platform, t.offerId).where(sql`${t.offerId} IS NOT NULL`),
+    index("sourcing_offers_image_key_idx").on(t.imageKey),
+    index("sourcing_offers_supplier_idx").on(t.supplierId),
+    check("sourcing_offers_platform_check", sql`${t.platform} IN ('1688', 'ALIBABA', 'TAOBAO', 'OTHER')`),
+    check("sourcing_offers_data_status_check", sql`${t.dataStatus} IN ('MANUAL', 'API', 'UNKNOWN')`),
+  ],
+);
+
+/** Ảnh chụp giá — CHỈ THÊM DÒNG, không sửa: giá nhảy đọc được. Tiền là FEN nguyên (`lib/sourcing/price.ts`). */
+export const sourcingOfferSnapshots = pgTable(
+  "sourcing_offer_snapshots",
+  {
+    id: id(),
+    offerId: text("offer_id")
+      .notNull()
+      .references(() => sourcingOffers.id, { onDelete: "restrict" }),
+    capturedAt: ts("captured_at").notNull().defaultNow(),
+    /** `[{ fromQty, priceFen }]` tăng dần — đọc / ghi CHỈ qua `parsePriceTiers` / `serializePriceTiers`. */
+    tiers: jsonb("tiers").notNull(),
+    moq: integer("moq"),
+    /** `{ colors: string[], sizes: string[] }` — chữ như trên trang nguồn; không vào phép tính nào. */
+    skus: jsonb("skus"),
+    source: text("source").notNull().default("MANUAL"),
+    capturedBy: text("captured_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => [
+    index("sourcing_offer_snapshots_offer_idx").on(t.offerId, t.capturedAt),
+    check("sourcing_offer_snapshots_source_check", sql`${t.source} IN ('MANUAL', 'API', 'UNKNOWN')`),
+    check("sourcing_offer_snapshots_tiers_check", sql`jsonb_typeof(${t.tiers}) = 'array' AND jsonb_array_length(${t.tiers}) BETWEEN 1 AND 8`),
+    check("sourcing_offer_snapshots_moq_check", sql`${t.moq} IS NULL OR ${t.moq} >= 1`),
+  ],
+);

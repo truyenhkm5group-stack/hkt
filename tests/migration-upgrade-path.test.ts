@@ -203,6 +203,7 @@ const MOI = [
   "0253_ai_usage_cache_write",
   "0254_carryover_first_work_month",
   "0255_ai_usage_sourcing_workload",
+  "0256_sourcing_offer_catalog",
 ] as const;
 
 /*
@@ -1975,6 +1976,32 @@ export async function testMigrationUpgradePath() {
       "0255: loại việc lạ vẫn bị chặn ở CSDL — mở rộng, không bỏ ràng buộc",
     );
     await client.query(`delete from platform_ai_usage where org_code = 'up-org'`);
+
+    /*
+      0256 (tìm hàng nguồn · kho mẫu nhập tay): CHỈ TẠO ba bảng, không gieo dòng nào. Hai khoá chống trùng (link chuẩn hoá ·
+      nền tảng + mã) chặn ở CSDL; mã NULL không đụng nhau; bậc giá phải là mảng 1–8 phần tử.
+    */
+    assert.ok(!/^\s*(update|insert)\b/im.test(readFileSync(path.join(goc, "0256_sourcing_offer_catalog.sql"), "utf8").replace(/--.*$/gm, "")), "0256: migration KHÔNG được có câu UPDATE / INSERT — không gieo mẫu nào (khác «ON UPDATE» của khoá ngoại)");
+    assert.equal(await dem("select count(*)::int as n from sourcing_offers"), 0, "0256: bảng mới rỗng");
+    await client.query(`insert into sourcing_offers (id, platform, offer_id, canonical_url, source_url) values ('up-so1', '1688', '611', 'https://detail.1688.com/offer/611.html', 'x'), ('up-so2', 'OTHER', null, 'https://a.vn/p1', 'x'), ('up-so3', 'OTHER', null, 'https://a.vn/p2', 'x')`);
+    await assert.rejects(
+      () => client.query(`insert into sourcing_offers (id, platform, offer_id, canonical_url, source_url) values ('up-so4', '1688', '611', 'https://detail.1688.com/offer/611.html?x', 'x')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("sourcing_offers_platform_offer_uq"),
+      "0256: cùng nền tảng + mã ⇒ CSDL chặn",
+    );
+    await assert.rejects(
+      () => client.query(`insert into sourcing_offers (id, platform, offer_id, canonical_url, source_url) values ('up-so5', 'OTHER', null, 'https://a.vn/p1', 'x')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("sourcing_offers_canonical_url_uq"),
+      "0256: cùng link chuẩn hoá ⇒ CSDL chặn",
+    );
+    await assert.rejects(
+      () => client.query(`insert into sourcing_offer_snapshots (id, offer_id, tiers) values ('up-ss1', 'up-so1', '[]'::jsonb)`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("sourcing_offer_snapshots_tiers_check"),
+      "0256: bậc giá rỗng bị chặn",
+    );
+    await client.query(`insert into sourcing_offer_snapshots (id, offer_id, tiers) values ('up-ss2', 'up-so1', '[{"fromQty":2,"priceFen":1230}]'::jsonb)`);
+    await client.query(`delete from sourcing_offer_snapshots where id = 'up-ss2'`);
+    await client.query(`delete from sourcing_offers where id like 'up-so%'`);
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });

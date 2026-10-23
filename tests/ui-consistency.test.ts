@@ -194,6 +194,8 @@ export function testNavigationCoverage() {
     "/billing-locked": "ĐÍCH chuyển hướng khi một lượt ghi bị chặn vì quá hạn thanh toán (0187) — lối vào gia hạn là dải nhắc ở bố cục + /settings/plan",
     "/inventory/planning/orders": "danh sách con của Kế hoạch SX, vào từ chính trang đó",
     "/inventory/planning/orders/new": "hành động tạo mới, không phải một mục menu",
+    "/sourcing/offers/new": "hành động tạo mới — nút «Thêm mẫu» trên khối Kho mẫu của /sourcing",
+    "/sourcing/compare": "mở từ nút «So sánh N mẫu» sau khi tick 2–4 mẫu ở Kho mẫu (/sourcing) — không có nghĩa khi chưa chọn mẫu",
     "/customers/retention": "vào từ nút 'Giữ chân khách' ngay trên trang Khách hàng, và từ ô lệnh ⌘K",
     "/ai/sales-chatbot/conversations": "drill-down từ ô KPI của màn «Hiệu quả» (nhóm · lý do chuyển người · nhánh thử nghiệm) — mở từ chính ô số, không phải việc chọn từ menu",
     "/ai/sales-chatbot/conversations/[id]": "xem lại MỘT hội thoại, mở từ danh sách drill-down",

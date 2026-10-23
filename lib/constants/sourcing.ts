@@ -114,3 +114,37 @@ export function fxStale(cfg: Pick<LandedCostConfig, "fxAsOf">, now: Date): boole
   const days = (now.getTime() - Date.parse(`${cfg.fxAsOf}T00:00:00+07:00`)) / 86_400_000;
   return days > SOURCING_FX_STALE_DAYS;
 }
+
+// ─────────────────────────── KHO MẪU NHẬP TAY (SRC-3) ───────────────────────────
+
+/** Nền tảng nguồn — danh sách ĐÓNG, có CHECK ở CSDL (0256). Tmall đi chung TAOBAO (cùng hệ, cùng mã `id=`). */
+export const SOURCING_PLATFORMS = ["1688", "ALIBABA", "TAOBAO", "OTHER"] as const;
+export type SourcingPlatform = (typeof SOURCING_PLATFORMS)[number];
+export const SOURCING_PLATFORM_LABEL: Record<SourcingPlatform, string> = { "1688": "1688", ALIBABA: "Alibaba", TAOBAO: "Taobao / Tmall", OTHER: "Khác" };
+
+/**
+ * Nguồn của con số — danh sách ĐÓNG, có CHECK. KHÔNG có «cũ»: cũ là hàm của THỜI GIAN, tính lúc đọc từ mốc chụp
+ * (`staleness`), không lưu — lưu thì nó sai ngay ngày hôm sau (cùng lý do với leo thang SLA, AGENTS 26).
+ */
+export const SOURCING_DATA_STATUSES = ["MANUAL", "API", "UNKNOWN"] as const;
+export type SourcingDataStatus = (typeof SOURCING_DATA_STATUSES)[number];
+export const SOURCING_DATA_STATUS_LABEL: Record<SourcingDataStatus, string> = { MANUAL: "Nhập tay", API: "Từ nguồn đã duyệt", UNKNOWN: "Chưa rõ nguồn" };
+
+/** Ngưỡng «cũ» DUY NHẤT cho số liệu nguồn (giá đã chụp, thông tin nhà cung cấp): quá số ngày này ⇒ in «cũ» cạnh số. */
+export const SOURCING_DATA_STALE_DAYS = 30;
+
+/** Số liệu chụp lúc `asOf` đã cũ chưa — `null` khi không có mốc (CHƯA BIẾT). HÀM THUẦN, `now` là tham số (AGENTS 50). */
+export function staleness(asOf: Date | string | null, now: Date): { stale: boolean; days: number } | null {
+  if (asOf === null) return null;
+  const t = typeof asOf === "string" ? Date.parse(asOf) : asOf.getTime();
+  if (!Number.isFinite(t)) return null;
+  const days = Math.floor((now.getTime() - t) / 86_400_000);
+  return { stale: days > SOURCING_DATA_STALE_DAYS, days: Math.max(0, days) };
+}
+
+/** Mốc SỐ LƯỢNG của bảng so sánh — chỉ để HIỂN THỊ (giá áp dụng khi mua đúng số đó), không phải ngưỡng nghiệp vụ. */
+export const SOURCING_COMPARE_QUANTITIES = [10, 50, 100, 300] as const;
+/** Số mẫu tối đa đặt cạnh nhau trên màn so sánh. */
+export const SOURCING_COMPARE_MAX = 4;
+/** Số bậc giá tối đa của một lần chụp. */
+export const SOURCING_PRICE_TIERS_MAX = 8;

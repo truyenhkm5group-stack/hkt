@@ -136,6 +136,16 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/ai-usage-ledger-complete.test.ts",
   },
+  {
+    tag: "0256_sourcing_offer_catalog",
+    why:
+      "Chỉ TẠO ba bảng mới ở CSDL tổ chức (sourcing_suppliers · sourcing_offers · sourcing_offer_snapshots) — không thêm / đổi / xoá " +
+      "cột của bảng nào mã đang đọc. Mọi đường ĐỌC của kho mẫu (`lib/queries/sourcing.ts`) bắt lỗi bảng chưa có (42P01) và trả " +
+      "`{ unavailable: true }` ⇒ /sourcing in «CSDL của tổ chức chưa áp 0256», không sập trang; mọi đường GHI " +
+      "(`lib/actions/sourcing-offers.ts`) bắt cùng lỗi và trả câu lỗi đó, không ghi gì. Không đường nào khác chạm ba bảng này.",
+    addedColumns: {},
+    proof: "tests/sourcing-offers.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */

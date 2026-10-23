@@ -1786,6 +1786,13 @@
       "when": 1792487287372,
       "tag": "0255_ai_usage_sourcing_workload",
       "breakpoints": true
+    },
+    {
+      "idx": 256,
+      "version": "7",
+      "when": 1792487347372,
+      "tag": "0256_sourcing_offer_catalog",
+      "breakpoints": true
     }
   ]
 }
