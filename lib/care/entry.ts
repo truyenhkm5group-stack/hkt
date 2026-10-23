@@ -89,12 +89,14 @@ export function legAwareStage(stage: ShipmentStage, legType: "OUTBOUND" | "RETUR
 
 /**
  * Trạng thái con dùng để MỞ / mô tả đợt: mã + chữ như mọi nơi khác, nhưng nếu chặng leg-aware nói
- * kiện đã quay đầu thì trạng thái con phải nói cùng một điều — 501 chiều hoàn là `RETURNED`, không
- * phải `DELIVERED`.
+ * kiện đã quay đầu thì trạng thái con phải nói cùng một điều.
+ *
+ * Chặng `RETURNED` do chính `carrierSubstate` lo (`RETURNED_STAGE_ABSORBS`) — tháp giao vận và care
+ * đọc cùng một luật, không còn bản sao ở đây. Chặng `RETURNING` vẫn ở đây: nó nuốt cả những trạng
+ * thái chiều ĐI (đang phát, tồn, chờ phát lại) mà chỉ care cần quy về «đang hoàn».
  */
 export function legAwareSubstate(input: { code: number | null; text: string | null; stage: ShipmentStage }): CarrierSubstate {
   const { substate } = carrierSubstate({ code: input.code, text: input.text, stage: input.stage });
-  if (input.stage === "RETURNED" && substate === "DELIVERED") return "RETURNED";
   if (input.stage === "RETURNING" && (substate === "DELIVERED" || substate === "OUT_FOR_DELIVERY" || substate === "DELIVERY_EXCEPTION" || substate === "WAITING_REDELIVERY" || substate === "WAITING_PROCESSING")) return "RETURNING";
   return substate;
 }

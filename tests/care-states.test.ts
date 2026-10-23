@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { CARRIER_SUBSTATES, CARRIER_SUBSTATE_LABEL, carrierSubstate, shipmentSubstateCache, SUBSTATE_IMPLIES_PICKED_UP, SUBSTATE_IS_FORWARD_ACTIVE } from "@/lib/constants/carrier-substate";
+import { shipmentStageEnum, type ShipmentStage } from "@/db/schema";
+import { CARRIER_SUBSTATES, CARRIER_SUBSTATE_LABEL, carrierSubstate, shipmentSubstateCache, SUBSTATE_IMPLIES_PICKED_UP, SUBSTATE_IS_FORWARD_ACTIVE, SUBSTATE_TEXT_RULES, VTP_CODE_TO_SUBSTATE, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { FULFILLMENT_BUCKETS, FULFILLMENT_BUCKET_LABEL, getOrderFulfillmentBucket, isActivelyShippedOrder, kiemTraBangRo, pickAttempt, type AttemptFacts } from "@/lib/constants/fulfillment-bucket";
 import { canApproveReturn, canRequestCarrierAction, canRequestRedelivery } from "@/lib/care/redelivery-eligibility";
 import { CARE_ENTRY_SUBSTATES, careEntryFor, legAwareStage, legAwareSubstate } from "@/lib/care/entry";
@@ -210,7 +211,15 @@ export async function test15TsVaSqlNoiCungMotDieu(db: Db) {
     { ma: null, chu: "Chờ xử lý", chang: "RETURNING" },
     // 501 trên CHẶNG HOÀN (AGENTS 3.2): mã nói «phát thành công» nhưng hàng đã về tới shop — RETURNED, không phải DELIVERED.
     { ma: 501, chu: "Phát thành công", chang: "RETURNED" },
+    // Dòng cuối của chiều hoàn: chữ khớp «chuyen tra» (RETURNING) nhưng chặng đã RETURNED — hàng đã về, không phải đang về.
+    { ma: null, chu: "Thành công - Chuyển trả người gửi", chang: "RETURNED" },
+    { ma: 505, chu: "Tồn - Thông báo chuyển hoàn bưu cục gốc", chang: "RETURNED" },
+    { ma: null, chu: "Phát thành công", chang: "RETURNED" },
+    { ma: null, chu: "Đã trả", chang: "RETURNED" },
   ];
+  assert.equal(carrierSubstate({ code: null, text: "Thành công - Chuyển trả người gửi", stage: "RETURNED" }).substate, "RETURNED", "chặng RETURNED: «chuyển trả người gửi» là hàng đã về, không phải đang về");
+  assert.equal(carrierSubstate({ code: null, text: "Thành công - Chuyển trả người gửi", stage: "RETURNING" }).substate, "RETURNING", "chặng chưa chốt thì chữ vẫn quyết");
+  assert.equal(carrierSubstate({ code: null, text: "Giao thành công", stage: "RETURNED" }).substate, "RETURNED", "chữ Pancake chuyển tiếp trên chặng hoàn = hàng về shop");
   assert.equal(carrierSubstate({ code: 501, text: "Phát thành công", stage: "RETURNED" }).substate, "RETURNED", "501 + chặng RETURNED = hoàn đã về shop");
   assert.equal(carrierSubstate({ code: 501, text: "Phát thành công", stage: "DELIVERED" }).substate, "DELIVERED", "501 chiều đi vẫn là giao tới khách");
   // Báo cáo dịch trạng thái con ở tầng ứng dụng bằng hàm nhớ theo bộ ba (`shipmentSubstateCache`) —
@@ -439,6 +448,93 @@ export function test24MotMaHaiChieu() {
   assert.equal(legAwareSubstate({ code: 506, text: "Tồn - Khách hàng nghỉ", stage: "DELIVERY_FAILED" }), "DELIVERY_EXCEPTION");
 }
 
+/*
+  ───── 25 · Chặng RETURNED nuốt «đã giao» / «đang hoàn» — bản cũ vs bản mới trên TOÀN lưới ─────
+
+  Bản CŨ chép NGUYÊN VĂN từ b807cb34 (#989): `carrierSubstate` chỉ quy 501 trên chặng RETURNED, và
+  `legAwareSubstate` tự vá thêm vế chữ «giao thành công» bằng dòng `stage === "RETURNED" && DELIVERED`.
+  Bản mới đưa luật vào `carrierSubstate` (mã LẪN chữ, cả hai trạng thái) và xoá dòng vá ở care.
+
+  Khẳng định: trên mọi mã × mọi mẫu chữ × mọi chặng, hai bản CHỈ khác nhau ở đúng tập đã khai —
+  không ô nào khác đổi theo — và bản SQL nói đúng điều bản TypeScript mới nói trên CÙNG lưới.
+*/
+function boDauCu(s: string): string {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/Đ/g, "D").toLowerCase().trim();
+}
+function carrierSubstateCu(input: { code?: number | null; text?: string | null; stage?: ShipmentStage | null }): CarrierSubstate {
+  const code = input.code ?? null;
+  if (code !== null && VTP_CODE_TO_SUBSTATE[code]) {
+    const byCode = VTP_CODE_TO_SUBSTATE[code];
+    return byCode === "DELIVERED" && input.stage === "RETURNED" ? "RETURNED" : byCode;
+  }
+  const text = boDauCu(String(input.text ?? ""));
+  if (text) {
+    for (const luat of SUBSTATE_TEXT_RULES) {
+      if (luat.match.some((m) => text.includes(m))) return luat.substate;
+    }
+  }
+  const stage = input.stage ?? null;
+  if (stage) {
+    const theoStage: Partial<Record<ShipmentStage, CarrierSubstate>> = {
+      PENDING: "AWAITING_PICKUP", PICKED_UP: "PICKED_UP", IN_TRANSIT: "IN_TRANSIT", OUT_FOR_DELIVERY: "OUT_FOR_DELIVERY", DELIVERED: "DELIVERED",
+      DELIVERY_FAILED: "DELIVERY_EXCEPTION", RETURNING: "RETURNING", RETURNED: "RETURNED", CANCELLED: "CANCELLED",
+    };
+    const s = theoStage[stage];
+    if (s) return s;
+  }
+  return "UNKNOWN";
+}
+function legAwareSubstateCu(input: { code: number | null; text: string | null; stage: ShipmentStage }): CarrierSubstate {
+  const substate = carrierSubstateCu(input);
+  if (input.stage === "RETURNED" && substate === "DELIVERED") return "RETURNED";
+  if (input.stage === "RETURNING" && (substate === "DELIVERED" || substate === "OUT_FOR_DELIVERY" || substate === "DELIVERY_EXCEPTION" || substate === "WAITING_REDELIVERY" || substate === "WAITING_PROCESSING")) return "RETURNING";
+  return substate;
+}
+
+export async function test25ChangHoanBanCuBanMoi(db: Db) {
+  const maThu: (number | null)[] = [null, 999, ...Object.keys(VTP_CODE_TO_SUBSTATE).map(Number)];
+  const chuThu: (string | null)[] = [
+    null, "", "Rác XYZ chưa từng thấy", "Đã trả", "Thành công - Chuyển trả người gửi", "Thành công - Phát thành công", "Giao thành công",
+    ...SUBSTATE_TEXT_RULES.flatMap((l) => l.match),
+  ];
+  const changThu: (ShipmentStage | null)[] = [null, ...shipmentStageEnum.enumValues];
+
+  const luoi: { ma: number | null; chu: string | null; chang: ShipmentStage | null; moi: CarrierSubstate }[] = [];
+  const lechCarrier = new Map<string, number>();
+  const lechCare = new Map<string, number>();
+  for (const ma of maThu)
+    for (const chu of chuThu)
+      for (const chang of changThu) {
+        const cu = carrierSubstateCu({ code: ma, text: chu, stage: chang });
+        const moi = carrierSubstate({ code: ma, text: chu, stage: chang }).substate;
+        luoi.push({ ma, chu, chang, moi });
+        if (cu !== moi) {
+          assert.ok(chang === "RETURNED" && (cu === "DELIVERED" || cu === "RETURNING") && moi === "RETURNED", `carrierSubstate đổi NGOÀI tập đã khai ở (mã=${ma}, chữ="${chu}", chặng=${chang}): ${cu} → ${moi}`);
+          lechCarrier.set(cu, (lechCarrier.get(cu) ?? 0) + 1);
+        }
+        if (chang === null) continue;
+        const careCu = legAwareSubstateCu({ code: ma, text: chu, stage: chang });
+        const careMoi = legAwareSubstate({ code: ma, text: chu, stage: chang });
+        if (careCu !== careMoi) {
+          // Dòng vá cũ của care đã lo «đã giao» trên chặng RETURNED ⇒ với care chỉ «đang hoàn» là đổi.
+          assert.ok(chang === "RETURNED" && careCu === "RETURNING" && careMoi === "RETURNED", `legAwareSubstate đổi NGOÀI tập đã khai ở (mã=${ma}, chữ="${chu}", chặng=${chang}): ${careCu} → ${careMoi}`);
+          lechCare.set(careCu, (lechCare.get(careCu) ?? 0) + 1);
+        }
+      }
+  // Cả hai vế phải THẬT SỰ xảy ra — một bài so không bắt được khác biệt nào là bài so không chạy.
+  assert.ok((lechCarrier.get("DELIVERED") ?? 0) > 0 && (lechCarrier.get("RETURNING") ?? 0) > 0, "lưới phải chạm cả «đã giao» lẫn «đang hoàn» trên chặng RETURNED");
+  assert.ok((lechCare.get("RETURNING") ?? 0) > 0 && !lechCare.has("DELIVERED"), "care: «đã giao» trên chặng RETURNED không đổi (dòng vá cũ đã lo), chỉ «đang hoàn» đổi");
+
+  // SQL trên CÙNG lưới, một câu lệnh.
+  const bieuThuc = carrierSubstateSql(sql`t.ma`, sql`t.chu`, sql`t.chang`);
+  const rows = (await db.execute(sql`select t.i, ${bieuThuc} as con from json_to_recordset(${JSON.stringify(luoi.map((c, i) => ({ i, ma: c.ma, chu: c.chu, chang: c.chang })))}::json) as t(i int, ma int, chu text, chang text)`)).rows as { i: number; con: string }[];
+  assert.equal(rows.length, luoi.length);
+  for (const r of rows) {
+    const c = luoi[Number(r.i)];
+    assert.equal(r.con, c.moi, `TS và SQL lệch nhau ở (mã=${c.ma}, chữ="${c.chu}", chặng=${c.chang})`);
+  }
+}
+
 export async function testCareStates(db: Db) {
   test01ChoPhatLaiKhongPhaiGiaoHong();
   test23LuatVaoCareMotHam();
@@ -465,5 +561,6 @@ export async function testCareStates(db: Db) {
   await test17ChoXuLyDaRoiKhoPhaiHienRa(db);
   await test18HaiTinhHuongHaiRo(db);
   await test22GuiHangLoatThanhCongMotPhan(db);
-  console.log("✓ Hai chiều trạng thái + “Đã gửi” theo chứng từ: 24 kiểm thử · luật vào care một hàm · 501 chiều hoàn = hàng về shop · chờ phát lại ≠ tồn ≠ chờ xử lý · TS và SQL cùng kết quả · mỗi đơn một rổ");
+  await test25ChangHoanBanCuBanMoi(db);
+  console.log("✓ Hai chiều trạng thái + “Đã gửi” theo chứng từ: 25 kiểm thử · luật vào care một hàm · 501 chiều hoàn = hàng về shop · chặng RETURNED nuốt «đã giao»/«đang hoàn» (bản cũ vs mới trên toàn lưới) · chờ phát lại ≠ tồn ≠ chờ xử lý · TS và SQL cùng kết quả · mỗi đơn một rổ");
 }
