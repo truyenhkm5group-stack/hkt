@@ -85,8 +85,15 @@ export type CartIntent = { kind: CartIntentKind; amounts: CartAmount[]; label: s
 // ─────────────────────────── ĐỌC SỐ LƯỢNG ───────────────────────────
 
 const WORD_NUM: Record<string, number> = { mot: 1, hai: 2, ba: 3, bon: 4, nam: 5, sau: 6, bay: 7, tam: 8, chin: 9, muoi: 10 };
-const WEIGHT_UNIT = "kg|kí|ký|ki|ky|cân|can|gram|gr|g";
-const PACK_UNIT = "túi|tui|gói|goi|hộp|hop|set|phần|phan|bịch|bich|khay|combo|suất|suat|hũ|hủ|hu|lọ|lo|cái|cai|chiếc|chiec|đôi|doi|bộ|bo|cây|cay";
+// «lạng» = 100 g («5 lạng chả mực» — cách nói phổ biến ở miền Bắc; trước đây giỏ RỖNG nên mọi hàng rào số lượng không áp). CHỈ dạng CÓ
+// DẤU: bỏ dấu thì trùng «Láng» của địa chỉ («số 12 Láng Hạ» sẽ thành 1,2 kg).
+// «kilo» / «ký lô» (= kg) đứng TRƯỚC «kí / ký / ki»: «1 kilo chả mực» từng cho giỏ rỗng, «2 ký lô chả cá thu» thì «lô» thành tên món.
+const WEIGHT_UNIT = "kilogram|kilo|ký lô|kí lô|ki lô|ky lo|ki lo|kg|kí|ký|ki|ky|cân|can|lạng|gram|gr|g";
+// «chai» / «thùng» (P0 #865, ca thật «1kg chả cá thu và 1 chai mắm»): thiếu hai chữ này thì món bán theo chai không bao giờ vào giỏ và hàng
+// rào «bỏ sót món» không có gì để bám. KHÔNG thêm «lon»: bỏ dấu thì trùng «lớn» (chữ cỡ trong ATTR_WORDS).
+// «chục» = 10 CÁI («1 chục nem» — trước đây giỏ rỗng): đếm như khách nói «10 cái», để hàng rào số lượng / đơn vị quy ra hộp theo quy cách.
+const PACK_UNIT = "túi|tui|gói|goi|hộp|hop|set|phần|phan|bịch|bich|khay|combo|suất|suat|hũ|hủ|hu|lọ|lo|chai|thùng|thung|chục|chuc|cái|cai|chiếc|chiec|đôi|doi|bộ|bo|cây|cay";
+const DOZEN_WORD_RE = /^(?:chục|chuc)$/i;
 const NUM_WORD = "một|mot|hai|ba|bốn|bon|năm|nam|sáu|sau|bảy|bay|tám|tam|chín|chin|mười|muoi";
 /** Nhận nguyên phân số trước số nguyên; chặn nhặt nhầm \"2 kg\" ở đuôi \"1/2 kg\" (#863). */
 const WEIGHT_RE = new RegExp(`(?<![\\p{L}\\d.,/:-])(\\d+\\s*\\/\\s*\\d+|\\d+(?:[.,]\\d+)?|${NUM_WORD}|nửa|nua)\\s*(${WEIGHT_UNIT})(?:\\s*(rưỡi|ruoi))?(?![\\p{L}\\d])`, "giu");
@@ -118,7 +125,7 @@ const STOP = new Set(
   (
     "chi anh em minh toi c a e ban cho lay mua dat gui ship giao them con doi bot giam thoi thui thoii thoiii thoy nhe nha ah voi va la thi nua sua thanh sang lai " +
     "chot len don order de ok oke okie vang u uh roi khong ko k hok hong hem khoi phai chu ma cua loai dt sdt so dien thoai dia gium giup dum luon di hang nay kia do nao " +
-    "the vay duoc dc can cai tong hay hoac moi ngon an truoc trc chiu bao nhieu bn gia sao dung tien het may tui goi hop set phan bich khay combo suat hu lo chiec cay " +
+    "the vay duoc dc can cai tong hay hoac moi ngon an truoc trc chiu bao nhieu bn gia sao dung tien het may tui goi hop set phan bich khay combo suat hu lo chai thung chuc chiec cay " +
     "kg ky ki can gram gr g x da uhm oki shop xuong tru ha mai mot ve du qua lam it lan gio hom ngay toi sang chieu trua dem tuan thang tet mon huy gi vao ra " +
     "nhen nghen nghe ne nhi hen nhaa ak day dau giu vs cung " +
     // «Mình MUỐN mua 1 kg» (#871, ca «Ngọc Nguyễn»): động từ «muốn / thích» không phải tên món — trước đây «muốn» thành nhãn món, số 1kg
@@ -228,6 +235,10 @@ function resolveLabel(raw: { match: string; display: string }, catalog?: readonl
         const nt = labelTokens(hit);
         const second = tokens[1];
         if (s === 0 && second && !nt.includes(second) && !/\d/.test(second) && !ATTR_WORDS.has(second)) return { match: "", display: "" };
+        // Đối xứng (P0 #865): từ đứng NGAY TRƯỚC đoạn khớp mà tên danh mục không có ⇒ đó là DANH TỪ MÓN của khách, đoạn khớp chỉ là phần bổ
+        // nghĩa — «1 chai nước mắm» khi shop chỉ có «Mắm tôm chua» KHÔNG phải mắm tôm. Không gán ⇒ tên ngoài danh mục ⇒ hỏi lại, không đoán.
+        const before = s > 0 ? tokens[s - 1] : null;
+        if (before && !nt.includes(before) && !/\d/.test(before) && !ATTR_WORDS.has(before)) return { match: "", display: "" };
         return { match: foldVi(hit), display: hit };
       }
       if (hits.length > 1 && len === tokens.length) return { match: "", display: "", ambiguous: true, hint: raw.match };
@@ -315,7 +326,7 @@ export function amountsIn(text: string, catalog?: readonly string[]): CartAmount
     if (n === null || wordNumGlued(m)) continue;
     const unit = foldVi(m[2]);
     const half = m[3] ? 0.5 : 0;
-    const grams = Math.round(/^(?:gram|gr|g)$/.test(unit) ? n + half : (n + half) * 1000);
+    const grams = Math.round(/^(?:gram|gr|g)$/.test(unit) ? n + half : (n + half) * (unit === "lang" ? 100 : 1000));
     if (grams > 0) push(grams, "g", m.index ?? 0, m[0].length);
   }
   for (const m of text.matchAll(PACK_RE)) {
@@ -330,7 +341,8 @@ export function amountsIn(text: string, catalog?: readonly string[]): CartAmount
       if (!catalog || !oneNameOf(capRunAt(text, idx + m[0].length), catalog)) continue;
     }
     if (out.some((a) => idx < a.end && idx + m[0].length > a.index)) continue;
-    push(n, "pack", idx, m[0].length, m[2]);
+    if (DOZEN_WORD_RE.test(m[2])) push(n * 10, "pack", idx, m[0].length, "cái");
+    else push(n, "pack", idx, m[0].length, m[2]);
   }
   // SỐ TRẦN + TÊN MÓN (P0 #855, ca «ThuyNgo» 16/10/2026): «Ship chị 1 mực giã tay» không có chữ đơn vị nên hai vòng trên ra 0 số lượng ⇒
   // giỏ có thẩm quyền rỗng ⇒ hàng rào căn cứ (`unrequestedProducts`) tắt ⇒ bot tự lên «1kg chả cá thu + 1kg chả mực = 680.000 ₫». Chỉ
@@ -1056,17 +1068,34 @@ export function productsStatedAt(cart: CartCommitment | undefined, asked: readon
 }
 
 /**
+ * MÓN BỊ BỎ SÓT HẲN (P0 #865, HSLC 16/10/2026 — khách chốt «1kg chả cá thu và 1 chai mắm», đơn tự chốt chỉ có chả cá): món khách nói
+ * TƯỜNG MINH, tên đọc CHẮC theo danh mục (`confidence` HIGH), chưa gắn sản phẩm, mà KHÔNG dòng nào của đơn nháp mang tên đó. `productFor`
+ * chỉ gắn được món vào sản phẩm ĐÃ có trong đơn (`bindCommitment` cũng gắn sau lượt ghi), nên món vắng mặt hẳn không bao giờ được gắn và
+ * hai hàng rào dưới từng bỏ qua nó. Đơn có nhiều dòng cùng tên thì không phải vắng mặt. HÀM THUẦN.
+ */
+function missingFromDraft(item: CommittedItem, asked: readonly AskedLine[]): boolean {
+  return item.customerExplicit && item.quantity > 0 && !item.productId && item.confidence === "HIGH" && Boolean(item.match) && !asked.some((l) => labelsMatch(item.match, l.name));
+}
+
+/**
  * KIỂM CỨNG phía máy chủ: đơn đề nghị GIẢM hoặc BỎ một món khách đã nói tường minh mà giỏ chưa ghi nhận câu sửa tường minh nào mới
- * hơn ⇒ câu lỗi cho model (công cụ từ chối). Tăng / thêm món khác ⇒ `null`. Không đo được ⇒ `null`. Lượt khách có dấu hiệu sửa mà máy
- * không áp chắc được (`relaxedTurn` = `turn`) ⇒ `null` — không bao giờ chặn khách sửa. HÀM THUẦN.
+ * hơn ⇒ câu lỗi cho model (công cụ từ chối). Bỏ = cả khi món VẮNG MẶT HẲN khỏi đơn (`missingFromDraft`, #865). Tăng / thêm món khác ⇒
+ * `null`. Không đo được ⇒ `null`. Lượt khách có dấu hiệu sửa mà máy không áp chắc được (`relaxedTurn` = `turn`) ⇒ `null` — không bao giờ
+ * chặn khách sửa. HÀM THUẦN.
  */
 export function commitmentViolation(cart: CartCommitment | undefined, asked: readonly AskedLine[], turn?: number | null): string | null {
   if (!cart) return null;
   if (turn !== undefined && turn !== null && cart.relaxedTurn === turn) return null;
+  const dropped = (name: string, want: string, src: number | null) =>
+    `KHÔNG được bỏ «${name}»: khách đã nói TƯỜNG MINH ${want} ${name}${src !== null ? ` (tin #${src})` : ""} và CHƯA có câu sửa tường minh nào mới hơn. Giữ ĐÚNG ${want}; KHÔNG gợi ý gói ăn thử / gói nhỏ hơn, KHÔNG hỏi lại số lượng. Khách nói muốn đổi mà câu chưa rõ ⇒ HỎI LẠI khách muốn còn bao nhiêu. Mời thêm món chỉ được THÊM món khác — khách không nhận lời mời thì chốt đúng đơn ${want} ${name}.`;
   for (const item of cart.selectedItems) {
     if (!item.customerExplicit) continue;
     const pid = productFor(item, cart, asked);
-    if (!pid) continue;
+    if (!pid) {
+      // Vắng mặt hẳn: bỏ sót là sai dù số khách nói có đơn vị hay không (kiểm đơn vị chỉ có nghĩa khi món CÓ trong đơn).
+      if (missingFromDraft(item, asked)) return dropped(item.label, amountText(item.quantity, item.unit, item.pieces), item.sourceMessageId);
+      continue;
+    }
     // CHỈ dòng có ĐƠN VỊ khách nói rõ mới có thẩm quyền chặn hạ số lượng (P0 22/10/2026, #8037F35A: «thêm 10 nem» đọc thành 10 gói đã chặn
     // đúng 1 hộp 10 cái rồi ép model ghi 10 hộp — tổng 540.000 ⇒ 1.740.000). Số trần suy ra / mơ hồ ⇒ `quantityUnitIssue`.
     if (bareResolution(item, asked.filter((l) => l.productId === pid)).kind !== "STATED") continue;
@@ -1074,8 +1103,8 @@ export function commitmentViolation(cart: CartCommitment | undefined, asked: rea
     if (proposed === null || proposed >= item.quantity) continue;
     const name = item.label || productName(asked.find((l) => l.productId === pid)?.name ?? "") || "món khách chọn";
     const want = amountText(item.quantity, item.unit, item.pieces);
-    const what = proposed === 0 ? `bỏ «${name}»` : `hạ «${name}» từ ${want} xuống ${amountText(proposed, item.unit, item.pieces)}`;
-    return `KHÔNG được ${what}: khách đã nói TƯỜNG MINH ${want} ${name}${item.sourceMessageId !== null ? ` (tin #${item.sourceMessageId})` : ""} và CHƯA có câu sửa tường minh nào mới hơn. Giữ ĐÚNG ${want}; KHÔNG gợi ý gói ăn thử / gói nhỏ hơn, KHÔNG hỏi lại số lượng. Khách nói muốn đổi mà câu chưa rõ ⇒ HỎI LẠI khách muốn còn bao nhiêu. Mời thêm món chỉ được THÊM món khác — khách không nhận lời mời thì chốt đúng đơn ${want} ${name}.`;
+    if (proposed === 0) return dropped(name, want, item.sourceMessageId);
+    return `KHÔNG được hạ «${name}» từ ${want} xuống ${amountText(proposed, item.unit, item.pieces)}: khách đã nói TƯỜNG MINH ${want} ${name}${item.sourceMessageId !== null ? ` (tin #${item.sourceMessageId})` : ""} và CHƯA có câu sửa tường minh nào mới hơn. Giữ ĐÚNG ${want}; KHÔNG gợi ý gói ăn thử / gói nhỏ hơn, KHÔNG hỏi lại số lượng. Khách nói muốn đổi mà câu chưa rõ ⇒ HỎI LẠI khách muốn còn bao nhiêu. Mời thêm món chỉ được THÊM món khác — khách không nhận lời mời thì chốt đúng đơn ${want} ${name}.`;
   }
   return null;
 }
@@ -1096,7 +1125,11 @@ export function cartDraftDiff(cart: CartCommitment | undefined, asked: readonly 
     if (!item.customerExplicit || item.quantity <= 0) continue;
     if (opts.since !== undefined && opts.since !== null && (item.sourceMessageId === null || item.sourceMessageId <= opts.since)) continue;
     const pid = productFor(item, cart, asked);
-    if (!pid) continue;
+    if (!pid) {
+      // Món vắng mặt hẳn khỏi đơn nháp (#865) ⇒ lệch với «đơn ghi 0».
+      if (missingFromDraft(item, asked)) out.push({ label: item.label, want: amountText(item.quantity, item.unit, item.pieces), got: amountText(0, item.unit, item.pieces), wantAmount: item.quantity, gotAmount: 0, unit: item.unit, sourceMessageId: item.sourceMessageId });
+      continue;
+    }
     // Số trần (không đơn vị) của món bán theo hộp N cái: so theo số hộp SUY RA, mơ hồ ⇒ không đoán (bỏ qua).
     const res = bareResolution(item, asked.filter((l) => l.productId === pid));
     if (res.kind === "AMBIGUOUS") continue;

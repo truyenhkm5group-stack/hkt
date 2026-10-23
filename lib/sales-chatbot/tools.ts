@@ -720,13 +720,13 @@ function quoteClaimOf(q: Quote): AgentQuoteClaim {
 /** Câu lý do của báo giá chưa xác thực — một chỗ cho ba công cụ. */
 const quoteReasons = (q: Quote) => q.unverifiedReasons.map((r) => r.detail).join(" · ") || "báo giá chưa xác thực";
 
-/** Mọi khối lượng khách nói trong câu, quy ra gram («2kg», «0,5 kg», «2 ký», «500g»). HÀM THUẦN. */
+/** Mọi khối lượng khách nói trong câu, quy ra gram («2kg», «0,5 kg», «2 ký», «500g», «5 lạng» — chỉ dạng có dấu, xem WEIGHT_UNIT). HÀM THUẦN. */
 export function gramsMentioned(text: string): number[] {
   const out: number[] = [];
-  for (const m of text.matchAll(/(\d+(?:[.,]\d+)?)\s*(kg|kí|ký|ki|ky|cân|can|gram|gr|g)(?![\p{L}])/giu)) {
+  for (const m of text.matchAll(/(\d+(?:[.,]\d+)?)\s*(kilogram|kilo|ký lô|kí lô|ki lô|ky lo|ki lo|kg|kí|ký|ki|ky|cân|can|lạng|gram|gr|g)(?![\p{L}])/giu)) {
     const n = Number(m[1].replace(",", "."));
     if (!Number.isFinite(n) || n <= 0) continue;
-    out.push(Math.round(/^(?:gram|gr|g)$/i.test(m[2]) ? n : n * 1000));
+    out.push(Math.round(/^(?:gram|gr|g)$/i.test(m[2]) ? n : /^lạng$/i.test(m[2]) ? n * 100 : n * 1000));
   }
   return out;
 }
