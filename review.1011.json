@@ -1,8 +1,8 @@
 {
   "pr": 1011,
-  "sha": "b8dec8ae5eecd05c17cf690f5efc6d5c09778893",
+  "sha": "ee5b412e25af06f4ae2365f40908fb11a19b9cac",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-23T18:23:00.400Z",
-  "note": "review lead: route nội bộ khoá HEADER so thời gian hằng, khoá rỗng ⇒ 401, ≤20 mã/đơn, chỉ chặng VTP + cờ + mốc, không tiền/người nhận, CSDL nhà; bot lùi về câu cũ khi route lỗi, tiêu cực Pancake không nói thẳng, đơn huỷ + reship còn sống ⇒ câu gửi lại (cả đơn chưa PUT); sync giữ partner_status khi ghép theo VTP; script audit diff + dừng khi tiền/dòng hàng đổi. Deploy ERP + container bot cùng lượt."
+  "at": "2026-10-23T22:26:06.957Z",
+  "note": "review lead (lại): 3 commit sau b8dec8ae — khai route ở CO_Y_CONG_KHAI + DOC_MOI_TRUONG_DA_KHAI kèm lý do (không nới bài); pos-reship-link bỏ qua đơn đã gắn xong trước khi cắt --limit (có bài CSDL); ops bot-order-describe chỉ GET POS + gọi route thật, không gửi tin, bản đầy đủ mã hoá."
 }
