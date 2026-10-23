@@ -1,3 +1,4 @@
+import { SOURCING_TRIAL_WORK_KINDS, SOURCING_TRIAL_WORK_LABEL } from "@/lib/constants/sourcing";
 import { CASE_TYPES, CASE_TYPE_LABEL, type CaseType } from "@/lib/constants/action-queue";
 import { departmentOfTeam, DEPARTMENT_CODES, type DepartmentCode } from "@/lib/constants/departments";
 import { BOTTLENECK_REASON_LABEL, BOTTLENECK_TEAM, FULFILLMENT_BLOCK_REASONS } from "@/lib/constants/fulfillment-bottleneck";
@@ -64,6 +65,7 @@ const SOURCE_OWNERSHIP_WHY: Record<WorkSource, string> = {
   APPROVAL: "Người duyệt được là quản trị viên / quản lý (quyền approvals:decide) — việc chờ chủ shop quyết, cùng tiền lệ với việc Tech và nhóm việc DATA.",
   PRODUCTION_TOPIC: "Bàn giá và phương án với xưởng là việc của nhóm Sản xuất — hôm nay nhóm đó route về Kho (TEAM_DEPARTMENT_DIVERGENCE) vì phòng Sản xuất chưa có thành viên; chuyển bằng ghi đè work.ownership.",
   SAMPLE_REVIEW: "Duyệt mẫu xưởng gửi là việc của nhóm Sản xuất — cùng lý do route về Kho như topic sản xuất cho tới khi phòng Sản xuất có người.",
+  SOURCING_TRIAL: "Đặt mua thử và theo dõi hàng về là việc của nhóm Sản xuất (người quyết mẫu nào đáng nhập) — cùng lý do route về Kho như topic sản xuất cho tới khi phòng Sản xuất có người; chuyển bằng ghi đè work.ownership.",
   PAYROLL_RECON: "Mỗi mục thiếu của kỳ lương đi về phòng GIỮ chứng từ ấy — xem bảng theo từng mục bên dưới, không phải một phòng cố định.",
   MANUAL_TASK: "Việc giao tay đi theo phòng mà người giao chọn; không có phòng mặc định nào đúng cho mọi việc.",
   RECURRING_TASK: "Việc định kỳ khai phòng ngay trong định nghĩa của nó.",
@@ -82,7 +84,7 @@ const SOURCE_RULES: OwnershipRule[] = WORK_SOURCES.filter(
        ĐÚNG MỘT dòng cho mỗi loại việc, trùng khớp với bảng hạn xử lý. Một bên khai mức nguồn còn
        bên kia khai mức loại thì màn hình cấu hình phải ghép hai lưới lệch nhau.
   */
-  (s) => WORK_SOURCE_SPEC[s].department !== null && s !== "FULFILLMENT_EXCEPTION" && s !== "INVENTORY_EXCEPTION",
+  (s) => WORK_SOURCE_SPEC[s].department !== null && s !== "FULFILLMENT_EXCEPTION" && s !== "INVENTORY_EXCEPTION" && s !== "SOURCING_TRIAL",
 ).map((s) => ({
   key: s,
   label: WORK_SOURCE_SPEC[s].label,
@@ -142,7 +144,15 @@ const INVENTORY_RULES: OwnershipRule[] = (["LOW_STOCK_RISK", "STOCKOUT_RISK"] as
   why: SOURCE_OWNERSHIP_WHY.INVENTORY_EXCEPTION,
 }));
 
-export const DEFAULT_OWNERSHIP_RULES: OwnershipRule[] = [...SOURCE_RULES, ...FULFILLMENT_RULES, ...INVENTORY_RULES, ...PAYROLL_RECON_RULES, ...ALERT_RULES];
+/** Mua thử mẫu nguồn (SRC-5b): khai theo LOẠI để bảng cấu hình có đúng một dòng cho mỗi loại, trùng khớp bảng hạn xử lý. */
+const SOURCING_TRIAL_RULES: OwnershipRule[] = SOURCING_TRIAL_WORK_KINDS.map((kind) => ({
+  key: `SOURCING_TRIAL:${kind}`,
+  label: SOURCING_TRIAL_WORK_LABEL[kind],
+  department: WORK_SOURCE_SPEC.SOURCING_TRIAL.department!,
+  why: SOURCE_OWNERSHIP_WHY.SOURCING_TRIAL,
+}));
+
+export const DEFAULT_OWNERSHIP_RULES: OwnershipRule[] = [...SOURCE_RULES, ...FULFILLMENT_RULES, ...INVENTORY_RULES, ...PAYROLL_RECON_RULES, ...SOURCING_TRIAL_RULES, ...ALERT_RULES];
 
 export const DEFAULT_OWNERSHIP_MAP: Record<string, OwnershipRule> = Object.fromEntries(DEFAULT_OWNERSHIP_RULES.map((r) => [r.key, r]));
 

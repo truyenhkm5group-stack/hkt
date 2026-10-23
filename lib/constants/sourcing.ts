@@ -10,6 +10,7 @@
  *    bừa (AGENTS 38: đích / tham số là quyết định kinh doanh, không phải hằng số trong mã).
  * HÀM THUẦN, client import được.
  */
+import { APPROVAL_VALID_HOURS } from "@/lib/constants/approval";
 
 export const SOURCING_LIMITS_KEY = "sourcing.limits";
 export const SOURCING_LANDED_COST_KEY = "sourcing.landedCost";
@@ -192,3 +193,30 @@ export function parseScoreWeights(raw: unknown): SourcingScoreWeights {
 export function scoreWeightsDeclared(w: SourcingScoreWeights): boolean {
   return SUPPLIER_SCORE_COMPONENTS.some((k) => (w.supplier[k] ?? 0) > 0);
 }
+
+// ─────────────────────────── VIỆC MUA THỬ TRÊN /work (SRC-5b) ───────────────────────────
+
+/**
+ * Hai loại việc của nguồn `SOURCING_TRIAL` — phép CHIẾU lên `sourcing_trial_requests` (luật 19): rời hàng đợi khi người bấm đúng
+ * hành động của miền («đã đặt» / «đã về» ở /sourcing/trials/[id]). Chờ DUYỆT không ở đây — nó đã là việc của nguồn `APPROVAL`.
+ */
+export const SOURCING_TRIAL_WORK_KINDS = ["ORDER", "RECEIVE"] as const;
+export type SourcingTrialWorkKind = (typeof SOURCING_TRIAL_WORK_KINDS)[number];
+export const SOURCING_TRIAL_WORK_LABEL: Record<SourcingTrialWorkKind, string> = {
+  ORDER: "Mua thử đã duyệt, chưa đặt",
+  RECEIVE: "Mua thử đã đặt, chưa về",
+};
+
+/**
+ * Hạn mặc định (giờ) — NGUỒN DUY NHẤT; `lib/constants/work-sla.ts` lấy lại từ đây, không gõ lại (luật 22). Chủ shop đổi ở `work.sla`.
+ *  · ORDER = hạn hiệu lực lời duyệt (`APPROVAL_VALID_HOURS`, hằng đang chạy của lõi duyệt): quá hạn ấy lời duyệt mất và phải xin lại,
+ *    nên «đã duyệt mà chưa đặt» vỡ hạn đúng lúc đó — không phải một con số mới.
+ *  · RECEIVE = `null` CỐ Ý: không có hằng đang chạy nào nói hàng mua thử được về chậm bao lâu; gõ số mới là bịa (luật 22, 38).
+ */
+export const SOURCING_TRIAL_SLA_HOURS: Record<SourcingTrialWorkKind, number | null> = { ORDER: APPROVAL_VALID_HOURS, RECEIVE: null };
+export const SOURCING_TRIAL_SLA_WHY: Record<SourcingTrialWorkKind, string> = {
+  ORDER: "Lấy lại hạn hiệu lực của lời duyệt: quá hạn ấy lời duyệt hết, người xin phải xin lại — nên đây là lúc việc thật sự vỡ hạn.",
+  RECEIVE:
+    "CỐ Ý bỏ trống: chưa có hằng số đang chạy nào nói hàng mua thử được phép về chậm bao lâu, và gõ một con số mới ở đây là bịa " +
+    "(AGENTS.md mục 22, 38). Chủ shop đặt được — nó đo «đã đặt bao lâu mà chưa về», tính từ lúc người bấm «đã đặt».",
+};
