@@ -131,7 +131,7 @@ const results: {
  * một câu 16 giây che mất hoàn toàn — không biết phải sửa câu nào. Hàm khớp mẫu dưới đây được ghi
  * lại MỌI câu từ 50ms trở lên trong lượt NGUỘI, in thành một mục riêng.
  */
-const TRONG_DIEM = /getPreOrderFunnel|getSalesLeakageQueue|getPreshipRiskBacktest|getNominalProfitReport|getMarketerDailyNominal|getAdsPerformance|getMarketerReport|getAdsDecision|salesByProductPage|dataQualitySummary|getDataQualityIssues|codSettlementSummary|listCodSettlement|customerFacets|getCashflowStatement|getFulfillmentBottleneckQueue|getActionQueue|getReplenishmentPlan|getStockShortage|getReconCenter/;
+const TRONG_DIEM = /getPreOrderFunnel|getSalesLeakageQueue|getPreshipRiskBacktest|getNominalProfitReport|getMarketerDailyNominal|getAdsPerformance|getMarketerReport|getAdsDecision|salesByProductPage|dataQualitySummary|getDataQualityIssues|codSettlementSummary|listCodSettlement|customerFacets|getCashflowStatement|getFulfillmentBottleneckQueue|getActionQueue|getReplenishmentPlan|getStockShortage|getReconCenter|getReturnRateSummary|getReturnRateByVariant|getReturnReasonReport|getReturnIntelligence|getProjectedDeliveryMetrics/;
 let cauTrongHam: { ms: number; sql: string }[] | null = null;
 const cauTheoHam = new Map<string, { ms: number; sql: string }[]>();
 
@@ -644,6 +644,10 @@ async function main() {
   await timed("/reports/returns", "getReturnRateByVariant 90d", () =>
     rr2.getReturnRateByVariant({ period: ret90, q: "", minShipped: 0, sort: "returned", dir: "desc", page: 1, pageSize: 50 }),
   );
+  // THÂN NGUỘI /reports/returns (Lead 24/10/2026): hai bậc dự báo mà trang gọi THẬT — PRODUCT (thẻ GTC ước tính
+  // + intelligence, gộp một lượt qua memo inflight) và VARIANT (bảng theo mẫu mã). Mốc SHIPPED như trang mặc định.
+  await timed("/reports/returns", "getProjectedDeliveryMetrics 90d SHIPPED PRODUCT", () => pd.getProjectedDeliveryMetrics(ret90, "SHIPPED", "PRODUCT"));
+  await timed("/reports/returns", "getProjectedDeliveryMetrics 90d SHIPPED VARIANT", () => pd.getProjectedDeliveryMetrics(ret90, "SHIPPED", "VARIANT"));
   await timed("/reports/returns", "getReturnRateBySource 90d", () => rr2.getReturnRateBySource(ret90, ""));
   await timed("/reports/returns", "getReturnRateByTier 90d", () => rr2.getReturnRateByTier(ret90, ""));
   const logi = await import("@/lib/queries/logistics");
