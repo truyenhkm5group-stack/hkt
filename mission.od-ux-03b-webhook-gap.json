@@ -3,7 +3,7 @@
   "mission_id": "od-ux-03b-webhook-gap",
   "title": "OD-UX-03b: thẻ đồng bộ nói ra chỗ hụt webhook chưa đo từ bao giờ",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-gap",
@@ -25,7 +25,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T14:05:19.758Z",
-  "updated_at": "2026-10-23T14:05:19.758Z",
-  "last_heartbeat": "2026-10-23T14:05:19.758Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T14:11:56.305Z",
+  "last_heartbeat": "2026-10-23T14:11:56.305Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/od-ux-03b-webhook-gap",
+    "sha": "10790f9809f97ed28f87d0d165246e2ffd0ba72c",
+    "at": "2026-10-23T14:11:56.305Z",
+    "actor": "DESKTOP-56TH98Y:wt-gap",
+    "title": "Thẻ đồng bộ nay nói ra chỗ hụt webhook chưa đo từ bao giờ, kèm lối bấm nhập tệp, thay vì chỉ in một cái mốc",
+    "summary": "OD-UX-03b. webhookGapCell: chưa từng đo / chưa đo từ <mốc> (N ngày) / đo lần cuối; hổ phách theo VTP_ORDER_LIST_MAX_AGE_HOURS đã khai (feed-freshness, 24 giờ), lối bấm /import-vtp. webhookMatchCell đọc lại matchRate/matchSample 30 ngày của vtpWebhookHealth: chưa đo / chưa đủ mẫu (<30) / %; không tô màu (AGENTS 38). Hai ô in trên thẻ đồng bộ /shipments + /reports/returns. Trang Kết nối dữ liệu dùng component khác — không đổi.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint 6 tệp: sạch",
+      "TEST_KHOI=K06,K15 npm test: ĐẠT (data-as-of: chưa từng / cũ 21 ngày / biên đúng nhịp / mới · tỷ lệ khớp không đo / thiếu mẫu / đủ mẫu, không tô màu · test-hygiene)",
+      "build: không chạy — server component, next/link"
+    ]
+  }
 }
