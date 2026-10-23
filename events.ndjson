@@ -1,4 +1,3 @@
-{"at":"2026-10-18T16:30:42.359Z","actor":"DESKTOP-56TH98Y:wt-cau-mau-kiem-luu","kind":"HANDOFF","mission":"quick-reply-config-guard","detail":"claude/cau-mau-kiem-luu-main @ 89d4369d4921 · 7 lệnh kiểm thử"}
 {"at":"2026-10-18T16:39:17.535Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"quick-reply-evidence","detail":"PASS e548e31c44996633e9e5839a22a44d413f02d624 2026-10-18T16:38:54.587Z"}
 {"at":"2026-10-18T16:54:20.809Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"quick-reply-probe","detail":"#901 @ 787082759bc1 → 342cb66bffd5 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-18T17:05:01.087Z","actor":"DESKTOP-56TH98Y:wt-cau-mau-kiem-luu","kind":"HANDOFF","mission":"quick-reply-config-guard","detail":"claude/cau-mau-kiem-luu-main @ e8435b7b4880 · 3 lệnh kiểm thử"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-23T22:26:38.922Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#1011 @ ee5b412e25af · review lead (lại): 3 commit sau b8dec8ae — khai route ở CO_Y_CONG_KHAI + DOC_MOI_TRUONG_DA_KHAI kèm lý do (không nới bài); pos-reship-link bỏ qua đơn đã gắn xong trước khi cắt --limit (có bài CSDL); ops bot-order-describe chỉ GET POS + gọi route thật, không gửi tin, bản đầy đủ mã hoá."}
 {"at":"2026-10-23T22:32:35.744Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"src-5a-trial-request","detail":"PASS 61caebe24ada3860f5f2d8911adad44c540df14e 2026-10-23T22:31:58.237Z"}
 {"at":"2026-10-23T22:33:26.288Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"tx-sequential-awaits","detail":"PASS 61caebe24ada3860f5f2d8911adad44c540df14e 2026-10-23T22:32:44.553Z"}
+{"at":"2026-10-23T22:34:11.554Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"tx-no-overlap","detail":"#1020 @ 2c4478bed4d0 → 0002422cf0bb (MERGE_ISOLATED · HIGH · gates success)"}

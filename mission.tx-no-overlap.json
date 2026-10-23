@@ -3,7 +3,7 @@
   "mission_id": "tx-no-overlap",
   "title": "Một giao dịch = một client: theoClient + lá chắn lúc chạy (getDb trong chayKhongJit) + payroll/bảng tên tính trước giao dịch + máy quét lan truyền",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-txseq",
@@ -30,9 +30,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T21:06:07.405Z",
-  "updated_at": "2026-10-23T22:11:01.708Z",
+  "updated_at": "2026-10-23T22:34:11.504Z",
   "last_heartbeat": "2026-10-23T22:09:03.684Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1020 → 0002422cf0bb7fccc431f94b598e2c91f0d88a12"
+  },
   "handoff": {
     "branch": "claude/tx-no-overlap",
     "sha": "2c4478bed4d09b8fbc743a0c40e000c1a0672ce8",
