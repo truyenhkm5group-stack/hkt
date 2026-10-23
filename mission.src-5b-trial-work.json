@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "src-5b-trial-work",
+  "title": "SRC-5b: việc mua thử trên /work (đã duyệt chưa đặt · đã đặt chưa về)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/constants/sourcing.ts",
+    "lib/constants/work-sources.ts",
+    "lib/constants/work-sla.ts",
+    "lib/constants/work-ownership.ts",
+    "lib/queries/work-adapters.ts",
+    "tests/sourcing-trial-work.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-23T19:50:24.182Z",
+  "updated_at": "2026-10-23T19:50:24.182Z",
+  "last_heartbeat": "2026-10-23T19:50:24.182Z",
+  "definition_of_done": []
+}
