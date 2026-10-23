@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
-import { chayKhongJit, getDb, KetNoiThuHaiError, theoClient, type Db } from "@/db";
+import { chayKhongJit, getDb, KetNoiThuHaiError, laGiaoDich, theoClient, type Db } from "@/db";
 import { getOperatingCostByDay } from "@/lib/queries/cost-engine";
 import { getRecognizedPayrollCost } from "@/lib/queries/payroll-cost";
 import type { Period } from "@/lib/search-params";
@@ -182,6 +182,39 @@ export async function testTxSequential(db: Db) {
   await assert.rejects(() => chayKhongJit(db, async () => getDb()), (e) => e instanceof KetNoiThuHaiError, "getDb() bên trong chayKhongJit phải bị chặn");
   assert.ok(await getDb(), "ngoài giao dịch thì getDb() chạy bình thường");
   assert.deepEqual(await chayKhongJit(db, (tx) => theoClient(tx, [() => Promise.resolve(1), Promise.resolve(2)])), [1, 2], "theoClient giữ đúng thứ tự");
+
+  // ───────── theoClient · CẢ HAI NHÁNH, đo bằng số việc chạy CÙNG LÚC (không tin tên lớp) ─────────
+  // Phân biệt bằng `instanceof PgTransaction` (danh tính lớp của drizzle, không phải chuỗi tên). Nâng drizzle mà
+  // lớp đổi thì hai khẳng định dưới đỏ ngay: giao dịch thật phải ra 1 việc cùng lúc, bể phải ra > 1.
+  const docDongThoi = async (client: Db) => {
+    let dang = 0;
+    let dinh = 0;
+    const viec = () => async () => {
+      dang += 1;
+      dinh = Math.max(dinh, dang);
+      await new Promise((r) => setTimeout(r, 15));
+      dang -= 1;
+      return dinh;
+    };
+    await theoClient(client, [viec(), viec(), viec()]);
+    return dinh;
+  };
+  assert.equal(laGiaoDich(db), false, "handle của bể không phải giao dịch");
+  assert.ok((await docDongThoi(db)) > 1, "trên BỂ: theoClient chạy song song như Promise.all");
+  const trongGiaoDich = await db.transaction(async (tx) => ({ la: laGiaoDich(tx as unknown as Db), dinh: await docDongThoi(tx as unknown as Db) }));
+  assert.equal(trongGiaoDich.la, true, "client của db.transaction phải được nhận là giao dịch");
+  assert.equal(trongGiaoDich.dinh, 1, "trên client GIAO DỊCH: theoClient chạy nối tiếp — đúng một việc tại một thời điểm");
+
+  // ───────── Lá chắn KHÔNG BAO GIỜ bật ở production: chỉ db/index.ts đọc cờ, không tệp triển khai nào đặt nó ─────────
+  const docCo = execSync("git grep -l ERP_TX_GUARD -- lib app db scripts", { encoding: "utf8" }).split("\n").filter(Boolean);
+  assert.deepEqual(docCo, ["db/index.ts"], "chỉ db/index.ts được đọc ERP_TX_GUARD");
+  let trienKhai = "";
+  try {
+    trienKhai = execSync('git grep -l ERP_TX_GUARD -- "docker-compose*.yml" Dockerfile ".env*" ".github/workflows/*.yml" "chatbot/*"', { encoding: "utf8" });
+  } catch (e) {
+    if ((e as { status?: number }).status !== 1) throw e;
+  }
+  assert.equal(trienKhai.trim(), "", "không tệp triển khai / mẫu môi trường nào được đặt ERP_TX_GUARD — lá chắn chỉ dành cho bộ kiểm thử");
 
   // ───────── TRƯỚC = SAU: getOperatingCostByDay — tự mở bể (song song) ↔ nhận client + payroll (nối tiếp) ─────────
   const ALL: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
