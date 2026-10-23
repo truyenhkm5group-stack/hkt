@@ -3,7 +3,7 @@
   "mission_id": "regression-watch-readonly",
   "title": "regression-watch-status đọc được mọi tổ chức (handle chỉ đọc trước withOrganization)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -21,7 +21,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-23T00:52:23.393Z",
-  "updated_at": "2026-10-23T00:52:23.393Z",
-  "last_heartbeat": "2026-10-23T00:52:23.393Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-23T00:52:56.613Z",
+  "last_heartbeat": "2026-10-23T00:52:56.613Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/regression-watch-readonly",
+    "sha": "cd2e0c71e4f37a9f192358365e426daef5474d4a",
+    "at": "2026-10-23T00:52:56.613Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "regression-watch-status đọc được mọi tổ chức (handle chỉ đọc trước withOrganization)",
+    "summary": "@cd2e0c71e CHỈ-SCRIPT: regression-watch-status gắn getDbForInspection trước withOrganization (như stuck-conversation-audit) — run 39879228607 có 5/6 tổ chức không đọc được vì mở CSDL tổ chức chạy lượt dọn platform_audit_log trong phiên chỉ đọc.",
+    "tests": [
+      "npm run typecheck: sạch",
+      "eslint: sạch",
+      "TEST_KHOI=K22 (regression-watch + bài quét mới): XANH trên cd2e0c71e",
+      "shard 1–4 + build: CI gates"
+    ]
+  }
 }
