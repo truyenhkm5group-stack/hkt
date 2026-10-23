@@ -2,6 +2,7 @@
  * Kiểm thử luồng đồng bộ với dữ liệu mẫu (không gọi API thật).
  * Chạy: npm test  (dùng CSDL PGlite tạm trong ./data/pglite-test, không ảnh hưởng dữ liệu thật)
  */
+import { testSourcingShell } from "./sourcing-shell.test";
 import "./setup-env";
 import { testReturnReasonKhachVangNha } from "./return-reason-vang-nha.test";
 import { testCodReconciliation } from "./cod-reconciliation.test";
@@ -2554,6 +2555,8 @@ async function main() {
     await testIdeas();
     await testPermissions();
     await testPlatformModules();
+    // SRC-1 (23/10/2026): khung module Tìm hàng nguồn — module · quyền · hai khoá cấu hình · không gọi nguồn ngoài.
+    testSourcingShell();
     await testVtpImportTruth(db);
     await testVtpImportRecovery(db);
     await testCostAllocation(db);

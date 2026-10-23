@@ -476,6 +476,13 @@ export const NAV_MODULES = [
     why: "Hỏi giá xưởng, chốt phương án, giá thành tạm tính, làm mẫu và duyệt mẫu — các quyết định bỏ vốn TRƯỚC khi có lệnh đặt hàng. Lệnh sản xuất trỏ vào bản thiết kế được duyệt ở đây.",
   },
   {
+    href: "/sourcing",
+    label: "Tìm hàng nguồn",
+    zone: "PRODUCTION",
+    permission: "sourcing:view",
+    why: "Phòng đặt xưởng quyết mẫu nào đáng nhập: tìm sản phẩm trên nguồn Trung Quốc, so bậc giá / MOQ / nhà cung cấp, lưu mẫu và xin mua thử trước khi bỏ vốn.",
+  },
+  {
     href: "/products/performance",
     label: "Hiệu quả mẫu mã",
     zone: "PRODUCTION",

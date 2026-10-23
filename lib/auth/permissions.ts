@@ -333,6 +333,19 @@ export const PERMISSION_GROUPS = [
       { key: "real_estate:manage", label: "BĐS: quản lý dự án & căn", hint: "Tạo dự án (khai số giờ giữ chỗ), thêm căn, khoá / mở căn, nhả giữ chỗ của sale khác, hoàn cọc / khách bỏ cọc (có lý do), ký bán." },
     ],
   },
+  /*
+    TÌM HÀNG NGUỒN (SRC-1, module `sourcing` — docs/tech/ai-sourcing.md): XEM · TÌM (tốn lượt AI / lượt gọi nguồn) · LƯU mẫu ·
+    DUYỆT & CẤU HÌNH (tham số giá về, trần chi phí, hành động ra bên ngoài). Mức cuối mặc định chỉ ADMIN.
+  */
+  {
+    module: "Tìm hàng nguồn",
+    items: [
+      { key: "sourcing:view", label: "Tìm hàng: xem", hint: "Xem trang Tìm hàng nguồn, mẫu đã lưu, tham số giá về Việt Nam và trần lượt AI." },
+      { key: "sourcing:search", label: "Tìm hàng: tìm", hint: "Chạy một lượt tìm (sinh từ khoá tiếng Trung, đọc ảnh) — tốn lượt AI / lượt gọi nguồn trong trần của tổ chức." },
+      { key: "sourcing:write", label: "Tìm hàng: lưu & sửa mẫu", hint: "Lưu sản phẩm nguồn vào kho mẫu, nhập tay bậc giá / MOQ / nhà cung cấp, soạn yêu cầu mua thử (chưa gửi đi)." },
+      { key: "sourcing:approve", label: "Tìm hàng: duyệt & cấu hình", hint: "Đổi tham số giá về Việt Nam và trần lượt AI; duyệt hành động ra bên ngoài (liên hệ nhà cung cấp, mua thử)." },
+    ],
+  },
 ] as const;
 
 /**
@@ -420,7 +433,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     lợi nhuận, quyền và migration; nó phải được CẤP có tên, không phải còn lại sau một phép loại.
     Chủ shop cấp tay ở trang Người dùng cho ai thật sự cần.
   */
-  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage", "modules:manage", "platform:operate", "metadata:manage", "workflow:manage", "customers:write", "products:write", "records:view", "records:write", "orders:write", "ai_sales:manage", "wholesale:scan", "wholesale:config"].includes(p)),
+  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "sourcing:approve", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage", "modules:manage", "platform:operate", "metadata:manage", "workflow:manage", "customers:write", "products:write", "records:view", "records:write", "orders:write", "ai_sales:manage", "wholesale:scan", "wholesale:config"].includes(p)),
   // Trưởng nhóm: báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền
   // thực, không sửa cấu hình. Lương: CHỈ của chính mình cho tới khi có phạm vi theo nhóm.
   LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "ai_sales:reply", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "models:write", "production:write", "production:topic-open", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage", "wholesale:view", "wholesale:work", "wholesale:assign"],
@@ -474,7 +487,7 @@ export const USER_PERMISSION_SNAPSHOT_KEY = "users.permissionsKnown";
  * Chỉ dùng cho các bản lưu cũ; từ nay mỗi lần lưu quyền đều kèm ảnh chụp khoá hiện có nên danh
  * sách này không cần dài thêm.
  */
-export const PERMISSIONS_ADDED_AFTER_SNAPSHOT: string[] = ["ideas:view", "ideas:write", "ideas:review", "work:view", "work:manage", "work:assign", "work:department", "work:all", "work:admin", "okr:view", "okr:manage", "performance:view", "review:manage"];
+export const PERMISSIONS_ADDED_AFTER_SNAPSHOT: string[] = ["ideas:view", "ideas:write", "ideas:review", "work:view", "work:manage", "work:assign", "work:department", "work:all", "work:admin", "okr:view", "okr:manage", "performance:view", "review:manage", "sourcing:view", "sourcing:search", "sourcing:write", "sourcing:approve"];
 
 /** Bộ khoá quyền của thời điểm trước khi có ảnh chụp — dùng cho người chưa có ảnh chụp nào. */
 function khoaDaBietKieuCu(): Set<string> {
