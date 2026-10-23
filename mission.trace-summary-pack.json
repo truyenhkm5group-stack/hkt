@@ -3,7 +3,7 @@
   "mission_id": "trace-summary-pack",
   "title": "Mọi dòng tóm tắt ops của conv-money-trace và stuck-conversation-audit vừa 280 byte, không mất chỉ số",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-summary-pack",
@@ -25,11 +25,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T04:17:35.962Z",
-  "updated_at": "2026-10-23T06:43:47.439Z",
+  "updated_at": "2026-10-23T07:48:49.581Z",
   "last_heartbeat": "2026-10-23T06:23:33.782Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#994 → 1c8b1e3844e3cea5e5f5dba2aa65501c9944d55a"
+    "merged": "#994 → 1c8b1e3844e3cea5e5f5dba2aa65501c9944d55a",
+    "verify": "PASS 2569f2ed5c960f9ce01749d5ea5339699482d898 2026-10-23T07:48:10.643Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/39917013887"
   },
   "handoff": {
     "branch": "claude/trace-summary-pack",
