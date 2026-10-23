@@ -1,0 +1,8 @@
+{
+  "pr": 994,
+  "sha": "e05d5e558dac661e492b41609a6e3252a6d37617",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T06:25:34.849Z",
+  "note": "review lead: lib/ops/summary-lines.ts thuần (SUMMARY_MAX_BYTES 280 byte UTF-8, packSummaryLines, splitSummaryLine theo ô « · » với nhãn (tiếp), unsplitSummaryLines); tomTat của conv-money-trace + stuck-conversation-audit đi qua splitSummaryLine ⇒ phủ mọi dòng; bài kiểm ghép lại đúng gốc (đã bắt lỗi chèn dấu chia ô), trần đọc từ ops-vps.yml. Chạm lib ⇒ cần deploy trước khi chạy hai ops ấy."
+}
