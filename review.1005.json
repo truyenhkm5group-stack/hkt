@@ -1,0 +1,8 @@
+{
+  "pr": 1005,
+  "sha": "8051bf4a32867c1d51483df06d0d07cb32764d77",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-23T14:38:27.270Z",
+  "note": "review lead: --peek chỉ GET + SELECT, không PUT, không audit; customer chỉ băm; so dòng hàng/tổng qua chính mapOrder của sync. Chỉ-script, không cần deploy."
+}
