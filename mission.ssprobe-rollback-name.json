@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "ssprobe-rollback-name",
+  "title": "shipment-state-probe: bắt rollback theo tên (EXPLAIN chạy được)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-ssprobe",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/ssprobe-rollback-name",
+  "base_sha": "6a2b46ff4852bd783889a013d368e4cf047d1a88",
+  "domains": [],
+  "owned_paths": [
+    "scripts/shipment-state-probe.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-24T12:45:03.058Z",
+  "updated_at": "2026-10-24T12:45:03.058Z",
+  "last_heartbeat": "2026-10-24T12:45:03.058Z",
+  "definition_of_done": []
+}
