@@ -3,7 +3,7 @@
   "mission_id": "order-dup-scan-ma-don",
   "title": "order-dup-scan: mã đơn đúng như ERP hiển thị + đếm cặp đã huỷ đơn sau",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-dupma",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-24T05:07:36.097Z",
-  "updated_at": "2026-10-24T07:18:24.543Z",
+  "updated_at": "2026-10-24T08:23:21.731Z",
   "last_heartbeat": "2026-10-24T06:54:51.982Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1038 → 71600ffa21757fce5e8f6aea2dce929bc723d8d0"
+  },
   "handoff": {
     "branch": "claude/order-dup-scan-ma-don",
     "sha": "99cfbcdc59b874e0fdd0f7b10edfff39d8d61520",
