@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "revert-1030",
+  "title": "Revert #1030 (lối lùi cho hồi quy đường ấm /reports/returns — chờ Lead quyết)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-rev1030",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/revert-1030",
+  "base_sha": "caea634ce6d683e2fb371d4c68066ffbb13a3c42",
+  "domains": [],
+  "owned_paths": [
+    "lib/queries/return-reason-report.ts",
+    "lib/queries/return-intelligence.ts",
+    "tests/returns-body.test.ts",
+    "tests/sync-fixtures.test.ts",
+    "tests/agent-chi-phi.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-24T06:17:44.025Z",
+  "updated_at": "2026-10-24T06:17:44.025Z",
+  "last_heartbeat": "2026-10-24T06:17:44.025Z",
+  "definition_of_done": []
+}
