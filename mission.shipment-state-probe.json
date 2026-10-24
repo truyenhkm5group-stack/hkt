@@ -23,18 +23,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-24T02:18:42.118Z",
-  "updated_at": "2026-10-24T03:58:24.376Z",
-  "last_heartbeat": "2026-10-24T03:58:24.376Z",
+  "updated_at": "2026-10-24T05:15:09.859Z",
+  "last_heartbeat": "2026-10-24T05:15:09.859Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/shipment-state-probe",
-    "sha": "c6f4493324acd5ce2d05c8865c8fd8290155c45d",
-    "at": "2026-10-24T03:58:24.376Z",
+    "sha": "6e4558add966477ad73c5806ba0715081a237c81",
+    "at": "2026-10-24T05:15:09.859Z",
     "actor": "DESKTOP-56TH98Y:wt-ssprobe",
     "title": "ops shipment-state-probe: đo cửa nội bộ bot → ERP nguội/ấm + EXPLAIN JIT",
-    "summary": "sửa gates #1028: regex đã thoát thay chuỗi literal process.env",
+    "summary": "gộp main (giữ cả order-dup-scan #1031) + probe đo qua getDb(), không mở pg.Pool thứ hai (S1 · ISO-17); tách primaryShipmentsQuery dùng chung route/probe",
     "tests": [
-      "tsc · eslint sạch · TEST_KHOI=K10,K15 ĐẠT (K15 = test-hygiene)"
+      "tsc · eslint sạch · TEST_KHOI=K01,K09,K10,K15,K17 ĐẠT"
     ]
   }
 }
