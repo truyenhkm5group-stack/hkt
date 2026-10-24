@@ -339,7 +339,16 @@ async function testRealOrg() {
     const holds = async () => (await db.select({ n: sql<number>`count(*)::int` }).from(schema.auditLogs).where(eq(schema.auditLogs.action, "SALES_CHAT_SAME_PHONE_HOLD")))[0]?.n ?? 0;
     // Các ca trước dùng chung SĐT `PHONE` ở nhiều hội thoại nên lớp tạm đã kích hoạt ở đó — đếm CHÊNH LỆCH từ đây.
     const h0 = await holds();
+    // HAI LUỒNG HỘP THƯ cùng SĐT (dáng «Kiều Văn Lệ» của followup-lifecycle — CI #1039) ⇒ hai PSID, hai khách: KHÔNG giữ.
+    const ib1 = await convOf("ib1");
+    const i1 = await botCreate(ib1.id, { autoConfirm: true, phone: "0388000444" });
+    const ib2 = await convOf("ib2");
+    const i2 = await botCreate(ib2.id, { autoConfirm: true, phone: "0388000444" });
+    assert.ok(!i1.isError && !i2.isError && i2.state.confirmed?.auto && !i2.state.draft?.samePhoneOf, `hai luồng hộp thư cùng SĐT ⇒ tự chốt như cũ: ${i2.content}`);
+    assert.equal(await holds(), h0, "không kích hoạt giữa hai luồng hộp thư");
+    // Luồng BÌNH LUẬN (có tin kind = COMMENT) ↔ hộp thư — đúng khe lớp tạm đỡ.
     const sp1 = await convOf("sp1");
+    await db.insert(schema.salesChatInbound).values({ pageId: PAGE, threadId: `${PAGE}_sp1`, messageId: "cmt-sp1", text: "chả cá thu bao nhiêu", status: "DONE", kind: "COMMENT" });
     const b1 = await botCreate(sp1.id, { autoConfirm: true, phone: PHONE_SP });
     assert.ok(!b1.isError && b1.state.confirmed?.auto, `đơn đầu (bình luận) tự chốt bình thường: ${b1.content}`);
     const sp2 = await convOf("sp2");

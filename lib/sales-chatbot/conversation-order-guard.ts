@@ -199,6 +199,19 @@ export async function samePhoneOpenBotOrders(conversationId: string, phone: stri
   const since = new Date(now.getTime() - CONVERSATION_ORDER_GUARD_HOURS * 3_600_000);
   const leftWarehouse = sql`exists (select 1 from ${schema.shipments} s where s.order_id = ${o.id} and coalesce(s.direction, 'OUTBOUND') <> 'RETURN' and s.stage::text not in ('PENDING', 'CANCELLED'))`;
   const digits = (col: typeof o.billPhone | typeof o.shipPhone) => sql`right(regexp_replace(coalesce(${col}, ''), '[^0-9]', '', 'g'), 9)`;
+  /*
+    CHỈ KHI MỘT TRONG HAI LÀ HỘI THOẠI BÌNH LUẬN (CI #1039, followup-lifecycle «Kiều Văn Lệ»): khoảng trống lớp này đỡ là ĐÚNG MỘT khe —
+    bình luận ↔ hộp thư, ERP chưa nối được danh tính (pha 3 + identity-link sẽ nối). Hai luồng HỘP THƯ trên cùng page là hai PSID = hai
+    tài khoản Facebook khác nhau: cùng SĐT (người nhà dùng chung số) vẫn là HAI khách, giữ «Mới» là chặn nhầm khách hợp lệ — đúng điều chủ
+    shop cấm. «Hội thoại bình luận» = cùng hai dấu hiệu `orderLookupBlock` (tools.ts) dùng: luồng có tin `kind = COMMENT`, hoặc
+    `visitor_key` không còn khớp (page, mã luồng) — mã luồng đã bị đổi sang mã hộp thư sau khi trả lời bình luận.
+  */
+  const isComment = (convId: SQL) => sql`exists (
+    select 1 from ${schema.salesChatConversations} c
+     where c.id = ${convId} and c.channel = 'FANPAGE' and c.page_id is not null and c.thread_id is not null
+       and ((c.visitor_key is not null and c.visitor_key <> encode(sha256(convert_to('fanpage:' || c.page_id || ':' || c.thread_id, 'UTF8')), 'hex'))
+            or exists (select 1 from ${schema.salesChatInbound} i where i.page_id = c.page_id and i.thread_id = c.thread_id and i.kind = 'COMMENT')))`;
+  const otherConv = sql`coalesce(${o.salesConversationId}, split_part(coalesce(${o.raw}->>'agentKey', ''), ':', 2))`;
   const rows = await db
     .select({ orderId: o.id, insertedAt: o.insertedAt })
     .from(o)
@@ -211,6 +224,7 @@ export async function samePhoneOpenBotOrders(conversationId: string, phone: stri
         sql`not ${leftWarehouse}`,
         gte(o.insertedAt, since),
         or(sql`${digits(o.billPhone)} = ${key}`, sql`${digits(o.shipPhone)} = ${key}`),
+        sql`(${isComment(sql`${conversationId}`)} or ${isComment(otherConv)})`,
       ),
     )
     .orderBy(desc(o.insertedAt))
