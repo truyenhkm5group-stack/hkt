@@ -37,11 +37,18 @@ export const DUP_SCAN_DEFAULT_GAP_HOURS = 72;
 export const DUP_SCAN_MAX_ORDERS = 20_000;
 /** Nhóm theo một khoá quá đông (SĐT dùng chung của shop, khách sỉ) thì không dựng cặp — nói ra số nhóm bị bỏ. */
 export const DUP_SCAN_MAX_GROUP = 40;
-const USAGE = `<mã tổ chức> [--days=1..${DUP_SCAN_MAX_DAYS}] [--max-gap-hours=1..720]`;
+const USAGE = `<mã tổ chức> [--days=1..${DUP_SCAN_MAX_DAYS} | --since=<ISO UTC, vd 2026-10-24T05:18:18Z>] [--max-gap-hours=1..720]`;
 
-export type DupScanArgs = { code: string; days: number; maxGapHours: number };
+/**
+ * `since` (khi có) THAY cho `days`: «từ mốc deploy này, còn sinh cặp mới không». Đơn TRƯỚC mốc trong `maxGapHours` vẫn được
+ * đọc để làm ĐƠN TRƯỚC của cặp — một đơn bot tự chốt lúc 05:20 mà đơn người lên lúc 05:10 vẫn phải bị thấy.
+ */
+export type DupScanArgs = { code: string; days: number; maxGapHours: number; since: Date | null };
 
-export function parseDupScanArgs(argv: readonly string[]): DupScanArgs | { error: string } {
+const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?Z$/;
+
+/** `now` là tham số (không đọc đồng hồ bên trong) để bài kiểm không mang hạn sử dụng (AGENTS mục 50). */
+export function parseDupScanArgs(argv: readonly string[], now: Date = new Date()): DupScanArgs | { error: string } {
   const code = (argv.find((a) => !a.startsWith("--")) ?? "").trim();
   if (!/^[a-z0-9][a-z0-9_-]{0,62}$/.test(code)) return { error: "thiếu / sai mã tổ chức" };
   const val = (k: string) => argv.find((a) => a.startsWith(`--${k}=`))?.slice(k.length + 3);
@@ -49,7 +56,15 @@ export function parseDupScanArgs(argv: readonly string[]): DupScanArgs | { error
   if (!Number.isInteger(days) || days < 1 || days > DUP_SCAN_MAX_DAYS) return { error: `--days phải là số nguyên 1..${DUP_SCAN_MAX_DAYS}` };
   const maxGapHours = val("max-gap-hours") === undefined ? DUP_SCAN_DEFAULT_GAP_HOURS : Number(val("max-gap-hours"));
   if (!Number.isInteger(maxGapHours) || maxGapHours < 1 || maxGapHours > 720) return { error: "--max-gap-hours phải là số nguyên 1..720" };
-  return { code, days, maxGapHours };
+  const sinceRaw = val("since");
+  let since: Date | null = null;
+  if (sinceRaw !== undefined) {
+    // Chỉ nhận mốc UTC có `Z`: «05:18» không múi giờ là đọc theo giờ máy chạy, lệch 7 giờ trên VPS so với máy người gõ.
+    if (!ISO_UTC.test(sinceRaw) || Number.isNaN(new Date(sinceRaw).getTime())) return { error: "--since phải là mốc ISO UTC có Z, vd 2026-10-24T05:18:18Z" };
+    since = new Date(sinceRaw);
+    if (since.getTime() < now.getTime() - DUP_SCAN_MAX_DAYS * 86_400_000) return { error: `--since không được cũ hơn ${DUP_SCAN_MAX_DAYS} ngày` };
+  }
+  return { code, days, maxGapHours, since };
 }
 
 // ─────────────────────────── PHẦN THUẦN ───────────────────────────
@@ -226,6 +241,34 @@ export function summarize(orders: number, pairs: readonly ScanPair[]): ScanSumma
   return { orders, pairs: pairs.length, byVerdict, sameConversation, byOriginCombo, bothActiveSuspected, suspectCancelledSuspected, keeperCancelledSuspected, moneyAtRisk, suspectLeftWarehouse, suspectDelivered, suspectCodCollected, suspectPaid };
 }
 
+/** Cặp MỚI kể từ `since`: ĐƠN SAU tạo từ mốc đó. «BOT sau người» = đơn sau do bot, đơn trước KHÔNG do bot — đúng ca P0 HSLC 24/10. */
+export function newPairStats(pairs: readonly ScanPair[], since: Date) {
+  const moi = pairs.filter((p) => p.suspect.insertedAt.getTime() >= since.getTime());
+  const botSauNguoi = (list: readonly ScanPair[]) => list.filter((p) => p.suspect.origin === "BOT" && p.keeper.origin !== "BOT").length;
+  const nghiTrung = moi.filter((p) => p.verdict === "DUPLICATE_SUSPECTED");
+  return { pairs: moi.length, botAfterHuman: botSauNguoi(moi), suspected: nghiTrung.length, suspectedBotAfterHuman: botSauNguoi(nghiTrung) };
+}
+
+export type GuardBlockRow = { step: string | null; same: string | null; n: number | string };
+
+/** Gộp số lần rào hội thoại chặn bot (`SALES_CHAT_DUPLICATE_ORDER_BLOCKED`) theo bước và «cùng đề xuất» — chỉ số đếm. */
+export function guardBlockStats(rows: readonly GuardBlockRow[]) {
+  const out = { total: 0, create: 0, createSame: 0, confirm: 0, confirmSame: 0, other: 0 };
+  for (const r of rows) {
+    const n = Number(r.n) || 0;
+    const same = r.same === "true";
+    out.total += n;
+    if (r.step === "CREATE") {
+      out.create += n;
+      if (same) out.createSame += n;
+    } else if (r.step === "CONFIRM") {
+      out.confirm += n;
+      if (same) out.confirmSame += n;
+    } else out.other += n;
+  }
+  return out;
+}
+
 // ─────────────────────────── ĐỌC CSDL ───────────────────────────
 
 const vnd = (n: number) => `${Math.round(n).toLocaleString("vi-VN")} ₫`;
@@ -314,7 +357,27 @@ async function attachDetails(db: Db, orders: ScanOrder[]): Promise<void> {
   }
 }
 
-export async function runOrderDupScan(db: Db, opts: { since: Date; maxGapHours: number; label: string; now: Date }) {
+/**
+ * Dòng do `lib/sales-chatbot/conversation-order-guard.ts::auditConversationOrderBlock` ghi; `audit()` đặt `after` BÊN TRONG
+ * cột `detail` (lib/audit.ts), nên đường đọc là `detail->'after'->>…`.
+ */
+async function loadGuardBlocks(db: Db, since: Date): Promise<GuardBlockRow[]> {
+  return rowsOf<GuardBlockRow>(
+    await db.execute(sql`
+      select l.detail->'after'->>'step' as step, l.detail->'after'->>'sameAsProposal' as same, count(*)::int as n
+        from audit_logs l
+       where l.action = 'SALES_CHAT_DUPLICATE_ORDER_BLOCKED'
+         and l.created_at >= ${since.toISOString()}::timestamptz
+       group by 1, 2
+    `),
+  );
+}
+
+/**
+ * `since` = mốc ĐỌC (đơn trước cũng phải có mặt). `newSince` (tuỳ chọn, vd mốc deploy) = mốc tính cặp MỚI và mốc đếm rào;
+ * không có thì cả hai lấy `since`.
+ */
+export async function runOrderDupScan(db: Db, opts: { since: Date; maxGapHours: number; label: string; now: Date; newSince?: Date | null }) {
   const { orders, capped } = await loadOrders(db, opts.since);
   await attachDetails(db, orders);
   const { pairs, skippedGroups } = findCandidatePairs(orders, opts.maxGapHours);
@@ -328,9 +391,10 @@ export async function runOrderDupScan(db: Db, opts: { since: Date; maxGapHours: 
     const x = p.suspect;
     const ship = (o: ScanOrder) => (o.delivered ? "đã giao" : o.leftWarehouse ? "đã rời kho" : "chưa rời kho");
     const inLive = x.insertedAt.getTime() >= liveCutoff && preship.has(x.stage) && !x.leftWarehouse;
+    const moi = opts.newSince && x.insertedAt.getTime() >= opts.newSince.getTime() ? " · MỚI (sau mốc)" : "";
     console.log(
       [
-        `${vnTime(x.insertedAt)} VN · ${p.verdict} [${p.signals.join(",")}] · cách ${p.gapMinutes} phút`,
+        `${vnTime(x.insertedAt)} VN · ${p.verdict} [${p.signals.join(",")}] · cách ${p.gapMinutes} phút${moi}`,
         `  đơn trước ${orderLabel(k)} · ${k.origin} · «${k.source}» · ${k.stage} · ${vnd(k.total)} · ${ship(k)} · COD đã thu ${vnd(k.codCollected)} · trả trước ${vnd(k.paid)}`,
         `  đơn sau   ${orderLabel(x)} · ${x.origin} · «${x.source}» · ${x.stage} · ${vnd(x.total)} · ${ship(x)} · COD đã thu ${vnd(x.codCollected)} · trả trước ${vnd(x.paid)} · đơn sau đã huỷ ${isCancelled(x) ? "RỒI" : "CHƯA"}`,
         `  cùng hội thoại ERP ${p.sameSalesConversation ? `CÓ (${short(k.salesConversationId)})` : "không"} · cùng hội thoại Pancake ${p.samePancakeConversation ? "CÓ" : "không"} · cùng khách ${p.sameCustomer ? "CÓ" : "không"} · cả hai còn hiệu lực ${p.bothActive ? "CÓ" : "không"} · đang trong hàng nghi trùng /work (48 giờ) ${inLive ? "CÓ" : "không"}`,
@@ -348,8 +412,15 @@ export async function runOrderDupScan(db: Db, opts: { since: Date; maxGapHours: 
   tomTat(`Theo nguồn gốc (đơn trước→đơn sau): ${fmt(s.byOriginCombo)}`);
   tomTat(`NGHI TRÙNG ${s.byVerdict.DUPLICATE_SUSPECTED ?? 0} cặp: đơn sau đã huỷ ${s.suspectCancelledSuspected} · đơn trước đã huỷ ${s.keeperCancelledSuspected} · cả hai còn hiệu lực ${s.bothActiveSuspected}`);
   tomTat(`NGHI TRÙNG, cả hai còn hiệu lực: ${s.bothActiveSuspected} cặp · tiền hàng đơn sau ${vnd(s.moneyAtRisk)} · đơn sau đã rời kho ${s.suspectLeftWarehouse} · đã giao ${s.suspectDelivered} · COD đã thu ${vnd(s.suspectCodCollected)} · trả trước ${vnd(s.suspectPaid)}`);
+  const mocMoi = opts.newSince ?? opts.since;
+  if (opts.newSince) {
+    const m = newPairStats(pairs, opts.newSince);
+    tomTat(`cặp mới từ ${opts.newSince.toISOString()}: ${m.pairs} (BOT sau người: ${m.botAfterHuman}) · trong đó nghi trùng ${m.suspected} (BOT sau người: ${m.suspectedBotAfterHuman})`);
+  }
+  const rao = guardBlockStats(await loadGuardBlocks(db, mocMoi));
+  tomTat(`rào hội thoại chặn bot từ ${mocMoi.toISOString()}: ${rao.total} lần · CREATE ${rao.create} (cùng đề xuất ${rao.createSame}) · CONFIRM ${rao.confirm} (cùng đề xuất ${rao.confirmSame})${rao.other ? ` · bước khác ${rao.other}` : ""}`);
   tomTat("Danh sách từng cặp (mã đơn, nguồn, trạng thái vận đơn / tiền) ở phần MÃ HOÁ — không huỷ / sửa đơn nào; người đối chiếu trong ERP.");
-  return { summary: s, pairs, capped, skippedGroups };
+  return { summary: s, pairs, capped, skippedGroups, guardBlocks: rao };
 }
 
 async function thoat(code: number): Promise<never> {
@@ -360,7 +431,7 @@ async function thoat(code: number): Promise<never> {
 
 async function main() {
   const now = new Date();
-  const args = parseDupScanArgs(process.argv.slice(2));
+  const args = parseDupScanArgs(process.argv.slice(2), now);
   if ("error" in args) {
     tomTat(`order-dup-scan: DỪNG · cách dùng sai — ${args.error} (arg: ${USAGE})`);
     return thoat(1);
@@ -375,6 +446,12 @@ async function main() {
   if (String(ro?.default_transaction_read_only ?? "") !== "on") {
     tomTat("order-dup-scan: DỪNG · phiên CSDL KHÔNG ở chế độ chỉ đọc — không đọc gì");
     return thoat(1);
+  }
+  if (args.since) {
+    // Đọc lùi thêm đúng khoảng ghép cặp trước mốc: đơn trước của một cặp mới có thể nằm trước mốc.
+    const doc = new Date(args.since.getTime() - args.maxGapHours * 3_600_000);
+    await runOrderDupScan(db, { since: doc, newSince: args.since, maxGapHours: args.maxGapHours, label: `từ ${args.since.toISOString()} tới ${now.toISOString()} (đọc lùi ${args.maxGapHours} giờ để ghép cặp)`, now });
+    return thoat(0);
   }
   const since = new Date(now.getTime() - args.days * 86_400_000);
   await runOrderDupScan(db, { since, maxGapHours: args.maxGapHours, label: `${args.days} ngày tới ${now.toISOString()}`, now });
