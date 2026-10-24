@@ -442,6 +442,17 @@ Mọi cụm chú thích từ 4 dòng liền nhau trở lên chuyển NGUYÊN VĂ
 # arg: "<mã tổ chức | --all> [--limit=1..100] [--apply] | <mã tổ chức> --rollback=<mã lượt> [--apply]" (script soát).
 ```
 
+### `order-dup-scan)`
+
+```
+# CẶP ĐƠN NGHI TRÙNG (scripts/order-dup-scan.ts — P0 HSLC 24/10/2026) — CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1 trước khi nạp
+# @/db và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection — không migrate, không tạo). Cặp ứng viên: hai đơn chưa xoá
+# cách nhau ≤ --max-gap-hours, chung SĐT (9 số cuối) / hội thoại ERP / hội thoại Pancake / khách; phán quyết = assessDuplicate
+# của bộ nghi trùng (không luật thứ hai). Nguồn gốc theo raw.agentKey (bot · form nhân viên · máy khác · đồng bộ / tay). Tóm tắt
+# chỉ số đếm + tiền; mã đơn / mã hội thoại chỉ trong bản MÃ HOÁ; không họ tên, SĐT, địa chỉ. Không huỷ / sửa đơn nào.
+# arg: "<mã tổ chức> [--days=1..90] [--max-gap-hours=1..720]".
+```
+
 ### `address-reask-audit)` (dòng 1129)
 
 ```

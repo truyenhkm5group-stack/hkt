@@ -1,0 +1,122 @@
+/**
+ * ═══ OPS `order-dup-scan` (P0 HSLC 24/10/2026 — bot tự chốt đơn thứ hai sau khi nhân viên vừa lên đơn) ═══
+ *
+ * Khoá: (1) ca thật — form nhân viên 02:47:56Z + bot tự chốt 02:49:19Z, cùng hội thoại, cùng SĐT, cùng món ⇒ DUPLICATE_SUSPECTED,
+ * cùng hội thoại, nguồn STAFF_FORM→BOT, tiền ảnh hưởng = đơn sau; (2) KHÔNG báo nhầm: khác mẫu mã ⇒ bỏ (luật của shop), quá khoảng
+ * cách ⇒ bỏ, mỗi cặp một lần dù chung nhiều khoá; cùng hội thoại khác SĐT vẫn in; nhóm quá đông bị bỏ và ĐẾM; tất định;
+ * (3) phán quyết là `assessDuplicate` (không luật thứ hai); (4) chạy được trên CSDL thật của bài kiểm; (5) script chỉ đọc, tự chứa,
+ * khai đủ ở ops-vps / platform-isolation-static, tóm tắt không mã đơn / SĐT.
+ */
+import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { getDb } from "@/db";
+import { DUP_SCAN_MAX_GROUP, findCandidatePairs, originOf, parseDupScanArgs, runOrderDupScan, summarize, type ScanOrder } from "../scripts/order-dup-scan";
+
+const item = (variantId: string, quantity = 1) => ({ variantId, sku: variantId, productName: "Chả cá thu", variationDetail: "1kg", quantity });
+
+function order(over: Partial<ScanOrder> & { id: string; insertedAt: Date }): ScanOrder {
+  return {
+    stage: "CONFIRMED",
+    source: "Fanpage (nhân viên chốt)",
+    origin: "STAFF_FORM",
+    phone: "0372000111",
+    receiverName: "Khách A",
+    address: "Gò Vấp, TP HCM",
+    total: 280_000,
+    customerId: "cus-1",
+    pageId: "page-1",
+    pancakeConversationId: "pc-1",
+    salesConversationId: "conv-1",
+    items: [item("v-cha-ca-1kg")],
+    leftWarehouse: false,
+    delivered: false,
+    codCollected: 0,
+    paid: 0,
+    ...over,
+  };
+}
+
+function testPure() {
+  assert.deepEqual(parseDupScanArgs(["hslc-hmt-shop"]), { code: "hslc-hmt-shop", days: 30, maxGapHours: 72 });
+  assert.deepEqual(parseDupScanArgs(["hslc-hmt-shop", "--days=7", "--max-gap-hours=6"]), { code: "hslc-hmt-shop", days: 7, maxGapHours: 6 });
+  for (const bad of [[], ["HSLC!"], ["x", "--days=0"], ["x", "--days=91"], ["x", "--max-gap-hours=0"]]) assert.ok("error" in parseDupScanArgs(bad), JSON.stringify(bad));
+  assert.deepEqual([originOf("sales-chat:conv-1:0"), originOf("chat:conv-1:req"), originOf("order-sync:x"), originOf(null)], ["BOT", "STAFF_FORM", "MACHINE_OTHER", "SYNC_OR_MANUAL"]);
+
+  // Ca thật: nhân viên 02:47:56Z, bot 02:49:19Z.
+  const staff = order({ id: "D2A8DE9B-staff", insertedAt: new Date("2026-10-24T02:47:58Z") });
+  const bot = order({ id: "A5CC67E2-bot", insertedAt: new Date("2026-10-24T02:49:19Z"), source: "Chatbot fanpage", origin: "BOT" });
+  // Không báo nhầm: cùng khách, KHÁC mẫu mã, cùng hội thoại khác ⇒ hai đơn hợp lệ.
+  const other = order({ id: "other-sku", insertedAt: new Date("2026-10-24T05:00:00Z"), items: [item("v-nem-hop")], salesConversationId: "conv-9", pancakeConversationId: "pc-9", origin: "BOT" });
+  // Quá khoảng cách.
+  const late = order({ id: "late", insertedAt: new Date("2026-10-28T02:49:00Z"), salesConversationId: "conv-7", pancakeConversationId: "pc-7" });
+  // Cùng hội thoại nhưng khác SĐT (người nhận khác) — vẫn in.
+  const sameConvOtherPhone = order({ id: "conv-other-phone", insertedAt: new Date("2026-10-24T03:30:00Z"), phone: "0909000222", customerId: "cus-2", items: [item("v-nem-hop")] });
+  const { pairs, skippedGroups } = findCandidatePairs([bot, staff, other, late, sameConvOtherPhone], 72);
+  assert.equal(skippedGroups, 0);
+  const real = pairs.find((p) => p.keeper.id === staff.id && p.suspect.id === bot.id)!;
+  assert.ok(real, `phải thấy cặp thật: ${JSON.stringify(pairs.map((p) => [p.keeper.id, p.suspect.id]))}`);
+  assert.deepEqual(
+    [real.verdict, real.gapMinutes, real.sameSalesConversation, real.samePancakeConversation, real.sameCustomer, real.bothActive, real.keeper.origin, real.suspect.origin],
+    ["DUPLICATE_SUSPECTED", 1, true, true, true, true, "STAFF_FORM", "BOT"],
+  );
+  assert.ok(!pairs.some((p) => p.suspect.id === "other-sku" && p.keeper.id !== "conv-other-phone"), "khác mẫu mã, khác hội thoại ⇒ không phải cặp (luật của shop)");
+  assert.ok(!pairs.some((p) => p.suspect.id === "late" || p.keeper.id === "late"), "quá khoảng cách ⇒ bỏ");
+  assert.ok(pairs.some((p) => p.suspect.id === "conv-other-phone" && p.verdict === "DISTINCT" && p.sameSalesConversation), "cùng hội thoại khác SĐT ⇒ vẫn in (tín hiệu riêng)");
+  assert.equal(new Set(pairs.map((p) => `${p.keeper.id}|${p.suspect.id}`)).size, pairs.length, "mỗi cặp đúng một lần dù chung SĐT + hội thoại + khách");
+  assert.deepEqual(findCandidatePairs([sameConvOtherPhone, late, other, staff, bot], 72), { pairs, skippedGroups: 0 }, "tất định với thứ tự đầu vào");
+
+  const s = summarize(5, pairs);
+  assert.equal(s.bothActiveSuspected, 1);
+  assert.equal(s.moneyAtRisk, 280_000, "tiền ảnh hưởng = tiền hàng đơn SAU của cặp nghi trùng còn hiệu lực cả hai");
+  assert.equal(s.byOriginCombo["STAFF_FORM→BOT"], 1);
+  const cancelled = summarize(2, findCandidatePairs([staff, { ...bot, stage: "CANCELLED" }], 72).pairs);
+  assert.deepEqual([cancelled.pairs, cancelled.bothActiveSuspected, cancelled.moneyAtRisk], [1, 0, 0], "đơn sau đã huỷ ⇒ vẫn in cặp, không tính tiền ảnh hưởng");
+
+  // Nhóm quá đông (SĐT dùng chung) ⇒ không dựng cặp, nhưng đếm.
+  const crowd = Array.from({ length: DUP_SCAN_MAX_GROUP + 1 }, (_, i) => order({ id: `c${i}`, insertedAt: new Date(Date.UTC(2026, 9, 24, 0, i)), phone: "0912345678", customerId: null, salesConversationId: null, pancakeConversationId: null, pageId: null }));
+  const big = findCandidatePairs(crowd, 72);
+  assert.deepEqual([big.pairs.length, big.skippedGroups], [0, 1]);
+}
+
+async function testOnDb() {
+  const printed: string[] = [];
+  const orig = console.log;
+  console.log = (...a: unknown[]) => void printed.push(a.map(String).join(" "));
+  try {
+    const db = await getDb();
+    const r = await runOrderDupScan(db, { since: new Date(Date.now() - 30 * 86_400_000), maxGapHours: 72, label: "kiểm thử", now: new Date() });
+    assert.ok(r.summary.orders >= 0 && Array.isArray(r.pairs), "câu SQL chạy được trên lược đồ thật");
+  } finally {
+    console.log = orig;
+  }
+  const summary = printed.filter((l) => l.startsWith("[ops:tom-tat]"));
+  assert.ok(summary.length >= 4, "có khối tóm tắt");
+  for (const l of summary) assert.ok(!/0\d{9}/.test(l), `tóm tắt không có SĐT: ${l}`);
+}
+
+function testSourceFences() {
+  const src = readFileSync("scripts/order-dup-scan.ts", "utf8");
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(src, /if \(CHAY_THANG\) process\.env\.ERP_READ_ONLY = "1";\nimport "dotenv\/config";/, "đặt ERP_READ_ONLY TRƯỚC khi nạp @/db");
+  assert.match(src, /show default_transaction_read_only/);
+  assert.match(src, /getDbForInspection/);
+  assert.ok(!/\bgetDb\(|withOrganization/.test(code), "không gọi lib đọc getDb() — chỉ handle chỉ đọc của tổ chức đã chọn");
+  assert.ok(!/\b(insert|update|delete)\s+(into|from)?\s*\w|\.insert\(|\.update\(|\.delete\(/i.test(code.replace(/\/\/.*$/gm, "")), "không ghi gì");
+  for (const m of code.matchAll(/from "@\/([^"]+)"/g)) assert.ok(existsSync(`${m[1]}.ts`) || existsSync(`${m[1]}/index.ts`), `import @/${m[1]} phải có sẵn`);
+  assert.ok(!/\(\?<[=!]/.test(code), "không nhìn-ngược");
+  assert.match(src, /process\.stdout\.write\("", \(\) => done\(\)\)/, "xả stdout trước khi thoát");
+  assert.ok(!/tomTat\([^)]*short\(|tomTat\([^)]*\.id\b|tomTat\([^)]*phone/.test(code), "tóm tắt không in mã đơn / SĐT");
+  const ops = readFileSync(".github/workflows/ops-vps.yml", "utf8").replace(/\r\n/g, "\n");
+  assert.match(ops, /- order-dup-scan\s+#/, "ops-vps khai lựa chọn");
+  assert.match(ops, /OPS_THAO_TAC_MA_HOA: "[^"]*\border-dup-scan\b/, "kết quả MÃ HOÁ");
+  assert.match(ops, /DOC_NANG="[^"]*\border-dup-scan\b/, "làn ĐỌC nặng");
+  assert.match(ops, /\n\s+order-dup-scan\)\n[\s\S]*?ma_hoa_ket_qua chay_voi_arg[^\n]*scripts\/order-dup-scan\.ts ;;/, "nhánh chạy đúng script, trong ma_hoa_ket_qua");
+  assert.ok(readFileSync("tests/platform-isolation-static.test.ts", "utf8").includes('"scripts/order-dup-scan.ts":'), "khai getDbForInspection ở platform-isolation-static");
+}
+
+export async function testOrderDupScan() {
+  testPure();
+  await testOnDb();
+  testSourceFences();
+  console.log("  ✓ ops order-dup-scan: ca thật (form nhân viên → bot tự chốt, cùng hội thoại, 1 phút) ⇒ nghi trùng, tiền ảnh hưởng 280.000 ₫ · khác mẫu mã / quá khoảng cách không báo nhầm · cùng hội thoại khác SĐT vẫn in · nhóm quá đông đếm riêng · tất định · chạy được trên CSDL · chỉ đọc, tóm tắt không mã đơn / SĐT");
+}
