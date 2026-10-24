@@ -3,7 +3,7 @@
   "mission_id": "order-dup-guard-phase2",
   "title": "P0 trùng đơn pha 2: khoá hội thoại chung bot · form · order_sync, C360, resume, cờ Nghi trùng /orders",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -34,9 +34,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-24T06:52:43.599Z",
-  "updated_at": "2026-10-24T06:56:41.575Z",
+  "updated_at": "2026-10-24T07:17:40.582Z",
   "last_heartbeat": "2026-10-24T06:53:26.590Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1034 → 912a194e50dbc20b76d8758a7e629c89b535b4c8"
+  },
   "handoff": {
     "branch": "claude/order-dup-guard-phase2",
     "sha": "523c70f5e5c4a13adcd950e47779524930ed975e",
