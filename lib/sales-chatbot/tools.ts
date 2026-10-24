@@ -39,7 +39,7 @@ import { createOrderAsAgent, flagOrderForReviewAsAgent, noteCustomerReconfirmAsA
 import { conversationCancelTargets, executeCustomerCancel, raiseCancelException, recordCustomerCancelRequest, recordCustomerKeptOrder } from "@/lib/records/order-cancel";
 import { CANCEL_BLOCK_LABEL } from "@/lib/constants/order-cancel";
 import { chatOrderAdId } from "@/lib/sales-chatbot/ad-referral";
-import { auditConversationOrderBlock, blockInstruction, decideConversationOrder, existingOrderMaker, otherConversationOrders, proposalCandidate, type ConversationOrderVerdict } from "@/lib/sales-chatbot/conversation-order-guard";
+import { auditConversationOrderBlock, blockInstruction, botOwnOrderIds, CONVERSATION_ORDER_FIELD, decideConversationOrder, existingOrderMaker, otherConversationOrders, proposalCandidate, type ConversationOrderScope, type ConversationOrderVerdict } from "@/lib/sales-chatbot/conversation-order-guard";
 import { markOrderWritten, omsValidationReason, orderSignalToolReason, OrderWriteError, recordOrderValidationFailure, recordOrderWriteFailure, sqlStateOf, type OrderWriteMark } from "@/lib/sales-chatbot/order-signals";
 import { agentUnitPrice } from "@/lib/commerce/pricing";
 import { notifySalesChatBooking, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
@@ -640,6 +640,20 @@ async function conversationOrderBlocked(v: Extract<ConversationOrderVerdict, { k
   if (step === "CREATE" && v.sameAsProposal) return e;
   return { ...e, requireHuman: step === "CREATE" ? `Hội thoại đã có đơn ${code} (${existingOrderMaker(v.order)}) — khách nói khác đơn đó; người kiểm / sửa ĐÚNG đơn ${code} (bot không tạo đơn thứ hai)` : `Hội thoại đã có đơn ${code} (${existingOrderMaker(v.order)}) — bot KHÔNG chốt đơn nháp${state.draft?.orderId ? ` #${manualOrderShortCode(state.draft.orderId)}` : ""}; người quyết giữ đơn nào (tránh hai đơn một lần mua)` };
 }
+/** Phạm vi rào cho lượt này: hội thoại + khách ĐÃ XÁC MINH (C360), trừ đơn của bot và đơn khách đã nói rõ là đơn riêng. */
+function guardScope(ctx: ToolContext, state: ChatState, now: Date): ConversationOrderScope {
+  return { conversationId: ctx.conversationId, exclude: botOwnOrderIds(state, state.draft?.separateOrder?.existingIds ?? []), verifiedCustomerId: verifiedCustomerId(state), now };
+}
+/**
+ * Lõi đơn bắt được đơn của người TRONG giao dịch đã khoá hội thoại (chen vào giữa lượt đọc của công cụ và lượt ghi — hai cú tạo cùng
+ * giây) ⇒ cùng câu trả lời với rào trước khi ghi. Không phải lỗi rào ⇒ `null` (người gọi xử lý lỗi như cũ).
+ */
+async function conversationConflict(r: { ok: true } | MetaFailure, step: "CREATE" | "CONFIRM", proposal: ReturnType<typeof proposalCandidate>, ctx: ToolContext, state: ChatState, now: Date): Promise<ToolOutcome | null> {
+  if (r.ok || r.code !== "CONFLICT" || r.errors[0]?.field !== CONVERSATION_ORDER_FIELD) return null;
+  const verdict = decideConversationOrder(await otherConversationOrders(guardScope(ctx, state, now)).catch(() => []), proposal, []);
+  if (verdict.kind === "BLOCK") return conversationOrderBlocked(verdict, step, ctx, state);
+  return { ...err(step === "CREATE" ? "Đơn nháp: hội thoại đã có đơn" : "Chốt: hội thoại đã có đơn khác", `${r.errors[0].message} — KHÔNG tạo / chốt đơn, KHÔNG nói đã lên đơn; nói khách shop kiểm lại đơn.`, state), requireHuman: `${r.errors[0].message} — bot không ${step === "CREATE" ? "tạo" : "chốt"} đơn; người kiểm` };
+}
 const GUARD_READ_FAILED = "Máy chủ chưa đọc được đơn đã có của hội thoại — KHÔNG lên / chốt đơn lượt này (tránh đơn trùng). Nói khách shop kiểm lại đơn và phản hồi ngay; KHÔNG nói đã lên đơn.";
 
 /** Tổng số lượng theo sản phẩm (mẫu mã khi chưa gắn sản phẩm). HÀM THUẦN. */
@@ -690,12 +704,15 @@ export function orderIdempotencyKey(conversationId: string, state: Pick<ChatStat
  * Chế độ giá + khoá LẦN MUA cho lõi đơn: lõi tính lại đơn giá theo đúng chế độ bot đang báo giá, và tạo đơn nháp hai lần
  * cho cùng một lượt mua (lỗi mạng, gọi lại) trả về ĐÚNG đơn đầu — không đơn thứ hai.
  */
-function agentOrderOpts(ctx: ToolContext, state: ChatState, creating: boolean, quote?: AgentQuoteClaim, holdNew = false): AgentOrderOptions {
+function agentOrderOpts(ctx: ToolContext, state: ChatState, creating: boolean, quote?: AgentQuoteClaim, holdNew = false, separateFrom: readonly string[] = []): AgentOrderOptions {
   // Bảng giá RIÊNG của khách chỉ khi danh tính đã xác minh — lõi đơn tính lại đúng chế độ này nên báo giá và đơn không lệch nhau.
   const pricing = !ctx.config.wholesalePricing ? "RETAIL" : verifiedCustomerId(state) ? "PRICE_BOOK" : "DEFAULT_BOOK";
   // Chữ địa chỉ NGUYÊN VĂN của lượt mua (AGENTS 3.12b) — máy chủ dựng từ tin khách, không nhận từ AI.
   const addressText = addressTextLines(ctx.roundCustomerTexts ?? ctx.customerTexts ?? []);
-  return { pricing, idempotencyKey: creating ? orderIdempotencyKey(ctx.conversationId, state) : null, allowShortStock: ctx.config.sellWithoutStockCheck, ...(quote ? { quote } : {}), ...(holdNew ? { holdNew: true } : {}), ...(addressText.length ? { addressText } : {}) };
+  // MỘT không gian khoá theo hội thoại (lõi đơn): khoá + khoá hội thoại lúc chèn + rào «đã có đơn của người» chạy lại TRONG giao dịch.
+  const scope = guardScope(ctx, state, ctx.now ?? new Date());
+  const conversation = { id: ctx.conversationId, origin: "AI_AGENT" as const, guard: { exclude: [...scope.exclude, ...separateFrom], verifiedCustomerId: scope.verifiedCustomerId, now: scope.now } };
+  return { pricing, idempotencyKey: creating ? orderIdempotencyKey(ctx.conversationId, state) : null, allowShortStock: ctx.config.sellWithoutStockCheck, ...(quote ? { quote } : {}), ...(holdNew ? { holdNew: true } : {}), ...(addressText.length ? { addressText } : {}), conversation };
 }
 
 /** Đơn `orderId` được tạo TRƯỚC mốc lượt mua hiện tại (`purchaseRoundStart`) — không có mốc ⇒ `false` (cả hội thoại là một lượt). */
@@ -1242,7 +1259,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       */
       let separateOrder = existing?.separateOrder ?? null;
       if (name === "create_draft_order" && !existing?.orderId && !simulated) {
-        const others = await otherConversationOrders(ctx.conversationId, state, now).catch(() => null);
+        const others = await otherConversationOrders(guardScope(ctx, state, now)).catch(() => null);
         if (others === null) return { ...err("Đơn nháp: chưa kiểm được đơn đã có", GUARD_READ_FAILED, state), requireHuman: "Không đọc được đơn đã có của hội thoại — bot không lên đơn (tránh trùng); người kiểm" };
         const verdict = decideConversationOrder(others, proposalCandidate(lines, recipient, now), [...(ctx.roundCustomerTexts ?? []).slice(-3), ctx.lastUserText]);
         if (verdict.kind === "BLOCK") return conversationOrderBlocked(verdict, "CREATE", ctx, state);
@@ -1445,7 +1462,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         const review = changeFlag ? { review: changeFlag } : {};
         const r = draft.orderId
           ? await updateOrderAsAgent(ctx.agent, draft.orderId, payload, { ...agentOrderOpts(ctx, state, false, quoteClaim, holdNew), ...review })
-          : await createOrderAsAgent(ctx.agent, payload, { ...agentOrderOpts(ctx, state, true, quoteClaim, holdNew), adId: await chatOrderAdId(ctx.conversationId, now), ...review });
+          : await createOrderAsAgent(ctx.agent, payload, { ...agentOrderOpts(ctx, state, true, quoteClaim, holdNew, draft.separateOrder?.existingIds ?? []), adId: await chatOrderAdId(ctx.conversationId, now), ...review });
+        const raced = await conversationConflict(r, "CREATE", proposalCandidate(lines, recipient, now), ctx, state, now);
+        if (raced) return raced;
         // Sửa đơn ĐÃ CHỐT bị lõi từ chối (vận đơn đang chạy ở hãng, đơn đã đi tiếp…) ⇒ việc của NHÂN VIÊN theo quy trình (P0 19/10/2026):
         // máy không hứa đã thêm món, không thử lại.
         if (!r.ok) return { ...err("Đơn nháp: lỗi", failureText(r), state, omsSignal(r)), ...(editingConfirmed ? { requireHuman: `Khách muốn sửa / thêm vào đơn đã chốt nhưng lõi đơn từ chối (${failureText(r).slice(0, 120)})` } : {}) };
@@ -1519,7 +1538,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // Hội thoại có đơn CÒN SỐNG của người (không phải đơn nháp này, không phải đơn khách đã nói rõ là đơn riêng) ⇒ KHÔNG chốt — kể cả
       // máy tự chốt (P0 HSLC 24/10/2026): đơn nháp lên TRƯỚC khi nhân viên lên đơn vẫn không được thành đơn thứ hai «Đã xác nhận».
       if (!simulated) {
-        const others = await otherConversationOrders(ctx.conversationId, state, now, d.separateOrder?.existingIds ?? []).catch(() => null);
+        const others = await otherConversationOrders(guardScope(ctx, state, now)).catch(() => null);
         if (others === null) return { ...err("Chốt: chưa kiểm được đơn đã có", GUARD_READ_FAILED, state), requireHuman: "Không đọc được đơn đã có của hội thoại — bot không chốt (tránh trùng); người kiểm" };
         const verdict = decideConversationOrder(others, proposalCandidate(d.lines, d.recipient, now), []);
         if (verdict.kind === "BLOCK") return conversationOrderBlocked(verdict, "CONFIRM", ctx, state);
@@ -1600,6 +1619,8 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       if (!simulated) {
         const payload = orderInput(state, { ...d, note: stockNotes.length ? [d.note, ...stockNotes].filter(Boolean).join("\n") : d.note }, priced, "CONFIRMED", ctx.config, ctx.channel);
         const r = await updateOrderAsAgent(ctx.agent, d.orderId, payload, agentOrderOpts(ctx, state, false, quoteClaimOf(priced.quote)));
+        const raced = await conversationConflict(r, "CONFIRM", proposalCandidate(d.lines, d.recipient, now), ctx, state, now);
+        if (raced) return raced;
         if (!r.ok) return err("Chốt: lỗi", failureText(r), state, omsSignal(r));
         markOrderWritten(ctx.writeMark, r.id);
         orderId = r.id;

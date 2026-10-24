@@ -22,6 +22,16 @@ export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
       <div className="min-w-[72px]">
         <RowLink href={`/orders/${row.original.id}`}>#{row.original.systemId ?? manualOrderShortCode(row.original.id)}</RowLink>
         {row.original.tags.length ? <div className="mt-0.5 flex flex-wrap gap-1">{row.original.tags.slice(0, 2).map((t) => <span key={t} className="rounded bg-muted px-1 text-[11px] text-muted-foreground">{t}</span>)}</div> : null}
+        {/* Nghi trùng (P0 HSLC 24/10/2026): CHÍNH phán quyết của hàng đợi nghi trùng — người mở hai đơn, gọi khách; máy không tự huỷ. */}
+        {row.original.duplicate ? (
+          <div
+            data-testid="order-duplicate-flag"
+            className={`mt-0.5 text-[11px] font-semibold ${row.original.duplicate.verdict === "DUPLICATE_SUSPECTED" ? "text-rose-600" : "text-amber-600"}`}
+            title={`${row.original.duplicate.why} Đơn này đặt ${row.original.duplicate.role === "SUSPECT" ? "SAU" : "TRƯỚC"} đơn #${row.original.duplicate.otherCode}.`}
+          >
+            {row.original.duplicate.verdict === "DUPLICATE_SUSPECTED" ? "Nghi trùng đơn" : "Có thể trùng đơn"} · #{row.original.duplicate.otherCode}
+          </div>
+        ) : null}
       </div>
     ),
     size: 96,

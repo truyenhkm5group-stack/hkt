@@ -191,12 +191,14 @@ export async function createOrderFromChatCore(user: SessionUser, conversationId:
       // Người nhận của LẦN MUA này — ô trống lấy của hồ sơ khách (lõi quyết) CHỈ khi hồ sơ đã xác minh (luật 5).
       recipient,
     },
-    { idempotencyKey: `chat:${conv.id}:${v.requestKey}` },
+    // Cùng không gian khoá hội thoại với bot + ghi đơn từ hội thoại (lõi đơn): khoá giao dịch theo hội thoại, khoá hội thoại ghi NGAY lúc
+    // chèn — bot đọc «hội thoại có đơn chưa» không còn rơi vào khe giữa lúc tạo đơn và lúc gắn đơn (P0 HSLC 24/10/2026).
+    { idempotencyKey: `chat:${conv.id}:${v.requestKey}`, conversation: { id: conv.id, origin: "ERP_FORM" } },
   );
   if (!created.ok) return created;
   const orderId = created.id;
 
-  // ── Gắn đơn về hội thoại: chỉ khi đơn chưa mang khoá hội thoại nào; nguồn = người (ERP_FORM) ──
+  // ── Gắn đơn về hội thoại: lõi đã ghi lúc chèn; lượt này chỉ còn tác dụng với đơn CŨ (gửi lại khoá lượt bấm của đơn tạo trước bản này) ──
   const o = schema.orders;
   const linked = await db
     .update(o)

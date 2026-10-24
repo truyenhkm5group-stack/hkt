@@ -20,6 +20,7 @@
  */
 import { and, eq, gte, inArray, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import type { DbOrTx } from "@/lib/db-transaction";
 import { audit } from "@/lib/audit";
 import { manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { assessDuplicate, CONVERSATION_ORDER_GUARD_HOURS, type DuplicateCandidate, type ItemLike } from "@/lib/constants/order-duplicate";
@@ -28,7 +29,8 @@ import type { OrderStage } from "@/db/schema";
 import { formatDateTime, formatVND } from "@/lib/format";
 import { foldVi } from "@/lib/sales-chatbot/text";
 
-export type ConversationOrder = DuplicateCandidate & { stage: OrderStage; origin: string | null; agentKey: string | null };
+/** `otherConversationOrders` của hội thoại KHÁC (khách C360 đã xác minh) — câu cho bot nói rõ, không giả là đơn của hội thoại này. */
+export type ConversationOrder = DuplicateCandidate & { stage: OrderStage; origin: string | null; agentKey: string | null; otherConversation?: boolean };
 
 export const SEPARATE_ORDER_REASON = "CUSTOMER_EXPLICIT_SEPARATE_ORDER";
 
@@ -75,7 +77,7 @@ export function decideConversationOrder(existing: readonly ConversationOrder[], 
 export function blockInstruction(v: Extract<ConversationOrderVerdict, { kind: "BLOCK" }>, step: "CREATE" | "CONFIRM"): string {
   const o = v.order;
   const code = `#${manualOrderShortCode(o.orderId)}`;
-  const head = `Hội thoại này ĐÃ CÓ đơn ${code} do ${existingOrderMaker(o)} lên lúc ${formatDateTime(o.insertedAt)} (${ORDER_STAGE_LABEL[o.stage] ?? o.stage}, tiền hàng ${formatVND(o.total)}). ${step === "CREATE" ? "KHÔNG tạo đơn mới" : "KHÔNG chốt đơn nháp của bot"} — tránh hai đơn cho một lần mua; KHÔNG nói đã lên / đã chốt đơn mới.`;
+  const head = `${o.otherConversation ? "Khách này (đã xác minh) ĐÃ CÓ đơn" : "Hội thoại này ĐÃ CÓ đơn"} ${code} do ${existingOrderMaker(o)}${o.otherConversation ? " ở hội thoại khác" : ""} lên lúc ${formatDateTime(o.insertedAt)} (${ORDER_STAGE_LABEL[o.stage] ?? o.stage}, tiền hàng ${formatVND(o.total)}). ${step === "CREATE" ? "KHÔNG tạo đơn mới" : "KHÔNG chốt đơn nháp của bot"} — tránh hai đơn cho một lần mua; KHÔNG nói đã lên / đã chốt đơn mới.`;
   const tail = v.sameAsProposal && step === "CREATE"
     ? ` Báo khách ngắn gọn: đơn ${code} đã được lên đúng món này, shop sẽ giao theo đơn đó — không hỏi lại thông tin, không chốt lại.`
     : ` Khách nói khác đơn ${code} (món / số lượng / người nhận) ⇒ máy chủ đã chuyển nhân viên kiểm và sửa ĐÚNG đơn ${code}; nói khách nhân viên sẽ kiểm lại đơn, KHÔNG hứa đã sửa.`;
@@ -84,24 +86,50 @@ export function blockInstruction(v: Extract<ConversationOrderVerdict, { kind: "B
 
 type BotOwnState = { draft?: { orderId: string | null } | undefined; confirmed?: { orderId: string | null } | undefined; pastOrders?: readonly { orderId: string | null }[] };
 
+/** Đơn bot đã ghi trong state (nháp · đã chốt · lượt mua trước) + đơn khách đã nói rõ là đơn riêng — rào bỏ qua. HÀM THUẦN. */
+export function botOwnOrderIds(state: BotOwnState, extra: readonly (string | null | undefined)[] = []): string[] {
+  return [state.draft?.orderId, state.confirmed?.orderId, ...(state.pastOrders ?? []).map((p) => p.orderId), ...extra].filter((x): x is string => typeof x === "string" && x.length > 0);
+}
+
 /**
- * Đơn CÒN SỐNG của hội thoại trong cửa sổ, KHÔNG phải của bot. `exclude` = thêm id bỏ qua (đơn khách đã nói rõ là đơn riêng). Ném khi
- * CSDL lỗi — người gọi quyết phía HẸP (không tạo).
+ * Phạm vi của rào. `verifiedCustomerId` = hồ sơ khách ĐÃ XÁC MINH là người đang nhắn (mã Facebook — `verifiedCustomerId(state)`):
+ * khi có, đơn CÓ NGƯỜI ĐỨNG SAU (`vouchedOrder`) của chính hồ sơ ấy ở hội thoại KHÁC trong cửa sổ cũng chặn (khách C360 — nhắn ở
+ * page / kênh khác, nhân viên đã lên đơn ở đó). Hồ sơ gắn qua SĐT GÕ TAY thì KHÔNG: kẻ gian gõ SĐT nạn nhân không được thấy (hay bị
+ * chặn bởi) đơn của nạn nhân (review bảo mật #651 / #656 — cùng luật với `vouchedOrder`).
  */
-export async function otherConversationOrders(conversationId: string, state: BotOwnState, now: Date, exclude: readonly string[] = []): Promise<ConversationOrder[]> {
-  const db = await getDb();
+export type ConversationOrderScope = { conversationId: string; exclude: readonly string[]; verifiedCustomerId: string | null; now: Date };
+
+/** Phần lỗi lõi đơn trả khi rào TRONG giao dịch ghi bắt được đơn vừa chen vào (hai cú tạo cùng giây). */
+export const CONVERSATION_ORDER_FIELD = "conversationOrder";
+
+export class ConversationOrderExistsError extends Error {
+  constructor(readonly orders: ConversationOrder[]) {
+    super(`Hội thoại đã có đơn #${manualOrderShortCode(orders[0]?.orderId ?? "")}`);
+  }
+}
+
+/**
+ * Đơn CÒN SỐNG của hội thoại (và của khách đã xác minh) trong cửa sổ, KHÔNG phải của bot. `exec` = giao dịch đang giữ khoá hội thoại
+ * (lõi đơn gọi lại TRONG giao dịch ghi) — không truyền thì đọc bằng kết nối thường. Ném khi CSDL lỗi — người gọi quyết phía HẸP.
+ */
+export async function otherConversationOrders(scope: ConversationOrderScope, exec?: DbOrTx): Promise<ConversationOrder[]> {
+  const db = exec ?? (await getDb());
   const o = schema.orders;
   const c = schema.salesChatConversations;
-  const [conv] = await db.select({ pageId: c.pageId, threadId: c.threadId }).from(c).where(eq(c.id, conversationId)).limit(1);
-  const own = [state.draft?.orderId, state.confirmed?.orderId, ...(state.pastOrders ?? []).map((p) => p.orderId), ...exclude].filter((x): x is string => typeof x === "string" && x.length > 0);
-  const links: SQL[] = [eq(o.salesConversationId, conversationId)];
+  const [conv] = await db.select({ pageId: c.pageId, threadId: c.threadId }).from(c).where(eq(c.id, scope.conversationId)).limit(1);
+  const links: SQL[] = [eq(o.salesConversationId, scope.conversationId)];
   if (conv?.pageId && conv.threadId) links.push(and(eq(o.pageId, conv.pageId), eq(o.conversationId, conv.threadId))!);
-  const botKey = `sales-chat:${conversationId}:`;
-  const since = new Date(now.getTime() - CONVERSATION_ORDER_GUARD_HOURS * 3_600_000);
+  if (scope.verifiedCustomerId) {
+    // Nạp động: returning.ts nạp tools.ts, tools.ts nạp tệp này — nạp tĩnh là thành vòng.
+    const { vouchedOrder } = await import("@/lib/sales-chatbot/returning");
+    links.push(and(eq(o.customerId, scope.verifiedCustomerId), vouchedOrder(o))!);
+  }
+  const botKey = `sales-chat:${scope.conversationId}:`;
+  const since = new Date(scope.now.getTime() - CONVERSATION_ORDER_GUARD_HOURS * 3_600_000);
   const rows = await db
-    .select({ id: o.id, stage: o.stage, insertedAt: o.insertedAt, origin: sql<string | null>`${o.origin}::text`, agentKey: sql<string | null>`${o.raw}->>'agentKey'`, total: o.totalPriceAfterDiscount, phone: o.billPhone, name: o.billFullName, address: o.shipAddress })
+    .select({ id: o.id, stage: o.stage, insertedAt: o.insertedAt, origin: sql<string | null>`${o.origin}::text`, agentKey: sql<string | null>`${o.raw}->>'agentKey'`, total: o.totalPriceAfterDiscount, phone: o.billPhone, name: o.billFullName, address: o.shipAddress, conv: o.salesConversationId })
     .from(o)
-    .where(and(or(...links), notInArray(o.stage, ["CANCELLED", "DELETED"]), gte(o.insertedAt, since), own.length ? notInArray(o.id, own) : undefined, sql`left(coalesce(${o.raw}->>'agentKey', ''), ${botKey.length}) <> ${botKey}`))
+    .where(and(or(...links), notInArray(o.stage, ["CANCELLED", "DELETED"]), gte(o.insertedAt, since), scope.exclude.length ? notInArray(o.id, [...scope.exclude]) : undefined, sql`left(coalesce(${o.raw}->>'agentKey', ''), ${botKey.length}) <> ${botKey}`))
     .limit(10);
   if (!rows.length) return [];
   const items = await db
@@ -114,6 +142,7 @@ export async function otherConversationOrders(conversationId: string, state: Bot
     stage: r.stage,
     origin: r.origin,
     agentKey: r.agentKey,
+    otherConversation: r.conv !== null && r.conv !== scope.conversationId,
     total: Number(r.total ?? 0) || 0,
     phone: r.phone ?? "",
     receiverName: r.name ?? "",

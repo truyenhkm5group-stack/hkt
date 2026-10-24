@@ -92,6 +92,7 @@ import { normalizeCustomerPhone } from "@/lib/records/customer-create";
 import { normalizePhone as pancakePhone } from "@/lib/integrations/http";
 import { orderCancellationOf, withCancelOutcome, type CancelActor, type CancelRequester, type RescueResult } from "@/lib/constants/order-cancel";
 import { canFlagOrderForReview, MACHINE_ADDRESS_NOTE_PREFIX, ORDER_REVIEW_HOLD_CODES, orderReviewOf, reviewConflictMessage, reviewResolveReason, unseenReviewEntries, withAddressCandidates, withAddressSettled, withCustomerReconfirm, withReviewEntry, withReviewResolved, type OrderReviewEntry, type OrderReviewResolution, type ReviewSeen } from "@/lib/constants/order-review";
+import { CONVERSATION_ORDER_FIELD, ConversationOrderExistsError, otherConversationOrders, type ConversationOrderScope } from "@/lib/sales-chatbot/conversation-order-guard";
 
 export type OrderGate = { allowed: true } | { allowed: false; code: "FORBIDDEN" | "NOT_SUPPORTED" | "MODULE_DISABLED"; reason: string };
 
@@ -116,6 +117,17 @@ export async function manualOrderGate(user: SessionUser): Promise<OrderGate> {
 
 /** Máy ghi đơn thay người — chatbot bán hàng của tổ chức. `source` đi vào nhật ký / sự kiện. */
 export type OrderAgent = { name: string; source: string };
+
+/**
+ * HỘI THOẠI SINH RA ĐƠN — MỘT KHÔNG GIAN KHOÁ cho ba đường tạo đơn từ hội thoại (bot `sales-chat:` · form hộp thư `chat:` · ghi đơn từ
+ * hội thoại `order-sync:`), P0 HSLC 24/10/2026. Trước bản này mỗi đường một khoá lần mua riêng (không bao giờ va nhau) và khoá hội thoại
+ * `sales_conversation_id` gắn SAU giao dịch ghi — bot đọc «hội thoại có đơn chưa» rơi đúng vào khe ấy thì không thấy đơn người vừa lên.
+ * Nay: khoá giao dịch `order-conv:<hội thoại>` giữ suốt lượt ghi (khoá hội thoại TRƯỚC, khoá lần mua SAU — cùng thứ tự ở mọi đường nên
+ * không kẹt chéo), `sales_conversation_id` + `origin` ghi NGAY lúc chèn, và `guard` (chỉ bot) = rào «hội thoại đã có đơn của người»
+ * (`lib/sales-chatbot/conversation-order-guard.ts`) chạy LẠI trong giao dịch đã khoá ⇒ hai cú tạo cùng giây không đẻ hai đơn. Rào bắt
+ * được ⇒ CONFLICT với field `CONVERSATION_ORDER_FIELD`, không ghi gì. Form của người KHÔNG có rào (người quyết, form cảnh báo trùng).
+ */
+export type ConversationWrite = { id: string; origin: "AI_AGENT" | "AI_ORDER_SYNC" | "ERP_FORM"; guard?: Omit<ConversationOrderScope, "conversationId"> };
 
 /**
  * Lượt ghi của MÁY phải khai chế độ giá (`lib/commerce/pricing.ts`): lõi tính lại đơn giá và từ chối khi lệch — không công
@@ -159,6 +171,8 @@ export type AgentOrderOptions = {
    * tồn tại ở trạng thái «có xã mà không cờ», kể cả một khoảnh khắc — job tạo vận đơn tự động không có khe hở để chen vào.
    */
   review?: Omit<OrderReviewEntry, "by" | "at">;
+  /** Đơn sinh ra từ một hội thoại — khoá + khoá hội thoại ghi lúc chèn + rào của bot (`ConversationWrite`). */
+  conversation?: ConversationWrite;
 };
 
 /** Người hay máy đang ghi — MỘT hình cho ba lượt ghi, để nhật ký / sự kiện / lời khai gốc nói cùng một điều. */
@@ -566,17 +580,17 @@ async function creditGate(p: Prepared, existingOrderId?: string): Promise<MetaFa
  * bấm hai lần / trình duyệt gửi lại cùng khoá ⇒ trả lại ĐÚNG đơn đã tạo (`reused: true`), không đẻ đơn thứ hai. Cùng chỗ lưu,
  * cùng khoá giao dịch với khoá lần mua của máy (`raw.agentKey`).
  */
-export async function createManualOrderCore(user: SessionUser, rawInput: unknown, opts: { idempotencyKey?: string | null } = {}): Promise<ManualOrderResult> {
+export async function createManualOrderCore(user: SessionUser, rawInput: unknown, opts: { idempotencyKey?: string | null; conversation?: ConversationWrite } = {}): Promise<ManualOrderResult> {
   const gate = await manualOrderGate(user);
   if (!gate.allowed) return fail(gate.code, gate.reason);
-  return createOrder(userWriter(user), rawInput, undefined, opts.idempotencyKey);
+  return createOrder(userWriter(user), rawInput, undefined, opts.idempotencyKey, opts.conversation);
 }
 
 /** Máy (chatbot bán hàng) tạo đơn — cổng tổ chức y hệt, quyền do lớp gọi quyết; giá / tồn / khoá lần mua theo `opts`. */
 export async function createOrderAsAgent(agent: OrderAgent, rawInput: unknown, opts: AgentOrderOptions): Promise<ManualOrderResult> {
   const gate = await manualOrderOrgGate();
   if (!gate.allowed) return fail(gate.code, gate.reason);
-  return createOrder(agentWriter(agent), rawInput, opts);
+  return createOrder(agentWriter(agent), rawInput, opts, undefined, opts.conversation);
 }
 
 /** Công tắc «đơn đủ thông tin = đã xác nhận» của tổ chức ngữ cảnh (mặc định TẮT). */
@@ -600,7 +614,7 @@ async function autoConfirmComplete(p: Prepared, existingOrderId?: string, existi
   return (await creditGate(promoted, existingOrderId)) ? p : promoted;
 }
 
-async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderOptions, userKey?: string | null): Promise<ManualOrderResult> {
+async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderOptions, userKey?: string | null, conv?: ConversationWrite): Promise<ManualOrderResult> {
   const prep = await prepare(rawInput);
   if (!prep.ok) return prep;
   let quote: StoredQuote | null = null;
@@ -623,6 +637,7 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
   let createdReview: OrderReviewEntry[] = [];
   try {
     await db.transaction(async (tx) => {
+      if (conv) await lockConversation(tx, conv.id);
       if (key) {
         // Cùng khoá lần mua ⇒ cùng đơn: khoá theo khoá rồi mới tìm, để hai lượt gọi đồng thời không cùng thấy «chưa có».
         await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`agent-order:${key}`}, 0))`);
@@ -632,17 +647,20 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
           return;
         }
       }
+      // Sau khoá lần mua: lượt gọi lại của CHÍNH bot (cùng khoá) trả đúng đơn cũ, không bị rào chặn nhầm.
+      if (conv?.guard) await assertNoConversationOrder(tx, conv.id, conv.guard);
       if (agentOpts && !agentOpts.allowShortStock && p.stage === "CONFIRMED") await assertAgentStock(tx, p, []);
       const cols = orderColumns(p, w, { ...(key ? { agentKey: key } : {}), ...(quote ? { quote } : {}) });
       const flagged = reviewsOnWrite(w, p, withAddressText(cols.raw, agentOpts, now), now, agentOpts);
       createdReview = flagged.changed ? (orderReviewOf(flagged.raw)?.entries ?? []) : [];
-      await tx.insert(schema.orders).values({ id, ...cols, raw: flagged.raw, ...(agentOpts?.adId ? { adId: agentOpts.adId } : {}), insertedAt: now, lastUpdateStatusAt: now, syncedAt: now });
+      await tx.insert(schema.orders).values({ id, ...cols, raw: flagged.raw, ...(agentOpts?.adId ? { adId: agentOpts.adId } : {}), ...(conv ? { salesConversationId: conv.id, origin: conv.origin } : {}), insertedAt: now, lastUpdateStatusAt: now, syncedAt: now });
     await tx.insert(schema.orderItems).values(itemRows(id, p));
     await tx.insert(schema.orderStatusHistory).values({ orderId: id, status: MANUAL_ORDER_STATUS_CODE[p.stage], oldStatus: null, editorName: w.name, updatedAt: now });
       if (p.stage === "CONFIRMED") await emitOrderEvent(tx, w, "order.confirmed", id, `order.confirmed:${id}`, { stage: p.stage, wasConfirmed: false, changes: [] });
     });
   } catch (error) {
     if (error instanceof StockShortError) return error.failure;
+    if (error instanceof ConversationOrderExistsError) return fail("CONFLICT", [{ field: CONVERSATION_ORDER_FIELD, message: error.message }]);
     throw error;
   }
   if (reused) return { ok: true, id: reused, reused: true };
@@ -651,6 +669,16 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
   if (p.stage === "CONFIRMED") await kickWorkflows();
   announceOrder(id, "created");
   return { ok: true, id };
+}
+
+async function lockConversation(tx: Tx, conversationId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`order-conv:${conversationId}`}, 0))`);
+}
+
+/** Rào của bot TRONG giao dịch đã khoá hội thoại — có đơn của người ⇒ ném, giao dịch không ghi gì. */
+async function assertNoConversationOrder(tx: Tx, conversationId: string, guard: Omit<ConversationOrderScope, "conversationId">, also: readonly string[] = []): Promise<void> {
+  const hit = await otherConversationOrders({ conversationId, ...guard, exclude: [...guard.exclude, ...also] }, tx);
+  if (hit.length) throw new ConversationOrderExistsError(hit);
 }
 
 /**
@@ -754,6 +782,13 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
         : null;
   try {
     await db.transaction(async (tx) => {
+      // Bot CHỐT đơn nháp của hội thoại ⇒ khoá hội thoại TRƯỚC (cùng thứ tự với lượt tạo) rồi rào lại: đơn của người chen vào giữa
+      // lượt đọc của công cụ và lượt ghi này vẫn bị thấy.
+      const convGuard = agentOpts?.conversation?.guard && p.stage === "CONFIRMED" && !wasConfirmed ? agentOpts.conversation : null;
+      if (convGuard?.guard) {
+        await lockConversation(tx, convGuard.id);
+        await assertNoConversationOrder(tx, convGuard.id, convGuard.guard, [row.id]);
+      }
       // `raw` dựng lại từ dòng ĐÃ KHOÁ và GỘP (không đè): lời khai gốc (origin · agentKey …) + cờ cần kiểm ai đó vừa gắn giữ nguyên
       // dù lượt này đọc đơn trước đó. Máy chốt khi xã chưa ghép ⇒ thêm cờ; người xác nhận ⇒ gỡ cờ — sau khi so dấu vết đã thấy.
       const lockedRaw = await lockOrderRaw(tx, row.id);
@@ -784,6 +819,7 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
     });
   } catch (error) {
     if (error instanceof StockShortError || error instanceof ReviewConflictError) return error.failure;
+    if (error instanceof ConversationOrderExistsError) return fail("CONFLICT", [{ field: CONVERSATION_ORDER_FIELD, message: error.message }]);
     throw error;
   }
   await audit({

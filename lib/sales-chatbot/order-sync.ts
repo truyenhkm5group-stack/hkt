@@ -726,7 +726,7 @@ async function syncThread(a: {
     note: notes.join("\n").slice(0, 2000),
     channel: ORDER_SYNC_CHANNEL,
     recipient: decision.recipient,
-  }, { pricing: pricing.mode, idempotencyKey: `order-sync:${conv.id}:${ag.id || ag.at}`, adId: await chatOrderAdId(conv.id, now), quote: { id: priced.quote.quoteId, priceVersion: priced.quote.priceVersion, subtotal: priced.quote.subtotal, total: priced.quote.total } });
+  }, { pricing: pricing.mode, idempotencyKey: `order-sync:${conv.id}:${ag.id || ag.at}`, conversation: { id: conv.id, origin: "AI_ORDER_SYNC" }, adId: await chatOrderAdId(conv.id, now), quote: { id: priced.quote.quoteId, priceVersion: priced.quote.priceVersion, subtotal: priced.quote.subtotal, total: priced.quote.total } });
   if (!created.ok) return { outcome: "SKIPPED", result: `Không ghi được đơn: ${"errors" in created ? created.errors.map((e) => e.message).join(" · ") : "lỗi"}` };
   const code = `#${manualOrderShortCode(created.id)}`;
   // Tổ chức bật «đơn đủ thông tin = đã xác nhận» ⇒ lõi ghi đơn đã ghi thẳng «Đã xác nhận».
