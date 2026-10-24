@@ -1,0 +1,8 @@
+{
+  "pr": 1034,
+  "sha": "523c70f5e5c4a13adcd950e47779524930ed975e",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T06:56:46.423Z",
+  "note": "review lead (P0 trùng đơn pha 2): khoá giao dịch order-conv:<hội thoại> chung cho bot + form + order_sync (thứ tự hội thoại→lần mua), sales_conversation_id ghi lúc chèn, rào chạy lại TRONG giao dịch qua client tx (không xin kết nối thứ hai); order_sync tính cả đơn bot; C360 chỉ danh tính đã xác minh; resume HUMAN_ORDERED; cờ «Nghi trùng đơn» /orders đọc assessDuplicate; luật đơn đang mở giữ nguyên"
+}
