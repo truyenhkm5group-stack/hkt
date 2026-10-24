@@ -3,7 +3,7 @@
   "mission_id": "ssprobe-rollback-name",
   "title": "shipment-state-probe: bắt rollback theo tên (EXPLAIN chạy được)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-ssprobe",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T12:45:03.058Z",
-  "updated_at": "2026-10-24T12:45:03.058Z",
-  "last_heartbeat": "2026-10-24T12:45:03.058Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T12:45:37.624Z",
+  "last_heartbeat": "2026-10-24T12:45:37.624Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/ssprobe-rollback-name",
+    "sha": "f05ab60ee4fc92cc452b1204e1ea35f8f2c60248",
+    "at": "2026-10-24T12:45:37.624Z",
+    "actor": "DESKTOP-56TH98Y:wt-ssprobe",
+    "title": "shipment-state-probe: bắt rollback theo tên (EXPLAIN chạy được)",
+    "summary": "ưu tiên thấp, chỉ script: catch rollback theo e.name/e.message thay instanceof (hai bản module drizzle)",
+    "tests": [
+      "tsc · eslint sạch · shipment-state-probe test chạy thẳng ĐẠT"
+    ]
+  }
 }
