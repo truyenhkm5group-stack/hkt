@@ -277,7 +277,8 @@ export async function publishOrganization(user: SessionUser): Promise<PublishRes
     .returning({ code: t.code });
   invalidateOrganizations();
   invalidateCapabilities(ctx.code);
-  clearMemo();
+  // Ghi vào CSDL NỀN TẢNG (trạng thái xuất bản), mà màn hình /platform của tổ chức nhà đọc ⇒ xoá đệm của MỌI tổ chức.
+  clearMemo("ALL");
   if (done.length === 0) return { ok: true, publication: await publicationOf(ctx.code), message: "ERP vừa được xuất bản bởi lượt khác." };
   const after = await publicationOf(ctx.code);
   await platformAudit({ action: "ORG_PUBLISH", targetOrgCode: ctx.code, subject: after.slug ?? ctx.code, before: { state: before.state }, after: { state: "PUBLISHED", slug: after.slug, url: after.url }, source: "UI", actor: actorOf(user, ctx.code) });

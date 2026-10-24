@@ -34,6 +34,7 @@ import { resolveWebhookOrganization, WEBHOOK_BINDINGS, type WebhookProvider, Web
 import { eventVisibleTo, publish, subscribeOrganization, type OrganizationEvent } from "@/lib/realtime/bus";
 import { HOME_CREDENTIAL_EXEMPT, HOME_CREDENTIAL_JOBS, JOB_DEFINITIONS, runJob, type JobSkipped } from "@/lib/sync/jobs";
 import { isJobRunning, jobLockKey, runSyncJob } from "@/lib/sync/runner";
+import { testMemoOrgScope } from "./memo-org-scope.test";
 
 const B = "pi-beta";
 const cho = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -86,6 +87,9 @@ export async function testPlatformProcessIsolation() {
     assert.ok(khoa.includes(KHOA), "khoá của tổ chức nhà GIỮ NGUYÊN (bài kiểm giữ ấm so tập khoá)");
     assert.ok(khoa.includes(`org:${B}:${KHOA}`), "khoá của tổ chức khác mang tiền tố org:<mã>:");
     assert.equal(memoStoreKey({ code: home.code, isHome: true }, KHOA), KHOA);
+
+    /* ── 1b · xoá đệm theo tổ chức: ghi ở B không xoá đệm nhà (tests/memo-org-scope.test.ts) ── */
+    await testMemoOrgScope(B, home.code);
 
     // Lượt tính ĐANG CHẠY của nhà không được dùng chung cho B (nhánh inflight).
     let mo!: () => void;

@@ -1,5 +1,6 @@
 import { getDb, schema } from "@/db";
-import { clearMemo, dangTrongJobNen, staleMemo } from "@/lib/cache";
+import { clearMemo, dangTrongJobNen, staleMemo, type MemoScope } from "@/lib/cache";
+import { currentOrganization } from "@/lib/platform/context";
 import type { AuditActorKind } from "@/lib/constants/audit-actor";
 
 /**
@@ -96,8 +97,14 @@ export type AuditParams = {
 
   `order.create_failed` / `order.validation_failed` (sứ mệnh saas-ops-signals · lib/sales-chatbot/order-signals.ts): vết của một lượt bot
   ghi đơn KHÔNG thành — theo định nghĩa không có dòng đơn nào đổi; đơn nào đã ghi trước đó thì ghi bằng hành động khác của chính nó.
+
+  `SALES_CHAT_DUPLICATE_ORDER_BLOCKED` (rào hội thoại #1029 · lib/sales-chatbot/conversation-order-guard.ts): vết của một lần bot
+  BỊ CHẶN không tạo / không chốt đơn thứ hai — cùng lớp với `order.create_failed`: không dòng đơn, không dòng nào khác đổi. Dòng
+  này chạy trong lượt trả lời của bot, giờ cao điểm; để ngoài danh sách là mỗi lần rào làm đúng việc thì đệm của tổ chức bị xoá.
+  Các vết máy KHÁC của bot (giao hội thoại · nhả hội thoại sau đơn · tự học câu mẫu) cố ý ĐỂ NGOÀI: chúng đổi trạng thái thật mà
+  hộp thư / hàng đợi có thể đọc qua đệm. Từ 24/10 chúng chỉ còn xoá đệm của CHÍNH tổ chức ghi (clearMemo theo phạm vi).
 */
-const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "PASSWORD_RESET_REQUEST", "META_AD_POST_LOOKUP", "RECOMMENDATION_DECIDED", "OUTREACH_BROADCAST_START", "OUTREACH_BROADCAST_STOP", "OUTREACH_BROADCAST_RESUME", "CUSTOM_FILE_DOWNLOAD", "BLUEPRINT_EXPORT", "DATA_EXPORT", "CHATBOT_AD_BOT_SAVE", "CHATBOT_AD_BOT_SWITCH", "CHATBOT_AD_BOT_SYNC", "ORG_CONNECTION_TOKEN_ROTATE", "order.create_failed", "order.validation_failed", "SOURCING_OFFER_CREATE", "SOURCING_OFFER_UPDATE", "SOURCING_OFFER_ARCHIVE", "SOURCING_OFFER_RESTORE", "SOURCING_SNAPSHOT_ADD", "SOURCING_SUPPLIER_UPDATE", "SOURCING_WEIGHT_ADD", "SOURCING_TRIAL_REQUEST", "SOURCING_TRIAL_ORDER", "SOURCING_TRIAL_RECEIVE", "SOURCING_TRIAL_CANCEL"]);
+const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "PASSWORD_RESET_REQUEST", "META_AD_POST_LOOKUP", "RECOMMENDATION_DECIDED", "OUTREACH_BROADCAST_START", "OUTREACH_BROADCAST_STOP", "OUTREACH_BROADCAST_RESUME", "CUSTOM_FILE_DOWNLOAD", "BLUEPRINT_EXPORT", "DATA_EXPORT", "CHATBOT_AD_BOT_SAVE", "CHATBOT_AD_BOT_SWITCH", "CHATBOT_AD_BOT_SYNC", "ORG_CONNECTION_TOKEN_ROTATE", "order.create_failed", "order.validation_failed", "SOURCING_OFFER_CREATE", "SOURCING_OFFER_UPDATE", "SOURCING_OFFER_ARCHIVE", "SOURCING_OFFER_RESTORE", "SOURCING_SNAPSHOT_ADD", "SOURCING_SUPPLIER_UPDATE", "SOURCING_WEIGHT_ADD", "SOURCING_TRIAL_REQUEST", "SOURCING_TRIAL_ORDER", "SOURCING_TRIAL_RECEIVE", "SOURCING_TRIAL_CANCEL", "SALES_CHAT_DUPLICATE_ORDER_BLOCKED"]);
 
 /**
  * Loại tác nhân cho cột `audit_logs.actor_kind` (Company OS · Agent G).
@@ -122,6 +129,20 @@ export function inferActorKind(params: Pick<AuditParams, "actorKind" | "userId" 
   return null;
 }
 
+/**
+ * Lượt ghi của tổ chức nào thì chỉ xoá đệm của tổ chức đó (lib/cache.ts — «XOÁ ĐỆM THEO TỔ CHỨC»). Phân giải bằng
+ * `currentOrganization()` để cả lượt ghi THEO PHIÊN (người của HSLC bấm trên trình duyệt) cũng có phạm vi; phân giải
+ * hỏng ⇒ `"ALL"` — xoá nhiều hơn là phía an toàn của đệm.
+ */
+async function phamViXoaDem(): Promise<MemoScope> {
+  try {
+    const o = await currentOrganization();
+    return { code: o.code, isHome: o.isHome };
+  } catch {
+    return "ALL";
+  }
+}
+
 export async function audit(params: AuditParams) {
   // Mọi thao tác ghi đều được ghi nhật ký → làm mới cache báo cáo. NHƯNG mức độ tuỳ ai ghi:
   //
@@ -132,7 +153,7 @@ export async function audit(params: AuditParams) {
   if (KHONG_DOI_SO_LIEU.has(params.action)) {
     // Không làm gì: xem KHONG_DOI_SO_LIEU.
   } else if (dangTrongJobNen()) staleMemo();
-  else clearMemo();
+  else clearMemo(await phamViXoaDem());
   try {
     const db = await getDb();
     const structured =

@@ -278,7 +278,11 @@ runJob(job, opts) // bọc withOrganization(opts.org ?? tổ chức của NGỮ 
 ## 9. Trạng thái mức tiến trình
 
 - `memo(key, …)`: tổ chức không phải nhà ⇒ khoá thật là `org:<code>:<key>`. Tổ chức nhà giữ khoá
-  cũ. `clearMemo()` / `staleMemo()` xoá/đánh dấu MỌI tổ chức (an toàn, chỉ tốn hiệu năng).
+  cũ. `clearMemo(scope)` xoá theo PHẠM VI (sửa 24/10/2026): mặc định là tổ chức của ngữ cảnh TƯỜNG MINH
+  (`withOrganization` — job, webhook, bot); `audit()` tự phân giải tổ chức (kể cả từ phiên); không xác định được ⇒
+  `"ALL"`. Ghi vào CSDL NỀN TẢNG mà mọi tổ chức đọc (vd xuất bản tổ chức) phải truyền `"ALL"` tường minh. Vì sao: một
+  lượt ghi của bot tổ chức B từng xoá đệm của nhà ⇒ trang nhà mở lần hai vẫn dựng lại từ đầu (đo 24/10: 9,2 s thay vì
+  ~0,4 s). `staleMemo()` (job nền) vẫn đánh dấu MỌI tổ chức; `clearMemoAll()` vẫn xoá hẳn tất cả.
 - `publish(event)`: gắn `org` (từ `currentOrganization()`); `subscribe` ở `/api/events` chỉ chuyển
   sự kiện cùng `org` với phiên.
 - Credential từ `process.env` (danh sách `CUSTOMER_CREDENTIAL_ENV` trong `lib/env.ts`) là của tổ chức

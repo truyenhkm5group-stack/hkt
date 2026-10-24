@@ -8,7 +8,7 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { record, reportName } from "@/lib/perf/registry";
-import { currentOrganization, withOrganization } from "@/lib/platform/context";
+import { currentOrganization, peekOrganization, withOrganization } from "@/lib/platform/context";
 import { publish } from "@/lib/realtime/bus";
 
 /** `at` = mốc dữ liệu CŨ NHẤT đứng sau `value` (lúc bắt đầu tính, hoặc sớm hơn nếu nó đọc lại một mục đệm cũ hơn). */
@@ -111,11 +111,36 @@ function tranChoChung(): number {
 
 type DangChay = { p: Promise<unknown>; at: number };
 
-const holder = globalThis as unknown as { __erpMemo?: { entries: Map<string, Entry>; inflight: Map<string, DangChay>; version: number; giuCu: string[] } };
-if (!holder.__erpMemo) holder.__erpMemo = { entries: new Map(), inflight: new Map(), version: 0, giuCu: [] };
+// MỘT dòng: tests/platform-isolation-static đọc tên holder trên chính dòng `globalThis as … {` (HOLDER_DA_KHAI).
+const holder = globalThis as unknown as { __erpMemo?: { entries: Map<string, Entry>; inflight: Map<string, DangChay>; version: number; giuCu: string[]; orgVersion: Map<string, number> } };
+if (!holder.__erpMemo) holder.__erpMemo = { entries: new Map(), inflight: new Map(), version: 0, giuCu: [], orgVersion: new Map() };
 const store = holder.__erpMemo;
 // Holder dựng bởi bản trước (chưa có trường này) trong cùng tiến trình — `giuCu` là tiền tố khoá, không chứa dữ liệu nghiệp vụ.
 if (!Array.isArray(store.giuCu)) store.giuCu = [];
+if (!(store.orgVersion instanceof Map)) store.orgVersion = new Map();
+const orgVersion = store.orgVersion;
+
+/**
+ * ═══════ XOÁ ĐỆM THEO TỔ CHỨC (đo 24/10/2026) ═══════
+ *
+ * Kho đệm là MỘT cho cả tiến trình, còn dữ liệu nằm ở CSDL RIÊNG của từng tổ chức. Bản cũ để mọi lượt ghi (`audit()`
+ * và các nơi gọi thẳng) xoá đệm của MỌI tổ chức. Giờ trưa 24/10, bot HSLC ghi liên tục vào CSDL của HSLC trong khi
+ * CSDL nhà chỉ có 3 dòng nhật ký trong 20 phút (db-query 40069757141), vậy mà /reports/returns của nhà mở lần hai —
+ * đáng ra trúng đệm — vẫn mất 9,2 s: một lượt ghi ở tổ chức A làm tổ chức B trả giá dựng lại toàn trang.
+ *
+ * `MemoScope` = MỘT tổ chức, hoặc `"ALL"`. Một tổ chức thì chỉ đụng khoá của nó (nhà: khoá trần; khác: `org:<mã>:`,
+ * xem `memoStoreKey`) và chỉ tăng phiên bản CỦA NÓ — lượt tính đang chạy của tổ chức khác vẫn được lưu.
+ * Không xác định được tổ chức ⇒ `"ALL"`: với đệm, phía AN TOÀN là xoá nhiều hơn (chỉ tốn hiệu năng), không phải ít hơn.
+ */
+export type MemoScope = { code: string; isHome: boolean } | "ALL";
+
+const maPhamVi = (org: { code: string; isHome: boolean }) => (org.isHome ? "@nha" : org.code);
+const thuocPhamVi = (key: string, org: { code: string; isHome: boolean }) => (org.isHome ? !key.startsWith("org:") : key.startsWith(`org:${org.code}:`));
+
+/** Phiên bản mà một lượt tính phải còn nguyên lúc lưu: lượt xoá TOÀN BỘ hoặc lượt xoá của CHÍNH tổ chức đó đều làm nó cũ. */
+type PhienBan = { all: number; org: number };
+const phienBanCua = (org: { code: string; isHome: boolean }): PhienBan => ({ all: store.version, org: orgVersion.get(maPhamVi(org)) ?? 0 });
+const conNguyen = (v: PhienBan, org: { code: string; isHome: boolean }) => v.all === store.version && v.org === (orgVersion.get(maPhamVi(org)) ?? 0);
 
 /**
  * KHOÁ GIỮ SỐ CŨ KHI NGƯỜI DÙNG GHI (OD-UX-05 mục 2(c)). Miền đăng ký tiền tố khoá GỐC (không mang `org:<mã>:`) — danh sách
@@ -135,8 +160,8 @@ const giuCuKhiGhi = (baseKey: string) => store.giuCu.some((p) => baseKey.startsW
  * CŨ (tính trên dữ liệu TRƯỚC lượt ghi — người đọc kế tiếp nhận ngay và lượt làm mới chạy sau); khoá khác ⇒ vứt như trước.
  * Trả về `true` khi đã ghi số TƯƠI.
  */
-function luuKetQua(key: string, baseKey: string, version: number, value: unknown, at: number, ttlMs: number): boolean {
-  if (store.version === version) {
+function luuKetQua(key: string, baseKey: string, org: { code: string; isHome: boolean }, version: PhienBan, value: unknown, at: number, ttlMs: number): boolean {
+  if (conNguyen(version, org)) {
     store.entries.set(key, { value, expiresAt: Date.now() + ttlMs, at });
     return true;
   }
@@ -215,7 +240,7 @@ async function memoFor<T>(org: { code: string; isHome: boolean }, baseKey: strin
    * còn liên quan. Trả số của tuần trước mà không nói gì là tệ hơn bắt chờ.
    */
   if (hit && !luotDangChay(key) && now - hit.expiresAt < NGUONG_QUA_CU) {
-    const version = store.version;
+    const version = phienBanCua(org);
     /*
       Lượt làm mới chạy SAU khi request đã trả lời, nên ngữ cảnh phiên có thể không còn đọc được.
       Tổ chức khác nhà ⇒ bọc tường minh bằng mã đã phân giải ở trên: lượt tính lại và sự kiện
@@ -224,7 +249,7 @@ async function memoFor<T>(org: { code: string; isHome: boolean }, baseKey: strin
     const run = org.isHome ? fn : () => withOrganization(org.code, fn);
     const refresh = tinhKemMoc(run)
       .then(({ value, at }) => {
-        if (luuKetQua(key, baseKey, version, value, at, ttlMs)) {
+        if (luuKetQua(key, baseKey, org, version, value, at, ttlMs)) {
           /**
            * NGƯỜI ĐANG XEM SỐ CŨ PHẢI ĐƯỢC KÉO LÊN SỐ MỚI.
            *
@@ -258,9 +283,9 @@ async function memoFor<T>(org: { code: string; isHome: boolean }, baseKey: strin
       return value;
     });
   }
-  const version = store.version;
+  const version = phienBanCua(org);
   const p = tinhKemMoc(fn).then(({ value, at }) => {
-    luuKetQua(key, baseKey, version, value, at, ttlMs);
+    luuKetQua(key, baseKey, org, version, value, at, ttlMs);
     record(name, performance.now() - started, false);
     return { value, at };
   });
@@ -300,17 +325,21 @@ function daDoi(a: unknown, b: unknown): boolean {
  *
  * Người vừa bấm lưu chấp nhận chờ, vì họ biết mình vừa thay đổi cái gì.
  *
- * Xoá MỌI tổ chức (hợp đồng mục 9): an toàn, chỉ tốn hiệu năng — một lượt ghi của tổ chức này làm
- * tổ chức kia tính lại một lần, không bao giờ làm ai thấy số của người khác.
+ * PHẠM VI (hợp đồng mục 9, sửa 24/10/2026): mặc định là tổ chức của NGỮ CẢNH TƯỜNG MINH (`withOrganization` — job,
+ * webhook, bot). Không có ngữ cảnh tường minh (server action theo phiên, script) ⇒ `"ALL"` như trước. `audit()` tự phân
+ * giải tổ chức (kể cả từ phiên) rồi truyền vào. Chỗ ghi dữ liệu CHUNG của nền tảng (CSDL nền tảng mà mọi tổ chức đọc)
+ * phải truyền `"ALL"` tường minh — xem `lib/platform/publish.ts`.
  */
-export function clearMemo() {
+export function clearMemo(scope: MemoScope = peekOrganization() ?? "ALL") {
   // Khoá giữ-cũ (registerStaleOnWrite) chỉ bị ĐÁNH DẤU CŨ — đúng ngữ nghĩa staleMemo; mọi khoá khác xoá hẳn như trước.
   const now = Date.now();
   for (const [k, e] of store.entries) {
+    if (scope !== "ALL" && !thuocPhamVi(k, scope)) continue;
     if (giuCuKhiGhi(khoaGoc(k))) store.entries.set(k, { value: e.value, expiresAt: Math.min(e.expiresAt, now), at: e.at });
     else store.entries.delete(k);
   }
-  store.version += 1;
+  if (scope === "ALL") store.version += 1;
+  else orgVersion.set(maPhamVi(scope), (orgVersion.get(maPhamVi(scope)) ?? 0) + 1);
 }
 
 /**
