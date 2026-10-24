@@ -1,3 +1,4 @@
+import { withSettingsScope } from "@/lib/settings";
 import { and, count, desc, eq, gte, inArray, isNotNull, lte, sql, sum } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { adsRatio } from "@/lib/constants/profit";
@@ -313,5 +314,6 @@ export async function getDashboardData(period: Period) {
   // TTL 60 giây quá ngắn cho một trang tốn hàng chục giây khi đệm nguội: người thứ hai mở trang
   // trong cùng phút được hưởng đệm, người mở sau 61 giây lại trả giá đầy đủ. Năm phút là khoảng mà
   // số liệu vẫn còn tươi với người vận hành nhưng chi phí dựng lại giảm ba lần.
-  return memo(`getDashboardData:${periodKey(period)}`, 300_000, () => getDashboardDataUncached(period));
+  // OD-UX-05 mục 3: khử trùng lượt đọc cấu hình trong lượt dựng (lib/settings.ts::withSettingsScope).
+  return memo(`getDashboardData:${periodKey(period)}`, 300_000, () => withSettingsScope(() => getDashboardDataUncached(period)));
 }
