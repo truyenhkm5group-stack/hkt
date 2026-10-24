@@ -3,7 +3,7 @@
   "mission_id": "od-ux-05-payroll-peek",
   "title": "OD-UX-05 mục 2(a): /work chỉ đọc đệm nguồn đối soát lương; job giữ ấm là đường tính duy nhất",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "FAILED",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-od05-payroll",
@@ -27,11 +27,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T22:38:05.037Z",
-  "updated_at": "2026-10-23T23:09:06.191Z",
+  "updated_at": "2026-10-24T00:54:43.518Z",
   "last_heartbeat": "2026-10-23T22:44:33.112Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1021 → 7c081caeaf920283a828a6f8931e3e283b1eac2f"
+    "merged": "#1021 → 7c081caeaf920283a828a6f8931e3e283b1eac2f",
+    "verify": "FAIL 321f7090146c5f0faa6556a3a7724d4799a260e5 2026-10-24T00:54:14.831Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40043818760"
   },
   "handoff": {
     "branch": "claude/od-ux-05-payroll-peek",
