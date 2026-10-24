@@ -3,7 +3,7 @@
   "mission_id": "comment-inbox-link-probe",
   "title": "ops comment-inbox-link-probe: bình luận → hộp thư, khoá nào lệch (P0 HSLC Ngọc)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-cilp",
@@ -25,7 +25,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T08:26:54.038Z",
-  "updated_at": "2026-10-24T08:26:54.038Z",
-  "last_heartbeat": "2026-10-24T08:26:54.038Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T08:27:38.069Z",
+  "last_heartbeat": "2026-10-24T08:27:38.069Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/comment-inbox-link-probe",
+    "sha": "901c22c557278de570590f627ee34eb0967f91e1",
+    "at": "2026-10-24T08:27:38.069Z",
+    "actor": "DESKTOP-56TH98Y:wt-cilp",
+    "title": "ops comment-inbox-link-probe: bình luận → hộp thư, khoá nào lệch (P0 HSLC Ngọc)",
+    "summary": "ops chỉ đọc so hộp thư Pancake (dòng dấu) với luồng tiếng vọng thật, visitor_key, commentCarry, from_id vs PSID, đơn theo phép nối rào #1029",
+    "tests": [
+      "tsc · eslint sạch · TEST_KHOI=K01,K10,K15,K17,K18,K21 ĐẠT (K01,K18,K21 lượt cuối 08:24Z; quét mã nguồn ops-log-leak/concurrency/isolation/hygiene/script-size chạy thẳng ĐẠT)"
+    ]
+  }
 }
