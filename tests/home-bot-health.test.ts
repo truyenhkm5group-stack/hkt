@@ -142,7 +142,7 @@ function testSource() {
   const svc = readFileSync("lib/home-bot/health.ts", "utf8");
   assert.doesNotMatch(svc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, ""), /\baudit\(|clearMemo|staleMemo/, "nhịp không đi qua audit() / clearMemo (lỗi #1036)");
   assert.match(svc, /notifyPlatformOperator/, "báo qua chuỗi vận hành có chống lặp");
-  assert.ok(readFileSync("middleware.ts", "utf8").includes("HOME_BOT_HEALTH_PATH];"), "PUBLIC_EXACT có đường bot-health");
+  assert.match(readFileSync("middleware.ts", "utf8"), /const PUBLIC_EXACT = \[[^\]]*\bHOME_BOT_HEALTH_PATH\b[^\]]*\]/, "PUBLIC_EXACT có đường bot-health (khớp đúng hằng, không mở tiền tố /api/internal)");
   assert.ok(readFileSync("lib/constants/platform-modules.ts", "utf8").includes('"/api/internal/bot-health"'));
   const gem = readFileSync("chatbot/src/gemini.js", "utf8");
   assert.equal((gem.match(/botHealth\.providerError\(res\.status/g) ?? []).length, 2, "cả hai đường gọi Gemini báo lỗi");

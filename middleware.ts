@@ -78,7 +78,7 @@ const PUBLIC_PREFIXES = ["/login", "/start", SITE_PAGE_PATH, ...SITE_LEGAL_PATHS
  *  · `/api/internal/bot-health` — bot nhà ĐẨY sức khoẻ của chính nó (lỗi nhà cung cấp AI · nhịp sống 5′, lib/constants/home-bot-health.ts).
  *    Cùng cổng khoá nội bộ qua HEADER; thân đóng (chỉ loại đã khai, không chữ khách), xô giới hạn tần suất; chỉ ghi khoá settings của nhà.
  */
-const PUBLIC_EXACT = ["/chat", WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH, "/api/platform/domain-allowed", "/sw.js", "/pricing", "/forgot", SHIPMENT_STATE_PATH, HOME_BOT_HEALTH_PATH];
+const PUBLIC_EXACT = ["/chat", WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH, "/api/platform/domain-allowed", "/sw.js", "/pricing", "/forgot", HOME_BOT_HEALTH_PATH, SHIPMENT_STATE_PATH];
 const COOKIE = SESSION_COOKIE;
 
 /**
