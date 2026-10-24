@@ -1,0 +1,8 @@
+{
+  "pr": 1052,
+  "sha": "30b0128c47708b33fa5b9c03337f42cbe485fdf5",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T17:48:44.606Z",
+  "note": "review lead: bot nhà đẩy lỗi nhà cung cấp + nhịp 5′ về /api/internal/bot-health (khoá header, zod strict, không PII, xô tần suất); ERP phân loại bằng classifyAiError một chỗ; trạng thái settings home-bot.health ghi không qua audit (bài kiểm: nhịp không xoá đệm nhà); báo vận hành một tin/sự cố + hồi phục, im lặng ≥30′ có khách, mất nhịp >15′; banner riêng không đụng rào bench; healthchecks.io giữ."
+}
