@@ -330,7 +330,14 @@ async function legacyKeys(db: Db, days: number): Promise<LegacyTally> {
   for (const r of rows) {
     if (!r.pageId || !r.threadId) continue;
     // Tiếng vọng của chính tin riêng bot vừa gửi: dòng tin có message_id = mã tin ⇒ luồng hộp thư THẬT (khoá xác định).
-    const [echo] = await db.select({ threadId: t.threadId }).from(t).where(and(eq(t.pageId, r.pageId), eq(t.messageId, r.threadId), ne(t.threadId, r.threadId))).limit(1);
+    // KHÔNG tính dòng DẤU nội bộ ở luồng `__private_reply__` (deliverCommentReply ghi nó với CHÍNH mã tin riêng — đo lượt 40090214039:
+    // 691/692 «luồng thật» là luồng dấu ấy). `message_id` là UNIQUE nên tiếng vọng thật thường không lưu được cùng mã ⇒ ECHO_NOT_FOUND là
+    // câu trả lời trung thực, không đoán.
+    const [echo] = await db
+      .select({ threadId: t.threadId })
+      .from(t)
+      .where(and(eq(t.pageId, r.pageId), eq(t.messageId, r.threadId), ne(t.threadId, r.threadId), ne(t.threadId, PRIVATE_REPLY_THREAD)))
+      .limit(1);
     const real = echo?.threadId ?? null;
     const realConv = real ? await convByThread(db, r.pageId, real) : null;
     const v = legacyVerdict(real, realConv?.id ?? null);
