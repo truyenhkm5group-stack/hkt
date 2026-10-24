@@ -26,18 +26,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T03:27:52.077Z",
-  "updated_at": "2026-10-24T03:47:31.909Z",
-  "last_heartbeat": "2026-10-24T03:47:31.909Z",
+  "updated_at": "2026-10-24T04:30:35.325Z",
+  "last_heartbeat": "2026-10-24T04:30:35.325Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/order-dup-guard",
-    "sha": "018032e6f1ec26049333661232cda07e3c2362ac",
-    "at": "2026-10-24T03:47:31.909Z",
+    "sha": "392db83f15c5f65e623d39f416ea80600ea6e8f6",
+    "at": "2026-10-24T04:30:35.325Z",
     "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
     "title": "P0: bot không tạo / tự chốt đơn thứ hai khi hội thoại đã có đơn người + cờ Nghi trùng trên /orders",
     "summary": "",
     "tests": [
-      "tsc --noEmit sạch · eslint các tệp đổi sạch · testConversationOrderGuard (K20) chạy riêng XANH trên PGlite; kiểm đột biến tắt rào ⇒ ĐỎ. 4 shard npm test để CI gates (đang chạy cục bộ song song)"
+      "sửa CI #1029 (golden khach-cu-van-dia-chi-cu): rào chỉ chặn đơn ĐANG MỞ (PRE_SHIP, chưa qua ĐVVC) tạo sau mốc lượt mua (purchaseRoundStart). tsc sạch · eslint sạch · conversation-order-guard + sales-agent-golden chạy riêng XANH; shard 3/4 đang chạy cục bộ"
     ]
   }
 }
