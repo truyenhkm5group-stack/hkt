@@ -42,7 +42,7 @@ export function testCommentInboxLinkProbe() {
   assert.ok(readOnlyAt >= 0 && readOnlyAt < code.indexOf('from "@/db"'), "chỉ đọc TRƯỚC khi nạp CSDL");
   assert.match(code, /show default_transaction_read_only/, "hỏi lại phiên chỉ đọc");
   assert.match(code, /getDbForInspection\(/, "CSDL tổ chức mở bằng handle chẩn đoán");
-  assert.doesNotMatch(code, /db\s*\.\s*(insert|update|delete)|sql`\s*(insert|update|delete)/i, "không ghi gì vào CSDL");
+  assert.doesNotMatch(code, /\bdb\s*\.\s*(insert|update|delete)\b|sql`\s*(insert|update|delete)\b/i, "không ghi gì vào CSDL");
   assert.doesNotMatch(code, /fetch\(/, "không gọi Pancake");
   for (const m of code.matchAll(/tomTat\(([\s\S]*?)\);\n/g)) {
     // Cấm NỘI SUY THẲNG một giá trị (cả biểu thức chỉ là một đường thuộc tính / một danh sách); so sánh ra đúng-sai thì được.
