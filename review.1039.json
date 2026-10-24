@@ -1,8 +1,8 @@
 {
   "pr": 1039,
-  "sha": "767cdc5b996c1018302f668e0c54246ba8247ad1",
+  "sha": "430d2385e87395c864e5b8e6ee590ed125808fde",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-24T09:05:55.376Z",
-  "note": "review lead (lại): cờ POSSIBLE_SAME_CUSTOMER là cờ NỘI BỘ — orderValidityOf bỏ qua (khách không nghe gì khác thường) nhưng vẫn giữ khỏi vận đơn và chặn tự nâng; p0-871 không đổi kỳ vọng."
+  "at": "2026-10-24T10:32:14.832Z",
+  "note": "review lead (lại): lớp tạm chỉ khi MỘT trong hai hội thoại là BÌNH LUẬN (khe chưa nối danh tính); hai luồng hộp thư cùng SĐT = hai khách ⇒ tự chốt bình thường; không đổi kỳ vọng followup-lifecycle, thêm ca hai luồng hộp thư."
 }
