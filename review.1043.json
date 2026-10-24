@@ -1,0 +1,8 @@
+{
+  "pr": 1043,
+  "sha": "55dbb1ea88c8fb485f4c146c2ae67ebfdf9493fc",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T10:07:12.008Z",
+  "note": "review lead: hai đường đọc thô settings (xác nhận trọng số mã, chữ ký đối soát) đi qua readSettingValue cùng phạm vi khử trùng; lỗi đọc vẫn ném (không biến cổng duyệt tiền thành rỗng); đường đọc trong giao dịch lúc ký giữ tx.select."
+}
