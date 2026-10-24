@@ -3,13 +3,13 @@
   "mission_id": "same-phone-hold",
   "title": "Lớp tạm: SĐT trùng đơn bot đang mở ở hội thoại khác ⇒ không tự chốt + cờ POSSIBLE_SAME_CUSTOMER",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
   "worker": null,
   "worktree": null,
-  "branch": null,
+  "branch": "claude/same-phone-hold",
   "base_sha": null,
   "domains": [],
   "owned_paths": [
@@ -24,7 +24,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T07:48:58.024Z",
-  "updated_at": "2026-10-24T07:48:58.024Z",
-  "last_heartbeat": "2026-10-24T07:48:58.024Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T07:49:54.892Z",
+  "last_heartbeat": "2026-10-24T07:49:54.892Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/same-phone-hold",
+    "sha": "bdc81d78b45a3fbb84d50ebe3e92b8be3977c4fd",
+    "at": "2026-10-24T07:49:54.892Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "Lớp tạm: SĐT trùng đơn bot đang mở ở hội thoại khác ⇒ không tự chốt + cờ POSSIBLE_SAME_CUSTOMER",
+    "summary": "",
+    "tests": [
+      "tsc · eslint sạch. Chạy riêng XANH: conversation-order-guard (ca 14 mới) · sales-agent-golden 23 · sales-quote-640 · order-golden 33×2. 4 shard để CI gates (lead dặn máy quá tải)"
+    ]
+  }
 }
