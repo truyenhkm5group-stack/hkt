@@ -1,0 +1,8 @@
+{
+  "pr": 1051,
+  "sha": "e5b261d88a484895cd709c63c7bd9fc4456a00cb",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T15:05:31.549Z",
+  "note": "review lead: chỉ-script; order-dup-scan --since thêm đếm BOT sau BOT khác hội thoại + SALES_CHAT_ORDER_MERGED + SALES_CHAT_SAME_PHONE_HOLD; chỉ số đếm."
+}
