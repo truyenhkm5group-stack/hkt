@@ -1,4 +1,3 @@
-{"at":"2026-10-21T02:39:47.214Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"meta-k3-k8-merge","detail":"OVERLAP_ACCEPTED với trang-chu-su-that-thuong-mai: phạm vi app/gioi-thieu/page.tsx — cách tích hợp: nhánh dựng trên main 7a0b95ea mới nhất, gộp sạch; chỉ thêm đọc cờ ở 3 chỗ chữ và khối điều khiển /platform — không đè thay đổi của saas-l4-channels/shell-copy-brand-r3/trang-chu-su-that-thuong-mai đã có trên main"}
 {"at":"2026-10-21T02:41:31.286Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"meta-k3-k8-merge","detail":"claude/meta-app-review-audit-r2 @ 94784a6d7b4e · 1 lệnh kiểm thử"}
 {"at":"2026-10-21T02:42:41.334Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"meta-k3-k8-merge","detail":"#935 cho claude/meta-app-review-audit-r2 @ 94784a6d7b4e"}
 {"at":"2026-10-21T02:45:57.688Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"messenger-webhook-reliability","detail":"PLANNING · 5 mẫu phạm vi · HIGH"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-24T11:14:25.046Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"same-phone-hold","detail":"PASS 5d4997bbce4be9a4233849cb97445e6bfdb45566 2026-10-24T11:13:50.525Z"}
 {"at":"2026-10-24T11:15:11.763Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"shipment-state-probe","detail":"PASS 5d4997bbce4be9a4233849cb97445e6bfdb45566 2026-10-24T11:14:31.716Z"}
 {"at":"2026-10-24T11:16:04.304Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"od-ux-05-settings-raw-reads","detail":"PASS 5d4997bbce4be9a4233849cb97445e6bfdb45566 2026-10-24T11:15:21.792Z"}
+{"at":"2026-10-24T11:17:00.475Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"comment-inbox-key-fix","detail":"#1044 @ 4dc1ee41b26c → cf92607761e5 (MERGE_NOW · MEDIUM · gates success)"}
