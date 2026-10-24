@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "home-bot-comment-inbox",
+  "title": "Bot nhà: ảnh trả lời bình luận vào hộp thư page_PSID + đếm lần rơi về câu cũ khi đọc ERP",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-hbci",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/home-bot-comment-inbox",
+  "base_sha": "db98d057cda8c75219f0c35bedbcf21c3ab32515",
+  "domains": [],
+  "owned_paths": [
+    "chatbot/src/",
+    "tests/home-bot-comment-inbox.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-24T12:39:08.835Z",
+  "updated_at": "2026-10-24T12:39:08.835Z",
+  "last_heartbeat": "2026-10-24T12:39:08.835Z",
+  "definition_of_done": []
+}
