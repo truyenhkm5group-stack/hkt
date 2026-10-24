@@ -3,7 +3,7 @@
   "mission_id": "order-dup-guard",
   "title": "P0: bot không tạo / tự chốt đơn thứ hai khi hội thoại đã có đơn người + cờ Nghi trùng trên /orders",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -23,12 +23,17 @@
   ],
   "dependencies": [],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    1029
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-24T03:27:52.077Z",
-  "updated_at": "2026-10-24T04:45:25.721Z",
+  "updated_at": "2026-10-24T05:05:38.228Z",
   "last_heartbeat": "2026-10-24T04:45:25.721Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1029 → caea634ce6d683e2fb371d4c68066ffbb13a3c42"
+  },
   "handoff": {
     "branch": "claude/order-dup-guard",
     "sha": "fdd5544d8d229c4825d5538d4907a4031f01a3c9",
