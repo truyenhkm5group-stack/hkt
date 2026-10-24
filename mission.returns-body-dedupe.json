@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "returns-body-dedupe",
+  "title": "/reports/returns: baseRows một lượt CSDL cho ba lần gọi + careRows chỉ tính kiện có care",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-rbody",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/returns-body-dedupe",
+  "base_sha": "c6968e7e64a067ef15b6f455dc5d03803afac6ec",
+  "domains": [],
+  "owned_paths": [
+    "lib/queries/return-reason-report.ts",
+    "lib/queries/return-intelligence.ts",
+    "tests/returns-body-dedupe.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-24T01:22:52.428Z",
+  "updated_at": "2026-10-24T01:22:52.428Z",
+  "last_heartbeat": "2026-10-24T01:22:52.428Z",
+  "definition_of_done": []
+}
