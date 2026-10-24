@@ -3,7 +3,7 @@
   "mission_id": "identity-link",
   "title": "P0 Ngọc PR2: verifiedSameCustomer / sameCustomerConversations — cùng khách qua bình luận + hộp thư, chỉ định danh nền tảng",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-idl",
@@ -24,11 +24,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-24T10:59:40.132Z",
-  "updated_at": "2026-10-24T13:05:50.872Z",
+  "updated_at": "2026-10-24T14:02:50.843Z",
   "last_heartbeat": "2026-10-24T11:30:44.821Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1047 → 0efa88fa6b93387e4e3e011d528585a6c2b32d87"
+    "merged": "#1047 → 0efa88fa6b93387e4e3e011d528585a6c2b32d87",
+    "verify": "PASS e54dc669c9eec9da6821139516ac611089327b3f 2026-10-24T14:02:20.218Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40099742329"
   },
   "handoff": {
     "branch": "claude/identity-link",
