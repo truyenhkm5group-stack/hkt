@@ -1,0 +1,8 @@
+{
+  "pr": 1047,
+  "sha": "531dbeba1bc7b7d65502e62cd91633091316047b",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T12:43:37.971Z",
+  "note": "review lead: verifiedSameCustomer thuần + bộ nạp (VERIFIED/SAME_PHONE_ONLY/NONE + bằng chứng + lý do), chỉ định danh nền tảng (from_id = PSID, comment_id hệ thống Meta, customers nối THREAD/FB_ID), không bao giờ theo tên; ghi state.commentOrigin trước lượt chat."
+}
