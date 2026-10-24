@@ -111,9 +111,8 @@ function tranChoChung(): number {
 
 type DangChay = { p: Promise<unknown>; at: number };
 
-const holder = globalThis as unknown as {
-  __erpMemo?: { entries: Map<string, Entry>; inflight: Map<string, DangChay>; version: number; giuCu: string[]; orgVersion?: Map<string, number> };
-};
+// MỘT dòng: tests/platform-isolation-static đọc tên holder trên chính dòng `globalThis as … {` (HOLDER_DA_KHAI).
+const holder = globalThis as unknown as { __erpMemo?: { entries: Map<string, Entry>; inflight: Map<string, DangChay>; version: number; giuCu: string[]; orgVersion: Map<string, number> } };
 if (!holder.__erpMemo) holder.__erpMemo = { entries: new Map(), inflight: new Map(), version: 0, giuCu: [], orgVersion: new Map() };
 const store = holder.__erpMemo;
 // Holder dựng bởi bản trước (chưa có trường này) trong cùng tiến trình — `giuCu` là tiền tố khoá, không chứa dữ liệu nghiệp vụ.
