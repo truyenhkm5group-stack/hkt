@@ -20,6 +20,7 @@
  * có tin phía page tới SAU nó thì bot bỏ qua. Tin do NHÂN VIÊN THẬT (có `uid` / `admin_id`, không phải tin bot vừa gửi)
  * còn làm bot nhường cả hội thoại `HUMAN_TAKEOVER_MINUTES` phút.
  */
+import { mergeCommentOrigin } from "@/lib/sales-chatbot/identity-link";
 import { draftCopilotSuggestion, loadModeConfig, pinArm } from "@/lib/sales-chatbot/operating-mode";
 import { readPinnedArm, replyGate } from "@/lib/sales-chatbot/operating-mode-shared";
 import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sales-chatbot/conversation-control-shared";
@@ -1419,6 +1420,15 @@ export async function processFanpageThread(pageId: string, threadId: string, dep
         await db.update(cv).set({ state: sql`${cv.state} || ${JSON.stringify({ postContext: { postId: commentRow.postId, text: postText } })}::jsonb` }).where(eq(cv.id, conv.id));
       }
       context = postContextPrompt(postText);
+    }
+    // NGƯỜI BÌNH LUẬN LÀ AI (P0 HSLC 24/10/2026, lib/sales-chatbot/identity-link.ts): lưu from_id + mã bình luận vào `state.commentOrigin`
+    // TRƯỚC lượt chat — sau khi chép sang hộp thư, `thread_id` / `visitor_key` của hội thoại đổi nên đây là chỗ DUY NHẤT còn giữ người
+    // bình luận để nối với hội thoại hộp thư của chính họ (from_id = PSID cùng page). Chỉ định danh nền tảng, không tên.
+    const commentRows = claimed.filter((r) => r.kind === "COMMENT");
+    if (commentRows.length) {
+      const origin = mergeCommentOrigin(((conv.state ?? {}) as ChatState).commentOrigin, commentRows.map((r) => ({ messageId: r.messageId, threadId, fromId: r.fromId, postId: r.postId })), now());
+      const cvo = schema.salesChatConversations;
+      if (origin) await db.update(cvo).set({ state: sql`${cvo.state} || ${JSON.stringify({ commentOrigin: origin })}::jsonb` }).where(eq(cvo.id, conv.id));
     }
     if (gate.mode === "COPILOT") {
       // Bot soạn ở hội thoại BÓNG, không gửi: người của shop trả lời; câu thật tới sau được đem so với gợi ý.
