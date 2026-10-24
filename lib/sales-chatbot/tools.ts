@@ -39,7 +39,8 @@ import { createOrderAsAgent, flagOrderForReviewAsAgent, noteCustomerReconfirmAsA
 import { conversationCancelTargets, executeCustomerCancel, raiseCancelException, recordCustomerCancelRequest, recordCustomerKeptOrder } from "@/lib/records/order-cancel";
 import { CANCEL_BLOCK_LABEL } from "@/lib/constants/order-cancel";
 import { chatOrderAdId } from "@/lib/sales-chatbot/ad-referral";
-import { auditConversationOrderBlock, auditSamePhoneHold, samePhoneOpenBotOrders, blockInstruction, botOwnOrderIds, CONVERSATION_ORDER_FIELD, decideConversationOrder, existingOrderMaker, otherConversationOrders, proposalCandidate, type ConversationOrderScope, type ConversationOrderVerdict } from "@/lib/sales-chatbot/conversation-order-guard";
+import { auditOrderMerge, findMergeTarget, increasedVariants, loadMergeTargetOrder, mergeLinesForAddOn, type MergeTargetOrder } from "@/lib/sales-chatbot/order-merge";
+import { auditConversationOrderBlock, auditSamePhoneHold, samePhoneOpenBotOrders, separateOrderIntent, blockInstruction, botOwnOrderIds, CONVERSATION_ORDER_FIELD, decideConversationOrder, existingOrderMaker, otherConversationOrders, proposalCandidate, type ConversationOrderScope, type ConversationOrderVerdict } from "@/lib/sales-chatbot/conversation-order-guard";
 import { markOrderWritten, omsValidationReason, orderSignalToolReason, OrderWriteError, recordOrderValidationFailure, recordOrderWriteFailure, sqlStateOf, type OrderWriteMark } from "@/lib/sales-chatbot/order-signals";
 import { agentUnitPrice } from "@/lib/commerce/pricing";
 import { notifySalesChatBooking, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
@@ -109,7 +110,7 @@ export type ChatState = {
    */
   /** Bộ đếm phản đối món của lượt mua hiện tại (P0 #855 — `nextObjectionTally`, handoff-routing-shared.ts). */
   objectionTally?: ObjectionTally;
-  draft?: { orderId: string | null; lines: CartLine[]; unitPrices: Record<string, number>; recipient: Recipient; note: string; simulated: boolean; shownTurn?: number; firstShownTurn?: number; quote?: AgentQuoteClaim; seenQuoteId?: string; seenLines?: CartLine[]; seenTotal?: number; packing?: string | null; separateOrder?: { reason: string; existingIds: string[] }; samePhoneOf?: string };
+  draft?: { orderId: string | null; lines: CartLine[]; unitPrices: Record<string, number>; recipient: Recipient; note: string; simulated: boolean; shownTurn?: number; firstShownTurn?: number; quote?: AgentQuoteClaim; seenQuoteId?: string; seenLines?: CartLine[]; seenTotal?: number; packing?: string | null; separateOrder?: { reason: string; existingIds: string[] }; samePhoneOf?: string; mergeOf?: string };
   /** Khách PHẢN ĐỐI giá (PRICE_DISPUTED, 11/10/2026) — engine ghi khi phát hiện; chốt đơn bị chặn tới khi máy chủ báo lại và khách xác nhận. */
   priceDispute?: PriceDisputeState;
   /**
@@ -331,6 +332,11 @@ export type ToolContext = {
   autoConfirm?: boolean;
   /** Do chính công cụ đặt khi gọi lượt chốt tự động — bỏ hai cổng «khách thấy tóm tắt» + «nguyên văn lời đồng ý». */
   autoConfirming?: boolean;
+  /**
+   * Lượt gộp mua thêm (pha 3, `mergeIntoOrder`): sửa ĐÚNG đơn này qua đường sửa đơn đã chốt, KỂ CẢ đơn chốt bằng lời đồng ý — chỉ trong
+   * CHÍNH lượt gộp (dòng chỉ được thêm, người nhận / địa chỉ không đổi). Lượt sau sửa / bớt / đổi vẫn theo luật cũ (ca «Đỗ Là»).
+   */
+  mergeAdd?: { orderId: string; ownerConversationId: string };
 };
 
 /**
@@ -654,6 +660,70 @@ async function conversationConflict(r: { ok: true } | MetaFailure, step: "CREATE
   if (verdict.kind === "BLOCK") return conversationOrderBlocked(verdict, step, ctx, state);
   return { ...err(step === "CREATE" ? "Đơn nháp: hội thoại đã có đơn" : "Chốt: hội thoại đã có đơn khác", `${r.errors[0].message} — KHÔNG tạo / chốt đơn, KHÔNG nói đã lên đơn; nói khách shop kiểm lại đơn.`, state), requireHuman: `${r.errors[0].message} — bot không ${step === "CREATE" ? "tạo" : "chốt"} đơn; người kiểm` };
 }
+/** Người nhận của lời mua mới trùng người nhận của đơn đích (cùng SĐT, cùng nơi giao) — khác ⇒ khách mua cho người khác ⇒ đơn mới. */
+function sameRecipientOf(a: Recipient, b: Recipient): boolean {
+  const pa = normalizeCustomerPhone(a.phone);
+  const pb = normalizeCustomerPhone(b.phone);
+  if (pa && pb && pa.slice(-9) !== pb.slice(-9)) return false;
+  return !b.address.trim() || !a.address.trim() || sameDeliveryPlace(a.address, b.address);
+}
+
+/** Đơn NGƯỜI đang mở của cùng danh tính (hoặc đơn bot ở hội thoại đang người giữ) ⇒ không tạo, chuyển người kèm ĐÚNG món + số lượng. */
+async function humanAddHandoff(orderId: string, maker: string, lines: readonly CartLine[], ctx: ToolContext, state: ChatState): Promise<ToolOutcome> {
+  const priced = await priceLines(lines, ctx.config, verifiedCustomerId(state)).catch(() => null);
+  const what = priced?.lines.length ? priced.lines.map((l) => `${l.name} × ${l.quantity}`).join(", ") : "món khách vừa nói";
+  const code = `#${manualOrderShortCode(orderId)}`;
+  return {
+    ...err("Đơn nháp: khách đã có đơn đang xử lý", `Khách này đã có đơn ${code} do ${maker} lên — KHÔNG tạo đơn mới, KHÔNG nói đã thêm. Máy chủ đã chuyển nhân viên thêm món vào ĐÚNG đơn ${code}; nói khách nhân viên sẽ cập nhật đơn giúp mình.`, state),
+    requireHuman: `Khách muốn thêm ${what} vào đơn ${code} (${maker}) — bot không tạo đơn mới, không sửa đơn người lên`,
+  };
+}
+
+/**
+ * GỘP LỜI MUA THÊM VÀO ĐƠN BOT ĐANG MỞ (pha 3). Nạp đơn đích vào state hội thoại này làm «đơn đang sửa» rồi đi ĐÚNG đường sửa đơn có sẵn
+ * (`update_draft_order` — mọi hàng rào: lời khách cho từng món, trần tăng tổng, tồn, giá máy chủ); dòng = `mergeLinesForAddOn` (món
+ * nhắc lại không cộng). Câu cho khách do MÁY CHỦ dựng, tổng = báo giá máy chủ của lượt sửa. Đơn đã chốt mà lượt sửa bị từ chối ⇒ chuyển
+ * người kèm món (đơn chốt bằng lời đồng ý: việc của người khi không thuần thêm được).
+ */
+async function mergeIntoOrder(target: MergeTargetOrder, requested: readonly CartLine[], ctx: ToolContext, state: ChatState): Promise<ToolOutcome> {
+  const code = `#${manualOrderShortCode(target.orderId)}`;
+  const reqPriced = await priceLines(requested, ctx.config, verifiedCustomerId(state));
+  const names = new Map(reqPriced.lines.map((l) => [l.variantId, l.name]));
+  const merged = mergeLinesForAddOn(target.lines, requested, increasedVariants(ctx.lastUserText, reqPriced.lines.map((l) => ({ variantId: l.variantId, name: l.name }))));
+  const base = await priceLines(target.lines, ctx.config, verifiedCustomerId(state), [target.recipient.address, target.recipient.province].join(", "));
+  const seenTurn = ctx.turn !== undefined ? ctx.turn - 1 : undefined;
+  const draft: NonNullable<ChatState["draft"]> = {
+    orderId: target.orderId,
+    lines: target.lines.map((l) => ({ ...l })),
+    unitPrices: Object.fromEntries(base.lines.map((l) => [l.variantId, l.unitPrice])),
+    recipient: { ...target.recipient },
+    note: target.note,
+    simulated: false,
+    quote: quoteClaimOf(base.quote),
+    ...(seenTurn !== undefined ? { shownTurn: seenTurn, firstShownTurn: seenTurn } : {}),
+    ...(target.ownerConversationId !== ctx.conversationId ? { mergeOf: target.ownerConversationId } : {}),
+  };
+  const confirmed = target.confirmed ? (state.confirmed?.orderId === target.orderId ? state.confirmed : { orderId: target.orderId, simulated: false, total: target.total, at: target.insertedAt.toISOString() }) : undefined;
+  const adopted: ChatState = { ...state, draft, ...(confirmed ? { confirmed } : {}) };
+  if (!confirmed) delete adopted.confirmed;
+  const addedText = [...merged.added, ...merged.increased].map((l) => `${l.quantity} × ${names.get(l.variantId) ?? l.variantId}`).join(", ");
+  if (!merged.added.length && !merged.increased.length) {
+    return ok(`Món đã có trong đơn ${code}`, { order_code: code, merged_into_order: code, say_to_customer: `Dạ các món này đã có trong đơn ${code} của mình rồi ạ, shop giao theo đơn đó nhé.`, instruction: "Khách nhắc lại đúng món đã có trong đơn đang mở — KHÔNG tạo đơn mới, KHÔNG cộng thêm. Gửi khách ĐÚNG câu say_to_customer." }, adopted);
+  }
+  const r = await executeToolCore("update_draft_order", { items: merged.lines.map((l) => ({ variant_id: l.variantId, quantity: l.quantity })) }, { ...ctx, state: adopted, mergeAdd: { orderId: target.orderId, ownerConversationId: target.ownerConversationId } });
+  if (r.isError) return confirmed ? { ...r, requireHuman: r.requireHuman ?? `Khách muốn thêm ${addedText} vào đơn ${code} — bot chưa gộp được (${r.summary})` } : r;
+  await auditOrderMerge(ctx.conversationId, target, merged);
+  const data = JSON.parse(r.content) as Record<string, unknown>;
+  const pending = data.say_to_customer === CLAIM_SAFE_TEXT.ORDER_PENDING_CHECK;
+  const say = `Dạ em gộp thêm ${addedText} vào đơn ${code} để giao một lần, tổng mới ${String(data.cod_total_text ?? "")} ạ.`;
+  const extra = confirmed
+    ? pending
+      ? { merged_into_order: code }
+      : { merged_into_order: code, say_to_customer: say, instruction: "Đơn ĐÃ CHỐT vừa được GỘP thêm món khách mua (giao một lần). Gửi khách ĐÚNG MỘT câu say_to_customer — không hỏi xác nhận lại, không nói đã lên đơn mới." }
+    : { merged_into_order: code, merge_note: `Đã gộp vào đơn ${code} khách đặt trước (chưa chốt) — gửi tóm tắt với tổng mới của máy chủ, nói rõ đã gộp vào đơn ${code}, rồi đợi khách đồng ý.` };
+  return { ...r, summary: `Gộp vào đơn ${code} · ${r.summary}`, content: JSON.stringify({ ...data, ...extra }) };
+}
+
 const GUARD_READ_FAILED = "Máy chủ chưa đọc được đơn đã có của hội thoại — KHÔNG lên / chốt đơn lượt này (tránh đơn trùng). Nói khách shop kiểm lại đơn và phản hồi ngay; KHÔNG nói đã lên đơn.";
 
 /** Tổng số lượng theo sản phẩm (mẫu mã khi chưa gắn sản phẩm). HÀM THUẦN. */
@@ -711,7 +781,7 @@ function agentOrderOpts(ctx: ToolContext, state: ChatState, creating: boolean, q
   const addressText = addressTextLines(ctx.roundCustomerTexts ?? ctx.customerTexts ?? []);
   // MỘT không gian khoá theo hội thoại (lõi đơn): khoá + khoá hội thoại lúc chèn + rào «đã có đơn của người» chạy lại TRONG giao dịch.
   const scope = guardScope(ctx, state, ctx.now ?? new Date());
-  const conversation = { id: ctx.conversationId, origin: "AI_AGENT" as const, guard: { exclude: [...scope.exclude, ...separateFrom], verifiedCustomerId: scope.verifiedCustomerId, now: scope.now } };
+  const conversation = { id: ctx.conversationId, origin: "AI_AGENT" as const, guard: { exclude: [...scope.exclude, ...separateFrom], verifiedCustomerId: scope.verifiedCustomerId, now: scope.now }, ...(ctx.mergeAdd ? { alsoLock: [ctx.mergeAdd.ownerConversationId] } : {}) };
   return { pricing, idempotencyKey: creating ? orderIdempotencyKey(ctx.conversationId, state) : null, allowShortStock: ctx.config.sellWithoutStockCheck, ...(quote ? { quote } : {}), ...(holdNew ? { holdNew: true } : {}), ...(addressText.length ? { addressText } : {}), conversation };
 }
 
@@ -1255,13 +1325,20 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // giao» là đơn thật kèm mong muốn ngày giao, chặn ở đây là đẩy khách về vòng tư vấn.
       if (name === "create_draft_order" && state.confirmed && futurePurchaseOnly(ctx.lastUserText)) return err("Đơn nháp: khách hẹn mua lần sau", "Khách nói sẽ mua LẦN SAU — KHÔNG lên đơn mới. Cảm ơn khách ngắn gọn, không mời mua thêm.", state);
       // Đơn máy TỰ CHỐT (P0-A): khách sửa ngay sau đó ⇒ update_draft_order sửa chính đơn đã chốt (giữ «Đã xác nhận»). Còn lại như cũ.
-      const editingConfirmed = Boolean(state.confirmed?.auto) && name === "update_draft_order" && Boolean(state.draft?.orderId || state.confirmed?.simulated);
+      const mergeEdit = Boolean(ctx.mergeAdd && state.confirmed?.orderId && state.confirmed.orderId === ctx.mergeAdd.orderId);
+      const editingConfirmed = (Boolean(state.confirmed?.auto) || mergeEdit) && name === "update_draft_order" && Boolean(state.draft?.orderId || state.confirmed?.simulated);
       // Đơn chốt qua LỜI ĐỒNG Ý (không phải máy tự chốt) ⇒ sửa / thêm vào đơn là việc của NHÂN VIÊN — máy chủ ép chuyển người, không để tuỳ
       // model (HOTFIX 12/10/2026: engine bỏ chuyển người mặc định sau chốt nên đây là lớp chặn ca «Đỗ Là» — bot hứa đổi địa chỉ / lịch giao).
       // Đơn máy TỰ CHỐT mà model gọi create_draft_order (review upsell-after-confirm B2: câu mời sau chốt «nhắn em "thêm …"» làm model tạo
       // đơn MỚI) ⇒ chỉ đường đúng: update_draft_order với đủ dòng — KHÔNG nói «đã chuyển nhân viên» khi không có ai được chuyển.
       if (state.confirmed?.auto && name === "create_draft_order" && Boolean(state.draft?.orderId || state.confirmed.simulated)) {
         return err("Đơn đã tự chốt", "Đơn của hội thoại này đã TỰ CHỐT — thêm / sửa món thì gọi update_draft_order với ĐỦ dòng hàng (dòng cũ + món khách vừa gọi tên). KHÔNG tạo đơn mới, KHÔNG nói đã thêm trước khi công cụ báo xong, KHÔNG nói đã chuyển nhân viên.", state);
+      }
+      // PHA 3 — MUA THÊM TRÊN ĐƠN CHỐT BẰNG LỜI ĐỒNG Ý CỦA CHÍNH HỘI THOẠI (Tech Lead 24/10/2026): mặc định GỘP (thuần thêm dòng), không chuyển
+      // người — trừ khi khách nói rõ đơn riêng. Đơn đã rời kho / không sửa được ⇒ lượt gộp báo lỗi + chuyển người (đúng luật cũ).
+      if (name === "create_draft_order" && state.confirmed && !state.confirmed.auto && !state.confirmed.simulated && state.confirmed.orderId && v.data.items && !ctx.mergeAdd && !separateOrderIntent([ctx.lastUserText])) {
+        const own = await loadMergeTargetOrder(state.confirmed.orderId, ctx.conversationId).catch(() => null);
+        if (own) return mergeIntoOrder(own, mergeLines(v.data.items.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))), ctx, state);
       }
       if (state.confirmed && !editingConfirmed) return { ...err("Đơn đã chốt", "Đơn của hội thoại này đã chốt — KHÔNG nói đã sửa / đã thêm; máy chủ đã chuyển nhân viên.", state), ...(state.confirmed.auto ? {} : { requireHuman: `Sửa đơn đã chốt — khách muốn ${name === "create_draft_order" ? "thêm đơn / thêm món" : "đổi đơn"}: «${ctx.lastUserText.trim().slice(0, 120)}»` }) };
       const base: Recipient = existing?.recipient ?? { name: state.customer.name, phone: state.customer.phone, address: state.customer.address, province: state.customer.province };
@@ -1282,6 +1359,16 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         if (verdict.kind === "SEPARATE_ALLOWED") separateOrder = { reason: verdict.reasonCode, existingIds: verdict.existingIds };
         // LỚP TẠM trước pha 3 (`samePhoneOpenBotOrders`): SĐT gõ trùng đơn BOT đang mở ở hội thoại KHÁC ⇒ vẫn lên đơn, KHÔNG tự chốt, cờ cần
         // kiểm. Đọc lỗi ⇒ bỏ qua lớp này (nó chỉ làm chậm xác nhận, không phải rào chặn — rào hội thoại ở trên đã chạy).
+        /*
+          PHA 3 — MUA BỔ SUNG CỦA CÙNG DANH TÍNH ĐÃ XÁC MINH (vụ Ngọc #8639C563 → #E2867CF0): đơn BOT đang mở ở hội thoại kia (bình luận ↔ hộp
+          thư) ⇒ GỘP vào đó, không tạo đơn; đơn NGƯỜI / hội thoại kia đang người giữ ⇒ chuyển người kèm món + số lượng. Khách nói rõ đơn riêng
+          / người nhận khác / địa chỉ khác ⇒ đơn mới như cũ. Đọc lỗi ⇒ bỏ qua (tạo như cũ; lớp tạm bên dưới vẫn chạy).
+        */
+        if (verdict.kind === "PROCEED" && !ctx.mergeAdd && !separateOrderIntent([...(ctx.roundCustomerTexts ?? []).slice(-3), ctx.lastUserText])) {
+          const target = await findMergeTarget(ctx.conversationId, now).catch(() => null);
+          if (target?.kind === "HUMAN") return humanAddHandoff(target.order.orderId, target.maker, lines, ctx, state);
+          if (target?.kind === "MERGE" && sameRecipientOf(target.order.recipient, recipient)) return mergeIntoOrder(target.order, lines, ctx, state);
+        }
         if (verdict.kind === "PROCEED") samePhoneOf = (await samePhoneOpenBotOrders(ctx.conversationId, recipient.phone, now).catch(() => []))[0]?.orderId ?? null;
       }
       // Yêu cầu đóng gói riêng («2 gói riêng», «chia 2 túi») — giữ qua các lượt sửa đơn, ghi vào ghi chú đơn cho kho.

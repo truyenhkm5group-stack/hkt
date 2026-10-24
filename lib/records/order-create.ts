@@ -127,7 +127,8 @@ export type OrderAgent = { name: string; source: string };
  * (`lib/sales-chatbot/conversation-order-guard.ts`) chạy LẠI trong giao dịch đã khoá ⇒ hai cú tạo cùng giây không đẻ hai đơn. Rào bắt
  * được ⇒ CONFLICT với field `CONVERSATION_ORDER_FIELD`, không ghi gì. Form của người KHÔNG có rào (người quyết, form cảnh báo trùng).
  */
-export type ConversationWrite = { id: string; origin: "AI_AGENT" | "AI_ORDER_SYNC" | "ERP_FORM"; guard?: Omit<ConversationOrderScope, "conversationId"> };
+/** `alsoLock` (pha 3 — gộp vào đơn của hội thoại KHÁC cùng danh tính): khoá thêm các hội thoại đó, mọi khoá theo thứ tự id tăng dần. */
+export type ConversationWrite = { id: string; origin: "AI_AGENT" | "AI_ORDER_SYNC" | "ERP_FORM"; guard?: Omit<ConversationOrderScope, "conversationId">; alsoLock?: readonly string[] };
 
 /**
  * Lượt ghi của MÁY phải khai chế độ giá (`lib/commerce/pricing.ts`): lõi tính lại đơn giá và từ chối khi lệch — không công
@@ -788,6 +789,9 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
         : null;
   try {
     await db.transaction(async (tx) => {
+      // Gộp mua thêm vào đơn của hội thoại KHÁC cùng danh tính (pha 3) ⇒ khoá CẢ hai hội thoại, theo thứ tự id (không kẹt chéo với lượt
+      // ghi của hội thoại kia — khoá giao dịch tư vấn của Postgres vào lại được trong cùng giao dịch nên khoá ở dưới không tự kẹt).
+      if (agentOpts?.conversation?.alsoLock?.length) for (const id of [...new Set([agentOpts.conversation.id, ...agentOpts.conversation.alsoLock])].sort()) await lockConversation(tx, id);
       // Bot CHỐT đơn nháp của hội thoại ⇒ khoá hội thoại TRƯỚC (cùng thứ tự với lượt tạo) rồi rào lại: đơn của người chen vào giữa
       // lượt đọc của công cụ và lượt ghi này vẫn bị thấy.
       const convGuard = agentOpts?.conversation?.guard && p.stage === "CONFIRMED" && !wasConfirmed ? agentOpts.conversation : null;
