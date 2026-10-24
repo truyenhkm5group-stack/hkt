@@ -3,7 +3,7 @@
   "mission_id": "cart-unit-probe",
   "title": "ops cart-unit-probe: đếm cách khách gõ k / l trước khi dạy bộ đọc giỏ (chỉ đọc)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -27,9 +27,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-24T09:42:08.385Z",
-  "updated_at": "2026-10-24T09:45:24.815Z",
+  "updated_at": "2026-10-24T10:06:21.787Z",
   "last_heartbeat": "2026-10-24T09:42:48.027Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1041 → 8e7a7efc63916bcd7387047514fbb5b8879b3efe"
+  },
   "handoff": {
     "branch": "claude/cart-unit-probe",
     "sha": "b71542f92704bc799781a4f7c4910fe470d045c8",
