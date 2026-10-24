@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "od-ux-05-settings-scope-more",
+  "title": "OD-UX-05 mục 3b: phạm vi đọc cấu hình cho đối soát lương, bảng lương, /ads, /work",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-scope2",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/od-ux-05-settings-scope-more",
+  "base_sha": "4eeb7751f2f92f7a5f231cae33ed3878cd5e73ea",
+  "domains": [],
+  "owned_paths": [
+    "lib/queries/payroll-recon-center.ts",
+    "lib/queries/payroll.ts",
+    "lib/queries/ads-performance.ts",
+    "lib/queries/work-adapters.ts",
+    "tests/settings-scope.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-24T06:59:05.755Z",
+  "updated_at": "2026-10-24T06:59:05.755Z",
+  "last_heartbeat": "2026-10-24T06:59:05.755Z",
+  "definition_of_done": []
+}
