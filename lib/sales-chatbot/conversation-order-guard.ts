@@ -7,7 +7,7 @@
  * `state.confirmed`), còn đơn của người chỉ nằm ở `orders.sales_conversation_id` — bot không bao giờ thấy nó.
  *
  * Luật (hai đường của bot: tạo đơn mới + chốt, gồm cả máy tự chốt): trước khi tạo / chốt, đọc đơn ĐANG MỞ của LƯỢT MUA HIỆN TẠI —
- * chưa rời kho (`PRE_SHIP_STAGES`, không lần gửi nào đã qua tay ĐVVC) và tạo SAU mốc lượt mua bot đang dùng (`purchaseRoundStart`) — của
+ * chưa rời kho (`PRE_SHIP_STAGES`, không lần gửi nào đã qua tay ĐVVC), tạo trong `CONVERSATION_ORDER_GUARD_HOURS` — của
  * CHÍNH hội thoại (khoá `sales_conversation_id`, hoặc đơn Pancake cùng page + cùng thread) tạo trong `CONVERSATION_ORDER_GUARD_HOURS`
  * mà KHÔNG phải đơn của bot — đơn bot ghi trong state (nháp / đã chốt / lượt mua trước) hoặc mang khoá lần mua của bot cho đúng hội
  * thoại này (`sales-chat:<hội thoại>:`) đã có luật lượt mua riêng. Có ⇒ KHÔNG tạo / KHÔNG chốt, trả bot đúng câu «đã có đơn #…»;
@@ -25,7 +25,6 @@ import { audit } from "@/lib/audit";
 import { manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { assessDuplicate, CONVERSATION_ORDER_GUARD_HOURS, type DuplicateCandidate, type ItemLike } from "@/lib/constants/order-duplicate";
 import { ORDER_STAGE_LABEL, PRE_SHIP_STAGES } from "@/lib/constants/pancake";
-import { purchaseRoundStart } from "@/lib/sales-chatbot/purchase-round";
 import type { OrderStage } from "@/db/schema";
 import { formatDateTime, formatVND } from "@/lib/format";
 import { foldVi } from "@/lib/sales-chatbot/text";
@@ -84,14 +83,16 @@ export function blockInstruction(v: Extract<ConversationOrderVerdict, { kind: "B
   return `${head}${tail} Chỉ khi khách nói RÕ muốn đặt THÊM một ĐƠN RIÊNG mới gọi lại create_draft_order.`;
 }
 
-type BotOwnState = { draft?: { orderId: string | null } | undefined; confirmed?: { orderId: string | null } | undefined; pastOrders?: { orderId: string | null; at: string; simulated: boolean; total: number }[]; roundStartAt?: string };
+type BotOwnState = { draft?: { orderId: string | null } | undefined; confirmed?: { orderId: string | null } | undefined; pastOrders?: readonly { orderId: string | null }[]; roundCheck?: { orderId: string; answer?: "NEW" | "SAME" } };
 
 /**
  * ĐƠN ĐANG MỞ CỦA LƯỢT MUA HIỆN TẠI, KHÔNG phải của bot. Hai luật giữ «khách cũ mua lại» không bị chặn nhầm (golden
  * `khach-cu-van-dia-chi-cu`: đơn Pancake cũ ĐÃ GỬI cùng thread, khách quay lại mua tiếp): (1) đơn đã rời kho / đã giao / hoàn / huỷ là
- * lượt mua đã KẾT THÚC — chỉ đơn còn trong `PRE_SHIP_STAGES` và chưa có lần gửi nào qua tay ĐVVC mới chặn; (2) mốc dưới = muộn hơn
- * trong cửa sổ `CONVERSATION_ORDER_GUARD_HOURS` và mốc lượt mua bot đang dùng (`purchaseRoundStart`: đơn bot chốt gần nhất · mốc lượt
- * mua mới) — đơn của lượt mua TRƯỚC không bao giờ chặn lượt này.
+ * lượt mua đã KẾT THÚC — chỉ đơn còn trong `PRE_SHIP_STAGES` và chưa có lần gửi nào qua tay ĐVVC mới chặn; (2) khách đã TRẢ LỜI «đặt
+ * thêm» cho câu hỏi «đơn cũ hay đơn mới» của máy chủ về ĐÚNG đơn đó (`roundCheck.answer = NEW` — round-check.ts) ⇒ đơn ấy là của lượt
+ * mua trước theo lời khách, không chặn.
+ * CỐ Ý KHÔNG dùng mốc lượt mua (`roundStartAt`) làm mốc dưới: lượt mua mới có thể mở ĐÚNG lúc bot quay lại sau khi người giữ hội thoại
+ * (khách im > 7 ngày trong sổ bot ⇒ `roundStartAt` = giờ hiện tại), và đơn người vừa lên trong lúc giữ sẽ nằm trước mốc ⇒ lọt rào.
  * Đơn CÒN SỐNG của hội thoại trong cửa sổ, KHÔNG phải của bot. `exclude` = thêm id bỏ qua (đơn khách đã nói rõ là đơn riêng). Ném khi
  * CSDL lỗi — người gọi quyết phía HẸP (không tạo).
  */
@@ -100,12 +101,12 @@ export async function otherConversationOrders(conversationId: string, state: Bot
   const o = schema.orders;
   const c = schema.salesChatConversations;
   const [conv] = await db.select({ pageId: c.pageId, threadId: c.threadId }).from(c).where(eq(c.id, conversationId)).limit(1);
-  const own = [state.draft?.orderId, state.confirmed?.orderId, ...(state.pastOrders ?? []).map((p) => p.orderId), ...exclude].filter((x): x is string => typeof x === "string" && x.length > 0);
+  const answeredNew = state.roundCheck?.answer === "NEW" ? state.roundCheck.orderId : null;
+  const own = [state.draft?.orderId, state.confirmed?.orderId, ...(state.pastOrders ?? []).map((p) => p.orderId), answeredNew, ...exclude].filter((x): x is string => typeof x === "string" && x.length > 0);
   const links: SQL[] = [eq(o.salesConversationId, conversationId)];
   if (conv?.pageId && conv.threadId) links.push(and(eq(o.pageId, conv.pageId), eq(o.conversationId, conv.threadId))!);
   const botKey = `sales-chat:${conversationId}:`;
-  const round = purchaseRoundStart(state);
-  const since = new Date(Math.max(now.getTime() - CONVERSATION_ORDER_GUARD_HOURS * 3_600_000, round ? round.getTime() : -Infinity));
+  const since = new Date(now.getTime() - CONVERSATION_ORDER_GUARD_HOURS * 3_600_000);
   const leftWarehouse = sql`exists (select 1 from ${schema.shipments} s where s.order_id = ${o.id} and coalesce(s.direction, 'OUTBOUND') <> 'RETURN' and s.stage::text not in ('PENDING', 'CANCELLED'))`;
   const rows = await db
     .select({ id: o.id, stage: o.stage, insertedAt: o.insertedAt, origin: sql<string | null>`${o.origin}::text`, agentKey: sql<string | null>`${o.raw}->>'agentKey'`, total: o.totalPriceAfterDiscount, phone: o.billPhone, name: o.billFullName, address: o.shipAddress })
