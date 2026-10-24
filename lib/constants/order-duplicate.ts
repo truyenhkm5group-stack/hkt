@@ -139,6 +139,15 @@ export function orderPair<T extends { orderId: string; insertedAt: Date }>(a: T,
 export const DUPLICATE_WINDOW_HOURS = 48;
 export const DUPLICATE_SETTING_KEY = "orders.duplicate-rule";
 
+/**
+ * CỬA SỔ CỦA RÀO «HỘI THOẠI ĐÃ CÓ ĐƠN CỦA NGƯỜI» (`lib/sales-chatbot/conversation-order-guard.ts`, P0 HSLC 24/10/2026) — khai MỘT chỗ.
+ * 24 giờ, chưa có số quét (b) của ops `order-dup-scan`: hai cặp thật hôm đó cách nhau 1 phút 23 giây và 12 phút, cùng một lần mua;
+ * 28/29 cặp cùng mẫu mã trong lịch sử nằm trong 6 giờ đầu (bảng ở trên). Rộng hơn 6 giờ để phủ «nhân viên lên đơn sáng, khách nhắn
+ * lại chiều»; hẹp hơn 48 giờ vì đây là rào CHẶN tạo đơn (khác hàng đợi nghi trùng chỉ gắn cờ) — khách quay lại mua hôm sau không bị
+ * chặn. Có số (b) thì chỉnh ở đây, không gõ lại nơi khác.
+ */
+export const CONVERSATION_ORDER_GUARD_HOURS = 24;
+
 export type DuplicateRule = {
   windowHours: number;
   /** Bật/tắt toàn bộ luật. Tắt thì hàng đợi rỗng và màn hình nói rõ là đã tắt, không nói là sạch. */
