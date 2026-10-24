@@ -26,18 +26,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-24T07:48:58.024Z",
-  "updated_at": "2026-10-24T07:52:16.317Z",
-  "last_heartbeat": "2026-10-24T07:49:54.892Z",
+  "updated_at": "2026-10-24T09:05:25.177Z",
+  "last_heartbeat": "2026-10-24T09:05:25.177Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/same-phone-hold",
-    "sha": "bdc81d78b45a3fbb84d50ebe3e92b8be3977c4fd",
-    "at": "2026-10-24T07:49:54.892Z",
+    "sha": "767cdc5b996c1018302f668e0c54246ba8247ad1",
+    "at": "2026-10-24T09:05:25.177Z",
     "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
     "title": "Lớp tạm: SĐT trùng đơn bot đang mở ở hội thoại khác ⇒ không tự chốt + cờ POSSIBLE_SAME_CUSTOMER",
     "summary": "",
     "tests": [
-      "tsc · eslint sạch. Chạy riêng XANH: conversation-order-guard (ca 14 mới) · sales-agent-golden 23 · sales-quote-640 · order-golden 33×2. 4 shard để CI gates (lead dặn máy quá tải)"
+      "sửa CI #1039 (p0-871): cờ POSSIBLE_SAME_CUSTOMER nội bộ, orderValidityOf bỏ qua. tsc · eslint sạch; khối K09 (gồm p0-871) XANH; conversation-order-guard + sales-agent-golden XANH"
     ]
   }
 }
