@@ -23,6 +23,7 @@ if (CHAY_THANG) process.env.ERP_READ_ONLY = "1";
 import "dotenv/config";
 import { sql } from "drizzle-orm";
 import { getDbForInspection, type Db } from "@/db";
+import { manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { assessDuplicate, phoneKey, type DuplicateVerdict, type ItemLike } from "@/lib/constants/order-duplicate";
 import { PRE_SHIP_STAGES } from "@/lib/constants/pancake";
 import { findOrganization } from "@/lib/platform/organizations";
@@ -64,6 +65,8 @@ export function originOf(agentKey: string | null | undefined): ScanOrigin {
 
 export type ScanOrder = {
   id: string;
+  /** Mã Pancake hiển thị (`orders.system_id`); đơn tạo trên ERP không có ⇒ `null`. */
+  systemId: number | null;
   insertedAt: Date;
   stage: string;
   source: string;
@@ -98,6 +101,18 @@ export type ScanPair = {
 };
 
 const DEAD = new Set(["CANCELLED", "DELETED"]);
+
+/**
+ * Mã đơn ĐÚNG như ERP in ở danh sách đơn (`app/(dashboard)/orders/columns.tsx`): `#` + mã Pancake, đơn tạo trên ERP thì
+ * `#` + 8 ký tự `manualOrderShortCode` (vd `#D2A8DE9B`). Người đối chiếu gõ đúng chuỗi này vào ô tìm của /orders — mã cắt
+ * 4 ký tự kiểu `erp-d2a8` không tra được ở đâu cả. Chỉ in ở phần MÃ HOÁ.
+ */
+export function orderLabel(o: Pick<ScanOrder, "id" | "systemId">): string {
+  return `#${o.systemId ?? manualOrderShortCode(o.id)}`;
+}
+
+/** Đơn đã huỷ (hoặc đã xoá) — lượt quét lại sau khi nhân viên xử lý đếm được còn bao nhiêu cặp. */
+export const isCancelled = (o: Pick<ScanOrder, "stage">) => DEAD.has(o.stage);
 
 /** Dựng cặp ứng viên — HÀM THUẦN, tất định (sắp theo mốc rồi mã), mỗi cặp đúng một lần dù chung nhiều khoá. */
 export function findCandidatePairs(orders: readonly ScanOrder[], maxGapHours: number): { pairs: ScanPair[]; skippedGroups: number } {
@@ -168,6 +183,10 @@ export type ScanSummary = {
   sameConversation: number;
   byOriginCombo: Record<string, number>;
   bothActiveSuspected: number;
+  /** Cặp nghi trùng mà ĐƠN SAU đã huỷ — đã xử lý theo cách thường gặp nhất. */
+  suspectCancelledSuspected: number;
+  /** Cặp nghi trùng mà ĐƠN TRƯỚC đã huỷ (giữ đơn sau). */
+  keeperCancelledSuspected: number;
   /** Tiền hàng của đơn SAU trong các cặp nghi trùng còn hiệu lực cả hai — tiền có thể bị giao / thu hai lần. */
   moneyAtRisk: number;
   suspectLeftWarehouse: number;
@@ -181,6 +200,8 @@ export function summarize(orders: number, pairs: readonly ScanPair[]): ScanSumma
   const byOriginCombo: Record<string, number> = {};
   let sameConversation = 0;
   let bothActiveSuspected = 0;
+  let suspectCancelledSuspected = 0;
+  let keeperCancelledSuspected = 0;
   let moneyAtRisk = 0;
   let suspectLeftWarehouse = 0;
   let suspectDelivered = 0;
@@ -191,6 +212,8 @@ export function summarize(orders: number, pairs: readonly ScanPair[]): ScanSumma
     const combo = [p.keeper.origin, p.suspect.origin].join("→");
     byOriginCombo[combo] = (byOriginCombo[combo] ?? 0) + 1;
     if (p.sameSalesConversation || p.samePancakeConversation) sameConversation++;
+    if (p.verdict === "DUPLICATE_SUSPECTED" && isCancelled(p.suspect)) suspectCancelledSuspected++;
+    if (p.verdict === "DUPLICATE_SUSPECTED" && isCancelled(p.keeper)) keeperCancelledSuspected++;
     if (p.verdict === "DUPLICATE_SUSPECTED" && p.bothActive) {
       bothActiveSuspected++;
       moneyAtRisk += p.suspect.total;
@@ -200,7 +223,7 @@ export function summarize(orders: number, pairs: readonly ScanPair[]): ScanSumma
       suspectPaid += p.suspect.paid;
     }
   }
-  return { orders, pairs: pairs.length, byVerdict, sameConversation, byOriginCombo, bothActiveSuspected, moneyAtRisk, suspectLeftWarehouse, suspectDelivered, suspectCodCollected, suspectPaid };
+  return { orders, pairs: pairs.length, byVerdict, sameConversation, byOriginCombo, bothActiveSuspected, suspectCancelledSuspected, keeperCancelledSuspected, moneyAtRisk, suspectLeftWarehouse, suspectDelivered, suspectCodCollected, suspectPaid };
 }
 
 // ─────────────────────────── ĐỌC CSDL ───────────────────────────
@@ -211,6 +234,7 @@ const short = (id: string | null) => (id ? id.slice(0, 8) : "—");
 
 type OrderRaw = {
   id: string;
+  system_id: number | string | null;
   inserted_at: string | Date;
   stage: string;
   source: string;
@@ -230,7 +254,7 @@ type OrderRaw = {
 async function loadOrders(db: Db, since: Date): Promise<{ orders: ScanOrder[]; capped: boolean }> {
   const raw = rowsOf<OrderRaw>(
     await db.execute(sql`
-      select o.id, o.inserted_at, o.stage::text as stage, o.source, o.raw->>'agentKey' as agent_key, o.bill_phone, o.bill_full_name,
+      select o.id, o.system_id, o.inserted_at, o.stage::text as stage, o.source, o.raw->>'agentKey' as agent_key, o.bill_phone, o.bill_full_name,
              o.ship_address, o.total_price_after_discount as total, o.customer_id, o.page_id, o.conversation_id, o.sales_conversation_id,
              o.prepaid, o.transfer_money
         from orders o
@@ -245,6 +269,7 @@ async function loadOrders(db: Db, since: Date): Promise<{ orders: ScanOrder[]; c
   const n = (v: unknown) => (Number.isFinite(Number(v ?? 0)) ? Number(v ?? 0) : 0);
   const orders: ScanOrder[] = list.map((r) => ({
     id: r.id,
+    systemId: r.system_id === null || r.system_id === undefined ? null : Number(r.system_id),
     insertedAt: new Date(r.inserted_at),
     stage: r.stage,
     source: r.source,
@@ -306,8 +331,8 @@ export async function runOrderDupScan(db: Db, opts: { since: Date; maxGapHours: 
     console.log(
       [
         `${vnTime(x.insertedAt)} VN · ${p.verdict} [${p.signals.join(",")}] · cách ${p.gapMinutes} phút`,
-        `  đơn trước ${short(k.id)} · ${k.origin} · «${k.source}» · ${k.stage} · ${vnd(k.total)} · ${ship(k)} · COD đã thu ${vnd(k.codCollected)} · trả trước ${vnd(k.paid)}`,
-        `  đơn sau   ${short(x.id)} · ${x.origin} · «${x.source}» · ${x.stage} · ${vnd(x.total)} · ${ship(x)} · COD đã thu ${vnd(x.codCollected)} · trả trước ${vnd(x.paid)}`,
+        `  đơn trước ${orderLabel(k)} · ${k.origin} · «${k.source}» · ${k.stage} · ${vnd(k.total)} · ${ship(k)} · COD đã thu ${vnd(k.codCollected)} · trả trước ${vnd(k.paid)}`,
+        `  đơn sau   ${orderLabel(x)} · ${x.origin} · «${x.source}» · ${x.stage} · ${vnd(x.total)} · ${ship(x)} · COD đã thu ${vnd(x.codCollected)} · trả trước ${vnd(x.paid)} · đơn sau đã huỷ ${isCancelled(x) ? "RỒI" : "CHƯA"}`,
         `  cùng hội thoại ERP ${p.sameSalesConversation ? `CÓ (${short(k.salesConversationId)})` : "không"} · cùng hội thoại Pancake ${p.samePancakeConversation ? "CÓ" : "không"} · cùng khách ${p.sameCustomer ? "CÓ" : "không"} · cả hai còn hiệu lực ${p.bothActive ? "CÓ" : "không"} · đang trong hàng nghi trùng /work (48 giờ) ${inLive ? "CÓ" : "không"}`,
       ].join("\n"),
     );
@@ -321,6 +346,7 @@ export async function runOrderDupScan(db: Db, opts: { since: Date; maxGapHours: 
   tomTat(`order-dup-scan ${opts.label}: ${s.orders}${capped ? "+ (chạm trần)" : ""} đơn chưa xoá · ${s.pairs} cặp ứng viên (≤ ${opts.maxGapHours} giờ)${skippedGroups ? ` · bỏ ${skippedGroups} nhóm > ${DUP_SCAN_MAX_GROUP} đơn` : ""}`);
   tomTat(`Theo phán quyết bộ nghi trùng: ${fmt(s.byVerdict)} · cùng hội thoại ${s.sameConversation}`);
   tomTat(`Theo nguồn gốc (đơn trước→đơn sau): ${fmt(s.byOriginCombo)}`);
+  tomTat(`NGHI TRÙNG ${s.byVerdict.DUPLICATE_SUSPECTED ?? 0} cặp: đơn sau đã huỷ ${s.suspectCancelledSuspected} · đơn trước đã huỷ ${s.keeperCancelledSuspected} · cả hai còn hiệu lực ${s.bothActiveSuspected}`);
   tomTat(`NGHI TRÙNG, cả hai còn hiệu lực: ${s.bothActiveSuspected} cặp · tiền hàng đơn sau ${vnd(s.moneyAtRisk)} · đơn sau đã rời kho ${s.suspectLeftWarehouse} · đã giao ${s.suspectDelivered} · COD đã thu ${vnd(s.suspectCodCollected)} · trả trước ${vnd(s.suspectPaid)}`);
   tomTat("Danh sách từng cặp (mã đơn, nguồn, trạng thái vận đơn / tiền) ở phần MÃ HOÁ — không huỷ / sửa đơn nào; người đối chiếu trong ERP.");
   return { summary: s, pairs, capped, skippedGroups };

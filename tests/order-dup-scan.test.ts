@@ -10,12 +10,14 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { getDb } from "@/db";
-import { DUP_SCAN_MAX_GROUP, findCandidatePairs, originOf, parseDupScanArgs, runOrderDupScan, summarize, type ScanOrder } from "../scripts/order-dup-scan";
+import { MANUAL_ORDER_ID_PREFIX } from "@/lib/constants/manual-orders";
+import { DUP_SCAN_MAX_GROUP, findCandidatePairs, isCancelled, orderLabel, originOf, parseDupScanArgs, runOrderDupScan, summarize, type ScanOrder } from "../scripts/order-dup-scan";
 
 const item = (variantId: string, quantity = 1) => ({ variantId, sku: variantId, productName: "Chả cá thu", variationDetail: "1kg", quantity });
 
 function order(over: Partial<ScanOrder> & { id: string; insertedAt: Date }): ScanOrder {
   return {
+    systemId: null,
     stage: "CONFIRMED",
     source: "Fanpage (nhân viên chốt)",
     origin: "STAFF_FORM",
@@ -71,6 +73,17 @@ function testPure() {
   assert.equal(s.byOriginCombo["STAFF_FORM→BOT"], 1);
   const cancelled = summarize(2, findCandidatePairs([staff, { ...bot, stage: "CANCELLED" }], 72).pairs);
   assert.deepEqual([cancelled.pairs, cancelled.bothActiveSuspected, cancelled.moneyAtRisk], [1, 0, 0], "đơn sau đã huỷ ⇒ vẫn in cặp, không tính tiền ảnh hưởng");
+  // Lượt quét lại sau khi nhân viên xử lý: đếm được cặp nào đã huỷ đơn sau, cặp nào huỷ đơn trước, cặp nào còn nguyên.
+  assert.deepEqual([cancelled.suspectCancelledSuspected, cancelled.keeperCancelledSuspected], [1, 0], "huỷ đơn SAU ⇒ đếm vào «đơn sau đã huỷ»");
+  const huyTruoc = summarize(2, findCandidatePairs([{ ...staff, stage: "CANCELLED" }, bot], 72).pairs);
+  assert.deepEqual([huyTruoc.suspectCancelledSuspected, huyTruoc.keeperCancelledSuspected, huyTruoc.bothActiveSuspected], [0, 1, 0], "huỷ đơn TRƯỚC ⇒ đếm riêng, không lẫn với huỷ đơn sau");
+  assert.deepEqual([s.suspectCancelledSuspected, s.keeperCancelledSuspected], [0, 0], "chưa ai huỷ ⇒ 0 / 0");
+  assert.deepEqual([isCancelled({ stage: "CANCELLED" }), isCancelled({ stage: "DELETED" }), isCancelled({ stage: "CONFIRMED" })], [true, true, false]);
+
+  // Mã đơn in ĐÚNG như danh sách /orders: `#` + mã Pancake, hoặc `#` + 8 ký tự của đơn tạo trên ERP — tra được bằng ô tìm.
+  assert.equal(orderLabel({ id: `${MANUAL_ORDER_ID_PREFIX}d2a8de9b-1111-4222-8333-444455556666`, systemId: null }), "#D2A8DE9B");
+  assert.equal(orderLabel({ id: "1849203311", systemId: 4521 }), "#4521", "đơn Pancake ⇒ mã hiển thị system_id, không phải id nội bộ");
+  assert.equal(orderLabel({ id: `${MANUAL_ORDER_ID_PREFIX}a5cc67e2-1111-4222-8333-444455556666`, systemId: 77 }), "#77", "có system_id thì system_id thắng, như columns.tsx");
 
   // Nhóm quá đông (SĐT dùng chung) ⇒ không dựng cặp, nhưng đếm.
   const crowd = Array.from({ length: DUP_SCAN_MAX_GROUP + 1 }, (_, i) => order({ id: `c${i}`, insertedAt: new Date(Date.UTC(2026, 9, 24, 0, i)), phone: "0912345678", customerId: null, salesConversationId: null, pancakeConversationId: null, pageId: null }));
@@ -104,6 +117,8 @@ function testSourceFences() {
   assert.ok(!/\b(insert|update|delete)\s+(into|from)?\s*\w|\.insert\(|\.update\(|\.delete\(/i.test(code.replace(/\/\/.*$/gm, "")), "không ghi gì");
   for (const m of code.matchAll(/from "@\/([^"]+)"/g)) assert.ok(existsSync(`${m[1]}.ts`) || existsSync(`${m[1]}/index.ts`), `import @/${m[1]} phải có sẵn`);
   assert.ok(!/\(\?<[=!]/.test(code), "không nhìn-ngược");
+  assert.ok(!/short\([kx]\.id\)/.test(code), "mã đơn đi qua orderLabel (đúng mã ERP hiển thị), không cắt 8 ký tự đầu của id nội bộ");
+  assert.match(code, /select o\.id, o\.system_id,/, "đọc system_id để in mã Pancake");
   assert.match(src, /process\.stdout\.write\("", \(\) => done\(\)\)/, "xả stdout trước khi thoát");
   assert.ok(!/tomTat\([^)]*short\(|tomTat\([^)]*\.id\b|tomTat\([^)]*phone/.test(code), "tóm tắt không in mã đơn / SĐT");
   const ops = readFileSync(".github/workflows/ops-vps.yml", "utf8").replace(/\r\n/g, "\n");
