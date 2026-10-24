@@ -1472,17 +1472,6 @@ async function chatTurnCore(
     }
     // Câu bot / page vừa nói — câu mẫu TRÙNG một câu trong số này thì không gửi lại (khách đang trả lời nó).
     const recentSaid = recentShopTexts(msgs, 4);
-    // KHÁCH PHÀN NÀN BỊ HỎI LẠI ⇒ CHUYỂN NGƯỜI NGAY, TRƯỚC câu mẫu và model (P0 HSLC 24/10/2026, ca «Trần Thị Ngọc» — «Địa chỉ gửi rồi mà»).
-    // Trước đây chỉ hàng rào chữ model (`addressReaskVerdict`, sau vòng công cụ) nhận ra lời phàn nàn ⇒ lượt kết thúc HANDOFF nhưng
-    // create_customer + create_draft_order đã ghi một đơn mới. Không vòng công cụ nào ở lượt này; nhân viên kiểm thông tin nhận hàng.
-    if (!st0.handoff && complainsOfContactReask(text, recentSaid)) {
-      const reason = ADDRESS_HANDOFF_REASON.COMPLAINT;
-      const st: ChatState = { ...st0, handoff: { reason, at: now.toISOString() } };
-      if (!isMessagingChannel(opts.channel)) await reply(conv, seq, cfg.handoff.message);
-      await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1, lastError: ADDRESS_REASK_NOTE.COMPLAINT });
-      if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey: `sales-chat:address-guard:${conv.id}:${turnSeq}` }).catch(() => undefined);
-      return { ok: true, view: (await conversationView(conv.id))! };
-    }
     // Tin KHÁCH thô (cũ ⇒ mới) trong cùng cửa sổ — căn cứ đọc ĐỊA CHỈ KHÁCH TỰ GÕ (P0 15/10/2026: dòng model chép vào công cụ có thể mất
     // phường khách đã ghi rõ) và hàng rào «địa chỉ đã biết không hỏi lại» (`address-memory.ts`) — cho CẢ câu mẫu lẫn chữ model (#871).
     const customerTexts = [...msgs.slice(Math.max(0, msgs.length - SALES_CHATBOT_LIMITS.historyMessages)).filter((m) => m.role === "user" && !m.content.some((b) => b.type === "tool_result")).map((m) => textOf(m.content)), text];
@@ -1501,6 +1490,19 @@ async function chatTurnCore(
     // (calculate_cart) lẫn lên / sửa / chốt đơn.
     // AGENTS 3.12b (chủ shop 22/10/2026): đã có chữ địa chỉ trong lượt mua ⇒ không chữ bot nào được hỏi địa chỉ nữa (đặt lại theo st0 mới nhất).
     const roundCustomerTexts = markAddressGiven(conv.id, msgs, st0, text);
+    // KHÁCH PHÀN NÀN BỊ HỎI LẠI ⇒ CHUYỂN NGƯỜI NGAY, TRƯỚC câu mẫu và model (P0 HSLC 24/10/2026, ca «Trần Thị Ngọc» — «Địa chỉ gửi rồi mà»).
+    // Trước đây chỉ hàng rào chữ model (`addressReaskVerdict`, sau vòng công cụ) nhận ra lời phàn nàn ⇒ lượt kết thúc HANDOFF nhưng
+    // create_customer + create_draft_order đã ghi một đơn mới. Không vòng công cụ nào ở lượt này; nhân viên kiểm thông tin nhận hàng.
+    if (!st0.handoff && complainsOfContactReask(text, recentSaid)) {
+      // Cùng thứ tự ưu tiên lý do với hàng rào chữ model: khách đòi «địa chỉ cũ» mà không có địa chỉ xác minh ⇒ REUSE_UNVERIFIED.
+      const reason = addressKnowledge(st0, roundCustomerTexts).reuseUnresolved ? ADDRESS_HANDOFF_REASON.REUSE_UNVERIFIED : ADDRESS_HANDOFF_REASON.COMPLAINT;
+      const st: ChatState = { ...st0, handoff: { reason, at: now.toISOString() } };
+      // Kênh không phải tin nhắn: ĐÚNG câu nhân viên mà hàng rào chữ model gửi ở tình huống này — khách thấy như trước.
+      if (!isMessagingChannel(opts.channel)) await reply(conv, seq, ADDRESS_STAFF_TEXT);
+      await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1, lastError: reason === ADDRESS_HANDOFF_REASON.COMPLAINT ? ADDRESS_REASK_NOTE.COMPLAINT : ADDRESS_REASK_NOTE.REUSE_UNVERIFIED });
+      if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey: `sales-chat:address-guard:${conv.id}:${turnSeq}` }).catch(() => undefined);
+      return { ok: true, view: (await conversationView(conv.id))! };
+    }
     // MÓN ĐANG BÀN (P0 18/10/2026, ca «ThanhPhương»): «xin giá chả cá» khớp chữ câu mẫu NEM vì câu nem mang nhầm cách hỏi đó. Câu mẫu
     // nói về món khác món đang bàn không được trả lời — ở bước khớp chữ, AI chọn mã, và công cụ `send_quick_reply`. Món đang bàn = món
     // khách gọi tên + món shop nói tới / mời sau đó; khách chưa gọi tên món ⇒ món của câu shop / page gần nhất (tin tự động của page).
