@@ -3,7 +3,7 @@
   "mission_id": "comment-carry-2b",
   "title": "2B COMMENT_CARRY_KEY_INVALID + sổ tái diễn #1044 (P2-7)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-cc2b",
@@ -26,7 +26,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T12:40:23.992Z",
-  "updated_at": "2026-10-24T12:40:23.992Z",
-  "last_heartbeat": "2026-10-24T12:40:23.992Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T12:41:00.872Z",
+  "last_heartbeat": "2026-10-24T12:41:00.872Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/comment-carry-2b",
+    "sha": "4427d684cfc7bee201a484376aa06b504c1df541",
+    "at": "2026-10-24T12:41:00.872Z",
+    "actor": "DESKTOP-56TH98Y:wt-cc2b",
+    "title": "2B COMMENT_CARRY_KEY_INVALID + sổ tái diễn #1044 (P2-7)",
+    "summary": "mã mới (nhóm địa chỉ) + collector commentCarry.at trong kỳ & thread «m_…» + REGRESSION_WATCH comment-inbox-key-fix liveAt 2026-10-24T11:31:22Z; kỳ vọng đổi đã duyệt: address-reask-qtyack (khẳng định tiền tố 18 mã) · regression-watch ảnh chụp thêm [1044, liveAt] · stuck-conversation-audit khai mẫu số commentCarries",
+    "tests": [
+      "tsc · eslint sạch · TEST_KHOI=K01,K20,K21,K22 ĐẠT 12:37Z"
+    ]
+  }
 }
