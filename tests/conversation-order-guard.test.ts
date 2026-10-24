@@ -7,7 +7,8 @@
  *  2. cùng hội thoại, khách nói khác (số lượng) ⇒ không tạo + chuyển người;
  *  3. khách nói RÕ «thêm một đơn riêng» ⇒ tạo, mã lý do trên state, KHÔNG tự chốt (giữ «Mới»);
  *  4. hội thoại KHÁC cùng SĐT ⇒ tạo bình thường (rào theo hội thoại, không theo SĐT);
- *  5. đơn của người đã huỷ / ngoài cửa sổ ⇒ không chặn; đơn Pancake cùng page + thread ⇒ chặn;
+ *  5. đơn của người đã huỷ / ngoài cửa sổ / ĐÃ GỬI ĐI / thuộc lượt mua TRƯỚC ⇒ không chặn (khách cũ mua lại); đơn Pancake cùng
+ *     page + thread ⇒ chặn;
  *  6. bot lên nháp TRƯỚC, người lên đơn SAU ⇒ `confirm_order` KHÔNG chốt nháp, chuyển người;
  *  7. mỗi lần chặn để lại một dòng nhật ký đếm được.
  * Phần thuần: ý định «đơn riêng» (đúng / phủ định / câu thường) · quyết định · câu cho bot.
@@ -163,6 +164,20 @@ async function testRealOrg() {
     await db.update(o).set({ salesConversationId: null, pageId: PAGE, conversationId: `${PAGE}_e` }).where(eq(o.id, staffE));
     const r7 = await botCreate(e.id);
     assert.ok(r7.isError && r7.content.includes(`#${manualOrderShortCode(staffE)}`), `đơn Pancake cùng page + thread ⇒ chặn: ${r7.content}`);
+
+    // ── 5b · Khách CŨ mua lại (golden `khach-cu-van-dia-chi-cu`): đơn cũ ĐÃ GỬI cùng thread ⇒ không chặn; đơn của lượt mua TRƯỚC mốc
+    // lượt mua bot đang dùng ⇒ không chặn ──
+    const sh = await convOf("sh");
+    const staffSh = await staffOrder(sh.id);
+    await db.update(o).set({ stage: "SHIPPED" }).where(eq(o.id, staffSh));
+    const rSh = await botCreate(sh.id);
+    assert.ok(!rSh.isError, `đơn đã gửi đi (lượt mua đã kết thúc) không chặn: ${rSh.content}`);
+    const rd = await convOf("rd");
+    await staffOrder(rd.id);
+    const ctxRd = ctxOf(rd.id, { state: { roundStartAt: new Date(Date.now() + 1_000).toISOString() } });
+    const cRd = await executeTool("create_customer", { name: "Nguyễn Thị Lan", phone: PHONE, address: ADDRESS }, ctxRd);
+    const rRd = await executeTool("create_draft_order", { items: [{ variant_id: v.id, quantity: 1 }] }, { ...ctxRd, state: cRd.state });
+    assert.ok(!rRd.isError, `đơn tạo TRƯỚC mốc lượt mua hiện tại không chặn: ${rRd.content}`);
 
     // ── 6 · Bot lên nháp TRƯỚC, người lên đơn SAU ⇒ confirm_order không chốt nháp, chuyển người ──
     const f = await convOf("f");

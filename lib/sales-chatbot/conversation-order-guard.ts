@@ -6,7 +6,8 @@
  * (#A5CC67E2 · #6CBDB6B5), cả bốn đơn «Đã xác nhận». Gốc: `create_draft_order` chỉ hỏi state CỦA BOT (`state.draft` /
  * `state.confirmed`), còn đơn của người chỉ nằm ở `orders.sales_conversation_id` — bot không bao giờ thấy nó.
  *
- * Luật (hai đường của bot: tạo đơn mới + chốt, gồm cả máy tự chốt): trước khi tạo / chốt, đọc đơn CÒN SỐNG (không Huỷ / Xoá) của
+ * Luật (hai đường của bot: tạo đơn mới + chốt, gồm cả máy tự chốt): trước khi tạo / chốt, đọc đơn ĐANG MỞ của LƯỢT MUA HIỆN TẠI —
+ * chưa rời kho (`PRE_SHIP_STAGES`, không lần gửi nào đã qua tay ĐVVC) và tạo SAU mốc lượt mua bot đang dùng (`purchaseRoundStart`) — của
  * CHÍNH hội thoại (khoá `sales_conversation_id`, hoặc đơn Pancake cùng page + cùng thread) tạo trong `CONVERSATION_ORDER_GUARD_HOURS`
  * mà KHÔNG phải đơn của bot — đơn bot ghi trong state (nháp / đã chốt / lượt mua trước) hoặc mang khoá lần mua của bot cho đúng hội
  * thoại này (`sales-chat:<hội thoại>:`) đã có luật lượt mua riêng. Có ⇒ KHÔNG tạo / KHÔNG chốt, trả bot đúng câu «đã có đơn #…»;
@@ -23,7 +24,8 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { manualOrderShortCode } from "@/lib/constants/manual-orders";
 import { assessDuplicate, CONVERSATION_ORDER_GUARD_HOURS, type DuplicateCandidate, type ItemLike } from "@/lib/constants/order-duplicate";
-import { ORDER_STAGE_LABEL } from "@/lib/constants/pancake";
+import { ORDER_STAGE_LABEL, PRE_SHIP_STAGES } from "@/lib/constants/pancake";
+import { purchaseRoundStart } from "@/lib/sales-chatbot/purchase-round";
 import type { OrderStage } from "@/db/schema";
 import { formatDateTime, formatVND } from "@/lib/format";
 import { foldVi } from "@/lib/sales-chatbot/text";
@@ -82,9 +84,14 @@ export function blockInstruction(v: Extract<ConversationOrderVerdict, { kind: "B
   return `${head}${tail} Chỉ khi khách nói RÕ muốn đặt THÊM một ĐƠN RIÊNG mới gọi lại create_draft_order.`;
 }
 
-type BotOwnState = { draft?: { orderId: string | null } | undefined; confirmed?: { orderId: string | null } | undefined; pastOrders?: readonly { orderId: string | null }[] };
+type BotOwnState = { draft?: { orderId: string | null } | undefined; confirmed?: { orderId: string | null } | undefined; pastOrders?: { orderId: string | null; at: string; simulated: boolean; total: number }[]; roundStartAt?: string };
 
 /**
+ * ĐƠN ĐANG MỞ CỦA LƯỢT MUA HIỆN TẠI, KHÔNG phải của bot. Hai luật giữ «khách cũ mua lại» không bị chặn nhầm (golden
+ * `khach-cu-van-dia-chi-cu`: đơn Pancake cũ ĐÃ GỬI cùng thread, khách quay lại mua tiếp): (1) đơn đã rời kho / đã giao / hoàn / huỷ là
+ * lượt mua đã KẾT THÚC — chỉ đơn còn trong `PRE_SHIP_STAGES` và chưa có lần gửi nào qua tay ĐVVC mới chặn; (2) mốc dưới = muộn hơn
+ * trong cửa sổ `CONVERSATION_ORDER_GUARD_HOURS` và mốc lượt mua bot đang dùng (`purchaseRoundStart`: đơn bot chốt gần nhất · mốc lượt
+ * mua mới) — đơn của lượt mua TRƯỚC không bao giờ chặn lượt này.
  * Đơn CÒN SỐNG của hội thoại trong cửa sổ, KHÔNG phải của bot. `exclude` = thêm id bỏ qua (đơn khách đã nói rõ là đơn riêng). Ném khi
  * CSDL lỗi — người gọi quyết phía HẸP (không tạo).
  */
@@ -97,11 +104,13 @@ export async function otherConversationOrders(conversationId: string, state: Bot
   const links: SQL[] = [eq(o.salesConversationId, conversationId)];
   if (conv?.pageId && conv.threadId) links.push(and(eq(o.pageId, conv.pageId), eq(o.conversationId, conv.threadId))!);
   const botKey = `sales-chat:${conversationId}:`;
-  const since = new Date(now.getTime() - CONVERSATION_ORDER_GUARD_HOURS * 3_600_000);
+  const round = purchaseRoundStart(state);
+  const since = new Date(Math.max(now.getTime() - CONVERSATION_ORDER_GUARD_HOURS * 3_600_000, round ? round.getTime() : -Infinity));
+  const leftWarehouse = sql`exists (select 1 from ${schema.shipments} s where s.order_id = ${o.id} and coalesce(s.direction, 'OUTBOUND') <> 'RETURN' and s.stage::text not in ('PENDING', 'CANCELLED'))`;
   const rows = await db
     .select({ id: o.id, stage: o.stage, insertedAt: o.insertedAt, origin: sql<string | null>`${o.origin}::text`, agentKey: sql<string | null>`${o.raw}->>'agentKey'`, total: o.totalPriceAfterDiscount, phone: o.billPhone, name: o.billFullName, address: o.shipAddress })
     .from(o)
-    .where(and(or(...links), notInArray(o.stage, ["CANCELLED", "DELETED"]), gte(o.insertedAt, since), own.length ? notInArray(o.id, own) : undefined, sql`left(coalesce(${o.raw}->>'agentKey', ''), ${botKey.length}) <> ${botKey}`))
+    .where(and(or(...links), inArray(o.stage, [...PRE_SHIP_STAGES]), sql`not ${leftWarehouse}`, gte(o.insertedAt, since), own.length ? notInArray(o.id, own) : undefined, sql`left(coalesce(${o.raw}->>'agentKey', ''), ${botKey.length}) <> ${botKey}`))
     .limit(10);
   if (!rows.length) return [];
   const items = await db
