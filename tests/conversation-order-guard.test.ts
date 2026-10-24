@@ -285,14 +285,17 @@ async function testRealOrg() {
     const jb = await convOf("jb");
     const rb = await botCreate(jb.id);
     assert.ok(!rb.isError && rb.state.draft?.orderId, rb.content);
-    const syncGuard = { exclude: [] as string[], verifiedCustomerId: null, now: new Date(), includeBotOrders: true };
+    const syncGuard = { exclude: [] as string[], verifiedCustomerId: null, now: new Date(), includeBotOrders: true, ownKeyPrefix: `order-sync:${jb.id}:` };
     const liveJb = await otherConversationOrders({ conversationId: jb.id, ...syncGuard });
     assert.deepEqual(liveJb.map((x) => x.orderId), [rb.state.draft!.orderId!], "order_sync thấy đơn bot của hội thoại");
     const syncAfterBot = await createOrderAsAgent({ name: "Ghi đơn từ hội thoại (thử)", source: "tests/conversation-order-guard.test.ts" }, payload, { pricing: "RETAIL", idempotencyKey: `order-sync:${jb.id}:m1`, conversation: { id: jb.id, origin: "AI_ORDER_SYNC", guard: syncGuard } });
     assert.ok(!syncAfterBot.ok && syncAfterBot.errors[0]?.field === CONVERSATION_ORDER_FIELD, `order_sync sau đơn bot ⇒ chặn trong giao dịch: ${JSON.stringify(syncAfterBot)}`);
     assert.equal((await ordersOf(jb.id)).length, 1, "chiều bot → order_sync: vẫn đúng một đơn");
     const syncSrc = readFileSync("lib/sales-chatbot/order-sync.ts", "utf8");
-    assert.ok(syncSrc.includes("includeBotOrders: true") && syncSrc.includes("guard: convGuard"), "order_sync dùng luật cấp hội thoại tính cả đơn bot, cả trước lẫn trong giao dịch");
+    assert.ok(syncSrc.includes("includeBotOrders: true") && syncSrc.includes("guard: convGuard") && syncSrc.includes("ownKeyPrefix: `order-sync:${conv.id}:`"), "order_sync dùng luật cấp hội thoại tính cả đơn bot, cả trước lẫn trong giao dịch, trừ đơn chính nó ghi");
+    // Đơn order_sync TỰ ghi trước đó (khách «1kg nữa» ba giờ sau) KHÔNG chặn lần ghi kế của chính nó — luật mốc cắt của nó lo.
+    const syncAgain = await createOrderAsAgent({ name: "Ghi đơn từ hội thoại (thử)", source: "tests/conversation-order-guard.test.ts" }, payload, { pricing: "RETAIL", idempotencyKey: `order-sync:${j.id}:m2`, conversation: { id: j.id, origin: "AI_ORDER_SYNC", guard: { exclude: [], verifiedCustomerId: null, now: new Date(), includeBotOrders: true, ownKeyPrefix: `order-sync:${j.id}:` } } });
+    assert.ok(syncAgain.ok, `đơn order_sync trước đó không chặn lần mua mới của chính nó: ${JSON.stringify(syncAgain)}`);
 
     // ── 11 · Khách C360: đơn người ở hội thoại KHÁC chỉ chặn khi danh tính ĐÃ XÁC MINH (mã Facebook) ──
     const k = await convOf("k");

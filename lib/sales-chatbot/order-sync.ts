@@ -698,7 +698,8 @@ async function syncThread(a: {
   // HỘI THOẠI ĐÃ CÓ ĐƠN SỐNG (P0 HSLC 24/10/2026 — order-dup-scan: 6 cặp bot → «nhân viên chốt» cách vài phút): bất kỳ đơn còn sống nào
   // của chính hội thoại trong cửa sổ — KỂ CẢ đơn bot — ⇒ máy KHÔNG ghi đơn thứ hai; khách đặt thêm thật thì nhân viên lên đơn tay. Đọc lỗi
   // ⇒ lượt sau đọc lại (không ghi khi chưa biết). Rào này chạy LẠI trong giao dịch ghi (khoá hội thoại) bên dưới.
-  const convGuard = { exclude: [] as string[], verifiedCustomerId: null, now, includeBotOrders: true };
+  // Đơn order_sync TỰ ghi trước đó không tính (`ownKeyPrefix`) — luật mốc cắt + mã tin chốt của nó đã lo; rào chỉ để thấy đơn bot · form · Pancake.
+  const convGuard = { exclude: [] as string[], verifiedCustomerId: null, now, includeBotOrders: true, ownKeyPrefix: `order-sync:${conv.id}:` };
   const live = await otherConversationOrders({ conversationId: conv.id, ...convGuard }).catch(() => null);
   if (live === null) return { retry: true, result: "không đọc được đơn đã có của hội thoại" };
   if (live.length) {

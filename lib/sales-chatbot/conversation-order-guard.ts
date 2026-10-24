@@ -114,6 +114,12 @@ export type ConversationOrderScope = {
    * bot → «Fanpage (nhân viên chốt)» cách vài phút, luật «cùng khách 30 phút» của order_sync không bắt được.
    */
   includeBotOrders?: boolean;
+  /**
+   * Khoá lần mua của CHÍNH người gọi — đơn mang khoá bắt đầu bằng chuỗi này KHÔNG tính. order_sync truyền `order-sync:<hội thoại>:`:
+   * đơn nó tự ghi trước đó đã có luật riêng (mốc cắt sau đơn vừa ghi + mã tin chốt trong ghi chú), và khách nói «1kg nữa» ba giờ sau
+   * là lần mua MỚI hợp lệ (tests/sales-order-sync.test.ts). Rào ở đây chỉ để thấy đơn order_sync KHÔNG tự thấy: bot · form · Pancake.
+   */
+  ownKeyPrefix?: string;
 };
 
 /** Phần lỗi lõi đơn trả khi rào TRONG giao dịch ghi bắt được đơn vừa chen vào (hai cú tạo cùng giây). */
@@ -150,7 +156,7 @@ export async function otherConversationOrders(scope: ConversationOrderScope, exe
   const rows = await db
     .select({ id: o.id, stage: o.stage, insertedAt: o.insertedAt, origin: sql<string | null>`${o.origin}::text`, agentKey: sql<string | null>`${o.raw}->>'agentKey'`, total: o.totalPriceAfterDiscount, phone: o.billPhone, name: o.billFullName, address: o.shipAddress, conv: o.salesConversationId })
     .from(o)
-    .where(and(or(...links, ...(scope.includeBotOrders ? [sql`left(coalesce(${o.raw}->>'agentKey', ''), ${botKey.length}) = ${botKey}`] : [])), inArray(o.stage, [...PRE_SHIP_STAGES]), sql`not ${leftWarehouse}`, gte(o.insertedAt, since), scope.exclude.length ? notInArray(o.id, [...scope.exclude]) : undefined, scope.includeBotOrders ? undefined : sql`left(coalesce(${o.raw}->>'agentKey', ''), ${botKey.length}) <> ${botKey}`))
+    .where(and(or(...links, ...(scope.includeBotOrders ? [sql`left(coalesce(${o.raw}->>'agentKey', ''), ${botKey.length}) = ${botKey}`] : [])), inArray(o.stage, [...PRE_SHIP_STAGES]), sql`not ${leftWarehouse}`, gte(o.insertedAt, since), scope.exclude.length ? notInArray(o.id, [...scope.exclude]) : undefined, scope.includeBotOrders ? undefined : sql`left(coalesce(${o.raw}->>'agentKey', ''), ${botKey.length}) <> ${botKey}`, scope.ownKeyPrefix ? sql`left(coalesce(${o.raw}->>'agentKey', ''), ${scope.ownKeyPrefix.length}) <> ${scope.ownKeyPrefix}` : undefined))
     .limit(10);
   if (!rows.length) return [];
   const items = await db
