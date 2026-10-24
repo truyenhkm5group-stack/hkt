@@ -1,0 +1,8 @@
+{
+  "pr": 1030,
+  "sha": "6780c1b38583d17c9129eba01e450224b0bdfc3c",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T03:51:03.229Z",
+  "note": "review lead: baseRows SQL đệm (khoá không kỳ, TTL 90 s, ~3 MB theo 3.544 dòng đếm thật) ⇒ kỳ này/kỳ trước/drilldown x3→x1, phần lọc kỳ ở TS giữ nguyên; careRows thêm exists shipment_care (EXPLAIN production 90 ngày: cùng 1.202 dòng, nhánh b 1,04→0,52 s); bài quét JIT dời mỏ neo sang baseRowsSql, yêu cầu tắt JIT giữ nguyên. Không chạm tệp của #1006, không đổi số."
+}
