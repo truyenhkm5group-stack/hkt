@@ -12,6 +12,7 @@
  *
  * Bảng của một kỳ đã TÍNH được chụp vào ảnh kỳ (`snapshot.profitRecon`); chữ ký cấp 1 ký đúng ảnh ấy.
  */
+import { readSettingValue } from "@/lib/settings";
 import { and, eq, gte, isNotNull, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
@@ -235,9 +236,9 @@ export async function getMonthReconciliation(monthKey: string, given?: { report:
  * Payroll V2 review vòng 5). Mặc định chỉ chữ ký CÒN HIỆU LỰC.
  */
 export async function loadProfitSignoffs(monthKey?: string, opts: { includeRevoked?: boolean } = {}): Promise<ProfitReconSignoff[]> {
-  const db = await getDb();
-  const [row] = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, PAYROLL_PROFIT_SIGNOFF_KEY)).limit(1);
-  return parseSignoffs(row?.value ?? null).filter((c) => (opts.includeRevoked || !c.revokedAt) && (!monthKey || c.monthKey === monthKey));
+  // Đọc thô qua lib/settings (dùng chung lượt đọc trong withSettingsScope — OD-UX-05 3c). Đường đọc TRONG giao dịch (khoá
+  // dòng lúc ký) giữ nguyên `tx.select` ở lib/payroll/recon-signoff.ts — không đi qua phạm vi.
+  return parseSignoffs(await readSettingValue(PAYROLL_PROFIT_SIGNOFF_KEY)).filter((c) => (opts.includeRevoked || !c.revokedAt) && (!monthKey || c.monthKey === monthKey));
 }
 
 /** Đọc ô settings chữ ký — dùng chung cho đường đọc thường và đường đọc TRONG giao dịch. Ô hỏng ⇒ rỗng (chặn duyệt). */

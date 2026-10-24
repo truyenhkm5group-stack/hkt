@@ -15,6 +15,7 @@
  */
 import { and, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { readSettingValue } from "@/lib/settings";
 import type { CodeAssignment, CodeSegment, CodeTerms, WeightMethod } from "@/lib/payroll/code-ledger";
 import { addDays, vnDateKey, vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { PAYROLL_CODE_WEIGHT_CONFIRM_KEY, type CodeWeightConfirmation } from "@/lib/constants/payroll-code";
@@ -224,11 +225,11 @@ export async function buildCodeSegmentsFor(
  * nào — khoản vẫn CHỜ, không bao giờ mở ra.
  */
 export async function loadWeightConfirmations(monthKey: string): Promise<CodeWeightConfirmation[]> {
-  const db = await getDb();
-  const [row] = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, PAYROLL_CODE_WEIGHT_CONFIRM_KEY)).limit(1);
+  // Đọc thô qua lib/settings (dùng chung lượt đọc trong withSettingsScope — OD-UX-05 3c), vẫn JSON.parse tại đây.
+  const raw = await readSettingValue(PAYROLL_CODE_WEIGHT_CONFIRM_KEY);
   let all: unknown = [];
   try {
-    all = row ? (JSON.parse(row.value) as unknown) : [];
+    all = raw ? (JSON.parse(raw) as unknown) : [];
   } catch {
     return [];
   }

@@ -408,6 +408,7 @@ import { testAddressNormalizePure, testAddressNormalizeTools } from "./address-n
 import { testAddressWardExplicitPure, testAddressWardExplicitTools } from "./address-ward-explicit.test";
 import { testAddressReaskAudit } from "./address-reask-audit.test";
 import { testOrderDupScan } from "./order-dup-scan.test";
+import { testCartUnitProbe } from "./cart-unit-probe.test";
 import { testP0855Address } from "./p0-855-address.test";
 import { testP0871ContactMemory } from "./p0-871-contact-memory.test";
 import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
@@ -669,6 +670,7 @@ import { testRegressionWatch } from "./regression-watch.test";
 import { testVtpReshipBackfill } from "./vtp-reship-backfill.test";
 import { testSalesAddressApplied } from "./sales-address-applied.test";
 import { testAddressNeverReask } from "./address-never-reask.test";
+import { testCommentInboxKey } from "./p0-comment-inbox-key.test";
 import { testIdentityLink } from "./identity-link.test";
 import { testAddressReaskQtyAck } from "./address-reask-qtyack.test";
 import { testAddressResolver } from "./address-resolver.test";
@@ -2536,6 +2538,7 @@ async function main() {
     await testAddressReaskAudit();
     // P0 HSLC 24/10/2026: ops order-dup-scan — quét cặp đơn nghi trùng (form nhân viên → bot tự chốt).
     await testOrderDupScan();
+    await testCartUnitProbe();
     await testP0855Address(); // #855: địa giới cũ / «như cũ» / địa chỉ mới thắng / không hỏi lại SĐT · tên · địa chỉ · phường
     await testP0871ContactMemory(); // #871: SĐT + địa chỉ đã biết không hỏi lại khi đổi chủ đề · câu mẫu cũng chịu hàng rào · hẹn giờ giao = ghi chú · hậu mãi không bán tiếp · gói tin trùng
     // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
@@ -3415,6 +3418,8 @@ async function main() {
     await testSalesAddressApplied();
     // AGENTS 3.12b (chủ shop 22/10/2026): địa chỉ khách không bao giờ hỏi lại — một điểm chặn cuối, chốt + upsell như đơn thường.
     await testAddressNeverReask();
+    // P0 HSLC 24/10/2026 (ca «Trần Thị Ngọc»): khoá hộp thư của tin riêng chỉ dạng page_PSID · phàn nàn bị hỏi lại ⇒ chuyển người trước model · lượt đã chuyển người không ghi.
+    await testCommentInboxKey();
     // P0 HSLC 24/10/2026: cùng một khách qua hội thoại bình luận + hộp thư — chỉ định danh nền tảng (identity-link, pha 3 gộp đơn dùng chung).
     await testIdentityLink();
     // 23/10/2026: câu máy chủ tự soạn qua điểm chặn · lời xin dạng kể · 2B ADDRESS_REASK theo 3.12b, REPEAT_ASK tách mã. Thuần, không gieo dữ liệu.

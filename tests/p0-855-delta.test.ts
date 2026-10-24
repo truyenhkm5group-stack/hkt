@@ -20,6 +20,7 @@ import { applyCustomerCartMessage, botProposedDenial, buyingText, customerTextsS
 import { CLAIM_SAFE_TEXT, guardClaims } from "@/lib/sales-chatbot/claim-guard";
 import { CUSTOMER_HANDOFF_REASON, customerHandoffVerdict } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { classifyHandoffReason } from "@/lib/sales-chatbot/events-shared";
+import { ADDRESS_HANDOFF_REASON } from "@/lib/sales-chatbot/address-memory";
 import { appendContextMessages, purchaseRoundStart } from "@/lib/sales-chatbot/engine";
 import { returningCustomerPrompt, type ReturningCustomer } from "@/lib/sales-chatbot/returning";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
@@ -335,6 +336,18 @@ const CASES: GoldenCase[] = [
     ],
   },
   {
+    // P0 24/10/2026: «ở trên rồi» nay là lời phàn nàn bị hỏi lại ⇒ chuyển người TRƯỚC model (ca trên). Ca này giữ độ phủ đường «model lặp
+    // đúng câu xin lỗi vừa gửi» bằng lời khách KHÔNG phàn nàn.
+    key: "p855d-lap-xin-loi-khong-phan-nan",
+    title: "Khách đáp «dạ» (không phàn nàn), model gửi lại ĐÚNG câu xin lỗi + xin địa chỉ ⇒ câu lặp bị bỏ, chuyển người",
+    shop: "food",
+    channel: "WEB",
+    turns: [
+      { say: "Ship chị 1 chả mực giã tay", ai: [() => [say("Dạ em xin lỗi, chị cho em xin địa chỉ nhận hàng ạ?")]] },
+      { say: "dạ", ai: [() => [say("Dạ em xin lỗi, chị cho em xin địa chỉ nhận hàng ạ?")]] },
+    ],
+  },
+  {
     key: "p855d-luot-mua-moi-xoa-bao-gia",
     title: "Lượt mua mới (đơn chốt > 3 ngày) xoá báo giá + sổ tổng bị từ chối của lượt mua trước",
     shop: "food",
@@ -436,7 +449,14 @@ async function testGolden() {
         case "p855d-khong-lap-xin-loi":
           assert.equal(t.turns[1].shown.filter((x) => /xin lỗi/.test(x)).length, 0, JSON.stringify(t.turns[1].shown));
           assert.equal(t.final.status, "HANDOFF");
-          assert.match(t.final.handoffReason ?? "", /lặp lại câu xin lỗi/);
+          // P0 24/10/2026 (lead duyệt): «ở trên rồi» sau câu xin địa chỉ = khách phàn nàn bị hỏi lại ⇒ chuyển người TRƯỚC model.
+          assert.equal(t.final.handoffReason, ADDRESS_HANDOFF_REASON.COMPLAINT);
+          assert.equal(t.turns[1].rounds.length, 0, "không hỏi model ở lượt phàn nàn");
+          return;
+        case "p855d-lap-xin-loi-khong-phan-nan":
+          assert.equal(t.turns[1].shown.filter((x) => /xin lỗi/.test(x)).length, 0, JSON.stringify(t.turns[1].shown));
+          assert.equal(t.final.status, "HANDOFF");
+          assert.match(t.final.handoffReason ?? "", /lặp lại câu xin lỗi/, `đường «model lặp câu xin lỗi» vẫn chạy: ${t.final.handoffReason}`);
           return;
         case "p855d-luot-mua-moi-xoa-bao-gia":
           assert.notEqual(state.quote?.id, "q-cu", "báo giá lượt mua trước đã xoá");

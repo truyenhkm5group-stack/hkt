@@ -31,7 +31,7 @@ import { and, eq, inArray, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { isManualOrderId, manualOrderGaps } from "@/lib/constants/manual-orders";
 import { manualOrderAmountDue, manualPaymentStatus, sumConfirmedPayments } from "@/lib/constants/order-payments";
-import { orderReviewOf } from "@/lib/constants/order-review";
+import { ORDER_REVIEW_INTERNAL_CODES, orderReviewOf } from "@/lib/constants/order-review";
 import { formatVND } from "@/lib/format";
 import { namedProductsIn } from "@/lib/sales-chatbot/cart-commitment";
 import type { ReferenceBreakdown } from "@/lib/sales-chatbot/quote";
@@ -693,7 +693,8 @@ export type OrderValidity = { valid: boolean; pending: "ADDRESS" | "CHECK" | nul
 export function orderValidityOf(o: { id: string; raw: unknown; phone: string; address: string; province: string; ward: string; itemsCount: number; total: number; shippingFee: number }): OrderValidity {
   if (!isManualOrderId(o.id)) return { valid: true, pending: null, reasons: [] };
   const gaps = manualOrderGaps({ phone: o.phone, address: o.address, province: o.province, ward: o.ward }, o.itemsCount);
-  const review = orderReviewOf(o.raw)?.entries ?? [];
+  // Cờ NỘI BỘ (`ORDER_REVIEW_INTERNAL_CODES`) không đổi lời bot nói với khách — chỉ người đối chiếu; vận đơn vẫn bị giữ ở lib/shipping/route.ts.
+  const review = (orderReviewOf(o.raw)?.entries ?? []).filter((e) => !ORDER_REVIEW_INTERNAL_CODES.includes(e.code));
   const reasons: string[] = [...gaps.map((g) => `thiếu ${g}`), ...review.map((e) => e.code)];
   const q = o.raw && typeof o.raw === "object" ? (o.raw as Record<string, unknown>).quote : null;
   const qTotal = q && typeof q === "object" ? (q as Record<string, unknown>).total : null;
