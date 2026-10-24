@@ -17,6 +17,7 @@ import { transcribeVoiceMessages, voiceLabel, isAudioAttachment, hasCustomerVoic
 import { voiceDeps } from "./voice-runtime.js";
 import { parseBody, lookupSize, parseChart } from "./sizechart.js";
 import { stripHtml, stripMarkdown, splitMessage, splitIntoBubbles, describeAttachments, parseTs, imageUrls, fetchImageAsBase64, sortChrono } from "./util.js";
+import { privateReplyInboxId } from "./comment-inbox.js";
 
 export const HANDOFF = "[[HANDOFF]]";
 /** Cau thay the khi bot dinh dua so tai khoan / doi coc (khong duoc phep) */
@@ -2082,7 +2083,7 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
       const orders = await this.recentOrdersCached(conversationId, phones);
       if (orders.length) {
         // Chặng theo chứng từ VTP của ERP (lỗi / chậm ⇒ rỗng ⇒ câu như cũ) — chatbot/src/orders.js erpOrderView.
-        const erpView = await erpOrderView(orders);
+        const erpView = await erpOrderView(orders, { pageId });
         systemPrompt += `\n\n## ĐƠN HÀNG CỦA KHÁCH TRÊN HỆ THỐNG POS (dữ liệu thật, hãy dùng để trả lời)\n${orders.map((o) => "- " + describeOrder(o, erpView)).join("\n")}\n- Khách hỏi đã gửi chưa / bao giờ nhận / đơn tới đâu: trả lời ĐÚNG theo trạng thái trên (nêu trạng thái, đơn vị vận chuyển, mã vận đơn, ngày gửi), TUYỆT ĐỐI không nói chung chung "giao toàn quốc ${settings.deliveryDays()} ngày". Trả lời 1–2 câu, không hỏi lại, không mời mua thêm.\n- Đơn "Đã gửi hàng"/"Đang giao": nhắc khách để ý điện thoại, bưu tá sẽ gọi. Đơn "Giao không thành công"/"Đang hoàn": xin lỗi, thêm [[HANDOFF]] để nhân viên xử lý.`;
         log.info(`[${pageId}] ${conversationId}: kem ${orders.length} don POS vao prompt (${orders.map((o) => "#" + o.id + " st" + o.status).join(", ")})`);
       }
@@ -2378,8 +2379,8 @@ ${eff.afterOrderText.trim()}`;
         try {
           const again = await client.getMessages(conversationId);
           const mine = (again.messages || []).find((m) => m.id === last.id);
-          const prc = mine?.private_reply_conversation;
-          const inboxId = typeof prc === "string" ? prc : prc?.id || prc?.conversation_id;
+          // Chi ma hop thu dang <page_id>_<PSID> — `id` la ma TIN rieng «m_...» (P0 24/10/2026, comment-inbox.js).
+          const { inboxId } = privateReplyInboxId(mine?.private_reply_conversation, pageId, last.from?.id);
           if (inboxId) await this.deliver(pageId, inboxId, { text: "", imageUrls: imageUrlsToSend, type: "INBOX" });
           else log.warn(`[${pageId}] Khong tim thay hoi thoai inbox tu binh luan de gui anh`);
         } catch (e) {

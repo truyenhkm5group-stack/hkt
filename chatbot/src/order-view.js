@@ -31,7 +31,24 @@ const ERP_STAGE_VI = { PENDING: "chờ bưu tá lấy hàng", PICKED_UP: "bưu t
 const PANCAKE_NEGATIVE = new Set(["canceled", "cancelled", "returning", "returned", "delivery_failed"]);
 
 /** Hoi ERP mot luot cho ca danh sach don (ma VTP + ma don). Loi / khong khoa ⇒ rong (bot noi nhu cu). Loi KHONG duoc dem. */
-export async function erpOrderView(orders, { fetchImpl = fetch, now = Date.now, baseUrl = process.env.ERP_INTERNAL_URL || "http://app:3000", token = "", warn = () => {} } = {}) {
+/**
+ * Ly do mot lan doc goc nhin ERP roi ve cau cu (24/10/2026, lead duyet sau phep do shipment-state-probe: route nguoi 106 ms ≪ timeout
+ * 1,5 s ⇒ lan «ERP tra 0» khong do cau truy van; can SO THAT thay vi doan). Ma DONG: TIMEOUT · HTTP_<ma> · DNS · NETWORK · BAD_BODY · OTHER.
+ */
+export function erpFallbackReason(e) {
+  const name = String(e?.name || "");
+  const msg = String(e?.message || "");
+  const code = String(e?.cause?.code || e?.code || "");
+  if (name === "TimeoutError" || name === "AbortError") return "TIMEOUT";
+  const http = /^ERP tra (\d{3})$/.exec(msg);
+  if (http) return `HTTP_${http[1]}`;
+  if (/ENOTFOUND|EAI_AGAIN/.test(`${code} ${msg}`)) return "DNS";
+  if (/ECONNREFUSED|ECONNRESET|EPIPE|ETIMEDOUT|UND_ERR|fetch failed/i.test(`${code} ${msg}`)) return "NETWORK";
+  if (name === "SyntaxError") return "BAD_BODY";
+  return "OTHER";
+}
+
+export async function erpOrderView(orders, { fetchImpl = fetch, now = Date.now, baseUrl = process.env.ERP_INTERNAL_URL || "http://app:3000", token = "", warn = () => {}, onDone = () => {} } = {}) {
   if (!token || !Array.isArray(orders) || !orders.length) return EMPTY_ERP_VIEW;
   const codes = [...new Set(orders.map((o) => String(o?.partner?.order_number_vtp || "").trim().toUpperCase()).filter((c) => /^[A-Z0-9]{8,24}$/.test(c)))].slice(0, ERP_VIEW_MAX);
   const ids = [...new Set(orders.map((o) => String(o?.id ?? "")).filter((x) => /^[0-9]{1,24}$/.test(x)))].slice(0, ERP_VIEW_MAX);
@@ -39,6 +56,7 @@ export async function erpOrderView(orders, { fetchImpl = fetch, now = Date.now, 
   const key = `${codes.join(",")}|${ids.join(",")}`;
   const hit = erpViewCache.get(key);
   if (hit && now() - hit.at < ERP_VIEW_TTL_MS) return hit.value;
+  const t0 = now();
   try {
     const url = `${baseUrl.replace(/\/+$/, "")}/api/internal/shipment-state?codes=${encodeURIComponent(codes.join(","))}&orders=${encodeURIComponent(ids.join(","))}`;
     const res = await fetchImpl(url, { headers: { "x-chatbot-token": token }, signal: AbortSignal.timeout(ERP_VIEW_TIMEOUT_MS) });
@@ -50,9 +68,13 @@ export async function erpOrderView(orders, { fetchImpl = fetch, now = Date.now, 
     };
     erpViewCache.set(key, { at: now(), value });
     if (erpViewCache.size > 500) erpViewCache.delete(erpViewCache.keys().next().value);
+    onDone({ ok: true, reason: null, ms: Math.round(now() - t0) });
     return value;
   } catch (e) {
-    warn(`Khong doc duoc goc nhin ERP cho ${ids.length} don: ${e instanceof Error ? e.message : e}`);
+    const reason = erpFallbackReason(e);
+    const ms = Math.round(now() - t0);
+    onDone({ ok: false, reason, ms });
+    warn(`Khong doc duoc goc nhin ERP cho ${ids.length} don (${reason}, ${ms} ms) -> noi nhu cu: ${e instanceof Error ? e.message : e}`);
     return EMPTY_ERP_VIEW;
   }
 }

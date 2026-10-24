@@ -158,7 +158,17 @@ export { ORDER_STATUS_VI, describeOrder };
 
 /** Goc nhin ERP cho cac don POS (chatbot/src/order-view.js) voi khoa noi bo ADMIN_TOKEN va log that cua bot. */
 export function erpOrderView(orders, opts = {}) {
-  return erpOrderViewCore(orders, { token: config.adminToken, warn: (m) => log.warn(m), ...opts });
+  const { pageId, ...rest } = opts;
+  // Dem theo page (hien o dong «Hom nay» cua ops chatbot-status): lan doc ERP thanh cong / roi ve cau cu + ly do (24/10/2026).
+  const onDone = ({ ok, reason }) => {
+    if (!pageId) return;
+    if (ok) store.bumpStat(pageId, "erpViewOk");
+    else {
+      store.bumpStat(pageId, "erpViewFallback");
+      store.bumpStat(pageId, `erpViewFallback_${reason}`);
+    }
+  };
+  return erpOrderViewCore(orders, { token: config.adminToken, warn: (m) => log.warn(m), onDone, ...rest });
 }
 
 
