@@ -175,7 +175,9 @@ async function traceConv(db: Db, conv: ConvRow, all: readonly ConvRow[]): Promis
   console.log(`\n══ Hội thoại ${conv.id} · ${conv.channel} · ${conv.status} · tạo ${conv.createdAt.toISOString()}`);
   console.log(`  page ${conv.pageId ?? "—"} · thread ${conv.threadId ?? "—"} (dáng ${idShape(conv.threadId)}) · visitor_key ${conv.visitorKey ?? "—"} · khớp khoá của thread chính nó: ${own === conv.visitorKey}`);
   console.log(`  state: commentCarry ${carry ? `${carry.outcome} · chép ${carry.copied} · lúc ${carry.at.toISOString()}` : "—"} · postContext ${post.postId ? "CÓ" : "—"} · customer SĐT ${Boolean(customer.phone)} · địa chỉ ${Boolean(customer.address)} · returning.fbIds ${fbIds.length} · roundStartAt ${String(st.roundStartAt ?? "—")}`);
-  tomTat(`HT ${id8}: ${conv.channel} · ${conv.status} · commentCarry ${carry ? `${carry.outcome}/chép ${carry.copied}` : "—"} · visitor_key = khoá thread của chính nó ${own === conv.visitorKey} · customer SĐT ${Boolean(customer.phone)} địa chỉ ${Boolean(customer.address)} · fbIds ${fbIds.length}`);
+  const coSdt = Boolean(customer.phone);
+  const coDiaChi = Boolean(customer.address);
+  tomTat(`HT ${id8}: ${conv.channel} · ${conv.status} · commentCarry ${carry ? `${carry.outcome}/chép ${carry.copied}` : "—"} · visitor_key = khoá thread của chính nó ${own === conv.visitorKey} · customer SĐT ${coSdt} địa chỉ ${coDiaChi} · fbIds ${fbIds.length}`);
 
   // Tin phía fanpage của luồng hội thoại đang mang.
   const t = schema.salesChatInbound;
