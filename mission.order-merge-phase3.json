@@ -3,7 +3,7 @@
   "mission_id": "order-merge-phase3",
   "title": "P0 trùng đơn pha 3: mua bổ sung gộp vào đơn bot đang mở của cùng danh tính (bình luận ↔ hộp thư)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -26,9 +26,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-24T14:12:23.634Z",
-  "updated_at": "2026-10-24T14:17:59.707Z",
+  "updated_at": "2026-10-24T14:39:15.904Z",
   "last_heartbeat": "2026-10-24T14:15:09.900Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1050 → f12c08932a6c5216cbdd6c7907d2427a8b22b2c5"
+  },
   "handoff": {
     "branch": "claude/order-merge-phase3-main",
     "sha": "1e03fa98e224b9e823c2fce8589d477033fa27f9",
