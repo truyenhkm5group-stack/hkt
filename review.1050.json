@@ -1,0 +1,8 @@
+{
+  "pr": 1050,
+  "sha": "1e03fa98e224b9e823c2fce8589d477033fa27f9",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T14:18:04.380Z",
+  "note": "review lead (P0 HSLC pha 3 gộp đơn mua bổ sung): đơn BOT đang mở của cùng danh tính VERIFIED (identity-link #1047) ≤24 giờ ⇒ gộp qua update_draft_order với mọi hàng rào; món nhắc lại không cộng; đơn người / hội thoại người giữ ⇒ chuyển người kèm món × SL; tổng câu khách do máy chủ; khoá hai hội thoại theo thứ tự id; câu Ngọc nguyên văn ⇒ chuyển người. Hồi quy Đỗ Là, #8037F35A, golden, order-golden"
+}
