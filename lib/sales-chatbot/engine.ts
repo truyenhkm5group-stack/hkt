@@ -1478,7 +1478,7 @@ async function chatTurnCore(
     if (!st0.handoff && complainsOfContactReask(text, recentSaid)) {
       const reason = ADDRESS_HANDOFF_REASON.COMPLAINT;
       const st: ChatState = { ...st0, handoff: { reason, at: now.toISOString() } };
-      if (!isMessagingChannel(opts.channel)) await reply(conv, seq, ADDRESS_STAFF_TEXT);
+      if (!isMessagingChannel(opts.channel)) await reply(conv, seq, cfg.handoff.message);
       await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1, lastError: ADDRESS_REASK_NOTE.COMPLAINT });
       if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey: `sales-chat:address-guard:${conv.id}:${turnSeq}` }).catch(() => undefined);
       return { ok: true, view: (await conversationView(conv.id))! };
