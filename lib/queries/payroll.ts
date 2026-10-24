@@ -33,7 +33,7 @@ import { carryoverMonth } from "@/lib/payroll/profit-carryover";
 import { getCarryoverConfig, resolveOpeningMany, type OpeningBasis, type OpeningResolution } from "@/lib/queries/payroll-carryover";
 import { computeEngineLines, type EmployeeEngineResult } from "@/lib/queries/payroll-engine";
 import type { Period } from "@/lib/search-params";
-import { getSettingJson } from "@/lib/settings";
+import { getSettingJson, withSettingsScope } from "@/lib/settings";
 import { isProfitLinked, isRegularVariable, type ProfitGatePolicy } from "@/lib/constants/payroll-profit-gate";
 import { eligibleProfitOf, evaluateProfitGate, type LateAdjustment, type ProfitGateAllocation, type ProfitGateClaim, type ProfitGateOpening, type ProfitGateResult } from "@/lib/payroll/profit-gate";
 import { getProfitGateConfig, resolveGateOpening } from "@/lib/queries/payroll-profit-gate";
@@ -576,7 +576,8 @@ async function productEconomics(period: Period) {
  *  - QC test (không thuộc mã) trừ vào chính người chạy.
  */
 export async function getMarketerReport(period: Period, basis: PayrollBasis = "profit1"): Promise<MarketerReport> {
-  return memo(`getMarketerReport:${periodKey(period)}:${basis}`, 120_000, () => getMarketerReportUncached(period, basis));
+  // OD-UX-05 mục 3b (24/10/2026, perf-probe «ĐỌC CẤU HÌNH TRONG TỪNG HÀM»): 11 lượt / 6 khoá.
+  return memo(`getMarketerReport:${periodKey(period)}:${basis}`, 120_000, () => withSettingsScope(() => getMarketerReportUncached(period, basis)));
 }
 
 async function getMarketerReportUncached(period: Period, basis: PayrollBasis): Promise<MarketerReport> {
@@ -1108,6 +1109,11 @@ export async function getPayrollReport(
   basis: PayrollBasis,
   gateMode: PayrollGateMode = { mode: "resolve" },
 ): Promise<PayrollReport> {
+  // OD-UX-05 mục 3b (24/10/2026, perf-probe «ĐỌC CẤU HÌNH TRONG TỪNG HÀM»): 15 lượt / 7 khoá. Chỉ khử trùng ĐỌC — không đổi một phép tính lương nào.
+  return withSettingsScope(() => getPayrollReportInScope(period, basis, gateMode));
+}
+
+async function getPayrollReportInScope(period: Period, basis: PayrollBasis, gateMode: PayrollGateMode): Promise<PayrollReport> {
   const [marketers, employees, cash, paid, carryConfig] = await Promise.all([
     getMarketerReport(period, basis),
     listEmployees(),

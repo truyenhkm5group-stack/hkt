@@ -37,7 +37,7 @@ import { memo, memoPeek, registerStaleOnWrite } from "@/lib/cache";
 import { WORK_ALERTS_KEY, WORK_FULFILLMENT_KEY, WORK_PAYROLL_RECON_PREFIX, WORK_STALE_ON_WRITE_PREFIXES, WORK_WRAPPER_TTL_MS } from "@/lib/constants/work-cache";
 import { approvalStillValid } from "@/lib/approvals/service";
 import { SOURCING_TRIAL_WORK_LABEL, type SourcingTrialWorkKind } from "@/lib/constants/sourcing";
-import { getSettingJson } from "@/lib/settings";
+import { getSettingJson, withSettingsScope } from "@/lib/settings";
 import { vnStartOfDay } from "@/lib/format";
 
 /**
@@ -1392,6 +1392,11 @@ export type CollectOptions = {
  * hiện một hàng đợi ngắn hơn thực tế mà không ai biết.
  */
 export async function collectWorkItems(opts: CollectOptions = {}): Promise<{ items: WorkItem[]; failed: { source: WorkSource; error: string }[] }> {
+  // OD-UX-05 mục 3b (24/10/2026, perf-probe «ĐỌC CẤU HÌNH TRONG TỪNG HÀM»): getMyWork 17 lượt / 11 khoá — các nguồn đọc chung cấu hình; một phạm vi cho cả lượt gom.
+  return withSettingsScope(() => collectWorkItemsInScope(opts));
+}
+
+async function collectWorkItemsInScope(opts: CollectOptions): Promise<{ items: WorkItem[]; failed: { source: WorkSource; error: string }[] }> {
   const now = opts.now ?? new Date();
   const closedSince = opts.closedSince ?? null;
   const want = (s: WorkSource) => !opts.sources || opts.sources.includes(s);
