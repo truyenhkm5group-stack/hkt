@@ -581,6 +581,7 @@ import { testCommerceAgent } from "./commerce-agent.test";
 import { testZaloOa } from "./zalo-oa.test";
 import { testSalesEvents } from "./sales-events.test";
 import { testChatAdAttribution } from "./chat-ad-attribution.test";
+import { testConversationOrderGuard } from "./conversation-order-guard.test";
 import { testOrderAttribution } from "./order-attribution.test";
 import { testLostReasons } from "./lost-reasons.test";
 import { testAiQuality } from "./ai-quality.test";
@@ -3229,6 +3230,8 @@ async function main() {
     await testSalesEvents();
     // Quảng cáo dẫn khách vào hội thoại ⇒ đơn bot mang ad_id (0225) — tổ chức THẬT `chat-ad-attr`, tự dọn.
     await testChatAdAttribution();
+    // Hội thoại đã có đơn của người ⇒ bot không tạo / không chốt đơn thứ hai (P0 HSLC 24/10/2026) — tổ chức THẬT `dup-guard`, tự dọn.
+    await testConversationOrderGuard();
     await testOrderAttribution();
     await testLostReasons();
     await testAiQuality();
