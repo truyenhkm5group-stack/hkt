@@ -740,5 +740,7 @@ export async function migrateOrganizationDb(
   await db.execute(sql`delete from platform_tenant_health_daily`);
   // 0248 · trạng thái lượt migrate của từng tổ chức — mặt phẳng điều khiển, chỉ bản ở CSDL nhà là thật (bản ở đây chưa từng được ghi).
   await db.execute(sql`delete from platform_org_migration_status`);
+  // 0259 · vết gửi tin cho người vận hành nền tảng — chỉ bản ở CSDL nhà là thật.
+  await db.execute(sql`delete from platform_operator_alerts`);
   return outcome;
 }

@@ -23,6 +23,7 @@ import { sendLark } from "@/lib/alerts/lark";
 import { sendTelegram } from "@/lib/alerts/telegram";
 import { currentOrganization, withOrganization } from "@/lib/platform/context";
 import { getHomeOrganization } from "@/lib/platform/organizations";
+import { deliverThroughChain, readOperatorAlertResult, recordOperatorAlert, type ChainOutcome, type ChannelAttempt, type OperatorNotifyResult } from "@/lib/platform/operator-alerts";
 import { STATUS_DOT, STATUS_LABEL, type HealthAlertDecision, type SalesHealth, type SalesHealthSnapshot } from "@/lib/sales-chatbot/health-shared";
 import { ORDER_WRITE_HANDOFF_PREFIX, ORDER_WRITE_STALE_MINUTES, ORDER_WRITE_STALE_SCAN_LIMIT } from "@/lib/constants/ops-signals";
 import { AI_DOWN_HANDOFF_REASON } from "@/lib/sales-chatbot/ai-hold-shared";
@@ -171,25 +172,68 @@ export const SALES_COCKPIT_HREF = "/ai/sales-chatbot/cockpit";
  * tổ chức + trạng thái + câu kiểm (số đếm, lớp lỗi) — KHÔNG tên khách, SĐT, nội dung tin (luật ISO-05 của `loadAlertConfig`:
  * dữ liệu của tổ chức khách không bao giờ chảy vào nhóm của VNX). Không ném.
  */
-export type OperatorNotifyResult = "SENT" | "NO_CHANNEL" | "FAILED";
-export async function notifyPlatformOperator(title: string, lines: string[]): Promise<OperatorNotifyResult> {
-  const send = async (): Promise<OperatorNotifyResult> => {
-    const cfg = await loadAlertConfig();
-    let r: { ok: boolean } | null = null;
-    if (cfg.larkManagerWebhookUrl) r = await sendLark(cfg.larkManagerWebhookUrl, cfg.larkManagerSecret, title, lines.map((text) => [{ text }]));
-    else if (cfg.larkWebhookUrl) r = await sendLark(cfg.larkWebhookUrl, cfg.larkSecret, title, lines.map((text) => [{ text }]));
-    else if (cfg.telegramBotToken && cfg.telegramChatId) {
-      const esc = (x: string) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      r = await sendTelegram(cfg.telegramBotToken, cfg.telegramChatId, [`<b>${esc(title)}</b>`, ...lines.map(esc)].join("\n"));
-    }
-    return r === null ? "NO_CHANNEL" : r.ok ? "SENT" : "FAILED";
-  };
+export type { OperatorNotifyResult };
+
+/** Kênh đã cấu hình, theo THỨ TỰ thử: Lark nhóm quản lý → Lark chung → Telegram (VPS từng bị chặn Telegram — Lark đi trước). */
+async function operatorChannels(title: string, lines: string[]): Promise<ChannelAttempt[]> {
+  const cfg = await loadAlertConfig();
+  const out: ChannelAttempt[] = [];
+  const larkLines = lines.map((text) => [{ text }]);
+  if (cfg.larkManagerWebhookUrl) out.push({ channel: "LARK_MANAGER", send: () => sendLark(cfg.larkManagerWebhookUrl!, cfg.larkManagerSecret, title, larkLines) });
+  if (cfg.larkWebhookUrl && cfg.larkWebhookUrl !== cfg.larkManagerWebhookUrl) out.push({ channel: "LARK", send: () => sendLark(cfg.larkWebhookUrl!, cfg.larkSecret, title, larkLines) });
+  if (cfg.telegramBotToken && cfg.telegramChatId) {
+    const esc = (x: string) => x.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    out.push({ channel: "TELEGRAM", send: () => sendTelegram(cfg.telegramBotToken!, cfg.telegramChatId!, [`<b>${esc(title)}</b>`, ...lines.map(esc)].join("\n")) });
+  }
+  return out;
+}
+
+/** Nguồn kênh — mặc định cấu hình thật; bài kiểm đưa kênh giả vào (không gọi mạng). */
+export type OperatorChannelSource = (title: string, lines: string[]) => Promise<ChannelAttempt[]>;
+
+/** Chạy chuỗi kênh trong ngữ cảnh tổ chức NHÀ (cấu hình kênh vận hành là của nhà). Không ném. */
+async function sendToOperator(title: string, lines: string[], channelsOf: OperatorChannelSource = operatorChannels): Promise<ChainOutcome> {
+  const run = async () => deliverThroughChain(await channelsOf(title, lines));
   try {
     const org = await currentOrganization();
-    if (org.isHome) return await send();
-    return await withOrganization((await getHomeOrganization()).code, send);
+    if (org.isHome) return await run();
+    return await withOrganization((await getHomeOrganization()).code, run);
+  } catch (e) {
+    return { result: "FAILED", channel: null, errors: [{ channel: "LARK_MANAGER", error: e instanceof Error ? e.message.slice(0, 200) : "lỗi lạ" }] };
+  }
+}
+
+/**
+ * Nhóm của ĐƠN VỊ VẬN HÀNH NỀN TẢNG (VNX) — Lark nhóm quản lý → Lark → Telegram, DỪNG ở kênh đầu tiên nhận. Chỉ nhận MÃ tổ chức +
+ * trạng thái + câu kiểm (số đếm, lớp lỗi) — KHÔNG tên khách, SĐT, nội dung tin (luật ISO-05 của `loadAlertConfig`: dữ liệu của tổ chức
+ * khách không bao giờ chảy vào nhóm của VNX). Không ném.
+ *
+ * `opts.dedupeKey` (+ `orgCode`): tin có danh tính ⇒ ghi VẾT ở CSDL nhà (`platform_operator_alerts`) và KHÔNG gửi lại khi vết đã SENT.
+ */
+export async function notifyPlatformOperator(title: string, lines: string[], opts: { dedupeKey?: string; orgCode?: string; channels?: OperatorChannelSource } = {}): Promise<OperatorNotifyResult> {
+  try {
+    const tracked = opts.dedupeKey && opts.orgCode ? { dedupeKey: opts.dedupeKey, orgCode: opts.orgCode } : null;
+    if (tracked && (await readOperatorAlertResult(tracked.orgCode, tracked.dedupeKey)) === "SENT") return "SENT";
+    const outcome = await sendToOperator(title, lines, opts.channels);
+    if (tracked) await recordOperatorAlert({ ...tracked, title, outcome });
+    return outcome.result;
   } catch {
     // Đường phụ — chuông của tổ chức đã ghi. Nơi cần biết (ngưỡng khách AI) đọc «FAILED» để thử lại lượt sau.
+    return "FAILED";
+  }
+}
+
+/**
+ * Thử LẠI một tin vận hành đã ghi vết FAILED (mọi kênh hỏng lượt trước). Chưa có vết (tin gửi trước bản 0259 / CSDL chưa áp) hay
+ * NO_CHANNEL (không có kênh để thử) ⇒ không gửi; SENT ⇒ không gửi lại. Lượt canh 5 phút gọi hàm này cho đúng khoá của quyết định.
+ */
+export async function retryFailedOperatorAlert(orgCode: string, dedupeKey: string, title: string, lines: string[], channels?: OperatorChannelSource): Promise<OperatorNotifyResult | null> {
+  try {
+    if ((await readOperatorAlertResult(orgCode, dedupeKey)) !== "FAILED") return null;
+    const outcome = await sendToOperator(title, lines, channels);
+    await recordOperatorAlert({ orgCode, dedupeKey, title, outcome });
+    return outcome.result;
+  } catch {
     return "FAILED";
   }
 }
@@ -214,7 +258,14 @@ export async function notifySalesHealth(p: { decision: Exclude<HealthAlertDecisi
     .values({ kind: "SYSTEM", severity: recovered ? "info" : health.status === "RED" ? "critical" : "warning", title, body: body.slice(0, 2000), href: SALES_COCKPIT_HREF, entityType: "SALES_CHAT", entityId: "health", dedupeKey: decision.dedupe, occurredAt: now })
     .onConflictDoNothing({ target: schema.notifications.dedupeKey })
     .returning({ id: schema.notifications.id });
-  if (!inserted.length) return;
+  const org = await currentOrganization();
+  const opTitle = `${title} — tổ chức ${org.code}`;
+  const opLines = recovered ? lines : bad.map((c) => `${c.level === "CRITICAL" ? "🔴" : "🟡"} ${c.title}: ${c.detail}`);
+  // Đã báo ở lượt trước (khoá đã có) ⇒ chuông / hộp thư / nhóm shop KHÔNG lặp; chỉ tin cho VNX được thử lại khi lượt trước mọi kênh hỏng.
+  if (!inserted.length) {
+    await retryFailedOperatorAlert(org.code, decision.dedupe, opTitle, opLines);
+    return;
+  }
   const users = await activeUserIdsWhoCan("ai_sales:manage");
   await sendInboxMessages(users.map((userId) => ({ userId, kind: "SALES_CHAT_AI_DOWN", title, body: body.slice(0, 2000), href: SALES_COCKPIT_HREF, dedupeKey: `${decision.dedupe}:${userId}` })), db);
   try {
@@ -223,8 +274,7 @@ export async function notifySalesHealth(p: { decision: Exclude<HealthAlertDecisi
   } catch {
     // Nhóm chat là đường phụ — chuông ERP ở trên đã ghi.
   }
-  const org = await currentOrganization();
-  await notifyPlatformOperator(`${title} — tổ chức ${org.code}`, recovered ? lines : bad.map((c) => `${c.level === "CRITICAL" ? "🔴" : "🟡"} ${c.title}: ${c.detail}`));
+  await notifyPlatformOperator(opTitle, opLines, { dedupeKey: decision.dedupe, orgCode: org.code });
 }
 
 /**

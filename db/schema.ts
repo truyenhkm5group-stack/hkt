@@ -12599,3 +12599,31 @@ export const sourcingTrialRequests = pgTable(
     check("sourcing_trial_requests_cancelled_check", sql`${t.status} <> 'CANCELLED' OR (${t.cancelledAt} IS NOT NULL AND ${t.cancelledBy} IS NOT NULL AND length(trim(${t.cancelReason})) >= 3)`),
   ],
 );
+
+/**
+ * Vết gửi tin cho NGƯỜI VẬN HÀNH nền tảng (0259 · P0 cạn credit AI 24/10/2026): MỘT dòng mỗi (tổ chức, khoá chống trùng của tin).
+ * Trả lời được «tin báo sự cố có tới nhóm VNX không, qua kênh nào» — và cho lượt canh kế thử lại tin FAILED mà không gửi trùng tin
+ * đã SENT. Chỉ mã tổ chức + tiêu đề vận hành, không dữ liệu khách. Ghi / đọc qua `lib/platform/operator-alerts.ts`.
+ */
+export const platformOperatorAlerts = pgTable(
+  "platform_operator_alerts",
+  {
+    orgCode: text("org_code").notNull(),
+    dedupeKey: text("dedupe_key").notNull(),
+    title: text("title").notNull(),
+    result: text("result").notNull(),
+    channel: text("channel"),
+    attempts: integer("attempts").notNull().default(1),
+    lastError: text("last_error"),
+    firstAt: ts("first_at").notNull().defaultNow(),
+    lastAt: ts("last_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: "platform_operator_alerts_pkey", columns: [t.orgCode, t.dedupeKey] }),
+    index("platform_operator_alerts_last_idx").on(t.lastAt),
+    check("platform_operator_alerts_result_check", sql`${t.result} IN ('SENT', 'NO_CHANNEL', 'FAILED')`),
+    check("platform_operator_alerts_channel_check", sql`${t.channel} IS NULL OR ${t.channel} IN ('LARK_MANAGER', 'LARK', 'TELEGRAM')`),
+    check("platform_operator_alerts_sent_check", sql`(${t.result} = 'SENT') = (${t.channel} IS NOT NULL)`),
+    check("platform_operator_alerts_attempts_check", sql`${t.attempts} >= 1`),
+  ],
+);
