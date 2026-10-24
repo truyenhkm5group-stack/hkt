@@ -1,0 +1,8 @@
+{
+  "pr": 1036,
+  "sha": "562b56de745da6ead43c2d2ad1f5cb016c6b4068",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T07:16:12.495Z",
+  "note": "review lead: clearMemo theo tổ chức (ngữ cảnh tường minh; không có ⇒ ALL), phiên bản riêng từng tổ chức; audit phân giải tổ chức; publish ALL tường minh; SALES_CHAT_DUPLICATE_ORDER_BLOCKED vào KHONG_DOI_SO_LIEU; bài kiểm: B ghi không xoá đệm nhà, lượt tính nhà sống qua lượt xoá của B, #1025 giữ hành vi."
+}
