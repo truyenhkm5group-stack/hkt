@@ -13,8 +13,13 @@
    · danh tính: `from_id` của bình luận có trùng `sender_id` (PSID) của khách ở luồng thật không, có nằm trong `state.returning.fbIds` không.
   Ghép dòng bình luận với hội thoại bằng CHỮ + MỐC chỉ để CHẨN ĐOÁN ở đây (nhãn «ghép theo chữ») — không phải luật nghiệp vụ.
 
-  Hai chế độ:  `<mã tổ chức> --conv=<uuid>[,<uuid>…]` (≤ 5)  ⇒ từng hội thoại: dòng, khoá, state.commentCarry, tin, đơn nối.
+  Ba chế độ:   `<mã tổ chức> --conv=<uuid>[,<uuid>…]` (≤ 5)  ⇒ từng hội thoại: dòng, khoá, state.commentCarry, tin, đơn nối.
                `<mã tổ chức> --days=1..14`                 ⇒ mọi hội thoại có `state.commentCarry` trong kỳ: phán quyết khoá theo nhóm.
+               `<mã tổ chức>|--all --legacy-keys [--days=1..60]` (P2-6, CHẠY THỬ — KHÔNG ghi, KHÔNG đổi khoá, KHÔNG gộp) ⇒ hội thoại
+               bình luận đang mang khoá mã TIN «m_…» (lỗi trước bản sửa privateReplyInboxId 24/10/2026), mỗi hội thoại: luồng hộp thư
+               THẬT tìm bằng CHÍNH mã tin riêng (dòng tin có `message_id` = «m_…» — tiếng vọng của tin bot vừa gửi, khoá xác định, không
+               ghép theo chữ) · hộp thư ấy có hội thoại riêng không (khách đang có HAI hội thoại) · đơn còn sống. Tóm tắt công khai chỉ số
+               đếm GỘP, không mã tổ chức.
   Có tên / SĐT / chữ tin ⇒ cả lượt chạy trong `ma_hoa_ket_qua`; dòng [ops:tom-tat] chỉ số đếm + cờ đúng/sai + mã hội thoại 8 ký tự.
   CHỈ ĐỌC do Postgres ép (`ERP_READ_ONLY=1` trước lần mở kết nối đầu tiên) và hỏi lại phiên.
 */
@@ -27,7 +32,7 @@ import { and, asc, eq, gte, inArray, lte, ne, or, sql } from "drizzle-orm";
 import { getDbForInspection, schema, type Db } from "@/db";
 import { splitSummaryLine } from "@/lib/ops/summary-lines";
 import { withOrganization } from "@/lib/platform/context";
-import { findOrganization } from "@/lib/platform/organizations";
+import { findOrganization, listOrganizations } from "@/lib/platform/organizations";
 import { fanpageVisitorKey, normalizeEcho } from "@/lib/sales-chatbot/fanpage";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -45,13 +50,26 @@ const PRIVATE_REPLY_THREAD = "__private_reply__";
 /** Dòng của KHÁCH = không phải dòng phía page / bot / chỉ ảnh — đúng cách conv-money-trace gán nhãn «KHÁCH». */
 const CUSTOMER_ROW = sql`coalesce(${schema.salesChatInbound.note}, '') not in ('PAGE_REPLY', 'BOT_SENT', 'MEDIA_ONLY')`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const USAGE = "<mã tổ chức> --conv=<uuid>[,<uuid>…] | <mã tổ chức> --days=1..14";
+const USAGE = "<mã tổ chức> --conv=<uuid>[,<uuid>…] | <mã tổ chức> --days=1..14 | <mã tổ chức>|--all --legacy-keys [--days=1..60]";
 
-export type LinkArgs = { code: string; convs: string[]; days: number | null };
+export const LEGACY_MAX_DAYS = 60;
+export const LEGACY_DEFAULT_DAYS = 30;
+export type LinkArgs = { code: string | null; all: boolean; legacy: boolean; convs: string[]; days: number | null };
 
 export function parseLinkArgs(argv: readonly string[]): LinkArgs | { error: string } {
+  const all = argv.includes("--all");
+  const legacy = argv.includes("--legacy-keys");
   const code = (argv.find((a) => !a.startsWith("--")) ?? "").trim();
-  if (!/^[a-z0-9][a-z0-9-]{1,40}$/.test(code)) return { error: "thiếu / sai mã tổ chức" };
+  if (all && code) return { error: "--all không đi cùng mã tổ chức" };
+  if (all && !legacy) return { error: "--all chỉ dùng với --legacy-keys" };
+  if (!all && !/^[a-z0-9][a-z0-9-]{1,40}$/.test(code)) return { error: "thiếu / sai mã tổ chức" };
+  if (legacy) {
+    if (argv.some((a) => a.startsWith("--conv="))) return { error: "--legacy-keys không đi cùng --conv" };
+    const raw = argv.find((a) => a.startsWith("--days="))?.slice(7);
+    const d = raw === undefined ? LEGACY_DEFAULT_DAYS : Number(raw);
+    if (!Number.isInteger(d) || d < 1 || d > LEGACY_MAX_DAYS) return { error: `--days (cùng --legacy-keys) phải là số nguyên 1..${LEGACY_MAX_DAYS}` };
+    return { code: all ? null : code, all, legacy, convs: [], days: d };
+  }
   const val = (k: string) => argv.find((a) => a.startsWith(`--${k}=`))?.slice(k.length + 3);
   const rawConv = val("conv");
   const convs = rawConv === undefined ? [] : rawConv.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
@@ -60,7 +78,7 @@ export function parseLinkArgs(argv: readonly string[]): LinkArgs | { error: stri
   const days = rawDays === undefined ? null : Number(rawDays);
   if (days !== null && (!Number.isInteger(days) || days < 1 || days > LINK_MAX_DAYS)) return { error: `--days phải là số nguyên 1..${LINK_MAX_DAYS}` };
   if (!convs.length && days === null) return { error: "cần --conv=<uuid,…> hoặc --days=N" };
-  return { code, convs, days };
+  return { code, all: false, legacy: false, convs, days };
 }
 
 /** Dáng một mã luồng để so bằng mắt mà không in mã: nhóm chữ số theo độ dài, giữ dấu phân cách («15d_16d»). HÀM THUẦN. */
@@ -282,6 +300,62 @@ async function scanCarries(db: Db, days: number): Promise<void> {
   tomTat(`quét: luồng thật ≠ hộp thư Pancake mà luồng thật có hội thoại RIÊNG (mở mới, trắng ngữ cảnh) ${realOwnConv} · khác DÁNG mã ${shapeDiff}`);
 }
 
+/**
+ * Phán quyết của MỘT hội thoại mang khoá «m_…» (P2-6, chạy thử). HÀM THUẦN.
+ *  · TWO_CONVERSATIONS     — tin riêng rơi vào luồng hộp thư thật VÀ luồng ấy có hội thoại riêng ⇒ khách đang có hai hội thoại (ca Ngọc);
+ *  · INBOX_NO_CONVERSATION — tìm được luồng hộp thư thật, chưa có hội thoại nào trên đó (khách chưa nhắn tiếp);
+ *  · ECHO_NOT_FOUND        — không có dòng tin nào mang đúng mã tin ấy ⇒ không xác định được luồng thật (KHÔNG đoán).
+ */
+export type LegacyVerdict = "TWO_CONVERSATIONS" | "INBOX_NO_CONVERSATION" | "ECHO_NOT_FOUND";
+export function legacyVerdict(realThread: string | null, realConversationId: string | null): LegacyVerdict {
+  if (!realThread) return "ECHO_NOT_FOUND";
+  return realConversationId ? "TWO_CONVERSATIONS" : "INBOX_NO_CONVERSATION";
+}
+
+export type LegacyTally = { conversations: number; openOrders: number; byVerdict: Record<LegacyVerdict, number>; twoWithOpenOrders: number };
+export const emptyLegacyTally = (): LegacyTally => ({ conversations: 0, openOrders: 0, byVerdict: { TWO_CONVERSATIONS: 0, INBOX_NO_CONVERSATION: 0, ECHO_NOT_FOUND: 0 }, twoWithOpenOrders: 0 });
+
+/** Hội thoại bình luận mang khoá mã tin «m_…» của MỘT tổ chức (CSDL ngữ cảnh). CHỈ ĐỌC. */
+async function legacyKeys(db: Db, days: number): Promise<LegacyTally> {
+  const since = new Date(Date.now() - days * 86_400_000);
+  const c = schema.salesChatConversations;
+  const t = schema.salesChatInbound;
+  const o = schema.orders;
+  const rows = await db
+    .select({ id: c.id, pageId: c.pageId, threadId: c.threadId, visitorKey: c.visitorKey, status: c.status, createdAt: c.createdAt })
+    .from(c)
+    .where(and(eq(c.channel, "FANPAGE"), sql`left(${c.threadId}, 2) = 'm_'`, gte(c.createdAt, since)))
+    .limit(5000);
+  const tally = emptyLegacyTally();
+  for (const r of rows) {
+    if (!r.pageId || !r.threadId) continue;
+    // Tiếng vọng của chính tin riêng bot vừa gửi: dòng tin có message_id = mã tin ⇒ luồng hộp thư THẬT (khoá xác định).
+    const [echo] = await db.select({ threadId: t.threadId }).from(t).where(and(eq(t.pageId, r.pageId), eq(t.messageId, r.threadId), ne(t.threadId, r.threadId))).limit(1);
+    const real = echo?.threadId ?? null;
+    const realConv = real ? await convByThread(db, r.pageId, real) : null;
+    const v = legacyVerdict(real, realConv?.id ?? null);
+    const live = await db.select({ id: o.id }).from(o).where(and(eq(o.salesConversationId, r.id), sql`${o.stage}::text not in ('CANCELLED', 'DELETED')`)).limit(5);
+    tally.conversations += 1;
+    tally.byVerdict[v] += 1;
+    tally.openOrders += live.length;
+    if (v === "TWO_CONVERSATIONS" && live.length) tally.twoWithOpenOrders += 1;
+    console.log(`  ${r.id} · tạo ${r.createdAt.toISOString()} · ${String(r.status)} · khoá = luồng «m_…» ${r.visitorKey === fanpageVisitorKey(r.pageId, r.threadId)} · ${v} · luồng thật ${real ?? "—"} (dáng ${idShape(real)}) · hội thoại hộp thư ${realConv?.id ?? "—"} · đơn còn sống ${live.length}`);
+  }
+  return tally;
+}
+
+const legacyLine = (t: LegacyTally) =>
+  `${t.conversations} hội thoại mang khoá mã tin «m_…» · khách đang có HAI hội thoại ${t.byVerdict.TWO_CONVERSATIONS} (trong đó còn đơn sống ${t.twoWithOpenOrders}) · có luồng hộp thư, chưa có hội thoại ${t.byVerdict.INBOX_NO_CONVERSATION} · không xác định được luồng thật ${t.byVerdict.ECHO_NOT_FOUND} · đơn còn sống ${t.openOrders}`;
+
+/** Mở CSDL tổ chức ở chế độ CHẨN ĐOÁN, hỏi lại phiên chỉ đọc, gắn handle, chạy `fn` trong ngữ cảnh tổ chức. */
+async function inOrg<T>(org: { code: string; isHome: boolean }, fn: (db: Db) => Promise<T>): Promise<T | "NOT_READ_ONLY"> {
+  const db: Db = await getDbForInspection(org);
+  const [ro] = rowsOf<Record<string, unknown>>(await db.execute(sql`show default_transaction_read_only`));
+  if (String(ro?.default_transaction_read_only ?? "") !== "on") return "NOT_READ_ONLY";
+  await bindReadOnlyOrgHandle(org, db);
+  return withOrganization(org.code, () => fn(db));
+}
+
 async function main() {
   const args = parseLinkArgs(process.argv.slice(2));
   if ("error" in args) {
@@ -289,7 +363,37 @@ async function main() {
     process.stdout.write("", () => process.exit(2));
     return;
   }
-  const org = await findOrganization(args.code);
+  if (args.legacy) {
+    const days = args.days ?? LEGACY_DEFAULT_DAYS;
+    const orgs = args.all ? (await listOrganizations()).filter((x) => x.status === "ACTIVE") : [await findOrganization(args.code ?? "")].filter((x): x is NonNullable<typeof x> => Boolean(x));
+    if (!orgs.length) {
+      tomTat("comment-inbox-link-probe: DỪNG · không có tổ chức nào để đọc");
+      process.stdout.write("", () => process.exit(1));
+      return;
+    }
+    const total = emptyLegacyTally();
+    let unreadable = 0;
+    for (const org of orgs) {
+      console.log(`\n══ ${org.code} · khoá «m_…» ${days} ngày (CHẠY THỬ — không ghi)`);
+      const r = await inOrg({ code: org.code, isHome: org.isHome }, (db) => legacyKeys(db, days)).catch((e: unknown) => {
+        console.log(`  không đọc được: ${e instanceof Error ? e.message.slice(0, 160) : String(e)}`);
+        return null;
+      });
+      if (r === null || r === "NOT_READ_ONLY") {
+        unreadable += 1;
+        continue;
+      }
+      console.log(`  ${legacyLine(r)}`);
+      total.conversations += r.conversations;
+      total.openOrders += r.openOrders;
+      total.twoWithOpenOrders += r.twoWithOpenOrders;
+      for (const k of Object.keys(total.byVerdict) as LegacyVerdict[]) total.byVerdict[k] += r.byVerdict[k];
+    }
+    tomTat(`legacy-keys ${days} ngày (CHẠY THỬ): ${orgs.length} tổ chức · ${unreadable} không đọc được · ${legacyLine(total)}`);
+    process.stdout.write("", () => process.exit(unreadable ? 1 : 0));
+    return;
+  }
+  const org = await findOrganization(args.code ?? "");
   if (!org) {
     tomTat(`comment-inbox-link-probe: DỪNG · không có tổ chức «${args.code}»`);
     process.stdout.write("", () => process.exit(1));

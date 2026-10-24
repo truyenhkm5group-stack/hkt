@@ -562,6 +562,8 @@ Mọi cụm chú thích từ 4 dòng liền nhau trở lên chuyển NGUYÊN VĂ
 # Pancake). So hộp thư Pancake trả (dòng dấu BOT_SENT) với luồng tiếng vọng thật, visitor_key, state.commentCarry, from_id vs PSID,
 # đơn theo hai phép nối của rào #1029. Có chữ tin ⇒ MÃ HOÁ cả lượt; tóm tắt chỉ cờ + số đếm + mã hội thoại 8 ký tự.
 # arg: "<mã tổ chức> --conv=<uuid>[,<uuid>…]" (≤ 5) hoặc "<mã tổ chức> --days=1..14" (script soát).
+# P2-6 CHẠY THỬ: "<mã tổ chức>|--all --legacy-keys [--days=1..60]" — hội thoại mang khoá mã tin «m_…», luồng thật tìm bằng
+# CHÍNH mã tin riêng; KHÔNG ghi, KHÔNG đổi khoá, KHÔNG gộp. Tóm tắt chỉ số gộp, không mã tổ chức.
 ```
 
 ### `inbox-read-audit)` (dòng 1211)
