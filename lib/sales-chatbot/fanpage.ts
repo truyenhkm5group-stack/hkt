@@ -1013,19 +1013,43 @@ const PAGE_TOKEN_FOR_TESTS = "token-bai-kiem";
 type CommentReplyInput = { pageId: string; threadId: string; token: string; commentId: string; postId: string; fromId: string; text: string; imageIds: readonly string[]; conversationId: string };
 type CommentReplyResult = { kind: "SENT"; inboxId: string | null; warning: string | null } | { kind: "ALREADY"; reason: string } | { kind: "FAILED"; reason: string };
 
-/** Hộp thư mà tin riêng của MỘT bình luận đã mở (`private_reply_conversation` của Pancake) — `null` khi chưa nhắn riêng / không đọc được. */
-async function privateReplyInbox(pageId: string, threadId: string, commentId: string, token: string, fetchImpl: typeof fetch): Promise<{ read: boolean; inboxId: string | null }> {
+/**
+ * MÃ HỘP THƯ của tin riêng một bình luận — CHỈ mã hội thoại hộp thư Pancake dạng `<page_id>_<PSID>`. HÀM THUẦN.
+ *
+ * P0 HSLC 24/10/2026 (ca «Trần Thị Ngọc», đo bằng ops comment-inbox-link-probe): bản cũ lấy `private_reply_conversation.id` TRƯỚC
+ * `conversation_id`, và `id` là mã TIN NHẮN riêng của Meta («m_…»). Hội thoại bình luận bị đổi khoá sang `fanpageVisitorKey(page, "m_…")`
+ * — khoá mà webhook hộp thư không bao giờ mang — nên tin Messenger kế tiếp mở một hội thoại MỚI, trắng ngữ cảnh: câu mẫu xin lại SĐT /
+ * địa chỉ, bot lên đơn thứ hai mà rào #1029 không thấy. 58/58 lượt chép trong 3 ngày ở hslc-hmt-shop đều đi đường ấy.
+ *
+ * Luật: nhận ứng viên (chuỗi trần, `conversation_id`, `id`) CHỈ khi khớp `^<page_id>_\d+$`. Không ứng viên nào khớp mà Pancake cho biết đã
+ * có tin riêng (`private_reply_conversation` khác rỗng) ⇒ dựng `<page_id>_<from_id>`: đo production, luồng hộp thư Pancake = page_id + «_» +
+ * PSID và PSID = `from.id` của người bình luận (cùng page). `from_id` không phải chuỗi số ⇒ KHÔNG đoán (`null`). Không bao giờ trả «m_…».
+ */
+export type CommentInboxSource = "PANCAKE_CONV_ID" | "DERIVED_PAGE_PSID" | "NONE";
+export function privateReplyInboxId(prc: unknown, pageId: string, fromId: string): { replied: boolean; inboxId: string | null; source: CommentInboxSource } {
+  const replied = typeof prc === "string" ? prc.trim().length > 0 : Boolean(prc && typeof prc === "object");
+  if (!replied) return { replied: false, inboxId: null, source: "NONE" };
+  const o = prc && typeof prc === "object" ? (prc as { id?: unknown; conversation_id?: unknown }) : null;
+  const candidates = typeof prc === "string" ? [prc] : [str(o?.conversation_id), str(o?.id)];
+  const pageEsc = pageId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const shape = new RegExp(`^${pageEsc}_\\d+$`);
+  const ok = pageId && candidates.find((x) => shape.test(x.trim()));
+  if (ok) return { replied: true, inboxId: ok.trim(), source: "PANCAKE_CONV_ID" };
+  if (/^\d+$/.test(pageId) && /^\d+$/.test(fromId.trim())) return { replied: true, inboxId: `${pageId}_${fromId.trim()}`, source: "DERIVED_PAGE_PSID" };
+  return { replied: true, inboxId: null, source: "NONE" };
+}
+
+/** Hộp thư mà tin riêng của MỘT bình luận đã mở (`private_reply_conversation` của Pancake, qua `privateReplyInboxId`). */
+async function privateReplyInbox(pageId: string, threadId: string, commentId: string, fromId: string, token: string, fetchImpl: typeof fetch): Promise<{ read: boolean; replied: boolean; inboxId: string | null; source: CommentInboxSource }> {
   try {
     const url = `${PANCAKE_PAGES_API}/v1/pages/${encodeURIComponent(pageId)}/conversations/${encodeURIComponent(threadId)}/messages?page_access_token=${encodeURIComponent(token)}`;
     const res = await fetchImpl(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(15_000) });
     const body = (await res.json().catch(() => null)) as { messages?: { id?: unknown; private_reply_conversation?: unknown }[] } | null;
-    if (!res.ok || !Array.isArray(body?.messages)) return { read: false, inboxId: null };
+    if (!res.ok || !Array.isArray(body?.messages)) return { read: false, replied: false, inboxId: null, source: "NONE" };
     const mine = body.messages.find((m) => str(m.id) === commentId);
-    const prc = mine?.private_reply_conversation as unknown;
-    const inboxId = typeof prc === "string" ? prc : prc && typeof prc === "object" ? str((prc as { id?: unknown }).id) || str((prc as { conversation_id?: unknown }).conversation_id) : "";
-    return { read: true, inboxId: inboxId || null };
+    return { read: true, ...privateReplyInboxId(mine?.private_reply_conversation, pageId, fromId) };
   } catch {
-    return { read: false, inboxId: null };
+    return { read: false, replied: false, inboxId: null, source: "NONE" };
   }
 }
 
@@ -1042,7 +1066,7 @@ async function privateReplyInbox(pageId: string, threadId: string, commentId: st
  * thoại fanpage (`conversationFor`) rồi chép tin khách — không chuyển hội thoại bình luận sang, vì nó mang câu bot soạn mà không gửi. Lỗi
  * không làm hỏng lượt trả lời.
  */
-async function carryIntoInbox(pageId: string, inboxId: string, commentConversationId: string, now: Date, botReplySent: boolean): Promise<void> {
+async function carryIntoInbox(pageId: string, inboxId: string, commentConversationId: string, now: Date, botReplySent: boolean, source: CommentInboxSource): Promise<void> {
   try {
     const db = await getDb();
     const c = schema.salesChatConversations;
@@ -1056,9 +1080,9 @@ async function carryIntoInbox(pageId: string, inboxId: string, commentConversati
       copied = r.copied;
       outcome = r.already ? "ALREADY_COPIED" : found ? "EXISTING_INBOX" : "OPENED_NEW";
     }
-    await recordCommentCarry(commentConversationId, outcome, copied, now);
+    await recordCommentCarry(commentConversationId, outcome, copied, now, source);
   } catch (e) {
-    await recordCommentCarry(commentConversationId, "FAILED", 0, now).catch(() => undefined);
+    await recordCommentCarry(commentConversationId, "FAILED", 0, now, source).catch(() => undefined);
     // Chỉ tên lỗi: thông điệp lỗi Drizzle mang cả tham số câu SQL (chữ khách) — không đưa vào log.
     console.warn(`[fanpage] không chép được lượt bình luận sang hộp thư: ${e instanceof Error ? e.name : "lỗi"}`);
   }
@@ -1072,10 +1096,12 @@ async function deliverCommentReply(input: CommentReplyInput, deps: FanpageDeps):
   if (!(await botSendAllowed(pageId))) return { kind: "FAILED", reason: PAGE_NOT_LIVE_SEND_ERROR };
   const text = input.text.trim().slice(0, TEXT_MAX);
   if (!text) return { kind: "FAILED", reason: "Bot không soạn được câu trả lời cho bình luận" };
-  const before = await privateReplyInbox(pageId, threadId, commentId, token, fetchImpl);
-  if (before.inboxId) {
+  const before = await privateReplyInbox(pageId, threadId, commentId, input.fromId, token, fetchImpl);
+  if (before.replied) {
     // Pancake tự động / nhân viên đã nhắn riêng: bot không nhắn lần hai, nhưng lời mua trong bình luận vẫn phải đi tiếp ở hộp thư (P0 17/10).
-    await carryIntoInbox(pageId, before.inboxId, input.conversationId, now(), false);
+    // Không ra được mã hộp thư hợp lệ ⇒ ghi NO_INBOX, không đoán (P0 24/10: không bao giờ dùng mã tin «m_…» làm khoá hội thoại).
+    if (before.inboxId) await carryIntoInbox(pageId, before.inboxId, input.conversationId, now(), false, before.source);
+    else await recordCommentCarry(input.conversationId, "NO_INBOX", 0, now(), before.source).catch(() => undefined);
     return { kind: "ALREADY", reason: "Bình luận đã được nhắn riêng (Pancake tự động / nhân viên) — bot không nhắn lần hai" };
   }
   const db = await getDb();
@@ -1096,10 +1122,10 @@ async function deliverCommentReply(input: CommentReplyInput, deps: FanpageDeps):
   } catch (e) {
     return { kind: "FAILED", reason: scrubSecrets(isNetworkFailure(e) ? `Không gọi được Pancake: ${describeNetworkFailure(e, "pages.fm")}` : `Không gọi được Pancake: ${e instanceof Error ? e.message : String(e)}`, [token]) };
   }
-  const after = await privateReplyInbox(pageId, threadId, commentId, token, fetchImpl);
+  const after = await privateReplyInbox(pageId, threadId, commentId, input.fromId, token, fetchImpl);
   const inboxId = after.inboxId;
   if (!inboxId) {
-    await recordCommentCarry(input.conversationId, "NO_INBOX", 0, now()).catch(() => undefined);
+    await recordCommentCarry(input.conversationId, "NO_INBOX", 0, now(), after.source).catch(() => undefined);
     return { kind: "SENT", inboxId: null, warning: input.imageIds.length ? "Đã nhắn riêng; chưa tìm được hộp thư để gửi ảnh" : null };
   }
   await db.insert(t).values({ pageId, threadId: inboxId, messageId: `bot-out:${randomUUID()}`, text: normalizeEcho(text), status: "DONE", processedAt: now(), note: "BOT_SENT" }).onConflictDoNothing({ target: t.messageId });
@@ -1111,7 +1137,7 @@ async function deliverCommentReply(input: CommentReplyInput, deps: FanpageDeps):
     .where(and(eq(c.id, input.conversationId), sql`not exists (select 1 from ${c} x where x.channel = 'FANPAGE' and x.visitor_key = ${fanpageVisitorKey(pageId, inboxId)})`))
     .catch(() => undefined);
   // Khách cũ đã có hội thoại hộp thư ⇒ bước chuyển trên bỏ qua; chép lượt bình luận sang hội thoại đó (P0 17/10, `carryCommentTurn`).
-  await carryIntoInbox(pageId, inboxId, input.conversationId, now(), true);
+  await carryIntoInbox(pageId, inboxId, input.conversationId, now(), true, after.source);
   let warning: string | null = null;
   if (input.imageIds.length) {
     const up = await contentIdsFor(pageId, token, input.imageIds, fetchImpl, now());

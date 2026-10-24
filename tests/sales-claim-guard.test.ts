@@ -20,6 +20,7 @@
  *
  * Không gọi mạng (luật 65): model giả của bộ hội thoại vàng. Không ghim ngày (luật 50).
  */
+import { ADDRESS_STAFF_TEXT } from "@/lib/sales-chatbot/address-memory";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -280,7 +281,7 @@ function testSourceScan() {
   assert.ok(heldLoop.indexOf("guardOutgoing(out") > 0 && heldLoop.indexOf("guardOutgoing(out") < heldLoop.indexOf('text: out }]'), "chữ có số tiền giữ lại qua guardOutgoing TRƯỚC khi ghi");
   // (f) Mọi chữ hằng gửi qua `reply()` không mang khẳng định; đối số không phải hằng thì nằm trong danh sách đã biết.
   // `draftUnsaid` (tóm tắt đơn theo kết quả công cụ) và `fallback` (câu hỏi đúng phần còn thiếu) đều qua guardOutgoing ngay trước reply.
-  const knownExpr = new Set(["acceptSay", "CLAIM_SAFE_TEXT.ORDER_EDIT", "cfg.handoff.message", "cfg.businessHours.outsideMessage", "EMPTY_REPLY_TEXT", "aiDownReply(cfg)", "pick.text", "safeText", "b.safe", "CLAIM_SAFE_TEXT.PRICE_DISPUTE", "CLAIM_SAFE_TEXT.REFUND", "CLAIM_SAFE_TEXT.DELIVERY_DELAY", "draftUnsaid", "fallback", "step.text", "pco.text", "menuStep.text", "qtyAck"]);
+  const knownExpr = new Set(["ADDRESS_STAFF_TEXT", "acceptSay", "CLAIM_SAFE_TEXT.ORDER_EDIT", "cfg.handoff.message", "cfg.businessHours.outsideMessage", "EMPTY_REPLY_TEXT", "aiDownReply(cfg)", "pick.text", "safeText", "b.safe", "CLAIM_SAFE_TEXT.PRICE_DISPUTE", "CLAIM_SAFE_TEXT.REFUND", "CLAIM_SAFE_TEXT.DELIVERY_DELAY", "draftUnsaid", "fallback", "step.text", "pco.text", "menuStep.text", "qtyAck"]);
   // P0 #863: câu máy chủ dựng khi khách huỷ (xin lỗi + đơn đã sửa · «đã huỷ» sau khi lõi ghi) qua guardOutgoing ngay trước reply.
   assert.match(core, /guardOutgoing\(step\.text, [^\n]*\n(?:[^\n]*\n){0,2}\s*await reply\(conv, seq, step\.text\)/, "câu huỷ của máy chủ qua guardOutgoing trước reply");
   // P0 20/10/2026: câu upsell của SHOP gửi sau chốt (`pco.text` — chữ câu mẫu đã điền số ERP) qua guardOutgoing ngay trước reply.
@@ -299,6 +300,8 @@ function testSourceScan() {
   assert.match(core, /guardOutgoing\(draftUnsaid, [^\n]*\n\s*await reply\(conv, seq\+\+, draftUnsaid\)/, "tóm tắt đơn qua guardOutgoing trước reply");
   assert.match(core, /guardOutgoing\(ask, [^\n]*\n(?:[^\n]*\n){0,12}\s*await reply\(conv, seq\+\+, fallback\)/, "câu hỏi lại qua guardOutgoing trước reply");
   assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.PRICE_DISPUTE), [], "câu an toàn khi khách phản đối giá không mang khẳng định");
+  // P0 24/10/2026: lối chuyển người SỚM khi khách phàn nàn bị hỏi lại (trước model) gửi ĐÚNG câu nhân viên của hàng rào hỏi lại.
+  assert.deepEqual(detectClaims(ADDRESS_STAFF_TEXT), [], "câu nhân viên kiểm thông tin nhận hàng không mang khẳng định");
   assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.REFUND), [], "câu an toàn khi khách khiếu nại (máy chủ chuyển người) không mang khẳng định / lời hứa");
   assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.ORDER_EDIT), [], "câu an toàn khi chặn «đã sửa đơn» không tự mang khẳng định");
   assert.deepEqual(detectClaims(CLAIM_SAFE_TEXT.DELIVERY_DELAY), [], "câu an toàn khi khách than giao chậm không mang khẳng định / lời hứa");

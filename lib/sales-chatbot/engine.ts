@@ -82,7 +82,7 @@ import { readConversationControl } from "@/lib/sales-chatbot/conversation-contro
 import { customerHandoffVerdict, nextObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
-import { ADDRESS_GIVEN_PROMPT, ADDRESS_KNOWN_TEXT, ADDRESS_STAFF_TEXT, CONTACT_KNOWN_TEXT, SCHEDULE_NOTED_TEXT, addressKnowledge, addressTextGiven, dropAddressAsks, addressReaskVerdict, continuesSameOrder, isScheduleOnly, knownContactPrompt, knownDeliveryAddressOf, latestCustomerAddress } from "@/lib/sales-chatbot/address-memory";
+import { ADDRESS_GIVEN_PROMPT, ADDRESS_HANDOFF_REASON, ADDRESS_KNOWN_TEXT, ADDRESS_REASK_NOTE, ADDRESS_STAFF_TEXT, CONTACT_KNOWN_TEXT, SCHEDULE_NOTED_TEXT, addressKnowledge, addressTextGiven, complainsOfContactReask, dropAddressAsks, addressReaskVerdict, continuesSameOrder, isScheduleOnly, knownContactPrompt, knownDeliveryAddressOf, latestCustomerAddress } from "@/lib/sales-chatbot/address-memory";
 import { classifyDeliveryQuestion, DELIVERY_HANDOFF_TEXT, deliveryPreferenceOf, deliveryPromiseIn, deliveryReplyViolation, turnDeliverySay } from "@/lib/sales-chatbot/delivery-intent";
 import { asksOrderStatus, asksQuestion, orderStatusSayOf, postSaleFallbackText, postSaleReplyGuard, turnOrderStatusSay } from "@/lib/sales-chatbot/post-sale-guard";
 import { openChatDelayCase } from "@/lib/cs/chat-delay-case";
@@ -1490,6 +1490,19 @@ async function chatTurnCore(
     // (calculate_cart) lẫn lên / sửa / chốt đơn.
     // AGENTS 3.12b (chủ shop 22/10/2026): đã có chữ địa chỉ trong lượt mua ⇒ không chữ bot nào được hỏi địa chỉ nữa (đặt lại theo st0 mới nhất).
     const roundCustomerTexts = markAddressGiven(conv.id, msgs, st0, text);
+    // KHÁCH PHÀN NÀN BỊ HỎI LẠI ⇒ CHUYỂN NGƯỜI NGAY, TRƯỚC câu mẫu và model (P0 HSLC 24/10/2026, ca «Trần Thị Ngọc» — «Địa chỉ gửi rồi mà»).
+    // Trước đây chỉ hàng rào chữ model (`addressReaskVerdict`, sau vòng công cụ) nhận ra lời phàn nàn ⇒ lượt kết thúc HANDOFF nhưng
+    // create_customer + create_draft_order đã ghi một đơn mới. Không vòng công cụ nào ở lượt này; nhân viên kiểm thông tin nhận hàng.
+    if (!st0.handoff && complainsOfContactReask(text, recentSaid)) {
+      // Cùng thứ tự ưu tiên lý do với hàng rào chữ model: khách đòi «địa chỉ cũ» mà không có địa chỉ xác minh ⇒ REUSE_UNVERIFIED.
+      const reason = addressKnowledge(st0, roundCustomerTexts).reuseUnresolved ? ADDRESS_HANDOFF_REASON.REUSE_UNVERIFIED : ADDRESS_HANDOFF_REASON.COMPLAINT;
+      const st: ChatState = { ...st0, handoff: { reason, at: now.toISOString() } };
+      // Kênh không phải tin nhắn: ĐÚNG câu nhân viên mà hàng rào chữ model gửi ở tình huống này — khách thấy như trước.
+      if (!isMessagingChannel(opts.channel)) await reply(conv, seq, ADDRESS_STAFF_TEXT);
+      await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1, lastError: reason === ADDRESS_HANDOFF_REASON.COMPLAINT ? ADDRESS_REASK_NOTE.COMPLAINT : ADDRESS_REASK_NOTE.REUSE_UNVERIFIED });
+      if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey: `sales-chat:address-guard:${conv.id}:${turnSeq}` }).catch(() => undefined);
+      return { ok: true, view: (await conversationView(conv.id))! };
+    }
     // MÓN ĐANG BÀN (P0 18/10/2026, ca «ThanhPhương»): «xin giá chả cá» khớp chữ câu mẫu NEM vì câu nem mang nhầm cách hỏi đó. Câu mẫu
     // nói về món khác món đang bàn không được trả lời — ở bước khớp chữ, AI chọn mã, và công cụ `send_quick_reply`. Món đang bàn = món
     // khách gọi tên + món shop nói tới / mời sau đó; khách chưa gọi tên món ⇒ món của câu shop / page gần nhất (tin tự động của page).
@@ -2464,11 +2477,13 @@ export const COMMENT_CARRY_OUTCOMES = ["MOVED", "EXISTING_INBOX", "OPENED_NEW", 
 export type CommentCarryOutcome = (typeof COMMENT_CARRY_OUTCOMES)[number];
 
 /** Ghi kết quả vào `state.commentCarry` của hội thoại bình luận (qua `writeConversation`). Lỗi không làm hỏng lượt trả lời. */
-export async function recordCommentCarry(conversationId: string, outcome: CommentCarryOutcome, copied: number, now: Date): Promise<void> {
+export async function recordCommentCarry(conversationId: string, outcome: CommentCarryOutcome, copied: number, now: Date, inboxSource?: "PANCAKE_CONV_ID" | "DERIVED_PAGE_PSID" | "NONE"): Promise<void> {
   const conv = await loadConversation(conversationId);
   if (!conv) return;
   const st = (conv.state ?? {}) as ChatState;
-  await writeConversation(conversationId, { state: { ...st, commentCarry: { outcome, copied, at: now.toISOString() } } as Record<string, unknown> }, now);
+  // `inboxSource` (P0 24/10/2026): mã hộp thư lấy từ đâu — `PANCAKE_CONV_ID` (Pancake trả đúng dạng page_PSID) · `DERIVED_PAGE_PSID` (dựng
+  // từ page + from_id) · `NONE` (không ra được ⇒ không chép). Đo được bằng ops comment-inbox-link-probe / conv-money-trace --scan.
+  await writeConversation(conversationId, { state: { ...st, commentCarry: { outcome, copied, at: now.toISOString(), ...(inboxSource ? { inboxSource } : {}) } } as Record<string, unknown> }, now);
 }
 
 /** Tin lưu trữ ⇒ dạng `customerTextsSince` đọc (chữ thô, mốc, cờ kết quả công cụ). HÀM THUẦN. */
