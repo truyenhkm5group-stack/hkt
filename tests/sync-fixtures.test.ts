@@ -251,6 +251,7 @@ import {
   testReasonRegroupAndThreeLevelDrilldown,
   testIntelligenceRuns,
 } from "./return-intelligence.test";
+import { testReturnsBodyTrim } from "./returns-body.test";
 import { testApproval } from "./approval.test";
 import { testCompanyOsControlPlane } from "./company-os-control-plane.test";
 import { testClientBoundaryExports } from "./client-boundary-exports.test";
@@ -405,6 +406,7 @@ import { testVnAddress } from "./vn-address.test";
 import { testAddressNormalizePure, testAddressNormalizeTools } from "./address-normalize.test";
 import { testAddressWardExplicitPure, testAddressWardExplicitTools } from "./address-ward-explicit.test";
 import { testAddressReaskAudit } from "./address-reask-audit.test";
+import { testOrderDupScan } from "./order-dup-scan.test";
 import { testP0855Address } from "./p0-855-address.test";
 import { testP0871ContactMemory } from "./p0-871-contact-memory.test";
 import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
@@ -2330,6 +2332,7 @@ async function main() {
     testReasonGroupContract();
     await testReasonRegroupAndThreeLevelDrilldown(db);
     await testIntelligenceRuns(db);
+    await testReturnsBodyTrim(db);
 
     // ═══ LỚP QUAN SÁT LÝ DO HOÀN (14/09/2026) ═══
     testReasonSourceRegistry();
@@ -2525,6 +2528,8 @@ async function main() {
     testAddressWardExplicitPure();
     await testAddressWardExplicitTools();
     await testAddressReaskAudit();
+    // P0 HSLC 24/10/2026: ops order-dup-scan — quét cặp đơn nghi trùng (form nhân viên → bot tự chốt).
+    await testOrderDupScan();
     await testP0855Address(); // #855: địa giới cũ / «như cũ» / địa chỉ mới thắng / không hỏi lại SĐT · tên · địa chỉ · phường
     await testP0871ContactMemory(); // #871: SĐT + địa chỉ đã biết không hỏi lại khi đổi chủ đề · câu mẫu cũng chịu hàng rào · hẹn giờ giao = ghi chú · hậu mãi không bán tiếp · gói tin trùng
     // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
