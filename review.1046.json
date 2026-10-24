@@ -1,0 +1,8 @@
+{
+  "pr": 1046,
+  "sha": "ebf143509ddb9a90c1f41056e7de7f2208da3fba",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T11:42:31.010Z",
+  "note": "review lead: chỉ-script; loại luồng dấu nội bộ __private_reply__ khỏi phép đếm legacy-keys (lượt trước đếm sai 691/692); không đoán luồng thật khi tiếng vọng không lưu được."
+}
