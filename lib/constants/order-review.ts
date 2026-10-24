@@ -30,7 +30,7 @@
  * KHÔNG có căn cứ từ khách (món mời khách chưa đồng ý · số lượng bot tự tăng) — máy chủ chặn từ nay (`lineBasisViolation`), cờ này dành
  * cho đơn đã tạo trước bản sửa. Không đổi tiền / dòng đơn: người gọi khách rồi sửa.
  */
-export const ORDER_REVIEW_CODES = ["CUSTOMER_CANCELLED", "ADDRESS_UNRESOLVED", "CANCEL_BLOCKED", "PRICE_DISPUTED", "PRICE_MISMATCH", "UPSELL_UNCONSENTED", "ROUND_ABANDONED"] as const;
+export const ORDER_REVIEW_CODES = ["CUSTOMER_CANCELLED", "ADDRESS_UNRESOLVED", "CANCEL_BLOCKED", "PRICE_DISPUTED", "PRICE_MISMATCH", "UPSELL_UNCONSENTED", "ROUND_ABANDONED", "POSSIBLE_SAME_CUSTOMER"] as const;
 export type OrderReviewCode = (typeof ORDER_REVIEW_CODES)[number];
 
 /**
@@ -38,7 +38,15 @@ export type OrderReviewCode = (typeof ORDER_REVIEW_CODES)[number];
  * (`orderReviewOpenOf` ở `lib/shipping/route.ts`, #855) và chặn công tắc «đơn đủ thông tin = đã xác nhận» tự nâng đơn
  * (`autoConfirmComplete` ở `lib/records/order-create.ts`, #863). Khách có thể không muốn ĐÚNG đơn này ⇒ người quyết, ở cả hai chỗ.
  */
-export const ORDER_REVIEW_HOLD_CODES: readonly OrderReviewCode[] = ["UPSELL_UNCONSENTED", "PRICE_DISPUTED", "PRICE_MISMATCH", "CUSTOMER_CANCELLED", "CANCEL_BLOCKED", "ROUND_ABANDONED"];
+export const ORDER_REVIEW_HOLD_CODES: readonly OrderReviewCode[] = ["UPSELL_UNCONSENTED", "PRICE_DISPUTED", "PRICE_MISMATCH", "CUSTOMER_CANCELLED", "CANCEL_BLOCKED", "ROUND_ABANDONED", "POSSIBLE_SAME_CUSTOMER"];
+
+/**
+ * Cờ NỘI BỘ: người phải đối chiếu, nhưng KHÁCH không có gì khác thường để nghe. `orderValidityOf` (claim-guard.ts) BỎ QUA chúng, nên
+ * bot vẫn nói «đã lên đơn», câu trạng thái / sau bán như đơn thường; còn giữ khỏi vận đơn + công tắc tự nâng thì VẪN như mọi mã trong
+ * `ORDER_REVIEW_HOLD_CODES`. `POSSIBLE_SAME_CUSTOMER` (lớp tạm trước pha 3 trùng đơn, 24/10/2026): Tech Lead chốt «khách không nghe gì
+ * khác thường» — CI #1039 đỏ đúng chỗ này (đơn khách tự chốt mang cờ ⇒ hỏi trạng thái nhận «nói rõ hơn»).
+ */
+export const ORDER_REVIEW_INTERNAL_CODES: readonly OrderReviewCode[] = ["POSSIBLE_SAME_CUSTOMER"];
 
 export const ORDER_REVIEW_LABEL: Record<OrderReviewCode, string> = {
   CUSTOMER_CANCELLED: "Khách báo huỷ trong hội thoại",
@@ -48,6 +56,7 @@ export const ORDER_REVIEW_LABEL: Record<OrderReviewCode, string> = {
   PRICE_MISMATCH: "Tiền hàng lệch báo giá máy chủ — cần kiểm giá",
   UPSELL_UNCONSENTED: "Đơn có món / số lượng khách chưa đồng ý — cần gọi khách",
   ROUND_ABANDONED: "Nháp của lượt mua CŨ — khách đã mua lượt mới, không giao cả hai",
+  POSSIBLE_SAME_CUSTOMER: "Có thể cùng khách với một đơn bot đang mở ở hội thoại khác — cần kiểm trùng",
 };
 
 /** Nhãn NGẮN (dòng lý do của khung đơn hộp thư). */
@@ -59,6 +68,7 @@ export const ORDER_REVIEW_SHORT_LABEL: Record<OrderReviewCode, string> = {
   PRICE_MISMATCH: "giá lệch báo giá",
   UPSELL_UNCONSENTED: "món khách chưa đồng ý",
   ROUND_ABANDONED: "nháp lượt mua cũ",
+  POSSIBLE_SAME_CUSTOMER: "có thể trùng đơn hội thoại khác",
 };
 
 /** Việc người phải làm với từng lý do — in cạnh lý do để người đọc biết bấm gì. */
@@ -70,6 +80,7 @@ export const ORDER_REVIEW_HINT: Record<OrderReviewCode, string> = {
   PRICE_MISMATCH: "Ghi chú có số tiền ĐÚNG theo báo giá máy chủ: sửa dòng đơn (thường là thiếu giảm theo khối lượng), báo khách nếu tổng đổi, rồi «Xác nhận đơn».",
   UPSELL_UNCONSENTED: "Gọi / nhắn khách xác nhận ĐÚNG món + số lượng: bỏ món khách không lấy, báo tổng mới, rồi «Xác nhận đơn».",
   ROUND_ABANDONED: "Khách quay lại mua lượt mới: đối chiếu với đơn MỚI của cùng khách — chỉ giữ đơn khách muốn (thường «Huỷ đơn» nháp cũ), không giao cả hai.",
+  POSSIBLE_SAME_CUSTOMER: "Mở đơn ghi trong lý do: cùng một người (bình luận ↔ hộp thư) ⇒ gộp món vào MỘT đơn rồi «Huỷ đơn» còn lại; người khác dùng chung SĐT ⇒ «Xác nhận đơn».",
 };
 
 /** Câu lý do mặc định khi huỷ bằng nút nhanh (người sửa được trước khi bấm). */
@@ -81,6 +92,7 @@ export const ORDER_REVIEW_CANCEL_REASON: Record<OrderReviewCode, string> = {
   PRICE_MISMATCH: "Giá đơn sai — huỷ để lên lại",
   UPSELL_UNCONSENTED: "Khách không đặt món bot tự thêm — huỷ để lên lại",
   ROUND_ABANDONED: "Nháp của lượt mua cũ — khách đã đặt lượt mới",
+  POSSIBLE_SAME_CUSTOMER: "Trùng đơn ở hội thoại khác — đã gộp vào một đơn",
 };
 
 /** Một lý do cần kiểm. `quote` = NGUYÊN VĂN câu khách (khách huỷ); `by` = tên máy / người ghi; `at` = mốc ISO. */
