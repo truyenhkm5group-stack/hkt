@@ -414,7 +414,8 @@ export const QUALITY_GROUP: Readonly<Partial<Record<string, QualityGroup>>> = {
   PACK_MULTIPLIER_LEAKED: "số lượng · tiền",
   UPSELL_ACCEPTED_BUT_REASKED: "upsell",
   UPSELL_ACCEPTED_NOT_ATTACHED: "upsell",
-  COMMENT_CARRY_KEY_INVALID: "khác",
+  // Hệ quả của lỗi là hỏi lại SĐT / địa chỉ ở hội thoại hộp thư trắng ngữ cảnh ⇒ nhóm «địa chỉ».
+  COMMENT_CARRY_KEY_INVALID: "địa chỉ",
 };
 
 // Trần byte + bộ dồn dòng: lib/ops/summary-lines.ts (dùng chung với conv-money-trace). Xuất lại cho bài kiểm cũ.
