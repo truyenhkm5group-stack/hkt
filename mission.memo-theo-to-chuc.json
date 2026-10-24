@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "memo-theo-to-chuc",
+  "title": "clearMemo theo tổ chức + vết rào bot không xoá đệm (hồi quy đường ấm /reports/returns giờ trưa)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-memoorg",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/memo-theo-to-chuc",
+  "base_sha": "caea634ce6d683e2fb371d4c68066ffbb13a3c42",
+  "domains": [],
+  "owned_paths": [
+    "lib/cache.ts",
+    "lib/audit.ts",
+    "lib/platform/publish.ts",
+    "docs/platform/shared-contracts.md",
+    "tests/memo-org-scope.test.ts",
+    "tests/platform-process-isolation.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-24T06:50:53.669Z",
+  "updated_at": "2026-10-24T06:50:53.669Z",
+  "last_heartbeat": "2026-10-24T06:50:53.669Z",
+  "definition_of_done": []
+}
