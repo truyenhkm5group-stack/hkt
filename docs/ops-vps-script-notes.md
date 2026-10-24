@@ -442,6 +442,17 @@ Mọi cụm chú thích từ 4 dòng liền nhau trở lên chuyển NGUYÊN VĂ
 # arg: "<mã tổ chức | --all> [--limit=1..100] [--apply] | <mã tổ chức> --rollback=<mã lượt> [--apply]" (script soát).
 ```
 
+### `cart-unit-probe)`
+
+```
+# CÁCH KHÁCH GÕ ĐƠN VỊ «k» / «l» (scripts/cart-unit-probe.ts — pha 3 trùng đơn 24/10/2026) — CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1
+# trước khi nạp @/db và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection — không migrate, không tạo). Nguồn: sales_chat_inbound,
+# dòng CỦA KHÁCH (sender_kind NULL, note không phải PAGE_REPLY / BOT_SENT). Đếm «<số>k <món bán theo khối lượng>», «<số> l/lít/ml <món>»,
+# «<số>k» ngữ cảnh tiền; mẫu số = tin đặt hàng (bộ đọc giỏ hiện tại thấy số lượng, hoặc khớp mẫu k / l). Đo TRƯỚC khi dạy bộ đọc «k» —
+# «k» cũng là nghìn đồng. Tóm tắt chỉ số đếm + tỷ lệ; ví dụ (che số dài) chỉ trong bản MÃ HOÁ. Không ghi gì.
+# arg: "<mã tổ chức> [--days=1..90]".
+```
+
 ### `order-dup-scan)`
 
 ```

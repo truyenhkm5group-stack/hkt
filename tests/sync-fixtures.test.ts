@@ -408,6 +408,7 @@ import { testAddressNormalizePure, testAddressNormalizeTools } from "./address-n
 import { testAddressWardExplicitPure, testAddressWardExplicitTools } from "./address-ward-explicit.test";
 import { testAddressReaskAudit } from "./address-reask-audit.test";
 import { testOrderDupScan } from "./order-dup-scan.test";
+import { testCartUnitProbe } from "./cart-unit-probe.test";
 import { testP0855Address } from "./p0-855-address.test";
 import { testP0871ContactMemory } from "./p0-871-contact-memory.test";
 import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
@@ -2535,6 +2536,7 @@ async function main() {
     await testAddressReaskAudit();
     // P0 HSLC 24/10/2026: ops order-dup-scan — quét cặp đơn nghi trùng (form nhân viên → bot tự chốt).
     await testOrderDupScan();
+    await testCartUnitProbe();
     await testP0855Address(); // #855: địa giới cũ / «như cũ» / địa chỉ mới thắng / không hỏi lại SĐT · tên · địa chỉ · phường
     await testP0871ContactMemory(); // #871: SĐT + địa chỉ đã biết không hỏi lại khi đổi chủ đề · câu mẫu cũng chịu hàng rào · hẹn giờ giao = ghi chú · hậu mãi không bán tiếp · gói tin trùng
     // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
