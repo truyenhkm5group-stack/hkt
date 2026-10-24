@@ -213,6 +213,12 @@ function testPure() {
   assert.deepEqual(resumeDecision({ owner: "AI_ACTIVE", turns: buildCustomerTurns(inflight), ledger: inflight, nowMs: now, pauseNotes: isPause }), { resume: false, reason: "IN_FLIGHT" });
   const answeredLater = [...paused, out("s", "VERIFIED_HUMAN", now - 8 * MIN)];
   assert.deepEqual(resumeDecision({ owner: "AI_ACTIVE", turns: buildCustomerTurns(answeredLater), ledger: answeredLater, nowMs: now, pauseNotes: isPause }), { resume: false, reason: "NO_OPEN_TURN" }, "người đã trả lời trong lúc nhường ⇒ không gửi bù");
+  // P0 HSLC 24/10/2026 (#D2A8DE9B → #A5CC67E2): người lên đơn TỪ / SAU tin đầu của lượt bị nhường ⇒ đã xử lý lượt ấy, KHÔNG mở lại;
+  // đơn người lên TRƯỚC lượt (sáng nay, khách nhắn chuyện khác chiều nay) ⇒ vẫn mở lại.
+  assert.deepEqual(resumeDecision({ owner: "AI_ACTIVE", turns: buildCustomerTurns(paused), ledger: paused, nowMs: now, pauseNotes: isPause, humanOrderAt: now - 5 * MIN }), { resume: false, reason: "HUMAN_ORDERED" }, "người lên đơn sau tin bị nhường ⇒ không chạy lại lượt");
+  assert.deepEqual(resumeDecision({ owner: "AI_ACTIVE", turns: buildCustomerTurns(paused), ledger: paused, nowMs: now, pauseNotes: isPause, humanOrderAt: now - 10 * MIN }), { resume: false, reason: "HUMAN_ORDERED" }, "đúng mốc tin đầu vẫn là đã xử lý");
+  assert.equal(resumeDecision({ owner: "AI_ACTIVE", turns: buildCustomerTurns(paused), ledger: paused, nowMs: now, pauseNotes: isPause, humanOrderAt: now - 60 * MIN }).resume, true, "đơn người TRƯỚC lượt ⇒ vẫn trả lời lượt mới");
+  assert.equal(resumeDecision({ owner: "AI_ACTIVE", turns: buildCustomerTurns(paused), ledger: paused, nowMs: now, pauseNotes: isPause, humanOrderAt: null }).resume, true, "không có đơn người ⇒ như cũ");
 
   // 9. Ý định mua.
   for (const t of ["Lấy 1kg", "lấy 1 kg nha", "Chốt đơn cho chị", "2k nha", "mua 2 hộp", "0832106422", "1094/3 Lê Đức Thọ P13 GV", "số nhà 12 đường Láng"]) assert.ok(purchaseIntent(t).intent, t);

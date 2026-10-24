@@ -6,6 +6,7 @@ import { rowsOf } from "@/lib/sql-rows";
 import { getSettingJson } from "@/lib/settings";
 import { DEAD_ORDER_STAGES, PRE_SHIP_STAGES } from "@/lib/constants/pancake";
 import { toDate } from "@/lib/format";
+import { manualOrderShortCode } from "@/lib/constants/manual-orders";
 import {
   assessDuplicate,
   DEFAULT_DUPLICATE_RULE,
@@ -303,4 +304,97 @@ export async function getDuplicateOrderQueue(): Promise<DuplicateOrderQueue> {
       measuredAt: now,
     };
   });
+}
+
+/* ═══════════════════ CỜ «NGHI TRÙNG ĐƠN» TRÊN /orders (P0 HSLC 24/10/2026) ═══════════════════ */
+
+/**
+ * Cặp #D2A8DE9B / #A5CC67E2 (cùng SĐT, cùng món, cách 83 giây) KHÔNG lộ ra ở nơi nhân viên làm đơn: hàng đợi trên chỉ hiện ở /work và
+ * /operations/preship, còn trang Đơn hàng — nơi kho in đơn và nhân viên gọi khách — không có một chữ nào. Cờ ở đây đọc CHÍNH
+ * `assessDuplicate` + `orderPair` (không luật thứ hai), cùng cửa sổ `orders.duplicate-rule`; luật tắt ⇒ không cờ. Một đơn có nhiều cặp
+ * ⇒ trả đủ (chi tiết đơn in hết; danh sách lấy cặp mạnh nhất). Không giới hạn «chưa rời kho» như hàng đợi: trang đơn là nơi tra lại,
+ * cặp đã giao vẫn là thông tin đúng. Không tự huỷ / gộp gì.
+ */
+export type DuplicateFlag = {
+  otherId: string;
+  otherCode: string;
+  otherStage: OrderStage;
+  otherInsertedAt: Date;
+  verdict: Exclude<DuplicateVerdict, "DISTINCT">;
+  /** `SUSPECT` = đơn này là đơn ĐẶT SAU (bản nghi); `KEEPER` = đơn này đặt trước (bản giữ). */
+  role: "SUSPECT" | "KEEPER";
+  why: string;
+  gapHours: number;
+};
+
+/** Trần số đơn đọc thêm cho một trang — vượt trần thì cờ thiếu một phần, không làm chậm trang (trang 50 đơn thực tế đọc vài chục). */
+const MAX_FLAG_SCAN = 2_000;
+
+const STRENGTH: Record<DuplicateVerdict, number> = { DUPLICATE_SUSPECTED: 2, POSSIBLE_DUPLICATE: 1, DISTINCT: 0 };
+
+/** Cặp mạnh nhất của một đơn (danh sách). HÀM THUẦN. */
+export function strongestFlag(flags: readonly DuplicateFlag[] | undefined): DuplicateFlag | null {
+  if (!flags?.length) return null;
+  return [...flags].sort((a, b) => STRENGTH[b.verdict] - STRENGTH[a.verdict] || a.gapHours - b.gapHours)[0];
+}
+
+export async function duplicateFlagsFor(orders: readonly { id: string; insertedAt: Date; billPhone: string | null }[]): Promise<Map<string, DuplicateFlag[]>> {
+  const out = new Map<string, DuplicateFlag[]>();
+  const keyed = orders.filter((o) => phoneKey(o.billPhone));
+  if (!keyed.length) return out;
+  const rule = await getDuplicateRule();
+  if (!rule.enabled) return out;
+  const win = rule.windowHours * 3_600_000;
+  const times = keyed.map((o) => o.insertedAt.getTime());
+  const from = new Date(Math.min(...times) - win);
+  const to = new Date(Math.max(...times) + win);
+  const keys = [...new Set(keyed.map((o) => phoneKey(o.billPhone)!))];
+  const dead = DEAD_ORDER_STAGES.map((s) => `'${s}'`).join(",");
+  const db = await getDb();
+  const rows = rowsOf<OrderRaw>(
+    await db.execute(sql`
+      select o.id, o.system_id, o.bill_full_name, o.bill_phone, o.ship_address, o.total_price_after_discount as total,
+             o.stage::text as stage, o.inserted_at, o.page_id, o.conversation_id, false as left_warehouse
+        from orders o
+       where o.inserted_at between ${from.toISOString()}::timestamptz and ${to.toISOString()}::timestamptz
+         and o.stage::text not in (${sql.raw(dead)})
+         and right(regexp_replace(coalesce(o.bill_phone, ''), '[^0-9]', '', 'g'), 9) in (${sql.join(keys.map((k) => sql`${k}`), sql`, `)})
+       -- Đơn của CHÍNH trang đứng đầu: vượt trần thì cắt phần đọc thêm, không cắt đơn đang hiện.
+       order by (o.id in (${sql.join(keyed.map((k) => sql`${k.id}`), sql`, `)})) desc, o.inserted_at desc
+       limit ${MAX_FLAG_SCAN}
+    `),
+  );
+  if (rows.length < 2) return out;
+  const items = rowsOf<ItemRaw>(
+    await db.execute(sql`
+      select i.order_id, i.variant_id, i.sku, i.product_name, i.variation_detail, i.quantity
+        from order_items i
+       where i.order_id in (${sql.join(rows.map((r) => sql`${r.id}`), sql`, `)}) and i.is_bonus = false
+    `),
+  );
+  const byOrder = new Map<string, ItemLike[]>();
+  for (const it of items) byOrder.set(it.order_id, [...(byOrder.get(it.order_id) ?? []), { variantId: it.variant_id, sku: it.sku ?? "", productName: it.product_name ?? "", variationDetail: it.variation_detail ?? "", quantity: Number(it.quantity ?? 0) || 0 }]);
+  type Full = DuplicateCandidate & { stage: OrderStage; code: string };
+  const full = new Map<string, Full>();
+  for (const r of rows) {
+    const insertedAt = toDate(r.inserted_at);
+    if (!insertedAt) continue;
+    full.set(r.id, { orderId: r.id, insertedAt, phone: r.bill_phone, receiverName: r.bill_full_name ?? "", address: r.ship_address ?? "", total: Number(r.total ?? 0) || 0, items: byOrder.get(r.id) ?? [], stage: r.stage, code: r.system_id !== null && r.system_id !== undefined ? String(r.system_id) : manualOrderShortCode(r.id) });
+  }
+  for (const o of keyed) {
+    const me = full.get(o.id);
+    if (!me) continue;
+    const flags: DuplicateFlag[] = [];
+    for (const other of full.values()) {
+      if (other.orderId === me.orderId || phoneKey(other.phone) !== phoneKey(me.phone)) continue;
+      const gap = Math.abs(other.insertedAt.getTime() - me.insertedAt.getTime());
+      if (gap > win) continue;
+      const a = assessDuplicate(me, other);
+      if (a.verdict === "DISTINCT") continue;
+      const pair = orderPair(me, other);
+      flags.push({ otherId: other.orderId, otherCode: other.code, otherStage: other.stage, otherInsertedAt: other.insertedAt, verdict: a.verdict, role: pair.suspect.orderId === me.orderId ? "SUSPECT" : "KEEPER", why: a.why, gapHours: gap / 3_600_000 });
+    }
+    if (flags.length) out.set(o.id, flags.sort((x, y) => STRENGTH[y.verdict] - STRENGTH[x.verdict] || x.gapHours - y.gapHours));
+  }
+  return out;
 }

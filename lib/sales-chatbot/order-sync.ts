@@ -40,6 +40,7 @@ import { currentOrganization } from "@/lib/platform/context";
 import { findOrganization } from "@/lib/platform/organizations";
 import { createCustomerAsAgent } from "@/lib/records/customer-create";
 import { createOrderAsAgent } from "@/lib/records/order-create";
+import { CONVERSATION_ORDER_FIELD, existingOrderMaker, otherConversationOrders } from "@/lib/sales-chatbot/conversation-order-guard";
 import { chatOrderAdId } from "@/lib/sales-chatbot/ad-referral";
 import { operationsGroupChannel, orderNotifyRuleLive } from "@/lib/sales-chatbot/alerts";
 import { placeGapLine } from "@/lib/sales-chatbot/new-order-alert";
@@ -694,6 +695,18 @@ async function syncThread(a: {
   const marker = `Mã tin fanpage: ${ag.id ?? `${a.threadId}@${ag.at}`}`;
   const [dup] = await db.select({ id: o.id }).from(o).where(like(o.note, `%${marker}%`)).limit(1);
   if (dup) return { outcome: "SKIPPED", result: `Lời chốt này đã thành đơn #${manualOrderShortCode(dup.id)}` };
+  // HỘI THOẠI ĐÃ CÓ ĐƠN SỐNG (P0 HSLC 24/10/2026 — order-dup-scan: 6 cặp bot → «nhân viên chốt» cách vài phút): bất kỳ đơn còn sống nào
+  // của chính hội thoại trong cửa sổ — KỂ CẢ đơn bot — ⇒ máy KHÔNG ghi đơn thứ hai; khách đặt thêm thật thì nhân viên lên đơn tay. Đọc lỗi
+  // ⇒ lượt sau đọc lại (không ghi khi chưa biết). Rào này chạy LẠI trong giao dịch ghi (khoá hội thoại) bên dưới.
+  const convGuard = { exclude: [] as string[], verifiedCustomerId: null, now, includeBotOrders: true };
+  const live = await otherConversationOrders({ conversationId: conv.id, ...convGuard }).catch(() => null);
+  if (live === null) return { retry: true, result: "không đọc được đơn đã có của hội thoại" };
+  if (live.length) {
+    const ex = live[0];
+    const text = `${a.customerName?.trim() || "Khách"}: hội thoại đã có đơn #${manualOrderShortCode(ex.orderId)} (${existingOrderMaker(ex)}, ${formatDateTime(ex.insertedAt)}) — máy KHÔNG ghi đơn thứ hai. Khách đặt thêm thật thì lên đơn tay.`;
+    await notifyLeadWithoutOrder(conv.id, text, `sales-order-sync:dup:${conv.id}:${ex.orderId}`, now);
+    return { outcome: "SKIPPED", result: text };
+  }
   const cust = await createCustomerAsAgent(ORDER_SYNC_AGENT, { name: decision.recipient.name, phone: decision.recipient.phone, address: decision.recipient.address, province: decision.recipient.province });
   if (!cust.ok) return { outcome: "SKIPPED", result: `Không lưu được khách: ${cust.errors.map((e) => e.message).join(" · ") || cust.code}` };
   const guardFrom = new Date(new Date(ag.at).getTime() - ORDER_SYNC_LIMITS.recentOrderGuardMinutes * 60_000);
@@ -726,7 +739,8 @@ async function syncThread(a: {
     note: notes.join("\n").slice(0, 2000),
     channel: ORDER_SYNC_CHANNEL,
     recipient: decision.recipient,
-  }, { pricing: pricing.mode, idempotencyKey: `order-sync:${conv.id}:${ag.id || ag.at}`, adId: await chatOrderAdId(conv.id, now), quote: { id: priced.quote.quoteId, priceVersion: priced.quote.priceVersion, subtotal: priced.quote.subtotal, total: priced.quote.total } });
+  }, { pricing: pricing.mode, idempotencyKey: `order-sync:${conv.id}:${ag.id || ag.at}`, conversation: { id: conv.id, origin: "AI_ORDER_SYNC", guard: convGuard }, adId: await chatOrderAdId(conv.id, now), quote: { id: priced.quote.quoteId, priceVersion: priced.quote.priceVersion, subtotal: priced.quote.subtotal, total: priced.quote.total } });
+  if (!created.ok && created.errors[0]?.field === CONVERSATION_ORDER_FIELD) return { outcome: "SKIPPED", result: `${created.errors[0].message} — vừa chen vào lúc ghi; máy KHÔNG ghi đơn thứ hai` };
   if (!created.ok) return { outcome: "SKIPPED", result: `Không ghi được đơn: ${"errors" in created ? created.errors.map((e) => e.message).join(" · ") : "lỗi"}` };
   const code = `#${manualOrderShortCode(created.id)}`;
   // Tổ chức bật «đơn đủ thông tin = đã xác nhận» ⇒ lõi ghi đơn đã ghi thẳng «Đã xác nhận».

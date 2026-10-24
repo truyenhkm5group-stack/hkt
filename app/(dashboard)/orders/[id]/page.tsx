@@ -17,13 +17,15 @@ import { SyncOrderButton } from "@/components/sync-order-button";
 import { DescriptionList, Money, SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { pancakeStatusName } from "@/lib/constants/pancake";
+import { ORDER_STAGE_LABEL, pancakeStatusName } from "@/lib/constants/pancake";
 import { orderGrossMargin } from "@/lib/constants/live-cogs";
 import { COD_STATUS_LABEL, getViettelPostTrackingUrl } from "@/lib/constants/viettelpost";
 import { env } from "@/lib/env";
 import { formatDateTime, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { customerOutcomeStats } from "@/lib/queries/customers";
 import { getDb } from "@/db";
+import { duplicateFlagsFor } from "@/lib/queries/order-duplicate";
+import { DUPLICATE_VERDICT_ACTION, DUPLICATE_VERDICT_LABEL } from "@/lib/constants/order-duplicate";
 import { chatLinkOf, getOrderDetail, orderChatThreads, salesInboxEnabled } from "@/lib/queries/orders";
 import { previousOrderHint } from "@/lib/queries/order-hints";
 import { getOrderValidation } from "@/lib/queries/preship-validation";
@@ -72,7 +74,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     Bỏ luôn lượt truy vấn cho nhóm đó: trang chi tiết đơn là trang mở nhiều nhất sau danh sách.
   */
   const chuaGui = PRE_SHIP_STAGES.includes(order.stage);
-  const [timeline, erpHist, erpOther, prev, soat, nguoiHen, khach] = await Promise.all([
+  const [timeline, erpHist, erpOther, prev, soat, nguoiHen, khach, dupFlags] = await Promise.all([
     getOrderTimeline(order.id),
     erpHistoryByPhone([order.billPhone ?? ""], order.id),
     erpOrderCountByPhone([order.billPhone ?? ""], order.id),
@@ -91,6 +93,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
       : Promise.resolve(null),
     // Khối «Khách hàng»: số đơn / thành công / hoàn theo ORDER_OUTCOME — CÙNG câu gom với trang chi tiết khách (một câu, có chỉ mục).
     order.customer ? customerOutcomeStats(order.customer.id) : Promise.resolve(null),
+    // Cờ «Nghi trùng đơn» — CHÍNH `assessDuplicate` của hàng đợi nghi trùng (P0 HSLC 24/10/2026).
+    duplicateFlagsFor([{ id: order.id, insertedAt: order.insertedAt, billPhone: order.billPhone }]).then((m) => m.get(order.id) ?? []),
   ]);
   const risk = assessCustomerRisk({ succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, isBlock: Boolean(order.customer?.isBlock), erpDelivered: erpHist.delivered, erpReturned: erpHist.returned }, riskCfg);
   const newPhone = isNewPhone({ phone: order.billPhone, succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, erpOtherOrders: erpOther });
@@ -286,6 +290,19 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         <section id="can-kiem" className="flex scroll-mt-24 flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-2.5">
           <p className="text-[12.5px] text-muted-foreground">Đơn chưa xác nhận — kiểm hàng, người nhận, địa chỉ rồi xác nhận.</p>
           <OrderQuickDecision orderId={order.id} stage={order.stage} entries={[]} gaps={gaps} />
+        </section>
+      ) : null}
+      {dupFlags.length ? (
+        <section className={cn("space-y-1 rounded-xl border px-4 py-3 text-[13px]", dupFlags[0].verdict === "DUPLICATE_SUSPECTED" ? "border-rose-300 bg-rose-50/70 dark:border-rose-900/60 dark:bg-rose-950/20" : "border-amber-300/70 bg-amber-50/60 dark:border-amber-900/60 dark:bg-amber-950/20")} data-testid="order-duplicate">
+          <p className="font-semibold">{dupFlags[0].verdict === "DUPLICATE_SUSPECTED" ? "Nghi trùng đơn" : "Có thể trùng đơn"}</p>
+          <ul className="space-y-0.5">
+            {dupFlags.map((f) => (
+              <li key={f.otherId}>
+                <Link href={`/orders/${f.otherId}`} className="font-medium underline underline-offset-2">#{f.otherCode}</Link> ({ORDER_STAGE_LABEL[f.otherStage] ?? f.otherStage}, {formatDateTime(f.otherInsertedAt)}) · {DUPLICATE_VERDICT_LABEL[f.verdict]} · đơn này đặt {f.role === "SUSPECT" ? "SAU" : "TRƯỚC"} · {f.why}
+              </li>
+            ))}
+          </ul>
+          <p className="text-[12px] text-muted-foreground">{DUPLICATE_VERDICT_ACTION[dupFlags[0].verdict]}</p>
         </section>
       ) : null}
       {lastReview && !reviewEntries.length ? (
