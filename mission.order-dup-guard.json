@@ -26,18 +26,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T03:27:52.077Z",
-  "updated_at": "2026-10-24T04:30:35.325Z",
-  "last_heartbeat": "2026-10-24T04:30:35.325Z",
+  "updated_at": "2026-10-24T04:45:25.721Z",
+  "last_heartbeat": "2026-10-24T04:45:25.721Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/order-dup-guard",
-    "sha": "392db83f15c5f65e623d39f416ea80600ea6e8f6",
-    "at": "2026-10-24T04:30:35.325Z",
+    "sha": "fdd5544d8d229c4825d5538d4907a4031f01a3c9",
+    "at": "2026-10-24T04:45:25.721Z",
     "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
     "title": "P0: bot không tạo / tự chốt đơn thứ hai khi hội thoại đã có đơn người + cờ Nghi trùng trên /orders",
     "summary": "",
     "tests": [
-      "sửa CI #1029 (golden khach-cu-van-dia-chi-cu): rào chỉ chặn đơn ĐANG MỞ (PRE_SHIP, chưa qua ĐVVC) tạo sau mốc lượt mua (purchaseRoundStart). tsc sạch · eslint sạch · conversation-order-guard + sales-agent-golden chạy riêng XANH; shard 3/4 đang chạy cục bộ"
+      "bỏ mốc lượt mua khỏi mốc dưới (lỗ roundStartAt = bây giờ khi bot quay lại). tsc · eslint sạch. conversation-order-guard (gồm 3 trình tự thật 5c) + sales-agent-golden chạy riêng XANH; đột biến khôi phục mốc lượt mua ⇒ [seq2] ĐỎ"
     ]
   }
 }
