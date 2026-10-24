@@ -92,6 +92,21 @@ export async function getSettingJson<T>(key: string, fallback: T): Promise<T> {
 }
 
 /**
+ * Đọc THÔ chuỗi `settings.value` (không trộn mặc định) — cho khoá lưu MẢNG mà `getSettingJson` sẽ gộp thành object
+ * (chữ ký đối soát, xác nhận trọng số mã…). Trong `withSettingsScope` dùng chung lượt đọc với `getSettingJson` (OD-UX-05 3c:
+ * getReconCenter còn 18 lượt / 10 khoá sau #1037, phần lặp là hai đường đọc thô này). Lỗi câu đọc NÉM như trước: hai nơi gọi
+ * hiện không bắt lỗi, và đổi thành «rỗng» là đổi một cổng duyệt tiền.
+ */
+export async function readSettingValue(key: string): Promise<string | null> {
+  const r = await docDongCauHinh(key);
+  if (!("loi" in r)) return r.row?.value ?? null;
+  // Đọc lại thẳng để ném ĐÚNG lỗi của câu đọc (phạm vi không giữ lượt lỗi).
+  const db = await getDb();
+  const [row] = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, key)).limit(1);
+  return row?.value ?? null;
+}
+
+/**
  * Tổ chức đã TỰ KHAI khoá này chưa (có dòng trong `settings`). `false` ⇒ mọi lượt đọc đang đi bằng giá trị MẶC ĐỊNH trong mã —
  * với tổ chức khách, mặc định ấy là số của tổ chức nhà, nên màn hình phải nói ra (F3 Fashion COD). Lỗi CSDL ⇒ `null`
  * (chưa biết — không khẳng định gì).

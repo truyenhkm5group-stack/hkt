@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { eq, inArray } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
-import { getSettingJson, setSettingJson, withSettingsScope } from "@/lib/settings";
+import { getSettingJson, readSettingValue, setSettingJson, withSettingsScope } from "@/lib/settings";
 
 export async function testSettingsScope(db: Db) {
   const K = "test-scope:a";
@@ -63,6 +63,17 @@ export async function testSettingsScope(db: Db) {
     const [a, b] = await Promise.all([pA, pB]);
     assert.deepEqual(a, [10, 10], "phạm vi A giữ số nó đã đọc");
     assert.equal(b, 20, "phạm vi B đọc riêng — không đi nhờ phạm vi A");
+
+    // Đọc THÔ (khoá lưu mảng — chữ ký đối soát, xác nhận trọng số mã): trả nguyên chuỗi, dùng chung phạm vi (OD-UX-05 3c).
+    await setSettingJson(K2, [{ id: "a" }, { id: "b" }]);
+    const tho = await withSettingsScope(async () => {
+      const x = await readSettingValue(K2);
+      await db.update(schema.settings).set({ value: "[]" }).where(eq(schema.settings.key, K2));
+      return [x, await readSettingValue(K2)];
+    });
+    assert.deepEqual(tho, ['[{"id":"a"},{"id":"b"}]', '[{"id":"a"},{"id":"b"}]'], "đọc thô: nguyên chuỗi mảng, một lượt trong phạm vi");
+    assert.equal(await readSettingValue(K2), "[]", "ngoài phạm vi ⇒ đọc thẳng");
+    assert.equal(await readSettingValue("test-scope:chua-co"), null, "chưa có dòng ⇒ null");
 
     // Khoá chưa có dòng ⇒ mặc định, như trước.
     assert.deepEqual(await withSettingsScope(() => doc("test-scope:chua-co")), { v: -1 });
