@@ -3,7 +3,7 @@
   "mission_id": "home-bot-health",
   "title": "Bot nhà đẩy sức khoẻ lên ERP (lỗi AI · nhịp 5′) ⇒ báo vận hành + banner",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-hbci",
@@ -33,9 +33,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-24T17:45:48.864Z",
-  "updated_at": "2026-10-24T17:48:39.792Z",
+  "updated_at": "2026-10-24T18:11:58.417Z",
   "last_heartbeat": "2026-10-24T17:46:27.918Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1052 → 2e38cf17c0e8a448a7ca3619e79b2b10a52dc25f"
+  },
   "handoff": {
     "branch": "claude/home-bot-health",
     "sha": "30b0128c47708b33fa5b9c03337f42cbe485fdf5",
