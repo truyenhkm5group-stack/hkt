@@ -1,0 +1,8 @@
+{
+  "pr": 1049,
+  "sha": "4427d684cfc7bee201a484376aa06b504c1df541",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T13:27:27.718Z",
+  "note": "review lead: mã 2B COMMENT_CARRY_KEY_INVALID + collector + REGRESSION_WATCH #1044 liveAt 11:31:22Z; kỳ vọng đổi đã duyệt (tiền tố 18 mã, ảnh chụp sổ thêm dòng 1044, mẫu số commentCarries)."
+}
