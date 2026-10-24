@@ -183,6 +183,7 @@ export async function testReturnsBodyTrim(db: Db) {
     const { value: intel, cau: cauIntel } = await ghiCau(db, () => getReturnIntelligence({ period: KY_NAY, previous: null, basis: "SHIPPED", codes: MA }));
     const care = cauIntel.filter((c) => c.text.includes(DAU_CARE_ROWS));
     assert.equal(care.length, 1, "tầng quyết định chạy đúng một câu careRows");
+    assert.ok(care[0].text.includes("exists (select 1 from shipment_care sc where sc.shipment_id"), "bảng dẫn xuất của careRows lọc kiện có đợt care TRƯỚC khi tính kết quả đơn");
     const a = intel.care.byState.find((s) => s.state === "RBD_A");
     const b = intel.care.byState.find((s) => s.state === "RBD_B");
     assert.deepEqual(
