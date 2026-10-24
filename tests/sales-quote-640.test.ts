@@ -778,7 +778,11 @@ async function testChatTurn() {
         assert.equal(scan0?.verdict.kind, "OK", JSON.stringify(scan0?.verdict));
         const mm = schema.salesChatMessages;
         const [lastMsg] = await db.select({ seq: mm.seq }).from(mm).where(eq(mm.conversationId, ctx.conversationId)).orderBy(desc(mm.seq)).limit(1);
-        const atOrder = orders[0].insertedAt ?? new Date();
+        // Đơn cũ trước bản sửa = đơn mà lượt update_draft_order (giả lập) GHI LẠI sau cùng: mốc tin = sau mọi tin của lượt thật, mốc sửa đơn
+        // = ngay sau đó. (Trước pha 2 trùng đơn 24/10/2026, lượt gắn hội thoại SAU giao dịch luôn đẩy `updated_at` về cuối lượt nên mốc tin
+        // = `inserted_at` vẫn lọt vào cửa sổ quét; nay khoá hội thoại ghi lúc chèn, không còn lượt ghi thứ hai ấy.)
+        const atOrder = new Date();
+        await db.update(schema.orders).set({ updatedAt: new Date(atOrder.getTime() + 1) }).where(eq(schema.orders.id, orders[0].id));
         await db.insert(mm).values([
           { conversationId: ctx.conversationId, seq: lastMsg.seq + 1, role: "user", content: [{ type: "text", text: "ok em" }], createdAt: atOrder },
           { conversationId: ctx.conversationId, seq: lastMsg.seq + 2, role: "assistant", content: [{ type: "tool_use", id: "tu-extra", name: "update_draft_order", input: { items: [{ variant_id: ctx.ids.get("CCT-2KG"), quantity: 1 }, { variant_id: ctx.ids.get("CHA-MUC"), quantity: 3 }] } }], createdAt: atOrder },

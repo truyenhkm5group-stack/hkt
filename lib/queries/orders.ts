@@ -1,4 +1,5 @@
 import { listKey, memo } from "@/lib/cache";
+import { duplicateFlagsFor, strongestFlag } from "@/lib/queries/order-duplicate";
 import { currentMarketerCost } from "@/lib/queries/current-marketer-cost";
 import { rowsOf } from "@/lib/sql-rows";
 import { and, asc, count, desc, eq, exists, gte, ilike, inArray, lte, or, sql, type SQL } from "drizzle-orm";
@@ -155,7 +156,8 @@ export async function listOrders(params: ListParams) {
     các đơn tay CỦA TRANG; trang không có đơn tay (tổ chức nhà) ⇒ không chạy câu nào. Đơn khác ⇒ `null` (không áp dụng).
   */
   const payStates = await manualPaymentStates(rowsRaw);
-  const [chats, inboxOn] = await Promise.all([orderChatThreads(rowsRaw.filter((r) => isManualOrderId(r.id)).map((r) => r.id)), salesInboxEnabled()]);
+  // Cờ «Nghi trùng đơn» (P0 HSLC 24/10/2026) — CHÍNH `assessDuplicate` của hàng đợi nghi trùng, một lượt đọc cho cả trang.
+  const [chats, inboxOn, dups] = await Promise.all([orderChatThreads(rowsRaw.filter((r) => isManualOrderId(r.id)).map((r) => r.id)), salesInboxEnabled(), duplicateFlagsFor(rowsRaw.map((r) => ({ id: r.id, insertedAt: r.insertedAt, billPhone: r.billPhone })))]);
   // Chứng từ bàn giao của từng lần gửi — để lần gửi đại diện khớp TỪNG BẬC với PRIMARY_ATTEMPT (vtp-reship-outcome 22/10/2026).
   const handed = await handedOffShipmentIds(db, rowsRaw.flatMap((r) => r.attempts.map((a) => a.id)));
   const rows = rowsRaw.map((r) => {
@@ -170,7 +172,7 @@ export async function listOrders(params: ListParams) {
     const chat = chatLinkOf(chats.get(r.id), inboxOn, { pageId: r.pageId, conversationId: r.conversationId });
     // Chỗ còn thiếu của đơn tay — nút nhanh «Xác nhận đơn» không chốt đơn thiếu xã / SĐT / địa chỉ, dẫn sang sửa đơn (review #675, L2).
     const gaps = isManualOrderId(r.id) ? manualOrderGaps({ phone: r.shipPhone, address: r.shipAddress, province: r.shipProvince, ward: r.shipCommune }, r.itemsCount) : [];
-    return { ...r, review: reviewFromValue(r.review)?.entries ?? [], gaps, shipment: vanDonDaiDien(withHandoff(r.attempts, handed)), risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null, payment: payStates.get(r.id) ?? null, noCodPayment: noCodPaymentState(r), chatUrl: chat?.href ?? null, chatInternal: chat?.internal ?? false };
+    return { ...r, review: reviewFromValue(r.review)?.entries ?? [], gaps, shipment: vanDonDaiDien(withHandoff(r.attempts, handed)), risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null, payment: payStates.get(r.id) ?? null, noCodPayment: noCodPaymentState(r), chatUrl: chat?.href ?? null, chatInternal: chat?.internal ?? false, duplicate: strongestFlag(dups.get(r.id)) };
   });
 
   return { rows, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };

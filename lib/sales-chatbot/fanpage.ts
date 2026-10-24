@@ -56,6 +56,7 @@ import { botSendAllowed, inboundPageGate, pageRuntimeMode } from "@/lib/sales-ch
 import { noteSendRateLimited, sendRecentlyLimited } from "@/lib/sales-chatbot/pancake-send-pressure";
 import { PAGE_NOT_LIVE_SEND_ERROR, PAGE_OFF_NOTE } from "@/lib/sales-chatbot/page-runtime-shared";
 import { mergePancakeAvatarFacts, pancakeAvatarFactsOf, pancakeAvatarPatch, type PancakeAvatarFacts } from "@/lib/sales-chatbot/avatar-profile";
+import { botOwnOrderIds, otherConversationOrders } from "@/lib/sales-chatbot/conversation-order-guard";
 import { buildCustomerTurns, buyIntentDuringPause, classifyOutbound, mergeSourceView, openTurnOf, partitionPending, purchaseIntent, resumeDecision, RESUME_MAX_TURN_AGE_MS, templateKeyOf, type LedgerMessage, type OutboundOrigin, type SourceMessage } from "@/lib/sales-chatbot/response-ownership";
 import { loadThreadLedger, ownerOfConversation, pauseVerified, templateTexts } from "@/lib/sales-chatbot/response-ownership-ledger";
 import { recordConversationEvent } from "@/lib/sales-chatbot/events";
@@ -1999,8 +2000,17 @@ export async function resumeFanpageAfterPause(deps: FanpageDeps = {}): Promise<R
       const ledger = await loadThreadLedger(pageId, threadId, now());
       const turns = buildCustomerTurns(ledger);
       const owner = ownerOfConversation(fresh, ledger, now());
-      const d = resumeDecision({ owner: owner.state, turns, ledger, nowMs: now().getTime(), pauseNotes: resumablePauseNote });
-      if (!d.resume) continue;
+      // Đơn MỚI NHẤT của NGƯỜI trên hội thoại (không phải đơn bot) — người đã lên đơn từ chính lượt bị nhường ⇒ không mở lại. Đọc lỗi ⇒
+      // KHÔNG mở lại lượt này (phía hẹp: một lượt không được trả lời bù còn hơn một đơn trùng đã xác nhận); lượt job sau đọc lại.
+      const humanOrderAt = await otherConversationOrders({ conversationId: fresh.id, exclude: botOwnOrderIds(fresh.state as Parameters<typeof botOwnOrderIds>[0]), verifiedCustomerId: null, now: now() })
+        .then((rows) => (rows.length ? Math.max(...rows.map((r) => r.insertedAt.getTime())) : null))
+        .catch(() => undefined);
+      if (humanOrderAt === undefined) continue;
+      const d = resumeDecision({ owner: owner.state, turns, ledger, nowMs: now().getTime(), pauseNotes: resumablePauseNote, humanOrderAt });
+      if (!d.resume) {
+        if (d.reason === "HUMAN_ORDERED") out.detail.push(`${threadId.slice(-6)}: không mở lại — người đã lên đơn sau tin bị nhường`);
+        continue;
+      }
       const [marked] = await db
         .update(c)
         .set({ state: sql`${c.state} || ${JSON.stringify({ resumedTurn: d.turnId })}::jsonb` })
