@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { commonPrefix, idShape, keyVerdict, messageText, parseLinkArgs, LINK_MAX_CONVS } from "../scripts/comment-inbox-link-probe";
+import { commonPrefix, emptyLegacyTally, idShape, keyVerdict, legacyVerdict, messageText, parseLinkArgs, LEGACY_DEFAULT_DAYS, LEGACY_MAX_DAYS, LINK_MAX_CONVS } from "../scripts/comment-inbox-link-probe";
 
 export function testCommentInboxLinkProbe() {
   // Bốn phán quyết: không dòng dấu ⇒ không biết Pancake trả gì; có dấu chưa có tiếng vọng ⇒ chưa kết luận; còn lại so luồng.
@@ -35,6 +35,19 @@ export function testCommentInboxLinkProbe() {
     assert.ok("error" in parseLinkArgs(bad), `tham số sai phải bị từ chối: ${bad.join(" ")}`);
   }
 
+  // P2-6 chạy thử khoá «m_…»: một tổ chức hoặc --all; --all chỉ với --legacy-keys; không đi cùng --conv; trần ngày riêng.
+  const lg = parseLinkArgs(["--all", "--legacy-keys"]);
+  assert.ok(!("error" in lg) && lg.all && lg.legacy && lg.code === null && lg.days === LEGACY_DEFAULT_DAYS, JSON.stringify(lg));
+  const lg1 = parseLinkArgs(["hslc-hmt-shop", "--legacy-keys", "--days=45"]);
+  assert.ok(!("error" in lg1) && !lg1.all && lg1.code === "hslc-hmt-shop" && lg1.days === 45);
+  for (const bad of [["--all"], ["--all", "hslc", "--legacy-keys"], ["hslc", "--legacy-keys", `--days=${LEGACY_MAX_DAYS + 1}`], ["hslc", "--legacy-keys", "--conv=7a5d4f63-2409-43e5-a920-ddc9536b5a26"]]) {
+    assert.ok("error" in parseLinkArgs(bad), `tham số sai phải bị từ chối: ${bad.join(" ")}`);
+  }
+  assert.equal(legacyVerdict("p_1", "conv-x"), "TWO_CONVERSATIONS", "ca Ngọc: tin riêng rơi luồng thật có hội thoại riêng");
+  assert.equal(legacyVerdict("p_1", null), "INBOX_NO_CONVERSATION");
+  assert.equal(legacyVerdict(null, null), "ECHO_NOT_FOUND", "không có dòng mang đúng mã tin ⇒ không đoán");
+  assert.deepEqual(emptyLegacyTally().byVerdict, { TWO_CONVERSATIONS: 0, INBOX_NO_CONVERSATION: 0, ECHO_NOT_FOUND: 0 });
+
   const src = readFileSync("scripts/comment-inbox-link-probe.ts", "utf8");
   const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
   // Tìm bằng regex đã thoát (không phải chuỗi literal): bài này KHÔNG đọc môi trường, chỉ đọc mã nguồn của script.
@@ -42,6 +55,8 @@ export function testCommentInboxLinkProbe() {
   assert.ok(readOnlyAt >= 0 && readOnlyAt < code.indexOf('from "@/db"'), "chỉ đọc TRƯỚC khi nạp CSDL");
   assert.match(code, /show default_transaction_read_only/, "hỏi lại phiên chỉ đọc");
   assert.match(code, /getDbForInspection\(/, "CSDL tổ chức mở bằng handle chẩn đoán");
+  assert.match(code, /eq\(t\.messageId, r\.threadId\)/, "luồng thật của khoá «m_…» tìm bằng CHÍNH mã tin (khoá xác định), không ghép theo chữ");
+  assert.doesNotMatch(code, /tomTat\(`legacy-keys[^`]*\$\{org\.code/, "tóm tắt chạy thử mọi tổ chức không mang mã tổ chức");
   assert.doesNotMatch(code, /\bdb\s*\.\s*(insert|update|delete)\b|sql`\s*(insert|update|delete)\b/i, "không ghi gì vào CSDL");
   assert.doesNotMatch(code, /fetch\(/, "không gọi Pancake");
   for (const m of code.matchAll(/tomTat\(([\s\S]*?)\);\n/g)) {
