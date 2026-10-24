@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "cart-unit-probe",
+  "title": "ops cart-unit-probe: đếm cách khách gõ k / l trước khi dạy bộ đọc giỏ (chỉ đọc)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "scripts/cart-unit-probe.ts",
+    "tests/cart-unit-probe.test.ts",
+    ".github/workflows/ops-vps.yml",
+    "tests/platform-isolation-static.test.ts",
+    "docs/ops-vps-script-notes.md",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-24T09:42:08.385Z",
+  "updated_at": "2026-10-24T09:42:08.385Z",
+  "last_heartbeat": "2026-10-24T09:42:08.385Z",
+  "definition_of_done": []
+}
