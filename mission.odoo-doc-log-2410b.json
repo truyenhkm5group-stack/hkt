@@ -3,7 +3,7 @@
   "mission_id": "odoo-doc-log-2410b",
   "title": "Tệp tiến độ Odoo §7.2.1: OD-UX-05 mục 2–3 + /reports/returns #1030/#1036 có số",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-odoolog2",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T09:53:59.794Z",
-  "updated_at": "2026-10-24T09:53:59.794Z",
-  "last_heartbeat": "2026-10-24T09:53:59.794Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T09:55:37.078Z",
+  "last_heartbeat": "2026-10-24T09:55:37.078Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/odoo-doc-log-2410b",
+    "sha": "656718606112b6f4d24d863592285dc90d952995",
+    "at": "2026-10-24T09:55:37.078Z",
+    "actor": "DESKTOP-56TH98Y:wt-odoolog2",
+    "title": "Tệp tiến độ Odoo §7.2.1: OD-UX-05 mục 2–3 + /reports/returns #1030/#1036 có số",
+    "summary": "",
+    "tests": [
+      "chỉ tài liệu, chỉ trong §7.2.1 · merge-tree với nhánh #1006 sạch"
+    ]
+  }
 }
