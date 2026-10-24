@@ -21,7 +21,8 @@ export function testShipmentStateProbe() {
   const ops = readFileSync(".github/workflows/ops-vps.yml", "utf8");
   assert.match(ops, /- shipment-state-probe\s+#/, "lựa chọn");
   assert.match(ops, /OPS_THAO_TAC_MA_HOA: "[^"]*\bshipment-state-probe\b/, "kết quả MÃ HOÁ");
-  assert.match(ops, /DOC_NHE="[^"]*\bshipment-state-probe\b/, "làn đọc nhẹ");
+  assert.match(ops, /DOC_NANG="[^"]*\bshipment-state-probe\b/, "làn đọc NẶNG (có khoá): script dựng tiến trình npx tsx trong container");
+  assert.doesNotMatch(ops, /DOC_NHE="[^"]*\bshipment-state-probe\b/, "không ở làn nhẹ chạy song song không giới hạn");
   assert.match(ops, /shipment-state-probe\)\n[\s\S]*?ma_hoa_ket_qua docker exec erp-app npx tsx --tsconfig tsconfig\.json scripts\/shipment-state-probe\.ts ;;/, "nhánh chạy");
   console.log("✓ ops shipment-state-probe: chỉ đọc từ đầu · đo đúng hàm route · không lộ khoá / mã · EXPLAIN chỉ đọc + rollback · khai đủ, mã hoá");
 }
