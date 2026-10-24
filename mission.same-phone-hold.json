@@ -3,7 +3,7 @@
   "mission_id": "same-phone-hold",
   "title": "Lớp tạm: SĐT trùng đơn bot đang mở ở hội thoại khác ⇒ không tự chốt + cờ POSSIBLE_SAME_CUSTOMER",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -26,12 +26,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-24T07:48:58.024Z",
-  "updated_at": "2026-10-24T10:40:23.237Z",
+  "updated_at": "2026-10-24T11:14:24.999Z",
   "last_heartbeat": "2026-10-24T10:31:44.864Z",
   "definition_of_done": [],
   "evidence": {
-    "verify": "PASS 6ca3af26be6582a918fd6ca7d1bc67a8d12ccc9b 2026-10-24T09:40:40.083Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40080447595",
+    "verify": "PASS 5d4997bbce4be9a4233849cb97445e6bfdb45566 2026-10-24T11:13:50.525Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40086846234",
     "merged": "#1039 → 5d4997bbce4be9a4233849cb97445e6bfdb45566"
   },
   "handoff": {
