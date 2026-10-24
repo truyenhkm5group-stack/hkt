@@ -8,7 +8,9 @@ import { readFileSync } from "node:fs";
 export function testShipmentStateProbe() {
   const src = readFileSync("scripts/shipment-state-probe.ts", "utf8");
   const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
-  assert.ok(code.indexOf('process.env.ERP_READ_ONLY = "1";') >= 0 && code.indexOf('process.env.ERP_READ_ONLY = "1";') < code.indexOf('await import("@/db")'), "chỉ đọc TRƯỚC khi nạp CSDL");
+  // Tìm bằng regex đã thoát (không phải chuỗi literal): bài này KHÔNG đọc môi trường, chỉ đọc mã nguồn của script.
+  const readOnlyAt = code.search(/process\.env\.ERP_READ_ONLY = "1";/);
+  assert.ok(readOnlyAt >= 0 && readOnlyAt < code.indexOf('await import("@/db")'), "chỉ đọc TRƯỚC khi nạp CSDL");
   assert.match(code, /import\("@\/lib\/queries\/shipment-state-internal"\)/, "đo đúng hàm route dùng");
   assert.doesNotMatch(code, /PRIMARY_ATTEMPT|order by \(sh\.stage/, "không viết bản thứ hai của câu lần gửi chính — câu EXPLAIN bắt lại từ chính lời gọi");
   assert.doesNotMatch(code, /console\.log\([^)]*\btoken\b/, "khoá không bao giờ đi vào log");
