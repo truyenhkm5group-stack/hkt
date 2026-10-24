@@ -3,7 +3,7 @@
   "mission_id": "od-ux-05-settings-dedupe",
   "title": "OD-UX-05 mục 3: khử trùng đọc cấu hình theo lượt dựng (trang chủ)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-settings",
@@ -25,7 +25,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T06:04:02.423Z",
-  "updated_at": "2026-10-24T06:04:02.423Z",
-  "last_heartbeat": "2026-10-24T06:04:02.423Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T06:20:57.566Z",
+  "last_heartbeat": "2026-10-24T06:20:57.566Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/od-ux-05-settings-dedupe",
+    "sha": "f19605eca2b678bd12120b330a08711ff3d25144",
+    "at": "2026-10-24T06:20:57.566Z",
+    "actor": "DESKTOP-56TH98Y:wt-settings",
+    "title": "Trang chủ không còn xin kết nối riêng cho mỗi lần đọc cùng một khoá cấu hình trong một lượt dựng",
+    "summary": "OD-UX-05 mục 3. withSettingsScope (ALS theo lượt dựng, không TTL, khoá mang mã tổ chức); lồng nhau dùng chung; setSettingJson xoá mục khoá ⇒ ghi rồi đọc lại thấy mới; câu lỗi không giữ; lỗi getDb vẫn ném. getBusinessBrief + getDashboardData tính trong phạm vi. perf-probe thêm mục đếm lượt / khoá settings theo hàm để đo phần cứu được.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint 7 tệp: sạch",
+      "TEST_KHOI=K06,K15,K16,K17,K18 npm test: ĐẠT (settings-scope · cache-semantics · test-hygiene · trang-cham-jit · platform-isolation-static · ops-log-leak)"
+    ]
+  }
 }
