@@ -3,7 +3,7 @@
   "mission_id": "perf-probe-work-warm",
   "title": "perf-probe: đo lại TỪNG NGUỒN của /work khi đệm đã ấm, in tên nguồn chạm hạn",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-probewarm",
@@ -22,9 +22,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-24T06:40:12.610Z",
-  "updated_at": "2026-10-24T07:00:07.325Z",
+  "updated_at": "2026-10-24T07:32:52.899Z",
   "last_heartbeat": "2026-10-24T06:58:21.301Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1035 → 4ee3c8f2ed26f80c91f2889019934b6d542d7198"
+  },
   "handoff": {
     "branch": "claude/perf-probe-work-warm",
     "sha": "ee891ae9f771bcebdd63cbabd6db56753564a058",
