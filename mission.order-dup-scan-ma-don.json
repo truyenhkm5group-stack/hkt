@@ -3,7 +3,7 @@
   "mission_id": "order-dup-scan-ma-don",
   "title": "order-dup-scan: mã đơn đúng như ERP hiển thị + đếm cặp đã huỷ đơn sau",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-dupma",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T05:07:36.097Z",
-  "updated_at": "2026-10-24T05:07:36.097Z",
-  "last_heartbeat": "2026-10-24T05:07:36.097Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T06:54:51.982Z",
+  "last_heartbeat": "2026-10-24T06:54:51.982Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/order-dup-scan-ma-don",
+    "sha": "99cfbcdc59b874e0fdd0f7b10edfff39d8d61520",
+    "at": "2026-10-24T06:54:51.982Z",
+    "actor": "DESKTOP-56TH98Y:wt-dupma",
+    "title": "order-dup-scan: mã đơn đúng như ERP hiển thị + đếm cặp đã huỷ đơn sau",
+    "summary": "",
+    "tests": [
+      "tsc + eslint sạch · TEST_KHOI=K09 xanh (tests/order-dup-scan.test.ts: mã #ERP 8 ký tự / #system_id, đếm huỷ đơn sau ≠ đơn trước, --since đúng lệnh Lead, cặp mới theo đơn sau, BOT sau người, đếm rào đọc detail->'after' ghi bằng chính audit()) · npm test đầy đủ cục bộ DỪNG theo Lead (máy quá tải) sau 61 nhóm, 0 đỏ — CI gates chạy đủ 4 shard"
+    ]
+  }
 }
