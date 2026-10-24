@@ -3,7 +3,7 @@
   "mission_id": "perf-probe-work-warm",
   "title": "perf-probe: đo lại TỪNG NGUỒN của /work khi đệm đã ấm, in tên nguồn chạm hạn",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-probewarm",
@@ -20,7 +20,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T06:40:12.610Z",
-  "updated_at": "2026-10-24T06:40:12.610Z",
-  "last_heartbeat": "2026-10-24T06:40:12.610Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T06:58:21.301Z",
+  "last_heartbeat": "2026-10-24T06:58:21.301Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/perf-probe-work-warm",
+    "sha": "ee891ae9f771bcebdd63cbabd6db56753564a058",
+    "at": "2026-10-24T06:58:21.301Z",
+    "actor": "DESKTOP-56TH98Y:wt-probewarm",
+    "title": "perf-probe: đo lại từng nguồn của /work khi đệm đã ấm và in tên nguồn còn chạm hạn",
+    "summary": "Chỉ-script. Sau mục TỪNG NGUỒN (nguội): làm ấm bằng đường trang (≤ 3 vòng, nghỉ 3 s), rồi đo lại từng nguồn + toàn trang KHÔNG xoá đệm, in nguồn chạm hạn / lỗi theo tên.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint: sạch",
+      "TEST_KHOI=K15,K16,K18 npm test: ĐẠT"
+    ]
+  }
 }
