@@ -1,8 +1,8 @@
 {
   "pr": 1028,
-  "sha": "da4bec3f524c5df44829d7ffb5e14c083466a2fd",
+  "sha": "c6f4493324acd5ce2d05c8865c8fd8290155c45d",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-24T02:21:35.691Z",
-  "note": "review lead: ops chỉ đọc đo route nội bộ nguội/ấm + EXPLAIN đúng câu bắt từ Pool.query trong giao dịch chỉ đọc có rollback; khoá đọc trong máy không in; mã/kế hoạch mã hoá."
+  "at": "2026-10-24T03:58:04.795Z",
+  "note": "review lead (lại): bài kiểm thôi chứa chuỗi process.env nguyên văn; ops chỉ đọc."
 }
