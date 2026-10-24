@@ -3,7 +3,7 @@
   "mission_id": "order-dup-guard",
   "title": "P0: bot không tạo / tự chốt đơn thứ hai khi hội thoại đã có đơn người + cờ Nghi trùng trên /orders",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -28,11 +28,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-24T03:27:52.077Z",
-  "updated_at": "2026-10-24T05:05:38.228Z",
+  "updated_at": "2026-10-24T05:18:54.024Z",
   "last_heartbeat": "2026-10-24T04:45:25.721Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1029 → caea634ce6d683e2fb371d4c68066ffbb13a3c42"
+    "merged": "#1029 → caea634ce6d683e2fb371d4c68066ffbb13a3c42",
+    "verify": "PASS caea634ce6d683e2fb371d4c68066ffbb13a3c42 2026-10-24T05:18:22.517Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40064917184"
   },
   "handoff": {
     "branch": "claude/order-dup-guard",
