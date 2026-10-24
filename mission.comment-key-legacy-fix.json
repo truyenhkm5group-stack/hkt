@@ -3,7 +3,7 @@
   "mission_id": "comment-key-legacy-fix",
   "title": "legacy-keys: loại dòng dấu __private_reply__ khỏi tìm luồng thật",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-ckl",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-24T11:34:17.465Z",
-  "updated_at": "2026-10-24T11:42:25.726Z",
+  "updated_at": "2026-10-24T12:04:54.709Z",
   "last_heartbeat": "2026-10-24T11:34:54.365Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1046 → 6a2b46ff4852bd783889a013d368e4cf047d1a88"
+  },
   "handoff": {
     "branch": "claude/comment-key-legacy-fix",
     "sha": "ebf143509ddb9a90c1f41056e7de7f2208da3fba",
