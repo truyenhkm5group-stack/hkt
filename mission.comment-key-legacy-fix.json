@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "mission_id": "comment-key-legacy-fix",
+  "title": "legacy-keys: loại dòng dấu __private_reply__ khỏi tìm luồng thật",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-ckl",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/comment-key-legacy-fix",
+  "base_sha": "db98d057cda8c75219f0c35bedbcf21c3ab32515",
+  "domains": [],
+  "owned_paths": [
+    "scripts/comment-inbox-link-probe.ts",
+    "tests/comment-inbox-link-probe.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-24T11:34:17.465Z",
+  "updated_at": "2026-10-24T11:34:17.465Z",
+  "last_heartbeat": "2026-10-24T11:34:17.465Z",
+  "definition_of_done": []
+}
