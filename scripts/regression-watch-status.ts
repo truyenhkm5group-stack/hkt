@@ -9,6 +9,11 @@
   cho MỖI sứ mệnh trong sổ: `scripts/ai-tech.ts close --status=DONE --regression-run=<run id>` đọc đúng dòng ấy.
 
   REOPENED = việc tái diễn ĐANG MỞ (chưa ai đóng, hoặc đã đóng mà lọt lại sau lúc đóng nên tự mở lại).
+
+  HAI SỐ LỌT, KHÔNG LẪN (24/10/2026 — ADDRESS_REASK in «lọt 0 · REGRESSION_REOPENED» khiến người đọc tưởng việc mở oan):
+   · «lọt N trong ngày D» — số của lượt 2B GẦN NHẤT (một ngày VN), KHÔNG phải tổng từ `liveAt`;
+   · «lọt cuối ngày L»   — ngày 2B của lượt gần nhất còn thấy lọt sau `liveAt` (lượt ấy viết lại tiêu đề việc tái diễn). Giờ chính
+     xác không có: `notifications` không lưu mốc lọt, nên in NGÀY chứ không bịa giờ. Không có việc nào ⇒ «—», tiêu đề lạ ⇒ «không đọc được».
   arg: không có.
 */
 const CHAY_THANG = Boolean(process.argv[1] && process.argv[1].endsWith("regression-watch-status.ts"));
@@ -32,8 +37,11 @@ export type OrgRegressionSnapshot = {
   /** Lượt 2B gần nhất có kết luận sổ theo dõi không (`null` = chưa chạy bản có sổ). */
   day: string | null;
   rows: NonNullable<SalesQualityState["regression"]>["rows"];
-  /** Việc tái diễn theo khoá: đang mở hay đã đóng. */
-  items: { dedupeKey: string; open: boolean }[];
+  /**
+   * Việc tái diễn theo khoá: đang mở hay đã đóng. `lastLeakDay` = ngày 2B (VN) trong tiêu đề việc — lượt CREATE / REFRESH / REOPEN gần
+   * nhất, tức ngày gần nhất còn thấy lọt sau `liveAt`; thiếu hoặc `null` = không đọc được.
+   */
+  items: { dedupeKey: string; open: boolean; lastLeakDay?: string | null; occurredAt?: string | null; resolvedAt?: string | null }[];
 };
 
 export type RegressionStatusRow = {
@@ -47,6 +55,12 @@ export type RegressionStatusRow = {
   blocked: number;
   /** Số tổ chức đang có việc tái diễn MỞ cho cặp này. */
   reopened: number;
+  /** Ngày 2B (VN) của các lượt mà `leaked` / `blocked` cộng lại — số lọt là của NGÀY ẤY, không phải từ `liveAt`. */
+  days: string[];
+  /** Ngày 2B muộn nhất còn thấy lọt sau `liveAt`, trên mọi tổ chức (việc mở lẫn đã đóng). `null` = chưa có việc tái diễn nào. */
+  lastLeakDay: string | null;
+  /** Có việc tái diễn mà KHÔNG đọc được ngày lọt cuối của bất kỳ việc nào. */
+  lastLeakUnreadable: boolean;
   status: "REGRESSION_REOPENED" | "HOLDING" | "QUIET" | "LEAK_UNAVAILABLE" | "NOT_RUN";
 };
 
@@ -61,6 +75,9 @@ export function regressionStatusTable(orgs: readonly OrgRegressionSnapshot[], wa
       const blocked = mine.reduce((t, r) => t + r.blocked, 0);
       const leaked = code === null ? null : mine.reduce((t, r) => t + (r.leaked ?? 0), 0);
       const reopened = code === null ? 0 : orgs.filter((o) => o.items.some((i) => i.open && i.dedupeKey === regressionDedupeKey(code, row.mission))).length;
+      const viec = code === null ? [] : orgs.flatMap((o) => o.items.filter((i) => i.dedupeKey === regressionDedupeKey(code, row.mission)));
+      const ngayLot = viec.map((i) => i.lastLeakDay ?? null).filter((d): d is string => d !== null).sort();
+      const days = [...new Set(ran.map((o) => o.day as string))].sort();
       const status: RegressionStatusRow["status"] = !ran.length
         ? "NOT_RUN"
         : reopened > 0
@@ -70,7 +87,19 @@ export function regressionStatusTable(orgs: readonly OrgRegressionSnapshot[], wa
             : blocked > 0
               ? "HOLDING"
               : "QUIET";
-      out.push({ mission: row.mission, code, liveAt: row.liveAt, leakMeasuredFrom: row.leakMeasuredFrom ?? null, leaked, blocked, reopened, status });
+      out.push({
+        mission: row.mission,
+        code,
+        liveAt: row.liveAt,
+        leakMeasuredFrom: row.leakMeasuredFrom ?? null,
+        leaked,
+        blocked,
+        reopened,
+        status,
+        days,
+        lastLeakDay: ngayLot.length ? ngayLot[ngayLot.length - 1] : null,
+        lastLeakUnreadable: viec.length > 0 && ngayLot.length === 0,
+      });
     }
   }
   return out;
@@ -84,13 +113,30 @@ export function regressionStatusTable(orgs: readonly OrgRegressionSnapshot[], wa
 export function regressionStatusLines(table: readonly RegressionStatusRow[], orgCount: number, ranCount: number, unreadable = 0): string[] {
   const lines = [`regression-watch: ${REGRESSION_WATCH.length} dòng sổ · ${orgCount} tổ chức · ${ranCount} đã chạy lượt 2B có sổ · ${unreadable} không đọc được`];
   for (const r of table) {
-    lines.push(`  ${r.code ?? "(chưa có mã lọt)"} · ${r.mission} · live ${r.liveAt} · lọt ${r.leaked === null ? "chưa đo được" : r.leaked}${r.leakMeasuredFrom && r.leaked !== null ? ` (đo lọt từ ${r.leakMeasuredFrom})` : ""} · đã chặn ${r.blocked} · ${r.status}`);
+    const ngay = r.days.length ? ` trong ngày ${r.days.length === 1 ? r.days[0] : `${r.days[0]}…${r.days[r.days.length - 1]}`}` : "";
+    const lot = r.leaked === null ? "chưa đo được" : `${r.leaked}${ngay}${r.leakMeasuredFrom ? ` (đo lọt từ ${r.leakMeasuredFrom})` : ""}`;
+    const cuoi = r.code === null ? "" : ` · lọt cuối ${r.lastLeakDay ? `ngày ${r.lastLeakDay}` : r.lastLeakUnreadable ? "không đọc được" : "— (chưa có việc tái diễn)"}`;
+    lines.push(`  ${r.code ?? "(chưa có mã lọt)"} · ${r.mission} · live ${r.liveAt} · lọt ${lot}${cuoi} · đã chặn ${r.blocked} · ${r.status}`);
   }
   for (const m of [...new Set(REGRESSION_WATCH.map((r) => r.mission))]) {
     const rows = table.filter((r) => r.mission === m);
     lines.push(unreadable > 0 || ranCount === 0 ? `regression-watch mission=${m} reopened=UNKNOWN rows=${rows.length}` : regressionSummaryLine(m, rows.reduce((t, r) => t + r.reopened, 0), rows.length));
   }
   return lines;
+}
+
+/**
+ * Ngày 2B (VN, `YYYY-MM-DD`) trong tiêu đề việc tái diễn — `regressionText` (lib/sales-quality/regression.ts) viết «(ngày DD/MM) — sứ mệnh …»
+ * ở mọi lượt CREATE / REFRESH / REOPEN. Tiêu đề không mang năm: ngày 2B không bao giờ muộn hơn hôm nay, nên ngày/tháng lớn hơn hôm nay là
+ * năm trước. Không khớp ⇒ `null` (không đoán). HÀM THUẦN; tests/regression-watch.test.ts dựng tiêu đề bằng chính `regressionText`.
+ */
+export function leakDayFromTitle(title: string, now: Date): string | null {
+  const m = /\(ngày (\d{2})\/(\d{2})\) — sứ mệnh /.exec(title);
+  if (!m) return null;
+  const today = new Date(now.getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
+  const year = Number(today.slice(0, 4));
+  const day = `${year}-${m[2]}-${m[1]}`;
+  return day > today ? `${year - 1}-${m[2]}-${m[1]}` : day;
 }
 
 type DbHolder = { __erpDb?: { orgs?: Map<string, { db?: Db }> } };
@@ -116,12 +162,22 @@ async function snapshotOf(): Promise<OrgRegressionSnapshot> {
   const [ro] = rowsOf<{ transaction_read_only?: string }>(await db.execute(sql`show transaction_read_only`));
   if (ro?.transaction_read_only !== "on") throw new Error("phiên CSDL không ở chế độ chỉ đọc — dừng");
   const n = schema.notifications;
-  const items = await db.select({ dedupeKey: n.dedupeKey, resolvedAt: n.resolvedAt }).from(n).where(like(n.dedupeKey, "sales-quality:regression:%"));
+  const items = await db
+    .select({ dedupeKey: n.dedupeKey, resolvedAt: n.resolvedAt, title: n.title, occurredAt: n.occurredAt })
+    .from(n)
+    .where(like(n.dedupeKey, "sales-quality:regression:%"));
+  const now = new Date();
   const st = await getSettingJson<Partial<SalesQualityState>>(SALES_QUALITY_STATE_KEY, {});
   return {
     day: st.regression ? (st.day ?? null) : null,
     rows: st.regression?.rows ?? [],
-    items: items.map((i) => ({ dedupeKey: i.dedupeKey, open: i.resolvedAt === null })),
+    items: items.map((i) => ({
+      dedupeKey: i.dedupeKey,
+      open: i.resolvedAt === null,
+      lastLeakDay: leakDayFromTitle(i.title ?? "", now),
+      occurredAt: i.occurredAt ? new Date(i.occurredAt).toISOString() : null,
+      resolvedAt: i.resolvedAt ? new Date(i.resolvedAt).toISOString() : null,
+    })),
   };
 }
 
@@ -149,7 +205,12 @@ async function main() {
     snaps.push(s);
     // Phần MÃ HOÁ: theo từng tổ chức.
     console.log(`── ${code} · lượt 2B ${s.day ?? "chưa có sổ"} · ${s.items.filter((i) => i.open).length} việc tái diễn mở / ${s.items.length}`);
-    for (const r of s.rows) console.log(`   ${r.code ?? "(chưa có mã lọt)"} · ${r.mission} · lọt ${r.leaked ?? "chưa đo được"} · đã chặn ${r.blocked} · ${r.verdict} · ${r.action ?? "—"}`);
+    for (const r of s.rows) console.log(`   ${r.code ?? "(chưa có mã lọt)"} · ${r.mission} · lọt ${r.leaked ?? "chưa đo được"} (ngày ${s.day}) · đã chặn ${r.blocked} · ${r.verdict} · ${r.action ?? "—"}`);
+    for (const i of s.items) {
+      console.log(
+        `   việc ${i.dedupeKey.replace("sales-quality:regression:", "")} · ${i.open ? "MỞ" : "đã đóng"} · tạo / mở lại ${i.occurredAt ?? "—"} · đóng ${i.resolvedAt ?? "—"} · lọt cuối ngày ${i.lastLeakDay ?? "không đọc được"}`,
+      );
+    }
   }
   for (const line of regressionStatusLines(regressionStatusTable(snaps), orgs.length, snaps.filter((s) => s.day !== null).length, unreadable)) tomTat(line);
   process.exit(0);

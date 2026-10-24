@@ -23,9 +23,9 @@ import {
 } from "@/lib/constants/regression-watch";
 import { SALES_QUALITY_CODES, SALES_QUALITY_SPEC, type SalesQualityCode } from "@/lib/constants/sales-quality";
 import { appendHistory, salesQualityRates } from "@/lib/sales-quality/daily";
-import { applyRegressionWatch, runningSha } from "@/lib/sales-quality/regression";
+import { applyRegressionWatch, regressionText, runningSha } from "@/lib/sales-quality/regression";
 import { parseRegressionRunLog, regressionDoneGate, regressionWatchedMissions } from "../scripts/ai-tech";
-import { regressionStatusLines, regressionStatusTable, type OrgRegressionSnapshot } from "../scripts/regression-watch-status";
+import { leakDayFromTitle, regressionStatusLines, regressionStatusTable, type OrgRegressionSnapshot } from "../scripts/regression-watch-status";
 
 const SO = readFileSync("lib/constants/regression-watch.ts", "utf8");
 const row = (mission: string) => REGRESSION_WATCH.find((r) => r.mission === mission)!;
@@ -177,13 +177,29 @@ function testStatusTable() {
   const base: OrgRegressionSnapshot = { day: "2026-10-23", rows: [], items: [] };
   const reopenKey = regressionDedupeKey("UPSELL_ACCEPTED_BUT_REASKED", "upsell-short-accept");
   const snaps: OrgRegressionSnapshot[] = [
-    { ...base, rows: [{ mission: "upsell-short-accept", code: "UPSELL_ACCEPTED_BUT_REASKED", leaked: 3, blocked: 0, verdict: "REGRESSION_REOPENED", action: "CREATE" }], items: [{ dedupeKey: reopenKey, open: true }] },
+    { ...base, rows: [{ mission: "upsell-short-accept", code: "UPSELL_ACCEPTED_BUT_REASKED", leaked: 3, blocked: 0, verdict: "REGRESSION_REOPENED", action: "CREATE" }], items: [{ dedupeKey: reopenKey, open: true, lastLeakDay: "2026-10-22" }] },
     { ...base, rows: [{ mission: "sales-qty-unit-guard", code: "PACK_MULTIPLIER_LEAKED", leaked: 0, blocked: 4, verdict: "HOLDING", action: null }], items: [{ dedupeKey: reopenKey, open: false }] },
   ];
   const t = regressionStatusTable(snaps);
   const q = t.find((x) => x.mission === "sales-qty-unit-guard")!;
   assert.deepEqual([q.code, q.leaked, q.blocked, q.status, q.leakMeasuredFrom], ["PACK_MULTIPLIER_LEAKED", 0, 4, "HOLDING", "2026-10-22T15:23:51Z"]);
-  assert.ok(regressionStatusLines(t, 2, 2).some((l) => l.includes("sales-qty-unit-guard") && l.includes("lọt 0 (đo lọt từ 2026-10-22T15:23:51Z)")), "0 lọt in kèm mốc bộ dò — không đọc nhầm thành 0 từ 11:19Z");
+  assert.ok(regressionStatusLines(t, 2, 2).some((l) => l.includes("sales-qty-unit-guard") && l.includes("lọt 0 trong ngày 2026-10-23 (đo lọt từ 2026-10-22T15:23:51Z)")), "0 lọt in kèm NGÀY 2B và mốc bộ dò — không đọc nhầm thành 0 từ 11:19Z");
+  // «lọt N» là của MỘT ngày 2B; «lọt cuối» là ngày gần nhất còn thấy lọt sau liveAt — ca ADDRESS_REASK 24/10: «lọt 0» cạnh REOPENED.
+  const dong = (code: string) => regressionStatusLines(t, 2, 2).find((l) => l.includes(`  ${code} · `))!;
+  assert.ok(dong("UPSELL_ACCEPTED_BUT_REASKED").includes("lọt cuối ngày 2026-10-22"), "việc mở in ngày lọt cuối (lấy ngày muộn nhất mọi tổ chức, cả việc đã đóng)");
+  assert.ok(dong("QTY_REASKED").includes("lọt cuối — (chưa có việc tái diễn)"), "không có việc ⇒ «—», không bịa ngày");
+  const khongDoc = regressionStatusTable([{ ...base, items: [{ dedupeKey: reopenKey, open: true, lastLeakDay: null }] }]).find((x) => x.code === "UPSELL_ACCEPTED_BUT_REASKED")!;
+  assert.deepEqual([khongDoc.lastLeakDay, khongDoc.lastLeakUnreadable], [null, true]);
+  assert.ok(regressionStatusLines([khongDoc], 1, 1)[1].includes("lọt cuối không đọc được"), "có việc mà tiêu đề lạ ⇒ «không đọc được», không phải «—»");
+  const haiNgay = regressionStatusTable([base, { ...base, day: "2026-10-22" }]);
+  assert.ok(regressionStatusLines(haiNgay, 2, 2).some((l) => l.includes("lọt 0 trong ngày 2026-10-22…2026-10-23")), "tổ chức chạy 2B khác ngày ⇒ in khoảng ngày, không giả một ngày");
+  // Ngày đọc từ CHÍNH tiêu đề regressionText viết — đổi định dạng tiêu đề mà quên bộ đọc thì đỏ ở đây.
+  const r972 = row("address-resolver-ladder");
+  const td = regressionText(r972, "ADDRESS_REASK", "2026-10-22", { hits: 2, convs: ["c1", "c2"] }, 0, null).title;
+  assert.equal(leakDayFromTitle(td, new Date("2026-10-24T05:00:00Z")), "2026-10-22");
+  const cuoiNam = regressionText(r972, "ADDRESS_REASK", "2026-12-31", { hits: 1, convs: ["c1"] }, 0, null).title;
+  assert.equal(leakDayFromTitle(cuoiNam, new Date("2027-01-01T02:00:00Z")), "2026-12-31", "ngày 2B không muộn hơn hôm nay ⇒ qua năm thì lùi năm");
+  assert.equal(leakDayFromTitle("Chất lượng AI bán hàng · tiêu đề khác", new Date("2026-10-24T05:00:00Z")), null);
   // Dòng chưa có bộ dò lọt (sổ giả trong bài kiểm): in «chưa đo được», không in 0.
   const chuaDo = [{ ...row("sales-qty-unit-guard"), leakCodes: [], leakUnavailable: "chưa có bộ dò — kiểm thử", leakMeasuredFrom: undefined }];
   const tc = regressionStatusTable([{ ...base, rows: [{ mission: "sales-qty-unit-guard", code: null, leaked: null, blocked: 4, verdict: "LEAK_UNAVAILABLE", action: null }] }], chuaDo);
