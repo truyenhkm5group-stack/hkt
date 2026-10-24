@@ -3,7 +3,7 @@
   "mission_id": "order-dup-scan-dod",
   "title": "order-dup-scan: đếm bằng chứng pha 3 (gộp · lớp tạm · BOT sau BOT khác hội thoại)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-24T15:02:02.746Z",
-  "updated_at": "2026-10-24T15:05:21.891Z",
+  "updated_at": "2026-10-24T15:25:49.449Z",
   "last_heartbeat": "2026-10-24T15:02:43.486Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1051 → d3f2d3205597093b1c1b7847b9a472b64b474da0"
+  },
   "handoff": {
     "branch": "claude/order-dup-scan-dod",
     "sha": "e5b261d88a484895cd709c63c7bd9fc4456a00cb",
