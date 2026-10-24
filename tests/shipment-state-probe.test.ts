@@ -1,6 +1,6 @@
 /**
  * ops `shipment-state-probe` — đo cửa nội bộ bot → ERP, CHỈ ĐỌC (24/10/2026). Quét mã nguồn: chỉ đọc từ đầu · khoá không bao giờ in ·
- * đo ĐÚNG hàm của route (không viết lại câu PRIMARY_ATTEMPT) · EXPLAIN trong giao dịch chỉ đọc + rollback · ops khai đủ, mã hoá.
+ * đo ĐÚNG hàm của route (không viết lại câu PRIMARY_ATTEMPT) · EXPLAIN qua getDb() trong giao dịch chỉ đọc + rollback · ops khai đủ, mã hoá.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -12,10 +12,12 @@ export function testShipmentStateProbe() {
   const readOnlyAt = code.search(/process\.env\.ERP_READ_ONLY = "1";/);
   assert.ok(readOnlyAt >= 0 && readOnlyAt < code.indexOf('await import("@/db")'), "chỉ đọc TRƯỚC khi nạp CSDL");
   assert.match(code, /import\("@\/lib\/queries\/shipment-state-internal"\)/, "đo đúng hàm route dùng");
-  assert.doesNotMatch(code, /PRIMARY_ATTEMPT|order by \(sh\.stage/, "không viết bản thứ hai của câu lần gửi chính — câu EXPLAIN bắt lại từ chính lời gọi");
+  assert.doesNotMatch(code, /PRIMARY_ATTEMPT|order by \(sh\.stage/, "không viết bản thứ hai của câu lần gửi chính — câu EXPLAIN lấy từ primaryShipmentsQuery của chính route");
   assert.doesNotMatch(code, /console\.log\([^)]*\btoken\b/, "khoá không bao giờ đi vào log");
   assert.doesNotMatch(code, /tomTat\([^)]*\$\{(ids|codes|url|mau)(\.join[^}]*)?\}/, "tóm tắt công khai không mang danh sách mã đơn / mã vận đơn / URL (số đếm thì được)");
-  assert.match(code, /await c\.query\("set transaction read only"\);[\s\S]*?await c\.query\("rollback"\)/, "EXPLAIN trong giao dịch chỉ đọc, kết thúc rollback");
+  assert.match(code, /db\s*\.transaction\(async \(tx\) => \{\s*await tx\.execute\(sql\.raw\("set transaction read only"\)\);[\s\S]*?tx\.rollback\(\);/, "EXPLAIN trong giao dịch chỉ đọc của getDb(), kết thúc rollback");
+  assert.match(code, /explain \(analyze, buffers, timing\) \$\{primaryShipmentsQuery\(ids\)\}/, "EXPLAIN đúng câu route dùng (primaryShipmentsQuery), không bắt lại câu từ driver");
+  assert.doesNotMatch(code, /import\(\s*["']pg["']\s*\)|new\s+(?:pg\.)?Pool\s*\(/, "không mở kết nối CSDL thứ hai (S1 · ISO-17)");
   const ops = readFileSync(".github/workflows/ops-vps.yml", "utf8");
   assert.match(ops, /- shipment-state-probe\s+#/, "lựa chọn");
   assert.match(ops, /OPS_THAO_TAC_MA_HOA: "[^"]*\bshipment-state-probe\b/, "kết quả MÃ HOÁ");

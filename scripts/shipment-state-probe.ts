@@ -8,8 +8,9 @@
  * Đo ba thứ, mỗi thứ «lượt 1 của tiến trình» rồi 5 lượt ấm:
  *  1. Hàm truy vấn thật (`primaryShipmentsByOrders`, `shipmentStatesByCodes`) với 20 đơn / 20 mã vận đơn tạo lại thật.
  *  2. Chính route HTTP trong container (localhost:3000) với khoá `CHATBOT_ADMIN_TOKEN` của máy — khoá KHÔNG bao giờ in.
- *  3. EXPLAIN (ANALYZE, BUFFERS) câu lần gửi chính — ĐÚNG câu hàm phát ra (bắt lại từ `Pool.query`, không viết bản thứ hai), JIT mặc định vs
- *     JIT tắt, xen kẽ 3 lượt mỗi bên, kèm khối `JIT:` nếu có.
+ *  3. EXPLAIN (ANALYZE, BUFFERS) câu lần gửi chính — ĐÚNG câu hàm phát ra (`primaryShipmentsQuery`, không viết bản thứ hai), JIT mặc định vs
+ *     JIT tắt, xen kẽ 3 lượt mỗi bên, kèm khối `JIT:` nếu có. Chạy qua `getDb()` (không mở kết nối thứ hai — S1 · ISO-17), trong giao dịch
+ *     chỉ đọc rồi rollback.
  * Chỉ đọc (ERP_READ_ONLY + select trong giao dịch rollback). Tóm tắt chỉ in SỐ; mã đơn / mã vận đơn / kế hoạch đầy đủ chỉ ở phần MÃ HOÁ.
  */
 // Module (không phải script toàn cục): tránh trùng tên `main` với script khác khi tsc kiểm cả thư mục.
@@ -21,27 +22,11 @@ const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
 const LUOT_AM = 5;
 const LUOT_EXPLAIN = 3;
 
-type Cap = { text: string; values: unknown[] };
-
 async function main() {
-  // Bắt câu lệnh mà hàm phát ra — để EXPLAIN đúng câu ấy với đúng tham số.
-  const pg = (await import("pg")).default as unknown as {
-    Pool: { prototype: { query: (...a: unknown[]) => unknown } };
-  };
-  let capture: Cap[] | null = null;
-  const goc = pg.Pool.prototype.query;
-  pg.Pool.prototype.query = function boc(...a: unknown[]) {
-    if (capture) {
-      const q = a[0] as string | { text?: string; values?: unknown[] };
-      capture.push(typeof q === "string" ? { text: q, values: (a[1] as unknown[]) ?? [] } : { text: String(q?.text ?? ""), values: q?.values ?? [] });
-    }
-    return goc.apply(this, a as never);
-  };
-
   const { getDb } = await import("@/db");
-  const { sql } = await import("drizzle-orm");
+  const { sql, TransactionRollbackError } = await import("drizzle-orm");
   const { rowsOf } = await import("@/lib/sql-rows");
-  const { primaryShipmentsByOrders, shipmentStatesByCodes } = await import("@/lib/queries/shipment-state-internal");
+  const { primaryShipmentsByOrders, primaryShipmentsQuery, shipmentStatesByCodes } = await import("@/lib/queries/shipment-state-internal");
   const { thoiGianThucThi, trungVi } = await import("@/lib/constants/perf-explain");
   const db = await getDb();
 
@@ -67,11 +52,8 @@ async function main() {
     tomTat(`${ten}: lượt 1 ${dau.toFixed(0)} ms · ấm trung vị ${tv === null ? "—" : tv.toFixed(0)} ms · max ${Math.max(...am).toFixed(0)} ms`);
   };
 
-  // 1. Hàm truy vấn — lượt đầu cũng bắt câu lệnh cho phần EXPLAIN.
-  capture = [];
+  // 1. Hàm truy vấn thật.
   await bamGio("primaryShipmentsByOrders (20 đơn)", () => primaryShipmentsByOrders(ids));
-  const cauChinh = capture.find((c) => /PRIMARY|"orders"\."id" in/i.test(c.text) || /from "orders"/.test(c.text)) ?? capture[0] ?? null;
-  capture = null;
   await bamGio("shipmentStatesByCodes (20 mã)", () => shipmentStatesByCodes(codes));
 
   // 2. Route HTTP thật trong container.
@@ -91,23 +73,23 @@ async function main() {
     tomTat(`route: HTTP ${lastStatus} · trả ${lastOrders} lần gửi chính / ${ids.length} đơn hỏi`);
   }
 
-  // 3. EXPLAIN câu lần gửi chính — JIT mặc định vs tắt, xen kẽ.
-  if (!cauChinh) tomTat("EXPLAIN: CHƯA ĐO ĐƯỢC — không bắt được câu lệnh của primaryShipmentsByOrders");
+  // 3. EXPLAIN câu lần gửi chính — JIT mặc định vs tắt, xen kẽ. Giao dịch chỉ đọc, luôn rollback.
+  if (!ids.length) tomTat("EXPLAIN: CHƯA ĐO ĐƯỢC — không có đơn mẫu");
   else {
-    const PoolCtor = (pg as unknown as { Pool: new (o: { connectionString: string; max: number }) => { connect: () => Promise<{ query: (t: string, v?: unknown[]) => Promise<{ rows?: Record<string, string>[] }>; release: () => void }>; end: () => Promise<void> } }).Pool;
-    const pool = new PoolCtor({ connectionString: process.env.DATABASE_URL ?? "", max: 1 });
-    const mot = async (jitTat: boolean) => {
-      const c = await pool.connect();
-      try {
-        await c.query("begin");
-        await c.query("set transaction read only");
-        if (jitTat) await c.query("set local jit = off");
-        const r = await c.query(`explain (analyze, buffers, timing) ${cauChinh.text}`, cauChinh.values);
-        return (r.rows ?? []).map((x) => String(Object.values(x)[0]));
-      } finally {
-        await c.query("rollback").catch(() => undefined);
-        c.release();
-      }
+    const mot = async (jitTat: boolean): Promise<string[]> => {
+      let dong: string[] = [];
+      await db
+        .transaction(async (tx) => {
+          await tx.execute(sql.raw("set transaction read only"));
+          if (jitTat) await tx.execute(sql.raw("set local jit = off"));
+          const r = await tx.execute(sql`explain (analyze, buffers, timing) ${primaryShipmentsQuery(ids)}`);
+          dong = rowsOf<Record<string, unknown>>(r).map((x) => String(Object.values(x)[0]));
+          tx.rollback();
+        })
+        .catch((e: unknown) => {
+          if (!(e instanceof TransactionRollbackError)) throw e;
+        });
+      return dong;
     };
     const bat: number[] = [];
     const tat: number[] = [];
@@ -126,7 +108,6 @@ async function main() {
       if (tt !== null) tat.push(tt);
       keHoach = dT;
     }
-    await pool.end().catch(() => undefined);
     const mB = trungVi(bat);
     const mT = trungVi(tat);
     console.log(`EXPLAIN JIT mặc định [${bat.map((x) => x.toFixed(1)).join(" · ")}] · JIT tắt [${tat.map((x) => x.toFixed(1)).join(" · ")}]`);
