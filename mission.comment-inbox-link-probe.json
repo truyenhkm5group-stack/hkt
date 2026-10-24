@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "comment-inbox-link-probe",
+  "title": "ops comment-inbox-link-probe: bình luận → hộp thư, khoá nào lệch (P0 HSLC Ngọc)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-cilp",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/comment-inbox-link-probe",
+  "base_sha": "912a194e50dbc20b76d8758a7e629c89b535b4c8",
+  "domains": [],
+  "owned_paths": [
+    ".github/workflows/",
+    "docs/ops-vps-script-notes.md",
+    "scripts/comment-inbox-link-probe.ts",
+    "tests/comment-inbox-link-probe.test.ts",
+    "tests/platform-isolation-static.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-24T08:26:54.038Z",
+  "updated_at": "2026-10-24T08:26:54.038Z",
+  "last_heartbeat": "2026-10-24T08:26:54.038Z",
+  "definition_of_done": []
+}
