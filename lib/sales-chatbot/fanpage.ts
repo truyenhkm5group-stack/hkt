@@ -1031,7 +1031,8 @@ export function privateReplyInboxId(prc: unknown, pageId: string, fromId: string
   if (!replied) return { replied: false, inboxId: null, source: "NONE" };
   const o = prc && typeof prc === "object" ? (prc as { id?: unknown; conversation_id?: unknown }) : null;
   const candidates = typeof prc === "string" ? [prc] : [str(o?.conversation_id), str(o?.id)];
-  const shape = new RegExp(`^${pageId.replace(/[^0-9A-Za-z]/g, "")}_\\d+$`);
+  const pageEsc = pageId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const shape = new RegExp(`^${pageEsc}_\\d+$`);
   const ok = pageId && candidates.find((x) => shape.test(x.trim()));
   if (ok) return { replied: true, inboxId: ok.trim(), source: "PANCAKE_CONV_ID" };
   if (/^\d+$/.test(pageId) && /^\d+$/.test(fromId.trim())) return { replied: true, inboxId: `${pageId}_${fromId.trim()}`, source: "DERIVED_PAGE_PSID" };

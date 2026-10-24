@@ -185,7 +185,7 @@ async function testDuongThat() {
   const db = await getDb();
   const now = new Date();
   const PAGE = `p0rb-page-${now.getTime()}`;
-  const INBOX = `p0rb-inbox-${now.getTime()}`;
+  const INBOX = `${PAGE}_${now.getTime()}1`; // luồng hộp thư Pancake dạng <page_id>_<số> (đo production 24/10/2026)
   const hopThu = (await openConversation("FANPAGE", { visitorKey: fanpageVisitorKey(PAGE, INBOX) })).id;
   await db.insert(schema.salesChatMessages).values({ conversationId: hopThu, seq: 2, role: "user", content: [{ type: "text", text: "Cho 1kg" }], createdAt: new Date(now.getTime() - 143 * NGAY) });
   const binhLuan = (await openConversation("FANPAGE", { visitorKey: `p0rb-cmt-${now.getTime()}` })).id;
@@ -207,7 +207,7 @@ async function testDuongThat() {
   assert.deepEqual({ ...(((blRow.state ?? {}) as ChatState).commentCarry ?? {}), at: undefined }, { outcome: "EXISTING_INBOX", copied: 1, at: undefined }, "kết quả ghi lại: chép sang hộp thư ĐÃ CÓ, 1 tin");
 
   // Ca THẬT 42f28794 (17/10): Meta / Pancake nhắn riêng TRƯỚC, hộp thư CHƯA có hội thoại ⇒ mở hội thoại hộp thư, lời mua đi vào đó.
-  const INBOX2 = `p0rb-inbox2-${now.getTime()}`;
+  const INBOX2 = `${PAGE}_${now.getTime()}2`;
   const binhLuan2 = (await openConversation("FANPAGE", { visitorKey: `p0rb-cmt2-${now.getTime()}` })).id;
   await db.insert(schema.salesChatMessages).values([
     { conversationId: binhLuan2, seq: 2, role: "user", content: [{ type: "text", text: "Cho 1,5 kg gửi đc cũ" }] },
@@ -231,7 +231,7 @@ async function testDuongThat() {
   assert.equal(((bl2Row.state ?? {}) as ChatState).commentCarry?.outcome, "OPENED_NEW", "kết quả ghi lại: mở hộp thư rồi chép");
 
   // Bot TỰ nhắn riêng (SENT), hộp thư chưa có hội thoại ⇒ hội thoại bình luận được CHUYỂN thành hội thoại hộp thư ⇒ kết quả MOVED.
-  const INBOX3 = `p0rb-inbox3-${now.getTime()}`;
+  const INBOX3 = `${PAGE}_${now.getTime()}3`;
   const binhLuan3 = (await openConversation("FANPAGE", { visitorKey: `p0rb-cmt3-${now.getTime()}` })).id;
   await db.insert(schema.salesChatMessages).values({ conversationId: binhLuan3, seq: 2, role: "user", content: [{ type: "text", text: "Cho 2kg" }] });
   let docLan = 0;
