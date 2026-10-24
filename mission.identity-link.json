@@ -22,18 +22,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T10:59:40.132Z",
-  "updated_at": "2026-10-24T11:01:01.233Z",
-  "last_heartbeat": "2026-10-24T11:01:01.233Z",
+  "updated_at": "2026-10-24T11:30:44.821Z",
+  "last_heartbeat": "2026-10-24T11:30:44.821Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/identity-link",
-    "sha": "b9d21921d49e004e4801e37e69eb9e4afedd4503",
-    "at": "2026-10-24T11:01:01.233Z",
+    "sha": "531dbeba1bc7b7d65502e62cd91633091316047b",
+    "at": "2026-10-24T11:30:44.821Z",
     "actor": "DESKTOP-56TH98Y:wt-idl",
     "title": "P0 Ngọc PR2: verifiedSameCustomer / sameCustomerConversations — cùng khách qua bình luận + hộp thư, chỉ định danh nền tảng",
-    "summary": "P2-2 identity-link: VERIFIED/SAME_PHONE_ONLY/NONE + lý do, chỉ định danh nền tảng (from_id = PSID · comment_id Meta · fb_id Pancake · cùng luồng), không tên, không customer_id; sameCustomerConversations gồm HANDOFF + heldByHuman; fanpage lưu state.commentOrigin trước lượt chat. code-erp-95 dùng cho pha 3.",
+    "summary": "identity-link gộp main sau PR1: sync-fixtures giữ cả testCommentInboxKey lẫn testIdentityLink",
     "tests": [
-      "tsc · eslint sạch · TEST_KHOI=K01,K22 ĐẠT 10:58Z (identity-link thuần + CSDL tổ chức PGlite thật)"
+      "tsc sạch · TEST_KHOI=K01,K22 ĐẠT 11:29Z sau khi gộp main cf926077 (PR1 #1044)"
     ]
   }
 }
