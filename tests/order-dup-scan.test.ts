@@ -13,7 +13,7 @@ import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { MANUAL_ORDER_ID_PREFIX } from "@/lib/constants/manual-orders";
-import { DUP_SCAN_MAX_GROUP, findCandidatePairs, guardBlockStats, isCancelled, newPairStats, orderLabel, originOf, parseDupScanArgs, runOrderDupScan, summarize, type ScanOrder } from "../scripts/order-dup-scan";
+import { DUP_SCAN_MAX_GROUP, findCandidatePairs, guardBlockStats, isCancelled, newPairStats, orderLabel, originOf, parseDupScanArgs, phase3ActionStats, runOrderDupScan, summarize, type ScanOrder } from "../scripts/order-dup-scan";
 
 const item = (variantId: string, quantity = 1) => ({ variantId, sku: variantId, productName: "Chả cá thu", variationDetail: "1kg", quantity });
 
@@ -94,10 +94,15 @@ function testPure() {
   // Cặp MỚI từ mốc deploy: tính theo ĐƠN SAU; đơn trước nằm TRƯỚC mốc vẫn ghép được. «BOT sau người» = đúng ca P0.
   const moc = new Date("2026-10-24T02:48:30Z"); // giữa đơn người (02:47:58) và đơn bot (02:49:19)
   // Ba cặp có đơn sau từ mốc: cặp thật + hai cặp «cùng hội thoại khác SĐT» (03:30) — chỉ cặp thật là nghi trùng và BOT sau người.
-  assert.deepEqual(newPairStats(pairs, moc), { pairs: 3, botAfterHuman: 1, suspected: 1, suspectedBotAfterHuman: 1 }, "đơn người trước mốc + bot sau mốc ⇒ đếm là cặp mới, BOT sau người");
-  assert.deepEqual(newPairStats(pairs, new Date("2026-10-24T06:00:00Z")), { pairs: 0, botAfterHuman: 0, suspected: 0, suspectedBotAfterHuman: 0 }, "không cặp nào có đơn sau từ 06:00");
+  assert.deepEqual(newPairStats(pairs, moc), { pairs: 3, botAfterHuman: 1, botAfterBotOtherConv: 0, suspected: 1, suspectedBotAfterHuman: 1, suspectedBotAfterBotOtherConv: 0 }, "đơn người trước mốc + bot sau mốc ⇒ đếm là cặp mới, BOT sau người");
+  assert.deepEqual(newPairStats(pairs, new Date("2026-10-24T06:00:00Z")), { pairs: 0, botAfterHuman: 0, botAfterBotOtherConv: 0, suspected: 0, suspectedBotAfterHuman: 0, suspectedBotAfterBotOtherConv: 0 }, "không cặp nào có đơn sau từ 06:00");
   const haiBot = findCandidatePairs([{ ...staff, origin: "BOT" }, bot], 72).pairs;
   assert.equal(newPairStats(haiBot, moc).botAfterHuman, 0, "bot sau bot không phải «BOT sau người»");
+  assert.equal(newPairStats(haiBot, moc).botAfterBotOtherConv, 0, "bot sau bot CÙNG hội thoại ⇒ luật lượt mua lo, không đếm");
+  // Dáng vụ Ngọc: đơn bot ở bình luận, đơn bot ở hộp thư (khác hội thoại ERP lẫn Pancake), cùng SĐT + cùng món ⇒ BOT sau BOT khác hội thoại.
+  const ngoc = findCandidatePairs([{ ...staff, origin: "BOT", salesConversationId: "conv-binh-luan", pancakeConversationId: "pc-binh-luan" }, bot], 72).pairs;
+  assert.deepEqual([newPairStats(ngoc, moc).botAfterBotOtherConv, newPairStats(ngoc, moc).suspectedBotAfterBotOtherConv], [1, 1]);
+  assert.deepEqual(phase3ActionStats([{ action: "SALES_CHAT_ORDER_MERGED", n: 2 }, { action: "SALES_CHAT_SAME_PHONE_HOLD", n: "3" }, { action: "KHAC", n: 9 }]), { merged: 2, samePhoneHold: 3 });
 
   // Rào hội thoại: chỉ số đếm theo bước + «cùng đề xuất»; bước lạ không rơi mất.
   assert.deepEqual(
@@ -133,6 +138,9 @@ async function testOnDb() {
         await audit({ userId: null, userEmail: MARK, actorKind: "AGENT", action: "SALES_CHAT_DUPLICATE_ORDER_BLOCKED", entity: "ORDER", entityId: "erp-test", after: { conversationId: "c", step, sameAsProposal, draftOrderId: null } });
       const r2 = await runOrderDupScan(db, { since: new Date(Date.now() - 30 * 86_400_000), newSince: truoc, maxGapHours: 72, label: "kiểm thử --since", now: new Date() });
       assert.ok(r2.guardBlocks.create >= 2 && r2.guardBlocks.createSame >= 1 && r2.guardBlocks.confirm >= 1, `đếm rào đọc đúng detail->'after': ${JSON.stringify(r2.guardBlocks)}`);
+      for (const action of ["SALES_CHAT_ORDER_MERGED", "SALES_CHAT_SAME_PHONE_HOLD", "SALES_CHAT_SAME_PHONE_HOLD"]) await audit({ userId: null, userEmail: MARK, actorKind: "AGENT", action, entity: "ORDER", entityId: "erp-test", after: { conversationId: "c" } });
+      const r3 = await runOrderDupScan(db, { since: new Date(Date.now() - 30 * 86_400_000), newSince: truoc, maxGapHours: 72, label: "kiểm thử pha 3", now: new Date() });
+      assert.ok(r3.phase3.merged >= 1 && r3.phase3.samePhoneHold >= 2, `đếm hai mã pha 3: ${JSON.stringify(r3.phase3)}`);
     } finally {
       await db.delete(schema.auditLogs).where(eq(schema.auditLogs.userEmail, MARK));
     }
@@ -141,7 +149,7 @@ async function testOnDb() {
   }
   const summary = printed.filter((l) => l.startsWith("[ops:tom-tat]"));
   assert.ok(summary.length >= 4, "có khối tóm tắt");
-  assert.ok(summary.some((l) => l.includes("cặp mới từ ")) && summary.some((l) => l.includes("rào hội thoại chặn bot từ ")), "có dòng cặp mới + dòng đếm rào");
+  assert.ok(summary.some((l) => l.includes("cặp mới từ ")) && summary.some((l) => l.includes("rào hội thoại chặn bot từ ")) && summary.some((l) => l.includes("pha 3 từ ") && l.includes("gộp mua bổ sung")), "có dòng cặp mới + dòng đếm rào + dòng pha 3");
   for (const l of summary) assert.ok(!/0\d{9}/.test(l), `tóm tắt không có SĐT: ${l}`);
 }
 

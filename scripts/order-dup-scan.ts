@@ -241,12 +241,32 @@ export function summarize(orders: number, pairs: readonly ScanPair[]): ScanSumma
   return { orders, pairs: pairs.length, byVerdict, sameConversation, byOriginCombo, bothActiveSuspected, suspectCancelledSuspected, keeperCancelledSuspected, moneyAtRisk, suspectLeftWarehouse, suspectDelivered, suspectCodCollected, suspectPaid };
 }
 
-/** Cặp MỚI kể từ `since`: ĐƠN SAU tạo từ mốc đó. «BOT sau người» = đơn sau do bot, đơn trước KHÔNG do bot — đúng ca P0 HSLC 24/10. */
+/**
+ * Cặp MỚI kể từ `since`: ĐƠN SAU tạo từ mốc đó. «BOT sau người» = đơn sau do bot, đơn trước KHÔNG do bot — đúng ca P0 HSLC 24/10.
+ * «BOT sau BOT khác hội thoại» = hai đơn đều do bot, KHÁC hội thoại ERP lẫn hội thoại Pancake — đúng dáng vụ Ngọc (bình luận ↔ hộp thư)
+ * mà pha 3 gộp; cùng hội thoại thì luật lượt mua của bot đã lo, không đếm ở đây.
+ */
 export function newPairStats(pairs: readonly ScanPair[], since: Date) {
   const moi = pairs.filter((p) => p.suspect.insertedAt.getTime() >= since.getTime());
   const botSauNguoi = (list: readonly ScanPair[]) => list.filter((p) => p.suspect.origin === "BOT" && p.keeper.origin !== "BOT").length;
+  const botSauBotKhacHoiThoai = (list: readonly ScanPair[]) => list.filter((p) => p.suspect.origin === "BOT" && p.keeper.origin === "BOT" && !p.sameSalesConversation && !p.samePancakeConversation).length;
   const nghiTrung = moi.filter((p) => p.verdict === "DUPLICATE_SUSPECTED");
-  return { pairs: moi.length, botAfterHuman: botSauNguoi(moi), suspected: nghiTrung.length, suspectedBotAfterHuman: botSauNguoi(nghiTrung) };
+  return {
+    pairs: moi.length,
+    botAfterHuman: botSauNguoi(moi),
+    botAfterBotOtherConv: botSauBotKhacHoiThoai(moi),
+    suspected: nghiTrung.length,
+    suspectedBotAfterHuman: botSauNguoi(nghiTrung),
+    suspectedBotAfterBotOtherConv: botSauBotKhacHoiThoai(nghiTrung),
+  };
+}
+
+/** Hai mã nhật ký của pha 3 + lớp tạm (lib/sales-chatbot/order-merge.ts · conversation-order-guard.ts) — đếm từ mốc, chỉ số đếm. */
+export const PHASE3_AUDIT_ACTIONS = ["SALES_CHAT_ORDER_MERGED", "SALES_CHAT_SAME_PHONE_HOLD"] as const;
+
+export function phase3ActionStats(rows: readonly { action: string; n: number | string }[]) {
+  const n = (a: string) => rows.filter((r) => r.action === a).reduce((t, r) => t + (Number(r.n) || 0), 0);
+  return { merged: n("SALES_CHAT_ORDER_MERGED"), samePhoneHold: n("SALES_CHAT_SAME_PHONE_HOLD") };
 }
 
 export type GuardBlockRow = { step: string | null; same: string | null; n: number | string };
@@ -373,6 +393,18 @@ async function loadGuardBlocks(db: Db, since: Date): Promise<GuardBlockRow[]> {
   );
 }
 
+async function loadPhase3Actions(db: Db, since: Date): Promise<{ action: string; n: number | string }[]> {
+  return rowsOf<{ action: string; n: number | string }>(
+    await db.execute(sql`
+      select l.action, count(*)::int as n
+        from audit_logs l
+       where l.action in (${sql.join(PHASE3_AUDIT_ACTIONS.map((a) => sql`${a}`), sql`, `)})
+         and l.created_at >= ${since.toISOString()}::timestamptz
+       group by 1
+    `),
+  );
+}
+
 /**
  * `since` = mốc ĐỌC (đơn trước cũng phải có mặt). `newSince` (tuỳ chọn, vd mốc deploy) = mốc tính cặp MỚI và mốc đếm rào;
  * không có thì cả hai lấy `since`.
@@ -415,12 +447,14 @@ export async function runOrderDupScan(db: Db, opts: { since: Date; maxGapHours: 
   const mocMoi = opts.newSince ?? opts.since;
   if (opts.newSince) {
     const m = newPairStats(pairs, opts.newSince);
-    tomTat(`cặp mới từ ${opts.newSince.toISOString()}: ${m.pairs} (BOT sau người: ${m.botAfterHuman}) · trong đó nghi trùng ${m.suspected} (BOT sau người: ${m.suspectedBotAfterHuman})`);
+    tomTat(`cặp mới từ ${opts.newSince.toISOString()}: ${m.pairs} (BOT sau người: ${m.botAfterHuman} · BOT sau BOT khác hội thoại: ${m.botAfterBotOtherConv}) · trong đó nghi trùng ${m.suspected} (BOT sau người: ${m.suspectedBotAfterHuman} · BOT sau BOT khác hội thoại: ${m.suspectedBotAfterBotOtherConv})`);
   }
   const rao = guardBlockStats(await loadGuardBlocks(db, mocMoi));
   tomTat(`rào hội thoại chặn bot từ ${mocMoi.toISOString()}: ${rao.total} lần · CREATE ${rao.create} (cùng đề xuất ${rao.createSame}) · CONFIRM ${rao.confirm} (cùng đề xuất ${rao.confirmSame})${rao.other ? ` · bước khác ${rao.other}` : ""}`);
+  const p3 = phase3ActionStats(await loadPhase3Actions(db, mocMoi));
+  tomTat(`pha 3 từ ${mocMoi.toISOString()}: gộp mua bổ sung vào đơn bot đang mở ${p3.merged} lần · lớp tạm giữ «Mới» (SĐT trùng, bình luận ↔ hộp thư) ${p3.samePhoneHold} lần`);
   tomTat("Danh sách từng cặp (mã đơn, nguồn, trạng thái vận đơn / tiền) ở phần MÃ HOÁ — không huỷ / sửa đơn nào; người đối chiếu trong ERP.");
-  return { summary: s, pairs, capped, skippedGroups, guardBlocks: rao };
+  return { summary: s, pairs, capped, skippedGroups, guardBlocks: rao, phase3: p3 };
 }
 
 async function thoat(code: number): Promise<never> {
