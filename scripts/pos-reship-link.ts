@@ -115,7 +115,8 @@ export type Fingerprint = { path: string; h: string; v: string | null };
 /**
  * Vân tay từng khoá con của các khối trong PEEK_BLOCKS: `path` (vd `items[0].variation_info.retail_price`) · `h` = băm 12 ký tự của giá trị ·
  * `v` = giá trị CHỈ khi là số / boolean. Khối `customer` đi sâu tới khoá con của từng địa chỉ trong sổ (lô 1 ngày 24/10/2026:
- * `customer.shop_customer_addresses[i]` đổi ở 10/20 đơn — phải biết khoá NÀO), nhưng chỉ lộ boolean, mốc thời gian ISO và số có tên khoá
+ * `customer.shop_customer_addresses[i]` đổi ở 10/20 đơn — phải biết khoá NÀO), nhưng chỉ lộ boolean, mốc ISO của khoá mốc hệ thống
+ * (`*_at` / updated / inserted / created — KHÔNG ngày sinh) và số có tên khoá
  * dạng đếm / mốc / cấp (`*_count`, `*_at`, `level`, `point`…); MỌI chuỗi chữ (tên, SĐT, địa chỉ) chỉ băm. So hai lần đọc theo `path` + `h`
  * là biết khoá NÀO đổi mà không lộ giá trị. HÀM THUẦN.
  */
@@ -134,12 +135,14 @@ export function fingerprintOrder(order: Record<string, unknown>): Fingerprint[] 
 
 const showValue = (_path: string, x: unknown) => (typeof x === "number" || typeof x === "boolean" ? String(x) : null);
 const ISO_AT = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/;
+/** Mốc ISO của khách chỉ lộ khi tên khoá là mốc HỆ THỐNG (tạo / sửa / lúc …) — ngày sinh dạng ISO đầy đủ là PII, không bao giờ lộ. */
+const CUSTOMER_TIME_KEY = /(_at$|updated|inserted|created)/i;
 const CUSTOMER_COUNTER_KEY = /(^|_)(count|times|level|point|points|rank)$|_at$/i;
 /** Khối khách: chỉ boolean · mốc ISO · số có tên khoá dạng đếm / mốc / cấp. Chuỗi chữ khác và số không mang tên ấy ⇒ `null` (chỉ băm). */
 function customerSafeValue(path: string, x: unknown): string | null {
   const key = path.slice(path.lastIndexOf(".") + 1);
   if (typeof x === "boolean") return String(x);
-  if (typeof x === "string" && ISO_AT.test(x)) return x;
+  if (typeof x === "string" && ISO_AT.test(x) && CUSTOMER_TIME_KEY.test(key)) return x;
   if (typeof x === "number" && CUSTOMER_COUNTER_KEY.test(key)) return String(x);
   return null;
 }

@@ -67,7 +67,9 @@ export function testPosReshipLink() {
   assert.ok(f1.every((f) => !f.path.startsWith("customer.") || f.path === "customer.order_count" || f.v === null), "customer: chữ / số thường chỉ băm");
   assert.equal(f1.find((f) => f.path === "customer.order_count")?.v, "3", "số mang tên khoá đếm được lộ");
   // Sổ địa chỉ khách: đi tới khoá con; mốc / boolean / đếm lộ, SĐT / địa chỉ / tên KHÔNG bao giờ.
-  const so = fingerprintOrder({ customer: { shop_customer_addresses: [{ full_name: "Trần Thị B", phone_number: "0912345678", full_address: "12 Ngõ 5, Hà Nội", is_default: true, updated_at: "2026-10-23T10:00:00", order_count: 2, district_id: 101 }] } });
+  const so = fingerprintOrder({ customer: { date_of_birth: "1990-05-17T00:00:00", shop_customer_addresses: [{ full_name: "Trần Thị B", phone_number: "0912345678", full_address: "12 Ngõ 5, Hà Nội", is_default: true, updated_at: "2026-10-23T10:00:00", order_count: 2, district_id: 101 }] } });
+  assert.equal(so.find((f) => f.path === "customer.date_of_birth")?.v, null, "ngày sinh dạng ISO đầy đủ KHÔNG lộ — chỉ mốc của khoá hệ thống");
+  assert.ok(!JSON.stringify(so).includes("1990-05-17"), "không lộ ngày sinh");
   const sv = (k: string) => so.find((f) => f.path === `customer.shop_customer_addresses[0].${k}`);
   assert.deepEqual([sv("updated_at")?.v, sv("is_default")?.v, sv("order_count")?.v], ["2026-10-23T10:00:00", "true", "2"]);
   assert.deepEqual([sv("full_name")?.v, sv("phone_number")?.v, sv("full_address")?.v, sv("district_id")?.v], [null, null, null, null], "chữ và số không mang tên đếm ⇒ chỉ băm");
