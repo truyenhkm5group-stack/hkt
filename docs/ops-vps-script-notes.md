@@ -543,6 +543,16 @@ Mọi cụm chú thích từ 4 dòng liền nhau trở lên chuyển NGUYÊN VĂ
 # đã che — không tên, SĐT, địa chỉ, chữ tin. Vẫn MÃ HOÁ cả lượt. arg: "<mã tổ chức> [--conv=<uuid>] [--days=1..60]" (script soát).
 ```
 
+### `comment-inbox-link-probe)`
+
+```
+# BÌNH LUẬN → HỘP THƯ CÓ GIỮ MẠCH KHÔNG (scripts/comment-inbox-link-probe.ts — P0 HSLC 24/10/2026) — CHỈ ĐỌC (script tự đặt
+# ERP_READ_ONLY=1 trước khi nạp @/db và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection — không migrate, không gọi
+# Pancake). So hộp thư Pancake trả (dòng dấu BOT_SENT) với luồng tiếng vọng thật, visitor_key, state.commentCarry, from_id vs PSID,
+# đơn theo hai phép nối của rào #1029. Có chữ tin ⇒ MÃ HOÁ cả lượt; tóm tắt chỉ cờ + số đếm + mã hội thoại 8 ký tự.
+# arg: "<mã tổ chức> --conv=<uuid>[,<uuid>…]" (≤ 5) hoặc "<mã tổ chức> --days=1..14" (script soát).
+```
+
 ### `inbox-read-audit)` (dòng 1211)
 
 ```
