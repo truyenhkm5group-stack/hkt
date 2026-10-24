@@ -1,0 +1,8 @@
+{
+  "pr": 1038,
+  "sha": "99cfbcdc59b874e0fdd0f7b10edfff39d8d61520",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T07:18:29.993Z",
+  "note": "review lead: chỉ-script; mã đơn như ERP hiển thị, cột đơn sau đã huỷ, --since, đếm rào chặn bot; chỉ đọc, mã đơn trong phần mã hoá."
+}
