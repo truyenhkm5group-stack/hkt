@@ -3,7 +3,7 @@
   "mission_id": "comment-key-legacy",
   "title": "P2-6 chạy thử đếm hội thoại bình luận mang khoá «m_…» (mọi tổ chức, không ghi)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-ckl",
@@ -23,7 +23,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T11:07:52.082Z",
-  "updated_at": "2026-10-24T11:07:52.082Z",
-  "last_heartbeat": "2026-10-24T11:07:52.082Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T11:08:27.674Z",
+  "last_heartbeat": "2026-10-24T11:08:27.674Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/comment-key-legacy",
+    "sha": "621da21d7dbf7fcbb2cc7120b077081b24bb0a38",
+    "at": "2026-10-24T11:08:27.674Z",
+    "actor": "DESKTOP-56TH98Y:wt-ckl",
+    "title": "P2-6 chạy thử đếm hội thoại bình luận mang khoá «m_…» (mọi tổ chức, không ghi)",
+    "summary": "P2-6: comment-inbox-link-probe --legacy-keys (một tổ chức | --all): hội thoại khoá «m_…», luồng thật tìm bằng chính mã tin riêng, TWO_CONVERSATIONS/INBOX_NO_CONVERSATION/ECHO_NOT_FOUND + đơn sống; CHẠY THỬ, chỉ script",
+    "tests": [
+      "tsc · eslint sạch · chạy thẳng ops-script-size · test-hygiene · platform-isolation-static · ops-concurrency · ops-log-leak · comment-inbox-link-probe ĐẠT"
+    ]
+  }
 }
