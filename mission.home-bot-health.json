@@ -3,7 +3,7 @@
   "mission_id": "home-bot-health",
   "title": "Bot nhà đẩy sức khoẻ lên ERP (lỗi AI · nhịp 5′) ⇒ báo vận hành + banner",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-hbci",
@@ -31,7 +31,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T17:45:48.864Z",
-  "updated_at": "2026-10-24T17:45:48.864Z",
-  "last_heartbeat": "2026-10-24T17:45:48.864Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T17:46:27.918Z",
+  "last_heartbeat": "2026-10-24T17:46:27.918Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/home-bot-health",
+    "sha": "30b0128c47708b33fa5b9c03337f42cbe485fdf5",
+    "at": "2026-10-24T17:46:27.918Z",
+    "actor": "DESKTOP-56TH98Y:wt-hbci",
+    "title": "Bot nhà đẩy sức khoẻ lên ERP (lỗi AI · nhịp 5′) ⇒ báo vận hành + banner",
+    "summary": "bot nhà POST /api/internal/bot-health (lỗi nhà cung cấp {status,message≤160} + nhịp 5′); ERP phân loại classifyAiError, trạng thái settings home-bot.health ghi KHÔNG qua audit (không clearMemo), notifyPlatformOperator một tin/sự cố + hồi phục, im lặng-có-khách ≥30′ / mất nhịp >15′, banner riêng /platform; healthchecks.io giữ nguyên",
+    "tests": [
+      "tsc · eslint sạch · TEST_KHOI=K01,K07,K10,K15,K17,K22 ĐẠT 17:44Z (build để CI — chỉ thêm server component)"
+    ]
+  }
 }
