@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "mission_id": "comment-carry-2b",
+  "title": "2B COMMENT_CARRY_KEY_INVALID + sổ tái diễn #1044 (P2-7)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-cc2b",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/comment-carry-2b",
+  "base_sha": "5d4997bbce4be9a4233849cb97445e6bfdb45566",
+  "domains": [],
+  "owned_paths": [
+    "lib/constants/",
+    "lib/sales-quality/",
+    "scripts/stuck-conversation-audit.ts",
+    "tests/address-reask-qtyack.test.ts",
+    "tests/regression-watch.test.ts",
+    "tests/sales-quality-daily.test.ts",
+    "tests/stuck-conversation-audit.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-24T12:40:23.992Z",
+  "updated_at": "2026-10-24T12:40:23.992Z",
+  "last_heartbeat": "2026-10-24T12:40:23.992Z",
+  "definition_of_done": []
+}
