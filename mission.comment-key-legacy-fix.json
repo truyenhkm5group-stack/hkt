@@ -3,7 +3,7 @@
   "mission_id": "comment-key-legacy-fix",
   "title": "legacy-keys: loại dòng dấu __private_reply__ khỏi tìm luồng thật",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-ckl",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T11:34:17.465Z",
-  "updated_at": "2026-10-24T11:34:17.465Z",
-  "last_heartbeat": "2026-10-24T11:34:17.465Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T11:34:54.365Z",
+  "last_heartbeat": "2026-10-24T11:34:54.365Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/comment-key-legacy-fix",
+    "sha": "ebf143509ddb9a90c1f41056e7de7f2208da3fba",
+    "at": "2026-10-24T11:34:54.365Z",
+    "actor": "DESKTOP-56TH98Y:wt-ckl",
+    "title": "legacy-keys: loại dòng dấu __private_reply__ khỏi tìm luồng thật",
+    "summary": "legacy-keys bắt nhầm dòng dấu __private_reply__ làm luồng thật (691/692) — loại ra; chỉ script",
+    "tests": [
+      "eslint sạch · comment-inbox-link-probe test chạy thẳng ĐẠT"
+    ]
+  }
 }
