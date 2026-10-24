@@ -1,0 +1,8 @@
+{
+  "pr": 1031,
+  "sha": "a4d5b01065aa81c84dc5381e463e621de6a291b1",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T03:54:02.601Z",
+  "note": "review lead: ops chỉ đọc quét cặp nghi trùng theo SĐT/hội thoại ERP/hội thoại Pancake/khách, phán quyết = assessDuplicate (không luật thứ hai), kèm nguồn gốc + vận đơn/thanh toán; mã đơn chỉ ở phần mã hoá, không PII công khai."
+}
