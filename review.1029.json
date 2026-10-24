@@ -1,8 +1,8 @@
 {
   "pr": 1029,
-  "sha": "018032e6f1ec26049333661232cda07e3c2362ac",
+  "sha": "392db83f15c5f65e623d39f416ea80600ea6e8f6",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-24T03:53:08.475Z",
-  "note": "review lead (HOTFIX P0 trùng đơn HSLC): rào máy chủ trong create_draft_order + confirm_order đọc đơn còn sống cùng hội thoại (sales_conversation_id hoặc page+thread) trong 24 giờ, loại đơn của chính bot; có đơn ⇒ không tạo/không chốt, đúng đơn ⇒ báo khách, khác ⇒ chuyển người; đọc lỗi ⇒ không tạo + chuyển người; ý định đơn riêng tường minh ⇒ tạo nhưng giữ Mới; đếm audit SALES_CHAT_DUPLICATE_ORDER_"
+  "at": "2026-10-24T04:31:05.187Z",
+  "note": "review lead (lại): rào chỉ chặn đơn ĐANG MỞ của lượt mua hiện tại (trước giao, chưa có lần gửi ngoài PENDING/CANCELLED, sau max(now−24h, purchaseRoundStart)); khách cũ đã gửi cùng thread ⇒ tạo; golden không sửa kỳ vọng."
 }
