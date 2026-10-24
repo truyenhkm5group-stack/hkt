@@ -7,7 +7,8 @@
  *  2. cùng hội thoại, khách nói khác (số lượng) ⇒ không tạo + chuyển người;
  *  3. khách nói RÕ «thêm một đơn riêng» ⇒ tạo, mã lý do trên state, KHÔNG tự chốt (giữ «Mới»);
  *  4. hội thoại KHÁC cùng SĐT ⇒ tạo bình thường (rào theo hội thoại, không theo SĐT);
- *  5. đơn của người đã huỷ / ngoài cửa sổ ⇒ không chặn; đơn Pancake cùng page + thread ⇒ chặn;
+ *  5. đơn của người đã huỷ / ngoài cửa sổ / ĐÃ GỬI ĐI / khách đã trả lời «đặt thêm» cho đúng đơn đó ⇒ không chặn (khách cũ mua lại);
+ *     đơn Pancake cùng page + thread ⇒ chặn; lượt mua MỚI mở đúng lúc bot quay lại (roundStartAt = bây giờ) ⇒ VẪN chặn;
  *  6. bot lên nháp TRƯỚC, người lên đơn SAU ⇒ `confirm_order` KHÔNG chốt nháp, chuyển người;
  *  7. mỗi lần chặn để lại một dòng nhật ký đếm được.
  * Phần thuần: ý định «đơn riêng» (đúng / phủ định / câu thường) · quyết định · câu cho bot.
@@ -30,9 +31,9 @@ import { createOrderAsAgent } from "@/lib/records/order-create";
 import { duplicateFlagsFor, strongestFlag } from "@/lib/queries/order-duplicate";
 import { createProductCore } from "@/lib/records/product-create";
 import { DEFAULT_SALES_CHATBOT_CONFIG } from "@/lib/sales-chatbot/config";
-import { blockInstruction, CONVERSATION_ORDER_FIELD, decideConversationOrder, separateOrderIntent, type ConversationOrder } from "@/lib/sales-chatbot/conversation-order-guard";
+import { blockInstruction, CONVERSATION_ORDER_FIELD, decideConversationOrder, otherConversationOrders, separateOrderIntent, type ConversationOrder } from "@/lib/sales-chatbot/conversation-order-guard";
 import { conversationFor } from "@/lib/sales-chatbot/fanpage";
-import { executeTool, type ToolContext } from "@/lib/sales-chatbot/tools";
+import { executeTool, type ChatState, type ToolContext } from "@/lib/sales-chatbot/tools";
 
 const ORG = "dup-guard";
 const ADMIN_EMAIL = "chu@dup-guard.local";
@@ -185,6 +186,39 @@ async function testRealOrg() {
     const r7 = await botCreate(e.id);
     assert.ok(r7.isError && r7.content.includes(`#${manualOrderShortCode(staffE)}`), `đơn Pancake cùng page + thread ⇒ chặn: ${r7.content}`);
 
+    // ── 5b · Khách CŨ mua lại (golden `khach-cu-van-dia-chi-cu`): đơn cũ ĐÃ GỬI cùng thread ⇒ không chặn; đơn của lượt mua TRƯỚC mốc
+    // lượt mua bot đang dùng ⇒ không chặn ──
+    const sh = await convOf("sh");
+    const staffSh = await staffOrder(sh.id);
+    await db.update(o).set({ stage: "SHIPPED" }).where(eq(o.id, staffSh));
+    const rSh = await botCreate(sh.id);
+    assert.ok(!rSh.isError, `đơn đã gửi đi (lượt mua đã kết thúc) không chặn: ${rSh.content}`);
+    // Khách TRẢ LỜI «đặt thêm» cho câu hỏi đơn cũ / đơn mới của máy chủ về ĐÚNG đơn đó ⇒ đơn ấy không chặn.
+    const rd = await convOf("rd");
+    const staffRd = await staffOrder(rd.id);
+    const ctxRd = ctxOf(rd.id, { state: { roundCheck: { orderId: staffRd, askedTurn: 1, at: new Date().toISOString(), answer: "NEW" } } });
+    const cRd = await executeTool("create_customer", { name: "Nguyễn Thị Lan", phone: PHONE, address: ADDRESS }, ctxRd);
+    const rRd = await executeTool("create_draft_order", { items: [{ variant_id: v.id, quantity: 1 }] }, { ...ctxRd, state: cRd.state });
+    assert.ok(!rRd.isError, `khách trả lời «đặt thêm» cho đúng đơn đó ⇒ không chặn: ${rRd.content}`);
+
+    // ── 5c · TRÌNH TỰ THẬT với state như production: lượt mua MỚI mở đúng lúc bot quay lại (khách im > 7 ngày trong sổ bot ⇒
+    // roundStartAt = giờ hiện tại), đơn người lên TRONG lúc giữ nằm trước mốc ⇒ VẪN chặn (mốc lượt mua không phải mốc dưới của rào) ──
+    // Mốc lượt mua dựng SAU khi nhân viên lên đơn — đúng thứ tự thật: người lên đơn lúc giữ, rồi bot mở lượt mua mới khi quay lại.
+    const sequences: [string, () => ChatState][] = [
+      ["seq1", () => ({})],
+      ["seq2", () => ({ roundStartAt: new Date().toISOString(), cycleStartTurns: 3, cartRev: new Date().toISOString() })],
+      ["seq3", () => ({ pastOrders: [{ orderId: null, simulated: false, total: 280_000, at: new Date(Date.now() - 2 * 86_400_000).toISOString() }], roundStartAt: new Date().toISOString() })],
+    ];
+    for (const [thread, state] of sequences) {
+      const cv = await convOf(thread);
+      await staffOrder(cv.id);
+      await new Promise((r) => setTimeout(r, 5));
+      const ctxS = ctxOf(cv.id, { state: state(), autoConfirm: true });
+      const cS = await executeTool("create_customer", { name: "Nguyễn Thị Lan", phone: PHONE, address: ADDRESS }, ctxS);
+      const rS = await executeTool("create_draft_order", { items: [{ variant_id: v.id, quantity: 1 }] }, { ...ctxS, state: cS.state });
+      assert.equal(rS.summary, "Đơn nháp: hội thoại đã có đơn", `[${thread}] đơn người lên trong lúc giữ ⇒ bot KHÔNG tạo dù lượt mua vừa mở: ${rS.content}`);
+    }
+
     // ── 6 · Bot lên nháp TRƯỚC, người lên đơn SAU ⇒ confirm_order không chốt nháp, chuyển người ──
     const f = await convOf("f");
     const r8 = await botCreate(f.id);
@@ -202,7 +236,7 @@ async function testRealOrg() {
     const r11 = await executeTool("confirm_order", { customer_confirmation: "ok chốt đơn" }, ctxOf(a.id, { state: r3.state, lastUserText: "ok chốt đơn", turn: 9 }));
     assert.notEqual(r11.summary, "Chốt: hội thoại đã có đơn khác", r11.content);
 
-    assert.equal(await blocks(), 4, "bốn lần chặn (ca 1 · 2 · Pancake · chốt) = bốn dòng nhật ký");
+    assert.equal(await blocks(), 7, "bảy lần chặn (ca 1 · 2 · ba trình tự thật 5c · Pancake · chốt) = bảy dòng nhật ký");
     const [log] = await db.select({ entityId: schema.auditLogs.entityId }).from(schema.auditLogs).where(and(eq(schema.auditLogs.action, "SALES_CHAT_DUPLICATE_ORDER_BLOCKED"), eq(schema.auditLogs.entityId, staffA))).limit(1);
     assert.ok(log, "nhật ký trỏ về đơn của người");
 
@@ -246,6 +280,19 @@ async function testRealOrg() {
     assert.deepEqual(await linkOf(synced.id), { conv: j.id, origin: "AI_ORDER_SYNC" });
     const r12 = await botCreate(j.id);
     assert.ok(r12.isError && r12.content.includes("máy ghi hộ"), r12.content);
+
+    // ── 10b · Chiều NGƯỢC (order-dup-scan 24/10: 6 cặp bot → order_sync): bot lên đơn trước ⇒ order_sync không ghi đơn thứ hai ──
+    const jb = await convOf("jb");
+    const rb = await botCreate(jb.id);
+    assert.ok(!rb.isError && rb.state.draft?.orderId, rb.content);
+    const syncGuard = { exclude: [] as string[], verifiedCustomerId: null, now: new Date(), includeBotOrders: true };
+    const liveJb = await otherConversationOrders({ conversationId: jb.id, ...syncGuard });
+    assert.deepEqual(liveJb.map((x) => x.orderId), [rb.state.draft!.orderId!], "order_sync thấy đơn bot của hội thoại");
+    const syncAfterBot = await createOrderAsAgent({ name: "Ghi đơn từ hội thoại (thử)", source: "tests/conversation-order-guard.test.ts" }, payload, { pricing: "RETAIL", idempotencyKey: `order-sync:${jb.id}:m1`, conversation: { id: jb.id, origin: "AI_ORDER_SYNC", guard: syncGuard } });
+    assert.ok(!syncAfterBot.ok && syncAfterBot.errors[0]?.field === CONVERSATION_ORDER_FIELD, `order_sync sau đơn bot ⇒ chặn trong giao dịch: ${JSON.stringify(syncAfterBot)}`);
+    assert.equal((await ordersOf(jb.id)).length, 1, "chiều bot → order_sync: vẫn đúng một đơn");
+    const syncSrc = readFileSync("lib/sales-chatbot/order-sync.ts", "utf8");
+    assert.ok(syncSrc.includes("includeBotOrders: true") && syncSrc.includes("guard: convGuard"), "order_sync dùng luật cấp hội thoại tính cả đơn bot, cả trước lẫn trong giao dịch");
 
     // ── 11 · Khách C360: đơn người ở hội thoại KHÁC chỉ chặn khi danh tính ĐÃ XÁC MINH (mã Facebook) ──
     const k = await convOf("k");
