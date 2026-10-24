@@ -3,7 +3,7 @@
   "mission_id": "od-ux-05-settings-scope-more",
   "title": "OD-UX-05 mục 3b: phạm vi đọc cấu hình cho đối soát lương, bảng lương, /ads, /work",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-scope2",
@@ -24,7 +24,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T06:59:05.755Z",
-  "updated_at": "2026-10-24T06:59:05.755Z",
-  "last_heartbeat": "2026-10-24T06:59:05.755Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T07:13:29.038Z",
+  "last_heartbeat": "2026-10-24T07:13:29.038Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/od-ux-05-settings-scope-more",
+    "sha": "2da93e4d60a33f565a8dee8ecfa3aeccc6e3273d",
+    "at": "2026-10-24T07:13:29.038Z",
+    "actor": "DESKTOP-56TH98Y:wt-scope2",
+    "title": "Đối soát lương không còn xin 202 lần kết nối để đọc 10 khoá cấu hình mỗi lượt tính",
+    "summary": "OD-UX-05 mục 3b. withSettingsScope bọc lượt tính của getReconCenter · getPayrollReport (vỏ mỏng + getPayrollReportInScope) · getMarketerReport · getAdsPerformance · collectWorkItems. Căn cứ probe TRƯỚC: getReconCenter 202 lượt / 10 khoá · getMyWork 17/11 · getPayrollReport 15/7 · /ads 11/6. Chỉ khử trùng đọc, không đổi phép tính. Đích sau deploy: getReconCenter ≈ 10/10.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint 5 tệp: sạch",
+      "TEST_KHOI=K01,K03,K04,K06,K07,K10,K11,K13,K14,K24 npm test: ĐẠT (mọi khối có bài kiểm bảng lương · chi phí · đối soát lương · /work · settings-scope)"
+    ]
+  }
 }
