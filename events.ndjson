@@ -1,4 +1,3 @@
-{"at":"2026-10-21T02:41:31.286Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"HANDOFF","mission":"meta-k3-k8-merge","detail":"claude/meta-app-review-audit-r2 @ 94784a6d7b4e · 1 lệnh kiểm thử"}
 {"at":"2026-10-21T02:42:41.334Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"meta-k3-k8-merge","detail":"#935 cho claude/meta-app-review-audit-r2 @ 94784a6d7b4e"}
 {"at":"2026-10-21T02:45:57.688Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"CLAIM","mission":"messenger-webhook-reliability","detail":"PLANNING · 5 mẫu phạm vi · HIGH"}
 {"at":"2026-10-21T02:45:57.688Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_ACCEPTED","mission":"messenger-webhook-reliability","detail":"OVERLAP_ACCEPTED với address-ward-explicit: phạm vi lib/sales-chatbot/messenger.ts ↔ lib/sales-chatbot/ — cách tích hợp: nhánh từ main 7a0b95ea; chỉ sửa webhooks.ts/route messenger/sales-chatbot messenger.ts, độc lập với #935"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-24T11:15:11.763Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"shipment-state-probe","detail":"PASS 5d4997bbce4be9a4233849cb97445e6bfdb45566 2026-10-24T11:14:31.716Z"}
 {"at":"2026-10-24T11:16:04.304Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"od-ux-05-settings-raw-reads","detail":"PASS 5d4997bbce4be9a4233849cb97445e6bfdb45566 2026-10-24T11:15:21.792Z"}
 {"at":"2026-10-24T11:17:00.475Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"comment-inbox-key-fix","detail":"#1044 @ 4dc1ee41b26c → cf92607761e5 (MERGE_NOW · MEDIUM · gates success)"}
+{"at":"2026-10-24T11:29:48.903Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"comment-key-legacy","detail":"#1045 @ 621da21d7dbf → db98d057cda8 (MERGE_ISOLATED · HIGH · gates success)"}

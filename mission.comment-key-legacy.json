@@ -3,7 +3,7 @@
   "mission_id": "comment-key-legacy",
   "title": "P2-6 chạy thử đếm hội thoại bình luận mang khoá «m_…» (mọi tổ chức, không ghi)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-ckl",
@@ -25,9 +25,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-24T11:07:52.082Z",
-  "updated_at": "2026-10-24T11:10:03.142Z",
+  "updated_at": "2026-10-24T11:29:48.862Z",
   "last_heartbeat": "2026-10-24T11:08:27.674Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1045 → db98d057cda8c75219f0c35bedbcf21c3ab32515"
+  },
   "handoff": {
     "branch": "claude/comment-key-legacy",
     "sha": "621da21d7dbf7fcbb2cc7120b077081b24bb0a38",
