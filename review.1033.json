@@ -1,0 +1,8 @@
+{
+  "pr": 1033,
+  "sha": "f19605eca2b678bd12120b330a08711ff3d25144",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T06:25:30.599Z",
+  "note": "review lead: withSettingsScope khử trùng getSettingJson trong MỘT lượt dựng (ALS, không TTL, khoá theo tổ chức), ghi xoá mục khoá, đọc lỗi không giữ; áp getBusinessBrief + getDashboardData; probe thêm mục đọc cấu hình để đo trước/sau."
+}
