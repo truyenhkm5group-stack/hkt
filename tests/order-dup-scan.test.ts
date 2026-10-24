@@ -9,13 +9,17 @@
  */
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { getDb } from "@/db";
-import { DUP_SCAN_MAX_GROUP, findCandidatePairs, originOf, parseDupScanArgs, runOrderDupScan, summarize, type ScanOrder } from "../scripts/order-dup-scan";
+import { eq } from "drizzle-orm";
+import { getDb, schema } from "@/db";
+import { audit } from "@/lib/audit";
+import { MANUAL_ORDER_ID_PREFIX } from "@/lib/constants/manual-orders";
+import { DUP_SCAN_MAX_GROUP, findCandidatePairs, guardBlockStats, isCancelled, newPairStats, orderLabel, originOf, parseDupScanArgs, runOrderDupScan, summarize, type ScanOrder } from "../scripts/order-dup-scan";
 
 const item = (variantId: string, quantity = 1) => ({ variantId, sku: variantId, productName: "Chả cá thu", variationDetail: "1kg", quantity });
 
 function order(over: Partial<ScanOrder> & { id: string; insertedAt: Date }): ScanOrder {
   return {
+    systemId: null,
     stage: "CONFIRMED",
     source: "Fanpage (nhân viên chốt)",
     origin: "STAFF_FORM",
@@ -37,9 +41,13 @@ function order(over: Partial<ScanOrder> & { id: string; insertedAt: Date }): Sca
 }
 
 function testPure() {
-  assert.deepEqual(parseDupScanArgs(["hslc-hmt-shop"]), { code: "hslc-hmt-shop", days: 30, maxGapHours: 72 });
-  assert.deepEqual(parseDupScanArgs(["hslc-hmt-shop", "--days=7", "--max-gap-hours=6"]), { code: "hslc-hmt-shop", days: 7, maxGapHours: 6 });
-  for (const bad of [[], ["HSLC!"], ["x", "--days=0"], ["x", "--days=91"], ["x", "--max-gap-hours=0"]]) assert.ok("error" in parseDupScanArgs(bad), JSON.stringify(bad));
+  // Đồng hồ là THAM SỐ: mốc ghim cạnh dữ liệu ghim, bài kiểm không mang hạn sử dụng (AGENTS mục 50).
+  const NOW = new Date("2026-10-24T09:00:00Z");
+  assert.deepEqual(parseDupScanArgs(["hslc-hmt-shop"], NOW), { code: "hslc-hmt-shop", days: 30, maxGapHours: 72, since: null });
+  assert.deepEqual(parseDupScanArgs(["hslc-hmt-shop", "--days=7", "--max-gap-hours=6"], NOW), { code: "hslc-hmt-shop", days: 7, maxGapHours: 6, since: null });
+  assert.deepEqual(parseDupScanArgs(["hslc-hmt-shop", "--since=2026-10-24T05:18:18Z", "--max-gap-hours=72"], NOW), { code: "hslc-hmt-shop", days: 30, maxGapHours: 72, since: new Date("2026-10-24T05:18:18Z") }, "đúng lệnh Lead sẽ chạy cho #1029");
+  for (const bad of [[], ["HSLC!"], ["x", "--days=0"], ["x", "--days=91"], ["x", "--max-gap-hours=0"], ["x", "--since=2026-10-24 05:18"], ["x", "--since=2026-10-24T05:18:18"], ["x", "--since=2026-07-01T00:00:00Z"]])
+    assert.ok("error" in parseDupScanArgs(bad, NOW), `${JSON.stringify(bad)}: thiếu Z (giờ máy chạy), sai dạng, hay cũ hơn 90 ngày ⇒ từ chối`);
   assert.deepEqual([originOf("sales-chat:conv-1:0"), originOf("chat:conv-1:req"), originOf("order-sync:x"), originOf(null)], ["BOT", "STAFF_FORM", "MACHINE_OTHER", "SYNC_OR_MANUAL"]);
 
   // Ca thật: nhân viên 02:47:56Z, bot 02:49:19Z.
@@ -71,6 +79,36 @@ function testPure() {
   assert.equal(s.byOriginCombo["STAFF_FORM→BOT"], 1);
   const cancelled = summarize(2, findCandidatePairs([staff, { ...bot, stage: "CANCELLED" }], 72).pairs);
   assert.deepEqual([cancelled.pairs, cancelled.bothActiveSuspected, cancelled.moneyAtRisk], [1, 0, 0], "đơn sau đã huỷ ⇒ vẫn in cặp, không tính tiền ảnh hưởng");
+  // Lượt quét lại sau khi nhân viên xử lý: đếm được cặp nào đã huỷ đơn sau, cặp nào huỷ đơn trước, cặp nào còn nguyên.
+  assert.deepEqual([cancelled.suspectCancelledSuspected, cancelled.keeperCancelledSuspected], [1, 0], "huỷ đơn SAU ⇒ đếm vào «đơn sau đã huỷ»");
+  const huyTruoc = summarize(2, findCandidatePairs([{ ...staff, stage: "CANCELLED" }, bot], 72).pairs);
+  assert.deepEqual([huyTruoc.suspectCancelledSuspected, huyTruoc.keeperCancelledSuspected, huyTruoc.bothActiveSuspected], [0, 1, 0], "huỷ đơn TRƯỚC ⇒ đếm riêng, không lẫn với huỷ đơn sau");
+  assert.deepEqual([s.suspectCancelledSuspected, s.keeperCancelledSuspected], [0, 0], "chưa ai huỷ ⇒ 0 / 0");
+  assert.deepEqual([isCancelled({ stage: "CANCELLED" }), isCancelled({ stage: "DELETED" }), isCancelled({ stage: "CONFIRMED" })], [true, true, false]);
+
+  // Mã đơn in ĐÚNG như danh sách /orders: `#` + mã Pancake, hoặc `#` + 8 ký tự của đơn tạo trên ERP — tra được bằng ô tìm.
+  assert.equal(orderLabel({ id: `${MANUAL_ORDER_ID_PREFIX}d2a8de9b-1111-4222-8333-444455556666`, systemId: null }), "#D2A8DE9B");
+  assert.equal(orderLabel({ id: "1849203311", systemId: 4521 }), "#4521", "đơn Pancake ⇒ mã hiển thị system_id, không phải id nội bộ");
+  assert.equal(orderLabel({ id: `${MANUAL_ORDER_ID_PREFIX}a5cc67e2-1111-4222-8333-444455556666`, systemId: 77 }), "#77", "có system_id thì system_id thắng, như columns.tsx");
+
+  // Cặp MỚI từ mốc deploy: tính theo ĐƠN SAU; đơn trước nằm TRƯỚC mốc vẫn ghép được. «BOT sau người» = đúng ca P0.
+  const moc = new Date("2026-10-24T02:48:30Z"); // giữa đơn người (02:47:58) và đơn bot (02:49:19)
+  // Ba cặp có đơn sau từ mốc: cặp thật + hai cặp «cùng hội thoại khác SĐT» (03:30) — chỉ cặp thật là nghi trùng và BOT sau người.
+  assert.deepEqual(newPairStats(pairs, moc), { pairs: 3, botAfterHuman: 1, suspected: 1, suspectedBotAfterHuman: 1 }, "đơn người trước mốc + bot sau mốc ⇒ đếm là cặp mới, BOT sau người");
+  assert.deepEqual(newPairStats(pairs, new Date("2026-10-24T06:00:00Z")), { pairs: 0, botAfterHuman: 0, suspected: 0, suspectedBotAfterHuman: 0 }, "không cặp nào có đơn sau từ 06:00");
+  const haiBot = findCandidatePairs([{ ...staff, origin: "BOT" }, bot], 72).pairs;
+  assert.equal(newPairStats(haiBot, moc).botAfterHuman, 0, "bot sau bot không phải «BOT sau người»");
+
+  // Rào hội thoại: chỉ số đếm theo bước + «cùng đề xuất»; bước lạ không rơi mất.
+  assert.deepEqual(
+    guardBlockStats([
+      { step: "CREATE", same: "true", n: 2 },
+      { step: "CREATE", same: "false", n: "1" },
+      { step: "CONFIRM", same: "false", n: 3 },
+      { step: null, same: null, n: 1 },
+    ]),
+    { total: 7, create: 3, createSame: 2, confirm: 3, confirmSame: 0, other: 1 },
+  );
 
   // Nhóm quá đông (SĐT dùng chung) ⇒ không dựng cặp, nhưng đếm.
   const crowd = Array.from({ length: DUP_SCAN_MAX_GROUP + 1 }, (_, i) => order({ id: `c${i}`, insertedAt: new Date(Date.UTC(2026, 9, 24, 0, i)), phone: "0912345678", customerId: null, salesConversationId: null, pancakeConversationId: null, pageId: null }));
@@ -86,11 +124,24 @@ async function testOnDb() {
     const db = await getDb();
     const r = await runOrderDupScan(db, { since: new Date(Date.now() - 30 * 86_400_000), maxGapHours: 72, label: "kiểm thử", now: new Date() });
     assert.ok(r.summary.orders >= 0 && Array.isArray(r.pairs), "câu SQL chạy được trên lược đồ thật");
+
+    // Đường đọc nhật ký rào đi qua ĐÚNG hình dạng `audit()` ghi (after nằm trong detail) — ghi bằng chính audit() như rào thật.
+    const MARK = "agent:tests/order-dup-scan.test.ts";
+    const truoc = new Date(Date.now() - 1000);
+    try {
+      for (const [step, sameAsProposal] of [["CREATE", true], ["CREATE", false], ["CONFIRM", false]] as const)
+        await audit({ userId: null, userEmail: MARK, actorKind: "AGENT", action: "SALES_CHAT_DUPLICATE_ORDER_BLOCKED", entity: "ORDER", entityId: "erp-test", after: { conversationId: "c", step, sameAsProposal, draftOrderId: null } });
+      const r2 = await runOrderDupScan(db, { since: new Date(Date.now() - 30 * 86_400_000), newSince: truoc, maxGapHours: 72, label: "kiểm thử --since", now: new Date() });
+      assert.ok(r2.guardBlocks.create >= 2 && r2.guardBlocks.createSame >= 1 && r2.guardBlocks.confirm >= 1, `đếm rào đọc đúng detail->'after': ${JSON.stringify(r2.guardBlocks)}`);
+    } finally {
+      await db.delete(schema.auditLogs).where(eq(schema.auditLogs.userEmail, MARK));
+    }
   } finally {
     console.log = orig;
   }
   const summary = printed.filter((l) => l.startsWith("[ops:tom-tat]"));
   assert.ok(summary.length >= 4, "có khối tóm tắt");
+  assert.ok(summary.some((l) => l.includes("cặp mới từ ")) && summary.some((l) => l.includes("rào hội thoại chặn bot từ ")), "có dòng cặp mới + dòng đếm rào");
   for (const l of summary) assert.ok(!/0\d{9}/.test(l), `tóm tắt không có SĐT: ${l}`);
 }
 
@@ -104,6 +155,8 @@ function testSourceFences() {
   assert.ok(!/\b(insert|update|delete)\s+(into|from)?\s*\w|\.insert\(|\.update\(|\.delete\(/i.test(code.replace(/\/\/.*$/gm, "")), "không ghi gì");
   for (const m of code.matchAll(/from "@\/([^"]+)"/g)) assert.ok(existsSync(`${m[1]}.ts`) || existsSync(`${m[1]}/index.ts`), `import @/${m[1]} phải có sẵn`);
   assert.ok(!/\(\?<[=!]/.test(code), "không nhìn-ngược");
+  assert.ok(!/short\([kx]\.id\)/.test(code), "mã đơn đi qua orderLabel (đúng mã ERP hiển thị), không cắt 8 ký tự đầu của id nội bộ");
+  assert.match(code, /select o\.id, o\.system_id,/, "đọc system_id để in mã Pancake");
   assert.match(src, /process\.stdout\.write\("", \(\) => done\(\)\)/, "xả stdout trước khi thoát");
   assert.ok(!/tomTat\([^)]*short\(|tomTat\([^)]*\.id\b|tomTat\([^)]*phone/.test(code), "tóm tắt không in mã đơn / SĐT");
   const ops = readFileSync(".github/workflows/ops-vps.yml", "utf8").replace(/\r\n/g, "\n");

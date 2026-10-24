@@ -45,6 +45,17 @@ let hamDangDo: string | null = null;
  * hàm đo cuối cùng (hamDangDo không bao giờ về null) và đẩy câu EXPLAIN vào «tám câu chậm nhất».
  */
 let dangDo = false;
+/**
+ * ĐỌC CẤU HÌNH TRONG TỪNG HÀM (OD-UX-05 mục 3): «câu chạy lại» gộp theo HÌNH DẠNG nên `settings where key = $1` ×6 không nói được là
+ * sáu khoá khác nhau hay một khoá đọc sáu lần — mà khử trùng theo lượt dựng chỉ cứu được trường hợp sau. Đếm theo khoá thật.
+ */
+let cauHinhHienTai = new Map<string, number>();
+const cauHinhTheoHam = new Map<string, Map<string, number>>();
+const ghiCauHinh = (sqlText: string, params: unknown[]) => {
+  if (!/from "settings"/.test(sqlText)) return;
+  const khoa = typeof params[0] === "string" ? params[0] : "(không đọc được khoá)";
+  cauHinhHienTai.set(khoa, (cauHinhHienTai.get(khoa) ?? 0) + 1);
+};
 let dbCalls = 0;
 let dbRows = 0;
 
@@ -139,6 +150,7 @@ async function timed(page: string, fn: string, run: () => Promise<unknown>) {
   clearMemo();
   hamDangDo = `${page} · ${fn}`;
   lapHienTai = new Map();
+  cauHinhHienTai = new Map();
   cauTrongHam = TRONG_DIEM.test(fn) ? [] : null;
   const dbBefore = dbMs;
   const callsBefore = dbCalls;
@@ -167,6 +179,7 @@ async function timed(page: string, fn: string, run: () => Promise<unknown>) {
     await run().catch(() => undefined);
     const warmMs = Date.now() - t1;
     dangDo = false;
+    if (cauHinhHienTai.size) cauHinhTheoHam.set(`${page} · ${fn}`, cauHinhHienTai);
 
     const lap = [...lapHienTai.values()].filter((v) => v.lan > 1).sort((a, b) => b.ms - a.ms)[0] ?? null;
     const size = out === undefined ? 0 : JSON.stringify(out).length;
@@ -249,6 +262,7 @@ async function main() {
               dbRows += rows;
               ghiCham(text, ms, layThamSo(args));
               ghiLap(text, ms, rows);
+              ghiCauHinh(text, layThamSo(args));
             },
             () => {
               const ms = Date.now() - t0;
@@ -336,6 +350,7 @@ async function main() {
             dbRows += rows;
             ghiCham(sqlText, ms, layThamSo(args));
             ghiLap(sqlText, ms, rows);
+            ghiCauHinh(sqlText, layThamSo(args));
             return kq;
           },
           (e) => {
@@ -825,6 +840,43 @@ async function main() {
       }
     }
 
+    /*
+      ẤM (OD-UX-05 mục 2, 24/10/2026): mục «TỪNG NGUỒN» ở trên luôn chạy sau clearMemo — xấu nhất tuyệt đối — nên không trả lời
+      được câu «khi đệm đã ấm (người dùng thật, job giữ ấm chạy đều) còn nguồn nào chạm hạn 2,5 s không». Smoke sau deploy
+      #1025: /work thân 2,2 s ≈ hạn ⇒ nghi còn MỘT nguồn đứng ở trần, mà smoke không in tên nguồn. Ở đây: làm ấm bằng chính đường
+      trang (tối đa 3 vòng, nghỉ 3 s, để lượt tính nền của nguồn chạm hạn ở trên kịp xong), rồi đo lại TỪNG NGUỒN và TOÀN TRANG
+      mà KHÔNG xoá đệm. Đọc kèm: mọi lượt ghi (audit) của MỌI tổ chức trong lúc đo vẫn xoá đệm toàn tiến trình (đang sửa riêng).
+    */
+    {
+      const nghi = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      const lamAm: string[] = [];
+      for (let vong = 1; vong <= 3; vong += 1) {
+        const t0 = Date.now();
+        const r = await wa.collectWorkItems({});
+        lamAm.push(`vòng ${vong}: ${Date.now() - t0}ms · thiếu ${r.failed.map((f) => f.source).join(", ") || "—"}`);
+        if (!r.failed.length) break;
+        await nghi(3_000);
+      }
+      const tungNguonAm: { ten: string; ms: number; viec: number; quaHan: string }[] = [];
+      for (const [ten, sources] of NGUON) {
+        const t0 = Date.now();
+        try {
+          const r = await wa.collectWorkItems({ sources });
+          tungNguonAm.push({ ten, ms: Date.now() - t0, viec: r.items.length, quaHan: r.failed.map((f) => `${f.source}: ${f.error}`).join(" · ") });
+        } catch (e) {
+          tungNguonAm.push({ ten, ms: Date.now() - t0, viec: 0, quaHan: `LỖI: ${e instanceof Error ? e.message : String(e)}` });
+        }
+      }
+      const t1 = Date.now();
+      const toan = await wa.collectWorkItems({});
+      const msToan = Date.now() - t1;
+      console.log("\n── /work: TỪNG NGUỒN KHI ĐỆM ĐÃ ẤM (không xoá đệm, sau làm ấm bằng đường trang) ──");
+      console.log(`  làm ấm: ${lamAm.join(" | ")}`);
+      for (const r of [...tungNguonAm].sort((a, b) => b.ms - a.ms))
+        console.log(`  ${String(r.ms).padStart(6)}ms  ${String(r.viec).padStart(5)} việc  ${r.ten.padEnd(28)} ${r.quaHan ? `QUÁ HẠN/LỖI — ${r.quaHan}` : ""}`);
+      console.log(`  TOÀN TRANG ấm: ${msToan}ms · ${toan.items.length} việc · nguồn chạm hạn / lỗi: ${toan.failed.map((f) => `${f.source} (${f.error.slice(0, 40)})`).join(" · ") || "KHÔNG"}`);
+    }
+
     // Toàn trang (phần dữ liệu): đúng lời gọi của app/(dashboard)/work/page.tsx, với một tài khoản quản trị thật.
     const { getDb: layDb } = await import("@/db");
     const dbW = await layDb();
@@ -997,6 +1049,13 @@ async function main() {
     await pool.end().catch(() => undefined);
   }
 
+  console.log("\n── ĐỌC CẤU HÌNH (settings) TRONG TỪNG HÀM: lượt · khoá khác nhau · khoá đọc lặp (nguội + ấm) ──");
+  if (!cauHinhTheoHam.size) console.log("  (không hàm nào đọc settings)");
+  for (const [fn, m] of [...cauHinhTheoHam].sort((a, b) => [...b[1].values()].reduce((t, x) => t + x, 0) - [...a[1].values()].reduce((t, x) => t + x, 0)).slice(0, 15)) {
+    const tong = [...m.values()].reduce((t, x) => t + x, 0);
+    const lap = [...m].filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, n]) => `${k}×${n}`).join(" · ");
+    console.log(`  ${String(tong).padStart(4)} lượt · ${String(m.size).padStart(3)} khoá  ${fn}${lap ? `  — lặp: ${lap}` : ""}`);
+  }
   console.log("\n── CÂU CHẬM BÊN TRONG TỪNG HÀM TRỌNG ĐIỂM (lượt nguội, từ 50ms) ──");
   for (const [fn, cau] of cauTheoHam) {
     console.log(`\n  ${fn}: ${cau.length ? "" : "(không câu nào từ 50ms)"}`);

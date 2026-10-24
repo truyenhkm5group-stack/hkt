@@ -516,13 +516,18 @@ export function turnTraceNote(i: { answered: boolean; isOpenTurn: boolean; code:
 
 // ─────────────────────────── 4. Hết nhường ⇒ đánh giá lại tồn ───────────────────────────
 
-export type ResumeVerdict = { resume: true; turnId: string; messageIds: string[] } | { resume: false; reason: "NOT_AI" | "NO_OPEN_TURN" | "MEDIA_ONLY" | "IN_FLIGHT" | "NOT_PAUSED" | "STALE" };
+export type ResumeVerdict = { resume: true; turnId: string; messageIds: string[] } | { resume: false; reason: "NOT_AI" | "NO_OPEN_TURN" | "MEDIA_ONLY" | "IN_FLIGHT" | "NOT_PAUSED" | "STALE" | "HUMAN_ORDERED" };
 
 /**
  * Hội thoại vừa về tay AI (hết nhường / trả lại): lượt khách MỚI NHẤT chưa ai trả lời, mọi tin của nó bị chốt bởi một lý do nhường /
  * «đã trả lời» nhầm (`pauseNotes`), còn tươi ⇒ mở lại CẢ lượt cho MỘT câu trả lời. Tin đang chờ (PENDING) ⇒ đường webhook đang lo. HÀM THUẦN.
+ *
+ * `humanOrderAt` = mốc đơn MỚI NHẤT của NGƯỜI trên hội thoại (form hộp thư · đơn Pancake · ghi đơn từ hội thoại — không phải đơn bot;
+ * `otherConversationOrders`). Người lên đơn TỪ hoặc SAU tin đầu của lượt bị nhường ⇒ người đã đọc lượt ấy và xử lý xong: KHÔNG mở lại
+ * (`HUMAN_ORDERED`) — P0 HSLC 24/10/2026: lượt chứa SĐT + địa chỉ khách gửi lúc người giữ được chạy lại 82 giây sau khi nhân viên lên
+ * đơn từ chính các tin đó, bot lên + tự chốt đơn thứ hai (#D2A8DE9B → #A5CC67E2).
  */
-export function resumeDecision(i: { owner: ResponseOwnerState; turns: readonly CustomerTurn[]; ledger: readonly LedgerMessage[]; nowMs: number; pauseNotes: (note: string | null) => boolean; maxAgeMs?: number }): ResumeVerdict {
+export function resumeDecision(i: { owner: ResponseOwnerState; turns: readonly CustomerTurn[]; ledger: readonly LedgerMessage[]; nowMs: number; pauseNotes: (note: string | null) => boolean; maxAgeMs?: number; humanOrderAt?: number | null }): ResumeVerdict {
   if (i.owner !== "AI_ACTIVE") return { resume: false, reason: "NOT_AI" };
   const t = openTurnOf(i.turns);
   if (!t) return { resume: false, reason: "NO_OPEN_TURN" };
@@ -532,6 +537,7 @@ export function resumeDecision(i: { owner: ResponseOwnerState; turns: readonly C
   if (rows.some((r) => r?.status === "PENDING")) return { resume: false, reason: "IN_FLIGHT" };
   if (!rows.every((r) => r && r.status === "SKIPPED" && i.pauseNotes(r.note ?? null))) return { resume: false, reason: "NOT_PAUSED" };
   if (i.nowMs - t.lastAt > (i.maxAgeMs ?? RESUME_MAX_TURN_AGE_MS)) return { resume: false, reason: "STALE" };
+  if (typeof i.humanOrderAt === "number" && i.humanOrderAt >= t.firstAt) return { resume: false, reason: "HUMAN_ORDERED" };
   return { resume: true, turnId: t.id, messageIds: rows.map((r) => r!.id) };
 }
 

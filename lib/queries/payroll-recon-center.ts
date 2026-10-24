@@ -15,6 +15,7 @@
  *    đã trả về) và COD ĐVVC báo đã thu nhưng chưa ghi tiền về.
  *  · `openingSeries` — chuỗi số đo từng tháng từ đầu kỳ dữ liệu cho đề xuất số dư mở sổ.
  */
+import { withSettingsScope } from "@/lib/settings";
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
@@ -258,7 +259,9 @@ export type ReconCenter = {
 
 /** Toàn bộ Trung tâm cho khoảng tháng `[fromMonth, toMonth]`. Memo 120 giây theo khoảng. */
 export async function getReconCenter(fromMonth: string, toMonth: string): Promise<ReconCenter> {
-  return memo(`payroll-recon-center:${fromMonth}:${toMonth}`, 120_000, async () => {
+  // OD-UX-05 mục 3b (24/10/2026, perf-probe «ĐỌC CẤU HÌNH TRONG TỪNG HÀM»): 202 lượt đọc settings / 10 khoá mỗi lượt tính (profit.assumptions ×83 · payroll.employees ×48 ·
+  // payroll.recognition ×34…) — mỗi lượt là một lần xin kết nối trong lúc job giữ 3–4/5 kết nối của bể. Một phạm vi cho cả lượt.
+  return memo(`payroll-recon-center:${fromMonth}:${toMonth}`, 120_000, () => withSettingsScope(async () => {
     const thang = monthsBetween(fromMonth, toMonth);
     const undated = new Map<string, { id: string; name: string; monthlyFixed: number }>();
     const coDoanhThu = new Set<string>();
@@ -312,5 +315,5 @@ export async function getReconCenter(fromMonth: string, toMonth: string): Promis
       ),
     });
     return { fromMonth, toMonth, months, cogsGaps: gaps, opening, approvals, dataStart: start };
-  });
+  }));
 }

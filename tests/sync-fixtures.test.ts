@@ -261,6 +261,7 @@ import { testLogisticsFreshness } from "./logistics-freshness.test";
 import { testOperatingFunnel } from "./operating-funnel.test";
 import { testMemoInflight } from "./memo-inflight.test";
 import { testCacheSemantics } from "./cache-semantics.test";
+import { testSettingsScope } from "./settings-scope.test";
 import { testSyncRunnerConcurrentStart } from "./sync-runner-concurrent-start.test";
 import { testRefreshButton } from "./refresh-button.test";
 import { testCommandCatalog } from "./command-catalog.test";
@@ -582,6 +583,7 @@ import { testCommerceAgent } from "./commerce-agent.test";
 import { testZaloOa } from "./zalo-oa.test";
 import { testSalesEvents } from "./sales-events.test";
 import { testChatAdAttribution } from "./chat-ad-attribution.test";
+import { testConversationOrderGuard } from "./conversation-order-guard.test";
 import { testOrderAttribution } from "./order-attribution.test";
 import { testLostReasons } from "./lost-reasons.test";
 import { testAiQuality } from "./ai-quality.test";
@@ -646,6 +648,7 @@ import { testSalesIntegrityAudit } from "./sales-integrity-audit.test";
 import { testCartIntentAudit } from "./cart-intent-audit.test";
 import { testFollowupLifecycle } from "./followup-lifecycle.test";
 import { testCustomer360 } from "./customer-360.test";
+import { testCommentInboxLinkProbe } from "./comment-inbox-link-probe.test";
 import { testChatWidget } from "./chat-widget.test";
 import { testWebProductImport } from "./web-product-import.test";
 import { testMessenger } from "./messenger.test";
@@ -2373,6 +2376,8 @@ async function main() {
     testPromisedDeliveryPure();
     await testMemoInflight();
     await testCacheSemantics();
+    // OD-UX-05 mục 3 (24/10/2026): khử trùng đọc cấu hình theo lượt dựng.
+    await testSettingsScope(db);
     // Team Premium F3: khoá «một job một lượt» của runSyncJob giữ TRƯỚC lượt await đầu — hai lượt cùng nhịp chỉ chạy thân job một lần;
     // chèn sync_runs ném thì khoá vẫn được nhả (không kẹt job tới khi khởi động lại).
     {
@@ -3231,6 +3236,8 @@ async function main() {
     await testSalesEvents();
     // Quảng cáo dẫn khách vào hội thoại ⇒ đơn bot mang ad_id (0225) — tổ chức THẬT `chat-ad-attr`, tự dọn.
     await testChatAdAttribution();
+    // Hội thoại đã có đơn của người ⇒ bot không tạo / không chốt đơn thứ hai (P0 HSLC 24/10/2026) — tổ chức THẬT `dup-guard`, tự dọn.
+    await testConversationOrderGuard();
     await testOrderAttribution();
     await testLostReasons();
     await testAiQuality();
@@ -3344,6 +3351,8 @@ async function main() {
     // Customer 360 (11/10/2026, ca «Nga Ho Thien»): nhận diện khách cũ qua đơn của chính hội thoại / SĐT, địa chỉ cũ ĐÃ XÁC MINH,
     // «vẫn địa chỉ cũ» ⇒ tra trước khi hỏi — tổ chức THẬT `gd-food-c360` / `gd-fashion-c360` (tổ chức khác không lọt).
     await testCustomer360();
+    // ops comment-inbox-link-probe (P0 HSLC 24/10/2026): bình luận → hộp thư, khoá nào lệch — phần thuần + quét mã nguồn.
+    testCommentInboxLinkProbe();
     // Đơn cần người kiểm (chủ shop 08/10/2026): khách huỷ ⇒ ghi chú + cờ, xã chưa ghép ⇒ cờ, nút nhanh Xác nhận / Huỷ, lời xác nhận,
     // SĐT chuẩn hoá — tổ chức THẬT `or-rv` (không Pancake; tự cấp, tự dọn).
     await testOrderReview();
