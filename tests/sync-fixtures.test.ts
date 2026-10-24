@@ -22,6 +22,7 @@ import { testFanpageAccessPure, testFanpageHistoryDb, testPageEvidencePure } fro
 import { testLandingAttributionDb, testLandingAttributionPure } from "./landing-attribution.test";
 import { testMetaAdPostPure, testMetaAdPostResolver, testMetaAdPostStoreDb, testMetaAdParents } from "./meta-ad-post.test";
 import { testConsistency } from "./consistency.test";
+import { testReturnsKpiDrill } from "./returns-kpi-drill.test";
 import { testDataQuality } from "./data-quality.test";
 import { testInventory } from "./inventory.test";
 import { testUnknownCost } from "./unknown-cost.test";
@@ -2129,6 +2130,7 @@ async function main() {
     await testDataQuality(db);
     await testBackfill(db);
     await testConsistency(db);
+    await testReturnsKpiDrill(db);
     await testMetricsContract(db);
     await testMetricShapeConsistency(db);
     await testBusinessInvariants(db);
