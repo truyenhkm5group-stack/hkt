@@ -3,13 +3,13 @@
   "mission_id": "order-dup-guard-phase2",
   "title": "P0 trùng đơn pha 2: khoá hội thoại chung bot · form · order_sync, C360, resume, cờ Nghi trùng /orders",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
   "worker": null,
   "worktree": null,
-  "branch": null,
+  "branch": "claude/order-dup-guard-phase2",
   "base_sha": null,
   "domains": [],
   "owned_paths": [
@@ -32,7 +32,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T06:52:43.599Z",
-  "updated_at": "2026-10-24T06:52:43.599Z",
-  "last_heartbeat": "2026-10-24T06:52:43.599Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T06:53:26.590Z",
+  "last_heartbeat": "2026-10-24T06:53:26.590Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/order-dup-guard-phase2",
+    "sha": "523c70f5e5c4a13adcd950e47779524930ed975e",
+    "at": "2026-10-24T06:53:26.590Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "P0 trùng đơn pha 2: khoá hội thoại chung bot · form · order_sync, C360, resume, cờ Nghi trùng /orders",
+    "summary": "",
+    "tests": [
+      "tsc · eslint sạch. npm test cục bộ: shard 1/4 XANH, 3/4 XANH, 4/4 XANH trên 523c70f5e; shard 2/4 XANH trên 2af379b92 (sau đó chỉ đổi order-sync + sales-quote-640, thuộc shard 1 · 3 đã xanh). Kiểm đột biến rào trong giao dịch ⇒ ĐỎ. Build chưa chạy (máy quá tải, lead cho để CI gates)"
+    ]
+  }
 }
