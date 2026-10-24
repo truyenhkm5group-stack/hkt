@@ -68,10 +68,16 @@ export async function testMemoOrgScope(B: string, homeCode: string) {
     clearMemo("ALL");
     let mo!: () => void;
     const cong = new Promise<void>((r) => (mo = r));
+    // memo() còn `await currentOrganization()` trước khi chụp phiên bản: phải ĐỢI lượt tính vào hẳn hàm rồi mới xoá,
+    // không thì lượt xoá chạy trước lượt tính và bài kiểm không đo điều nó nói.
+    let daVao!: () => void;
+    const vao = new Promise<void>((r) => (daVao = r));
     const p = memo(K2, 60_000, async () => {
+      daVao();
       await cong;
       return "dang-chay";
     });
+    await vao;
     await withOrganization(ai, async () => clearMemo());
     mo();
     assert.equal(await p, "dang-chay");
