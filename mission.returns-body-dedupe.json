@@ -3,7 +3,7 @@
   "mission_id": "returns-body-dedupe",
   "title": "/reports/returns: baseRows một lượt CSDL cho ba lần gọi + careRows chỉ tính kiện có care",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-rbody",
@@ -24,7 +24,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T01:22:52.428Z",
-  "updated_at": "2026-10-24T02:08:03.348Z",
-  "last_heartbeat": "2026-10-24T02:08:03.348Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T03:48:25.816Z",
+  "last_heartbeat": "2026-10-24T03:48:25.816Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/returns-body-dedupe",
+    "sha": "6780c1b38583d17c9129eba01e450224b0bdfc3c",
+    "at": "2026-10-24T03:48:25.816Z",
+    "actor": "DESKTOP-56TH98Y:wt-rbody",
+    "title": "/reports/returns: baseRows một lượt CSDL cho ba lần gọi + careRows chỉ tính kiện có care",
+    "summary": "",
+    "tests": [
+      "tsc --noEmit sạch · eslint sạch · npm test TẤT CẢ KIỂM THỬ ĐẠT @6780c1b38 (K05 tests/returns-body.test.ts: kỳ này·kỳ trước·drilldown = 1 câu baseRows; dựng từ đệm ≡ dựng từ CSDL; clearMemo đọc lại; careRows cùng tập ca + vế exists) · EXPLAIN careRows production (Lead): nhánh b 1,04 → 0,52 s, cùng 1.202 dòng"
+    ]
+  }
 }
