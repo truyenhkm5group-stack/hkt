@@ -3,7 +3,7 @@
   "mission_id": "ai-credit-alert",
   "title": "P0: báo cạn credit AI tới được người (lùi kênh + vết gửi) + banner /platform + rào bench",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "FAILED",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -33,11 +33,13 @@
     "0259": "2026-10-23T21:52:44.128Z"
   },
   "created_at": "2026-10-23T21:52:09.826Z",
-  "updated_at": "2026-10-24T00:04:53.459Z",
+  "updated_at": "2026-10-24T00:55:18.786Z",
   "last_heartbeat": "2026-10-23T23:37:48.440Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1023 → f994d713f904fc660fe9bad7ab20634f1f6924c9"
+    "merged": "#1023 → f994d713f904fc660fe9bad7ab20634f1f6924c9",
+    "verify": "FAIL 321f7090146c5f0faa6556a3a7724d4799a260e5 2026-10-24T00:54:50.088Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40043818760"
   },
   "handoff": {
     "branch": "claude/ai-credit-alert",
