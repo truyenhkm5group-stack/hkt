@@ -23,18 +23,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-24T02:18:42.118Z",
-  "updated_at": "2026-10-24T02:21:30.431Z",
-  "last_heartbeat": "2026-10-24T02:19:22.102Z",
+  "updated_at": "2026-10-24T03:58:24.376Z",
+  "last_heartbeat": "2026-10-24T03:58:24.376Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/shipment-state-probe",
-    "sha": "da4bec3f524c5df44829d7ffb5e14c083466a2fd",
-    "at": "2026-10-24T02:19:22.102Z",
+    "sha": "c6f4493324acd5ce2d05c8865c8fd8290155c45d",
+    "at": "2026-10-24T03:58:24.376Z",
     "actor": "DESKTOP-56TH98Y:wt-ssprobe",
     "title": "ops shipment-state-probe: đo cửa nội bộ bot → ERP nguội/ấm + EXPLAIN JIT",
-    "summary": "chỉ-script CHỈ ĐỌC (bước (c) lead duyệt): đo route nguội/ấm + EXPLAIN JIT trước khi nới timeout — không cần deploy",
+    "summary": "sửa gates #1028: regex đã thoát thay chuỗi literal process.env",
     "tests": [
-      "tsc --noEmit --incremental false sạch · eslint sạch · tsx testShipmentStateProbe() XANH · ops-script-size đạt · full suite giao CI gates"
+      "tsc · eslint sạch · TEST_KHOI=K10,K15 ĐẠT (K15 = test-hygiene)"
     ]
   }
 }
