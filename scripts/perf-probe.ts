@@ -45,6 +45,17 @@ let hamDangDo: string | null = null;
  * hàm đo cuối cùng (hamDangDo không bao giờ về null) và đẩy câu EXPLAIN vào «tám câu chậm nhất».
  */
 let dangDo = false;
+/**
+ * ĐỌC CẤU HÌNH TRONG TỪNG HÀM (OD-UX-05 mục 3): «câu chạy lại» gộp theo HÌNH DẠNG nên `settings where key = $1` ×6 không nói được là
+ * sáu khoá khác nhau hay một khoá đọc sáu lần — mà khử trùng theo lượt dựng chỉ cứu được trường hợp sau. Đếm theo khoá thật.
+ */
+let cauHinhHienTai = new Map<string, number>();
+const cauHinhTheoHam = new Map<string, Map<string, number>>();
+const ghiCauHinh = (sqlText: string, params: unknown[]) => {
+  if (!/from "settings"/.test(sqlText)) return;
+  const khoa = typeof params[0] === "string" ? params[0] : "(không đọc được khoá)";
+  cauHinhHienTai.set(khoa, (cauHinhHienTai.get(khoa) ?? 0) + 1);
+};
 let dbCalls = 0;
 let dbRows = 0;
 
@@ -139,6 +150,7 @@ async function timed(page: string, fn: string, run: () => Promise<unknown>) {
   clearMemo();
   hamDangDo = `${page} · ${fn}`;
   lapHienTai = new Map();
+  cauHinhHienTai = new Map();
   cauTrongHam = TRONG_DIEM.test(fn) ? [] : null;
   const dbBefore = dbMs;
   const callsBefore = dbCalls;
@@ -167,6 +179,7 @@ async function timed(page: string, fn: string, run: () => Promise<unknown>) {
     await run().catch(() => undefined);
     const warmMs = Date.now() - t1;
     dangDo = false;
+    if (cauHinhHienTai.size) cauHinhTheoHam.set(`${page} · ${fn}`, cauHinhHienTai);
 
     const lap = [...lapHienTai.values()].filter((v) => v.lan > 1).sort((a, b) => b.ms - a.ms)[0] ?? null;
     const size = out === undefined ? 0 : JSON.stringify(out).length;
@@ -249,6 +262,7 @@ async function main() {
               dbRows += rows;
               ghiCham(text, ms, layThamSo(args));
               ghiLap(text, ms, rows);
+              ghiCauHinh(text, layThamSo(args));
             },
             () => {
               const ms = Date.now() - t0;
@@ -336,6 +350,7 @@ async function main() {
             dbRows += rows;
             ghiCham(sqlText, ms, layThamSo(args));
             ghiLap(sqlText, ms, rows);
+            ghiCauHinh(sqlText, layThamSo(args));
             return kq;
           },
           (e) => {
@@ -1034,6 +1049,13 @@ async function main() {
     await pool.end().catch(() => undefined);
   }
 
+  console.log("\n── ĐỌC CẤU HÌNH (settings) TRONG TỪNG HÀM: lượt · khoá khác nhau · khoá đọc lặp (nguội + ấm) ──");
+  if (!cauHinhTheoHam.size) console.log("  (không hàm nào đọc settings)");
+  for (const [fn, m] of [...cauHinhTheoHam].sort((a, b) => [...b[1].values()].reduce((t, x) => t + x, 0) - [...a[1].values()].reduce((t, x) => t + x, 0)).slice(0, 15)) {
+    const tong = [...m.values()].reduce((t, x) => t + x, 0);
+    const lap = [...m].filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, n]) => `${k}×${n}`).join(" · ");
+    console.log(`  ${String(tong).padStart(4)} lượt · ${String(m.size).padStart(3)} khoá  ${fn}${lap ? `  — lặp: ${lap}` : ""}`);
+  }
   console.log("\n── CÂU CHẬM BÊN TRONG TỪNG HÀM TRỌNG ĐIỂM (lượt nguội, từ 50ms) ──");
   for (const [fn, cau] of cauTheoHam) {
     console.log(`\n  ${fn}: ${cau.length ? "" : "(không câu nào từ 50ms)"}`);

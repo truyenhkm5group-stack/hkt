@@ -1,3 +1,4 @@
+import { withSettingsScope } from "@/lib/settings";
 import { memo, periodKey } from "@/lib/cache";
 import { getDashboardData } from "@/lib/queries/dashboard";
 import { getDashboardActionQueue } from "@/lib/queries/dashboard-queue";
@@ -64,7 +65,8 @@ const vnd = (v: number) => `${Math.round(v).toLocaleString("vi-VN")}đ`;
  * của dữ liệu, không phải một sự đánh đổi.
  */
 export async function getBusinessBrief(period: Period): Promise<BusinessBrief> {
-  return memo(`businessBrief:${periodKey(period)}`, 600_000, () => buildBusinessBrief(period));
+  // OD-UX-05 mục 3: mọi báo cáo con đọc cấu hình trong một phạm vi — cùng khoá chỉ chạm CSDL một lần (lib/settings.ts).
+  return memo(`businessBrief:${periodKey(period)}`, 600_000, () => withSettingsScope(() => buildBusinessBrief(period)));
 }
 
 async function buildBusinessBrief(period: Period): Promise<BusinessBrief> {
