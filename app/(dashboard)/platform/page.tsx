@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AiProviderIncidentBanner } from "@/components/platform/ai-provider-incident-banner";
+import { HomeBotHealthBanner } from "@/components/platform/home-bot-health-banner";
 import { redirect } from "next/navigation";
 import { PlatformAiSwitchControl } from "@/components/ai-usage/ai-controls";
 import { PageHeader } from "@/components/page-header";
@@ -137,6 +138,7 @@ export default async function PlatformPage({ searchParams }: { searchParams: Pro
         }
       />
       <AiProviderIncidentBanner />
+      <HomeBotHealthBanner />
 
       {health.registryProblems.length ? (
         <div role="alert" className="rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-2.5 text-sm">

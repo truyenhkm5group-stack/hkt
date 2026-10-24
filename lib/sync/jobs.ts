@@ -51,6 +51,7 @@ import { reconcileCareCoverage } from "@/lib/care/lifecycle";
 import { relinkUnmatchedStatementLines } from "@/lib/integrations/viettelpost/statement-db";
 import { getDb } from "@/db";
 import { currentOrganization, withOrganization } from "@/lib/platform/context";
+import { checkHomeBotStale } from "@/lib/home-bot/health";
 import { findOrganization, isOperationalOrganization } from "@/lib/platform/organizations";
 import { orgBillingStanding } from "@/lib/billing/standing";
 import { canUseModule } from "@/lib/platform/capabilities";
@@ -942,7 +943,10 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
         // Giám sát CHẤT LƯỢNG hằng ngày (2B · lib/sales-quality/daily.ts) — ké đúng lịch này: một lượt / tổ chức / ngày từ 7 giờ, các
         // lượt 5 phút khác chỉ đọc một khoá settings rồi thoát. Không ném.
         const quality = salesQualitySummary(await runSalesQualityDaily());
-        ctx.summary.detail = `${r.status} · ${r.alerted} · ${r.health.headline} · ${mirror}${owText}${hoText}${usage.sent ? ` · báo ngưỡng khách AI ${usage.sent}` : ""}${balance.sent ? ` · báo số dư AI ${balance.sent}` : ""}${quality}`.slice(0, 900);
+        // BOT NHÀ MẤT NHỊP (24/10/2026 — lib/constants/home-bot-health.ts): chỉ ở lượt của tổ chức NHÀ; nhịp cuối > beatStaleMinutes ⇒ MỘT
+        // tin vận hành. Bot chưa từng gửi nhịp ⇒ không kết luận. Không ném.
+        const hb = (await currentOrganization()).isHome ? await checkHomeBotStale() : { alerts: 0 };
+        ctx.summary.detail = `${r.status} · ${r.alerted} · ${r.health.headline} · ${mirror}${owText}${hoText}${hb.alerts ? ` · báo bot nhà mất nhịp ${hb.alerts}` : ""}${usage.sent ? ` · báo ngưỡng khách AI ${usage.sent}` : ""}${balance.sent ? ` · báo số dư AI ${balance.sent}` : ""}${quality}`.slice(0, 900);
         if (r.status === "RED") ctx.summary.warning = r.health.headline.slice(0, 500);
         return { status: r.status, alerted: r.alerted, health: r.health, mirror };
       }),

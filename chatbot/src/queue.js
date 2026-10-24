@@ -1,4 +1,5 @@
 import { config } from "./config.js";
+import { botHealth } from "./erp-health.js";
 import { log } from "./logger.js";
 
 /**
@@ -29,6 +30,8 @@ export class ConversationQueue {
     const entry = this.pending.get(key);
     if (!entry) return;
     this.pending.delete(key);
+    // Moi luot xu ly = mot luot khach cho tra loi — mau so cua nhip suc khoe gui ERP (erp-health.js).
+    botHealth.customerTurn();
     const prev = this.running.get(key) || Promise.resolve();
     const run = prev
       .catch(() => {})

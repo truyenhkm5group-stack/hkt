@@ -84,6 +84,7 @@ const CO_Y_CONG_KHAI: Record<string, string> = {
   // 23/10/2026 · bot nhà (container erp-chatbot) hỏi chặng vận đơn theo chứng từ VTP: máy-gọi-máy, KHÔNG có phiên — tự gác bằng khoá
   // nội bộ CHATBOT_ADMIN_TOKEN qua header (secretEquals, khoá rỗng ⇒ 401); chỉ trả mã + chặng + cờ kết thúc + mốc, không tiền /
   // người nhận (lib/constants/shipment-state-api.ts; hình dạng khoá ở tests/shipment-state-api.test.ts).
+  "app/api/internal/bot-health/route.ts": "bot nhà ĐẨY sức khoẻ của chính nó bằng khoá nội bộ CHATBOT_ADMIN_TOKEN qua header (secretEquals); không có đường phiên; thân đóng (zod strict), xô giới hạn tần suất; chỉ ghi khoá settings home-bot.health của nhà",
   "app/api/internal/shipment-state/route.ts": "bot nhà gọi bằng khoá nội bộ CHATBOT_ADMIN_TOKEN qua header (secretEquals); không có đường phiên; chỉ mã + chặng + cờ kết thúc + mốc",
 };
 

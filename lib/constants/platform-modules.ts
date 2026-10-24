@@ -116,8 +116,10 @@ export const PLATFORM_PERMISSION_KEYS = ["modules:manage", "platform:operate", "
  *  · `/pricing` (0222): trang giá công khai — người đọc chưa có tổ chức; chỉ đọc gói cước + chế độ đăng ký của nền tảng.
  *  · `/api/internal/shipment-state` (23/10/2026): bot nhà (container erp-chatbot) hỏi chặng vận đơn theo chứng từ VTP — máy-gọi-máy,
  *    không phiên; cổng là khoá nội bộ CHATBOT_ADMIN_TOKEN qua header (lib/constants/shipment-state-api.ts), chỉ CSDL nhà.
+ *  · `/api/internal/bot-health` (24/10/2026): bot nhà đẩy sức khoẻ của chính nó (lỗi AI · nhịp sống) — máy-gọi-máy, cùng cổng khoá
+ *    nội bộ qua header, chỉ ghi khoá settings của tổ chức nhà (lib/constants/home-bot-health.ts).
  */
-export const MODULE_FREE_PATH_PREFIXES = ["/api/webhooks", "/api/sync", "/login", "/start", "/join", "/reset", "/forgot", "/chat", "/api/platform/domain-allowed", "/gioi-thieu", "/chinh-sach-bao-mat", "/dieu-khoan-su-dung", "/_next", "/robots.txt", "/sitemap.xml", "/pricing", "/api/internal/shipment-state"] as const;
+export const MODULE_FREE_PATH_PREFIXES = ["/api/webhooks", "/api/sync", "/login", "/start", "/join", "/reset", "/forgot", "/chat", "/api/platform/domain-allowed", "/gioi-thieu", "/chinh-sach-bao-mat", "/dieu-khoan-su-dung", "/_next", "/robots.txt", "/sitemap.xml", "/pricing", "/api/internal/shipment-state", "/api/internal/bot-health"] as const;
 
 export const PLATFORM_MODULES: readonly ModuleDef[] = [
   {
