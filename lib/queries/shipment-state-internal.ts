@@ -28,12 +28,7 @@ export async function primaryShipmentsByOrders(orderIds: readonly string[]): Pro
   if (!orderIds.length) return [];
   const db = await getDb();
   const rows = rowsOf<{ order_id: string; code: string | null; stage: string; final: boolean | null; at: Date | string | null; reship: boolean }>(
-    await db.execute(sql`select "orders"."id" as order_id, "shipments"."vtp_order_number" as code, "shipments"."stage"::text as stage,
-        "shipments"."is_final" as final, "shipments"."vtp_status_date" as at, ("shipments"."raw" -> 'reship' ->> 'of' is not null) as reship
-      from "orders"
-      join "shipments" on "shipments"."order_id" = "orders"."id" and ${PRIMARY_ATTEMPT}
-      where "orders"."id" in (${sql.join(orderIds.map((id) => sql`${id}`), sql`, `)})
-        and "shipments"."vtp_status_date" is not null and "shipments"."vtp_order_number" is not null`),
+    await db.execute(primaryShipmentsQuery(orderIds)),
   );
   return rows.map((r) => ({
     orderId: String(r.order_id),
@@ -43,4 +38,14 @@ export async function primaryShipmentsByOrders(orderIds: readonly string[]): Pro
     at: r.at ? new Date(r.at).toISOString() : null,
     reship: Boolean(r.reship),
   }));
+}
+
+/** Câu lệnh của `primaryShipmentsByOrders` — tách ra để ops `shipment-state-probe` EXPLAIN đúng câu này, không viết bản thứ hai. */
+export function primaryShipmentsQuery(orderIds: readonly string[]) {
+  return sql`select "orders"."id" as order_id, "shipments"."vtp_order_number" as code, "shipments"."stage"::text as stage,
+        "shipments"."is_final" as final, "shipments"."vtp_status_date" as at, ("shipments"."raw" -> 'reship' ->> 'of' is not null) as reship
+      from "orders"
+      join "shipments" on "shipments"."order_id" = "orders"."id" and ${PRIMARY_ATTEMPT}
+      where "orders"."id" in (${sql.join(orderIds.map((id) => sql`${id}`), sql`, `)})
+        and "shipments"."vtp_status_date" is not null and "shipments"."vtp_order_number" is not null`;
 }
