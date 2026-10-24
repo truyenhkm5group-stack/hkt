@@ -7,6 +7,7 @@
  *  Lưu ý đơn vị: báo cáo danh nghĩa trả % (0–100); ở đây quy về phân số (0–1) để hiển thị thống nhất.
  *  - Theo marketer: doanh số / lợi nhuận của mã được chia theo tỷ trọng tiền QC mỗi người chạy cho mã đó (cùng công thức với Lương).
  */
+import { withSettingsScope } from "@/lib/settings";
 import { and, eq, gte, lte, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
@@ -311,5 +312,6 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
 }
 
 export async function getAdsPerformance(period: Period) : Promise<AdsPerformance> {
-  return memo(`getAdsPerformance:${periodKey(period)}`, 120000, () => getAdsPerformanceUncached(period));
+  // OD-UX-05 mục 3b (24/10/2026, perf-probe «ĐỌC CẤU HÌNH TRONG TỪNG HÀM»): 11 lượt / 6 khoá.
+  return memo(`getAdsPerformance:${periodKey(period)}`, 120000, () => withSettingsScope(() => getAdsPerformanceUncached(period)));
 }
