@@ -204,7 +204,7 @@ async function testDuongThat() {
   const [row] = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, hopThu));
   assert.ok(((row.state ?? {}) as ChatState).roundStartAt, "hộp thư im 5 tháng ⇒ lượt mua mới");
   const [blRow] = await db.select().from(schema.salesChatConversations).where(eq(schema.salesChatConversations.id, binhLuan));
-  assert.deepEqual({ ...(((blRow.state ?? {}) as ChatState).commentCarry ?? {}), at: undefined }, { outcome: "EXISTING_INBOX", copied: 1, at: undefined }, "kết quả ghi lại: chép sang hộp thư ĐÃ CÓ, 1 tin");
+  assert.deepEqual({ ...(((blRow.state ?? {}) as ChatState).commentCarry ?? {}), at: undefined }, { outcome: "EXISTING_INBOX", copied: 1, at: undefined, inboxSource: "PANCAKE_CONV_ID" }, "kết quả ghi lại: chép sang hộp thư ĐÃ CÓ, 1 tin · mã hộp thư Pancake trả đúng dạng page_<số>");
 
   // Ca THẬT 42f28794 (17/10): Meta / Pancake nhắn riêng TRƯỚC, hộp thư CHƯA có hội thoại ⇒ mở hội thoại hộp thư, lời mua đi vào đó.
   const INBOX2 = `${PAGE}_${now.getTime()}2`;

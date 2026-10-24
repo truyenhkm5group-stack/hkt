@@ -121,7 +121,12 @@ export async function testCommentInboxKeyChat() {
         assert.equal(t.final.handoffReason, ADDRESS_HANDOFF_REASON.COMPLAINT);
         assert.deepEqual(t.turns[1].shown, [], "fanpage: bot không nhắn gì, nhân viên tiếp quản");
       }
-      if (c.key === "ngoc-luoi-cong-cu-ghi") assert.match(results, /Lượt này ĐÃ chuyển nhân viên/, `create_draft_order trả lỗi «đã chuyển nhân viên»: ${results}`);
+      if (c.key === "ngoc-luoi-cong-cu-ghi") {
+        // Engine dừng sau vòng có chuyển người nên khung chạy không có lượt model kế để chụp kết quả — đọc kết quả công cụ đã lưu.
+        const saved = await db.select({ content: schema.salesChatMessages.content }).from(schema.salesChatMessages).where(eq(schema.salesChatMessages.conversationId, ctx.conversationId));
+        const toolResults = JSON.stringify(saved.map((m) => m.content));
+        assert.match(toolResults, /Lượt này ĐÃ chuyển nhân viên/, `create_draft_order trả lỗi «đã chuyển nhân viên»: ${toolResults.slice(0, 900)}`);
+      }
     },
   });
   assert.equal(seen.size, CASES.length, "mọi ca đều chạy");
