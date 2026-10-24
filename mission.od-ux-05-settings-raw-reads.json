@@ -3,7 +3,7 @@
   "mission_id": "od-ux-05-settings-raw-reads",
   "title": "OD-UX-05 mục 3c: hai đường đọc thô chữ ký đối soát / xác nhận trọng số qua phạm vi đọc cấu hình",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-rawread",
@@ -23,7 +23,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T09:59:32.823Z",
-  "updated_at": "2026-10-24T09:59:32.823Z",
-  "last_heartbeat": "2026-10-24T09:59:32.823Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T10:04:32.629Z",
+  "last_heartbeat": "2026-10-24T10:04:32.629Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/od-ux-05-settings-raw-reads",
+    "sha": "55dbb1ea88c8fb485f4c146c2ae67ebfdf9493fc",
+    "at": "2026-10-24T10:04:32.629Z",
+    "actor": "DESKTOP-56TH98Y:wt-rawread",
+    "title": "Đối soát lương đọc chữ ký đối soát và xác nhận trọng số mã một lần mỗi lượt tính thay vì mỗi tháng một lần",
+    "summary": "OD-UX-05 mục 3c. readSettingValue (đọc thô, dùng chung phạm vi với getSettingJson; lỗi vẫn ném) cho loadWeightConfirmations + loadProfitSignoffs — phần lặp còn lại của getReconCenter sau #1037 (18 lượt / 10 khoá). Đường đọc trong giao dịch lúc ký giữ nguyên tx.select.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint 4 tệp: sạch",
+      "TEST_KHOI=K06,K10,K14,K24 npm test: ĐẠT (settings-scope · đối soát lương · bảng lương · chi phí)"
+    ]
+  }
 }
