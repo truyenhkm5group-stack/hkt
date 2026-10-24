@@ -29,6 +29,8 @@ import { findOrganization, invalidateOrganizations } from "@/lib/platform/organi
 import { provisionOrganization } from "@/lib/platform/provision";
 import { createOrderFromChatCore } from "@/lib/records/chat-order";
 import { createOrderAsAgent } from "@/lib/records/order-create";
+import { orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
+import { orderReviewOpenOf } from "@/lib/shipping/route";
 import { duplicateFlagsFor, strongestFlag } from "@/lib/queries/order-duplicate";
 import { createProductCore } from "@/lib/records/product-create";
 import { DEFAULT_SALES_CHATBOT_CONFIG } from "@/lib/sales-chatbot/config";
@@ -350,6 +352,9 @@ async function testRealOrg() {
     const entries = ((o2?.raw as { review?: { entries?: { code: string; note: string }[] } }).review?.entries ?? []);
     const same = entries.find((e) => e.code === "POSSIBLE_SAME_CUSTOMER");
     assert.ok(same && same.note.includes(`#${manualOrderShortCode(b1.state.confirmed!.orderId!)}`), `cờ cần kiểm nêu đúng đơn kia: ${JSON.stringify(entries)}`);
+    // Cờ NỘI BỘ: giữ khỏi vận đơn, nhưng KHÔNG đổi lời bot nói với khách (CI #1039: hỏi trạng thái từng nhận «nói rõ hơn»).
+    assert.equal(orderReviewOpenOf(o2!.raw), true, "đơn bị giữ khỏi vận đơn");
+    assert.deepEqual(orderValidityOf({ id: b2.state.draft!.orderId!, raw: o2!.raw, phone: PHONE_SP, address: ADDRESS, province: "Hà Nội", ward: "x", itemsCount: 1, total: 0, shippingFee: 0 }).reasons.filter((r) => r === "POSSIBLE_SAME_CUSTOMER"), [], "orderValidityOf bỏ qua cờ nội bộ");
     assert.ok(!b2.content.includes(manualOrderShortCode(b1.state.confirmed!.orderId!)), "kết quả công cụ (model đọc, có thể nói với khách) KHÔNG nêu đơn của hội thoại kia — chỉ cờ nội bộ nêu");
     assert.equal(await holds(), h0 + 1, "một lần kích hoạt = một dòng nhật ký");
     // Đối chứng: SĐT khác ⇒ tự chốt như cũ; hội thoại CHÍNH nó (đơn bot của sp1) không tự kích hoạt; đơn bot kia đã rời kho ⇒ không.

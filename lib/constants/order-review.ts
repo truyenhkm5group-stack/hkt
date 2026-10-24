@@ -40,6 +40,14 @@ export type OrderReviewCode = (typeof ORDER_REVIEW_CODES)[number];
  */
 export const ORDER_REVIEW_HOLD_CODES: readonly OrderReviewCode[] = ["UPSELL_UNCONSENTED", "PRICE_DISPUTED", "PRICE_MISMATCH", "CUSTOMER_CANCELLED", "CANCEL_BLOCKED", "ROUND_ABANDONED", "POSSIBLE_SAME_CUSTOMER"];
 
+/**
+ * Cờ NỘI BỘ: người phải đối chiếu, nhưng KHÁCH không có gì khác thường để nghe. `orderValidityOf` (claim-guard.ts) BỎ QUA chúng, nên
+ * bot vẫn nói «đã lên đơn», câu trạng thái / sau bán như đơn thường; còn giữ khỏi vận đơn + công tắc tự nâng thì VẪN như mọi mã trong
+ * `ORDER_REVIEW_HOLD_CODES`. `POSSIBLE_SAME_CUSTOMER` (lớp tạm trước pha 3 trùng đơn, 24/10/2026): Tech Lead chốt «khách không nghe gì
+ * khác thường» — CI #1039 đỏ đúng chỗ này (đơn khách tự chốt mang cờ ⇒ hỏi trạng thái nhận «nói rõ hơn»).
+ */
+export const ORDER_REVIEW_INTERNAL_CODES: readonly OrderReviewCode[] = ["POSSIBLE_SAME_CUSTOMER"];
+
 export const ORDER_REVIEW_LABEL: Record<OrderReviewCode, string> = {
   CUSTOMER_CANCELLED: "Khách báo huỷ trong hội thoại",
   ADDRESS_UNRESOLVED: "Địa chỉ chưa ghép được xã / phường",
