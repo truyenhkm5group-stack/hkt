@@ -24,7 +24,7 @@ const LUOT_EXPLAIN = 3;
 
 async function main() {
   const { getDb } = await import("@/db");
-  const { sql, TransactionRollbackError } = await import("drizzle-orm");
+  const { sql } = await import("drizzle-orm");
   const { rowsOf } = await import("@/lib/sql-rows");
   const { primaryShipmentsByOrders, primaryShipmentsQuery, shipmentStatesByCodes } = await import("@/lib/queries/shipment-state-internal");
   const { thoiGianThucThi, trungVi } = await import("@/lib/constants/perf-explain");
@@ -87,7 +87,9 @@ async function main() {
           tx.rollback();
         })
         .catch((e: unknown) => {
-          if (!(e instanceof TransactionRollbackError)) throw e;
+          // Bắt theo TÊN lỗi, không `instanceof`: lỗi ném ra từ bản module drizzle mà getDb() nạp, khác bản `import("drizzle-orm")` ở đây —
+          // run 40092503297 (24/10/2026) dừng ở «Rollback» vì instanceof trả false.
+          if (!(e instanceof Error) || (e.name !== "TransactionRollbackError" && e.message !== "Rollback")) throw e;
         });
       return dong;
     };
