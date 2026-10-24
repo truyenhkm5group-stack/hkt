@@ -3,7 +3,7 @@
   "mission_id": "regression-watch-last-leak",
   "title": "regression-watch-status: lọt N trong ngày D + lọt cuối ngày L",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-rwll",
@@ -24,7 +24,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T07:42:51.879Z",
-  "updated_at": "2026-10-24T07:42:51.879Z",
-  "last_heartbeat": "2026-10-24T07:42:51.879Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T07:43:51.094Z",
+  "last_heartbeat": "2026-10-24T07:43:51.094Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/regression-watch-last-leak",
+    "sha": "719780b321695a0461dc9f3a93bcec3ab39b942e",
+    "at": "2026-10-24T07:43:51.094Z",
+    "actor": "DESKTOP-56TH98Y:wt-rwll",
+    "title": "regression-watch-status: lọt N trong ngày D + lọt cuối ngày L",
+    "summary": "regression-watch-status in «lọt N trong ngày D» + «lọt cuối ngày L» (chỉ script)",
+    "tests": [
+      "tsc · eslint sạch · TEST_KHOI=K01,K15,K17,K20,K22 ĐẠT"
+    ]
+  }
 }
