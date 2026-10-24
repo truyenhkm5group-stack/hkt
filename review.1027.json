@@ -1,0 +1,8 @@
+{
+  "pr": 1027,
+  "sha": "54637e2a813f7da0861c55f73f922635829bc707",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T00:20:00.345Z",
+  "note": "review lead: chỉ-script; mốc ISO của khách chỉ lộ khi khoá là mốc hệ thống (_at/updated/inserted/created) — ngày sinh không lộ vào audit_logs vĩnh viễn."
+}
