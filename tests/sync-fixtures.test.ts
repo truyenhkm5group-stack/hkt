@@ -250,6 +250,7 @@ import {
   testReasonRegroupAndThreeLevelDrilldown,
   testIntelligenceRuns,
 } from "./return-intelligence.test";
+import { testReturnsBodyTrim } from "./returns-body.test";
 import { testApproval } from "./approval.test";
 import { testCompanyOsControlPlane } from "./company-os-control-plane.test";
 import { testClientBoundaryExports } from "./client-boundary-exports.test";
@@ -2329,6 +2330,7 @@ async function main() {
     testReasonGroupContract();
     await testReasonRegroupAndThreeLevelDrilldown(db);
     await testIntelligenceRuns(db);
+    await testReturnsBodyTrim(db);
 
     // ═══ LỚP QUAN SÁT LÝ DO HOÀN (14/09/2026) ═══
     testReasonSourceRegistry();

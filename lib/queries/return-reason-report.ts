@@ -236,15 +236,32 @@ export type ReasonFilter = {
   taxonomy?: ReasonTaxonomy;
 } & ReasonFilterSelection;
 
+type BaseSqlRow = {
+  order_id: string;
+  shipment_id: string | null;
+  outcome: string;
+  basis_at: unknown;
+  marketer_id: string | null;
+  marketer_evidence: MarketerEvidence | null;
+  marketer_state: MarketerLinkState;
+  marketer_conflict: boolean;
+  revenue: string | number | null;
+  src: string;
+  carrier: string | null;
+  province_raw: string | null;
+  post_office: string | null;
+  care_owner: string | null;
+  care_any: boolean | string | null;
+};
+
 /**
  * Dòng thô: mỗi ĐƠN một dòng, kèm kết quả chuẩn, vận đơn quyết định và mốc của cách lọc đang dùng.
  *
  * `basisAt` được chọn ra RIÊNG chứ không nhét vào `where`, để đếm được bao nhiêu ca rơi ra vì
  * thiếu mốc — con số đó là một phần của báo cáo, không phải rác cần quét đi.
  */
-async function baseRows(f: ReasonFilter) {
+async function baseRowsSql(f: ReasonFilter, basis: TimeBasis): Promise<BaseSqlRow[]> {
   const db = await getDb();
-  const basis = f.basis ?? "OUTCOME";
   const conds: SQL[] = [REPORTABLE_ORDER];
   const locGiaTri = orderValueWhereSql(f.value ?? NO_ORDER_VALUE_FILTER);
   if (locGiaTri) conds.push(sql.raw(locGiaTri));
@@ -292,23 +309,7 @@ async function baseRows(f: ReasonFilter) {
     khỏi danh sách tệp dùng `chayKhongJit`. Không đổi KẾT QUẢ — JIT chỉ đổi cách thực thi.
     Xem docs/perf/JIT-bat-tat-2026-09-23.md.
   */
-  const rows = rowsOf<{
-    order_id: string;
-    shipment_id: string | null;
-    outcome: string;
-    basis_at: unknown;
-    marketer_id: string | null;
-    marketer_evidence: MarketerEvidence | null;
-    marketer_state: MarketerLinkState;
-    marketer_conflict: boolean;
-    revenue: string | number | null;
-    src: string;
-    carrier: string | null;
-    province_raw: string | null;
-    post_office: string | null;
-    care_owner: string | null;
-    care_any: boolean | string | null;
-  }>(
+  return rowsOf<BaseSqlRow>(
     await chayKhongJit(db, (tx) => tx.execute(sql`
       select b.order_id, b.shipment_id, b.outcome, b.basis_at, b.marketer_id, b.marketer_evidence, b.marketer_state, b.marketer_conflict, b.revenue,
              b.src, b.carrier, b.province_raw, b.post_office, b.care_owner, b.care_any
@@ -356,7 +357,42 @@ async function baseRows(f: ReasonFilter) {
        where b.outcome in (${sql.raw(ELIGIBLE_SENT_SQL)})${locSauCung}
     `)),
   );
+}
 
+/**
+ * ═══ MỘT LƯỢT CSDL CHO MỌI KỲ CỦA CÙNG MỘT BỘ LỌC (đo 24/10/2026, perf-probe-returns-body) ═══
+ *
+ * Câu SQL ở `baseRowsSql` KHÔNG lọc theo kỳ — kỳ lọc ở TS bên dưới để còn đếm được ca thiếu mốc. Nên báo cáo KỲ NÀY, báo
+ * cáo KỲ TRƯỚC (tầng quyết định + bảng nguyên nhân) và `listReasonShipments` của `problemByProduct` gửi lên CSDL ĐÚNG
+ * MỘT câu với ĐÚNG một bộ tham số: ba lần trong một lượt mở /reports/returns. perf-probe production đo "câu chạy lại
+ * nhiều nhất x3" ở cả 3 lượt nguội (6,3–12,2 s CSDL, 2,0–2,2 s mỗi lượt trên đường ứng dụng), và hai lần sau nằm trên
+ * ĐƯỜNG GĂNG — chúng chỉ bắt đầu khi báo cáo kỳ này đã xong.
+ *
+ * RAM: đếm production 24/10 (db-query, mốc SHIPPED) câu này trả 3.544 dòng; đo ~836 B/dòng ⇒ ~3 MB mỗi khoá. `memo` giữ
+ * mục cả sau khi hết hạn (để trả số cũ), nên con số ấy nằm lại trong tiến trình — và LỚN DẦN theo số đơn, vì khoá không
+ * có kỳ. Nếu một ngày nó tới hàng chục MB thì đệm KẾT QUẢ đã gộp, đừng đệm dòng thô.
+ *
+ * Khoá gồm ĐÚNG những gì câu SQL đọc (mốc · giá trị đơn · mã hàng · mẫu mã · marketer) — KHÔNG có kỳ, KHÔNG có bộ lọc 2b,
+ * KHÔNG có cách xếp lý do: những thứ đó áp ở TS phía sau, cho từng lần gọi. Cùng TTL với báo cáo đứng trên nó (90 s,
+ * AGENTS mục 2), và `clearMemo()` (người xác nhận lý do / sửa nhóm) xoá cả hai cùng lúc. Mảng trả về DÙNG CHUNG: không
+ * nơi nào được sửa tại chỗ — bên dưới chỉ `map` / `filter` ra mảng mới.
+ */
+const BASE_ROWS_TTL_MS = 90_000;
+
+function baseRowsKey(f: ReasonFilter, basis: TimeBasis): string {
+  return [
+    "return-reason-base-rows",
+    basis,
+    orderValueKey(f.value ?? NO_ORDER_VALUE_FILTER),
+    (f.codes ?? []).join("+"),
+    (f.variantKeys ?? []).join("+"),
+    (f.marketerIds ?? []).join("+"),
+  ].join(":");
+}
+
+async function baseRows(f: ReasonFilter) {
+  const basis = f.basis ?? "OUTCOME";
+  const rows = await memo(baseRowsKey(f, basis), BASE_ROWS_TTL_MS, () => baseRowsSql(f, basis));
   const mapped = rows.map((r) => {
     const careAny = r.care_any === true || r.care_any === "t";
     const facts: ReasonFilterFacts = {

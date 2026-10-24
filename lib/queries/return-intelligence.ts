@@ -416,6 +416,13 @@ async function careRows(period: Period, basis: TimeBasis, value: OrderValueFilte
   if (period.from) dk.push(sql`${moc} >= ${period.from}`);
   if (period.to) dk.push(sql`${moc} <= ${period.to}`);
   if ((period.from || period.to) && basis !== "ORDERED") dk.push(sql`${moc} is not null`);
+  /*
+    CHỈ KIỆN CÓ ĐỢT CARE (đo 24/10/2026, perf-probe-returns-body: câu này 2,7–3,3 s, chậm nhất của tầng quyết định ở 2/3
+    lượt nguội). Bảng dẫn xuất từng tính mốc kỳ + ORDER_OUTCOME_FAST cho MỌI vận đơn của kỳ, rồi phép `join` (inner) với
+    `shipment_care` vứt đi mọi kiện không có đợt nào — vài trăm đợt trên hàng nghìn kiện. Vế `exists` này đúng bằng điều
+    kiện mà phép nối kia đã đòi, nên tập dòng không đổi; nó chỉ cho Postgres lọc TRƯỚC khi tính các biểu thức đắt.
+  */
+  dk.push(sql`exists (select 1 from shipment_care sc where sc.shipment_id = "shipments"."id")`);
 
   // TẮT JIT: bảng dẫn xuất tính ORDER_OUTCOME_FAST cho mọi đơn của kỳ — cùng họ câu SQL thô với `baseRows` (return-reason-report.ts) đã đo JIT bật 4.034 ms ↔ tắt 183 ms.
   const rows = rowsOf<{
