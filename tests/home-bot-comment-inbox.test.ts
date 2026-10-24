@@ -27,5 +27,35 @@ export async function testHomeBotCommentInbox() {
   assert.match(bot, /privateReplyInboxId\(mine\?\.private_reply_conversation, pageId, last\.from\?\.id\)/);
   assert.doesNotMatch(bot, /prc\?\.id \|\| prc\?\.conversation_id/, "không còn lấy id tin trước conversation_id");
   assert.doesNotMatch(readFileSync("chatbot/src/comment-inbox.js", "utf8"), /^import /m, "module thuần: không import gì (không chốt DATA_DIR của bot)");
-  console.log("✓ Bot nhà: hộp thư tin riêng của bình luận chỉ dạng page_PSID (conversation_id · dựng từ from_id · không đoán · không «m_…») — ảnh trả lời bình luận gửi đúng hộp thư");
+  // ── Rơi về câu cũ khi đọc góc nhìn ERP: lý do + thời gian thật, đếm theo page (lead duyệt 24/10/2026 sau phép đo route nguội 106 ms).
+  type Done = { ok: boolean; reason: string | null; ms: number };
+  type View = {
+    erpOrderView: (orders: Record<string, unknown>[], opts: Record<string, unknown>) => Promise<{ byCode: Record<string, unknown>; byOrder: Record<string, unknown> }>;
+    erpFallbackReason: (e: unknown) => string;
+  };
+  const v = (await import(pathToFileURL(path.resolve("chatbot/src/order-view.js")).href)) as View;
+  const err = (name: string, message: string, code?: string) => Object.assign(new Error(message), { name, ...(code ? { cause: { code } } : {}) });
+  assert.equal(v.erpFallbackReason(err("TimeoutError", "The operation was aborted due to timeout")), "TIMEOUT");
+  assert.equal(v.erpFallbackReason(err("Error", "ERP tra 503")), "HTTP_503");
+  assert.equal(v.erpFallbackReason(err("TypeError", "fetch failed", "ENOTFOUND")), "DNS");
+  assert.equal(v.erpFallbackReason(err("TypeError", "fetch failed", "ECONNREFUSED")), "NETWORK");
+  assert.equal(v.erpFallbackReason(err("SyntaxError", "Unexpected token")), "BAD_BODY");
+  assert.equal(v.erpFallbackReason("lạ"), "OTHER");
+  let clock = 1_000;
+  const done: Done[] = [];
+  const order = (id: number) => ({ id, partner: { order_number_vtp: `15528155${String(id).padStart(4, "0")}` } });
+  const run = (id: number, fetchImpl: () => Promise<unknown>) => v.erpOrderView([order(id)], { token: "t", fetchImpl, now: () => clock, onDone: (d: Done) => done.push(d) });
+  const slow = async () => { clock += 1_600; throw err("TimeoutError", "aborted"); };
+  assert.deepEqual(await run(1, slow), { byCode: {}, byOrder: {} }, "rơi về câu cũ ⇒ góc nhìn rỗng");
+  await run(2, async () => ({ ok: false, status: 503 }));
+  await run(3, async () => { throw err("TypeError", "fetch failed", "ENOTFOUND"); });
+  await run(4, async () => { clock += 40; return { ok: true, json: async () => ({ states: [], orders: [] }) }; });
+  assert.deepEqual(done, [{ ok: false, reason: "TIMEOUT", ms: 1600 }, { ok: false, reason: "HTTP_503", ms: 0 }, { ok: false, reason: "DNS", ms: 0 }, { ok: true, reason: null, ms: 40 }], `lý do + thời gian thật: ${JSON.stringify(done)}`);
+  // Lớp bọc của bot đếm theo page (hiện ở «Hôm nay» của chatbot-status) và bot.js truyền pageId.
+  const ordersSrc = readFileSync("chatbot/src/orders.js", "utf8");
+  assert.match(ordersSrc, /store\.bumpStat\(pageId, "erpViewOk"\)/);
+  assert.match(ordersSrc, /store\.bumpStat\(pageId, `erpViewFallback_\$\{reason\}`\)/);
+  assert.match(bot, /await erpOrderView\(orders, \{ pageId \}\)/, "bot.js truyền pageId để đếm theo page");
+
+  console.log("✓ Bot nhà: hộp thư tin riêng của bình luận chỉ dạng page_PSID (conversation_id · dựng từ from_id · không đoán · không «m_…») · rơi về câu cũ khi đọc ERP: lý do (TIMEOUT · HTTP · DNS · NETWORK) + thời gian thật, đếm theo page");
 }
