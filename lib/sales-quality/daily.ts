@@ -44,7 +44,8 @@ export type SalesQualityState = {
   capped: boolean;
   counts: Record<SalesQualityCode, number>;
   /** `addressFlagged` = mẫu số của ADDRESS_RECEIVED_BUT_NOT_APPLIED (đơn bot chốt còn cờ «địa chỉ chưa ghép», từ đầu kỳ). */
-  bases: QualityBases & { handoffWaiting: number; addressFlagged: number };
+  /** `commentCarries` — mẫu số COMMENT_CARRY_KEY_INVALID (24/10/2026); ảnh chụp cũ không có ⇒ «mẫu số chưa có». */
+  bases: QualityBases & { handoffWaiting: number; addressFlagged: number; commentCarries?: number };
   /** STAFF_AI_QUOTE_CONFLICT tách theo nguồn: từ MẪU TỰ ĐỘNG page (Pancake) hay tin page khác (nhân viên / chưa rõ). */
   quoteConflictSources?: { PAGE_AUTOMATION: number; OTHER: number };
   /** Hạn chờ người đọc được (giờ); `null` ⇒ không kết luận HANDOFF_UNANSWERED. */
@@ -223,6 +224,27 @@ export async function collectAddressNotApplied(from: Date, to: Date): Promise<{ 
   return { ids: [...new Set(ids)], flagged: rows.length, hits };
 }
 
+/** Luồng của hội thoại là mã TIN Meta («m_…»), không phải luồng hộp thư — dấu đúng của lỗi chép bình luận trước 24/10/2026. HÀM THUẦN. */
+export const commentCarryKeyInvalid = (threadId: string | null | undefined): boolean => typeof threadId === "string" && threadId.startsWith("m_");
+
+/**
+ * COMMENT_CARRY_KEY_INVALID (P0 HSLC 24/10/2026, ca «Trần Thị Ngọc»): lượt chép bình luận sang hộp thư TRONG KỲ (`state.commentCarry.at`) mà
+ * hội thoại bị gắn khoá mã tin «m_…» thay vì luồng hộp thư `<page_id>_<PSID>`. Mốc hit = lúc chép — lượt chép trước khi bản sửa lên
+ * production không phải tái diễn của bản sửa. `carries` = mẫu số: mọi lượt chép trong kỳ.
+ */
+export async function collectCommentCarryKeyInvalid(from: Date, to: Date): Promise<{ ids: string[]; carries: number; hits: { conv: string; at: Date }[] }> {
+  const db = await getDb();
+  const c = schema.salesChatConversations;
+  const at = sql`(${c.state}->'commentCarry'->>'at')::timestamptz`;
+  const rows = await db
+    .select({ id: c.id, threadId: c.threadId, at: sql<string>`${c.state}->'commentCarry'->>'at'` })
+    .from(c)
+    .where(and(eq(c.channel, "FANPAGE"), sql`${c.state} ? 'commentCarry'`, sql`${at} >= ${from.toISOString()}::timestamptz`, sql`${at} < ${to.toISOString()}::timestamptz`))
+    .limit(SALES_QUALITY_MAX_CONVERSATIONS);
+  const bad = rows.filter((r) => commentCarryKeyInvalid(r.threadId));
+  return { ids: bad.map((r) => r.id), carries: rows.length, hits: bad.map((r) => ({ conv: r.id, at: new Date(r.at) })) };
+}
+
 const dayLabel = (day: string) => `${day.slice(8, 10)}/${day.slice(5, 7)}`;
 
 /** Chữ của một việc — số đếm, mẫu số, mã băm, việc phải làm. Không chữ tin, không tên, không SĐT. HÀM THUẦN. */
@@ -259,12 +281,14 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
     const scan = await scanDay(from, to);
     const ho = await collectHandoffUnanswered(now);
     const na = await collectAddressNotApplied(from, now);
+    const cc = await collectCommentCarryKeyInvalid(from, to);
     const counts = Object.fromEntries(SALES_QUALITY_CODES.map((k) => [k, 0])) as Record<SalesQualityCode, number>;
     const detail = new Map<SalesQualityCode, SalesQualityCount>();
     const sample = (convs: Iterable<string>) => [...convs].map(conversationHash).sort().slice(0, SALES_QUALITY_SAMPLE_HASHES);
     for (const [code, e] of scan.byCode) detail.set(code, { hits: e.hits, conversations: e.convs.size, hashes: sample(e.convs) });
     if (ho.ids.length) detail.set("HANDOFF_UNANSWERED", { hits: ho.ids.length, conversations: ho.ids.length, hashes: sample(ho.ids) });
     if (na.ids.length) detail.set("ADDRESS_RECEIVED_BUT_NOT_APPLIED", { hits: na.ids.length, conversations: na.ids.length, hashes: sample(na.ids) });
+    if (cc.ids.length) detail.set("COMMENT_CARRY_KEY_INVALID", { hits: cc.ids.length, conversations: cc.ids.length, hashes: sample(cc.ids) });
     for (const [code, n] of detail) counts[code] = n.hits;
     const b = scan.bases;
     const slaHours = ho.slaMs === null ? null : Math.round(ho.slaMs / 3_600_000);
@@ -289,13 +313,14 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
       ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT: `Mẫu số: ${b.orderWrites} lần bot gọi công cụ ghi đơn`,
       PACK_MULTIPLIER_LEAKED: `Mẫu số: ${b.orderWrites} lần bot gọi công cụ ghi đơn`,
       REPEAT_ASK_UNANSWERED: `Mẫu số: ${b.botMessages} tin bot (gồm tin theo dõi tự động)`,
+      COMMENT_CARRY_KEY_INVALID: `Mẫu số: ${cc.carries} lượt chép bình luận sang hộp thư trong kỳ`,
     };
     const db = await getDb();
     let created = 0;
     for (const code of SALES_QUALITY_CODES) {
       const n = detail.get(code);
       if (!n || n.conversations === 0) continue;
-      const { title, body } = salesQualityText(code, day, n, `${baseOf[code]}${scan.capped && code !== "HANDOFF_UNANSWERED" && code !== "ADDRESS_RECEIVED_BUT_NOT_APPLIED" ? ` · đọc chạm trần ${SALES_QUALITY_MAX_CONVERSATIONS} hội thoại — số là trần dưới` : ""}`, now);
+      const { title, body } = salesQualityText(code, day, n, `${baseOf[code]}${scan.capped && code !== "HANDOFF_UNANSWERED" && code !== "ADDRESS_RECEIVED_BUT_NOT_APPLIED" && code !== "COMMENT_CARRY_KEY_INVALID" ? ` · đọc chạm trần ${SALES_QUALITY_MAX_CONVERSATIONS} hội thoại — số là trần dưới` : ""}`, now);
       const ins = await db
         .insert(schema.notifications)
         .values({ kind: "SALES_QUALITY", severity: "warning", title, body, href: "/ai/sales-chatbot/inbox", entityType: "SALES_QUALITY", entityId: code, dedupeKey: salesQualityDedupeKey(code, day), occurredAt: now })
@@ -305,7 +330,11 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
     }
     const addressResolver = await collectAddressResolverDay(from, to, now).catch(() => undefined);
     // Sổ tái diễn: cùng tập hit vừa đếm (tin của hôm qua + đơn bot chốt chưa ghép địa chỉ), không quét lại.
-    const watchHits: WatchHit[] = [...scan.events, ...na.hits.map((h) => ({ code: "ADDRESS_RECEIVED_BUT_NOT_APPLIED" as const, at: h.at, conv: h.conv }))];
+    const watchHits: WatchHit[] = [
+      ...scan.events,
+      ...na.hits.map((h) => ({ code: "ADDRESS_RECEIVED_BUT_NOT_APPLIED" as const, at: h.at, conv: h.conv })),
+      ...cc.hits.map((h) => ({ code: "COMMENT_CARRY_KEY_INVALID" as const, at: h.at, conv: h.conv })),
+    ];
     const reg = await applyRegressionWatch(db, { day, now, hits: watchHits, orgCode: peekOrganization()?.code ?? null });
     const rates = salesQualityRates(counts, reg.regressions);
     const state: SalesQualityState = {
@@ -314,7 +343,7 @@ export async function runSalesQualityDaily(now: Date = new Date()): Promise<Sale
       conversations: scan.conversations,
       capped: scan.capped,
       counts,
-      bases: { ...b, handoffWaiting: ho.waiting, addressFlagged: na.flagged },
+      bases: { ...b, handoffWaiting: ho.waiting, addressFlagged: na.flagged, commentCarries: cc.carries },
       slaHours,
       quoteConflictSources: { PAGE_AUTOMATION: scan.automationQuoteConflicts, OTHER: counts.STAFF_AI_QUOTE_CONFLICT - scan.automationQuoteConflicts },
       rates,

@@ -34,6 +34,9 @@ export const SALES_QUALITY_CODES = [
   "PACK_MULTIPLIER_LEAKED",
   // Xin LẶP SĐT / địa chỉ / tên khách CHƯA từng cho (tách khỏi ADDRESS_REASK 23/10/2026). KHÔNG nối vào sổ tái diễn.
   "REPEAT_ASK_UNANSWERED",
+  // Bình luận chép sang hộp thư mà hội thoại bị gắn khoá mã TIN «m_…» (P0 HSLC 24/10/2026, ca «Trần Thị Ngọc»): khách nhắn tiếp sẽ mở
+  // hội thoại MỚI, trắng ngữ cảnh. Sau bản sửa privateReplyInboxId phải về 0 — nối sổ tái diễn khi bản sửa live.
+  "COMMENT_CARRY_KEY_INVALID",
 ] as const;
 export type SalesQualityCode = (typeof SALES_QUALITY_CODES)[number];
 
@@ -194,6 +197,14 @@ export const SALES_QUALITY_SPEC: Record<SalesQualityCode, SalesQualitySpec> = {
     delivery: "REACHED_CUSTOMER",
     source: "lib/sales-chatbot/address-memory.ts",
     action: "Xem tin theo dõi / câu hỏi lặp: khách chưa trả lời lần trước — cân nhắc giãn nhịp theo dõi hoặc chuyển người, KHÔNG phải lỗi hỏi lại thứ đã cho.",
+  },
+  COMMENT_CARRY_KEY_INVALID: {
+    label: "Bình luận chuyển sang hộp thư bị gắn khoá mã tin «m_…» — khách nhắn tiếp sẽ mở hội thoại trắng ngữ cảnh",
+    unit: "CONVERSATION",
+    delivery: "REACHED_CUSTOMER",
+    source: "lib/sales-chatbot/fanpage.ts",
+    action:
+      "Chạy ops comment-inbox-link-probe «<mã tổ chức> --legacy-keys» xem khách nào đang có HAI hội thoại; mở hộp thư của khách, kiểm đơn trùng. Bản sửa privateReplyInboxId (khoá chỉ dạng <page_id>_<PSID>) phải làm số này về 0 — còn > 0 là lỗi kỹ thuật, báo kỹ thuật.",
   },
 };
 

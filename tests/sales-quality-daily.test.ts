@@ -20,7 +20,7 @@ import { TEAM_DEPARTMENT } from "@/lib/constants/departments";
 import { SALES_QUALITY_CODES, SALES_QUALITY_SPEC, SALES_QUALITY_STATE_KEY, salesQualityDedupeKey, salesQualityDue, salesQualityWindow, type SalesQualityCode } from "@/lib/constants/sales-quality";
 import { CLAIM_SAFE_TEXT } from "@/lib/sales-chatbot/claim-guard";
 import { EMPTY_REPLY_TEXT } from "@/lib/sales-chatbot/engine";
-import { collectHandoffFacts, collectHandoffUnanswered, runSalesQualityDaily } from "@/lib/sales-quality/daily";
+import { collectHandoffFacts, collectHandoffUnanswered, commentCarryKeyInvalid, runSalesQualityDaily } from "@/lib/sales-quality/daily";
 import { conversationHash, scanThreadQuality, templateHead, wrongTemplateOf, type QualityMsg } from "@/lib/sales-quality/detectors";
 import { setSettingJson } from "@/lib/settings";
 import { quickReplyHead, scanPatterns, wrongProductTemplate } from "../scripts/conv-money-trace";
@@ -45,6 +45,8 @@ const QTY: [string, unknown][] = [
 ];
 
 function testPure() {
+  // COMMENT_CARRY_KEY_INVALID: luồng là mã TIN Meta «m_…» (lỗi chép bình luận trước 24/10/2026), không phải luồng hộp thư page_<số>.
+  assert.deepEqual([commentCarryKeyInvalid("m_shyjBB5_x"), commentCarryKeyInvalid("100200300_29100200300"), commentCarryKeyInvalid(null), commentCarryKeyInvalid("")], [true, false, false, false]);
   // Kỳ: trọn ngày giờ VN trước ngày của `now`; giờ chạy.
   assert.equal(WINDOW.day, "2031-03-01");
   assert.equal(WINDOW.from.toISOString(), "2031-02-28T17:00:00.000Z");
@@ -145,12 +147,15 @@ async function testDaily() {
   const fall = randomUUID();
   const fall2 = randomUUID();
   const waiting = randomUUID();
+  // COMMENT_CARRY_KEY_INVALID (P0 24/10/2026): một lượt chép bình luận gắn khoá mã tin «m_…», một lượt gắn đúng luồng page_<số>.
+  const carryBad = randomUUID();
+  const carryOk = randomUUID();
   const convs = new Map<string, [string, unknown][]>([
     [qty, QTY],
     [fall, [["user", txt(`Lấy chị 1kg, sđt ${PHONE}`)], ["assistant", txt(EMPTY_REPLY_TEXT)]]],
     [fall2, [["user", txt("alo")], ["assistant", txt(EMPTY_REPLY_TEXT)]]],
   ]);
-  const ids = [qty, fall, fall2, waiting];
+  const ids = [qty, fall, fall2, waiting, carryBad, carryOk];
   const wipe = async () => {
     await db.delete(schema.salesChatMessages).where(inArray(schema.salesChatMessages.conversationId, ids));
     await db.delete(schema.salesChatConversations).where(inArray(schema.salesChatConversations.id, ids));
@@ -163,6 +168,10 @@ async function testDaily() {
   try {
     await db.insert(schema.salesChatConversations).values([
       ...[...convs.keys()].map((id) => ({ id, channel: "WEB" as const, status: "OPEN" as const, state: {}, updatedAt: new Date(T0 + 30 * 60_000) })),
+      ...[
+        [carryBad, "m_shyjBB5_kiemthu"],
+        [carryOk, "100200300_29100200300"],
+      ].map(([id, threadId]) => ({ id, channel: "FANPAGE" as const, status: "OPEN" as const, pageId: "100200300", threadId, state: { commentCarry: { outcome: "MOVED", copied: 0, at: new Date(T0 + 60 * 60_000).toISOString() } }, updatedAt: new Date(T0 + 60 * 60_000) })),
       // Chờ người: khách nhắn cuối 27/02, không ai trả lời ⇒ quá mọi hạn mặc định lúc 02/03.
       { id: waiting, channel: "WEB" as const, status: "HANDOFF" as const, handoffReason: "Cần người xử lý — kiểm thử 2B", state: {}, lastCustomerAt: new Date("2031-02-27T03:00:00Z"), updatedAt: new Date("2031-02-27T03:00:00Z") },
     ]);
@@ -183,10 +192,11 @@ async function testDaily() {
     assert.equal(r.day, "2031-03-01");
     assert.equal(r.state.counts.CLARIFY_FALLBACK, 2, "hai hội thoại cùng lỗi ⇒ đếm 2");
     assert.equal(typeof r.state.bases.addressFlagged, "number", "mẫu số ADDRESS_RECEIVED_BUT_NOT_APPLIED được lưu vào state.bases");
+    assert.deepEqual([r.state.counts.COMMENT_CARRY_KEY_INVALID, r.state.bases.commentCarries], [1, 2], "một lượt chép gắn khoá «m_…» trên hai lượt chép trong kỳ");
     const rows = await db.select().from(schema.notifications).where(like(schema.notifications.dedupeKey, "sales-quality:%:2031-03-01"));
     const byCode = new Map(rows.map((n) => [n.entityId as SalesQualityCode, n]));
     assert.equal(rows.length, r.created);
-    for (const code of ["QTY_REASKED", "SECONDARY_INTENT_UNANSWERED", "CLARIFY_FALLBACK", "HANDOFF_UNANSWERED"] as const) {
+    for (const code of ["QTY_REASKED", "SECONDARY_INTENT_UNANSWERED", "CLARIFY_FALLBACK", "HANDOFF_UNANSWERED", "COMMENT_CARRY_KEY_INVALID"] as const) {
       const n = byCode.get(code);
       assert.ok(n, `${code}: có việc`);
       assert.ok(n.kind === "SALES_QUALITY" && n.dedupeKey === salesQualityDedupeKey(code, "2031-03-01") && n.resolvedAt === null, JSON.stringify(n));

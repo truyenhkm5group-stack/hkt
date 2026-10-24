@@ -79,8 +79,10 @@ export function testAddressReaskQtyAck() {
   ];
   assert.ok(scanThreadQuality(given, w).hits.some((h) => h.code === "ADDRESS_REASK"), "đã có chữ địa chỉ mà bot xin (kể cả dạng kể) ⇒ ADDRESS_REASK");
 
-  // ── Sổ mã: REPEAT_ASK_UNANSWERED ở CUỐI danh sách (khoá cũ giữ nguyên), KHÔNG nối vào sổ tái diễn; ADDRESS_REASK khai mốc đổi định nghĩa.
-  assert.equal(SALES_QUALITY_CODES[SALES_QUALITY_CODES.length - 1], "REPEAT_ASK_UNANSWERED");
+  // ── Sổ mã: khoá cũ GIỮ NGUYÊN thứ tự ở ĐẦU danh sách, mã mới chỉ THÊM SAU (không chèn giữa — Tech Lead duyệt 24/10/2026 khi thêm
+  // COMMENT_CARRY_KEY_INVALID); REPEAT_ASK_UNANSWERED KHÔNG nối vào sổ tái diễn; ADDRESS_REASK khai mốc đổi định nghĩa.
+  const CODES_24_10 = ["HANDOFF_UNANSWERED", "QTY_REASKED", "SECONDARY_INTENT_UNANSWERED", "WRONG_PRODUCT_TEMPLATE", "ADDRESS_REASK", "COMPLAINT_WHILE_SELLING", "CLARIFY_FALLBACK", "CLAIM_GUARD_BLOCK", "UPSELL_ACCEPTED_BUT_REASKED", "UPSELL_ACCEPTED_NOT_ATTACHED", "ADDRESS_RECEIVED_BUT_NOT_APPLIED", "QUANTITY_UNIT_AMBIGUOUS", "PACK_MULTIPLIER_MISMATCH", "CART_TOTAL_CONFLICT", "STAFF_AI_QUOTE_CONFLICT", "ORDER_UPDATED_WITHOUT_VERIFIED_CONSENT", "PACK_MULTIPLIER_LEAKED", "REPEAT_ASK_UNANSWERED"];
+  assert.deepEqual(SALES_QUALITY_CODES.slice(0, CODES_24_10.length), CODES_24_10, "18 khoá cũ giữ nguyên thứ tự ở đầu — mã mới chỉ thêm sau");
   assert.ok(!REGRESSION_WATCH.some((r) => (r.leakCodes as readonly string[]).includes("REPEAT_ASK_UNANSWERED")), "mã mới không mở lại sổ tái diễn");
   assert.ok(!KNOWN_REASK_CODES.includes("REPEAT_ASK"), "REPEAT_ASK không phải mã «đã biết»");
   const spec = SALES_QUALITY_SPEC.ADDRESS_REASK;
