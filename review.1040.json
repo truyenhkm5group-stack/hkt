@@ -1,0 +1,8 @@
+{
+  "pr": 1040,
+  "sha": "901c22c557278de570590f627ee34eb0967f91e1",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T08:29:44.094Z",
+  "note": "review lead: ops chỉ đọc mã hoá truy khoá liên kết bình luận ↔ hộp thư (commentCarry, thread_id/visitor_key, from_id vs PSID); tóm tắt chỉ cờ/số; không chạm lib."
+}
