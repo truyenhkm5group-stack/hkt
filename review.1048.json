@@ -1,0 +1,8 @@
+{
+  "pr": 1048,
+  "sha": "99156e5a15f54257550f1eb7e3ad4a48a15edd6d",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T13:07:05.536Z",
+  "note": "review lead: bot nhà dùng privateReplyInboxId thuần (không còn mã tin m_…) cho gửi ảnh sau trả lời bình luận; đếm erpViewOk/Fallback theo lý do trong chatbot-status."
+}
