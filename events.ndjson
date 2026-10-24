@@ -1,4 +1,3 @@
-{"at":"2026-10-19T10:57:13.847Z","actor":"DESKTOP-56TH98Y:wt-upsell-audit-lap","kind":"OVERLAP_DETECTED","mission":"upsell-audit-lap","detail":"OVERLAP với upsell-after-confirm: phạm vi scripts/upsell-offer-audit.ts ⇒ tuần tự hoá (--after=upsell-after-confirm) hoặc khai cách tích hợp (--accept-overlap=\"…\")"}
 {"at":"2026-10-19T10:57:44.051Z","actor":"DESKTOP-56TH98Y:wt-upsell-audit-lap","kind":"CLAIM","mission":"upsell-audit-lap","detail":"PLANNING · 2 mẫu phạm vi · MEDIUM"}
 {"at":"2026-10-19T10:57:44.051Z","actor":"DESKTOP-56TH98Y:wt-upsell-audit-lap","kind":"OVERLAP_ACCEPTED","mission":"upsell-audit-lap","detail":"OVERLAP_ACCEPTED với upsell-after-confirm: phạm vi scripts/upsell-offer-audit.ts — cách tích hợp: upsell-after-confirm (#908) đã vào main; nhánh tách từ origin/main d8f8c6b6 chứa nó; chỉ THÊM số đếm vào script đo"}
 {"at":"2026-10-19T10:58:08.976Z","actor":"DESKTOP-56TH98Y:wt-upsell-audit-lap","kind":"HANDOFF","mission":"upsell-audit-lap","detail":"claude/upsell-audit-lap @ 8675f490cec1 · 1 lệnh kiểm thử"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-24T04:01:05.823Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#1028 @ c6f4493324ac · review lead (lại): bài kiểm thôi chứa chuỗi process.env nguyên văn; ops chỉ đọc."}
 {"at":"2026-10-24T04:13:48.208Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"returns-body-dedupe","detail":"#1030 @ 6780c1b38583 → 65883e6bea4e (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-24T04:18:01.621Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"order-dup-scan","detail":"#1031 @ a4d5b01065aa → c46afd0f3010 (MERGE_ISOLATED · HIGH · gates success)"}
+{"at":"2026-10-24T04:29:41.172Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"odoo-doc-log-2410","detail":"#1032 @ 4d22fa5bccf1 → 0c73bccdcd8b (MERGE_NOW · LOW · gates success)"}
