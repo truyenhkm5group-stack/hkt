@@ -3,7 +3,7 @@
   "mission_id": "identity-link",
   "title": "P0 Ngọc PR2: verifiedSameCustomer / sameCustomerConversations — cùng khách qua bình luận + hộp thư, chỉ định danh nền tảng",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-idl",
@@ -24,9 +24,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-24T10:59:40.132Z",
-  "updated_at": "2026-10-24T12:43:33.232Z",
+  "updated_at": "2026-10-24T13:05:50.872Z",
   "last_heartbeat": "2026-10-24T11:30:44.821Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1047 → 0efa88fa6b93387e4e3e011d528585a6c2b32d87"
+  },
   "handoff": {
     "branch": "claude/identity-link",
     "sha": "531dbeba1bc7b7d65502e62cd91633091316047b",
