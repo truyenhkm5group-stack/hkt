@@ -39,7 +39,7 @@ async function main() {
   const codes = mau.map((r) => String(r.code));
   console.log(`mẫu: ${ids.length} đơn · ${codes.length} mã`);
 
-  const bamGio = async (ten: string, fn: () => Promise<unknown>) => {
+  const bamGio = async (phepDo: string, fn: () => Promise<unknown>) => {
     const out: number[] = [];
     for (let i = 0; i <= LUOT_AM; i += 1) {
       const t0 = performance.now();
@@ -48,8 +48,8 @@ async function main() {
     }
     const [dau, ...am] = out;
     const tv = trungVi(am);
-    console.log(`${ten}: lượt 1 ${dau.toFixed(0)} ms · ấm ${am.map((x) => x.toFixed(0)).join(" / ")} ms`);
-    tomTat(`${ten}: lượt 1 ${dau.toFixed(0)} ms · ấm trung vị ${tv === null ? "—" : tv.toFixed(0)} ms · max ${Math.max(...am).toFixed(0)} ms`);
+    console.log(`${phepDo}: lượt 1 ${dau.toFixed(0)} ms · ấm ${am.map((x) => x.toFixed(0)).join(" / ")} ms`);
+    tomTat(`${phepDo}: lượt 1 ${dau.toFixed(0)} ms · ấm trung vị ${tv === null ? "—" : tv.toFixed(0)} ms · max ${Math.max(...am).toFixed(0)} ms`);
   };
 
   // 1. Hàm truy vấn thật.
