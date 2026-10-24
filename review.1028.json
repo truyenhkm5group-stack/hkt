@@ -1,8 +1,8 @@
 {
   "pr": 1028,
-  "sha": "c6f4493324acd5ce2d05c8865c8fd8290155c45d",
+  "sha": "6e4558add966477ad73c5806ba0715081a237c81",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-24T03:58:04.795Z",
-  "note": "review lead (lại): bài kiểm thôi chứa chuỗi process.env nguyên văn; ops chỉ đọc."
+  "at": "2026-10-24T05:15:40.461Z",
+  "note": "review lead (lại): tách primaryShipmentsQuery dùng chung route + probe (không bản PRIMARY_ATTEMPT thứ hai); probe EXPLAIN qua getDb trong giao dịch read only + rollback, không pg.Pool riêng (ISO-17 xanh). Chạm lib ⇒ probe chỉ chạy được SAU deploy."
 }
