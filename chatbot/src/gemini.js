@@ -1,6 +1,7 @@
 import { config } from "./config.js";
 import { log } from "./logger.js";
 import { sleep } from "./util.js";
+import { botHealth } from "./erp-health.js";
 
 const BASE = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -112,8 +113,10 @@ export async function generateReply(systemPrompt, history, opts = {}) {
       continue;
     }
     if (!res.ok) {
+      botHealth.providerError(res.status, data?.error?.message || "");
       throw new Error(`Gemini loi ${res.status}: ${data?.error?.message || JSON.stringify(data)}`);
     }
+    botHealth.providerOk();
 
     const cand = data.candidates?.[0];
     const finishReason = cand?.finishReason || data.promptFeedback?.blockReason || "UNKNOWN";
@@ -160,7 +163,11 @@ export async function generateWithTools(systemPrompt, contents, functionDeclarat
       await sleep(Math.min(30000, 1000 * 2 ** attempt));
       continue;
     }
-    if (!res.ok) throw new Error(`Gemini loi ${res.status}: ${data?.error?.message || JSON.stringify(data)}`);
+    if (!res.ok) {
+      botHealth.providerError(res.status, data?.error?.message || "");
+      throw new Error(`Gemini loi ${res.status}: ${data?.error?.message || JSON.stringify(data)}`);
+    }
+    botHealth.providerOk();
     const cand = data.candidates?.[0];
     return { parts: cand?.content?.parts || [], finishReason: cand?.finishReason || data.promptFeedback?.blockReason || "UNKNOWN", usage: data.usageMetadata || {} };
   }

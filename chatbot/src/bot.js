@@ -18,6 +18,7 @@ import { voiceDeps } from "./voice-runtime.js";
 import { parseBody, lookupSize, parseChart } from "./sizechart.js";
 import { stripHtml, stripMarkdown, splitMessage, splitIntoBubbles, describeAttachments, parseTs, imageUrls, fetchImageAsBase64, sortChrono } from "./util.js";
 import { privateReplyInboxId } from "./comment-inbox.js";
+import { botHealth } from "./erp-health.js";
 
 export const HANDOFF = "[[HANDOFF]]";
 /** Cau thay the khi bot dinh dua so tai khoan / doi coc (khong duoc phep) */
@@ -2345,6 +2346,7 @@ ${eff.afterOrderText.trim()}`;
     }
 
     store.bumpStat(pageId, "replies");
+    botHealth.reply();
     if (handoff) store.bumpStat(pageId, "handoffs");
     // SDT khach da go trong hoi thoai bot dang phu trach — mau so cua "chi phi AI / 1 SDT"
     for (const m of messages) {

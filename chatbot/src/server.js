@@ -1,6 +1,7 @@
 import http from "node:http";
 import { config, assertConfig } from "./config.js";
 import { log } from "./logger.js";
+import { startHealthBeat } from "./erp-health.js";
 import { Bot } from "./bot.js";
 import { startPoller } from "./poller.js";
 import { startWatchdog } from "./watchdog.js";
@@ -127,6 +128,8 @@ server.listen(config.port, () => {
   bot.orderBot.start(); // Bot len don: quet don cho qua han moi 5 phut
   tagTimer.unref?.();
   startHealthcheck();
+  // Them vao healthchecks.io (KHONG thay): nhip 5′ + loi nha cung cap AI day len ERP — /api/internal/bot-health.
+  startHealthBeat();
 });
 
 process.on("unhandledRejection", (e) => log.error("unhandledRejection:", e));

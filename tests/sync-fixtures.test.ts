@@ -43,6 +43,7 @@ import { testPayrollOwnerApply } from "./payroll-owner-apply.test";
 import { testPosReshipLink, testPosReshipLinkDb, testPosReshipSyncBack } from "./pos-reship-link.test";
 import { testShipmentStateApi } from "./shipment-state-api.test";
 import { testHomeBotCommentInbox } from "./home-bot-comment-inbox.test";
+import { testHomeBotHealth } from "./home-bot-health.test";
 import { testShipmentStateProbe } from "./shipment-state-probe.test";
 import { testPayrollCodeLedger } from "./payroll-code-ledger.test";
 import { testPayrollReconciliationPure } from "./payroll-reconciliation.test";
@@ -2628,6 +2629,8 @@ async function main() {
     await testShipmentStateApi(db);
     // Bot nhà: ảnh trả lời bình luận gửi vào hộp thư page_PSID, không vào mã tin «m_…» (P0 24/10/2026).
     await testHomeBotCommentInbox();
+    // Sức khoẻ bot nhà vào chuỗi báo vận hành (24/10/2026 — bot nhà im 6 giờ vì Gemini 403).
+    await testHomeBotHealth();
     testShipmentStateProbe();
     testOpsScriptSize();
     testPerfProbePages();

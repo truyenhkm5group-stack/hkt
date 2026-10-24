@@ -4,6 +4,7 @@ import { hostSlug } from "@/lib/platform/host";
 import { BRAND_ASSET_PREFIX, BRAND_HINT_PARAM, brandAppOrigin, brandIconPath, brandOfRequest, ERP_SITE_BRAND_HEADER, matchSite, SITE_LEGAL_PATHS, SITE_PAGE_PATH, siteEnvFromProcess, siteRoute, type SiteEnv } from "@/lib/platform/site-host";
 import { WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH } from "@/lib/sales-chatbot/widget";
 import { SHIPMENT_STATE_PATH } from "@/lib/constants/shipment-state-api";
+import { HOME_BOT_HEALTH_PATH } from "@/lib/constants/home-bot-health";
 import {
   ERP_HEADER_PREFIX,
   ERP_HOST_SLUG_HEADER,
@@ -74,8 +75,10 @@ const PUBLIC_PREFIXES = ["/login", "/start", SITE_PAGE_PATH, ...SITE_LEGAL_PATHS
  *  · `/api/internal/shipment-state` — bot nhà hỏi chặng vận đơn theo chứng từ VTP (lib/constants/shipment-state-api.ts). Không có
  *    phiên vì bot không đăng nhập; route tự gác bằng khoá nội bộ `CHATBOT_ADMIN_TOKEN` qua HEADER (so thời gian hằng), khoá rỗng ⇒
  *    401 mọi lượt; chỉ trả mã + chặng + cờ kết thúc + mốc, không tiền, không người nhận.
+ *  · `/api/internal/bot-health` — bot nhà ĐẨY sức khoẻ của chính nó (lỗi nhà cung cấp AI · nhịp sống 5′, lib/constants/home-bot-health.ts).
+ *    Cùng cổng khoá nội bộ qua HEADER; thân đóng (chỉ loại đã khai, không chữ khách), xô giới hạn tần suất; chỉ ghi khoá settings của nhà.
  */
-const PUBLIC_EXACT = ["/chat", WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH, "/api/platform/domain-allowed", "/sw.js", "/pricing", "/forgot", SHIPMENT_STATE_PATH];
+const PUBLIC_EXACT = ["/chat", WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH, "/api/platform/domain-allowed", "/sw.js", "/pricing", "/forgot", SHIPMENT_STATE_PATH, HOME_BOT_HEALTH_PATH];
 const COOKIE = SESSION_COOKIE;
 
 /**

@@ -530,6 +530,10 @@ const ROUTE_CONG_KHAI: Record<string, { lyDo: string; cong: RegExp | null }> = {
     lyDo: "Webhook máy-gọi-máy: xác thực bằng bí mật trong URL / chữ ký của nhà cung cấp và phân giải tổ chức qua resolveWebhookOrganization (S11) — không có phiên người dùng để đi qua.",
     cong: /\bresolveWebhookOrganization\(/,
   },
+  "app/api/internal/bot-health/route.ts": {
+    lyDo: "Bot nhà (container erp-chatbot) ĐẨY sức khoẻ của chính nó (lỗi nhà cung cấp AI · nhịp sống 5′, 24/10/2026) — không phiên; khoá nội bộ CHATBOT_ADMIN_TOKEN qua header. Ghi vào tổ chức NHÀ là ĐÚNG ý đồ: route tự gọi withOrganization(getHomeOrganization()), chỉ khoá settings home-bot.health.",
+    cong: /\bsecretEquals\(/,
+  },
   "app/api/internal/shipment-state/route.ts": {
     lyDo: "Bot nhà (container erp-chatbot) hỏi chặng vận đơn theo chứng từ VTP (23/10/2026) — không phiên; khoá nội bộ CHATBOT_ADMIN_TOKEN qua header. Rơi về tổ chức NHÀ là ĐÚNG ý đồ: một bot cho cả máy chủ = bot của nhà (lib/integrations/chatbot/client.ts). Chỉ mã + chặng + cờ kết thúc + mốc, không tiền, không người nhận.",
     cong: /\bsecretEquals\(/,
