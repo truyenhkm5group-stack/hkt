@@ -3,13 +3,13 @@
   "mission_id": "order-dup-scan",
   "title": "P0 trùng đơn HSLC: ops order-dup-scan chỉ đọc (quét cặp nghi trùng N ngày)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
   "worker": null,
   "worktree": null,
-  "branch": null,
+  "branch": "claude/order-dup-scan",
   "base_sha": null,
   "domains": [],
   "owned_paths": [
@@ -24,7 +24,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T03:13:55.771Z",
-  "updated_at": "2026-10-24T03:13:55.771Z",
-  "last_heartbeat": "2026-10-24T03:13:55.771Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T03:26:32.144Z",
+  "last_heartbeat": "2026-10-24T03:26:32.144Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/order-dup-scan",
+    "sha": "a4d5b01065aa81c84dc5381e463e621de6a291b1",
+    "at": "2026-10-24T03:26:32.144Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "Ops order-dup-scan (chỉ đọc): cặp đơn nghi trùng N ngày",
+    "summary": "P0 HSLC 24/10: quét cặp nghi trùng theo SĐT/hội thoại/khách, phán quyết assessDuplicate, nguồn gốc bot/nhân viên, vận đơn + tiền; tóm tắt chỉ số đếm",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint tệp mới: sạch",
+      "K09 (order-dup-scan + address-reask): ĐẠT",
+      "platform-isolation-static + ops-script-size: ĐẠT",
+      "4 shard: để CI gates chạy (lead dặn)"
+    ]
+  }
 }
