@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "same-phone-hold",
+  "title": "Lớp tạm: SĐT trùng đơn bot đang mở ở hội thoại khác ⇒ không tự chốt + cờ POSSIBLE_SAME_CUSTOMER",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/constants/order-review.ts",
+    "lib/records/order-create.ts",
+    "lib/sales-chatbot/conversation-order-guard.ts",
+    "lib/sales-chatbot/tools.ts",
+    "tests/conversation-order-guard.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-24T07:48:58.024Z",
+  "updated_at": "2026-10-24T07:48:58.024Z",
+  "last_heartbeat": "2026-10-24T07:48:58.024Z",
+  "definition_of_done": []
+}
