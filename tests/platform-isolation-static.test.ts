@@ -113,6 +113,7 @@ const HOLDER_DA_KHAI: Record<string, { loai: LoaiHolder; lyDo: string }> = {
   "db/migrate.ts::__erpOrgMigrateToken": { loai: "NEN_TANG", lyDo: "Mã ngẫu nhiên của TIẾN TRÌNH (sinh một lần khi nạp mô-đun) để phân biệt tiến trình mới với tiến trình cũ cùng pid + tên máy; không dữ liệu nghiệp vụ." },
   "lib/cache.ts::__erpMemo": { loai: "THEO_TO_CHUC", lyDo: "Khoá đệm của tổ chức khác nhà mang tiền tố `org:<mã>:` do chính `memo()` thêm (ISO-01)." },
   "lib/cache.ts::__erpAsOf": { loai: "NEN_TANG", lyDo: "AsyncLocalStorage của MỘT lượt `collectAsOf` (OD-UX-03): chỉ giữ một mốc thời gian, không giữ giá trị đệm hay dòng dữ liệu nào; giá trị vẫn đọc qua khoá theo tổ chức của `__erpMemo`." },
+  "lib/settings.ts::__erpSettingsScope": { loai: "THEO_TO_CHUC", lyDo: "AsyncLocalStorage của MỘT lượt dựng (withSettingsScope, OD-UX-05 mục 3); khoá trong phạm vi mang mã tổ chức `<mã>:<khoá>` nên hai tổ chức không đọc lẫn cấu hình; không TTL, hết lượt dựng là mất." },
   "lib/cache.ts::__erpJobNen": { loai: "NEN_TANG", lyDo: "Bộ đếm 'đang trong job nền' chỉ đổi xoá cứng/mềm của đệm — sai lệch tệ nhất là một lượt đánh dấu cũ (ISO-26, chấp nhận)." },
   "lib/realtime/bus.ts::erpBus": { loai: "THEO_TO_CHUC", lyDo: "Sự kiện đóng dấu `org`; SSE chỉ nghe qua `subscribeOrganization` (ISO-08)." },
   "lib/sync/runner.ts::__erpSyncJobLocks": { loai: "THEO_TO_CHUC", lyDo: "Khoá job `jobLockKey(tổ chức, nguồn, job)` (ISO-12)." },
