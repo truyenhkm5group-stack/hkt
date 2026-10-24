@@ -671,6 +671,7 @@ import { testVtpReshipBackfill } from "./vtp-reship-backfill.test";
 import { testSalesAddressApplied } from "./sales-address-applied.test";
 import { testAddressNeverReask } from "./address-never-reask.test";
 import { testCommentInboxKey } from "./p0-comment-inbox-key.test";
+import { testIdentityLink } from "./identity-link.test";
 import { testAddressReaskQtyAck } from "./address-reask-qtyack.test";
 import { testAddressResolver } from "./address-resolver.test";
 import { testMessengerConfigReport } from "./messenger-config-report.test";
@@ -3419,6 +3420,8 @@ async function main() {
     await testAddressNeverReask();
     // P0 HSLC 24/10/2026 (ca «Trần Thị Ngọc»): khoá hộp thư của tin riêng chỉ dạng page_PSID · phàn nàn bị hỏi lại ⇒ chuyển người trước model · lượt đã chuyển người không ghi.
     await testCommentInboxKey();
+    // P0 HSLC 24/10/2026: cùng một khách qua hội thoại bình luận + hộp thư — chỉ định danh nền tảng (identity-link, pha 3 gộp đơn dùng chung).
+    await testIdentityLink();
     // 23/10/2026: câu máy chủ tự soạn qua điểm chặn · lời xin dạng kể · 2B ADDRESS_REASK theo 3.12b, REPEAT_ASK tách mã. Thuần, không gieo dữ liệu.
     testAddressReaskQtyAck();
     // address-resolver-ladder PR-B: máy ánh xạ địa chỉ nền (chữ khách → C360 → Google của tổ chức), không chạm lượt chat.

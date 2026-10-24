@@ -241,6 +241,8 @@ export type ChatState = {
   returning?: PancakeThreadProfile;
   /** Nội dung bài viết khách bình luận dưới (`null` = đã hỏi Pancake, không đọc được) — đọc một lần mỗi bài. */
   postContext?: { postId: string; text: string | null };
+  /** Người bình luận (from_id) + mã bình luận của hội thoại BÌNH LUẬN — lib/sales-chatbot/identity-link.ts (P0 24/10/2026). */
+  commentOrigin?: { postId: string | null; commentIds: string[]; fromIds: string[]; at: string };
   /** Số lượt của hội thoại lúc lượt mua hiện tại bắt đầu — trần lượt (`turnsPerConversation`) đếm theo LƯỢT MUA, không theo đời hội thoại. */
   cycleStartTurns?: number;
   /**
