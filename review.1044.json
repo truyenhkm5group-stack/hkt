@@ -1,0 +1,8 @@
+{
+  "pr": 1044,
+  "sha": "4dc1ee41b26c3ff18da2ba26a6cdeeb859742c78",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T10:54:25.943Z",
+  "note": "review lead (P0 HSLC bình luận→Messenger PR1): privateReplyInboxId chỉ nhận ^<page>_\\d+$ / dựng page_<from_id> số, không bao giờ mã tin «m_…», ghi inboxSource; phàn nàn bị hỏi lại ⇒ handoff TRƯỚC câu mẫu/model; lượt đã handoff ⇒ 4 công cụ ghi trả lỗi. Kỳ vọng đổi đã được lead duyệt từng ca (p855d COMPLAINT, repeat-buyer inboxSource, fixture dạng production), thêm ca giữ độ phủ; golden không đổi."
+}
