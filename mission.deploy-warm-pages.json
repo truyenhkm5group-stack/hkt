@@ -3,7 +3,7 @@
   "mission_id": "deploy-warm-pages",
   "title": "Deploy làm ấm 8 trang nặng NGAY sau health, TRƯỚC smoke (lượt đầu sau khởi động không rơi vào người dùng thật)",
   "business_goal": "",
-  "status": "FAILED",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-warm",
@@ -27,12 +27,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-23T22:40:15.655Z",
-  "updated_at": "2026-10-24T00:55:53.662Z",
+  "updated_at": "2026-10-24T01:12:44.838Z",
   "last_heartbeat": "2026-10-23T23:49:34.204Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#1024 → 321f7090146c5f0faa6556a3a7724d4799a260e5",
-    "verify": "FAIL 321f7090146c5f0faa6556a3a7724d4799a260e5 2026-10-24T00:55:24.907Z",
+    "verify": "PASS 321f7090146c5f0faa6556a3a7724d4799a260e5 2026-10-24T01:12:19.015Z",
     "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40043818760"
   },
   "handoff": {
