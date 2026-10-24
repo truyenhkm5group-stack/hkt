@@ -840,6 +840,43 @@ async function main() {
       }
     }
 
+    /*
+      ẤM (OD-UX-05 mục 2, 24/10/2026): mục «TỪNG NGUỒN» ở trên luôn chạy sau clearMemo — xấu nhất tuyệt đối — nên không trả lời
+      được câu «khi đệm đã ấm (người dùng thật, job giữ ấm chạy đều) còn nguồn nào chạm hạn 2,5 s không». Smoke sau deploy
+      #1025: /work thân 2,2 s ≈ hạn ⇒ nghi còn MỘT nguồn đứng ở trần, mà smoke không in tên nguồn. Ở đây: làm ấm bằng chính đường
+      trang (tối đa 3 vòng, nghỉ 3 s, để lượt tính nền của nguồn chạm hạn ở trên kịp xong), rồi đo lại TỪNG NGUỒN và TOÀN TRANG
+      mà KHÔNG xoá đệm. Đọc kèm: mọi lượt ghi (audit) của MỌI tổ chức trong lúc đo vẫn xoá đệm toàn tiến trình (đang sửa riêng).
+    */
+    {
+      const nghi = (ms: number) => new Promise((r) => setTimeout(r, ms));
+      const lamAm: string[] = [];
+      for (let vong = 1; vong <= 3; vong += 1) {
+        const t0 = Date.now();
+        const r = await wa.collectWorkItems({});
+        lamAm.push(`vòng ${vong}: ${Date.now() - t0}ms · thiếu ${r.failed.map((f) => f.source).join(", ") || "—"}`);
+        if (!r.failed.length) break;
+        await nghi(3_000);
+      }
+      const tungNguonAm: { ten: string; ms: number; viec: number; quaHan: string }[] = [];
+      for (const [ten, sources] of NGUON) {
+        const t0 = Date.now();
+        try {
+          const r = await wa.collectWorkItems({ sources });
+          tungNguonAm.push({ ten, ms: Date.now() - t0, viec: r.items.length, quaHan: r.failed.map((f) => `${f.source}: ${f.error}`).join(" · ") });
+        } catch (e) {
+          tungNguonAm.push({ ten, ms: Date.now() - t0, viec: 0, quaHan: `LỖI: ${e instanceof Error ? e.message : String(e)}` });
+        }
+      }
+      const t1 = Date.now();
+      const toan = await wa.collectWorkItems({});
+      const msToan = Date.now() - t1;
+      console.log("\n── /work: TỪNG NGUỒN KHI ĐỆM ĐÃ ẤM (không xoá đệm, sau làm ấm bằng đường trang) ──");
+      console.log(`  làm ấm: ${lamAm.join(" | ")}`);
+      for (const r of [...tungNguonAm].sort((a, b) => b.ms - a.ms))
+        console.log(`  ${String(r.ms).padStart(6)}ms  ${String(r.viec).padStart(5)} việc  ${r.ten.padEnd(28)} ${r.quaHan ? `QUÁ HẠN/LỖI — ${r.quaHan}` : ""}`);
+      console.log(`  TOÀN TRANG ấm: ${msToan}ms · ${toan.items.length} việc · nguồn chạm hạn / lỗi: ${toan.failed.map((f) => `${f.source} (${f.error.slice(0, 40)})`).join(" · ") || "KHÔNG"}`);
+    }
+
     // Toàn trang (phần dữ liệu): đúng lời gọi của app/(dashboard)/work/page.tsx, với một tài khoản quản trị thật.
     const { getDb: layDb } = await import("@/db");
     const dbW = await layDb();
