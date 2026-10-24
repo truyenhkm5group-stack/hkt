@@ -1,0 +1,8 @@
+{
+  "pr": 1029,
+  "sha": "018032e6f1ec26049333661232cda07e3c2362ac",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T03:53:08.475Z",
+  "note": "review lead (HOTFIX P0 trùng đơn HSLC): rào máy chủ trong create_draft_order + confirm_order đọc đơn còn sống cùng hội thoại (sales_conversation_id hoặc page+thread) trong 24 giờ, loại đơn của chính bot; có đơn ⇒ không tạo/không chốt, đúng đơn ⇒ báo khách, khác ⇒ chuyển người; đọc lỗi ⇒ không tạo + chuyển người; ý định đơn riêng tường minh ⇒ tạo nhưng giữ Mới; đếm audit SALES_CHAT_DUPLICATE_ORDER_"
+}
