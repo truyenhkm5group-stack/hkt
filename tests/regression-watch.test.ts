@@ -58,7 +58,8 @@ function testRegistry() {
   // Bốn bản sửa P0 có dòng, mốc là mốc DEPLOY xanh (đo API Actions 22/10/2026), không phải mốc gộp.
   assert.deepEqual(
     REGRESSION_WATCH.map((r) => [r.pr, r.liveAt]),
-    [[945, "2026-10-21T08:42:12Z"], [959, "2026-10-21T20:58:25Z"], [966, "2026-10-22T07:23:47Z"], [968, "2026-10-22T11:19:35Z"], [972, "2026-10-22T13:35:10Z"]],
+    // #1044 (P0 HSLC 24/10/2026, bình luận → hộp thư): updated_at của Deploy ERP to VPS run 40089318256 — lượt xanh đầu tiên chứa cf926077.
+    [[945, "2026-10-21T08:42:12Z"], [959, "2026-10-21T20:58:25Z"], [966, "2026-10-22T07:23:47Z"], [968, "2026-10-22T11:19:35Z"], [972, "2026-10-22T13:35:10Z"], [1044, "2026-10-24T11:31:22Z"]],
   );
   assert.deepEqual(REGRESSION_WATCH.filter((r) => r.leakCodes.includes("ADDRESS_REASK")).map((r) => r.mission), ["address-resolver-ladder"], "ADDRESS_REASK nối #972, không nối #966");
   for (const r of REGRESSION_WATCH) if (r.leakMeasuredFrom) assert.ok(Date.parse(r.leakMeasuredFrom) >= Date.parse(r.liveAt), `${r.mission}: bộ dò lọt không thể có trước bản sửa`);

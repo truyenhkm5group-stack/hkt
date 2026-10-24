@@ -101,6 +101,19 @@ export const REGRESSION_WATCH: readonly RegressionWatchRow[] = [
     blockedCodes: [],
     orgScope: "ALL",
   },
+  {
+    // P0 HSLC 24/10/2026 (ca «Trần Thị Ngọc», #1044): privateReplyInboxId chỉ nhận mã hộp thư dạng <page_id>_<PSID> — sau mốc này, lượt chép
+    // bình luận nào còn gắn khoá mã tin «m_…» là TÁI DIỄN. Bộ đo 2B COMMENT_CARRY_KEY_INVALID lên sau bản sửa: đọc `state.commentCarry.at`
+    // của ngày được quét, nên lọt sau `liveAt` đếm được từ lượt 2B đầu tiên có bộ đo.
+    mission: "comment-inbox-key-fix",
+    pr: 1044,
+    sha: "cf92607761e51716a7608e0e63283ec13ea0d857",
+    liveAt: "2026-10-24T11:31:22Z",
+    deployRun: 40089318256,
+    leakCodes: ["COMMENT_CARRY_KEY_INVALID"],
+    blockedCodes: [],
+    orgScope: "ALL",
+  },
 ];
 
 export type RegressionVerdict = "REGRESSION_REOPENED" | "HOLDING" | "QUIET" | "LEAK_UNAVAILABLE";

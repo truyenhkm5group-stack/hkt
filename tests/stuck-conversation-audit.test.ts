@@ -341,7 +341,7 @@ function testQualityState() {
     assert.ok(line, `daily.ts baseOf thiếu mã ${c}`);
     const field = QUALITY_BASE_FIELD[c];
     // Mẫu số không nằm trong `QualityBases` (ảnh chụp lúc chạy) ⇒ đúng biểu thức daily.ts in cạnh mã đó.
-    const special: Record<string, string> = { handoffWaiting: "${ho.waiting}", addressFlagged: "${na.flagged}" };
+    const special: Record<string, string> = { handoffWaiting: "${ho.waiting}", addressFlagged: "${na.flagged}", commentCarries: "${cc.carries}" };
     const want = special[field] ?? `\${b.${field}}`;
     assert.ok(line.includes(want), `${c}: script lấy mẫu số «${field}» nhưng daily.ts in ${line.trim().slice(0, 120)}`);
   }

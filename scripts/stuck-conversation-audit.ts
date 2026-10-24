@@ -331,6 +331,7 @@ export const QUALITY_BASE_FIELD: Readonly<Record<string, string>> = {
   WRONG_PRODUCT_TEMPLATE: "botMessages",
   ADDRESS_REASK: "botMessages",
   REPEAT_ASK_UNANSWERED: "botMessages",
+  COMMENT_CARRY_KEY_INVALID: "commentCarries",
   COMPLAINT_WHILE_SELLING: "complaints",
   CLARIFY_FALLBACK: "botMessages",
   CLAIM_GUARD_BLOCK: "botMessages",
@@ -413,6 +414,8 @@ export const QUALITY_GROUP: Readonly<Partial<Record<string, QualityGroup>>> = {
   PACK_MULTIPLIER_LEAKED: "số lượng · tiền",
   UPSELL_ACCEPTED_BUT_REASKED: "upsell",
   UPSELL_ACCEPTED_NOT_ATTACHED: "upsell",
+  // Hệ quả của lỗi là hỏi lại SĐT / địa chỉ ở hội thoại hộp thư trắng ngữ cảnh ⇒ nhóm «địa chỉ».
+  COMMENT_CARRY_KEY_INVALID: "địa chỉ",
 };
 
 // Trần byte + bộ dồn dòng: lib/ops/summary-lines.ts (dùng chung với conv-money-trace). Xuất lại cho bài kiểm cũ.
