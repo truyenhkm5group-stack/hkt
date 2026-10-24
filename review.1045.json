@@ -1,0 +1,8 @@
+{
+  "pr": 1045,
+  "sha": "621da21d7dbf7fcbb2cc7120b077081b24bb0a38",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T11:10:08.048Z",
+  "note": "review lead: chỉ-script chỉ đọc; chế độ --legacy-keys đếm hội thoại mang khoá «m_…» theo tổ chức với phán quyết TWO_CONVERSATIONS / INBOX_NO_CONVERSATION / ECHO_NOT_FOUND + đơn còn sống; không ghi, không đổi khoá, không gộp."
+}
