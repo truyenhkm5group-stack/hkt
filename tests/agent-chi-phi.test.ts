@@ -411,7 +411,8 @@ export function testMetricResolverTatJit() {
   const goc3 = path.resolve(__dirname, "..");
   const DA_DO: { tep: string; ham: string; soLan: number }[] = [
     { tep: "lib/queries/metric-resolver.ts", ham: "async function outcomeAggregate(", soLan: 1 },
-    { tep: "lib/queries/return-reason-report.ts", ham: "async function baseRows(", soLan: 1 },
+    /* Câu SQL của baseRows nằm ở baseRowsSql từ khi baseRows đệm nó (24/10/2026) — chốt đi theo câu, không theo tên cũ. */
+    { tep: "lib/queries/return-reason-report.ts", ham: "async function baseRowsSql(", soLan: 1 },
     /* Câu danh sách (đã đo) + câu đếm chạy song song với nó — trang chờ câu chậm hơn. */
     { tep: "lib/queries/customers.ts", ham: "export async function listCustomers(", soLan: 2 },
   ];
