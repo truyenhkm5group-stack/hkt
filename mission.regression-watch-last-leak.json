@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "regression-watch-last-leak",
+  "title": "regression-watch-status: lọt N trong ngày D + lọt cuối ngày L",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-rwll",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/regression-watch-last-leak",
+  "base_sha": "caea634ce6d683e2fb371d4c68066ffbb13a3c42",
+  "domains": [],
+  "owned_paths": [
+    "scripts/regression-watch-status.ts",
+    "tests/regression-watch.test.ts"
+  ],
+  "dependencies": [
+    "regression-watch-readonly",
+    "regression-reopen-watch"
+  ],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-24T07:42:51.879Z",
+  "updated_at": "2026-10-24T07:42:51.879Z",
+  "last_heartbeat": "2026-10-24T07:42:51.879Z",
+  "definition_of_done": []
+}
