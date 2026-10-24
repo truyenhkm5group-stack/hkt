@@ -3,7 +3,7 @@
   "mission_id": "memo-theo-to-chuc",
   "title": "clearMemo theo tổ chức + vết rào bot không xoá đệm (hồi quy đường ấm /reports/returns giờ trưa)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-memoorg",
@@ -27,11 +27,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-24T06:50:53.669Z",
-  "updated_at": "2026-10-24T09:03:22.913Z",
+  "updated_at": "2026-10-24T09:39:50.149Z",
   "last_heartbeat": "2026-10-24T08:45:59.096Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1036 → 6ca3af26be6582a918fd6ca7d1bc67a8d12ccc9b"
+    "merged": "#1036 → 6ca3af26be6582a918fd6ca7d1bc67a8d12ccc9b",
+    "verify": "PASS 6ca3af26be6582a918fd6ca7d1bc67a8d12ccc9b 2026-10-24T09:38:24.685Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40080447595"
   },
   "handoff": {
     "branch": "claude/memo-theo-to-chuc",
