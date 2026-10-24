@@ -170,7 +170,7 @@ export type AgentOrderOptions = {
    * CỜ CẦN NGƯỜI KIỂM do MÁY gắn, ghi trong CÙNG giao dịch tạo / sửa đơn (#855 — khách đổi địa chỉ chưa xác minh): đơn không bao giờ
    * tồn tại ở trạng thái «có xã mà không cờ», kể cả một khoảnh khắc — job tạo vận đơn tự động không có khe hở để chen vào.
    */
-  review?: Omit<OrderReviewEntry, "by" | "at">;
+  review?: Omit<OrderReviewEntry, "by" | "at"> | readonly Omit<OrderReviewEntry, "by" | "at">[];
   /** Đơn sinh ra từ một hội thoại — khoá + khoá hội thoại ghi lúc chèn + rào của bot (`ConversationWrite`). */
   conversation?: ConversationWrite;
 };
@@ -447,8 +447,14 @@ export type ManualOrderResult = { ok: true; id: string; reused?: boolean } | Met
 function reviewsOnWrite(w: Writer, p: Prepared, raw: Record<string, unknown>, now: Date, agentOpts?: AgentOrderOptions): { raw: Record<string, unknown>; changed: boolean; settled: OrderReviewEntry[] } {
   const a = addressReview(w, p, raw, now);
   if (w.actorKind !== "AGENT" || !agentOpts?.review) return a;
-  const b = withReviewEntry(a.raw, { ...agentOpts.review, at: now.toISOString(), by: w.name });
-  return { raw: b.raw, changed: a.changed || b.changed, settled: a.settled };
+  let raw2 = a.raw;
+  let changed = a.changed;
+  for (const entry of Array.isArray(agentOpts.review) ? agentOpts.review : [agentOpts.review]) {
+    const b = withReviewEntry(raw2, { ...entry, at: now.toISOString(), by: w.name });
+    raw2 = b.raw;
+    changed = changed || b.changed;
+  }
+  return { raw: raw2, changed, settled: a.settled };
 }
 
 /** Gắn chữ địa chỉ nguyên văn của lượt (máy) vào `raw.addressText` — bản mới thay bản cũ; không có ⇒ giữ nguyên. HÀM THUẦN. */

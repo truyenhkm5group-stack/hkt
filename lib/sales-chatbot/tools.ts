@@ -39,7 +39,7 @@ import { createOrderAsAgent, flagOrderForReviewAsAgent, noteCustomerReconfirmAsA
 import { conversationCancelTargets, executeCustomerCancel, raiseCancelException, recordCustomerCancelRequest, recordCustomerKeptOrder } from "@/lib/records/order-cancel";
 import { CANCEL_BLOCK_LABEL } from "@/lib/constants/order-cancel";
 import { chatOrderAdId } from "@/lib/sales-chatbot/ad-referral";
-import { auditConversationOrderBlock, blockInstruction, botOwnOrderIds, CONVERSATION_ORDER_FIELD, decideConversationOrder, existingOrderMaker, otherConversationOrders, proposalCandidate, type ConversationOrderScope, type ConversationOrderVerdict } from "@/lib/sales-chatbot/conversation-order-guard";
+import { auditConversationOrderBlock, auditSamePhoneHold, samePhoneOpenBotOrders, blockInstruction, botOwnOrderIds, CONVERSATION_ORDER_FIELD, decideConversationOrder, existingOrderMaker, otherConversationOrders, proposalCandidate, type ConversationOrderScope, type ConversationOrderVerdict } from "@/lib/sales-chatbot/conversation-order-guard";
 import { markOrderWritten, omsValidationReason, orderSignalToolReason, OrderWriteError, recordOrderValidationFailure, recordOrderWriteFailure, sqlStateOf, type OrderWriteMark } from "@/lib/sales-chatbot/order-signals";
 import { agentUnitPrice } from "@/lib/commerce/pricing";
 import { notifySalesChatBooking, notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
@@ -109,7 +109,7 @@ export type ChatState = {
    */
   /** Bộ đếm phản đối món của lượt mua hiện tại (P0 #855 — `nextObjectionTally`, handoff-routing-shared.ts). */
   objectionTally?: ObjectionTally;
-  draft?: { orderId: string | null; lines: CartLine[]; unitPrices: Record<string, number>; recipient: Recipient; note: string; simulated: boolean; shownTurn?: number; firstShownTurn?: number; quote?: AgentQuoteClaim; seenQuoteId?: string; seenLines?: CartLine[]; seenTotal?: number; packing?: string | null; separateOrder?: { reason: string; existingIds: string[] } };
+  draft?: { orderId: string | null; lines: CartLine[]; unitPrices: Record<string, number>; recipient: Recipient; note: string; simulated: boolean; shownTurn?: number; firstShownTurn?: number; quote?: AgentQuoteClaim; seenQuoteId?: string; seenLines?: CartLine[]; seenTotal?: number; packing?: string | null; separateOrder?: { reason: string; existingIds: string[] }; samePhoneOf?: string };
   /** Khách PHẢN ĐỐI giá (PRICE_DISPUTED, 11/10/2026) — engine ghi khi phát hiện; chốt đơn bị chặn tới khi máy chủ báo lại và khách xác nhận. */
   priceDispute?: PriceDisputeState;
   /**
@@ -1258,12 +1258,16 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
         đơn còn sống của hội thoại trước; có ⇒ không tạo. Khách nói RÕ «thêm một đơn riêng» ⇒ cho tạo nhưng không tự chốt (`separateOrder`).
       */
       let separateOrder = existing?.separateOrder ?? null;
+      let samePhoneOf: string | null = existing?.samePhoneOf ?? null;
       if (name === "create_draft_order" && !existing?.orderId && !simulated) {
         const others = await otherConversationOrders(guardScope(ctx, state, now)).catch(() => null);
         if (others === null) return { ...err("Đơn nháp: chưa kiểm được đơn đã có", GUARD_READ_FAILED, state), requireHuman: "Không đọc được đơn đã có của hội thoại — bot không lên đơn (tránh trùng); người kiểm" };
         const verdict = decideConversationOrder(others, proposalCandidate(lines, recipient, now), [...(ctx.roundCustomerTexts ?? []).slice(-3), ctx.lastUserText]);
         if (verdict.kind === "BLOCK") return conversationOrderBlocked(verdict, "CREATE", ctx, state);
         if (verdict.kind === "SEPARATE_ALLOWED") separateOrder = { reason: verdict.reasonCode, existingIds: verdict.existingIds };
+        // LỚP TẠM trước pha 3 (`samePhoneOpenBotOrders`): SĐT gõ trùng đơn BOT đang mở ở hội thoại KHÁC ⇒ vẫn lên đơn, KHÔNG tự chốt, cờ cần
+        // kiểm. Đọc lỗi ⇒ bỏ qua lớp này (nó chỉ làm chậm xác nhận, không phải rào chặn — rào hội thoại ở trên đã chạy).
+        if (verdict.kind === "PROCEED") samePhoneOf = (await samePhoneOpenBotOrders(ctx.conversationId, recipient.phone, now).catch(() => []))[0]?.orderId ?? null;
       }
       // Yêu cầu đóng gói riêng («2 gói riêng», «chia 2 túi») — giữ qua các lượt sửa đơn, ghi vào ghi chú đơn cho kho.
       const packing = packingRequestOf(ctx.lastUserText) ?? existing?.packing ?? null;
@@ -1451,15 +1455,18 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       // Báo giá + dòng khách ĐÃ THẤY = của đơn nháp ở lượt TRƯỚC (sửa nhiều lần trong một lượt vẫn giữ bản khách đã thấy).
       const carrySeen = existing && existing.shownTurn !== ctx.turn;
       const seen = carrySeen ? { seenQuoteId: existing.quote?.id, seenLines: existing.lines, seenTotal: existing.quote ? (existing.quote.total ?? existing.quote.subtotal) : undefined } : { seenQuoteId: existing?.seenQuoteId, seenLines: existing?.seenLines, seenTotal: existing?.seenTotal };
-      const draft = { ...(ctx.turn !== undefined ? { shownTurn: ctx.turn } : {}), ...(firstShown !== undefined ? { firstShownTurn: firstShown } : {}), orderId: existing?.orderId ?? null, lines: priced.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })), unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient, note: v.data.delivery_note ?? existing?.note ?? "", simulated, quote: quoteClaim, ...(seen.seenQuoteId ? seen : {}), packing, ...(separateOrder ? { separateOrder } : {}) };
+      const draft = { ...(ctx.turn !== undefined ? { shownTurn: ctx.turn } : {}), ...(firstShown !== undefined ? { firstShownTurn: firstShown } : {}), orderId: existing?.orderId ?? null, lines: priced.lines.map((l) => ({ variantId: l.variantId, quantity: l.quantity })), unitPrices: Object.fromEntries(priced.lines.map((l) => [l.variantId, l.unitPrice])), recipient, note: v.data.delivery_note ?? existing?.note ?? "", simulated, quote: quoteClaim, ...(seen.seenQuoteId ? seen : {}), packing, ...(separateOrder ? { separateOrder } : {}), ...(samePhoneOf ? { samePhoneOf } : {}) };
       if (!simulated) {
         const payload = orderInput(state, draft, priced, editingConfirmed ? "CONFIRMED" : "NEW", ctx.config, ctx.channel);
         // Đơn MỚI mang mã quảng cáo đã dẫn khách vào hội thoại (trong cửa sổ quy kết — máy chủ quyết); sửa đơn KHÔNG đổi nó.
         // Tổ chức tự chốt mà bot quyết CHƯA chốt (khách hoãn / phản đối giá / vừa mời thêm món) ⇒ lõi giữ «Mới» (`holdNew`).
         // Đơn RIÊNG khách xin thêm khi hội thoại đã có đơn của người ⇒ luôn giữ «Mới»: khách đồng ý tóm tắt ở tin sau mới chốt.
-        const holdNew = Boolean(draft.separateOrder) || (ctx.autoConfirm === true && autoConfirmBlocker({ ...state, draft }, ctx) !== null);
+        const holdNew = Boolean(draft.separateOrder) || Boolean(draft.samePhoneOf) || (ctx.autoConfirm === true && autoConfirmBlocker({ ...state, draft }, ctx) !== null);
         // Cờ «khách đổi địa chỉ» ghi CÙNG giao dịch với đơn (tạo / sửa) — hỏng thì cả lượt ghi hỏng, không có đơn «có xã mà không cờ».
-        const review = changeFlag ? { review: changeFlag } : {};
+        // Cờ «có thể cùng khách» (lớp tạm) chỉ gắn lúc TẠO đơn — đi CÙNG giao dịch với đơn, như cờ đổi địa chỉ.
+        const sameFlag = samePhoneOf && !draft.orderId ? { code: "POSSIBLE_SAME_CUSTOMER" as const, note: `SĐT khách gõ trùng đơn bot đang mở #${manualOrderShortCode(samePhoneOf)} ở hội thoại khác (bình luận ↔ hộp thư?) — đối chiếu: cùng người ⇒ gộp vào một đơn; khác người ⇒ xác nhận`, quote: null } : null;
+        const flags = [changeFlag, sameFlag].filter((x): x is NonNullable<typeof x> => x !== null);
+        const review = flags.length ? { review: flags } : {};
         const r = draft.orderId
           ? await updateOrderAsAgent(ctx.agent, draft.orderId, payload, { ...agentOrderOpts(ctx, state, false, quoteClaim, holdNew), ...review })
           : await createOrderAsAgent(ctx.agent, payload, { ...agentOrderOpts(ctx, state, true, quoteClaim, holdNew, draft.separateOrder?.existingIds ?? []), adId: await chatOrderAdId(ctx.conversationId, now), ...review });
@@ -1474,6 +1481,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
           return { ...err("Đơn nháp: lỗi", "Khoá đơn trỏ tới ĐƠN CỦA LƯỢT MUA TRƯỚC — không dùng lại đơn cũ cho lượt mua này; chuyển nhân viên kiểm.", state), requireHuman: "Khoá đơn trỏ tới đơn của lượt mua trước — người kiểm, không dùng lại đơn cũ" };
         }
         markOrderWritten(ctx.writeMark, r.id);
+        if (sameFlag) await auditSamePhoneHold(ctx.conversationId, samePhoneOf!, r.id);
         draft.orderId = r.id;
       }
       state.draft = draft;
@@ -1505,7 +1513,7 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       }
       // TỰ CHỐT KHI ĐỦ ĐƠN (P0-A): đủ sáu điều kiện ⇒ chốt NGAY bằng chính lượt chốt của confirm_order (cùng kiểm giá · tồn · địa chỉ của lõi),
       // không hỏi khách «có chốt không / lấy thêm gì không». Thiếu ⇒ nói đúng phần thiếu cho model hỏi khách.
-      if (ctx.autoConfirm && !state.confirmed && !draft.separateOrder) {
+      if (ctx.autoConfirm && !state.confirmed && !draft.separateOrder && !draft.samePhoneOf) {
         const blocker = autoConfirmBlocker(state, ctx);
         if (!blocker) {
           const c = await executeToolCore("confirm_order", { customer_confirmation: "" }, { ...ctx, state, autoConfirming: true });

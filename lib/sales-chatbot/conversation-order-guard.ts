@@ -19,12 +19,12 @@
  * Chưa phủ (pha 2): khoá giao dịch theo hội thoại cho ba đường tạo đơn (bot · form · ghi đơn từ hội thoại) — hôm nay kiểm ở đây chạy
  * NGOÀI giao dịch ghi, nên hai cú tạo trong cùng một giây vẫn lọt; khách C360 ở hội thoại khác; cờ «Nghi trùng đơn» trên /orders.
  */
-import { and, eq, gte, inArray, notInArray, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { DbOrTx } from "@/lib/db-transaction";
 import { audit } from "@/lib/audit";
 import { manualOrderShortCode } from "@/lib/constants/manual-orders";
-import { assessDuplicate, CONVERSATION_ORDER_GUARD_HOURS, type DuplicateCandidate, type ItemLike } from "@/lib/constants/order-duplicate";
+import { assessDuplicate, CONVERSATION_ORDER_GUARD_HOURS, phoneKey, type DuplicateCandidate, type ItemLike } from "@/lib/constants/order-duplicate";
 import { ORDER_STAGE_LABEL, PRE_SHIP_STAGES } from "@/lib/constants/pancake";
 import type { OrderStage } from "@/db/schema";
 import { formatDateTime, formatVND } from "@/lib/format";
@@ -176,6 +176,60 @@ export async function otherConversationOrders(scope: ConversationOrderScope, exe
     address: r.address ?? "",
     items: items.filter((i) => i.orderId === r.id).map((i): ItemLike => ({ variantId: i.variantId, sku: i.sku ?? "", productName: i.productName ?? "", variationDetail: i.variationDetail ?? "", quantity: Number(i.quantity ?? 0) || 0 })),
   }));
+}
+
+/**
+ * ═══ LỚP TẠM (P0 HSLC 24/10/2026, vụ #8639C563 → #E2867CF0) — HẾT HIỆU LỰC KHI PHA 3 (gộp vào đơn bot đang mở của CÙNG DANH TÍNH)
+ * VÀ LIÊN KẾT DANH TÍNH BÌNH LUẬN ↔ HỘP THƯ LÊN ═══
+ *
+ * Bình luận và Messenger là HAI hội thoại; hôm nay ERP chưa nối được danh tính giữa chúng (0/709 hồ sơ có mã Facebook), nên bot ở hộp
+ * thư không thấy đơn bot vừa tự chốt ở bình luận và lên đơn thứ hai. Lớp này KHÔNG chặn, KHÔNG chuyển người (HSLC đang có ~100+ hội
+ * thoại chuyển người chưa ai nhận — chuyển thêm là mất đơn thật — Tech Lead 24/10): SĐT GÕ ở hội thoại này trùng SĐT (9 số cuối) của
+ * một đơn BOT ĐANG MỞ (PRE_SHIP, chưa qua ĐVVC, ≤ `CONVERSATION_ORDER_GUARD_HOURS`) ở hội thoại KHÁC ⇒ đơn mới vẫn lên nhưng KHÔNG tự
+ * chốt, mang cờ `POSSIBLE_SAME_CUSTOMER` (giữ khỏi vận đơn + công tắc tự nâng) để người đối chiếu trên /orders cạnh cờ «Nghi trùng
+ * đơn». Khách không nghe gì khác thường, không lộ dữ liệu của SĐT ấy (luật #651 / #656: SĐT gõ tay không đổi nhận diện, không điền gì —
+ * nó chỉ làm đơn của CHÍNH người gõ chậm xác nhận). Chỉ đơn của BOT: đơn của người đã có luồng riêng (rào hội thoại, form cảnh báo).
+ */
+export async function samePhoneOpenBotOrders(conversationId: string, phone: string | null | undefined, now: Date, exec?: DbOrTx): Promise<{ orderId: string; insertedAt: Date }[]> {
+  const key = phoneKey(phone);
+  if (!key) return [];
+  const db = exec ?? (await getDb());
+  const o = schema.orders;
+  const own = `sales-chat:${conversationId}:`;
+  const since = new Date(now.getTime() - CONVERSATION_ORDER_GUARD_HOURS * 3_600_000);
+  const leftWarehouse = sql`exists (select 1 from ${schema.shipments} s where s.order_id = ${o.id} and coalesce(s.direction, 'OUTBOUND') <> 'RETURN' and s.stage::text not in ('PENDING', 'CANCELLED'))`;
+  const digits = (col: typeof o.billPhone | typeof o.shipPhone) => sql`right(regexp_replace(coalesce(${col}, ''), '[^0-9]', '', 'g'), 9)`;
+  const rows = await db
+    .select({ orderId: o.id, insertedAt: o.insertedAt })
+    .from(o)
+    .where(
+      and(
+        sql`left(coalesce(${o.raw}->>'agentKey', ''), 11) = 'sales-chat:'`,
+        sql`left(coalesce(${o.raw}->>'agentKey', ''), ${own.length}) <> ${own}`,
+        sql`coalesce(${o.salesConversationId}, '') <> ${conversationId}`,
+        inArray(o.stage, [...PRE_SHIP_STAGES]),
+        sql`not ${leftWarehouse}`,
+        gte(o.insertedAt, since),
+        or(sql`${digits(o.billPhone)} = ${key}`, sql`${digits(o.shipPhone)} = ${key}`),
+      ),
+    )
+    .orderBy(desc(o.insertedAt))
+    .limit(5);
+  return rows;
+}
+
+/** Một dòng nhật ký mỗi lần lớp tạm kích hoạt — đếm được bằng `audit_logs.action`. Không ném. */
+export async function auditSamePhoneHold(conversationId: string, otherOrderId: string, newOrderId: string): Promise<void> {
+  await audit({
+    userId: null,
+    userEmail: "agent:lib/sales-chatbot/conversation-order-guard.ts",
+    actorKind: "AGENT",
+    action: "SALES_CHAT_SAME_PHONE_HOLD",
+    entity: "ORDER",
+    entityId: newOrderId,
+    after: { conversationId, otherOrderId },
+    reason: `Đơn bot giữ «Mới» + cờ cần kiểm: SĐT trùng đơn bot đang mở #${manualOrderShortCode(otherOrderId)} ở hội thoại khác (lớp tạm trước pha 3)`,
+  }).catch(() => undefined);
 }
 
 /** Đề nghị của bot dạng so được với `assessDuplicate`. HÀM THUẦN. */
