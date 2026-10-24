@@ -42,6 +42,7 @@ import { testPayrollProfitGate } from "./payroll-profit-gate.test";
 import { testPayrollOwnerApply } from "./payroll-owner-apply.test";
 import { testPosReshipLink, testPosReshipLinkDb, testPosReshipSyncBack } from "./pos-reship-link.test";
 import { testShipmentStateApi } from "./shipment-state-api.test";
+import { testShipmentStateProbe } from "./shipment-state-probe.test";
 import { testPayrollCodeLedger } from "./payroll-code-ledger.test";
 import { testPayrollReconciliationPure } from "./payroll-reconciliation.test";
 import { testPayrollReconCenter } from "./payroll-recon-center.test";
@@ -2609,6 +2610,7 @@ async function main() {
     await testPosReshipLinkDb(db);
     await testPosReshipSyncBack(db);
     await testShipmentStateApi(db);
+    testShipmentStateProbe();
     testOpsScriptSize();
     testPerfProbePages();
     await testDataTruth(db);
