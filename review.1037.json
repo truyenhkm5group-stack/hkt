@@ -1,0 +1,8 @@
+{
+  "pr": 1037,
+  "sha": "2da93e4d60a33f565a8dee8ecfa3aeccc6e3273d",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-24T07:19:46.426Z",
+  "note": "review lead: withSettingsScope bọc lượt tính getReconCenter/getPayrollReport/getMarketerReport/getAdsPerformance/collectWorkItems — chỉ khử trùng ĐỌC settings trong một lượt, không đổi phép tính lương/QC; không có ghi settings trong các lượt này. Số trước: getReconCenter 202 lượt/10 khoá."
+}
