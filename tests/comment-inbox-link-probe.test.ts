@@ -56,6 +56,7 @@ export function testCommentInboxLinkProbe() {
   assert.match(code, /show default_transaction_read_only/, "hỏi lại phiên chỉ đọc");
   assert.match(code, /getDbForInspection\(/, "CSDL tổ chức mở bằng handle chẩn đoán");
   assert.match(code, /eq\(t\.messageId, r\.threadId\)/, "luồng thật của khoá «m_…» tìm bằng CHÍNH mã tin (khoá xác định), không ghép theo chữ");
+  assert.match(code, /eq\(t\.messageId, r\.threadId\), ne\(t\.threadId, r\.threadId\), ne\(t\.threadId, PRIVATE_REPLY_THREAD\)/, "dòng DẤU ở luồng __private_reply__ không phải luồng thật (lượt 40090214039: 691/692 bắt nhầm)");
   assert.doesNotMatch(code, /tomTat\(`legacy-keys[^`]*\$\{org\.code/, "tóm tắt chạy thử mọi tổ chức không mang mã tổ chức");
   assert.doesNotMatch(code, /\bdb\s*\.\s*(insert|update|delete)\b|sql`\s*(insert|update|delete)\b/i, "không ghi gì vào CSDL");
   assert.doesNotMatch(code, /fetch\(/, "không gọi Pancake");
