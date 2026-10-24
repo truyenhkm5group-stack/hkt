@@ -3,7 +3,7 @@
   "mission_id": "peek-iso-key",
   "title": "Vân tay khách: mốc ISO chỉ ở khoá mốc hệ thống, không lộ ngày sinh",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-iso",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-24T00:03:35.221Z",
-  "updated_at": "2026-10-24T00:03:35.221Z",
-  "last_heartbeat": "2026-10-24T00:03:35.221Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-24T00:04:11.962Z",
+  "last_heartbeat": "2026-10-24T00:04:11.962Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/peek-iso-key",
+    "sha": "54637e2a813f7da0861c55f73f922635829bc707",
+    "at": "2026-10-24T00:04:11.962Z",
+    "actor": "DESKTOP-56TH98Y:wt-iso",
+    "title": "Vân tay khách: mốc ISO chỉ ở khoá mốc hệ thống, không lộ ngày sinh",
+    "summary": "chỉ-script vệ sinh PII theo review của lead: không cần deploy",
+    "tests": [
+      "tsc · eslint sạch · tsx testPosReshipLink() XANH (thêm: date_of_birth ISO ⇒ không lộ) · full suite giao CI gates"
+    ]
+  }
 }
