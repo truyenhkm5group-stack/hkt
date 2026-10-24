@@ -52,7 +52,8 @@ function trangBangDieuKhien(dir: string): string[] {
 export async function testRefreshButton() {
   // ───────── 1. Server action phải xoá đệm, không chỉ trả về một mốc giờ ─────────
   const action = boChuThich(doc(ACTION));
-  assert.ok(/\bclearMemo\s*\(/.test(action), `${ACTION}: không gọi clearMemo() — nút làm mới sẽ dựng lại trang trên số CŨ còn trong đệm 60–120 giây.`);
+  // clearMemoAll (OD-UX-05 2c): `clearMemo` sau lượt GHI cố ý giữ cũ khoá riêng /work — nút làm mới thì phải xoá hẳn TẤT CẢ.
+  assert.ok(/\bclearMemoAll\s*\(/.test(action), `${ACTION}: không gọi clearMemoAll() — nút làm mới sẽ dựng lại trang trên số CŨ còn trong đệm 60–120 giây (kể cả khoá giữ-cũ của /work).`);
   assert.ok(
     !/\bstaleMemo\s*\(/.test(action),
     `${ACTION}: dùng staleMemo() — đánh dấu cũ trả NGAY số cũ cho chính cú bấm vừa yêu cầu số mới. Đường NGƯỜI bấm phải xoá hẳn (xem tests/cache-semantics.test.ts).`,

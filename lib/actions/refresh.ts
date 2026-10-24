@@ -1,7 +1,7 @@
 "use server";
 
 import { getCurrentUser } from "@/lib/auth/session";
-import { clearMemo } from "@/lib/cache";
+import { clearMemoAll } from "@/lib/cache";
 
 /**
  * ═══════ LÀM MỚI SỐ LIỆU MÀ KHÔNG TẢI LẠI CẢ TRANG ═══════
@@ -41,6 +41,7 @@ export async function refreshReportData(): Promise<{ at: number } | { error: str
   // không mở thêm một cánh cửa nào. Không đăng nhập thì nói thẳng lý do thay vì im lặng không đổi.
   const user = await getCurrentUser();
   if (!user) return { error: "Phiên đăng nhập đã hết hạn — đăng nhập lại để lấy số mới." };
-  clearMemo();
+  // XOÁ HẲN kể cả khoá giữ-cũ của /work (OD-UX-05 2c): người bấm hỏi đúng «số bây giờ».
+  clearMemoAll();
   return { at: Date.now() };
 }

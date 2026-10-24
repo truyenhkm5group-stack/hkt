@@ -10,7 +10,7 @@ import { getPurchasingReport } from "@/lib/queries/purchasing";
 import { loadReturnsPage, returnsPageParams } from "@/lib/queries/returns-report-page";
 import { getStockShortage } from "@/lib/queries/stock-shortage";
 import { getWorkConfig } from "@/lib/queries/work-config";
-import { adaptPayrollRecon, PAYROLL_RECON_WARM_EVERY_MINUTES } from "@/lib/queries/work-adapters";
+import { actionQueueForWork, adaptPayrollRecon, fulfillmentQueueForWork, PAYROLL_RECON_WARM_EVERY_MINUTES } from "@/lib/queries/work-adapters";
 import { resolvePeriod } from "@/lib/search-params";
 
 /**
@@ -191,6 +191,9 @@ export function workWarmTasks(): WarmTask[] {
     { key: "work:stock-shortage", run: () => getStockShortage() },
     // Nguồn ALERT: kế hoạch đặt hàng mặc định, ĐÚNG lời gọi không tham số trong action-queue.ts.
     { key: "work:replenishment-plan", run: () => getReplenishmentPlan() },
+    // OD-UX-05 mục 2(c): hai khoá RIÊNG của /work bọc ngoài hai hàm nền trên (giữ số cũ khi người dùng ghi — lib/constants/work-cache.ts).
+    { key: "work:fulfillment", run: () => fulfillmentQueueForWork() },
+    { key: "work:alerts", run: () => actionQueueForWork() },
     // Cấu hình hạn / phòng (một dòng `settings`, rẻ) — `collectWorkItems` đọc nó TRƯỚC mọi nguồn; làm ấm để
     // lượt mở /work sau một lượt job không tự tính một khoá có đệm nào (bài kiểm so tập khoá, không ngoại lệ).
     { key: "work:config", run: () => getWorkConfig() },

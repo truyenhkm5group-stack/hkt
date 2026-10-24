@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import type { SessionUser } from "@/lib/auth/session";
-import { clearMemo, memoKeys } from "@/lib/cache";
+import { clearMemoAll, clearMemo, memoKeys } from "@/lib/cache";
 import { getModelSignalsBatch } from "@/lib/queries/model-signal";
 import { getOwnerDecisionQueue } from "@/lib/queries/owner-decisions";
 import { cockpitWarmTasks, reportWarmTasks, runWarms, warmCockpit, warmDashboard, warmDetail, workWarmTasks, type WarmTask } from "@/lib/queries/warm";
@@ -267,11 +267,12 @@ export async function testWorkWarmDb() {
   const nvTruoc = await getSettingJson<unknown>(PAYROLL_EMPLOYEES_KEY, { list: [] });
   await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [{ id: "warm-nv", name: "NV làm ấm", shortName: "NV", department: "", aliases: [], accountIds: [], fixed: 0, percentTotal: 0, percentPersonal: 0, percentRevenue: 0, active: true, note: "" }] });
   try {
-    clearMemo();
+    // Đặt lại SẠCH (clearMemoAll): `clearMemo` sau lượt ghi cố ý giữ cũ khoá riêng /work (OD-UX-05 2c) — phép so tập khoá cần nguội thật.
+    clearMemoAll();
     await adaptPayrollRecon(new Date());
     const khoaLuong = memoKeys();
     assert.ok(khoaLuong.some((k) => k.startsWith("work:payroll-recon:")), "chuẩn bị: nguồn lương đọc qua đệm riêng của nó");
-    clearMemo();
+    clearMemoAll();
     // Bộ đếm nhịp MỚI: bước (3) vừa chạy job, mục nhịp 12 phút sẽ bị bỏ «chưa tới nhịp».
     await runWarms(workWarmTasks(), { lastRun: new Map() });
     const amLuong = new Set(memoKeys());
