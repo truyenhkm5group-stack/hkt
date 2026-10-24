@@ -526,6 +526,13 @@ for i in $(seq 1 60); do
 done
 docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health 2>/dev/null | grep -q '"ok":true' && say "ERP đã chạy" || warn "ERP chưa phản hồi, xem log: $COMPOSE logs -f app"
 
+# ═══ LÀM ẤM TRANG NẶNG — NGAY SAU HEALTH, TRƯỚC MỌI BƯỚC KHÁC (lib/constants/deploy-warm.ts) ═══
+# Caddy đã chuyển traffic sang container mới. Lượt ĐẦU tới một tuyến phải nạp bundle máy chủ của tuyến đó trước khi
+# flush được khung loading: đo 24/10/2026, /reports/returns đầu phản hồi 5,6 s ở lượt đầu → 1,0 s khi module đã ấm.
+# Smoke chạm tuyến này rất muộn, nên người dùng thật trong cửa sổ đó trả trọn giá. Không bao giờ chặn deploy.
+say "Làm ấm các trang nặng (trước smoke)"
+docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/warm-pages.ts || warn "Làm ấm trang nặng KHÔNG chạy được — người mở trang đầu tiên sau deploy sẽ chờ lâu hơn."
+
 # ═══ SAO LƯU TỰ ĐỘNG — CÀI LỊCH Ở MỌI LẦN DEPLOY (idempotent) ═══
 # Toàn bộ luật sao lưu nằm ở scripts/erp-backup.sh; ở đây chỉ cài cron hệ thống gọi nó. KHÔNG chạy
 # một lượt sao lưu trong lúc deploy: deploy đang cầm khoá vòng đời ĐỘC QUYỀN, còn sao lưu cần khoá

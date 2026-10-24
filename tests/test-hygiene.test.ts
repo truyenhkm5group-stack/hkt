@@ -351,6 +351,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "`src.indexOf('process.env.ERP_READ_ONLY = \"1\"')` là quét MÃ NGUỒN để đòi script bật cờ chỉ-đọc, không phải đọc môi trường. Bộ gác không tách được chuỗi trong dấu nháy nên khai ở đây.",
   "tests/purchasing-leadtime-probe.test.ts":
     "`src.indexOf('process.env.ERP_READ_ONLY = \"1\"')` là quét MÃ NGUỒN để đòi ops purchasing-leadtime-probe bật cờ chỉ-đọc TRƯỚC khi nạp @/db, không phải đọc môi trường. Bộ gác không tách được chuỗi trong dấu nháy nên khai ở đây.",
+  "tests/deploy-warm.test.ts":
+    "`sc.indexOf('process.env.ERP_READ_ONLY = \"1\"')` là quét MÃ NGUỒN để đòi scripts/warm-pages.ts bật cờ chỉ-đọc TRƯỚC khi nạp @/db, không phải đọc môi trường. Bộ gác không tách được chuỗi trong dấu nháy nên khai ở đây.",
   "tests/returns-page-probe.test.ts":
     "`src.indexOf('process.env.ERP_READ_ONLY = \"1\"')` là quét MÃ NGUỒN để đòi ops returns-page-probe bật cờ chỉ-đọc TRƯỚC khi nạp @/db, không phải đọc môi trường. Bộ gác không tách được chuỗi trong dấu nháy nên khai ở đây.",
   "tests/customer-360.test.ts":
