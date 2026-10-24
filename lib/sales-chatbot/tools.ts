@@ -141,7 +141,7 @@ export type ChatState = {
    */
   directOffer?: import("@/lib/sales-chatbot/short-accept").DirectOffer;
   /** Kết quả đưa lời mua của bình luận sang hộp thư (`recordCommentCarry` — engine.ts), chỉ trên hội thoại BÌNH LUẬN. */
-  commentCarry?: { outcome: string; copied: number; at: string };
+  commentCarry?: { outcome: string; copied: number; at: string; inboxSource?: "PANCAKE_CONV_ID" | "DERIVED_PAGE_PSID" | "NONE" };
   /** Mọi TỔNG / tiền hàng máy chủ đã tính cho các giỏ / đơn nháp trong hội thoại (`noteSeenTotals`) — hàng rào chặn nói lại tổng của giỏ CŨ. */
   seenTotals?: number[];
   /**
@@ -995,8 +995,23 @@ export async function executeTool(name: string, rawInput: unknown, ctx: ToolCont
   return out;
 }
 
+/**
+ * Công cụ GHI (hồ sơ khách / đơn). Lượt đã quyết CHUYỂN NGƯỜI (mốc `state.handoff.at` không sớm hơn đồng hồ lượt `ctx.now` — mọi nguồn:
+ * handoff_to_human, hàng rào khẳng định, hàng rào hỏi lại…) thì chúng trả lỗi, không ghi (P0 HSLC 24/10/2026, ca «Trần Thị Ngọc»: lượt kết
+ * thúc HANDOFF mà đơn #E2867CF0 vẫn được lên). Mốc handoff của lượt TRƯỚC không chặn — AI đã được trả lại hội thoại thì ghi bình thường.
+ */
+export const HANDOFF_BLOCKED_WRITE_TOOLS = ["create_customer", "create_draft_order", "update_draft_order", "confirm_order"] as const;
+export function handoffBlocksWrite(name: string, state: Pick<ChatState, "handoff">, turnClock: Date | undefined): boolean {
+  if (!(HANDOFF_BLOCKED_WRITE_TOOLS as readonly string[]).includes(name) || !state.handoff?.at || !turnClock) return false;
+  const at = Date.parse(state.handoff.at);
+  return Number.isFinite(at) && at >= turnClock.getTime();
+}
+
 async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext): Promise<ToolOutcome> {
   const state: ChatState = structuredClone(ctx.state);
+  if (handoffBlocksWrite(name, state, ctx.now)) {
+    return err("Đã chuyển nhân viên", "Lượt này ĐÃ chuyển nhân viên — KHÔNG lưu khách, KHÔNG lên / sửa / chốt đơn; nhân viên kiểm và làm đơn. KHÔNG nói đã lên đơn.", state);
+  }
   const isBooking = (BOOKING_TOOLS as readonly string[]).includes(name);
   if (isBooking ? !ctx.bookingOn : !(ctx.config.allowedTools as readonly string[]).includes(name) && !(PROCESS_TOOLS as readonly string[]).includes(name)) return err(`${name}: không được bật`, `Công cụ «${name}» không được bật cho bot này.`, state);
   const input = (rawInput && typeof rawInput === "object" ? rawInput : {}) as Record<string, unknown>;

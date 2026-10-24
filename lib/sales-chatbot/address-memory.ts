@@ -892,6 +892,23 @@ function askedFields(sentence: string): Set<AskField> {
 }
 
 /**
+ * Tin KHÁCH là lời phàn nàn bị hỏi lại thông tin nhận hàng — ĐÚNG bộ nhận biết của vế COMPLAINT trong `addressReaskVerdict` (`isComplaint`), áp
+ * lên tin khách TRƯỚC khi gọi câu mẫu / model, và chỉ khi một câu BOT gần đây (`botTexts`, tin «[Shop đã nhắn]» bị bỏ như hàng rào) ĐÃ xin
+ * SĐT / địa chỉ / phường / tên. «robot hả» giữa lúc tư vấn không phải lời phàn nàn bị hỏi lại. HÀM THUẦN.
+ *
+ * Vì sao (P0 HSLC 24/10/2026, ca «Trần Thị Ngọc»): «Địa chỉ gửi rồi mà» sau câu mẫu «xin SĐT + địa chỉ» — hàng rào chỉ đọc chữ model ĐÃ
+ * viết, tức SAU vòng công cụ, nên lượt đã quyết chuyển người mà create_customer + create_draft_order vẫn ghi xong một đơn mới.
+ */
+export function complainsOfContactReask(customerText: string, botTexts: readonly string[]): boolean {
+  if (!isComplaint(customerText)) return false;
+  return botTexts
+    .filter((t) => !SHOP_SAID_RE.test(t))
+    .flatMap(sentencesOf)
+    .filter(isAsking)
+    .some((s) => askedFields(s).size > 0);
+}
+
+/**
  * Câu bot sắp gửi có HỎI LẠI phần địa chỉ / SĐT / tên đã biết / đã hỏi không. Có ⇒ `rest` = các câu còn lại, `note` = lý do cho người
  * vận hành, `handoff` = lý do chuyển người. Không ⇒ `null`.
  *  · Một câu chỉ bị bỏ khi MỌI trường nó xin đều được bỏ (review #855: «xin số điện thoại và địa chỉ» khi đã có SĐT vẫn phải xin địa chỉ).

@@ -82,7 +82,7 @@ import { readConversationControl } from "@/lib/sales-chatbot/conversation-contro
 import { customerHandoffVerdict, nextObjectionTally } from "@/lib/sales-chatbot/handoff-routing-shared";
 import { sellableCatalog } from "@/lib/sales-chatbot/catalog";
 import { allowedImageUrl, describeImages, fetchCustomerImage, IMAGE_PROMPT_RULE, imageLine, VISION_LIMITS } from "@/lib/sales-chatbot/vision";
-import { ADDRESS_GIVEN_PROMPT, ADDRESS_KNOWN_TEXT, ADDRESS_STAFF_TEXT, CONTACT_KNOWN_TEXT, SCHEDULE_NOTED_TEXT, addressKnowledge, addressTextGiven, dropAddressAsks, addressReaskVerdict, continuesSameOrder, isScheduleOnly, knownContactPrompt, knownDeliveryAddressOf, latestCustomerAddress } from "@/lib/sales-chatbot/address-memory";
+import { ADDRESS_GIVEN_PROMPT, ADDRESS_HANDOFF_REASON, ADDRESS_KNOWN_TEXT, ADDRESS_REASK_NOTE, ADDRESS_STAFF_TEXT, CONTACT_KNOWN_TEXT, SCHEDULE_NOTED_TEXT, addressKnowledge, addressTextGiven, complainsOfContactReask, dropAddressAsks, addressReaskVerdict, continuesSameOrder, isScheduleOnly, knownContactPrompt, knownDeliveryAddressOf, latestCustomerAddress } from "@/lib/sales-chatbot/address-memory";
 import { classifyDeliveryQuestion, DELIVERY_HANDOFF_TEXT, deliveryPreferenceOf, deliveryPromiseIn, deliveryReplyViolation, turnDeliverySay } from "@/lib/sales-chatbot/delivery-intent";
 import { asksOrderStatus, asksQuestion, orderStatusSayOf, postSaleFallbackText, postSaleReplyGuard, turnOrderStatusSay } from "@/lib/sales-chatbot/post-sale-guard";
 import { openChatDelayCase } from "@/lib/cs/chat-delay-case";
@@ -1472,6 +1472,17 @@ async function chatTurnCore(
     }
     // Câu bot / page vừa nói — câu mẫu TRÙNG một câu trong số này thì không gửi lại (khách đang trả lời nó).
     const recentSaid = recentShopTexts(msgs, 4);
+    // KHÁCH PHÀN NÀN BỊ HỎI LẠI ⇒ CHUYỂN NGƯỜI NGAY, TRƯỚC câu mẫu và model (P0 HSLC 24/10/2026, ca «Trần Thị Ngọc» — «Địa chỉ gửi rồi mà»).
+    // Trước đây chỉ hàng rào chữ model (`addressReaskVerdict`, sau vòng công cụ) nhận ra lời phàn nàn ⇒ lượt kết thúc HANDOFF nhưng
+    // create_customer + create_draft_order đã ghi một đơn mới. Không vòng công cụ nào ở lượt này; nhân viên kiểm thông tin nhận hàng.
+    if (!st0.handoff && complainsOfContactReask(text, recentSaid)) {
+      const reason = ADDRESS_HANDOFF_REASON.COMPLAINT;
+      const st: ChatState = { ...st0, handoff: { reason, at: now.toISOString() } };
+      if (!isMessagingChannel(opts.channel)) await reply(conv, seq, ADDRESS_STAFF_TEXT);
+      await bump({ status: "HANDOFF", handoffReason: reason, state: st as Record<string, unknown>, turns: conv.turns + 1, lastError: ADDRESS_REASK_NOTE.COMPLAINT });
+      if (isPublicChannel(opts.channel)) await notifySalesChatHandoff(conv.id, reason, st.customer, now, { dedupeKey: `sales-chat:address-guard:${conv.id}:${turnSeq}` }).catch(() => undefined);
+      return { ok: true, view: (await conversationView(conv.id))! };
+    }
     // Tin KHÁCH thô (cũ ⇒ mới) trong cùng cửa sổ — căn cứ đọc ĐỊA CHỈ KHÁCH TỰ GÕ (P0 15/10/2026: dòng model chép vào công cụ có thể mất
     // phường khách đã ghi rõ) và hàng rào «địa chỉ đã biết không hỏi lại» (`address-memory.ts`) — cho CẢ câu mẫu lẫn chữ model (#871).
     const customerTexts = [...msgs.slice(Math.max(0, msgs.length - SALES_CHATBOT_LIMITS.historyMessages)).filter((m) => m.role === "user" && !m.content.some((b) => b.type === "tool_result")).map((m) => textOf(m.content)), text];
@@ -2464,11 +2475,13 @@ export const COMMENT_CARRY_OUTCOMES = ["MOVED", "EXISTING_INBOX", "OPENED_NEW", 
 export type CommentCarryOutcome = (typeof COMMENT_CARRY_OUTCOMES)[number];
 
 /** Ghi kết quả vào `state.commentCarry` của hội thoại bình luận (qua `writeConversation`). Lỗi không làm hỏng lượt trả lời. */
-export async function recordCommentCarry(conversationId: string, outcome: CommentCarryOutcome, copied: number, now: Date): Promise<void> {
+export async function recordCommentCarry(conversationId: string, outcome: CommentCarryOutcome, copied: number, now: Date, inboxSource?: "PANCAKE_CONV_ID" | "DERIVED_PAGE_PSID" | "NONE"): Promise<void> {
   const conv = await loadConversation(conversationId);
   if (!conv) return;
   const st = (conv.state ?? {}) as ChatState;
-  await writeConversation(conversationId, { state: { ...st, commentCarry: { outcome, copied, at: now.toISOString() } } as Record<string, unknown> }, now);
+  // `inboxSource` (P0 24/10/2026): mã hộp thư lấy từ đâu — `PANCAKE_CONV_ID` (Pancake trả đúng dạng page_PSID) · `DERIVED_PAGE_PSID` (dựng
+  // từ page + from_id) · `NONE` (không ra được ⇒ không chép). Đo được bằng ops comment-inbox-link-probe / conv-money-trace --scan.
+  await writeConversation(conversationId, { state: { ...st, commentCarry: { outcome, copied, at: now.toISOString(), ...(inboxSource ? { inboxSource } : {}) } } as Record<string, unknown> }, now);
 }
 
 /** Tin lưu trữ ⇒ dạng `customerTextsSince` đọc (chữ thô, mốc, cờ kết quả công cụ). HÀM THUẦN. */
