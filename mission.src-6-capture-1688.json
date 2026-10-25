@@ -3,7 +3,7 @@
   "mission_id": "src-6-capture-1688",
   "title": "SRC-6: Lưu mẫu từ trang 1688 (tiện ích Chrome + API token)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -44,9 +44,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T11:58:26.238Z",
-  "updated_at": "2026-10-25T12:01:56.644Z",
+  "updated_at": "2026-10-25T12:25:33.871Z",
   "last_heartbeat": "2026-10-25T11:59:04.298Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1068 → 79d19fdf9783cf10827a25f9ecf9ea6c5d1a5410"
+  },
   "handoff": {
     "branch": "claude/src-6-capture-1688",
     "sha": "553d051d1cf7df5b1fd10dcddcb123cf0706ac4d",

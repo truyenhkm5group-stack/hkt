@@ -1,4 +1,3 @@
-{"at":"2026-10-22T09:08:18.271Z","actor":"DESKTOP-56TH98Y:wt-2b-block","kind":"OVERLAP_ACCEPTED","mission":"stuck-audit-2b-block","detail":"OVERLAP_ACCEPTED với stuck-audit-a2-silent: phạm vi scripts/stuck-conversation-audit.ts, tests/stuck-conversation-audit.test.ts — cách tích hợp: chỉ script ops + bài kiểm của nó"}
 {"at":"2026-10-22T09:08:18.271Z","actor":"DESKTOP-56TH98Y:wt-2b-block","kind":"OVERLAP_ACCEPTED","mission":"stuck-audit-2b-block","detail":"OVERLAP_ACCEPTED với stuck-conversation-audit: phạm vi scripts/stuck-conversation-audit.ts — cách tích hợp: chỉ script ops + bài kiểm của nó"}
 {"at":"2026-10-22T09:08:59.438Z","actor":"DESKTOP-56TH98Y:wt-2b-block","kind":"HANDOFF","mission":"stuck-audit-2b-block","detail":"claude/stuck-audit-2b-block @ 27195b10c249 · 4 lệnh kiểm thử"}
 {"at":"2026-10-22T09:09:35.358Z","actor":"DESKTOP-56TH98Y:wt-perf-reason","kind":"CLAIM","mission":"perf-probe-reason-report","detail":"PLANNING · 1 mẫu phạm vi · MEDIUM"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-25T12:08:33.197Z","actor":"DESKTOP-56TH98Y:wt-flush","kind":"HANDOFF","mission":"returns-flush-timeline","detail":"claude/returns-flush-timeline @ 9cdc9f9df713 · 1 lệnh kiểm thử"}
 {"at":"2026-10-25T12:10:22.090Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"returns-flush-timeline","detail":"#1069 cho claude/returns-flush-timeline @ 9cdc9f9df713"}
 {"at":"2026-10-25T12:11:01.855Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#1069 @ 9cdc9f9df713 · review lead: chỉ scripts/returns-page-probe.ts, đo dòng thời gian xả (mốc chữ KPI, khối phân tích, dấu $RC/$RS) trên lượt HTTP; chỉ đọc."}
+{"at":"2026-10-25T12:25:33.907Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"src-6-capture-1688","detail":"#1068 @ 553d051d1cf7 → 79d19fdf9783 (MERGE_ISOLATED · HIGH · gates success)"}
