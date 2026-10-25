@@ -26,18 +26,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T12:43:28.075Z",
-  "updated_at": "2026-10-25T12:46:30.296Z",
-  "last_heartbeat": "2026-10-25T12:44:07.602Z",
+  "updated_at": "2026-10-25T14:26:27.122Z",
+  "last_heartbeat": "2026-10-25T14:26:27.122Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/src-6-capture-hardening",
-    "sha": "f751e38218bde7e17142487bfd681bd907e66f9c",
-    "at": "2026-10-25T12:44:07.602Z",
+    "sha": "ae66658df5852672cb4620aba2128cca48f91f62",
+    "at": "2026-10-25T14:26:27.122Z",
     "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
     "title": "SRC-6 gia cố: trần tần suất theo token + đọc thân có trần + README rủi ro nonce",
     "summary": "",
     "tests": [
-      "rebase lên main 63a731d40: tsc sạch, sourcing-capture XONG; trước rebase: eslint sạch, TEST_SHARD=4/4 ĐẠT; kiểm đột biến request.text() ⇒ đỏ «đã kéo 5701632 byte»"
+      "@ae66658df: gates CI XANH đủ 4/4 shard cả lượt ẩn danh lẫn token giả (lead xác nhận); sửa HOLDER_DA_KHAI cho __erpSourcingCaptureBuckets (khoá <mã tổ chức>:<token> đã kiểm); cục bộ: tsc + eslint sạch, sourcing-capture XONG; lượt chạy đủ 4 shard cục bộ trên cây này ĐANG CHẠY (chưa xong)"
     ]
   }
 }
