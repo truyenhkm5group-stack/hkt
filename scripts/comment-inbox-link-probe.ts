@@ -20,6 +20,9 @@
                THẬT tìm bằng CHÍNH mã tin riêng (dòng tin có `message_id` = «m_…» — tiếng vọng của tin bot vừa gửi, khoá xác định, không
                ghép theo chữ) · hộp thư ấy có hội thoại riêng không (khách đang có HAI hội thoại) · đơn còn sống. Tóm tắt công khai chỉ số
                đếm GỘP, không mã tổ chức.
+               `<mã tổ chức>|--all --dup-threads [--days=1..60]` (P0 24/10/2026, gốc cặp #B1135EC0 / #E0663E84 — CHẠY THỬ, KHÔNG ghi) ⇒
+               luồng (page, thread) có > 1 hội thoại FANPAGE: chủ (visitor_key = khoá của luồng) vs dòng bị đè, trạng thái, đơn còn sống
+               mỗi bên — số để chủ shop quyết sửa dòng trùng cũ (lib/sales-chatbot/thread-owner.ts chặn dòng mới).
   Có tên / SĐT / chữ tin ⇒ cả lượt chạy trong `ma_hoa_ket_qua`; dòng [ops:tom-tat] chỉ số đếm + cờ đúng/sai + mã hội thoại 8 ký tự.
   CHỈ ĐỌC do Postgres ép (`ERP_READ_ONLY=1` trước lần mở kết nối đầu tiên) và hỏi lại phiên.
 */
@@ -50,25 +53,27 @@ const PRIVATE_REPLY_THREAD = "__private_reply__";
 /** Dòng của KHÁCH = không phải dòng phía page / bot / chỉ ảnh — đúng cách conv-money-trace gán nhãn «KHÁCH». */
 const CUSTOMER_ROW = sql`coalesce(${schema.salesChatInbound.note}, '') not in ('PAGE_REPLY', 'BOT_SENT', 'MEDIA_ONLY')`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const USAGE = "<mã tổ chức> --conv=<uuid>[,<uuid>…] | <mã tổ chức> --days=1..14 | <mã tổ chức>|--all --legacy-keys [--days=1..60]";
+const USAGE = "<mã tổ chức> --conv=<uuid>[,<uuid>…] | <mã tổ chức> --days=1..14 | <mã tổ chức>|--all --legacy-keys|--dup-threads [--days=1..60]";
 
 export const LEGACY_MAX_DAYS = 60;
 export const LEGACY_DEFAULT_DAYS = 30;
-export type LinkArgs = { code: string | null; all: boolean; legacy: boolean; convs: string[]; days: number | null };
+export type LinkArgs = { code: string | null; all: boolean; legacy: boolean; dup: boolean; convs: string[]; days: number | null };
 
 export function parseLinkArgs(argv: readonly string[]): LinkArgs | { error: string } {
   const all = argv.includes("--all");
   const legacy = argv.includes("--legacy-keys");
+  const dup = argv.includes("--dup-threads");
   const code = (argv.find((a) => !a.startsWith("--")) ?? "").trim();
+  if (legacy && dup) return { error: "--legacy-keys và --dup-threads là hai lượt riêng" };
   if (all && code) return { error: "--all không đi cùng mã tổ chức" };
-  if (all && !legacy) return { error: "--all chỉ dùng với --legacy-keys" };
+  if (all && !legacy && !dup) return { error: "--all chỉ dùng với --legacy-keys / --dup-threads" };
   if (!all && !/^[a-z0-9][a-z0-9-]{1,40}$/.test(code)) return { error: "thiếu / sai mã tổ chức" };
-  if (legacy) {
-    if (argv.some((a) => a.startsWith("--conv="))) return { error: "--legacy-keys không đi cùng --conv" };
+  if (legacy || dup) {
+    if (argv.some((a) => a.startsWith("--conv="))) return { error: `${legacy ? "--legacy-keys" : "--dup-threads"} không đi cùng --conv` };
     const raw = argv.find((a) => a.startsWith("--days="))?.slice(7);
     const d = raw === undefined ? LEGACY_DEFAULT_DAYS : Number(raw);
-    if (!Number.isInteger(d) || d < 1 || d > LEGACY_MAX_DAYS) return { error: `--days (cùng --legacy-keys) phải là số nguyên 1..${LEGACY_MAX_DAYS}` };
-    return { code: all ? null : code, all, legacy, convs: [], days: d };
+    if (!Number.isInteger(d) || d < 1 || d > LEGACY_MAX_DAYS) return { error: `--days phải là số nguyên 1..${LEGACY_MAX_DAYS}` };
+    return { code: all ? null : code, all, legacy, dup, convs: [], days: d };
   }
   const val = (k: string) => argv.find((a) => a.startsWith(`--${k}=`))?.slice(k.length + 3);
   const rawConv = val("conv");
@@ -78,7 +83,7 @@ export function parseLinkArgs(argv: readonly string[]): LinkArgs | { error: stri
   const days = rawDays === undefined ? null : Number(rawDays);
   if (days !== null && (!Number.isInteger(days) || days < 1 || days > LINK_MAX_DAYS)) return { error: `--days phải là số nguyên 1..${LINK_MAX_DAYS}` };
   if (!convs.length && days === null) return { error: "cần --conv=<uuid,…> hoặc --days=N" };
-  return { code, all: false, legacy: false, convs, days };
+  return { code, all: false, legacy: false, dup: false, convs, days };
 }
 
 /** Dáng một mã luồng để so bằng mắt mà không in mã: nhóm chữ số theo độ dài, giữ dấu phân cách («15d_16d»). HÀM THUẦN. */
@@ -354,6 +359,55 @@ async function legacyKeys(db: Db, days: number): Promise<LegacyTally> {
 const legacyLine = (t: LegacyTally) =>
   `${t.conversations} hội thoại mang khoá mã tin «m_…» · khách đang có HAI hội thoại ${t.byVerdict.TWO_CONVERSATIONS} (trong đó còn đơn sống ${t.twoWithOpenOrders}) · có luồng hộp thư, chưa có hội thoại ${t.byVerdict.INBOX_NO_CONVERSATION} · không xác định được luồng thật ${t.byVerdict.ECHO_NOT_FOUND} · đơn còn sống ${t.openOrders}`;
 
+/** Một luồng có > 1 hội thoại FANPAGE: dòng chủ / bị đè. HÀM THUẦN. */
+export type DupRow = { id: string; status: string; owner: boolean; carried: boolean; live: number };
+export type DupTally = { threads: number; rows: number; noOwner: number; nonOwnerWaiting: number; nonOwnerLive: number; ownerLive: number; bothLive: number };
+export const emptyDupTally = (): DupTally => ({ threads: 0, rows: 0, noOwner: 0, nonOwnerWaiting: 0, nonOwnerLive: 0, ownerLive: 0, bothLive: 0 });
+export function tallyDupThread(t: DupTally, rows: readonly DupRow[]): DupTally {
+  const owners = rows.filter((r) => r.owner);
+  const others = rows.filter((r) => !r.owner);
+  const ownerLive = owners.reduce((n, r) => n + r.live, 0);
+  const otherLive = others.reduce((n, r) => n + r.live, 0);
+  return {
+    threads: t.threads + 1,
+    rows: t.rows + rows.length,
+    noOwner: t.noOwner + (owners.length ? 0 : 1),
+    nonOwnerWaiting: t.nonOwnerWaiting + others.filter((r) => r.status === "WAITING").length,
+    nonOwnerLive: t.nonOwnerLive + otherLive,
+    ownerLive: t.ownerLive + ownerLive,
+    bothLive: t.bothLive + (ownerLive > 0 && otherLive > 0 ? 1 : 0),
+  };
+}
+const dupLine = (t: DupTally) =>
+  `${t.threads} luồng có > 1 hội thoại (${t.rows} dòng) · không có chủ ${t.noOwner} · dòng bị đè đang WAITING ${t.nonOwnerWaiting} · đơn còn sống: ở dòng bị đè ${t.nonOwnerLive} · ở chủ ${t.ownerLive} · luồng CẢ HAI bên có đơn sống ${t.bothLive}`;
+
+/** Luồng (page, thread) có > 1 hội thoại FANPAGE, ít nhất một dòng hoạt động trong `days` ngày. CHỈ ĐỌC. */
+async function dupThreads(db: Db, days: number): Promise<DupTally> {
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const groups = rowsOf<{ page_id: string; thread_id: string; rows: DupRow[] }>(
+    await db.execute(sql`
+      select c.page_id, c.thread_id,
+        json_agg(json_build_object(
+          'id', c.id, 'status', c.status::text,
+          'owner', c.visitor_key = encode(sha256(convert_to('fanpage:' || c.page_id || ':' || c.thread_id, 'UTF8')), 'hex'),
+          'carried', c.state ? 'carriedTo',
+          'live', (select count(*) from orders o where o.sales_conversation_id = c.id and o.stage::text not in ('CANCELLED', 'DELETED'))
+        ) order by c.created_at) as rows
+      from sales_chat_conversations c
+      where c.channel = 'FANPAGE' and c.page_id is not null and c.thread_id is not null
+      group by c.page_id, c.thread_id
+      having count(*) > 1 and max(c.updated_at) >= ${since}::timestamptz
+      limit 2000`),
+  );
+  let t = emptyDupTally();
+  for (const g of groups) {
+    const rows = (Array.isArray(g.rows) ? g.rows : []).map((r) => ({ id: String(r.id), status: String(r.status), owner: Boolean(r.owner), carried: Boolean(r.carried), live: Number(r.live) || 0 }));
+    t = tallyDupThread(t, rows);
+    console.log(`  luồng dáng ${idShape(g.thread_id)} · ${rows.map((r) => `${r.id.slice(0, 8)} ${r.status}${r.owner ? " CHỦ" : " bị đè"}${r.carried ? " carriedTo" : ""} · đơn sống ${r.live}`).join(" | ")}`);
+  }
+  return t;
+}
+
 /** Mở CSDL tổ chức ở chế độ CHẨN ĐOÁN, hỏi lại phiên chỉ đọc, gắn handle, chạy `fn` trong ngữ cảnh tổ chức. */
 async function inOrg<T>(org: { code: string; isHome: boolean }, fn: (db: Db) => Promise<T>): Promise<T | "NOT_READ_ONLY"> {
   const db: Db = await getDbForInspection(org);
@@ -368,6 +422,28 @@ async function main() {
   if ("error" in args) {
     tomTat(`comment-inbox-link-probe: DỪNG · cách dùng sai — ${args.error} (arg: ${USAGE})`);
     process.stdout.write("", () => process.exit(2));
+    return;
+  }
+  if (args.dup) {
+    const days = args.days ?? LEGACY_DEFAULT_DAYS;
+    const orgs = args.all ? (await listOrganizations()).filter((x) => x.status === "ACTIVE") : [await findOrganization(args.code ?? "")].filter((x): x is NonNullable<typeof x> => Boolean(x));
+    let total = emptyDupTally();
+    let unreadable = 0;
+    for (const org of orgs) {
+      console.log(`\n══ ${org.code} · luồng có > 1 hội thoại, hoạt động ${days} ngày (CHẠY THỬ — không ghi)`);
+      const r = await inOrg({ code: org.code, isHome: org.isHome }, (db) => dupThreads(db, days)).catch((e: unknown) => {
+        console.log(`  không đọc được: ${e instanceof Error ? e.message.slice(0, 160) : String(e)}`);
+        return null;
+      });
+      if (r === null || r === "NOT_READ_ONLY") {
+        unreadable += 1;
+        continue;
+      }
+      console.log(`  ${dupLine(r)}`);
+      total = { threads: total.threads + r.threads, rows: total.rows + r.rows, noOwner: total.noOwner + r.noOwner, nonOwnerWaiting: total.nonOwnerWaiting + r.nonOwnerWaiting, nonOwnerLive: total.nonOwnerLive + r.nonOwnerLive, ownerLive: total.ownerLive + r.ownerLive, bothLive: total.bothLive + r.bothLive };
+    }
+    tomTat(`dup-threads ${days} ngày (CHẠY THỬ): ${orgs.length} tổ chức · ${unreadable} không đọc được · ${dupLine(total)}`);
+    process.stdout.write("", () => process.exit(unreadable ? 1 : 0));
     return;
   }
   if (args.legacy) {
