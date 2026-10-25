@@ -179,7 +179,8 @@ export const PAGE_BLOCKED_CODES = [{ page: "aura - thoi trang nu cao cap", codes
 
 // Page ban MAU MOI CHUA CO TREN POS: khong dung danh muc POS (khong ma, mau, size, anh cua mau khac), khong len don POS
 // tu dong. Chu shop 13/10/2026 (AURA): sau khi chan Q005 bot lai chot "Dam Q004 mau Do" + anh Q004 — page chi co mau moi.
-export const PAGE_OFF_CATALOG = ["aura - thoi trang nu cao cap"];
+// Jax Shop (chu shop 25/10/2026): page ban do the thao nam hang US/UK order, khong co mau nao trong danh muc dam POS.
+export const PAGE_OFF_CATALOG = ["aura - thoi trang nu cao cap", "jax shop - chuyen hang us uk chinh hang gia tot"];
 
 // Page chi ban MOT mau dam (chu shop 17/10/2026, Hoa Tra Fashion CS1: "page nay rep Q002 giong page Linh Tay Luxury").
 // Moi ma DAM khac (Q…) bi chan o page do: anh khach gui nhan dien ra mau dam khac (Q005 trong giong Q002) thi hieu la ma nay,

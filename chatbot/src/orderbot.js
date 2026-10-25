@@ -31,6 +31,25 @@ const PAGE_DEFAULT_PRODUCT_SEED = [
 ];
 
 
+// Cai dat MOT lan cho page theo ten (chu shop gui thong tin qua chat, khong co man hinh sua bang size / thoi gian giao rieng).
+// Chi ghi o trong (`ifEmpty`) hoac ghi de khi khoa moi; nguoi sua lai sau do khong bi ghi de nua.
+// Jax Shop (25/10/2026): set gio NIKE tuyen Anh navy, bang size form US cua chu shop, giao 7–9 ngay (hang order), xung "anh".
+const JAX_SIZE_CHART = '[{"h":[130,167.9],"w":[[40,63.9,"XS"],[64,73.9,"S"],[74,83.9,"M"],[84,93.9,"L"],[94,110,"XL"]]},{"h":[168,174.9],"w":[[40,63.9,"S"],[64,73.9,"S"],[74,83.9,"M"],[84,93.9,"L"],[94,110,"XL"]]},{"h":[175,179.9],"w":[[40,63.9,"M"],[64,73.9,"M"],[74,83.9,"M"],[84,93.9,"L"],[94,110,"XL"]]},{"h":[180,184.9],"w":[[40,63.9,"L"],[64,73.9,"L"],[74,83.9,"L"],[84,93.9,"L"],[94,110,"XL"]]},{"h":[185,220],"w":[[40,63.9,"XL"],[64,73.9,"XL"],[74,83.9,"XL"],[84,93.9,"XL"],[94,110,"XL"]]}]';
+export const PAGE_PROFILE_SEED = [
+  {
+    key: "jax-2026-10-25",
+    page: "jax shop - chuyen hang us uk chinh hang gia tot",
+    set: {
+      ownPrompt: true,
+      customerTitle: "anh",
+      deliveryDays: "7–9",
+      sizeChart: JAX_SIZE_CHART,
+      sizeNote: "(size form US — rộng hơn size Việt Nam)",
+    },
+    ifEmpty: { extraPrompt: "SHOP: Jax Shop – chuyên hàng US/UK chính hãng. Khách chủ yếu là nam: gọi khách là \"anh\" (khách nữ thì \"chị\"), xưng \"em\".\n\nSẢN PHẨM ĐANG BÁN: Set gió NIKE tuyển Anh màu xanh navy – chính hãng, order Mỹ, lẻ size.\n- Giá: đang sale 799.000đ / 1 set (giá gốc 2.350.000đ). Chỉ báo đúng giá này, không tự giảm thêm.\n- Chất liệu: Polyester cao cấp, 2 lớp; form áo may tỉ mỉ, đường nét chắc chắn.\n- Size: XS, S, M, L, XL – form US (rộng hơn size Việt Nam, ví dụ XS form US tương đương M Việt Nam). Size tra theo bảng size của page (hệ thống tự tra theo chiều cao + cân nặng), không tự đoán.\n- Chính sách: thanh toán khi nhận hàng (COD); khách được mặc thử áo khi nhận, không vừa shop đổi size.\n- Thời gian giao: hàng order nên khoảng 7–9 ngày.\n- Phí ship: chưa có thông tin — khách hỏi thì nói em kiểm tra rồi báo anh ngay, KHÔNG tự nêu số.\n\nKỊCH BẢN: chào + báo giá ngắn gọn → xin chiều cao, cân nặng để tư vấn size → báo size → xin tên, số điện thoại, địa chỉ nhận hàng → tóm tắt đơn (Set gió NIKE tuyển Anh navy, size, giá, SĐT, địa chỉ) để khách xác nhận.\nMẫu câu mở đầu: \"Dạ em chào anh, set gió NIKE chính hãng order Mỹ lẻ size bên em đang sale 799k 1 set (giá gốc 2350k) ạ. Anh được mặc thử áo khi nhận, không vừa bên em đổi size nha. Anh cho em xin chiều cao, cân nặng để em tư vấn size chuẩn ạ?\"" },
+  },
+];
+
 // Quet lai MOT lan cac hoi thoai co SDT 15 ngay qua cua page (chu shop 06/10/2026: "check cac don tren page nay don moi dien dung dia
 // chi san pham roi xac nhan"): hoi thoai trong `hours` gio qua chua xac nhan duoc kiem lai ngay -> dien don nhap, du dieu
 // kien thi tu xac nhan, thieu (vd khach chi ghi ten cua hang, khong co xa/huyen/tinh) thi sang "can duyet" kem ly do.
@@ -594,6 +613,17 @@ export class OrderBot {
     for (const [pid, ten] of this.bot.pageNames) {
       // Ten Pancake tai sau khi khoi dong -> xet ca hai ten; sweep goi lai nen page doi ten muon van duoc ap
       const cacTen = [ten, this.bot.pancakeNames?.get(pid)].map(khongDau);
+      for (const pr of PAGE_PROFILE_SEED) {
+        const k = `${pid}:profile:${pr.key}`;
+        if (daAp[k] || !cacTen.includes(pr.page)) continue;
+        daAp[k] = Date.now();
+        const cur = settings.get(pid);
+        const them = { ...pr.set };
+        for (const [f, v] of Object.entries(pr.ifEmpty || {})) if (!String(cur[f] || "").trim()) them[f] = v;
+        settings.update(pid, them);
+        log.info(`[orderbot] page ${ten}: ap cai dat ${pr.key} (${Object.keys(them).join(", ")})`);
+        out.push(pid);
+      }
       // Mau chu luc dang la ma page KHONG ban -> bo (moi page mot lan), de bot chat / bot len don khong mac dinh ma do nua
       const cam = blockedCodesFor(cacTen);
       const dangCo = String(settings.get(pid).defaultProduct || "").trim().toUpperCase();

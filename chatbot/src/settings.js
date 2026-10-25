@@ -43,6 +43,7 @@ const DEFAULTS = {
   ownPrompt: false, // true = page dung rieng huong dan cua minh, KHONG dung kich ban chung (vd page ban do nam)
   sizeChart: "",
   sizeNote: "", // ghi chu kem theo khi bao size (vd quy doi size VN)
+  deliveryDays: "", // thoi gian giao RIENG cua page ("7–9"); trong = theo cai dat chung
   saleEnabled: false,
   saleTrigger: "", // tu khoa nhan biet trong tin cua shop, cach nhau bang |
   salePrompt: "", // huong dan/bang gia chi dung khi hoi thoai dang chay khuyen mai
@@ -147,7 +148,10 @@ class Settings {
    * THOI GIAN GIAO HANG bot hen khach ("5–7" ngay). Mot cho duy nhat: dua vao prompt va sua lai moi cau hen so ngay
    * khac trong tra loi (prompt chung / huong dan rieng cu con ghi "2–4 ngay"). Chu shop doi 30/09/2026: 5–7 ngay.
    */
-  deliveryDays() {
+  deliveryDays(pageId) {
+    // Page ban hang order (vd Jax Shop, hang US/UK) giao lau hon page dam: thoi gian RIENG cua page thang cai dat chung
+    const rieng = pageId !== undefined ? String(this.get(pageId).deliveryDays || "").trim() : "";
+    if (/^\d{1,2}–\d{1,2}$/.test(rieng)) return rieng;
     return String(this.global.deliveryDays || DEFAULT_DELIVERY_DAYS);
   }
 
