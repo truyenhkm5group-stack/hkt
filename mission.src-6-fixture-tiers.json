@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "src-6-fixture-tiers",
+  "title": "SRC-6: fixture 951023546393 (bậc giá thật, dữ liệu đã dịch) + nhận tên thuộc tính đã dịch",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/src-6-fixture-tiers",
+  "base_sha": "22dabf6444077fa7318e4f94bebc0ec371c64e72",
+  "domains": [],
+  "owned_paths": [
+    "extensions/sourcing-1688/",
+    "lib/sourcing/",
+    "tests/fixtures/sourcing-1688/",
+    "tests/sourcing-capture.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-25T16:31:44.923Z",
+  "updated_at": "2026-10-25T16:31:44.923Z",
+  "last_heartbeat": "2026-10-25T16:31:44.923Z",
+  "definition_of_done": []
+}
