@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "src-6-capture-hardening",
+  "title": "SRC-6 gia cố: trần tần suất theo token + đọc thân có trần + README rủi ro nonce",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/src-6-capture-hardening",
+  "base_sha": "63a731d40c135bf3eb88863836a5a66cdd1e4c9a",
+  "domains": [],
+  "owned_paths": [
+    "app/api/sourcing/capture/",
+    "extensions/sourcing-1688/",
+    "lib/constants/",
+    "lib/sourcing/",
+    "tests/sourcing-capture.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-25T12:43:28.075Z",
+  "updated_at": "2026-10-25T12:43:28.075Z",
+  "last_heartbeat": "2026-10-25T12:43:28.075Z",
+  "definition_of_done": []
+}
