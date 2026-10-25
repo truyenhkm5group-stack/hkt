@@ -3,7 +3,7 @@
   "mission_id": "vtp-gap-skew",
   "title": "vtp-direct-sync (1): lệch đồng hồ tệp ↔ webhook ≤ 120 s không phải rơi gói",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-vds",
@@ -28,9 +28,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T17:18:44.166Z",
-  "updated_at": "2026-10-25T17:22:30.448Z",
+  "updated_at": "2026-10-25T17:42:30.112Z",
   "last_heartbeat": "2026-10-25T17:19:33.513Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1076 → b65521872fcc11610c616df82fb263592ba9a1e5"
+  },
   "handoff": {
     "branch": "claude/vtp-gap-skew",
     "sha": "226bc0ed8e3bba5cc12b62ddbc4d99c1187ee665",
