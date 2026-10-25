@@ -1,0 +1,8 @@
+{
+  "pr": 1068,
+  "sha": "553d051d1cf7df5b1fd10dcddcb123cf0706ac4d",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T12:02:02.006Z",
+  "note": "review lead (bảo mật): route công khai gác bằng authenticateCaptureToken — token 32 byte ngẫu nhiên, chỉ lưu băm sha256 trong CSDL của tổ chức ghi ở tiền tố, mỗi lượt kiểm người đang bật + sourcing:write + module + thu phí, thân chỉ đọc sau khi qua cổng; tiện ích chỉ gửi theo danh sách cho phép 25 đường (máy chủ lọc lại), credentials omit, sender phải là detail.1688.com; migration 0260 chỉ nới CHE"
+}
