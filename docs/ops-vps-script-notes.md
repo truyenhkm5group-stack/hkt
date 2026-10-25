@@ -566,6 +566,17 @@ Mọi cụm chú thích từ 4 dòng liền nhau trở lên chuyển NGUYÊN VĂ
 # CHÍNH mã tin riêng; KHÔNG ghi, KHÔNG đổi khoá, KHÔNG gộp. Tóm tắt chỉ số gộp, không mã tổ chức.
 ```
 
+### `app-log-evt-count)`
+
+```
+# ĐẾM DÒNG SỰ KIỆN JSON TRONG LOG CỦA APP (scripts/app-log-evt-count.ts — 25/10/2026) — CHỈ ĐỌC, KHÔNG mở CSDL, không gọi mạng.
+# `docker logs -t --since 72h erp-app` đi vào STDIN của script (không ra log công khai); script chỉ đếm theo bộ (evt · code · source)
+# — ba trường là TÊN trong mã nguồn, mọi trường khác (mã hội thoại, số) bị bỏ. Dùng cho hàng rào CHẶN câu bot: câu không được gửi thì
+# không có dòng CSDL nào cho 2B (vd address_ask_dropped · KNOWN_ADDRESS_REASKED · source COMMENT của #1060). Kèm PHỦ: mốc dòng đầu /
+# cuối — container khởi động lại sau mỗi deploy, «0 lần» chỉ có nghĩa trong khoảng log thật sự có.
+# arg: "[--hours=1..72 | --since=<ISO>] [--evt=<tên>]" (mặc định 24 giờ, mọi evt; script soát).
+```
+
 ### `inbox-read-audit)` (dòng 1211)
 
 ```
