@@ -3,7 +3,7 @@
   "mission_id": "returns-kpi-parts-timing",
   "title": "returns-page-probe 1c: mốc xong từng lời hứa + thân chính KPI muộn nhất của bốn thứ nó chờ",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-kpiparts",
@@ -22,9 +22,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T12:51:29.653Z",
-  "updated_at": "2026-10-25T12:53:55.811Z",
+  "updated_at": "2026-10-25T13:15:27.384Z",
   "last_heartbeat": "2026-10-25T12:52:11.885Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1071 → 289c2e984356757bad7163781e71c9e822aa3c55"
+  },
   "handoff": {
     "branch": "claude/returns-kpi-parts-timing",
     "sha": "9d44858b7747e7424deafad41c73f9e68d91141f",
