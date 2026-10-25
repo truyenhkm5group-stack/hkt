@@ -1,0 +1,8 @@
+{
+  "pr": 1073,
+  "sha": "4d92188f971ce3f9cfe02f93644cc5071fc03bc8",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T14:37:51.227Z",
+  "note": "review lead: chỉ lib/queries/returns-report-page.ts + bài kiểm; SAU CỜ reports.returns-kpi-first mặc định TẮT (chỉ {on:true} mới bật, đọc lỗi ⇒ tắt, memo 30 s); cờ bật: summary + 2 danh mục + dự báo PRODUCT cùng khoá đệm chạy ngay, nhánh khác chờ summary hoặc trần 800 ms; lời gọi/tham số/khoá đệm không đổi, không chạm ORDER_OUTCOME; bài bật/tắt so nguyên 17 trường."
+}
