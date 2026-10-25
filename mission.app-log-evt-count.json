@@ -3,7 +3,7 @@
   "mission_id": "app-log-evt-count",
   "title": "ops app-log-evt-count: đếm dòng sự kiện JSON trong log app (lần hàng rào chặn câu bot)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-logevt",
@@ -24,7 +24,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-25T06:55:35.319Z",
-  "updated_at": "2026-10-25T06:55:35.319Z",
-  "last_heartbeat": "2026-10-25T06:55:35.319Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-25T06:56:18.746Z",
+  "last_heartbeat": "2026-10-25T06:56:18.746Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/app-log-evt-count",
+    "sha": "2f87bb78df49e681c850b2ab1eda5ad7158391ab",
+    "at": "2026-10-25T06:56:18.746Z",
+    "actor": "DESKTOP-56TH98Y:wt-logevt",
+    "title": "ops app-log-evt-count: đếm dòng sự kiện JSON trong log app (lần hàng rào chặn câu bot)",
+    "summary": "Thao tác ops mới CHỈ ĐỌC, không mở CSDL: docker logs -t --since 72h erp-app vào STDIN, đếm theo (evt · code · source) trong cửa sổ --hours/--since, in phủ log (mốc đầu/cuối). Để đo address_ask_dropped/KNOWN_ADDRESS_REASKED source COMMENT của #1060 — câu bị chặn không có dòng CSDL nào cho 2B.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint: sạch",
+      "TEST_KHOI=K10,K15,K17,K18: TẤT CẢ ĐẠT",
+      "TEST_KHOI=K20,K22: TẤT CẢ ĐẠT"
+    ]
+  }
 }
