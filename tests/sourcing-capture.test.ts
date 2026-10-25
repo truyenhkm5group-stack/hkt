@@ -25,6 +25,7 @@ import { listOfferCaptures } from "@/lib/queries/sourcing";
 import { deriveCapture } from "@/lib/sourcing/capture";
 import { filterPicks, parse1688Detail, pickFromContext, PICK_PATHS_1688 } from "@/lib/sourcing/capture-1688";
 import { createCaptureToken, hashCaptureSecret, revokeCaptureToken, takeCaptureSlot } from "@/lib/sourcing/capture-tokens";
+import { buildExtensionPackage, crc32, EXTENSION_DIR } from "@/lib/sourcing/extension-package";
 import { parseSizeChart } from "@/lib/sourcing/size-chart";
 
 const ORG_A = "cap-a";
@@ -155,6 +156,64 @@ function testRateLimit() {
   assert.ok(takeCaptureSlot("rl-org", "rl-tok", t0 + SOURCING_CAPTURE_RATE.refillMs).ok, "đợi một nhịp ⇒ đúng một lượt");
   assert.ok(!takeCaptureSlot("rl-org", "rl-tok", t0 + SOURCING_CAPTURE_RATE.refillMs).ok);
   assert.ok(SOURCING_CAPTURE_RATE.burst * (60_000 / SOURCING_CAPTURE_RATE.refillMs) >= 30, "nhịp bền vững ≈ 30 lượt / phút");
+}
+
+/** Đọc zip «stored» bằng central directory — độc lập với bộ dựng, để bài kiểm không tự xác nhận chính nó. */
+function readZip(zip: Buffer): { name: string; method: number; crc: number; data: Buffer }[] {
+  const eocd = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  assert.ok(eocd >= 0, "zip có end-of-central-directory");
+  const count = zip.readUInt16LE(eocd + 10);
+  let p = zip.readUInt32LE(eocd + 16);
+  const out: { name: string; method: number; crc: number; data: Buffer }[] = [];
+  for (let i = 0; i < count; i++) {
+    assert.equal(zip.readUInt32LE(p), 0x02014b50, "chữ ký central directory");
+    const method = zip.readUInt16LE(p + 10);
+    const crc = zip.readUInt32LE(p + 16);
+    const size = zip.readUInt32LE(p + 20);
+    const nameLen = zip.readUInt16LE(p + 28);
+    const extraLen = zip.readUInt16LE(p + 30);
+    const commentLen = zip.readUInt16LE(p + 32);
+    const local = zip.readUInt32LE(p + 42);
+    const name = zip.subarray(p + 46, p + 46 + nameLen).toString("utf8");
+    assert.equal(zip.readUInt32LE(local), 0x04034b50, `${name}: chữ ký local header`);
+    const lNameLen = zip.readUInt16LE(local + 26);
+    const lExtraLen = zip.readUInt16LE(local + 28);
+    const start = local + 30 + lNameLen + lExtraLen;
+    out.push({ name, method, crc, data: zip.subarray(start, start + size) });
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return out;
+}
+
+function testExtensionPackage() {
+  assert.equal(crc32(Buffer.from("123456789")), 0xcbf43926, "CRC-32 chuẩn (vector kiểm của IEEE 802.3)");
+  const pkg = buildExtensionPackage();
+  const manifest = JSON.parse(readFileSync(`${EXTENSION_DIR}/manifest.json`, "utf8")) as { version: string; background: { service_worker: string }; options_page: string; content_scripts: { js: string[] }[] };
+  const declared = new Set(["manifest.json", "README.md", manifest.background.service_worker, manifest.options_page, ...manifest.content_scripts.flatMap((c) => c.js)]);
+  for (const m of readFileSync(`${EXTENSION_DIR}/${manifest.options_page}`, "utf8").matchAll(/<script[^>]*\ssrc="([^"]+)"/g)) declared.add(m[1]);
+  assert.deepEqual(pkg.files, [...declared].sort(), "gói chứa ĐÚNG các tệp manifest khai (+ script trang cài đặt nạp + README)");
+  assert.deepEqual(readdirSync(EXTENSION_DIR).sort(), pkg.files, "thư mục tiện ích không có tệp nào manifest không nhắc tới — tệp lạ không lọt vào gói, cũng không nằm im ngoài gói");
+  assert.equal(pkg.version, manifest.version);
+  assert.equal(pkg.filename, `VNX-Luu-mau-1688-v${manifest.version}.zip`, "tên tệp mang phiên bản");
+  const entries = readZip(pkg.zip);
+  assert.deepEqual(entries.map((e) => e.name), pkg.files.map((f) => `VNX-Luu-mau-1688-v${manifest.version}/${f}`), "mọi tệp nằm dưới MỘT thư mục gốc — giải nén ra gọn, chọn đúng thư mục đó ở «Tải tiện ích đã giải nén»");
+  for (const e of entries) {
+    const file = e.name.split("/").slice(1).join("/");
+    assert.equal(e.method, 0, `${file}: stored`);
+    assert.ok(e.data.equals(readFileSync(`${EXTENSION_DIR}/${file}`)), `${file}: đúng từng byte của mã nguồn`);
+    assert.equal(e.crc, crc32(e.data), `${file}: CRC khớp`);
+    const text = e.data.toString("utf8");
+    assert.ok(!/vnxs1\.[a-z0-9][a-z0-9-]{0,62}\.[A-Za-z0-9_-]{43}/.test(text), `${file}: không có token`);
+    const hosts = [...text.matchAll(/https?:\/\/([^/\s"'`)<>]+)/g)].map((m) => m[1]);
+    assert.deepEqual(hosts.filter((h) => !["detail.1688.com", "*", "localhost", "…", "<tên miền ERP của shop>"].includes(h)), [], `${file}: không mang địa chỉ ERP / máy chủ nào ngoài 1688 (thấy ${hosts.join(", ")})`);
+    assert.ok(!/AUTH_SECRET|DATABASE_URL|CRON_SECRET|password\s*[:=]/i.test(text), `${file}: không có bí mật`);
+  }
+  assert.ok(buildExtensionPackage().zip.equals(pkg.zip), "cùng mã nguồn ⇒ cùng byte (mốc giờ trong zip cố định)");
+  const page = readFileSync("app/(dashboard)/sourcing/extension/page.tsx", "utf8");
+  assert.ok(page.includes('href="/api/sourcing/extension"') && page.includes("Tải tiện ích (.zip)"), "trang có nút tải gói");
+  assert.ok(page.includes("KHÔNG hiện ở trang tìm kiếm"), "nói rõ nút chỉ có ở trang chi tiết sản phẩm");
+  const route = readFileSync("app/api/sourcing/extension/route.ts", "utf8");
+  assert.ok(route.includes('can(user, "sourcing:view")') && !/token|erpBase/i.test(route.replace(/\/\*[\s\S]*?\*\//g, "")), "tải gói cần quyền xem; route không chèn token / địa chỉ ERP vào gói");
 }
 
 function testNoSecrets() {
@@ -367,6 +426,7 @@ export async function testSourcingCapture() {
   testAllowlist();
   testExtensionSource();
   testRateLimit();
+  testExtensionPackage();
   testNoSecrets();
   await testDb();
   console.log(

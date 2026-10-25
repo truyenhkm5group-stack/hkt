@@ -8,25 +8,32 @@ tỷ lệ khách quay lại, điểm dịch vụ, nơi gửi hàng, khối lư�
 Tiện ích **chỉ chạy khi bạn bấm**, chỉ trên trang đang mở. Không tự quét, không mở trang khác, không vượt CAPTCHA, **không gửi
 cookie hay tài khoản 1688 của bạn** về ERP. Không bao giờ đặt hàng hay nhắn tin cho nhà cung cấp.
 
-## 1. Lấy thư mục tiện ích
+## 1. Tải tiện ích về máy
 
-Người vận hành gửi tệp nén `sourcing-1688.zip`. Giải nén vào một thư mục **cố định** (vd `D:\VNX\sourcing-1688`). Xoá hay đổi tên
-thư mục này là tiện ích mất — Chrome đọc thẳng từ đó.
+1. Đăng nhập ERP ⇒ **Tìm hàng nguồn** ⇒ nút **Tiện ích lưu mẫu 1688** ở đầu trang.
+2. Bấm **Tải tiện ích (.zip)**. Tệp `VNX-Luu-mau-1688-v….zip` về thư mục **Tải xuống** (Downloads). Tệp không chứa token hay địa chỉ
+   ERP nào — bạn tự dán ở bước 3.
+3. Mở thư mục Tải xuống, **chuột phải** vào tệp ⇒ **Giải nén tất cả…** (Extract All) ⇒ chọn một nơi **CỐ ĐỊNH**, ví dụ thư mục
+   **Tài liệu** (Documents) hoặc ổ **D:** ⇒ **Giải nén**.
+
+   ⚠️ Đừng để trong Tải xuống rồi dọn đi: Chrome đọc tiện ích thẳng từ thư mục này — xoá hay đổi tên thư mục là tiện ích mất.
 
 ## 2. Nạp vào Chrome (một lần cho mỗi máy)
 
-1. Mở Chrome, gõ `chrome://extensions` vào thanh địa chỉ, Enter.
-2. Bật **Chế độ dành cho nhà phát triển** (Developer mode) ở góc trên bên phải.
-3. Bấm **Tải tiện ích đã giải nén** (Load unpacked) ⇒ chọn thư mục `sourcing-1688` ở bước 1.
-4. Thấy thẻ «VNX ERP — Lưu mẫu từ 1688» là xong. Bấm biểu tượng ghim (📌) cạnh thanh địa chỉ để tiện ích luôn hiện.
+1. Mở Chrome, gõ `chrome://extensions` vào thanh địa chỉ (chỗ gõ trang web), bấm **Enter**.
+2. Ở góc trên bên phải, bật công tắc **Chế độ dành cho nhà phát triển** (Developer mode).
+3. Bấm nút **Tải tiện ích đã giải nén** (Load unpacked) vừa hiện ra ⇒ chọn thư mục `VNX-Luu-mau-1688-v…` đã giải nén (thư mục có tệp
+   `manifest.json` bên trong) ⇒ **Chọn thư mục**.
+4. Thấy thẻ «VNX ERP — Lưu mẫu từ 1688» là xong. Bấm biểu tượng **mảnh ghép** 🧩 cạnh thanh địa chỉ ⇒ bấm **ghim** 📌 cạnh tên tiện
+   ích để biểu tượng luôn hiện.
 
-## 3. Dán token
+## 3. Dán token và địa chỉ ERP
 
-1. Trong ERP: **Tìm hàng nguồn › Tiện ích lưu mẫu 1688 › Tạo token cho máy này**, đặt tên máy (vd «Chrome máy văn phòng»), bấm
-   **Tạo token**, bấm **Chép**. Token chỉ hiện MỘT lần.
-2. Bấm biểu tượng tiện ích trên Chrome ⇒ trang **Cài đặt** mở ra.
-3. Dán **Địa chỉ ERP** (phần `https://…` đầu thanh địa chỉ khi bạn mở ERP, tới trước dấu «/» đầu tiên) và **Token**, bấm **Lưu**. Chrome hỏi quyền gửi dữ liệu tới địa chỉ ERP đó ⇒
-   bấm **Cho phép**.
+1. Trong ERP, trang **Tiện ích lưu mẫu 1688** ⇒ khung **Tạo token cho máy này**: đặt tên máy (vd «Chrome máy văn phòng»), bấm **Tạo
+   token**, bấm **Chép**. Token chỉ hiện MỘT lần.
+2. Bấm biểu tượng tiện ích vừa ghim trên Chrome ⇒ trang **Cài đặt** mở ra.
+3. Dán **Địa chỉ ERP** (trang tải tiện ích in sẵn địa chỉ này ở bước 8 — hoặc phần `https://…` đầu thanh địa chỉ khi bạn mở ERP, tới
+   trước dấu «/» đầu tiên) và dán **Token** ⇒ bấm **Lưu** ⇒ Chrome hỏi quyền gửi dữ liệu tới địa chỉ ERP đó ⇒ bấm **Cho phép**.
 
 Mỗi máy một token. Mất máy / nghỉ việc ⇒ vào trang token trong ERP bấm **Thu hồi** — tiện ích trên máy đó bị từ chối ngay lượt sau.
 
@@ -49,8 +56,11 @@ hiển thị, **không** đổi dữ liệu tiện ích đọc — ERP vẫn lư
 
 ## 5. Dùng
 
-Mở một trang `detail.1688.com/offer/<mã>.html` ⇒ bấm nút đỏ **Lưu mẫu vào ERP** ở góc dưới bên phải ⇒ khung báo kết quả hiện ra,
-kèm link **Mở mẫu trong ERP**.
+Mở **trang chi tiết của một sản phẩm** — địa chỉ dạng `detail.1688.com/offer/<mã>.html` — ⇒ bấm nút đỏ **Lưu mẫu vào ERP** ở góc
+**dưới bên phải** ⇒ khung báo kết quả hiện ra, kèm link **Mở mẫu trong ERP**.
+
+> **Không thấy nút?** Nút CHỈ hiện trên trang chi tiết sản phẩm (`detail.1688.com/offer/…`). Nút **KHÔNG** hiện ở trang tìm kiếm,
+> trang chủ 1688 hay trang shop — bấm vào một sản phẩm để mở trang chi tiết của nó.
 
 Khung báo có thể kèm các dòng «•» — đó là chỗ ERP **không kết luận được và để trống**, không phải lỗi:
 
@@ -68,7 +78,7 @@ Khung báo có thể kèm các dòng «•» — đó là chỗ ERP **không k�
 | «Token không hợp lệ hoặc đã thu hồi» | Tạo token mới trong ERP, dán lại |
 | «Không đọc được dữ liệu gốc của trang» | Tải lại trang 1688 (F5), đợi trang hiện giá rồi bấm lại |
 | «Tài khoản của token không còn quyền…» | Nhờ quản trị cấp quyền «Tìm hàng: lưu & sửa mẫu» |
-| Không thấy nút | Kiểm tra đúng trang `detail.1688.com/offer/…`; ở `chrome://extensions` bấm ⟳ tải lại tiện ích |
+| Không thấy nút | Nút chỉ có ở trang chi tiết sản phẩm `detail.1688.com/offer/…` (không có ở trang tìm kiếm / trang chủ / trang shop); tải lại trang (F5); ở `chrome://extensions` kiểm tra tiện ích đang BẬT, bấm ⟳ tải lại |
 
 ## Rủi ro đã biết (Tech Lead chấp nhận 25/10/2026) — cho người bảo trì
 
