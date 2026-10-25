@@ -1,0 +1,274 @@
+{
+ "offerId": "683567693110",
+ "capturedAt": "2026-10-25T10:34:03.780Z",
+ "source": "window.context — đi qua PICK_PATHS_1688 (đúng thứ tiện ích gửi)",
+ "language": "简体中文 · CNY (chữ gốc)",
+ "picks": {
+  "result.data.gallery.fields.subject": "2026春秋季妈妈装收腰修身过膝蝴蝶结V领雪纺长裙连衣裙通勤风",
+  "result.data.gallery.fields.mainImage": [
+   "https://cbu01.alicdn.com/img/ibank/O1CN0130g9IU1nYld4WnmgI_!!4175875102-0-cib.jpg",
+   "https://cbu01.alicdn.com/img/ibank/O1CN013CoQ1K1nYld4CEZ2e_!!4175875102-0-cib.jpg",
+   "https://cbu01.alicdn.com/img/ibank/O1CN01FCgEJo1nYld2bq7d2_!!4175875102-0-cib.jpg",
+   "https://cbu01.alicdn.com/img/ibank/O1CN01Rm7aUd1nYld1cEEE7_!!4175875102-0-cib.jpg",
+   "https://cbu01.alicdn.com/img/ibank/O1CN01AgdxcK1nYld2bt4Zu_!!4175875102-0-cib.jpg"
+  ],
+  "result.data.Root.fields.dataJson.tempModel.offerId": 683567693110,
+  "result.data.Root.fields.dataJson.tempModel.offerTitle": "2026春秋季妈妈装收腰修身过膝蝴蝶结V领雪纺长裙连衣裙通勤风",
+  "result.data.Root.fields.dataJson.tempModel.companyName": "深圳市依多客服装有限公司",
+  "result.data.Root.fields.dataJson.offerBaseInfo.sellerWinportUrl": "https://shop9357vm378e316.1688.com",
+  "result.data.Root.fields.dataJson.skuModel.skuProps": [
+   {
+    "fid": 3216,
+    "prop": "颜色",
+    "value": [
+     {
+      "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01GvNUMO1nYlXITvVny_!!4175875102-0-cib.jpg",
+      "name": "粉色"
+     },
+     {
+      "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01nDQQHF1nYlXLP3tSr_!!4175875102-0-cib.jpg",
+      "name": "绿色"
+     }
+    ]
+   },
+   {
+    "fid": 450,
+    "prop": "尺码",
+    "value": [
+     {
+      "name": "M"
+     },
+     {
+      "name": "L"
+     },
+     {
+      "name": "XL"
+     },
+     {
+      "name": "2XL"
+     }
+    ]
+   }
+  ],
+  "result.data.Root.fields.dataJson.skuModel.skuInfoMap": {
+   "粉色&gt;L": {
+    "specId": "bafa4ffc2633231c41827946e49de47e",
+    "saleCount": 0,
+    "discountPrice": "26.00",
+    "canBookCount": 314,
+    "specAttrs": "粉色&gt;L",
+    "price": "26.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 4890674165043,
+    "isPromotionSku": true
+   },
+   "绿色&gt;2XL": {
+    "specId": "26a1f070d172d4e3de0653f7a0f45eb0",
+    "saleCount": 0,
+    "discountPrice": "26.00",
+    "canBookCount": 0,
+    "specAttrs": "绿色&gt;2XL",
+    "price": "26.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 4890674165052,
+    "isPromotionSku": true
+   },
+   "绿色&gt;L": {
+    "specId": "75c5a5bc426ee6f3d819a42127b165b3",
+    "saleCount": 0,
+    "discountPrice": "26.00",
+    "canBookCount": 1537,
+    "specAttrs": "绿色&gt;L",
+    "price": "26.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 4890674165050,
+    "isPromotionSku": true
+   },
+   "绿色&gt;M": {
+    "specId": "d4f666284d3a40bad1e0149a6a991709",
+    "saleCount": 0,
+    "discountPrice": "26.00",
+    "canBookCount": 1587,
+    "specAttrs": "绿色&gt;M",
+    "price": "26.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 4890674165049,
+    "isPromotionSku": true
+   },
+   "粉色&gt;2XL": {
+    "specId": "c00809cb19979b35f59bdac1715c192c",
+    "saleCount": 0,
+    "discountPrice": "26.00",
+    "canBookCount": 0,
+    "specAttrs": "粉色&gt;2XL",
+    "price": "26.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 4890674165045,
+    "isPromotionSku": true
+   },
+   "粉色&gt;XL": {
+    "specId": "1bbd0acb3b8e6e4b280059fa2e96581b",
+    "saleCount": 0,
+    "discountPrice": "26.00",
+    "canBookCount": 0,
+    "specAttrs": "粉色&gt;XL",
+    "price": "26.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 4890674165044,
+    "isPromotionSku": true
+   },
+   "粉色&gt;M": {
+    "specId": "93186103ae87fb959dde63698680fc1d",
+    "saleCount": 0,
+    "discountPrice": "26.00",
+    "canBookCount": 356,
+    "specAttrs": "粉色&gt;M",
+    "price": "26.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 4890674165042,
+    "isPromotionSku": true
+   },
+   "绿色&gt;XL": {
+    "specId": "6307d3d751a2bb62fa7679a7a458f956",
+    "saleCount": 0,
+    "discountPrice": "26.00",
+    "canBookCount": 0,
+    "specAttrs": "绿色&gt;XL",
+    "price": "26.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 4890674165051,
+    "isPromotionSku": true
+   }
+  },
+  "result.data.Root.fields.dataJson.skuModel.skuInfoMapOriginal": {
+   "粉色&gt;L": {
+    "specId": "bafa4ffc2633231c41827946e49de47e",
+    "saleCount": 0,
+    "discountPrice": "26.00",
+    "canBookCount": 314,
+    "specAttrs": "粉色&gt;L",
+    "price": "26.00",
+    "priceAmount": 1,
+    "skuId": 4890674165043,
+    "isPromotionSku": false
+   },
+   "粉色&gt;XL": {
+    "specId": "1bbd0acb3b8e6e4b280059fa2e96581b",
+    "saleCount": 0,
+    "discountPrice": "26.00",
+    "canBookCount": 0,
+    "specAttrs": "粉色&gt;XL",
+    "price": "26.00",
+    "priceAmount": 1,
+    "skuId": 4890674165044,
+    "isPromotionSku": false
+   },
+   "绿色&gt;L": {
+    "specId": "75c5a5bc426ee6f3d819a42127b165b3",
+    "saleCount": 0,
+    "discountPrice": "26.00",
+    "canBookCount": 1537,
+    "specAttrs": "绿色&gt;L",
+    "price": "26.00",
+    "priceAmount": 1,
+    "skuId": 4890674165050,
+    "isPromotionSku": false
+   },
+   "粉色&gt;2XL": {
+    "specId": "c00809cb19979b35f59bdac1715c192c",
+    "saleCount": 0,
+    "discountPrice": "26.00",
+    "canBookCount": 0,
+    "specAttrs": "粉色&gt;2XL",
+    "price": "26.00",
+    "priceAmount": 1,
+    "skuId": 4890674165045,
+    "isPromotionSku": false
+   },
+   "绿色&gt;M": {
+    "specId": "d4f666284d3a40bad1e0149a6a991709",
+    "saleCount": 0,
+    "discountPrice": "26.00",
+    "canBookCount": 1587,
+    "specAttrs": "绿色&gt;M",
+    "price": "26.00",
+    "priceAmount": 1,
+    "skuId": 4890674165049,
+    "isPromotionSku": false
+   },
+   "绿色&gt;XL": {
+    "specId": "6307d3d751a2bb62fa7679a7a458f956",
+    "saleCount": 0,
+    "discountPrice": "26.00",
+    "canBookCount": 0,
+    "specAttrs": "绿色&gt;XL",
+    "price": "26.00",
+    "priceAmount": 1,
+    "skuId": 4890674165051,
+    "isPromotionSku": false
+   },
+   "粉色&gt;M": {
+    "specId": "93186103ae87fb959dde63698680fc1d",
+    "saleCount": 0,
+    "discountPrice": "26.00",
+    "canBookCount": 356,
+    "specAttrs": "粉色&gt;M",
+    "price": "26.00",
+    "priceAmount": 1,
+    "skuId": 4890674165042,
+    "isPromotionSku": false
+   },
+   "绿色&gt;2XL": {
+    "specId": "26a1f070d172d4e3de0653f7a0f45eb0",
+    "saleCount": 0,
+    "discountPrice": "26.00",
+    "canBookCount": 0,
+    "specAttrs": "绿色&gt;2XL",
+    "price": "26.00",
+    "priceAmount": 1,
+    "skuId": 4890674165052,
+    "isPromotionSku": false
+   }
+  },
+  "result.data.Root.fields.dataJson.orderParamModel.orderParam.beginNum": 1,
+  "result.data.Root.fields.dataJson.orderParamModel.orderParam.skuParam": {
+   "skuPriceType": "skuPrice",
+   "skuRangePrices": [
+    {
+     "price": "26.00",
+     "beginAmount": "1"
+    }
+   ]
+  },
+  "result.data.mainPrice.fields.priceModel.currentPrices": [
+   {
+    "price": "26.00",
+    "beginAmount": 1
+   }
+  ],
+  "result.data.mainPrice.fields.priceModel.originalPrices": [
+   {
+    "displayStyle": "line_price",
+    "price": "26.00",
+    "beginAmount": 1
+   }
+  ],
+  "result.data.mainPrice.fields.finalPriceModel.tradeWithoutPromotion.offerBeginAmount": 1,
+  "result.data.productTitle.fields.shopInfo.companyName": "深圳市依多客服装有限公司",
+  "result.data.productTitle.fields.shopInfo.byrRepeatRate3m": "52.67%",
+  "result.data.productTitle.fields.shopInfo.sellerSlrServiceScore": "3.5分",
+  "result.data.productTitle.fields.rateInfo.goodRates": 73.9,
+  "result.data.shippingServices.fields.location": "广东省揭阳市",
+  "result.data.shippingServices.fields.deliveryLimitText": "承诺48小时发货",
+  "result.data.productPackInfo.fields.unitWeight": 0.5,
+  "result.global.globalData.model.consignModel.hasConsignPrice": false
+ }
+}

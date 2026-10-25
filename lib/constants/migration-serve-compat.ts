@@ -175,6 +175,16 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/operator-alert-chain.test.ts",
   },
+  {
+    tag: "0260_sourcing_capture",
+    why:
+      "Chỉ TẠO hai bảng mới ở CSDL tổ chức (sourcing_capture_tokens · sourcing_offer_captures) và NỚI bốn CHECK nguồn số liệu thêm " +
+      "'EXTENSION' — không thêm / đổi / xoá cột nào. Mọi đường ĐỌC của hai bảng (`lib/queries/sourcing.ts`, `lib/sourcing/capture-tokens.ts`) " +
+      "bắt lỗi bảng chưa có (42P01) ⇒ trang mẫu không có mục «lần chụp», trang token in «CSDL chưa áp 0260». Đường GHI duy nhất " +
+      "(`lib/sourcing/capture-service.ts`) bắt cùng lỗi ⇒ POST /api/sourcing/capture trả 503 và giao dịch không để lại mẫu mồ côi.",
+    addedColumns: {},
+    proof: "tests/sourcing-capture.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */

@@ -614,7 +614,8 @@ export const PLATFORM_MODULES: readonly ModuleDef[] = [
     // Lưu mẫu ⇒ mã tạm `TEST-` của vòng đời mẫu (module Sản xuất) — docs/tech/ai-sourcing.md §3.1.
     dependsOn: ["products", "production"],
     features: [],
-    routes: ["/sourcing"],
+    // `/api/sourcing`: POST /api/sourcing/capture của tiện ích «Lưu mẫu từ 1688» (SRC-6) — route tự gác bằng token + kiểm module.
+    routes: ["/sourcing", "/api/sourcing"],
     permissions: ["sourcing:view", "sourcing:search", "sourcing:write", "sourcing:approve"],
     why: "Tìm hàng là việc TRƯỚC khi có mẫu: dữ liệu nguồn (sản phẩm, nhà cung cấp, bậc giá) là bằng chứng để quyết mẫu nào đáng thử, không phải sổ hàng. Chỉ dùng nguồn có quyền sử dụng rõ ràng — không cào web; mọi hành động ra bên ngoài (liên hệ, đặt mua) cần duyệt. Giá về Việt Nam là số ƯỚC TÍNH từ tham số chủ shop khai, vào giá dự tính chứ không vào giá vốn. BẬT ở tổ chức nhà (dòng thiếu theo moduleDefault ENABLED), TẮT ở tổ chức khách tới khi bật — không cần migration (SRC-1, 23/10/2026).",
   },

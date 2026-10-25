@@ -70,7 +70,7 @@ type Db = Awaited<ReturnType<typeof getDb>>;
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 /** Nhà cung cấp theo link shop chuẩn hoá: có thì dùng lại (điền tên nếu đang trống), chưa có thì tạo. Link trống ⇒ `null`. */
-async function upsertSupplier(db: Db | Tx, platform: string, shopRaw: string, name: string, userId: string): Promise<{ id: string | null } | { error: string }> {
+export async function upsertSupplier(db: Db | Tx, platform: string, shopRaw: string, name: string, userId: string): Promise<{ id: string | null } | { error: string }> {
   if (!shopRaw) return { id: null };
   const shopUrl = canonicalShopUrl(shopRaw);
   if (!shopUrl) return { error: "Link shop nhà cung cấp không đọc được (cần http/https)." };

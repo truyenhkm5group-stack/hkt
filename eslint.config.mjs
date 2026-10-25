@@ -20,6 +20,9 @@ const eslintConfig = [
       "next-env.d.ts",
       // Bot chat: dự án Node thuần riêng (ESM, không TS), có bộ selftest riêng — `npm run selftest` trong chatbot/.
       "chatbot/**",
+      // Tiện ích Chrome «Lưu mẫu từ 1688» (SRC-6): JS thuần chạy trong trình duyệt (API chrome.*), không qua Next — nạp unpacked,
+      // không đóng gói. Bài kiểm tests/sourcing-capture.test.ts đọc mã nguồn của nó (danh sách cho phép, không innerText, không cookie).
+      "extensions/**",
     ],
   },
 ];

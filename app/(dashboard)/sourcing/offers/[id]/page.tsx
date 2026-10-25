@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ExternalLink } from "lucide-react";
+import { CaptureHistory } from "@/components/sourcing/capture-history";
 import { LandedCostCell } from "@/components/sourcing/landed-cost-view";
 import { AddWeightForm, ArchiveOfferForm, AddSnapshotForm, EditOfferForm, SupplierFactsForm } from "@/components/sourcing/offer-forms";
 import { SaveShortlistButton, TrialRequestForm } from "@/components/sourcing/trial-forms";
@@ -19,7 +20,7 @@ import {
   parseScoreWeights,
 } from "@/lib/constants/sourcing";
 import { formatDateTime, formatNumber, vnDateKey } from "@/lib/format";
-import { getSourcingOffer, latestOfferWeights } from "@/lib/queries/sourcing";
+import { getSourcingOffer, latestOfferWeights, listOfferCaptures } from "@/lib/queries/sourcing";
 import { getOfferShortlist } from "@/lib/queries/sourcing-trials";
 import { TRIAL_STATE_LABEL } from "@/lib/sourcing/trial";
 import { getSettingJson } from "@/lib/settings";
@@ -53,7 +54,7 @@ export default async function SourcingOfferPage({ params }: { params: Promise<{ 
   const now = new Date();
   const latest = snapshots[0] ?? null;
   const link = safeHttpUrl(offer.canonicalUrl);
-  const [weightRows, saved] = await Promise.all([latestOfferWeights([offer.id], 10), getOfferShortlist(offer.id)]);
+  const [weightRows, saved, captures] = await Promise.all([latestOfferWeights([offer.id], 10), getOfferShortlist(offer.id), listOfferCaptures(offer.id)]);
   const weightHistory = weightRows.byOffer.get(offer.id) ?? [];
   const grams = weightHistory[0]?.grams ?? null;
   const score = supplierScore(supplier, weights);
@@ -166,6 +167,12 @@ export default async function SourcingOfferPage({ params }: { params: Promise<{ 
           </div>
         ) : null}
       </SectionCard>
+
+      {"unavailable" in captures ? null : captures.length ? (
+        <SectionCard title="Lần chụp từ trang 1688" description="Mỗi lần bấm «Lưu mẫu vào ERP» là một dòng mới. Giá chỉ lấy ở trang chi tiết — giá thẻ tìm kiếm / giá khách mới không phải giá mua.">
+          <CaptureHistory captures={captures} />
+        </SectionCard>
+      ) : null}
 
       <SectionCard title="Giá về Việt Nam (ước tính)" description="Theo tham số giá về đã khai và lần chụp giá mới nhất. Chỉ để so sánh — không vào giá vốn, không vào giá dự tính.">
         <div className="space-y-4 text-sm">

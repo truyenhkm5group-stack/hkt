@@ -7,7 +7,9 @@
  */
 import { and, asc, count, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { SOURCING_COMPARE_MAX, SOURCING_PLATFORMS, type SourcingDataStatus, type SourcingPlatform } from "@/lib/constants/sourcing";
+import { SOURCING_CAPTURE_FLAGS, SOURCING_COMPARE_MAX, SOURCING_PLATFORMS, type SourcingCaptureFlag, type SourcingCaptureSource, type SourcingDataStatus, type SourcingPlatform } from "@/lib/constants/sourcing";
+import { captureFactsSchema, type CaptureFacts } from "@/lib/sourcing/capture";
+import { parseSizeChart, type SizeChart } from "@/lib/sourcing/size-chart";
 import { parsePriceTiers, type PriceTier } from "@/lib/sourcing/price";
 import { parseSkus, type OfferSkus } from "@/lib/sourcing/skus";
 import type { ListParams } from "@/lib/search-params";
@@ -300,4 +302,53 @@ export async function latestOfferWeights(offerIds: readonly string[], historyLim
     if (isMissingSourcingTable(e)) return { unavailable: true, byOffer };
     throw e;
   }
+}
+
+// ─────────────────────────── LẦN CHỤP TRANG CHI TIẾT (SRC-6, 0260) ───────────────────────────
+
+export type OfferCaptureView = {
+  id: string;
+  capturedAt: Date;
+  source: SourcingCaptureSource;
+  capturedByName: string | null;
+  pageUrl: string;
+  parserVersion: number;
+  hasSnapshot: boolean;
+  flags: SourcingCaptureFlag[];
+  /** Kết quả bộ đọc lúc chụp — đọc lại bằng `captureFactsSchema`; hình dạng hỏng ⇒ `null` (in «không đọc được»), không đoán. */
+  facts: CaptureFacts | null;
+  sizeChart: SizeChart | null;
+};
+
+const FLAG_SET: ReadonlySet<string> = new Set(SOURCING_CAPTURE_FLAGS);
+
+/** Các lần chụp của một mẫu, mới nhất trước. Bảng chưa có (CSDL chưa áp 0260) ⇒ `unavailable` — trang mẫu chạy như cũ. */
+export async function listOfferCaptures(offerId: string, limit = 20): Promise<OfferCaptureView[] | Unavailable> {
+  return guard(async () => {
+    const db = await getDb();
+    const c = schema.sourcingOfferCaptures;
+    const rows = await db
+      .select({ cap: c, byName: schema.users.name })
+      .from(c)
+      .leftJoin(schema.users, eq(schema.users.id, c.capturedBy))
+      .where(eq(c.offerId, offerId))
+      .orderBy(desc(c.capturedAt))
+      .limit(limit);
+    return rows.map(({ cap, byName }) => {
+      const parsed = captureFactsSchema.safeParse(cap.facts);
+      const flags = Array.isArray(cap.flags) ? cap.flags.filter((x): x is SourcingCaptureFlag => typeof x === "string" && FLAG_SET.has(x)) : [];
+      return {
+        id: cap.id,
+        capturedAt: cap.capturedAt,
+        source: cap.source as SourcingCaptureSource,
+        capturedByName: byName,
+        pageUrl: cap.pageUrl,
+        parserVersion: cap.parserVersion,
+        hasSnapshot: cap.snapshotId !== null,
+        flags,
+        facts: parsed.success ? parsed.data : null,
+        sizeChart: parsed.success ? parseSizeChart(parsed.data.sizeChartZh) : null,
+      };
+    });
+  });
 }

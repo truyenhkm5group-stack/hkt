@@ -5,6 +5,7 @@ import { BRAND_ASSET_PREFIX, BRAND_HINT_PARAM, brandAppOrigin, brandIconPath, br
 import { WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH } from "@/lib/sales-chatbot/widget";
 import { SHIPMENT_STATE_PATH } from "@/lib/constants/shipment-state-api";
 import { HOME_BOT_HEALTH_PATH } from "@/lib/constants/home-bot-health";
+import { SOURCING_CAPTURE_PATH } from "@/lib/constants/sourcing";
 import {
   ERP_HEADER_PREFIX,
   ERP_HOST_SLUG_HEADER,
@@ -77,8 +78,11 @@ const PUBLIC_PREFIXES = ["/login", "/start", SITE_PAGE_PATH, ...SITE_LEGAL_PATHS
  *    401 mọi lượt; chỉ trả mã + chặng + cờ kết thúc + mốc, không tiền, không người nhận.
  *  · `/api/internal/bot-health` — bot nhà ĐẨY sức khoẻ của chính nó (lỗi nhà cung cấp AI · nhịp sống 5′, lib/constants/home-bot-health.ts).
  *    Cùng cổng khoá nội bộ qua HEADER; thân đóng (chỉ loại đã khai, không chữ khách), xô giới hạn tần suất; chỉ ghi khoá settings của nhà.
+ *  · `/api/sourcing/capture` — tiện ích Chrome «Lưu mẫu vào ERP» (SRC-6) gửi một lần chụp trang 1688. Không phiên vì tiện ích không
+ *    mang cookie ERP; route tự gác bằng token của MỘT người qua HEADER (`authenticateCaptureToken`: băm khớp trong CSDL tổ chức của
+ *    tiền tố token, người đang bật có `sourcing:write`, module bật, cổng thu phí) — sai ⇒ 401, không rơi về tổ chức nhà.
  */
-const PUBLIC_EXACT = ["/chat", WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH, "/api/platform/domain-allowed", "/sw.js", "/pricing", "/forgot", HOME_BOT_HEALTH_PATH, SHIPMENT_STATE_PATH];
+const PUBLIC_EXACT = ["/chat", WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH, "/api/platform/domain-allowed", "/sw.js", "/pricing", "/forgot", HOME_BOT_HEALTH_PATH, SOURCING_CAPTURE_PATH, SHIPMENT_STATE_PATH];
 const COOKIE = SESSION_COOKIE;
 
 /**

@@ -12447,7 +12447,7 @@ export const sourcingSuppliers = pgTable(
   (t) => [
     uniqueIndex("sourcing_suppliers_shop_url_uq").on(t.shopUrl),
     check("sourcing_suppliers_platform_check", sql`${t.platform} IN ('1688', 'ALIBABA', 'TAOBAO', 'OTHER')`),
-    check("sourcing_suppliers_facts_source_check", sql`${t.factsSource} IN ('MANUAL', 'API', 'UNKNOWN')`),
+    check("sourcing_suppliers_facts_source_check", sql`${t.factsSource} IN ('MANUAL', 'API', 'EXTENSION', 'UNKNOWN')`),
     check("sourcing_suppliers_years_check", sql`${t.yearsOnPlatform} IS NULL OR ${t.yearsOnPlatform} BETWEEN 0 AND 100`),
     check("sourcing_suppliers_rating_check", sql`${t.ratingX100} IS NULL OR ${t.ratingX100} BETWEEN 0 AND 500`),
     check("sourcing_suppliers_response_check", sql`${t.responseRateBp} IS NULL OR ${t.responseRateBp} BETWEEN 0 AND 10000`),
@@ -12485,7 +12485,7 @@ export const sourcingOffers = pgTable(
     index("sourcing_offers_image_key_idx").on(t.imageKey),
     index("sourcing_offers_supplier_idx").on(t.supplierId),
     check("sourcing_offers_platform_check", sql`${t.platform} IN ('1688', 'ALIBABA', 'TAOBAO', 'OTHER')`),
-    check("sourcing_offers_data_status_check", sql`${t.dataStatus} IN ('MANUAL', 'API', 'UNKNOWN')`),
+    check("sourcing_offers_data_status_check", sql`${t.dataStatus} IN ('MANUAL', 'API', 'EXTENSION', 'UNKNOWN')`),
   ],
 );
 
@@ -12508,7 +12508,7 @@ export const sourcingOfferSnapshots = pgTable(
   },
   (t) => [
     index("sourcing_offer_snapshots_offer_idx").on(t.offerId, t.capturedAt),
-    check("sourcing_offer_snapshots_source_check", sql`${t.source} IN ('MANUAL', 'API', 'UNKNOWN')`),
+    check("sourcing_offer_snapshots_source_check", sql`${t.source} IN ('MANUAL', 'API', 'EXTENSION', 'UNKNOWN')`),
     check("sourcing_offer_snapshots_tiers_check", sql`jsonb_typeof(${t.tiers}) = 'array' AND jsonb_array_length(${t.tiers}) BETWEEN 1 AND 8`),
     check("sourcing_offer_snapshots_moq_check", sql`${t.moq} IS NULL OR ${t.moq} >= 1`),
   ],
@@ -12530,7 +12530,67 @@ export const sourcingOfferWeights = pgTable(
   (t) => [
     index("sourcing_offer_weights_offer_idx").on(t.offerId, t.capturedAt),
     check("sourcing_offer_weights_grams_check", sql`${t.grams} BETWEEN 1 AND 100000`),
-    check("sourcing_offer_weights_source_check", sql`${t.source} IN ('MANUAL', 'API', 'UNKNOWN')`),
+    check("sourcing_offer_weights_source_check", sql`${t.source} IN ('MANUAL', 'API', 'EXTENSION', 'UNKNOWN')`),
+  ],
+);
+
+/**
+ * Token của tiện ích «Lưu mẫu từ 1688» (SRC-6, 0260) — MỘT người, MỘT máy. CSDL CỦA TỔ CHỨC: token mang mã tổ chức ở tiền tố
+ * (`vnxs1.<mã>.<bí mật>`), bí mật chỉ lưu BĂM sha256 ⇒ lộ CSDL không lộ token, và token tổ chức A không khớp dòng nào ở tổ chức B.
+ * Phạm vi DUY NHẤT `sourcing:capture` (CHECK). Thu hồi = `revoked_at`, không xoá — lần chụp cũ vẫn truy được về token.
+ */
+export const sourcingCaptureTokens = pgTable(
+  "sourcing_capture_tokens",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    label: text("label").notNull().default(""),
+    tokenHash: text("token_hash").notNull(),
+    /** 4 ký tự cuối của bí mật — để người nhận ra token nào trên màn hình, không đủ để dùng lại. */
+    tokenHint: text("token_hint").notNull(),
+    scope: text("scope").notNull().default("sourcing:capture"),
+    createdAt: createdAt(),
+    lastUsedAt: ts("last_used_at"),
+    revokedAt: ts("revoked_at"),
+    revokedBy: text("revoked_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => [
+    uniqueIndex("sourcing_capture_tokens_hash_uq").on(t.tokenHash),
+    index("sourcing_capture_tokens_user_idx").on(t.userId),
+    check("sourcing_capture_tokens_scope_check", sql`${t.scope} = 'sourcing:capture'`),
+  ],
+);
+
+/**
+ * Một lần CHỤP trang chi tiết (SRC-6, 0260) — CHỈ THÊM DÒNG: giá đổi theo thời gian, lần cũ phải đọc được. `facts` = kết quả bộ đọc
+ * chuẩn hoá (bậc giá, giá từng SKU, dropship, bảng size đã đọc từ chữ Trung GỐC, số liệu nhà cung cấp); `raw` = nhánh dữ liệu sản
+ * phẩm đúng như tiện ích gửi, để đọc lại khi bộ đọc đổi (`parser_version`) — không bao giờ đọc lại ngầm. `snapshot_id` NULL khi trang
+ * không có giá chi tiết đọc được (giá về CHƯA BIẾT, không chụp bậc giả).
+ */
+export const sourcingOfferCaptures = pgTable(
+  "sourcing_offer_captures",
+  {
+    id: id(),
+    offerId: text("offer_id")
+      .notNull()
+      .references(() => sourcingOffers.id, { onDelete: "restrict" }),
+    snapshotId: text("snapshot_id").references(() => sourcingOfferSnapshots.id, { onDelete: "restrict" }),
+    source: text("source").notNull(),
+    capturedAt: ts("captured_at").notNull().defaultNow(),
+    capturedBy: text("captured_by").references(() => users.id, { onDelete: "set null" }),
+    tokenId: text("token_id").references(() => sourcingCaptureTokens.id, { onDelete: "set null" }),
+    pageUrl: text("page_url").notNull(),
+    parserVersion: integer("parser_version").notNull(),
+    facts: jsonb("facts").notNull(),
+    raw: jsonb("raw"),
+    flags: jsonb("flags").notNull().default(sql`'[]'::jsonb`),
+  },
+  (t) => [
+    index("sourcing_offer_captures_offer_idx").on(t.offerId, t.capturedAt),
+    check("sourcing_offer_captures_source_check", sql`${t.source} IN ('EXTENSION', 'API')`),
+    check("sourcing_offer_captures_flags_check", sql`jsonb_typeof(${t.flags}) = 'array'`),
   ],
 );
 
