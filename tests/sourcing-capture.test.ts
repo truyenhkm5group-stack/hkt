@@ -16,7 +16,7 @@ import { eq, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/sourcing/capture/route";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
-import { parseCaptureToken, SOURCING_CAPTURE_FLAGS, SOURCING_CAPTURE_PATH, SOURCING_DATA_STATUSES } from "@/lib/constants/sourcing";
+import { parseCaptureToken, SOURCING_CAPTURE_FLAGS, SOURCING_CAPTURE_MAX_BYTES, SOURCING_CAPTURE_PATH, SOURCING_CAPTURE_RATE, SOURCING_DATA_STATUSES } from "@/lib/constants/sourcing";
 import { invalidateCapabilities } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
@@ -24,7 +24,7 @@ import { provisionOrganization } from "@/lib/platform/provision";
 import { listOfferCaptures } from "@/lib/queries/sourcing";
 import { deriveCapture } from "@/lib/sourcing/capture";
 import { filterPicks, parse1688Detail, pickFromContext, PICK_PATHS_1688 } from "@/lib/sourcing/capture-1688";
-import { createCaptureToken, hashCaptureSecret, revokeCaptureToken } from "@/lib/sourcing/capture-tokens";
+import { createCaptureToken, hashCaptureSecret, revokeCaptureToken, takeCaptureSlot } from "@/lib/sourcing/capture-tokens";
 import { parseSizeChart } from "@/lib/sourcing/size-chart";
 
 const ORG_A = "cap-a";
@@ -129,6 +129,18 @@ function testExtensionSource() {
   assert.ok(content.includes('addEventListener("click"') && !/setInterval|MutationObserver|location\.(assign|replace)|window\.open\(/.test(content), "chỉ chạy khi người bấm — không lặp, không tự điều hướng");
 }
 
+function testRateLimit() {
+  // Xô theo token: bắn liền `burst` lượt, lượt kế bị chặn, đợi `refillMs` thì thêm đúng một lượt; token khác không bị kéo theo.
+  const t0 = 1_000_000;
+  for (let i = 0; i < SOURCING_CAPTURE_RATE.burst; i++) assert.ok(takeCaptureSlot("rl-org", "rl-tok", t0).ok, `lượt ${i + 1} vào được`);
+  const blocked = takeCaptureSlot("rl-org", "rl-tok", t0);
+  assert.ok(!blocked.ok && blocked.retryAfterMs > 0, "lượt thứ burst + 1 bị chặn, kèm thời gian chờ");
+  assert.ok(takeCaptureSlot("rl-org", "rl-tok-khac", t0).ok, "token khác có xô riêng");
+  assert.ok(takeCaptureSlot("rl-org", "rl-tok", t0 + SOURCING_CAPTURE_RATE.refillMs).ok, "đợi một nhịp ⇒ đúng một lượt");
+  assert.ok(!takeCaptureSlot("rl-org", "rl-tok", t0 + SOURCING_CAPTURE_RATE.refillMs).ok);
+  assert.ok(SOURCING_CAPTURE_RATE.burst * (60_000 / SOURCING_CAPTURE_RATE.refillMs) >= 30, "nhịp bền vững ≈ 30 lượt / phút");
+}
+
 function testNoSecrets() {
   const tokenLike = /vnxs1\.[a-z0-9][a-z0-9-]{0,62}\.[A-Za-z0-9_-]{43}/;
   for (const dir of ["extensions/sourcing-1688", "tests/fixtures/sourcing-1688"]) {
@@ -160,14 +172,30 @@ async function provision(code: string) {
   await provisionOrganization({ code, name: `Shop ${code}`, plan: "trial", modules: MODULES, admin: { email: `chu@${code}.local`, name: "Chủ shop", password: "LuuMau1688@2026!" }, source: "TEST", actor: null });
 }
 
-async function post(token: string | null, body: unknown): Promise<{ status: number; body: Record<string, unknown> }> {
+async function post(token: string | null, body: unknown): Promise<{ status: number; body: Record<string, unknown>; headers: Headers }> {
   const req = new NextRequest(`http://localhost${SOURCING_CAPTURE_PATH}`, {
     method: "POST",
     headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(body),
   });
   const res = await POST(req);
-  return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  return { status: res.status, body: (await res.json()) as Record<string, unknown>, headers: res.headers };
+}
+
+/** Thân dạng LUỒNG, không khai content-length (chunked) — người gửi có thể nói dối về kích thước, hoặc không nói gì. */
+async function postStream(token: string, bytes: number): Promise<{ status: number; pulled: number }> {
+  const chunk = new TextEncoder().encode("x".repeat(64 * 1024));
+  let sent = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (sent >= bytes) return controller.close();
+      sent += chunk.byteLength;
+      controller.enqueue(chunk);
+    },
+  });
+  const init = { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: stream, duplex: "half" } as unknown as ConstructorParameters<typeof NextRequest>[1];
+  const res = await POST(new NextRequest(`http://localhost${SOURCING_CAPTURE_PATH}`, init));
+  return { status: res.status, pulled: sent };
 }
 
 const bodyOf = (id: string) => ({ offerId: id, pageUrl: `https://detail.1688.com/offer/${id}.html`, picks: fixture(id).picks });
@@ -287,6 +315,18 @@ async function testDb() {
     assert.equal((await post(ta.token, bodyOf("815636568273"))).status, 401, "token đã thu hồi ⇒ 401");
     assert.equal((await post(tb.token, bodyOf("835865258913"))).status, 200, "thu hồi token A không đụng token B");
 
+    // ── Thân quá trần mà không khai content-length ⇒ 413, đọc dừng ở trần, không ghi gì.
+    const big = await postStream(tb.token, SOURCING_CAPTURE_MAX_BYTES + 4 * 1024 * 1024);
+    assert.equal(big.status, 413, "thân dạng luồng vượt trần ⇒ 413");
+    assert.ok(big.pulled < SOURCING_CAPTURE_MAX_BYTES + 1024 * 1024, `đọc DỪNG ở trần, không kéo hết thân (đã kéo ${big.pulled} byte)`);
+    // ── Trần tần suất của token: xô cạn ⇒ 429 + Retry-After; lượt bị chặn không ghi gì.
+    while (takeCaptureSlot(ORG_B, tb.id).ok);
+    const capsBefore = await withOrganization(ORG_B, async () => (await (await getDb()).select().from(schema.sourcingOfferCaptures)).length);
+    const limited = await post(tb.token, bodyOf("815636568273"));
+    assert.equal(limited.status, 429, "token gửi dồn ⇒ 429");
+    assert.ok(Number(limited.headers.get("retry-after")) >= 1, "kèm Retry-After (giây)");
+    assert.equal(await withOrganization(ORG_B, async () => (await (await getDb()).select().from(schema.sourcingOfferCaptures)).length), capsBefore, "lượt bị chặn không ghi lần chụp nào");
+
     // ── Trần token mỗi người.
     for (let i = 0; i < 4; i++) assert.ok((await withOrganization(ORG_B, () => createCaptureToken(b, ORG_B, { label: `Máy ${i}` }))).ok);
     assert.ok(!(await withOrganization(ORG_B, () => createCaptureToken(b, ORG_B, { label: "Máy thứ sáu" }))).ok, "tối đa 5 token còn hiệu lực");
@@ -310,9 +350,10 @@ export async function testSourcingCapture() {
   testParser();
   testAllowlist();
   testExtensionSource();
+  testRateLimit();
   testNoSecrets();
   await testDb();
   console.log(
-    "  ✓ SRC-6 lưu mẫu từ 1688: 3 trang thật (giá SKU ¥26 · 斤 ⇒ 45–50 kg · 新人价 ¥11.28 bỏ, giá đặt ¥17.28) · dữ liệu 1688 đã dịch ⇒ cờ, không đọc cân nặng · danh sách cho phép giống hệt tiện ích ↔ máy chủ · token băm, sai tổ chức / khoá / thu hồi ⇒ 401, mất quyền ⇒ 403 · gửi lại ⇒ lần chụp mới · hai tổ chức không thấy nhau · chưa áp 0260 ⇒ 503",
+    "  ✓ SRC-6 lưu mẫu từ 1688: 3 trang thật (giá SKU ¥26 · 斤 ⇒ 45–50 kg · 新人价 ¥11.28 bỏ, giá đặt ¥17.28) · dữ liệu 1688 đã dịch ⇒ cờ, không đọc cân nặng · danh sách cho phép giống hệt tiện ích ↔ máy chủ · token băm, sai tổ chức / khoá / thu hồi ⇒ 401, mất quyền ⇒ 403 · gửi lại ⇒ lần chụp mới · hai tổ chức không thấy nhau · trần 30 lượt / token ⇒ 429 · thân luồng quá trần ⇒ 413 · chưa áp 0260 ⇒ 503",
   );
 }

@@ -19,14 +19,36 @@ const bodySchema = z.object({
   picks: z.record(z.string(), z.unknown()),
 });
 
-const json = (status: number, body: Record<string, unknown>) => NextResponse.json(body, { status, headers: { "cache-control": "no-store" } });
+const json = (status: number, body: Record<string, unknown>, headers: Record<string, string> = {}) => NextResponse.json(body, { status, headers: { "cache-control": "no-store", ...headers } });
+
+/**
+ * Đọc thân dạng LUỒNG, dừng ngay khi vượt trần — kể cả khi người gửi không khai content-length (chunked) hoặc khai sai. Không
+ * bao giờ giữ quá `max` byte trong bộ nhớ. Vượt ⇒ `null`.
+ */
+async function readCapped(request: NextRequest, max: number): Promise<string | null> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
 
 export async function POST(request: NextRequest) {
   const declared = Number(request.headers.get("content-length") ?? "0");
   if (declared > SOURCING_CAPTURE_MAX_BYTES) return json(413, { ok: false, error: "Dữ liệu trang quá lớn." });
   const r = await authenticateCaptureToken(request.headers.get("authorization"), async (ctx) => {
-    const text = await request.text();
-    if (Buffer.byteLength(text, "utf8") > SOURCING_CAPTURE_MAX_BYTES) return json(413, { ok: false, error: "Dữ liệu trang quá lớn." });
+    const text = await readCapped(request, SOURCING_CAPTURE_MAX_BYTES);
+    if (text === null) return json(413, { ok: false, error: "Dữ liệu trang quá lớn." });
     let body: unknown;
     try {
       body = JSON.parse(text);
@@ -55,6 +77,6 @@ export async function POST(request: NextRequest) {
       message: `${res.created ? "Đã thêm mẫu mới vào kho" : "Đã chụp thêm một lần cho mẫu đã có"}${res.archived ? " (mẫu đang lưu trữ)" : ""}.`,
     });
   });
-  if (isCaptureAuthFailure(r)) return json(r.status, { ok: false, error: r.error });
+  if (isCaptureAuthFailure(r)) return json(r.status, { ok: false, error: r.error }, r.retryAfterMs ? { "retry-after": String(Math.ceil(r.retryAfterMs / 1000)) } : {});
   return r;
 }

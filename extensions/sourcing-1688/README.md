@@ -65,3 +65,14 @@ Khung báo có thể kèm các dòng «•» — đó là chỗ ERP **không k�
 | «Không đọc được dữ liệu gốc của trang» | Tải lại trang 1688 (F5), đợi trang hiện giá rồi bấm lại |
 | «Tài khoản của token không còn quyền…» | Nhờ quản trị cấp quyền «Tìm hàng: lưu & sửa mẫu» |
 | Không thấy nút | Kiểm tra đúng trang `detail.1688.com/offer/…`; ở `chrome://extensions` bấm ⟳ tải lại tiện ích |
+
+## Rủi ro đã biết (Tech Lead chấp nhận 25/10/2026) — cho người bảo trì
+
+- **Script của chính trang 1688 giả được câu trả lời của `main-world.js`.** `content.js` hỏi `main-world.js` bằng sự kiện
+  `vnx-sourcing:request` mang một nonce; script của trang cũng nghe được sự kiện đó (thấy nonce) nên có thể trả về dữ liệu giả
+  trước. Hậu quả TỐI ĐA: một mẫu bị lưu dữ liệu sai vào kho mẫu. Máy chủ vẫn lọc lại theo danh sách cho phép, đọc bằng bộ đọc thuần
+  (`lib/sourcing/capture-1688.ts`), không chạm tiền / giá vốn / tồn kho / đơn hàng, và mỗi lần chụp đều có người bấm + nhật ký.
+  Không có cách đọc `window.context` mà trang không nhìn thấy được; nếu một ngày cần chắc hơn, so dữ liệu chụp với lời gọi API
+  chính thức (keywordQuery / chi tiết) khi đã có 采购服务商.
+- **Trần tần suất theo token** (`SOURCING_CAPTURE_RATE`: bắn liền 30 lượt, rồi 1 lượt / 2 giây). Trần nằm trong bộ nhớ của tiến
+  trình app — khởi động lại app thì xô đầy lại; đủ cho một máy chủ, chưa phải trần chung nhiều máy.

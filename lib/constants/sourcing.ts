@@ -257,6 +257,11 @@ export function parseCaptureToken(raw: string): { orgCode: string; secret: strin
 export const SOURCING_CAPTURE_TOKENS_PER_USER = 5;
 /** Trần thân yêu cầu của một lần chụp — nhánh dữ liệu sản phẩm của một trang, không phải cả trang. */
 export const SOURCING_CAPTURE_MAX_BYTES = 1_500_000;
+/**
+ * Trần tần suất của MỘT token (xô GCRA, `lib/rate-limit.ts`): bắn liền tối đa 30 lượt, sau đó 1 lượt / 2 giây (≈ 30 / phút).
+ * Người bấm tay không bao giờ chạm trần; một token lộ thì không đổ rác vào kho mẫu nhanh hơn thế. Lượt bị chặn ⇒ 429 + Retry-After.
+ */
+export const SOURCING_CAPTURE_RATE = { burst: 30, refillMs: 2_000, maxKeys: 5_000 } as const;
 /** Phiên bản bộ đọc trang chi tiết — đổi bộ đọc thì tăng, dòng cũ giữ số cũ (không đọc lại ngầm, AGENTS 8.8). */
 export const SOURCING_CAPTURE_PARSER_VERSION = 1;
 
