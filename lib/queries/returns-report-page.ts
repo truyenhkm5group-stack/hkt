@@ -207,7 +207,22 @@ export async function kpiFirstEnabled(): Promise<boolean> {
  * dữ liệu của khối đó xong (Suspense, 25/10/2026): KPI chỉ cần `summary`, không phải đứng chờ tầng quyết định ~7 s nguội.
  * Cùng lời gọi, cùng tham số, cùng khoá đệm với `loadReturnsPage` — hàm đó chỉ là «chờ hết các lời hứa này».
  */
-export function startReturnsPage(p: ReturnsPageParams) {
+/**
+ * Chế độ của một lượt dựng. `kpiFirst` CHỈ cho probe đo XEN KẼ tắt/bật trong cùng một lượt script (cùng điều kiện tải —
+ * cặp đo bằng set-setting ngày 25/10 không so được vì máy bận lên giữa hai lượt). Thiếu tham số ⇒ đọc cờ như cũ: trang
+ * (`streamReturnsPage`) và job giữ ấm (`loadReturnsPage`) KHÔNG truyền nó.
+ */
+export type StartReturnsPageOptions = { kpiFirst?: boolean };
+
+/** Probe đọc hằng số này để biết bản ĐANG CHẠY có nhận `kpiFirst` không (script chạy từ main, lib từ container). */
+export const KPI_FIRST_OPTION_SUPPORTED = true;
+
+/** Lượt dựng này có đi «KPI khởi chạy trước» không: tham số tường minh thắng; thiếu ⇒ cờ `settings`. */
+export function kpiFirstMode(opts?: StartReturnsPageOptions): Promise<boolean> {
+  return typeof opts?.kpiFirst === "boolean" ? Promise.resolve(opts.kpiFirst) : kpiFirstEnabled();
+}
+
+export function startReturnsPage(p: ReturnsPageParams, opts?: StartReturnsPageOptions) {
   const { params, minShipped, variantKey, giaTriDon, basis, codes, marketerIds, trendGrain, previous, reasonFilter, reasonFilterBase, reasonFiltered, kpiBucket, kpiPage } = p;
 
   /*
@@ -232,7 +247,7 @@ export function startReturnsPage(p: ReturnsPageParams) {
   const summary = getReturnRateSummary(params.period, params.q, basis, giaTriDon);
   const danhMucMa = listProductCodes();
   const danhSachMarketer = listAttributedMarketers();
-  const mo = kpiFirstEnabled().then((bat) => {
+  const mo = kpiFirstMode(opts).then((bat) => {
     if (!bat) return;
     // ĐÚNG tham số `getReturnRateSummary` truyền cho dự báo ⇒ cùng khoá đệm, summary gộp vào lượt này.
     getProjectedDeliveryMetrics(params.period, basis, "PRODUCT", giaTriDon).catch(() => undefined);

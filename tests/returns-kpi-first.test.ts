@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { clearMemo } from "@/lib/cache";
 import { setSettingJson } from "@/lib/settings";
-import { choKpiHoacTran, KPI_FIRST_CAP_MS, KPI_FIRST_FLAG_TTL_MS, KPI_FIRST_SETTING_KEY, kpiFirstEnabled, loadReturnsPage, returnsPageParams } from "@/lib/queries/returns-report-page";
+import { choKpiHoacTran, KPI_FIRST_CAP_MS, KPI_FIRST_FLAG_TTL_MS, KPI_FIRST_OPTION_SUPPORTED, KPI_FIRST_SETTING_KEY, kpiFirstEnabled, kpiFirstMode, loadReturnsPage, returnsPageParams } from "@/lib/queries/returns-report-page";
 
 /*
   ═══ /reports/returns: KPI KHỞI CHẠY TRƯỚC (hướng B, 25/10/2026) ═══
@@ -48,6 +48,12 @@ export async function testReturnsKpiFirstPure() {
       assert.ok(truoc.includes("sau(() =>") || truoc.includes("await "), `${ham}: phải khởi chạy qua cổng sau(…) — nếu không nó chen hàng với KPI`);
     }
   }
+  // Trang (`streamReturnsPage`) và job giữ ấm (`loadReturnsPage`) KHÔNG truyền tham số ⇒ luôn đi đường cờ.
+  for (const ham of ["streamReturnsPage", "loadReturnsPage"]) {
+    const d = src.indexOf(`function ${ham}(`);
+    const t = src.slice(d, src.indexOf("\n}\n", d));
+    assert.ok(/startReturnsPage\(p\)/.test(t) && !/startReturnsPage\(p,/.test(t), `${ham} gọi startReturnsPage(p) KHÔNG kèm tham số — đường mặc định đọc cờ`);
+  }
   for (const ham of ["getReturnRateSummary", "listProductCodes", "listAttributedMarketers"]) {
     const g = new RegExp(`const \\w+ = ${ham}\\(`).exec(than);
     assert.ok(g, `${ham}: khởi chạy NGAY (thân trang chờ nó)`);
@@ -78,6 +84,16 @@ export async function testReturnsKpiFirstDb() {
       assert.equal(await kpiFirstEnabled(), false, `cờ ${JSON.stringify(hong)} ⇒ TẮT`);
     }
     assert.ok(KPI_FIRST_FLAG_TTL_MS > 0 && KPI_FIRST_FLAG_TTL_MS <= 60_000, "TTL cờ ngắn — người đo phải chờ đủ TTL sau set-setting");
+
+    // Tham số `kpiFirst` (chỉ probe đo xen kẽ): THIẾU ⇒ đọc cờ; CÓ ⇒ thắng cờ ở cả hai chiều.
+    assert.equal(KPI_FIRST_OPTION_SUPPORTED, true, "probe đọc hằng số này để biết bản đang chạy nhận tham số");
+    for (const co of [true, false]) {
+      await setSettingJson(KPI_FIRST_SETTING_KEY, { on: co });
+      clearMemo();
+      assert.equal(await kpiFirstMode(), co, `thiếu tham số ⇒ đọc cờ (${co})`);
+      assert.equal(await kpiFirstMode({}), co, "object rỗng ⇒ vẫn đọc cờ");
+      assert.equal(await kpiFirstMode({ kpiFirst: !co }), !co, "tham số tường minh thắng cờ");
+    }
   } finally {
     await setSettingJson(KPI_FIRST_SETTING_KEY, { on: false });
     clearMemo();

@@ -85,7 +85,8 @@ async function main() {
   }
   const { clearMemo } = await import("@/lib/cache");
   const { canUseModule } = await import("@/lib/platform/capabilities");
-  const { loadReturnsPage, returnsPageParams, startReturnsPage, withDefaultReturnsBasis } = await import("@/lib/queries/returns-report-page");
+  const trangHoan = await import("@/lib/queries/returns-report-page");
+  const { loadReturnsPage, returnsPageParams, startReturnsPage, withDefaultReturnsBasis } = trangHoan;
   const { getReturnReasonReport } = await import("@/lib/queries/return-reason-report");
   const { getProjectedDeliveryMetrics } = await import("@/lib/queries/projected-delivery");
   const { getReturnIntelligence } = await import("@/lib/queries/return-intelligence");
@@ -173,6 +174,39 @@ async function main() {
     console.log(
       `  ⇒ ${kpiChung !== null && motMinh > 0 ? `chung / một mình = ${(kpiChung / motMinh).toFixed(1)}×: ${kpiChung > motMinh * 1.5 ? "KPI đang XẾP HÀNG sau các nhánh khác" : "KPI chậm vì CHÍNH truy vấn của nó"}` : "chưa đủ số để kết luận"}`,
     );
+
+    /*
+      1d. «KPI KHỞI CHẠY TRƯỚC» TẮT ↔ BẬT, XEN KẼ × 3 CẶP TRONG CÙNG MỘT LƯỢT SCRIPT (Lead duyệt 25/10/2026).
+      Cặp đo bằng set-setting (15:5xZ) không so được: lời gọi dự báo TRỰC TIẾP (không qua cờ) cũng chậm 2,3× ở lượt «sau» —
+      máy bận lên giữa hai lượt. Xen kẽ tắt/bật/tắt/bật… cùng điều kiện tải, mỗi lượt nguội như 1c (kho học ấm), lấy trung vị.
+      Bản đang chạy chưa nhận tham số `kpiFirst` (lib từ container) ⇒ CHƯA ĐO ĐƯỢC, không in số giả.
+    */
+    console.log("── 1d. KPI KHỞI CHẠY TRƯỚC: TẮT ↔ BẬT XEN KẼ × 3 CẶP (cùng lượt script, kỳ 30 ngày, kho học ấm) ──");
+    if ((trangHoan as { KPI_FIRST_OPTION_SUPPORTED?: boolean }).KPI_FIRST_OPTION_SUPPORTED !== true) {
+      console.log("  CHƯA ĐO ĐƯỢC: bản đang chạy chưa nhận tham số kpiFirst — đo sau khi bản có tham số này đã deploy");
+    } else {
+      const luot: { bat: boolean; kpi: number; ca: number }[] = [];
+      for (const bat of [false, true, false, true, false, true]) {
+        await nguoiTruKhoHoc();
+        const t = performance.now();
+        const phan = startReturnsPage(ts30, { kpiFirst: bat });
+        let kpi = -1;
+        phan.summary.then(() => (kpi = Math.round(performance.now() - t))).catch(() => undefined);
+        await Promise.allSettled(Object.values(phan));
+        luot.push({ bat, kpi, ca: Math.round(performance.now() - t) });
+      }
+      const trungVi = (xs: number[]) => {
+        const v = [...xs].sort((a, b) => a - b);
+        return v.length ? v[Math.floor(v.length / 2)] : null;
+      };
+      for (const [nhan, bat] of [["TẮT", false], ["BẬT", true]] as const) {
+        const cua = luot.filter((l) => l.bat === bat);
+        console.log(`  ${nhan}: KPI trung vị ${trungVi(cua.map((l) => l.kpi))} ms [${cua.map((l) => l.kpi).join(" · ")}] · cả trang trung vị ${trungVi(cua.map((l) => l.ca))} ms [${cua.map((l) => l.ca).join(" · ")}]`);
+      }
+      const tvTat = trungVi(luot.filter((l) => !l.bat).map((l) => l.ca));
+      const tvBat = trungVi(luot.filter((l) => l.bat).map((l) => l.ca));
+      if (tvTat && tvBat) console.log(`  ⇒ cả trang BẬT / TẮT = ${(tvBat / tvTat).toFixed(2)}× (ngưỡng Lead: > 1,10 ⇒ giữ cờ TẮT)`);
+    }
   }
 
   console.log("── 2. TỪNG NHÁNH NẶNG CỦA INTELLIGENCE, mỗi nhánh nguội riêng ──");
