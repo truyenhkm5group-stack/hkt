@@ -1,0 +1,8 @@
+{
+  "pr": 1061,
+  "sha": "2f87bb78df49e681c850b2ab1eda5ad7158391ab",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T06:59:41.827Z",
+  "note": "review lead: ops chỉ đọc đếm sự kiện log erp-app theo (evt·code·source), bỏ mã hội thoại/số, log không ra log công khai (mã hoá), in phủ log; không mở CSDL, không gọi mạng."
+}
