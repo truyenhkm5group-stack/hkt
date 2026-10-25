@@ -3,7 +3,7 @@
   "mission_id": "vtp-gap-skew",
   "title": "vtp-direct-sync (1): lệch đồng hồ tệp ↔ webhook ≤ 120 s không phải rơi gói",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-vds",
@@ -26,7 +26,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-25T17:18:44.166Z",
-  "updated_at": "2026-10-25T17:18:44.166Z",
-  "last_heartbeat": "2026-10-25T17:18:44.166Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-25T17:19:33.513Z",
+  "last_heartbeat": "2026-10-25T17:19:33.513Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/vtp-gap-skew",
+    "sha": "226bc0ed8e3bba5cc12b62ddbc4d99c1187ee665",
+    "at": "2026-10-25T17:19:33.513Z",
+    "actor": "DESKTOP-56TH98Y:wt-vds",
+    "title": "vtp-direct-sync (1): lệch đồng hồ tệp ↔ webhook ≤ 120 s không phải rơi gói",
+    "summary": "WEBHOOK_CLOCK_SKEW_SECONDS=120: measureWebhookGap + đọc lại vtp_webhook_gaps lúc đọc (reconcile WEBHOOK_GAP, sức khoẻ webhook, lượt nhập). Không sửa 358 dòng; verdictOf cố ý không đổi. Lượt nhập 25/10: biết trước 9→367, hụt 366→8.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint: sạch",
+      "TEST_SHARD=1/4: TẤT CẢ ĐẠT",
+      "TEST_SHARD=4/4: TẤT CẢ ĐẠT (K10)"
+    ]
+  }
 }
