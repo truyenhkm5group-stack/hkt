@@ -1,0 +1,8 @@
+{
+  "pr": 1066,
+  "sha": "6d8494528436ee9d6b4c6548dac2613050ae35d6",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T10:27:24.426Z",
+  "note": "review lead: chỉ docs/tech/ai-sourcing.md; §2.1c ghi đúng số đo 25/10 (游客, 采购服务商, keywordQuery-1 có thật), ba luật giá chi tiết / size từ chữ gốc / rỗng nhất thời; không lộ secret."
+}
