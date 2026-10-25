@@ -1,3 +1,4 @@
+import { supersededAttemptSql } from "@/lib/queries/shipment-superseded";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { careEntryFor, CARE_ENTRY_SUBSTATES, CARE_TERMINAL_STAGES, LEFT_WAREHOUSE_EVENT_STAGES, legAwareStage, legAwareSubstate } from "@/lib/care/entry";
@@ -537,6 +538,8 @@ export async function reconcileCareCoverage(db: Db, now = new Date(), scope: { s
          and s.stage::text not in ${[...CARE_TERMINAL_STAGES, "RETURNING"]}
          and ${con} in ${["WAITING_PROCESSING", "WAITING_REDELIVERY", "DELIVERY_EXCEPTION"]}
          and not exists (select 1 from shipment_care c where c.shipment_id = s.id and c.active)
+         -- Vận đơn BỊ THAY THẾ không bao giờ là việc care: hàng đi bằng lần gửi khác (shipment-superseded.ts, 25/10/2026).
+         and not ${sql.raw(supersededAttemptSql("s"))}
          -- …VÀ tình trạng này chưa có người xử lý xong. Thiếu vế này thì mỗi lượt đối chiếu dựng
          -- lại ca ngay sau khi nhân viên bấm hoàn tất — 16/18 lần dựng lại đo được là như vậy.
          and ${chuaAiXuLyXongSql(sql`s.id`, sql`s.vtp_status_date`)}

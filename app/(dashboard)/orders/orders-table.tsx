@@ -37,6 +37,7 @@ export function OrdersTable({ rows, pageCount, total, meta, stageLabels, carrier
             cell: ({ row }) => (
               <div className="space-y-1">
                 <OrderStageBadge stage={row.original.stage} label={(relabel ? stageLabels?.[row.original.stage] : undefined) ?? (row.original.statusName || undefined)} />
+                {row.original.shippingDespitePosCancel !== null ? <div className="text-[11px] font-medium text-amber-700 dark:text-amber-400">POS huỷ — hàng vẫn đang đi bằng vận đơn {row.original.shippingDespitePosCancel}</div> : null}
                 {row.original.lastUpdateStatusAt ? <div className="text-xs text-muted-foreground">{formatTimeAgo(row.original.lastUpdateStatusAt)}</div> : null}
                 <OrderReviewEntries entries={row.original.review} compact />
                 {canDecide && isManualOrderId(row.original.id) ? <OrderQuickDecision orderId={row.original.id} stage={row.original.stage} entries={row.original.review} gaps={row.original.gaps} size="xs" /> : null}
@@ -88,6 +89,7 @@ function OrderMobileCard({ row, stageLabel, canDecide }: { row: OrderListRow; st
         {row.shipment ? <ShipmentStageBadge stage={row.shipment.stage} label={row.shipment.vtpStatusName ?? undefined} /> : <span className="text-xs text-muted-foreground">Chưa gửi ĐVVC</span>}
         {row.lastUpdateStatusAt ? <span className="ml-auto text-xs text-muted-foreground">{formatTimeAgo(row.lastUpdateStatusAt)}</span> : null}
       </div>
+      {row.shippingDespitePosCancel !== null ? <div className="text-[11px] font-medium text-amber-700 dark:text-amber-400">POS huỷ — hàng vẫn đang đi bằng vận đơn {row.shippingDespitePosCancel}</div> : null}
       <OrderReviewEntries entries={row.review} compact />
       {canDecide && isManualOrderId(row.id) ? <OrderQuickDecision orderId={row.id} stage={row.stage} entries={row.review} gaps={row.gaps} size="xs" /> : null}
     </div>

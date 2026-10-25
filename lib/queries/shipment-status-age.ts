@@ -1,3 +1,4 @@
+import { supersededAttemptSql } from "@/lib/queries/shipment-superseded";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import type { ShipmentStage } from "@/db/schema";
@@ -247,6 +248,8 @@ export async function getShipmentStatusAgeQueue(): Promise<StatusAgeQueue> {
              KHÔNG xoá dòng đó (nó là dữ liệu ĐVVC đã gửi thật), chỉ thôi đếm nó như một sự cố.
            */
            and not (${sql.raw(sqlIsTestTracking("s.vtp_order_number"))})
+           -- Vận đơn BỊ THAY THẾ không «đứng ở chặng chờ lấy» — đơn đã đi bằng lần gửi khác (shipment-superseded.ts, 25/10/2026).
+           and not ${sql.raw(supersededAttemptSql("s"))}
          order by s.created_at desc
          limit ${MAX_ROWS + 1}
       `),

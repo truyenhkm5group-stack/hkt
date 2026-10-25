@@ -287,7 +287,7 @@ async function AllShipments({ raw, user }: { raw: SearchParams; user: SessionUse
   */
   const params = parseListParams(raw, {
     defaultSort: "createdAt",
-    filterKeys: ["product", "stage", "carrierState", "care", "carrier", "cod", "owner", "source", "final", "linked"],
+    filterKeys: ["product", "stage", "carrierState", "care", "carrier", "cod", "owner", "source", "final", "linked", "attempt"],
     sortable: SHIPMENT_SORTABLE,
     defaultPeriod: "30d",
   });
@@ -318,6 +318,7 @@ async function AllShipments({ raw, user }: { raw: SearchParams; user: SessionUse
           { key: "source", label: "Nguồn đơn", options: facets.sources },
           { key: "final", label: "Theo dõi", options: facets.finals, single: true },
           { key: "linked", label: "Kênh", options: facets.linked, single: true },
+          { key: "attempt", label: "Lần gửi", options: facets.attempts, single: true },
         ]}
         resultLabel={`${formatNumber(total)} vận đơn phù hợp · ${formatNumber(summary.delivered)} giao thành công · ${formatNumber(summary.returning)} hoàn / không thu được tiền · COD chưa thu ${formatVND(summary.codPending, { compact: true })}`}
       />

@@ -1,3 +1,4 @@
+import { supersededAttemptSql } from "@/lib/queries/shipment-superseded";
 import { sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
@@ -181,7 +182,8 @@ function ruleSql(rule: ReconciliationRuleKey): SQL {
           coalesce(s.vtp_status_date, s.updated_at) as at, s.id as entity_id
         from shipments s
         where s.stage in ('PENDING','PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','RETURNING')
-          and coalesce(s.vtp_status_date, s.updated_at) < now() - interval '10 days'`;
+          and coalesce(s.vtp_status_date, s.updated_at) < now() - interval '10 days'
+          and not ${sql.raw(supersededAttemptSql("s"))}`;
     case "UNKNOWN_VTP_STATUS":
       return sql`select e.status as code,
           count(*)::text || ' sự kiện mang mã này' as evidence,

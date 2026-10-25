@@ -3,6 +3,7 @@
  * tạo thông báo mới (chống trùng bằng dedupeKey), tự đóng thông báo cũ khi điều kiện không còn,
  * gửi Telegram cho thông báo mới và phát sự kiện realtime để chuông trên giao diện cập nhật.
  */
+import { supersededAttemptSql } from "@/lib/queries/shipment-superseded";
 import { and, asc, eq, inArray, isNull, lte, notInArray, sql } from "drizzle-orm";
 import { PRIMARY_ATTEMPT, SHIPMENT_DELIVERED } from "@/lib/queries/return-rate";
 import { getDb, schema } from "@/db";
@@ -863,7 +864,8 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
         const [{ choLay }] = await db
           .select({ choLay: sql<number>`count(*)` })
           .from(schema.shipments)
-          .where(and(eq(schema.shipments.stage, "PENDING"), eq(schema.shipments.isFinal, false)));
+          // Vận đơn BỊ THAY THẾ (đơn đã đi bằng lần gửi khác — shipment-superseded.ts) không phải kiện chờ lấy.
+          .where(and(eq(schema.shipments.stage, "PENDING"), eq(schema.shipments.isFinal, false), sql.raw(`not ${supersededAttemptSql("shipments")}`)));
         const tuoi = han.ageHours === null ? "chưa từng nhập tệp nào" : `lần nhập gần nhất cách đây ${Math.floor(han.ageHours)} giờ`;
         candidates.push({
           kind: "VTP_ORDER_LIST_DUE",
