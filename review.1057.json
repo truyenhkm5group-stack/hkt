@@ -1,0 +1,8 @@
+{
+  "pr": 1057,
+  "sha": "fab356afd22c51afdac2b698af65dff2feba90db",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T02:39:43.243Z",
+  "note": "review lead: chỉ-script chỉ đọc; đếm luồng có >1 hội thoại, chủ vs bị đè, bị đè còn WAITING, đơn sống mỗi bên; không ghi."
+}
