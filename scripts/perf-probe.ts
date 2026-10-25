@@ -414,7 +414,7 @@ async function main() {
   const shp = await import("@/lib/queries/shipments");
   const shipmentParams = lp.parseListParams({}, {
     defaultSort: "createdAt",
-    filterKeys: ["product", "stage", "carrierState", "care", "carrier", "cod", "owner", "source", "final", "linked"],
+    filterKeys: ["product", "stage", "carrierState", "care", "carrier", "cod", "owner", "source", "final", "linked", "attempt"],
     sortable: shp.SHIPMENT_SORTABLE,
     defaultPeriod: "30d",
   });
