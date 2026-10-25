@@ -3,7 +3,7 @@
   "mission_id": "returns-flush-timeline",
   "title": "returns-page-probe: dòng thời gian lượt xả HTTP (KPI · khối phân tích · ranh giới Suspense)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-flush",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-25T12:07:08.632Z",
-  "updated_at": "2026-10-25T12:07:08.632Z",
-  "last_heartbeat": "2026-10-25T12:07:08.632Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-25T12:08:33.158Z",
+  "last_heartbeat": "2026-10-25T12:08:33.158Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/returns-flush-timeline",
+    "sha": "9cdc9f9df713c57e3860c9a9d8af941528397291",
+    "at": "2026-10-25T12:08:33.158Z",
+    "actor": "DESKTOP-56TH98Y:wt-flush",
+    "title": "returns-page-probe: dòng thời gian lượt xả HTTP (KPI · khối phân tích · ranh giới Suspense)",
+    "summary": "",
+    "tests": [
+      "tsc + eslint sạch · testReturnsPageProbe đạt · đếm dấu ranh giới thử mọi vị trí cắt mảnh · chỉ script, chỉ đọc"
+    ]
+  }
 }
