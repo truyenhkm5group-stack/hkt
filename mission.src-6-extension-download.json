@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "src-6-extension-download",
+  "title": "SRC-6: nút Tải tiện ích (.zip) + hướng dẫn cài từng bước",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/src-6-extension-download",
+  "base_sha": "c3226461bf23c4753d158dda0d571cb128118e5a",
+  "domains": [],
+  "owned_paths": [
+    "app/(dashboard)/sourcing/extension/",
+    "app/api/sourcing/extension/",
+    "extensions/sourcing-1688/",
+    "lib/sourcing/",
+    "tests/sourcing-capture.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-25T17:40:19.018Z",
+  "updated_at": "2026-10-25T17:40:19.018Z",
+  "last_heartbeat": "2026-10-25T17:40:19.018Z",
+  "definition_of_done": []
+}
