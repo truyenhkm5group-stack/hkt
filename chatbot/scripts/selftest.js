@@ -2479,7 +2479,8 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   settings.update("PJAX", { extraPrompt: "" });
   ob.seedDefaultProducts();
   const st = settings.get("PJAX");
-  assert.equal(st.customerTitle, "anh");
+  assert.equal(st.customerTitle, "anh/chị", "cau mau trung tinh");
+  assert.match(st.extraPrompt, /XƯNG HÔ ĐÚNG GIỚI TÍNH KHÁCH/);
   assert.equal(st.ownPrompt, true);
   assert.match(st.extraPrompt, /799\.000đ/);
   assert.equal(settings.deliveryDays("PJAX"), "7–9", "giao rieng page");
