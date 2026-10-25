@@ -3,7 +3,7 @@
   "mission_id": "src-6-capture-hardening",
   "title": "SRC-6 gia cố: trần tần suất theo token + đọc thân có trần + README rủi ro nonce",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -24,7 +24,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-25T12:43:28.075Z",
-  "updated_at": "2026-10-25T12:43:28.075Z",
-  "last_heartbeat": "2026-10-25T12:43:28.075Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-25T12:44:07.602Z",
+  "last_heartbeat": "2026-10-25T12:44:07.602Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/src-6-capture-hardening",
+    "sha": "f751e38218bde7e17142487bfd681bd907e66f9c",
+    "at": "2026-10-25T12:44:07.602Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "SRC-6 gia cố: trần tần suất theo token + đọc thân có trần + README rủi ro nonce",
+    "summary": "",
+    "tests": [
+      "rebase lên main 63a731d40: tsc sạch, sourcing-capture XONG; trước rebase: eslint sạch, TEST_SHARD=4/4 ĐẠT; kiểm đột biến request.text() ⇒ đỏ «đã kéo 5701632 byte»"
+    ]
+  }
 }
