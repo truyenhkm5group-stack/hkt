@@ -131,7 +131,12 @@ export async function findMergeTarget(conversationId: string, now: Date): Promis
   let best: { order: ConversationOrder; conv: (typeof same)[number] } | null = null;
   for (const c of same) {
     const orders = await otherConversationOrders({ conversationId: c.conversationId, exclude: [], verifiedCustomerId: null, now, includeBotOrders: true });
-    for (const order of orders) if (!best || order.insertedAt.getTime() > best.order.insertedAt.getTime()) best = { order, conv: c };
+    // Phạm vi của hội thoại kia nay gồm các hàng cùng luồng — tức có thể gồm CHÍNH hội thoại này: đơn của nó thuộc state / rào riêng.
+    const own = `sales-chat:${conversationId}:`;
+    for (const order of orders) {
+      if (order.agentKey?.startsWith(own)) continue;
+      if (!best || order.insertedAt.getTime() > best.order.insertedAt.getTime()) best = { order, conv: c };
+    }
   }
   if (!best) return null;
   const isBot = Boolean(best.order.agentKey?.startsWith("sales-chat:"));

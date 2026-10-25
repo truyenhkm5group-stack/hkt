@@ -644,7 +644,7 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
   let createdReview: OrderReviewEntry[] = [];
   try {
     await db.transaction(async (tx) => {
-      if (conv) await lockConversation(tx, conv.id);
+      if (conv) await lockConversations(tx, [conv.id]);
       if (key) {
         // Cùng khoá lần mua ⇒ cùng đơn: khoá theo khoá rồi mới tìm, để hai lượt gọi đồng thời không cùng thấy «chưa có».
         await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`agent-order:${key}`}, 0))`);
@@ -678,8 +678,27 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
   return { ok: true, id };
 }
 
-async function lockConversation(tx: Tx, conversationId: string): Promise<void> {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`order-conv:${conversationId}`}, 0))`);
+/**
+ * Khoá của từng hội thoại: theo LUỒNG (page, thread) khi có — mọi hàng hội thoại ERP cùng một luồng Pancake (vd hội thoại bình luận đã
+ * chép sang hộp thư) chung MỘT khoá, hai bot trả lời cùng lúc không lọt (vụ #B1135EC0 → #E0663E84); không có luồng ⇒ theo id. Không
+ * trùng, sắp TĂNG DẦN — mọi đường khoá nhiều hội thoại cùng thứ tự ⇒ không kẹt chéo. HÀM THUẦN.
+ */
+export function conversationLockKeys(ids: readonly string[], rows: readonly { id: string; pageId: string | null; threadId: string | null }[]): string[] {
+  const keys = new Set<string>();
+  for (const id of ids) {
+    const r = rows.find((x) => x.id === id);
+    keys.add(r?.pageId && r.threadId ? `order-thread:${r.pageId}:${r.threadId}` : `order-conv:${id}`);
+  }
+  return [...keys].sort();
+}
+
+/** Khoá giao dịch cho các hội thoại (theo luồng khi có). Khoá tư vấn vào lại được trong cùng giao dịch ⇒ gọi lại không tự kẹt. */
+async function lockConversations(tx: Tx, ids: readonly string[]): Promise<void> {
+  const uniq = [...new Set(ids)];
+  if (!uniq.length) return;
+  const c = schema.salesChatConversations;
+  const rows = await tx.select({ id: c.id, pageId: c.pageId, threadId: c.threadId }).from(c).where(inArray(c.id, uniq));
+  for (const k of conversationLockKeys(uniq, rows)) await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${k}, 0))`);
 }
 
 /** Rào của bot TRONG giao dịch đã khoá hội thoại — có đơn của người ⇒ ném, giao dịch không ghi gì. */
@@ -791,12 +810,12 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
     await db.transaction(async (tx) => {
       // Gộp mua thêm vào đơn của hội thoại KHÁC cùng danh tính (pha 3) ⇒ khoá CẢ hai hội thoại, theo thứ tự id (không kẹt chéo với lượt
       // ghi của hội thoại kia — khoá giao dịch tư vấn của Postgres vào lại được trong cùng giao dịch nên khoá ở dưới không tự kẹt).
-      if (agentOpts?.conversation?.alsoLock?.length) for (const id of [...new Set([agentOpts.conversation.id, ...agentOpts.conversation.alsoLock])].sort()) await lockConversation(tx, id);
+      if (agentOpts?.conversation?.alsoLock?.length) await lockConversations(tx, [agentOpts.conversation.id, ...agentOpts.conversation.alsoLock]);
       // Bot CHỐT đơn nháp của hội thoại ⇒ khoá hội thoại TRƯỚC (cùng thứ tự với lượt tạo) rồi rào lại: đơn của người chen vào giữa
       // lượt đọc của công cụ và lượt ghi này vẫn bị thấy.
       const convGuard = agentOpts?.conversation?.guard && p.stage === "CONFIRMED" && !wasConfirmed ? agentOpts.conversation : null;
       if (convGuard?.guard) {
-        await lockConversation(tx, convGuard.id);
+        await lockConversations(tx, [convGuard.id]);
         await assertNoConversationOrder(tx, convGuard.id, convGuard.guard, [row.id]);
       }
       // `raw` dựng lại từ dòng ĐÃ KHOÁ và GỘP (không đè): lời khai gốc (origin · agentKey …) + cờ cần kiểm ai đó vừa gắn giữ nguyên
