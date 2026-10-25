@@ -1,0 +1,8 @@
+{
+  "pr": 1053,
+  "sha": "7bab1295db9773db0fdfd08d79414687f7b00d59",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T01:51:54.033Z",
+  "note": "review lead (P0 HSLC cặp #B1135EC0/#E0663E84): rào otherConversationOrders coi mọi hội thoại ERP cùng (page, thread) là cùng hội thoại (gồm đơn bot của chúng, trừ khoá bot của chính hội thoại); khoá giao dịch theo luồng order-thread:<page>:<thread> thay mọi chỗ khoá cũ, sắp tăng dần; bài kiểm dựng đúng trình tự chép bình luận→hộp thư, đột biến đỏ."
+}
