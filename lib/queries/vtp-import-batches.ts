@@ -1,5 +1,6 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq, getTableColumns, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { gapWithinSkewSql } from "@/lib/constants/webhook-gap";
 
 /**
  * ═══════════ SỔ LẦN NHẬP: ĐỌC LẠI ĐƯỢC THÌ MỚI LÀ SỔ ═══════════
@@ -32,13 +33,25 @@ export type ImportBatchRow = {
   checked: number;
   webhookOk: number;
   webhookGaps: number;
+  /**
+   * Dòng sổ hụt của lượt này nằm trong dung sai lệch đồng hồ tệp ↔ webhook (webhook-gap.ts, 25/10/2026) — đã cộng vào `webhookOk`,
+   * trừ khỏi `webhookGaps` LÚC ĐỌC; bộ đếm ghi trên dòng sổ giữ nguyên. Lượt CHẠY THỬ không ghi dòng hụt nên không phân loại lại được.
+   */
+  skewReclassified: number;
   error: string | null;
   createdAt: Date;
 };
 
+/** Số dòng hụt của MỘT lượt nhập nằm trong dung sai lệch đồng hồ (bản SQL của erpKnewWithinSkew). */
+const skewReclassifiedOf = sql<number>`(select count(*)::int from vtp_webhook_gaps g where g.batch_id = ${schema.vtpImportBatches.id} and ${sql.raw(gapWithinSkewSql("g"))})`;
+
 export async function listVtpImportBatches(limit = 30): Promise<ImportBatchRow[]> {
   const db = await getDb();
-  const rows = await db.select().from(schema.vtpImportBatches).orderBy(desc(schema.vtpImportBatches.createdAt)).limit(limit);
+  const rows = await db
+    .select({ ...getTableColumns(schema.vtpImportBatches), lech: skewReclassifiedOf })
+    .from(schema.vtpImportBatches)
+    .orderBy(desc(schema.vtpImportBatches.createdAt))
+    .limit(limit);
   return rows.map((r) => ({
     id: r.id,
     filename: r.filename,
@@ -56,8 +69,9 @@ export async function listVtpImportBatches(limit = 30): Promise<ImportBatchRow[]
     unknownStatus: r.unknownStatus,
     invalid: r.invalid,
     checked: r.checked,
-    webhookOk: r.webhookOk,
-    webhookGaps: r.webhookGaps,
+    webhookOk: r.webhookOk + Number(r.lech ?? 0),
+    webhookGaps: Math.max(0, r.webhookGaps - Number(r.lech ?? 0)),
+    skewReclassified: Number(r.lech ?? 0),
     error: r.error,
     createdAt: r.createdAt,
   }));
@@ -86,7 +100,11 @@ export type ImportBatchDetail = {
 
 export async function getVtpImportBatch(id: string): Promise<ImportBatchDetail | null> {
   const db = await getDb();
-  const row = await db.query.vtpImportBatches.findFirst({ where: eq(schema.vtpImportBatches.id, id) });
+  const [row] = await db
+    .select({ ...getTableColumns(schema.vtpImportBatches), lech: skewReclassifiedOf })
+    .from(schema.vtpImportBatches)
+    .where(eq(schema.vtpImportBatches.id, id))
+    .limit(1);
   if (!row) return null;
   const [gaps, sameFile] = await Promise.all([
     db
@@ -100,7 +118,8 @@ export async function getVtpImportBatch(id: string): Promise<ImportBatchDetail |
         severity: schema.vtpWebhookGaps.severity,
       })
       .from(schema.vtpWebhookGaps)
-      .where(eq(schema.vtpWebhookGaps.batchId, id))
+      // Chỉ dòng hụt THẬT — dòng lệch đồng hồ trong dung sai đã được tính là «ERP đã biết» ở bộ đếm.
+      .where(sql`${schema.vtpWebhookGaps.batchId} = ${id} and not ${sql.raw(gapWithinSkewSql("vtp_webhook_gaps"))}`)
       .orderBy(desc(schema.vtpWebhookGaps.gapMinutes))
       .limit(100),
     db
@@ -112,6 +131,7 @@ export async function getVtpImportBatch(id: string): Promise<ImportBatchDetail |
       .orderBy(desc(schema.vtpImportBatches.createdAt))
       .limit(20),
   ]);
-  const { summary, ...rest } = row;
-  return { batch: rest as ImportBatchRow, summary, gaps, sameFile };
+  const { summary, lech, ...rest } = row;
+  const n = Number(lech ?? 0);
+  return { batch: { ...rest, webhookOk: rest.webhookOk + n, webhookGaps: Math.max(0, rest.webhookGaps - n), skewReclassified: n } as ImportBatchRow, summary, gaps, sameFile };
 }

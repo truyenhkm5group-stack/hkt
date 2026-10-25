@@ -62,6 +62,7 @@ export async function BatchHistory() {
                     <>
                       đối chiếu {formatNumber(b.checked)} dòng · ERP biết trước {formatNumber(b.webhookOk)}
                       {b.webhookGaps ? <span className="ml-1 font-medium text-amber-700 dark:text-amber-400">· {formatNumber(b.webhookGaps)} khoảng hụt</span> : " · không khoảng hụt nào"}
+                      {b.skewReclassified ? <span className="ml-1">· {formatNumber(b.skewReclassified)} dòng lệch đồng hồ tính là đã biết</span> : null}
                     </>
                   ) : (
                     <span>chưa đo</span>

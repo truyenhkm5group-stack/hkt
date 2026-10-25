@@ -4,7 +4,7 @@ import { NavLink } from "@/components/nav-progress";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
-import { GAP_SEVERITY_LABEL, type GapSeverity } from "@/lib/constants/webhook-gap";
+import { GAP_SEVERITY_LABEL, WEBHOOK_CLOCK_SKEW_SECONDS, type GapSeverity } from "@/lib/constants/webhook-gap";
 import { getVtpImportBatch } from "@/lib/queries/vtp-import-batches";
 import { formatDateTime, formatNumber } from "@/lib/format";
 
@@ -67,6 +67,11 @@ export default async function ImportBatchPage({ params }: { params: Promise<{ ba
             <O nhan="Dòng đưa vào phép đo" so={b.checked} />
             <O nhan="ERP đã biết trước" so={b.webhookOk} phu="webhook làm đúng việc" />
             <O nhan="ERP chưa hề biết" so={b.webhookGaps} phu="webhook đã rơi gói tin" />
+            {b.skewReclassified ? (
+              <p className="text-xs text-muted-foreground sm:col-span-3">
+                {formatNumber(b.skewReclassified)} dòng tính là «ERP đã biết»: mốc trên tệp lệch mốc webhook không quá {WEBHOOK_CLOCK_SKEW_SECONDS} giây — hai hệ thống của Viettel Post đóng dấu giờ cùng một sự việc lệch nhau vài giây. Lượt này ghi chúng là khoảng hụt theo luật cũ; dòng sổ giữ nguyên, chỉ đọc lại theo luật 25/10/2026.
+              </p>
+            ) : null}
           </div>
         ) : (
           /* CHƯA ĐO khác hẳn ĐO RỒI VÀ KHÔNG THẤY GÌ. Lần nhập chạy trước khi phép đo tồn tại

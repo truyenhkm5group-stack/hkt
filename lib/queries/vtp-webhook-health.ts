@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
-import { webhookMatchRate, WEBHOOK_MATCH_MIN_SAMPLE } from "@/lib/constants/webhook-gap";
+import { gapWithinSkewSql, webhookMatchRate, WEBHOOK_MATCH_MIN_SAMPLE } from "@/lib/constants/webhook-gap";
 import { webhookLatencyVerdict, WEBHOOK_LATENCY_BASELINE_MIN_DAYS, type WebhookLatencyVerdict } from "@/lib/constants/webhook-latency";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -198,11 +198,15 @@ export async function vtpWebhookHealth(): Promise<WebhookHealth> {
       Mẫu số là số dòng tệp ghép được về một vận đơn ERP đã biết; tử số là số dòng ERP đã biết
       trước. Dưới 30 dòng thì trả `null`: "1/1 hụt" không phải "webhook rơi 100%".
     */
-    const [do30] = rowsOf<{ checked: number; ok: number; gaps: number }>(await db.execute(sql`
+    // Bộ đếm của từng lượt nhập ghi theo luật CŨ (không dung sai lệch đồng hồ tệp ↔ webhook — webhook-gap.ts). Dòng sổ hụt nằm trong
+    // dung sai được PHÂN LOẠI LẠI lúc đọc thành «ERP đã biết», không sửa dòng đã ghi (đo 25/10/2026: 358/366 dòng lệch ≤ 120 giây).
+    const [do30] = rowsOf<{ checked: number; ok: number; gaps: number; lech_dong_ho: number }>(await db.execute(sql`
       select
         coalesce(sum(checked), 0)::int as checked,
         coalesce(sum(webhook_ok), 0)::int as ok,
-        coalesce(sum(webhook_gaps), 0)::int as gaps
+        coalesce(sum(webhook_gaps), 0)::int as gaps,
+        (select count(*)::int from vtp_webhook_gaps g join vtp_import_batches gb on gb.id = g.batch_id
+          where gb.mode = 'APPLY' and gb.created_at >= now() - interval '30 days' and ${sql.raw(gapWithinSkewSql("g"))}) as lech_dong_ho
       from vtp_import_batches
       where mode = 'APPLY' and created_at >= now() - interval '30 days'
     `));
@@ -212,12 +216,13 @@ export async function vtpWebhookHealth(): Promise<WebhookHealth> {
         count(*)::int as n,
         count(*) filter (where severity = 'CRITICAL')::int as nang,
         max(detected_at) as lan_cuoi
-      from vtp_webhook_gaps
-      where detected_at >= now() - interval '30 days'
+      from vtp_webhook_gaps g
+      where g.detected_at >= now() - interval '30 days' and not ${sql.raw(gapWithinSkewSql("g"))}
     `));
 
-    const known = Number(do30?.ok ?? 0);
-    const gaps = Number(do30?.gaps ?? 0);
+    const lechDongHo = Number(do30?.lech_dong_ho ?? 0);
+    const known = Number(do30?.ok ?? 0) + lechDongHo;
+    const gaps = Math.max(0, Number(do30?.gaps ?? 0) - lechDongHo);
     const h24 = Number(dem?.h24 ?? 0);
     const duplicate24h = Number(dem?.duplicate ?? 0);
     return {
