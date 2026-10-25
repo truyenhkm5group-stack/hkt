@@ -44,6 +44,34 @@ export const WEBHOOK_GAP_MIN_MINUTES = 120;
  */
 export const WEBHOOK_MATCH_MIN_SAMPLE = 30;
 
+/**
+ * Mốc của CÙNG một sự việc trên tệp "Danh sách vận đơn" và trong gói webhook LỆCH NHAU VÀI GIÂY — hai hệ thống của Viettel Post
+ * đóng dấu giờ ở hai chỗ khác nhau. Đo production 25/10/2026 (tệp 452 dòng): 357/366 dòng bị ghi là "khoảng hụt" có mốc tệp
+ * CHẬM HƠN mốc webhook ERP đang giữ 1–10 giây, 1 dòng 11–120 giây (358/366 ≤ 120 giây; 8 dòng còn lại là ERP chưa có mốc nào), và 358/358 có đúng sự kiện webhook trong ±120 giây — phép so
+ * `>=` không dung sai biến một webhook làm đúng việc thành "rơi 98%". Ngưỡng 120 giây phủ mọi độ lệch đã đo và vẫn nhỏ hơn
+ * `WEBHOOK_GAP_MIN_MINUTES` 60 lần, nên không che được một lần rơi thật (đo bằng giờ).
+ * Một hằng số, hai bản luật cùng tệp: TS (`erpKnewWithinSkew`, phép đo lúc ghi) và SQL (`gapWithinSkewSql`, đọc lại sổ đã ghi —
+ * dòng sổ ghi theo luật cũ KHÔNG bị sửa, chỉ bị phân loại lại lúc đọc).
+ *
+ * CỐ Ý KHÔNG áp vào phán quyết từng dòng của lượt nhập (`verdictOf` · `sameTimeConflict` / `older` của đường ghi): đo cùng ngày,
+ * MỌI dòng NEWER mà ERP có mốc đều lệch ≤ 120 giây VÀ khác chặng — 24 kiện webhook gửi 300/400 không cờ chiều hoàn mà tệp ghi
+ * «Đang chuyển hoàn», 11 kiện PICKED_UP mà tệp ghi «Giao thành công», 4 kiện «Chờ phát lại». Tệp đúng ở cả 39; coi chúng là
+ * «cùng khoảnh khắc» thì cả 39 thành STATUS_CONFLICT và dừng chờ người — phép đo đúng hơn mà dữ liệu tệ đi. Đừng «sửa cho
+ * nhất quán»; ca cùng-khoảnh-khắc-khác-chặng đi qua bộ dịch theo bối cảnh dòng (AGENTS 66).
+ */
+export const WEBHOOK_CLOCK_SKEW_SECONDS = 120;
+
+/** ERP đã biết sự việc (mốc ERP ≥ mốc tệp − dung sai lệch đồng hồ). HÀM THUẦN. */
+export function erpKnewWithinSkew(erpKnewAt: Date | null, carrierEventAt: Date): boolean {
+  return erpKnewAt !== null && erpKnewAt.getTime() >= carrierEventAt.getTime() - WEBHOOK_CLOCK_SKEW_SECONDS * 1000;
+}
+
+/** Bản SQL của `erpKnewWithinSkew` trên một dòng `vtp_webhook_gaps` (bí danh `alias`). */
+export function gapWithinSkewSql(alias: string): string {
+  if (!/^[a-z_][a-z0-9_]*$/.test(alias)) throw new Error("gapWithinSkewSql: bí danh không hợp lệ");
+  return `(${alias}.erp_knew_at is not null and ${alias}.erp_knew_at >= ${alias}.carrier_event_at - interval '${WEBHOOK_CLOCK_SKEW_SECONDS} seconds')`;
+}
+
 export const GAP_SEVERITIES = ["MINOR", "MAJOR", "CRITICAL"] as const;
 export type GapSeverity = (typeof GAP_SEVERITIES)[number];
 
@@ -90,8 +118,8 @@ export type GapMeasure =
 export function measureWebhookGap(input: GapMeasureInput): GapMeasure {
   const minutes = Math.round((input.importedAt.getTime() - input.carrierEventAt.getTime()) / 60_000);
   // ERP đã biết bằng hoặc mới hơn ⇒ không có gì hụt. So bằng mốc ĐVVC, không bằng lúc ERP nhận:
-  // câu hỏi là "ERP có biết sự việc này chưa", không phải "ERP có bận không".
-  if (input.erpKnewAt && input.erpKnewAt.getTime() >= input.carrierEventAt.getTime()) {
+  // câu hỏi là "ERP có biết sự việc này chưa", không phải "ERP có bận không". Có dung sai lệch đồng hồ tệp ↔ webhook.
+  if (erpKnewWithinSkew(input.erpKnewAt, input.carrierEventAt)) {
     return { isGap: false, reason: "ERP_ALREADY_AHEAD", minutes };
   }
   if (minutes < WEBHOOK_GAP_MIN_MINUTES) return { isGap: false, reason: "TOO_FRESH", minutes };

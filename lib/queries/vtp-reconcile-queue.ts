@@ -4,6 +4,7 @@ import { memo } from "@/lib/cache";
 import { rowsOf } from "@/lib/sql-rows";
 import { effectiveThresholdFor, FRESHNESS_BY_STAGE, FRESHNESS_DEFAULT } from "@/lib/constants/logistics-freshness";
 import { getFreshnessConfig } from "@/lib/queries/logistics-config";
+import { gapWithinSkewSql } from "@/lib/constants/webhook-gap";
 import {
   CARE_SILENCE_HOURS,
   GAP_QUEUE_DAYS,
@@ -155,6 +156,8 @@ export async function getVtpReconcileQueue(trang = 1): Promise<ReconcileQueue> {
           exists (
             select 1 from vtp_webhook_gaps g
             where g.shipment_id = s.id and g.detected_at >= now() - ${`${GAP_QUEUE_DAYS} days`}::interval
+              -- Lệch đồng hồ tệp ↔ webhook trong dung sai KHÔNG phải rơi gói (webhook-gap.ts, đo 25/10/2026) — phân loại lại lúc đọc.
+              and not ${sql.raw(gapWithinSkewSql("g"))}
           ) as r_gap
         from shipments s
         -- Việc của hàng đợi này là "một người mở viettelpost.vn tra lại mã này". Kiện không có mã
