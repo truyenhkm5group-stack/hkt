@@ -6,7 +6,7 @@
  * fanpage tra hội thoại bình luận CÙNG KHÁCH bằng identity-link (CHỈ mức VERIFIED — định danh nền tảng, không tên, không SĐT) trong 7 ngày:
  *  · hồ sơ nhận hàng khách đã cho ở bình luận (`state.customer` do create_customer ghi) được CHÉP sang khi hộp thư chưa có hồ sơ — mang nguồn
  *    COMMENT + id hội thoại + mốc ⇒ mức sẵn sàng · hàng rào hỏi lại (câu mẫu lẫn chữ model) · lời nhắc đều thấy «đã có SĐT / địa chỉ»;
- *  · đơn đang mở của hội thoại bình luận CHỈ được NÊU trong lời nhắc (không ghi, không nhân bản) — gộp / sửa đơn là việc của pha 3 (code-erp-95).
+ *  · đơn của hội thoại bình luận CHỈ được NÊU trong lời nhắc (không ghi, không nhân bản) — gộp đơn là pha 3 (#1050, máy chủ tự gộp, không hỏi khách).
  * Không ghi gì vào hội thoại bình luận.
  */
 import { inArray } from "drizzle-orm";
@@ -104,6 +104,8 @@ export function linkedCommentPrompt(link: LinkedComment | undefined): string {
   if (!link?.found) return "";
   const lines = ["KHÁCH NÀY VỪA BÌNH LUẬN TRÊN BÀI VIẾT CỦA PAGE (cùng một người — đã xác minh bằng định danh Facebook, không đoán):"];
   if (link.customerCopied) lines.push("· SĐT / địa chỉ nhận hàng khách gửi trong bình luận ĐÃ CÓ trong hồ sơ khách — KHÔNG xin lại, không hỏi lại phường / xã của địa chỉ ấy.");
-  if (link.orderId) lines.push(`· Khách ĐÃ CÓ đơn #${manualOrderShortCode(link.orderId)} lên từ lượt bình luận — KHÔNG nói «chưa có đơn»; khách muốn thêm món thì hỏi gộp vào đơn đó, không tự lên đơn mới khác ý khách.`);
+  // Pha 3 (#1050) mặc định GỘP: mua thêm mà đơn bot của hội thoại kia còn mở ⇒ máy chủ tự gộp (findMergeTarget); đơn đã rời «Mới» ⇒ chuyển
+  // nhân viên. Lời nhắc chỉ NÊU sự thật — một câu «gộp hay tách?» là hỏi khách điều máy chủ đằng nào cũng làm.
+  if (link.orderId) lines.push(`· Khách đã có đơn #${manualOrderShortCode(link.orderId)} từ lượt bình luận — KHÔNG nói «chưa có đơn». Khách mua thêm ⇒ máy chủ tự gộp vào đơn này (đơn đã qua xử lý thì máy chủ chuyển nhân viên): KHÔNG hỏi khách gộp hay tách, KHÔNG tạo đơn mới.`);
   return lines.join("\n");
 }

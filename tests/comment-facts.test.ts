@@ -50,8 +50,11 @@ export function testCommentFactsPure() {
   const p = linkedCommentPrompt({ checkedAt: now.toISOString(), found: true, conversationId: "c1", orderId: ORDER_ID, customerCopied: true });
   assert.match(p, /KHÔNG xin lại/);
   assert.ok(p.includes(`#${manualOrderShortCode(ORDER_ID)}`) && !p.includes(ORDER_ID), `đơn nêu bằng mã ngắn: ${p}`);
+  // Pha 3 (#1050) mặc định GỘP ⇒ lời nhắc không bảo bot hỏi khách gộp / tách, không cho tạo đơn mới.
+  assert.match(p, /KHÔNG hỏi khách gộp hay tách, KHÔNG tạo đơn mới/);
+  assert.ok(!/(?:^|[^G] )hỏi (?:khách )?(?:có )?(?:muốn )?(?:gộp|tách)/.test(p.replace("KHÔNG hỏi khách gộp hay tách", "")), `lời nhắc không bảo hỏi gộp / tách: ${p}`);
   const noCopy = linkedCommentPrompt({ checkedAt: now.toISOString(), found: true, conversationId: "c1", orderId: null, customerCopied: false });
-  assert.ok(!/KHÔNG xin lại/.test(noCopy) && !/ĐÃ CÓ đơn/.test(noCopy), "không chép, không đơn ⇒ chỉ dòng đầu");
+  assert.ok(!/KHÔNG xin lại/.test(noCopy) && !/đã có đơn/.test(noCopy), "không chép, không đơn ⇒ chỉ dòng đầu");
 
   // Điểm chặn: hồ sơ chép từ bình luận còn đứng ⇒ bỏ câu xin lại SĐT / địa chỉ, kể cả lần hỏi ĐẦU.
   const fromComment = { customer: { ...CUSTOMER, source: "COMMENT" as const, sourceConversationId: "c1" } };
@@ -132,7 +135,7 @@ export async function testCommentFactsChat() {
         assert.ok(st.linkedComment?.found && st.linkedComment.customerCopied, `[${c.key}] đã nối: ${JSON.stringify(st.linkedComment)}`);
         assert.deepEqual([st.customer?.phone, st.customer?.address, st.customer?.source], [CUSTOMER.phone, CUSTOMER.address, "COMMENT"], `[${c.key}] hồ sơ chép sang: ${JSON.stringify(st.customer)}`);
         // Harness chuẩn hoá mã đơn trong prompt thành «#<MÃ ĐƠN>» — mã ngắn thật đã khoá ở phần thuần.
-        assert.ok(prompt.includes("KHÁCH NÀY VỪA BÌNH LUẬN") && /KHÔNG xin lại/.test(prompt) && /ĐÃ CÓ đơn #(?:<MÃ ĐƠN>|[A-Z0-9]{8}) lên từ lượt bình luận/.test(prompt), `[${c.key}] lời nhắc nêu bình luận + đơn: ${prompt.slice(-600)}`);
+        assert.ok(prompt.includes("KHÁCH NÀY VỪA BÌNH LUẬN") && /KHÔNG xin lại/.test(prompt) && /đã có đơn #(?:<MÃ ĐƠN>|[A-Z0-9]{8}) từ lượt bình luận/.test(prompt)& /đã có đơn #(?:<MÃ ĐƠN>|[A-Z0-9]{8}) từ lượt bình luận/.test(prompt) && prompt.includes("KHÔNG hỏi khách gộp hay tách"), `[${c.key}] lời nhắc nêu bình luận + đơn: ${prompt.slice(-600)}`);
         assert.ok(!shown.some((s) => ASKS_CONTACT.test(s)), `[${c.key}] khách không nhận câu xin SĐT / địa chỉ: ${shown.join(" | ")}`);
       } else {
         assert.equal(st.linkedComment?.found, false, `[${c.key}] khác PSID ⇒ không nối: ${JSON.stringify(st.linkedComment)}`);
