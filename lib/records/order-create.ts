@@ -94,7 +94,7 @@ import { orderCancellationOf, withCancelOutcome, type CancelActor, type CancelRe
 import { canFlagOrderForReview, MACHINE_ADDRESS_NOTE_PREFIX, ORDER_REVIEW_HOLD_CODES, orderReviewOf, reviewConflictMessage, reviewResolveReason, unseenReviewEntries, withAddressCandidates, withAddressSettled, withCustomerReconfirm, withReviewEntry, withReviewResolved, type OrderReviewEntry, type OrderReviewResolution, type ReviewSeen } from "@/lib/constants/order-review";
 import { CONVERSATION_ORDER_FIELD, ConversationOrderExistsError, otherConversationOrders, type ConversationOrderScope } from "@/lib/sales-chatbot/conversation-order-guard";
 import { DUPLICATE_ACK_FIELD, DUPLICATE_VERDICT_LABEL, type DuplicateAckWarning } from "@/lib/constants/order-duplicate";
-import { duplicateFlagsFor } from "@/lib/queries/order-duplicate";
+import { duplicateDraftFlags, duplicateFlagsFor, type DuplicateDraft } from "@/lib/queries/order-duplicate";
 
 export type OrderGate = { allowed: true } | { allowed: false; code: "FORBIDDEN" | "NOT_SUPPORTED" | "MODULE_DISABLED"; reason: string };
 
@@ -614,11 +614,35 @@ export async function loadAutoConfirmComplete(): Promise<boolean> {
 /** Cờ cần kiểm chặn công tắc «đơn đủ thông tin = đã xác nhận» tự nâng đơn (P0 #863) — CÙNG danh sách giữ đơn khỏi vận đơn (#855). */
 const AUTO_CONFIRM_BLOCKING_REVIEW: ReadonlySet<string> = new Set(ORDER_REVIEW_HOLD_CODES);
 
-async function autoConfirmComplete(p: Prepared, existingOrderId?: string, existingRaw?: unknown): Promise<Prepared> {
+/** Bản sắp ghi của đơn cho luật nghi trùng — cùng cột mà `orderColumns` / `itemRows` ghi (SĐT + tên của KHÁCH, địa chỉ người nhận). */
+function duplicateDraftOf(p: Prepared, existing: { id: string; insertedAt: Date } | null): DuplicateDraft {
+  return {
+    id: existing?.id ?? null,
+    insertedAt: existing?.insertedAt ?? new Date(),
+    billPhone: p.customer.phone,
+    receiverName: p.customer.name,
+    address: p.recipient.address,
+    total: p.totals.totalPriceAfterDiscount,
+    items: p.totals.lines.map((l) => {
+      const v = p.variants.get(l.variantId)!;
+      return { variantId: v.id, sku: v.sku, productName: v.productName, variationDetail: variationText(v), quantity: l.quantity };
+    }),
+  };
+}
+
+/**
+ * `existing` = đơn đang sửa (lượt tạo ⇒ không có). `checkDuplicates` = lượt của NGƯỜI: đơn có tín hiệu trùng (cờ POSSIBLE_SAME_CUSTOMER
+ * — đã trong `ORDER_REVIEW_HOLD_CODES` — hoặc cặp `duplicateDraftFlags` ≠ DISTINCT trong cửa sổ) giữ «Mới» để người xác nhận qua rào hai
+ * bước; công tắc mà vẫn nâng thì nó là lối vòng qua rào (Tech Lead 25/10/2026). Lượt của MÁY không hỏi ở đây: đơn bot tự chốt đã có rào
+ * riêng (#1029 · pha 2/3 trùng đơn).
+ */
+async function autoConfirmComplete(p: Prepared, existing: { id: string; raw: unknown; insertedAt: Date } | null, checkDuplicates: boolean): Promise<Prepared> {
   if (p.stage !== "NEW" || !manualOrderComplete(p.recipient, p.totals.lines.length) || !(await loadAutoConfirmComplete())) return p;
   // Luật 04/10 «trừ những đơn huỷ»: đơn khách đã báo huỷ (cờ CẦN NGƯỜI KIỂM còn mở) KHÔNG được công tắc tự nâng — người quyết. P0 #863:
   // cùng luật cho đơn mang cờ món / số lượng khách chưa đồng ý, khách phản đối giá, máy không huỷ được — khách có thể không muốn ĐÚNG đơn này.
-  if (orderReviewOf(existingRaw)?.entries.some((e) => AUTO_CONFIRM_BLOCKING_REVIEW.has(e.code))) return p;
+  if (orderReviewOf(existing?.raw)?.entries.some((e) => AUTO_CONFIRM_BLOCKING_REVIEW.has(e.code))) return p;
+  if (checkDuplicates && (await duplicateDraftFlags(duplicateDraftOf(p, existing))).length) return p;
+  const existingOrderId = existing?.id;
   const promoted: Prepared = { ...p, stage: "CONFIRMED" };
   return (await creditGate(promoted, existingOrderId)) ? p : promoted;
 }
@@ -632,7 +656,7 @@ async function createOrder(w: Writer, rawInput: unknown, agentOpts?: AgentOrderO
     if (gate.failure) return gate.failure;
     quote = gate.quote;
   }
-  let p = agentOpts?.holdNew ? prep.p : await autoConfirmComplete(prep.p);
+  let p = agentOpts?.holdNew ? prep.p : await autoConfirmComplete(prep.p, null, !agentOpts);
   // Máy chỉ LƯU NHÁP mà công tắc tự nâng lên «Đã xác nhận»: thiếu hàng ⇒ giữ «Mới» (cùng tinh thần hạn mức nợ ở trên) —
   // chỉ lượt máy CHỦ ĐỘNG chốt mới bị từ chối vì thiếu hàng.
   if (agentOpts && !agentOpts.allowShortStock && p !== prep.p && (await agentStockFailure(await getDb(), p, [], false))) p = prep.p;
@@ -807,7 +831,7 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
     quote = gate.quote;
   }
   const row = existing.row;
-  let p = agentOpts?.holdNew ? prep.p : await autoConfirmComplete(prep.p, row.id, row.raw);
+  let p = agentOpts?.holdNew ? prep.p : await autoConfirmComplete(prep.p, row, !agentOpts);
   // Như lượt tạo: công tắc tự nâng đơn NHÁP của máy mà thiếu hàng ⇒ giữ «Mới» (đơn tự nâng chỉ đi từ «Mới» ⇒ chưa giữ hàng).
   if (agentOpts && !agentOpts.allowShortStock && p !== prep.p && (await agentStockFailure(await getDb(), p, [], false))) p = prep.p;
   const credit = await creditGate(p, row.id);

@@ -127,14 +127,27 @@ async function testRealOrg() {
     assert.ok(dv);
     const e3 = await updateManualOrderCore(admin, d, { ...dv, stage: "NEW", note: "khách hẹn chiều" });
     assert.ok(e3.ok, `sửa giữ «Mới» ⇒ không hỏi: ${JSON.stringify(e3)}`);
-    // Công tắc «đơn đủ thông tin = đã xác nhận» BẬT: lượt sửa giữ «Mới» được MÁY tự nâng — không phải người bấm xác nhận
-    // ⇒ không rào hai bước (CI #1055: `tests/manual-order-outcome.test.ts` đỏ trong chuỗi vì rào đọc stage SAU khi tự nâng).
+    // ── 7 · Công tắc «đơn đủ thông tin = đã xác nhận» BẬT: KHÔNG tự nâng đơn có tín hiệu trùng (Tech Lead 25/10/2026 — nếu không,
+    // công tắc là lối vòng qua rào). Lượt sửa giữ «Mới» không phải cú bấm xác nhận ⇒ không rào hai bước (CI #1055), và cũng không nâng.
+    const sach = await order("sach", "0955444333", v2.id);
+    const sv = await manualOrderFormValues(sach);
+    assert.ok(sv);
     await setSettingJson(AUTO_CONFIRM_COMPLETE_SETTING_KEY, { enabled: true });
     try {
       const e4 = await updateManualOrderCore(admin, d, { ...dv, stage: "NEW", note: "khách hẹn tối" });
-      assert.ok(e4.ok, `tự nâng ở lượt sửa ⇒ không hỏi: ${JSON.stringify(e4)}`);
-      assert.equal(await stageOf(d), "CONFIRMED", "công tắc vẫn tự nâng như trước");
+      assert.ok(e4.ok, `sửa giữ «Mới» ⇒ không hỏi: ${JSON.stringify(e4)}`);
+      assert.equal(await stageOf(d), "NEW", "đơn nghi trùng (cùng SĐT + món với a/b/c) ⇒ công tắc KHÔNG nâng, người xác nhận qua rào");
       assert.equal(await acks(d), 0, "không có người thấy cảnh báo ⇒ không nhật ký");
+      const e5 = await confirmOrderReviewCore(admin, d, { count: 0, latestAt: null });
+      assert.ok(!e5.ok && e5.code === "CONFLICT", `đơn công tắc để lại vẫn đi đúng rào hai bước: ${JSON.stringify(e5)}`);
+      const e6 = await updateManualOrderCore(admin, sach, { ...sv, stage: "NEW", note: "khách hẹn tối" });
+      assert.ok(e6.ok, JSON.stringify(e6));
+      assert.equal(await stageOf(sach), "CONFIRMED", "sửa đơn sạch giữ «Mới» ⇒ công tắc nâng như cũ");
+      // Lượt TẠO: đơn nghi trùng giữ «Mới»; đơn sạch (SĐT khác) ⇒ «Đã xác nhận» như cũ.
+      const t1 = await order("t1", "0919000808", v.id);
+      assert.equal(await stageOf(t1), "NEW", "tạo đơn nghi trùng khi công tắc bật ⇒ giữ «Mới»");
+      const t2 = await order("t2", "0977555666", v.id);
+      assert.equal(await stageOf(t2), "CONFIRMED", "tạo đơn không tín hiệu trùng ⇒ công tắc tự nâng như cũ");
     } finally {
       await setSettingJson(AUTO_CONFIRM_COMPLETE_SETTING_KEY, { enabled: false });
     }
@@ -182,5 +195,5 @@ export async function testConfirmDuplicateAck() {
     await cleanupOrg(ORG);
   }
   testUiFences();
-  console.log("  ✓ xác nhận tay đơn có thể trùng: nút nhanh + form sửa đơn hai bước (lượt 1 cảnh báo, không ghi · lượt 2 đúng khoá ⇒ xác nhận + nhật ký) · khoá cũ không thay khoá mới · cờ «có thể cùng khách» · đơn không trùng một bước · sửa giữ «Mới» không hỏi, kể cả khi công tắc tự nâng");
+  console.log("  ✓ xác nhận tay đơn có thể trùng: nút nhanh + form sửa đơn hai bước (lượt 1 cảnh báo, không ghi · lượt 2 đúng khoá ⇒ xác nhận + nhật ký) · khoá cũ không thay khoá mới · cờ «có thể cùng khách» · đơn không trùng một bước · sửa giữ «Mới» không hỏi · công tắc tự nâng không nâng đơn nghi trùng (tạo + sửa), đơn sạch như cũ");
 }

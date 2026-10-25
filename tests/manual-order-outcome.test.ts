@@ -125,6 +125,15 @@ export async function testManualOrderOutcome() {
       const receiptCount = async () => Number((await db.select({ n: sql<number>`count(*)` }).from(schema.stockReceipts))[0].n);
       const receipts0 = await receiptCount();
       const input = (qty: number) => ({ customerId: c.id, stage: "CONFIRMED", orderDiscount: 0, shippingFee: 0, lines: [{ variantId: "erp-mo-var", quantity: qty, unitPrice: 280_000, discount: 0 }] });
+      // Đơn mà công tắc «đủ thông tin» phải nâng đứng trên một khách RIÊNG (SĐT riêng, cùng địa chỉ): cùng khách + cùng món trong
+      // cửa sổ là cặp NGHI TRÙNG, và công tắc KHÔNG nâng đơn nghi trùng (Tech Lead 25/10/2026). Bài này đo luật «đủ thông tin»,
+      // luật trùng đo ở `tests/confirm-duplicate-ack.test.ts`.
+      let solo = 0;
+      const soloCustomer = async () => {
+        solo += 1;
+        const [k] = await db.insert(schema.customers).values({ name: `Chị Lan ${solo}`, phone: `09123400${String(solo).padStart(2, "0")}`, address: "12 Hàng Bạc, Phường Hoàn Kiếm", province: "Hà Nội" }).returning({ id: schema.customers.id });
+        return k.id;
+      };
 
       // ── PHÍ GIAO ĐỒNG GIÁ ──
       assert.equal(await loadManualDeliveryFee(), null, "chưa khai ⇒ null, không đoán");
@@ -160,7 +169,7 @@ export async function testManualOrderOutcome() {
 
       // ── GIAO KHÔNG THÀNH CÔNG ──
       assert.deepEqual(await stockOf("erp-mo-var"), { actual: 20, available: 18 }, "đơn A lại ở «Đã xác nhận» — giữ 2");
-      const neu = await createManualOrderCore(admin, { ...input(1), stage: "NEW" });
+      const neu = await createManualOrderCore(admin, { ...input(1), customerId: await soloCustomer(), stage: "NEW" });
       assert.ok(neu.ok);
       assert.equal(codeOf(await markManualDeliveryFailedCore(admin, neu.id, { reason: "khách không nhận" })), "CONFLICT", "đơn «Mới» chưa chốt ⇒ không báo giao hỏng");
       assert.equal(codeOf(await markManualDeliveryFailedCore({ ...admin, permissions: ["orders:read"], role: "MANAGER" }, a.id, { reason: "khách không nhận" })), "FORBIDDEN");
@@ -203,7 +212,7 @@ export async function testManualOrderOutcome() {
       // ── ĐƠN ĐỦ THÔNG TIN = ĐÃ XÁC NHẬN (chủ shop HSLC 04/10/2026) ──
       const stageOf = async (id: string) => (await db.query.orders.findFirst({ where: eq(schema.orders.id, id) }))?.stage;
       assert.equal(await loadAutoConfirmComplete(), false, "mặc định TẮT");
-      const cu = await createManualOrderCore(admin, { ...input(1), stage: "NEW" });
+      const cu = await createManualOrderCore(admin, { ...input(1), customerId: await soloCustomer(), stage: "NEW" });
       assert.ok(cu.ok);
       assert.equal(await stageOf(cu.id), "NEW", "công tắc tắt ⇒ đơn Mới vẫn Mới");
       // Khách thiếu địa chỉ ⇒ đơn thiếu thông tin; khách có hạn mức nợ 0 ⇒ xác nhận sẽ vượt hạn mức.
@@ -227,15 +236,16 @@ export async function testManualOrderOutcome() {
       assert.equal((await getNominalProfitReport(ALL)).totals.ordersDistinct, nominalBefore + 2, "báo cáo danh nghĩa (nền của /ads) đếm đơn vừa tính");
       assert.equal((await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.action, "ORDER_AUTO_CONFIRM_COMPLETE"))).length, 1);
       // Đơn MỚI tạo sau khi bật: đủ thông tin ⇒ thẳng «Đã xác nhận»; «Chờ hàng» là lựa chọn của người ⇒ giữ nguyên.
-      const moi = await createManualOrderCore(admin, { ...input(1), stage: "NEW" });
+      const moi = await createManualOrderCore(admin, { ...input(1), customerId: await soloCustomer(), stage: "NEW" });
       assert.ok(moi.ok);
       assert.equal(await stageOf(moi.id), "CONFIRMED", "đơn đủ SĐT · địa chỉ · hàng tính là đơn ngay");
       assert.deepEqual(await db.query.orders.findFirst({ where: eq(schema.orders.id, moi.id), columns: { shipProvince: true, shipCommune: true } }), { shipProvince: "Thành phố Hà Nội", shipCommune: "Phường Hoàn Kiếm" }, "lõi ghi đơn điền tỉnh + xã theo địa giới mới từ dòng địa chỉ");
       // Địa chỉ không ghép được xã (05/10/2026) ⇒ CHƯA đủ thông tin ⇒ giữ «Mới» để người chọn xã.
-      const mo = await createManualOrderCore(admin, { ...input(1), stage: "NEW", recipient: { name: "Chị Lan", phone: "0912345678", address: "12 Lê Văn Sỹ p13 q3", province: "tphcm" } });
+      const moCustomer = await soloCustomer();
+      const mo = await createManualOrderCore(admin, { ...input(1), customerId: moCustomer, stage: "NEW", recipient: { name: "Chị Lan", phone: "0912345678", address: "12 Lê Văn Sỹ p13 q3", province: "tphcm" } });
       assert.ok(mo.ok);
       assert.equal(await stageOf(mo.id), "NEW", "xã cũ bị chia cho nhiều xã mới ⇒ không tự xác nhận");
-      assert.ok((await updateManualOrderCore(admin, mo.id, { ...input(1), stage: "NEW", recipient: { name: "Chị Lan", phone: "0912345678", address: "12 Lê Văn Sỹ p13 q3", province: "tphcm", ward: "Phường Nhiêu Lộc" } })).ok);
+      assert.ok((await updateManualOrderCore(admin, mo.id, { ...input(1), customerId: moCustomer, stage: "NEW", recipient: { name: "Chị Lan", phone: "0912345678", address: "12 Lê Văn Sỹ p13 q3", province: "tphcm", ward: "Phường Nhiêu Lộc" } })).ok);
       assert.equal(await stageOf(mo.id), "CONFIRMED", "người chọn xã ⇒ đủ ⇒ tự xác nhận ở lượt sửa");
       assert.ok((await cancelManualOrderCore(admin, mo.id, { reason: "đơn thử" })).ok);
       const cho = await createManualOrderCore(admin, { ...input(1), stage: "WAITING" });
