@@ -29,18 +29,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T02:20:33.664Z",
-  "updated_at": "2026-10-25T02:23:37.586Z",
-  "last_heartbeat": "2026-10-25T02:21:08.930Z",
+  "updated_at": "2026-10-25T03:44:57.519Z",
+  "last_heartbeat": "2026-10-25T03:44:57.519Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/confirm-dup-warning",
-    "sha": "e898c57825aca1245f327fc47066b1622340db96",
-    "at": "2026-10-25T02:21:08.930Z",
+    "sha": "b909073dcb4cf45c6cf623e19435c98f1dc98d4f",
+    "at": "2026-10-25T03:44:57.519Z",
     "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
     "title": "Xác nhận tay đơn có thể trùng: hai bước, hộp cảnh báo + nhật ký",
     "summary": "",
     "tests": [
-      "tsc · eslint sạch · next build XANH. Chạy riêng XANH: confirm-duplicate-ack · order-review · inbox-v2-b · shipping-routing · price-lists-receivables · saas-acceptance · carrier-vtp · manual-order-outcome · self-service-journey. pilot-orders ĐỎ cả trên nền main (không do PR). 4 shard để CI gates"
+      "CI #1055 đỏ manual-order-outcome:238 ⇒ rào đọc stage người xin (prep.p) thay vì stage sau tự nâng; confirm-duplicate-ack thêm ca công tắc bật + kiểm đột biến tái hiện đúng CONFLICT của CI; TEST_SHARD=1/4 ĐẠT (10/24 khối); tsc + eslint sạch"
     ]
   }
 }
