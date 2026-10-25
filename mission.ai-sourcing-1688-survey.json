@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "ai-sourcing-1688-survey",
+  "title": "AI Sourcing: khảo sát 1688 phiên chủ shop (tài liệu)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/ai-sourcing-1688-survey",
+  "base_sha": "3fc6431c29481e9cf4bcb477bff28c95fad8b584",
+  "domains": [],
+  "owned_paths": [
+    "docs/tech/"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-25T10:23:59.046Z",
+  "updated_at": "2026-10-25T10:23:59.046Z",
+  "last_heartbeat": "2026-10-25T10:23:59.046Z",
+  "definition_of_done": []
+}
