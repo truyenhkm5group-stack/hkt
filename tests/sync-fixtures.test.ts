@@ -400,6 +400,7 @@ import { testCompanyOsStockFeedbackDb, testCompanyOsStockFeedbackPure } from "./
 import { testCompanyOsOwnerDigestDb, testCompanyOsOwnerDigestPure } from "./company-os-owner-digest.test";
 import { testCompanyOsEarlyTopicDb, testCompanyOsEarlyTopicPure } from "./company-os-early-topic.test";
 import { testCompanyOsWarmDb, testCompanyOsWarmPure, testWorkWarmDb } from "./company-os-warm.test";
+import { testReturnsKpiFirstDb, testReturnsKpiFirstPure } from "./returns-kpi-first.test";
 import { testCompanyOsSummaryDb, testCompanyOsSummaryPure } from "./company-os-summary.test";
 import { testOrgSummaryDb, testOrgSummaryPure } from "./org-summary.test";
 import { testOrgAiCutoverApply, testOrgAiCutoverPure } from "./org-ai-cutover.test";
@@ -2505,6 +2506,8 @@ async function main() {
     // Company OS · Agent W: job giữ ấm phủ khoá đệm của "Cần anh quyết" (so TẬP KHOÁ, không gõ tên) + ops company-os-summary (mã `cos-w-` / `COSW`, tự dọn, trả lại `owner.digest`).
     await testCompanyOsWarmPure();
     await testCompanyOsWarmDb();
+    await testReturnsKpiFirstPure();
+    await testReturnsKpiFirstDb();
     await testWorkWarmDb();
     testCompanyOsSummaryPure();
     await testCompanyOsSummaryDb(db);
