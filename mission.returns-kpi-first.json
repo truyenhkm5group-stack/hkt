@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "returns-kpi-first",
+  "title": "/reports/returns: KPI khởi chạy trước (sau cờ, mặc định tắt) — câu đếm ‖ dự báo, 7 nhánh nặng chờ KPI hoặc trần 800 ms",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-kpifirst",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/returns-kpi-first",
+  "base_sha": "289c2e984356757bad7163781e71c9e822aa3c55",
+  "domains": [],
+  "owned_paths": [
+    "lib/queries/returns-report-page.ts",
+    "tests/returns-kpi-first.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-25T14:33:18.935Z",
+  "updated_at": "2026-10-25T14:33:18.935Z",
+  "last_heartbeat": "2026-10-25T14:33:18.935Z",
+  "definition_of_done": []
+}
