@@ -3,7 +3,7 @@
   "mission_id": "dup-threads-probe",
   "title": "Chạy thử đếm luồng có > 1 hội thoại (gốc #B1135EC0/#E0663E84)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-ckl",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T01:53:25.958Z",
-  "updated_at": "2026-10-25T02:39:38.570Z",
+  "updated_at": "2026-10-25T03:08:56.155Z",
   "last_heartbeat": "2026-10-25T01:54:13.526Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1057 → 80a9f0dfde3f0d51b7fbf9f971ea83cfa8546ade"
+  },
   "handoff": {
     "branch": "claude/dup-threads-probe",
     "sha": "fab356afd22c51afdac2b698af65dff2feba90db",
