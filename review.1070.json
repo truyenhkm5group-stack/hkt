@@ -1,8 +1,8 @@
 {
   "pr": 1070,
-  "sha": "f751e38218bde7e17142487bfd681bd907e66f9c",
+  "sha": "ae66658df5852672cb4620aba2128cca48f91f62",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-25T12:46:35.814Z",
-  "note": "review lead: trần GCRA 30 lượt/token SAU khi token khớp (token sai không tốn lượt) ⇒ 429 + Retry-After; route đọc thân dạng luồng, dừng khi vượt 1,5 MB kể cả thiếu/sai content-length; README ghi rủi ro nonce đã chấp nhận. Không đổi kỳ vọng cũ."
+  "at": "2026-10-25T14:05:00.407Z",
+  "note": "review lead (lượt 2, thêm khai HOLDER_DA_KHAI THEO_TO_CHUC — khoá xô đã kiểm là orgCode:tokenId ở capture-tokens.ts:119): trần GCRA 30 lượt/token SAU khi token khớp (token sai không tốn lượt) ⇒ 429 + Retry-After; route đọc thân dạng luồng, dừng khi vượt 1,5 MB kể cả thiếu/sai content-length; README ghi rủi ro nonce đã chấp nhận. Không đổi kỳ vọng cũ."
 }
