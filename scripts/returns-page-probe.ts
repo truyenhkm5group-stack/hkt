@@ -22,6 +22,10 @@
  *      dùng THẤY con số, không phải lúc byte đầu tới.
  *   1b. Câu nhỏ (`select 1`, cùng bể kết nối) chờ bao lâu khi trang đang dựng NGUỘI, so với lúc máy rảnh —
  *      đúng chỗ các câu nhỏ của layout xếp hàng nếu trang chiếm hết bể (giả thuyết của đầu phản hồi nguội 2–3 s).
+ *   1c. KPI của kỳ KHÔNG mặc định (30 ngày) khi nguội: chạy MỘT MÌNH ↔ chạy CHUNG cả trang, kho học + thử ngược ẤM
+ *      như trên production (job giữ ấm 10 phút). Sau Suspense (#1065), KPI kỳ 30 ngày vẫn hiện ở 6,1 s — phép này
+ *      tách «truy vấn KPI tự chậm» khỏi «KPI xếp hàng sau 11 nhánh nặng của chính trang». Kèm phân lớp: dự báo
+ *      PRODUCT một mình (kho học ấm) và phần còn lại của summary (dự báo đã ấm) = câu đếm của chính nó.
  *
  * Số ở (1)–(2) là của TIẾN TRÌNH SCRIPT, không phải tiến trình Next: cùng mã, cùng dữ liệu, nên nó nói
  * mã đó chặn vòng sự kiện bao lâu; không nói máy chủ đang bận việc gì khác. (3) là số người dùng thật.
@@ -81,7 +85,7 @@ async function main() {
   }
   const { clearMemo } = await import("@/lib/cache");
   const { canUseModule } = await import("@/lib/platform/capabilities");
-  const { loadReturnsPage, returnsPageParams, withDefaultReturnsBasis } = await import("@/lib/queries/returns-report-page");
+  const { loadReturnsPage, returnsPageParams, startReturnsPage, withDefaultReturnsBasis } = await import("@/lib/queries/returns-report-page");
   const { getReturnReasonReport } = await import("@/lib/queries/return-reason-report");
   const { getProjectedDeliveryMetrics } = await import("@/lib/queries/projected-delivery");
   const { getReturnIntelligence } = await import("@/lib/queries/return-intelligence");
@@ -120,6 +124,43 @@ async function main() {
   await doCauNho("máy rảnh (không việc nền)", null);
   clearMemo();
   await doCauNho("trong lúc loadReturnsPage NGUỘI", () => loadReturnsPage(thamSo));
+
+  console.log("── 1c. KPI KỲ 30 NGÀY KHI NGUỘI: MỘT MÌNH ↔ CHUNG CẢ TRANG (kho học + thử ngược ẤM như production) ──");
+  {
+    const { getProbabilityLookup, getProjectionBacktest, getProjectedDeliveryMetrics: duBaoPRODUCT } = await import("@/lib/queries/projected-delivery");
+    const { getReturnRateSummary } = await import("@/lib/queries/return-rate");
+    // Tham số kỳ 30 ngày dựng qua ĐÚNG hai hàm của trang (như khi người dùng bấm «30 ngày»).
+    const ts30 = returnsPageParams(withDefaultReturnsBasis({ period: "30d" }, await canUseModule("logistics")));
+    const p30 = ts30.params.period;
+    /** Xoá đệm rồi nạp lại ĐÚNG hai mục đệm 10 phút mà production luôn có ấm — mọi thứ còn lại của kỳ 30 ngày nguội. */
+    const nguoiTruKhoHoc = async () => {
+      clearMemo();
+      await Promise.all([getProbabilityLookup(), getProjectionBacktest()]);
+    };
+    const doMs = async (viec: () => Promise<unknown>) => {
+      const t = performance.now();
+      await viec();
+      return Math.round(performance.now() - t);
+    };
+    await nguoiTruKhoHoc();
+    const motMinh = await doMs(() => getReturnRateSummary(p30, ts30.params.q, ts30.basis, ts30.giaTriDon));
+    await nguoiTruKhoHoc();
+    const duBao = await doMs(() => duBaoPRODUCT(p30, ts30.basis, "PRODUCT", ts30.giaTriDon));
+    const phanConLai = await doMs(() => getReturnRateSummary(p30, ts30.params.q, ts30.basis, ts30.giaTriDon));
+    await nguoiTruKhoHoc();
+    const t0 = performance.now();
+    const ca = startReturnsPage(ts30);
+    let kpiChung: number | null = null;
+    ca.summary.then(() => (kpiChung = Math.round(performance.now() - t0))).catch(() => undefined);
+    await Promise.allSettled(Object.values(ca));
+    const caTrang = Math.round(performance.now() - t0);
+    console.log(`  kỳ ${p30.label} · mốc ${ts30.basis}`);
+    console.log(`  KPI (getReturnRateSummary) MỘT MÌNH: ${motMinh} ms  =  dự báo PRODUCT một mình ${duBao} ms  +  phần còn lại (câu đếm) ${phanConLai} ms`);
+    console.log(`  KPI khi CHUNG cả trang (startReturnsPage, 12 nhánh cùng lúc): ${kpiChung ?? "?"} ms · cả trang xong ${caTrang} ms`);
+    console.log(
+      `  ⇒ ${kpiChung !== null && motMinh > 0 ? `chung / một mình = ${(kpiChung / motMinh).toFixed(1)}×: ${kpiChung > motMinh * 1.5 ? "KPI đang XẾP HÀNG sau các nhánh khác" : "KPI chậm vì CHÍNH truy vấn của nó"}` : "chưa đủ số để kết luận"}`,
+    );
+  }
 
   console.log("── 2. TỪNG NHÁNH NẶNG CỦA INTELLIGENCE, mỗi nhánh nguội riêng ──");
   clearMemo();
