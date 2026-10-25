@@ -91,6 +91,7 @@ import { flagOrderForReviewAsAgent, loadAutoConfirmComplete } from "@/lib/record
 import type { PriceDisputeState } from "@/lib/sales-chatbot/quote-shared";
 import { catalogReferenceAmounts, catalogReferenceBreakdown } from "@/lib/sales-chatbot/quote";
 import { vnDayOffset, WEEKDAY_LABEL } from "@/lib/constants/booking";
+import { commentContactHeld, dropCommentContactAsks, linkedCommentPrompt, loadLinkedComment, needsLinkedCheck } from "@/lib/sales-chatbot/comment-facts";
 
 export const SALES_AGENT = { name: "Chatbot bán hàng", source: "lib/sales-chatbot/engine.ts" } as const;
 
@@ -505,6 +506,8 @@ async function flagAbandonedDraft(st: ChatState, now: Date): Promise<void> {
  * lượt mua, xoá khi lượt kết thúc (`chatTurn`). Hội thoại chạy tuần tự (khoá lượt) nên một ô / hội thoại là đủ.
  */
 const turnAddressGiven = new Map<string, boolean>();
+/** Hồ sơ nhận hàng chép từ bình luận còn đứng ở lượt này (comment-facts.ts::commentContactHeld) — cùng vòng đời với `turnAddressGiven`. */
+const turnCommentContact = new Map<string, { address: boolean; phone: boolean }>();
 
 /**
  * ĐIỂM CHẶN CUỐI của MỌI chữ bot ghi vào hội thoại trong lượt (kênh đọc lại đúng các dòng này để gửi khách): chữ model, câu mẫu, câu dự
@@ -532,6 +535,7 @@ export function guardAssistantContent(content: AiBlock[], given: boolean): { con
 function markAddressGiven(conversationId: string, msgs: Parameters<typeof customerMsgsOf>[0], st: ChatState, text: string): string[] {
   const texts = [...customerTextsSince(customerMsgsOf(msgs), purchaseRoundStart(st)), text];
   turnAddressGiven.set(conversationId, addressTextGiven(texts));
+  turnCommentContact.set(conversationId, commentContactHeld(st, text));
   return texts;
 }
 
@@ -541,6 +545,16 @@ async function appendMessage(conversationId: string, seq: number, role: "user" |
     const g = guardAssistantContent(content, turnAddressGiven.get(conversationId) === true);
     if (g.dropped) console.warn(JSON.stringify({ evt: "address_ask_dropped", code: "KNOWN_ADDRESS_REASKED", conversation: conversationId.slice(0, 8), dropped: g.dropped }));
     content = g.content;
+    // Hồ sơ chép từ bình luận (P2-3 / P2-4): câu xin lại SĐT / địa chỉ khách đã gửi ở bình luận bị bỏ — kể cả lần hỏi ĐẦU.
+    const held = turnCommentContact.get(conversationId);
+    if (held && (held.address || held.phone)) {
+      content = content.map((b) => {
+        if (b.type !== "text") return b;
+        const r = dropCommentContactAsks(b.text, held);
+        if (r.dropped) console.warn(JSON.stringify({ evt: "address_ask_dropped", code: "KNOWN_ADDRESS_REASKED", source: "COMMENT", conversation: conversationId.slice(0, 8), dropped: r.dropped }));
+        return r.dropped ? { ...b, text: r.text } : b;
+      });
+    }
   }
   const rows = await db.insert(schema.salesChatMessages).values({ conversationId, seq, role, content }).onConflictDoNothing().returning({ id: schema.salesChatMessages.id });
   if (rows.length === 0) throw new SeqConflict(TURN_BUSY_ERROR);
@@ -1060,6 +1074,7 @@ export const chatTurn = withTurnEvents(async (...args: Parameters<typeof chatTur
     return await chatTurnCore(...args);
   } finally {
     turnAddressGiven.delete(args[0]);
+    turnCommentContact.delete(args[0]);
   }
 });
 async function chatTurnCore(
@@ -1145,6 +1160,18 @@ async function chatTurnCore(
     // chốt ⇒ bỏ qua câu mẫu (chốt đơn cần công cụ của AI). Bước AI ĐỌC HIỂU chạy SAU công tắc / hạn mức / khoá bên dưới.
     const qrSettings = await loadQuickReplySettings();
     let st0 = (conv.state ?? {}) as ChatState;
+    // BÌNH LUẬN CỦA CHÍNH KHÁCH ⇒ HỘP THƯ BIẾT (P2-3/P2-4 — P0 HSLC 24/10/2026, ca «Trần Thị Ngọc», comment-facts.ts): hội thoại fanpage tra hội
+    // thoại bình luận CÙNG KHÁCH (identity-link, chỉ VERIFIED) — hồ sơ nhận hàng khách gửi ở bình luận chép sang khi hộp thư chưa có, nên câu
+    // mẫu lẫn chữ model không xin lại SĐT / địa chỉ; đơn của bình luận chỉ được NÊU (gộp đơn là pha 3). Lỗi tra ⇒ bỏ qua, không chặn lượt.
+    if (opts.channel === "FANPAGE" && needsLinkedCheck(st0, now)) {
+      const lc = await loadLinkedComment(conv.id, now).catch(() => null);
+      if (lc) {
+        const st: ChatState = { ...st0, linkedComment: { ...lc.link, customerCopied: Boolean(lc.customer && !st0.customer) }, ...(lc.customer && !st0.customer ? { customer: lc.customer } : {}) };
+        await bump({ state: st as Record<string, unknown> });
+        conv.state = st as Record<string, unknown>;
+        st0 = st;
+      }
+    }
     // ĐƠN THẬT THẮNG STATE CŨ (P0-A/B 11/10/2026): đơn nháp của bot đã «Đã xác nhận» trong CSDL (công tắc tự xác nhận, nhân viên) mà
     // state chưa biết ⇒ ghi state.confirmed theo đơn — AI không bao giờ xin khách xác nhận lại một đơn đã xác nhận.
     if (!st0.confirmed && st0.draft?.orderId && opts.channel !== "TEST") {
@@ -1707,6 +1734,7 @@ async function chatTurnCore(
       { text: confirmedOrderPrompt(known), tier: "CONVERSATION" },
       { text: cartPromptOf(known, text, turnSeq, autoConfirm, prevTurn, { phone: promptPhone, roundTexts: roundCustomerTexts, previousAddress }), tier: "TURN" },
       { text: postSale ? "" : knownContactPrompt(known, roundCustomerTexts, { phoneKnown: usableKnownPhone(knownPhone) !== null }), tier: "TURN" },
+      { text: postSale ? "" : linkedCommentPrompt(known.linkedComment), tier: "CONVERSATION" },
       { text: postSale || !addressTextGiven(roundCustomerTexts) ? "" : ADDRESS_GIVEN_PROMPT, tier: "TURN" },
       { text: postSale ? "" : knownPhonePrompt(promptPhone), tier: "TURN" },
       { text: postSale || reuse.address !== null ? "" : previousAddressPrompt(previousAddress), tier: "TURN" },

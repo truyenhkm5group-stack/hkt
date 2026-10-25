@@ -677,6 +677,7 @@ import { testAddressNeverReask } from "./address-never-reask.test";
 import { testCommentInboxKey } from "./p0-comment-inbox-key.test";
 import { testIdentityLink } from "./identity-link.test";
 import { testThreadOwner } from "./thread-owner.test";
+import { testCommentFacts } from "./comment-facts.test";
 import { testAddressReaskQtyAck } from "./address-reask-qtyack.test";
 import { testAddressResolver } from "./address-resolver.test";
 import { testMessengerConfigReport } from "./messenger-config-report.test";
@@ -3437,6 +3438,8 @@ async function main() {
     await testIdentityLink();
     // Một luồng một hội thoại (P0 24/10/2026 — gốc cặp #B1135EC0 / #E0663E84): EXISTING_INBOX không đè luồng, mọi đường đọc chọn chủ.
     await testThreadOwner();
+    // P2-3 / P2-4 (P0 HSLC 24/10/2026): dữ kiện + đơn của hội thoại bình luận cùng khách (VERIFIED) sang hộp thư — không xin lại SĐT / địa chỉ.
+    await testCommentFacts();
     // 23/10/2026: câu máy chủ tự soạn qua điểm chặn · lời xin dạng kể · 2B ADDRESS_REASK theo 3.12b, REPEAT_ASK tách mã. Thuần, không gieo dữ liệu.
     testAddressReaskQtyAck();
     // address-resolver-ladder PR-B: máy ánh xạ địa chỉ nền (chữ khách → C360 → Google của tổ chức), không chạm lượt chat.
