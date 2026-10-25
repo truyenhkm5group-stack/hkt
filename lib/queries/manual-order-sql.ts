@@ -82,13 +82,13 @@ export const MANUAL_ORDER_PAID: SQL = sql`(${IS_MANUAL_ORDER} and ${MANUAL_PAYME
  * chức này có đồng bộ đơn không" trả lời bằng CHÍNH DỮ LIỆU của CSDL tổ chức: có đơn nào không phải `erp-` không. Câu con
  * KHÔNG tương quan ⇒ Postgres tính MỘT lần mỗi câu (InitPlan), dừng ở dòng đầu tiên — không tốn gì ở câu gộp nóng của nhà.
  */
-const ORG_HAS_SYNCED_ORDERS: SQL = sql`exists (select 1 from orders so_sync where so_sync.id not like ${PATTERN})`;
+export const ORG_HAS_SYNCED_ORDERS: SQL = sql`exists (select 1 from orders so_sync where so_sync.id not like ${PATTERN})`;
 
 /**
  * Quản trị shop đã TUYÊN BỐ chuyển hẳn sang ERP (`ERP_NATIVE_SETTING_KEY` — ORDER_OUTCOME.md mục 11.3): đơn Pancake trong CSDL
  * chỉ còn là LỊCH SỬ đã nhập, không phải dấu hiệu đang đồng bộ. Câu con KHÔNG tương quan ⇒ InitPlan, tính một lần mỗi câu.
  */
-const ORG_DECLARED_ERP_NATIVE: SQL = sql`exists (select 1 from settings st_native where st_native.key = ${ERP_NATIVE_SETTING_KEY})`;
+export const ORG_DECLARED_ERP_NATIVE: SQL = sql`exists (select 1 from settings st_native where st_native.key = ${ERP_NATIVE_SETTING_KEY})`;
 
 /** Đơn nằm trong báo cáo danh nghĩa / phép so marketer: đơn đồng bộ, hoặc MỌI đơn ở tổ chức không đồng bộ đơn / đã chuyển hẳn sang ERP. */
 export const IN_SALES_REPORTS: SQL = sql`(${schema.orders.id} not like ${PATTERN} or not ${ORG_HAS_SYNCED_ORDERS} or ${ORG_DECLARED_ERP_NATIVE})`;

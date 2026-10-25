@@ -37,6 +37,7 @@ import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { getAdsPerformance } from "@/lib/queries/ads-performance";
 import { listOrders, ORDER_SORTABLE } from "@/lib/queries/orders";
+import { ORG_DECLARED_ERP_NATIVE, ORG_HAS_SYNCED_ORDERS } from "@/lib/queries/manual-order-sql";
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { ORDER_OUTCOME, ORDER_OUTCOME_VERIFIED, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { availableStockExpr, erpStockExpr, listReservedOrderLines, listVariantsForReceipt, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
@@ -52,6 +53,7 @@ import { validateRuleInput } from "@/lib/workflow/rules";
 import { approvalAmountOf } from "@/lib/workflow/subject";
 import { recordEventObjectProblem } from "@/lib/workflow/trigger-object";
 import type { PageBlock } from "@/lib/pages/types";
+import { rowsOf } from "@/lib/sql-rows";
 
 const ORG = "po-si";
 
@@ -210,6 +212,14 @@ async function testHome() {
 
   // Luật 3.9: một đơn `erp-` ĐÃ XÁC NHẬN và một đơn `erp-` ĐÃ GIAO (phiếu ký nhận — G-ORDER) nằm trong CSDL nhà ⇒ báo cáo
   // danh nghĩa + hiệu quả QC theo marketer KHÔNG đổi; doanh thu giao thành công / lợi nhuận KHÔNG đổi một đồng.
+  // Tiền điều kiện của luật 3.9 là DỮ LIỆU của CSDL nhà (`IN_SALES_REPORTS`): có đơn không `erp-` và chưa tuyên bố chuyển
+  // hẳn sang ERP. Chạy riêng bài này thì CSDL nhà chưa có đơn Pancake nào ⇒ nhà bị đọc như tổ chức không đồng bộ ⇒ đơn tay
+  // VÀO báo cáo (đúng luật 11.3) và bài đỏ — nên bài tự gieo một đơn Pancake đã xác nhận thay vì dựa vào fixture chạy trước.
+  const seedPancake = "88990001";
+  const seeded = (await db.insert(schema.orders).values({ id: seedPancake, stage: "CONFIRMED", status: 1, statusName: "Đã xác nhận", billFullName: "Khách Pancake (fixture)", totalPrice: 0, totalPriceAfterDiscount: 0, insertedAt: new Date() }).onConflictDoNothing().returning({ id: schema.orders.id })).length > 0;
+  const [precondition] = rowsOf<{ synced: boolean; native: boolean }>(await db.execute(sql`select ${ORG_HAS_SYNCED_ORDERS} as synced, ${ORG_DECLARED_ERP_NATIVE} as native`));
+  assert.equal(precondition.synced, true, "tiền điều kiện 3.9: CSDL nhà có đơn đồng bộ (ORG_HAS_SYNCED_ORDERS)");
+  assert.equal(precondition.native, false, "tiền điều kiện 3.9: nhà chưa tuyên bố chuyển hẳn sang ERP (ORG_DECLARED_ERP_NATIVE)");
   clearMemo();
   const before = await getNominalProfitReport(ALL);
   const perfBefore = await getAdsPerformance(ALL);
@@ -252,6 +262,7 @@ async function testHome() {
   } finally {
     await db.delete(schema.orders).where(eq(schema.orders.id, oidGiao));
     await db.delete(schema.orders).where(eq(schema.orders.id, oid));
+    if (seeded) await db.delete(schema.orders).where(eq(schema.orders.id, seedPancake));
     await db.delete(schema.productVariants).where(eq(schema.productVariants.id, "po-home-var"));
     await db.delete(schema.products).where(eq(schema.products.id, "po-home-prod"));
     clearMemo();
