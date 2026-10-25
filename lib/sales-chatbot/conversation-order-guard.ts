@@ -144,7 +144,17 @@ export async function otherConversationOrders(scope: ConversationOrderScope, exe
   const c = schema.salesChatConversations;
   const [conv] = await db.select({ pageId: c.pageId, threadId: c.threadId }).from(c).where(eq(c.id, scope.conversationId)).limit(1);
   const links: SQL[] = [eq(o.salesConversationId, scope.conversationId)];
-  if (conv?.pageId && conv.threadId) links.push(and(eq(o.pageId, conv.pageId), eq(o.conversationId, conv.threadId))!);
+  if (conv?.pageId && conv.threadId) {
+    links.push(and(eq(o.pageId, conv.pageId), eq(o.conversationId, conv.threadId))!);
+    /*
+      HÀNG HỘI THOẠI ERP KHÁC TRÊN CÙNG LUỒNG (page, thread) = CÙNG hội thoại (vụ HSLC #B1135EC0 → #E0663E84, 24/10/2026 15:00–15:02Z):
+      hội thoại bình luận chép sang hộp thư có sẵn (EXISTING_INBOX) đổi thread sang luồng hộp thư, nên MỘT luồng Pancake có HAI hàng
+      hội thoại ERP, hai bot cùng trả lời; đơn ERP không mang page / conversation_id nên phép nối trên không thấy đơn của hàng kia. Cùng
+      luồng = cùng khách, xác định — không cần identity-link. Đơn BOT của hàng kia cũng tính (khoá bot chỉ trừ của CHÍNH hội thoại này).
+    */
+    const siblings = sql`select s.id from ${c} s where s.page_id = ${conv.pageId} and s.thread_id = ${conv.threadId} and s.id <> ${scope.conversationId}`;
+    links.push(sql`${o.salesConversationId} in (${siblings})`, sql`split_part(coalesce(${o.raw}->>'agentKey', ''), ':', 2) in (${siblings})`);
+  }
   if (scope.verifiedCustomerId) {
     // Nạp động: returning.ts nạp tools.ts, tools.ts nạp tệp này — nạp tĩnh là thành vòng.
     const { vouchedOrder } = await import("@/lib/sales-chatbot/returning");

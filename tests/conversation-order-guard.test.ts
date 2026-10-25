@@ -28,7 +28,7 @@ import { withOrganization } from "@/lib/platform/context";
 import { findOrganization, invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { createOrderFromChatCore } from "@/lib/records/chat-order";
-import { createOrderAsAgent } from "@/lib/records/order-create";
+import { conversationLockKeys, createOrderAsAgent } from "@/lib/records/order-create";
 import { orderValidityOf } from "@/lib/sales-chatbot/claim-guard";
 import { orderReviewOpenOf } from "@/lib/shipping/route";
 import { duplicateFlagsFor, strongestFlag } from "@/lib/queries/order-duplicate";
@@ -378,6 +378,29 @@ async function testRealOrg() {
     assert.equal(await holds(), h0 + 1);
     const guardSrc = readFileSync("lib/sales-chatbot/conversation-order-guard.ts", "utf8");
     assert.ok(guardSrc.includes("LỚP TẠM") && guardSrc.includes("HẾT HIỆU LỰC KHI PHA 3"), "mã ghi rõ đây là lớp tạm");
+
+    // ── 15 · HAI HÀNG HỘI THOẠI ERP CÙNG MỘT LUỒNG (vụ #B1135EC0 → #E0663E84, 24/10 15:00–15:02Z): hội thoại BÌNH LUẬN tạo + tự chốt đơn,
+    // rồi bị chép sang hộp thư có sẵn — thread đổi sang luồng hộp thư, visitor_key giữ nguyên; hội thoại HỘP THƯ của đúng luồng đó nhận
+    // tin chép và bot lên lại đơn ⇒ nay BỊ CHẶN như cùng một hội thoại ──
+    const PHONE_TH = "0388000666";
+    const cmt = await convOf("cmt-th");
+    const xa = await botCreate(cmt.id, { autoConfirm: true, phone: PHONE_TH });
+    const xId = xa.state.confirmed?.orderId;
+    assert.ok(!xa.isError && xId, `đơn ở hội thoại bình luận tự chốt: ${xa.content}`);
+    await db.update(schema.salesChatConversations).set({ threadId: `${PAGE}_ib-th` }).where(eq(schema.salesChatConversations.id, cmt.id));
+    const ib = await convOf("ib-th");
+    assert.notEqual(ib.id, cmt.id, "hộp thư là một HÀNG hội thoại khác (khoá visitor_key khác), cùng luồng");
+    const y1 = await botCreate(ib.id, { autoConfirm: true, phone: PHONE_TH, text: "Nhận hàng từ 9h đến 14h" });
+    assert.ok(y1.isError && y1.summary === "Đơn nháp: hội thoại đã có đơn" && y1.content.includes(`#${manualOrderShortCode(xId!)}`), `cùng luồng ⇒ thấy đơn của hàng kia, KHÔNG tạo: ${y1.summary} ${y1.content}`);
+    assert.equal(y1.requireHuman, undefined, "cùng món ⇒ bot báo khách đơn đã lên, không chuyển người");
+    const y2 = await botCreate(ib.id, { qty: 2, phone: PHONE_TH });
+    assert.ok(y2.isError && y2.requireHuman?.includes(`#${manualOrderShortCode(xId!)}`), `khác số lượng ⇒ chặn + chuyển người: ${y2.requireHuman}`);
+    assert.deepEqual((await ordersOf(ib.id)).map((x) => x.id), [], "hàng hộp thư KHÔNG có đơn thứ hai");
+    // Khoá giao dịch theo LUỒNG: hai hàng cùng (page, thread) ⇒ MỘT khoá; không luồng ⇒ theo id; sắp tăng dần, không trùng.
+    assert.deepEqual(
+      conversationLockKeys([ib.id, cmt.id, "khong-luong"], [{ id: ib.id, pageId: PAGE, threadId: `${PAGE}_ib-th` }, { id: cmt.id, pageId: PAGE, threadId: `${PAGE}_ib-th` }, { id: "khong-luong", pageId: null, threadId: null }]),
+      [`order-conv:khong-luong`, `order-thread:${PAGE}:${PAGE}_ib-th`],
+    );
   });
 }
 
@@ -393,7 +416,8 @@ function testUiFences() {
   const body = flagSrc.slice(flagSrc.indexOf("export async function duplicateFlagsFor"));
   assert.ok(body.includes("assessDuplicate(") && body.includes("orderPair("), "cờ đọc CHÍNH assessDuplicate + orderPair");
   const core = readFileSync("lib/records/order-create.ts", "utf8");
-  assert.match(core, /if \(conv\) await lockConversation\(tx, conv\.id\);\s*if \(key\)/, "khoá hội thoại TRƯỚC khoá lần mua (một thứ tự, không kẹt chéo)");
+  assert.match(core, /if \(conv\) await lockConversations\(tx, \[conv\.id\]\);\s*if \(key\)/, "khoá hội thoại (theo luồng) TRƯỚC khoá lần mua (một thứ tự, không kẹt chéo)");
+  assert.ok(!/lockConversation\(/.test(core), "mọi chỗ khoá hội thoại đi qua lockConversations (khoá theo luồng)");
   for (const f of ["lib/records/chat-order.ts", "lib/sales-chatbot/order-sync.ts"]) assert.ok(readFileSync(f, "utf8").includes("conversation: { id: conv.id, origin: "), `${f} đi chung không gian khoá hội thoại`);
 }
 
