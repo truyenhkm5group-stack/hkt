@@ -1,0 +1,8 @@
+{
+  "pr": 1077,
+  "sha": "b11df887ce6f16534f59174b9fc7474c35076bec",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T17:44:17.889Z",
+  "note": "review lead: GET /api/sourcing/extension qua apiGuard + can(sourcing:view); gói zip dựng từ extensions/sourcing-1688 theo danh sách manifest (chặn .., đường tuyệt đối), không token/địa chỉ ERP; extensions/ có trong image (COPY . ., không bị .dockerignore loại); trang cài đặt 10 bước + khung «Không thấy nút?»."
+}
