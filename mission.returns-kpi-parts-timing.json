@@ -3,7 +3,7 @@
   "mission_id": "returns-kpi-parts-timing",
   "title": "returns-page-probe 1c: mốc xong từng lời hứa + thân chính KPI muộn nhất của bốn thứ nó chờ",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-kpiparts",
@@ -20,7 +20,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-25T12:51:29.653Z",
-  "updated_at": "2026-10-25T12:51:29.653Z",
-  "last_heartbeat": "2026-10-25T12:51:29.653Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-25T12:52:11.885Z",
+  "last_heartbeat": "2026-10-25T12:52:11.885Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/returns-kpi-parts-timing",
+    "sha": "9d44858b7747e7424deafad41c73f9e68d91141f",
+    "at": "2026-10-25T12:52:11.885Z",
+    "actor": "DESKTOP-56TH98Y:wt-kpiparts",
+    "title": "returns-page-probe 1c: mốc xong từng lời hứa + thân chính KPI muộn nhất của bốn thứ nó chờ",
+    "summary": "",
+    "tests": [
+      "tsc + eslint sạch · testReturnsPageProbe đạt · chỉ script, chỉ đọc"
+    ]
+  }
 }
