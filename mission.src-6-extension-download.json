@@ -3,7 +3,7 @@
   "mission_id": "src-6-extension-download",
   "title": "SRC-6: nút Tải tiện ích (.zip) + hướng dẫn cài từng bước",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -26,9 +26,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T17:40:19.018Z",
-  "updated_at": "2026-10-25T17:44:12.361Z",
+  "updated_at": "2026-10-25T18:05:44.104Z",
   "last_heartbeat": "2026-10-25T17:40:58.787Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1077 → cd91574bae3282ddf04880d6a9b7c0c1e9a88e05"
+  },
   "handoff": {
     "branch": "claude/src-6-extension-download",
     "sha": "b11df887ce6f16534f59174b9fc7474c35076bec",
