@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "mission_id": "confirm-dup-warning",
+  "title": "Xác nhận tay đơn có thể trùng: hai bước, hộp cảnh báo + nhật ký",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "CRITICAL",
+  "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
+  "worker": null,
+  "worktree": null,
+  "branch": null,
+  "base_sha": null,
+  "domains": [],
+  "owned_paths": [
+    "lib/records/order-create.ts",
+    "lib/actions/manual-orders.ts",
+    "lib/constants/order-duplicate.ts",
+    "lib/saas/acceptance-e2e.ts",
+    "components/orders/duplicate-ack.tsx",
+    "components/orders/order-review-quick.tsx",
+    "app/(dashboard)/orders/manual-order-form.tsx",
+    "tests/"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-25T02:20:33.664Z",
+  "updated_at": "2026-10-25T02:20:33.664Z",
+  "last_heartbeat": "2026-10-25T02:20:33.664Z",
+  "definition_of_done": []
+}
