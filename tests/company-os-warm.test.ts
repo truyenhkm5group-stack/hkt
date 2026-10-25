@@ -137,7 +137,15 @@ export async function testCompanyOsWarmPure() {
 
   // Trang và job đi CÙNG một đường — trang không được tự gọi lại từng truy vấn.
   const trang = readFileSync(path.join(process.cwd(), "app/(dashboard)/reports/returns/page.tsx"), "utf8");
-  assert.ok(/returnsPageParams\(raw\)/.test(trang) && /loadReturnsPage\(/.test(trang), "/reports/returns phải dựng tham số + gọi truy vấn qua returns-report-page");
+  assert.ok(/returnsPageParams\(raw\)/.test(trang) && /streamReturnsPage\(/.test(trang), "/reports/returns phải dựng tham số + gọi truy vấn qua returns-report-page");
+  // Trang vẽ từng khối (Suspense) qua `streamReturnsPage`, job làm ấm chờ hết qua `loadReturnsPage` — cả hai PHẢI đi qua
+  // `startReturnsPage`, nếu không hai bên dựng hai bộ lời gọi và khoá đệm của trang lệch khỏi khoá job làm ấm.
+  const nap = readFileSync(path.join(process.cwd(), "lib/queries/returns-report-page.ts"), "utf8");
+  const than = (ten: string) => {
+    const dau = nap.indexOf(`function ${ten}(`);
+    return dau < 0 ? "" : nap.slice(dau, nap.indexOf("\n}\n", dau));
+  };
+  for (const ten of ["loadReturnsPage", "streamReturnsPage"]) assert.ok(/startReturnsPage\(p\)/.test(than(ten)), `${ten} phải dựng lời gọi qua startReturnsPage`);
   assert.ok(!/getReturnRateByVariant\(|getReturnReasonReport\(|getReturnIntelligence\(/.test(trang), "trang không được gọi thẳng truy vấn — khoá đệm sẽ lệch khỏi khoá job làm ấm");
   assert.ok(/returnsPageParams\(\{\}\)/.test(warmSrc), "job làm ấm trang MẶC ĐỊNH (URL rỗng)");
 
