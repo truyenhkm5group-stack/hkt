@@ -3,7 +3,7 @@
   "mission_id": "returns-kpi-first",
   "title": "/reports/returns: KPI khởi chạy trước (sau cờ, mặc định tắt) — câu đếm ‖ dự báo, 7 nhánh nặng chờ KPI hoặc trần 800 ms",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-kpifirst",
@@ -22,7 +22,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-25T14:33:18.935Z",
-  "updated_at": "2026-10-25T14:33:18.935Z",
-  "last_heartbeat": "2026-10-25T14:33:18.935Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-25T14:34:39.025Z",
+  "last_heartbeat": "2026-10-25T14:34:39.025Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/returns-kpi-first",
+    "sha": "4d92188f971ce3f9cfe02f93644cc5071fc03bc8",
+    "at": "2026-10-25T14:34:39.025Z",
+    "actor": "DESKTOP-56TH98Y:wt-kpifirst",
+    "title": "/reports/returns: KPI khởi chạy trước (sau cờ, mặc định tắt) — câu đếm ‖ dự báo, 7 nhánh nặng chờ KPI hoặc trần 800 ms",
+    "summary": "",
+    "tests": [
+      "tsc + eslint sạch · TEST_KHOI=K08 xanh (tests/returns-kpi-first.test.ts: cổng mở theo KPI / trần / KPI lỗi · 7 nhánh nặng qua cổng · bật/tắt cờ ⇒ loadReturnsPage ra CÙNG dữ liệu, so nguyên khối 17 trường · 6 dạng cờ hỏng ⇒ TẮT; company-os-warm xanh) · npm test đầy đủ cục bộ không chạy (máy quá tải) — CI 4 shard"
+    ]
+  }
 }
