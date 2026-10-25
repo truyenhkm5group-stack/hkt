@@ -1,0 +1,8 @@
+{
+  "pr": 1067,
+  "sha": "b0df54b478d2f6a76a38ddba7ce79da0cbc208bd",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T11:35:38.439Z",
+  "note": "review lead: chỉ scripts/returns-page-probe.ts, khối 1c chỉ đọc (clearMemo trong tiến trình script); tách KPI kỳ 30 ngày một mình ↔ chung cả trang để chọn sửa câu hay ưu tiên."
+}
