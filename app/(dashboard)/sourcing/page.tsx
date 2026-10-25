@@ -62,6 +62,11 @@ export default async function SourcingPage({ searchParams }: { searchParams: Pro
         eyebrow="Sản xuất"
         title="Tìm hàng nguồn"
         description="Gõ tiếng Việt hoặc tải ảnh để tìm sản phẩm thật trên nguồn Trung Quốc, so sánh nhà cung cấp, lưu mẫu và xin mua thử."
+        actions={
+          <Button asChild size="sm" variant="outline">
+            <Link href="/sourcing/extension">Tiện ích lưu mẫu 1688</Link>
+          </Button>
+        }
       />
 
       <SectionCard title="Sinh từ khoá tiếng Trung" description="Gõ món hàng bằng tiếng Việt ⇒ 3–5 truy vấn tiếng Trung từ cụ thể tới rộng, bấm «Chép» để tìm trên 1688.">

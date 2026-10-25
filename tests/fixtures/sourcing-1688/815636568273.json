@@ -1,0 +1,465 @@
+{
+ "offerId": "815636568273",
+ "capturedAt": "2026-10-25T10:34:21.418Z",
+ "source": "window.context — đi qua PICK_PATHS_1688 (đúng thứ tiện ích gửi)",
+ "language": "简体中文 · CNY (chữ gốc)",
+ "picks": {
+  "result.data.gallery.fields.subject": "大码女装法式抹胸性感显瘦遮肚裙子长裙胖mm吊带玫红色连衣裙女",
+  "result.data.gallery.fields.mainImage": [
+   "https://cbu01.alicdn.com/img/ibank/O1CN010Jm9QR1nYlhQVb9kh_!!4175875102-0-cib.jpg",
+   "https://cbu01.alicdn.com/img/ibank/O1CN013pw8JZ1nYlhPJRicR_!!4175875102-0-cib.jpg",
+   "https://cbu01.alicdn.com/img/ibank/O1CN01f7waFY1nYlhQc1wQN_!!4175875102-0-cib.jpg",
+   "https://cbu01.alicdn.com/img/ibank/O1CN015uWkO71nYlhP2gjVa_!!4175875102-0-cib.jpg",
+   "https://cbu01.alicdn.com/img/ibank/O1CN011oZYlJ1nYlhQ6j95o_!!4175875102-0-cib.jpg"
+  ],
+  "result.data.Root.fields.dataJson.tempModel.offerId": 815636568273,
+  "result.data.Root.fields.dataJson.tempModel.offerTitle": "大码女装法式抹胸性感显瘦遮肚裙子长裙胖mm吊带玫红色连衣裙女",
+  "result.data.Root.fields.dataJson.tempModel.companyName": "深圳市依多客服装有限公司",
+  "result.data.Root.fields.dataJson.offerBaseInfo.sellerWinportUrl": "https://shop9357vm378e316.1688.com",
+  "result.data.Root.fields.dataJson.skuModel.skuProps": [
+   {
+    "fid": 3216,
+    "prop": "颜色",
+    "value": [
+     {
+      "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01VeqtVF1nYlhSqcxIU_!!4175875102-0-cib.jpg",
+      "name": "玫红色"
+     },
+     {
+      "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN014ZvQpJ1nYlhPOed87_!!4175875102-0-cib.jpg",
+      "name": "绿色"
+     },
+     {
+      "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01ZC3Pi71nYlhPOcDTI_!!4175875102-0-cib.jpg",
+      "name": "黑色"
+     },
+     {
+      "name": "白色"
+     }
+    ]
+   },
+   {
+    "fid": 450,
+    "prop": "尺码",
+    "value": [
+     {
+      "name": "M （建议90~100斤）"
+     },
+     {
+      "name": "L （建议100~120斤）"
+     },
+     {
+      "name": "XL （建议120~140斤）"
+     },
+     {
+      "name": "2XL （建议140~160斤）"
+     }
+    ]
+   }
+  ],
+  "result.data.Root.fields.dataJson.skuModel.skuInfoMap": {
+   "玫红色&gt;M （建议90~100斤）": {
+    "specId": "99ee091d1973e55770c9cc47866048b5",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 0,
+    "specAttrs": "玫红色&gt;M （建议90~100斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 5511234644079,
+    "isPromotionSku": true
+   },
+   "黑色&gt;M （建议90~100斤）": {
+    "specId": "4de6d01f2672782978990bdb85bf08ae",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 911,
+    "specAttrs": "黑色&gt;M （建议90~100斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 5511234644091,
+    "isPromotionSku": true
+   },
+   "白色&gt;M （建议90~100斤）": {
+    "specId": "6c4fe4353773007d1346b1bf3e12aa62",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 958,
+    "specAttrs": "白色&gt;M （建议90~100斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 5511234592563,
+    "isPromotionSku": true
+   },
+   "白色&gt;XL （建议120~140斤）": {
+    "specId": "35ba3a2380e9b598228b1b80e010cecb",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 973,
+    "specAttrs": "白色&gt;XL （建议120~140斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 5511234592561,
+    "isPromotionSku": true
+   },
+   "玫红色&gt;2XL （建议140~160斤）": {
+    "specId": "6aa7a939ab3812d5cc5036f6aa692ecb",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 0,
+    "specAttrs": "玫红色&gt;2XL （建议140~160斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 5511234644082,
+    "isPromotionSku": true
+   },
+   "黑色&gt;2XL （建议140~160斤）": {
+    "specId": "c8306f72ed547b360759b9113f53e4f8",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 918,
+    "specAttrs": "黑色&gt;2XL （建议140~160斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 5511234644094,
+    "isPromotionSku": true
+   },
+   "黑色&gt;L （建议100~120斤）": {
+    "specId": "f5c2798788d30eabea08c23253bb649c",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 910,
+    "specAttrs": "黑色&gt;L （建议100~120斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 5511234644092,
+    "isPromotionSku": true
+   },
+   "绿色&gt;M （建议90~100斤）": {
+    "specId": "6fa2d8bc9061210daf9c222f57223b2f",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 921,
+    "specAttrs": "绿色&gt;M （建议90~100斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 5511234644085,
+    "isPromotionSku": true
+   },
+   "绿色&gt;XL （建议120~140斤）": {
+    "specId": "aca2d3797b573173b77189358ee0f159",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 904,
+    "specAttrs": "绿色&gt;XL （建议120~140斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 5511234644087,
+    "isPromotionSku": true
+   },
+   "绿色&gt;L （建议100~120斤）": {
+    "specId": "c657afc5906d9d0e0c65f78f78931f3e",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 902,
+    "specAttrs": "绿色&gt;L （建议100~120斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 5511234644086,
+    "isPromotionSku": true
+   },
+   "玫红色&gt;XL （建议120~140斤）": {
+    "specId": "12ec1b9ee0bed9f947a607a98e650017",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 0,
+    "specAttrs": "玫红色&gt;XL （建议120~140斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 5511234644081,
+    "isPromotionSku": true
+   },
+   "白色&gt;L （建议100~120斤）": {
+    "specId": "b67f3444ffbc53573d4b7c2ac971357e",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 969,
+    "specAttrs": "白色&gt;L （建议100~120斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 5511234592560,
+    "isPromotionSku": true
+   },
+   "黑色&gt;XL （建议120~140斤）": {
+    "specId": "75b84349722dded727c5996dd32a5b9a",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 920,
+    "specAttrs": "黑色&gt;XL （建议120~140斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 5511234644093,
+    "isPromotionSku": true
+   },
+   "玫红色&gt;L （建议100~120斤）": {
+    "specId": "7aef7313b64d474ce817f7b9d2da95a2",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 0,
+    "specAttrs": "玫红色&gt;L （建议100~120斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 5511234644080,
+    "isPromotionSku": true
+   },
+   "绿色&gt;2XL （建议140~160斤）": {
+    "specId": "dfd72d8770a035de5a4e01dd84719be9",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 910,
+    "specAttrs": "绿色&gt;2XL （建议140~160斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 5511234644088,
+    "isPromotionSku": true
+   },
+   "白色&gt;2XL （建议140~160斤）": {
+    "specId": "5fb6e96ddf6a151122fbe7b5461d2601",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 968,
+    "specAttrs": "白色&gt;2XL （建议140~160斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "retailPrice": "",
+    "skuId": 5511234592562,
+    "isPromotionSku": true
+   }
+  },
+  "result.data.Root.fields.dataJson.skuModel.skuInfoMapOriginal": {
+   "黑色&gt;L （建议100~120斤）": {
+    "specId": "f5c2798788d30eabea08c23253bb649c",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 910,
+    "specAttrs": "黑色&gt;L （建议100~120斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "skuId": 5511234644092,
+    "isPromotionSku": false
+   },
+   "白色&gt;2XL （建议140~160斤）": {
+    "specId": "5fb6e96ddf6a151122fbe7b5461d2601",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 968,
+    "specAttrs": "白色&gt;2XL （建议140~160斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "skuId": 5511234592562,
+    "isPromotionSku": false
+   },
+   "黑色&gt;XL （建议120~140斤）": {
+    "specId": "75b84349722dded727c5996dd32a5b9a",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 920,
+    "specAttrs": "黑色&gt;XL （建议120~140斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "skuId": 5511234644093,
+    "isPromotionSku": false
+   },
+   "白色&gt;L （建议100~120斤）": {
+    "specId": "b67f3444ffbc53573d4b7c2ac971357e",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 969,
+    "specAttrs": "白色&gt;L （建议100~120斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "skuId": 5511234592560,
+    "isPromotionSku": false
+   },
+   "绿色&gt;L （建议100~120斤）": {
+    "specId": "c657afc5906d9d0e0c65f78f78931f3e",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 902,
+    "specAttrs": "绿色&gt;L （建议100~120斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "skuId": 5511234644086,
+    "isPromotionSku": false
+   },
+   "绿色&gt;M （建议90~100斤）": {
+    "specId": "6fa2d8bc9061210daf9c222f57223b2f",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 921,
+    "specAttrs": "绿色&gt;M （建议90~100斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "skuId": 5511234644085,
+    "isPromotionSku": false
+   },
+   "黑色&gt;2XL （建议140~160斤）": {
+    "specId": "c8306f72ed547b360759b9113f53e4f8",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 918,
+    "specAttrs": "黑色&gt;2XL （建议140~160斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "skuId": 5511234644094,
+    "isPromotionSku": false
+   },
+   "白色&gt;XL （建议120~140斤）": {
+    "specId": "35ba3a2380e9b598228b1b80e010cecb",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 973,
+    "specAttrs": "白色&gt;XL （建议120~140斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "skuId": 5511234592561,
+    "isPromotionSku": false
+   },
+   "玫红色&gt;M （建议90~100斤）": {
+    "specId": "99ee091d1973e55770c9cc47866048b5",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 0,
+    "specAttrs": "玫红色&gt;M （建议90~100斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "skuId": 5511234644079,
+    "isPromotionSku": false
+   },
+   "白色&gt;M （建议90~100斤）": {
+    "specId": "6c4fe4353773007d1346b1bf3e12aa62",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 958,
+    "specAttrs": "白色&gt;M （建议90~100斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "skuId": 5511234592563,
+    "isPromotionSku": false
+   },
+   "绿色&gt;XL （建议120~140斤）": {
+    "specId": "aca2d3797b573173b77189358ee0f159",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 904,
+    "specAttrs": "绿色&gt;XL （建议120~140斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "skuId": 5511234644087,
+    "isPromotionSku": false
+   },
+   "玫红色&gt;L （建议100~120斤）": {
+    "specId": "7aef7313b64d474ce817f7b9d2da95a2",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 0,
+    "specAttrs": "玫红色&gt;L （建议100~120斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "skuId": 5511234644080,
+    "isPromotionSku": false
+   },
+   "玫红色&gt;XL （建议120~140斤）": {
+    "specId": "12ec1b9ee0bed9f947a607a98e650017",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 0,
+    "specAttrs": "玫红色&gt;XL （建议120~140斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "skuId": 5511234644081,
+    "isPromotionSku": false
+   },
+   "绿色&gt;2XL （建议140~160斤）": {
+    "specId": "dfd72d8770a035de5a4e01dd84719be9",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 910,
+    "specAttrs": "绿色&gt;2XL （建议140~160斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "skuId": 5511234644088,
+    "isPromotionSku": false
+   },
+   "黑色&gt;M （建议90~100斤）": {
+    "specId": "4de6d01f2672782978990bdb85bf08ae",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 911,
+    "specAttrs": "黑色&gt;M （建议90~100斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "skuId": 5511234644091,
+    "isPromotionSku": false
+   },
+   "玫红色&gt;2XL （建议140~160斤）": {
+    "specId": "6aa7a939ab3812d5cc5036f6aa692ecb",
+    "saleCount": 0,
+    "discountPrice": "24.00",
+    "canBookCount": 0,
+    "specAttrs": "玫红色&gt;2XL （建议140~160斤）",
+    "price": "24.00",
+    "priceAmount": 1,
+    "skuId": 5511234644082,
+    "isPromotionSku": false
+   }
+  },
+  "result.data.Root.fields.dataJson.orderParamModel.orderParam.beginNum": 1,
+  "result.data.Root.fields.dataJson.orderParamModel.orderParam.skuParam": {
+   "skuPriceType": "skuPrice",
+   "skuRangePrices": [
+    {
+     "price": "24.00",
+     "beginAmount": "1"
+    }
+   ]
+  },
+  "result.data.mainPrice.fields.priceModel.currentPrices": [
+   {
+    "price": "24.00",
+    "beginAmount": 1
+   }
+  ],
+  "result.data.mainPrice.fields.priceModel.originalPrices": [
+   {
+    "displayStyle": "line_price",
+    "price": "24.00",
+    "beginAmount": 1
+   }
+  ],
+  "result.data.mainPrice.fields.finalPriceModel.tradeWithoutPromotion.offerBeginAmount": 1,
+  "result.data.productTitle.fields.shopInfo.companyName": "深圳市依多客服装有限公司",
+  "result.data.productTitle.fields.shopInfo.byrRepeatRate3m": "52.67%",
+  "result.data.productTitle.fields.shopInfo.sellerSlrServiceScore": "3.5分",
+  "result.data.productTitle.fields.rateInfo.goodRates": 73.9,
+  "result.data.shippingServices.fields.location": "广东省揭阳市",
+  "result.data.shippingServices.fields.deliveryLimitText": "承诺48小时发货",
+  "result.data.productPackInfo.fields.unitWeight": 0.3,
+  "result.global.globalData.model.consignModel.hasConsignPrice": false
+ }
+}

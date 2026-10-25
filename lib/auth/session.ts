@@ -419,6 +419,26 @@ export async function activeUserIdsWhoCan(permission: Permission): Promise<strin
   return out;
 }
 
+/**
+ * Người dùng ĐANG BẬT theo id, quyền tính bằng ĐÚNG đường của phiên đăng nhập (`sessionUserOfRow`) — cho lối vào không có cookie
+ * nhưng mang khoá của MỘT người: token tiện ích «Lưu mẫu từ 1688» (SRC-6, `lib/sourcing/capture-tokens.ts`). Chạy trong ngữ cảnh
+ * tổ chức của token. Không tính quyền lần thứ hai: tài khoản bị khoá ⇒ `null` ngay lượt sau, quyền bị gỡ ⇒ `can()` sai ngay lượt sau.
+ */
+export async function activeSessionUserById(userId: string): Promise<SessionUser | null> {
+  const db = await getDb();
+  const [row, templates, snapshots, platform] = await Promise.all([
+    db.query.users.findFirst({
+      where: eq(schema.users.id, userId),
+      columns: { id: true, email: true, name: true, role: true, active: true, permissions: true, accessRoleId: true, positionId: true, dataScope: true },
+    }),
+    loadRoleTemplates(),
+    loadPermissionSnapshots(),
+    platformOfSession(),
+  ]);
+  if (!row || !row.active) return null;
+  return sessionUserOfRow(row, templates, snapshots, platform);
+}
+
 /** Tổ chức + module bật của phiên hiện hành — cùng ngữ cảnh mà `getDb()` vừa dùng để tra người dùng. */
 async function platformOfSession(): Promise<Required<Pick<SessionUser, "organization" | "modules">>> {
   const ctx = await currentOrganization();

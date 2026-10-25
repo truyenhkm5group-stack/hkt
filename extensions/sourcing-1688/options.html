@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <title>Cài đặt — Lưu mẫu từ 1688</title>
+    <style>
+      body { font: 14px/1.5 system-ui, sans-serif; max-width: 560px; margin: 32px auto; padding: 0 16px; color: #111; }
+      label { display: block; margin-top: 16px; font-weight: 600; }
+      input { width: 100%; box-sizing: border-box; padding: 8px; margin-top: 4px; font: inherit; border: 1px solid #ccc; border-radius: 6px; }
+      button { margin-top: 20px; padding: 8px 16px; font: inherit; font-weight: 600; background: #e4393c; color: #fff; border: 0; border-radius: 6px; cursor: pointer; }
+      #msg { margin-top: 12px; }
+      .muted { color: #666; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <h1>Lưu mẫu từ 1688 — cài đặt</h1>
+    <p class="muted">Token tạo ở ERP › Tìm hàng nguồn › Tiện ích lưu mẫu 1688. Token lưu trên MÁY NÀY (không đồng bộ sang máy khác).</p>
+    <label for="erpBase">Địa chỉ ERP</label>
+    <input id="erpBase" placeholder="https://<tên miền ERP của shop>" autocomplete="off" />
+    <label for="token">Token</label>
+    <input id="token" type="password" placeholder="vnxs1.…" autocomplete="off" />
+    <button id="save" type="button">Lưu</button>
+    <div id="msg"></div>
+    <script src="options.js"></script>
+  </body>
+</html>

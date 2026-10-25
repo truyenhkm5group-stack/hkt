@@ -27,7 +27,9 @@ const KEYS = ["sourcing:view", "sourcing:search", "sourcing:write", "sourcing:ap
 function testModule() {
   const m = moduleDef("sourcing");
   assert.ok(m, "module sourcing có trong sổ");
-  assert.deepEqual([m!.routes, m!.permissions, m!.dependsOn, m!.core], [["/sourcing"], KEYS, ["products", "production"], false]);
+  // SRC-6 (25/10/2026) thêm `/api/sourcing` — POST /api/sourcing/capture của tiện ích «Lưu mẫu từ 1688» thuộc module này (P9).
+  assert.deepEqual([m!.routes, m!.permissions, m!.dependsOn, m!.core], [["/sourcing", "/api/sourcing"], KEYS, ["products", "production"], false]);
+  assert.equal(moduleOfPath("/api/sourcing/capture"), "sourcing", "API của tiện ích thuộc module Tìm hàng nguồn");
   assert.ok(!m!.homeOptIn, "không homeOptIn: tổ chức nhà dòng thiếu ⇒ BẬT, không cần dòng migration");
   assert.equal(moduleOfPath("/sourcing"), "sourcing");
   assert.ok(resolveEnabledModules({ moduleDefault: "ENABLED" }, []).has("sourcing"), "tổ chức nhà (moduleDefault ENABLED, chưa có dòng) ⇒ BẬT");

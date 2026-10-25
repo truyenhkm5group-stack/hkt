@@ -7,6 +7,7 @@ import { testSourcingQuery } from "./sourcing-query.test";
 import { testSourcingOffers } from "./sourcing-offers.test";
 import { testSourcingLandedCost } from "./sourcing-landed-cost.test";
 import { testSourcingTrials } from "./sourcing-trials.test";
+import { testSourcingCapture } from "./sourcing-capture.test";
 import { testSourcingTrialWork } from "./sourcing-trial-work.test";
 import "./setup-env";
 import { testReturnReasonKhachVangNha } from "./return-reason-vang-nha.test";
@@ -2611,6 +2612,8 @@ async function main() {
     await testSourcingTrials();
     // SRC-5b: việc mua thử trên /work — phép chiếu, hạn lấy lại từ hằng số miền, nhóm Sản xuất về Kho theo chỗ lệch đã khai.
     await testSourcingTrialWork();
+    // SRC-6: lưu mẫu từ trang chi tiết 1688 — 3 trang thật, giá chỉ từ trang chi tiết (新人价 bỏ), 斤 ⇒ kg từ chữ gốc, token theo tổ chức.
+    await testSourcingCapture();
     await testVtpImportTruth(db);
     await testVtpImportRecovery(db);
     await testCostAllocation(db);

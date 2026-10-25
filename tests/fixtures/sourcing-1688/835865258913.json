@@ -1,0 +1,806 @@
+{
+ "offerId": "835865258913",
+ "capturedAt": "2026-10-25T10:34:38.485Z",
+ "source": "window.context — đi qua PICK_PATHS_1688 (đúng thứ tiện ích gửi)",
+ "language": "简体中文 · CNY (chữ gốc)",
+ "picks": {
+  "result.data.gallery.fields.subject": "男士冰丝短袖翻领T桖宽松商务休闲Polo衫夏季汗衫上衣体恤纯色",
+  "result.data.gallery.fields.mainImage": [
+   "https://cbu01.alicdn.com/img/ibank/O1CN01Gdmu3m2EYIuab0FGV_!!3064908756-0-cib.jpg",
+   "https://cbu01.alicdn.com/img/ibank/O1CN01N1uXeQ2EYIuXrcvy0_!!3064908756-0-cib.jpg",
+   "https://cbu01.alicdn.com/img/ibank/O1CN01aw2OjC2EYIucCdd68_!!3064908756-0-cib.jpg",
+   "https://cbu01.alicdn.com/img/ibank/O1CN019wt2Ds2EYIubQVpnV_!!3064908756-0-cib.jpg",
+   "https://cbu01.alicdn.com/img/ibank/O1CN01YEqO4B1Bs2xgWZzwG_!!0-0-cib.jpg"
+  ],
+  "result.data.Root.fields.dataJson.tempModel.offerId": 835865258913,
+  "result.data.Root.fields.dataJson.tempModel.offerTitle": "男士冰丝短袖翻领T桖宽松商务休闲Polo衫夏季汗衫上衣体恤纯色",
+  "result.data.Root.fields.dataJson.tempModel.companyName": "桐乡市濮院木直服装厂",
+  "result.data.Root.fields.dataJson.offerBaseInfo.sellerWinportUrl": "https://565544919.1688.com",
+  "result.data.Root.fields.dataJson.skuModel.skuProps": [
+   {
+    "fid": 3216,
+    "prop": "颜色",
+    "value": [
+     {
+      "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01pLl6R92EYIuayfrRM_!!3064908756-0-cib.jpg",
+      "name": "豆绿"
+     },
+     {
+      "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01eSga8G2EYIuaeochl_!!3064908756-0-cib.jpg",
+      "name": "咖啡"
+     },
+     {
+      "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01PfzOtn2EYIubMpurD_!!3064908756-0-cib.jpg",
+      "name": "绣红"
+     },
+     {
+      "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01ZYQagd2EYIuafH1Kj_!!3064908756-0-cib.jpg",
+      "name": "黑色"
+     },
+     {
+      "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01cxbSSd2EYIuXrsZi7_!!3064908756-0-cib.jpg",
+      "name": "米白"
+     },
+     {
+      "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN019xtOUz2EYIus1JYdo_!!3064908756-0-cib.jpg",
+      "name": "藏青"
+     }
+    ]
+   },
+   {
+    "fid": 450,
+    "prop": "尺码",
+    "value": [
+     {
+      "name": "165/48"
+     },
+     {
+      "name": "170/50"
+     },
+     {
+      "name": "175/52"
+     },
+     {
+      "name": "180/54"
+     },
+     {
+      "name": "185/56"
+     },
+     {
+      "name": "190/58"
+     }
+    ]
+   }
+  ],
+  "result.data.Root.fields.dataJson.skuModel.skuInfoMap": {
+   "绣红&gt;180/54": {
+    "specId": "8ef5b8799f62f8b77e1135c4df32ced0",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 904,
+    "specAttrs": "绣红&gt;180/54",
+    "priceAmount": 1,
+    "skuId": 5590933552041,
+    "isPromotionSku": true
+   },
+   "咖啡&gt;165/48": {
+    "specId": "3dcef95c55fcdf74dbf78f937a31aeb0",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 979,
+    "specAttrs": "咖啡&gt;165/48",
+    "priceAmount": 1,
+    "skuId": 5590933552032,
+    "isPromotionSku": true
+   },
+   "豆绿&gt;165/48": {
+    "specId": "b717bcd1a672012fd5453b06dc4b9391",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 950,
+    "specAttrs": "豆绿&gt;165/48",
+    "priceAmount": 1,
+    "skuId": 5590933552026,
+    "isPromotionSku": true
+   },
+   "绣红&gt;170/50": {
+    "specId": "356142e46cdc94899d94c1e14f573dcf",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 929,
+    "specAttrs": "绣红&gt;170/50",
+    "priceAmount": 1,
+    "skuId": 5590933552039,
+    "isPromotionSku": true
+   },
+   "黑色&gt;190/58": {
+    "specId": "0e45219943ff7301f54c44ff437e7b63",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 969,
+    "specAttrs": "黑色&gt;190/58",
+    "priceAmount": 1,
+    "skuId": 5590933552049,
+    "isPromotionSku": true
+   },
+   "黑色&gt;180/54": {
+    "specId": "8c4cac1219334dc84ddff624348a4ce6",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 861,
+    "specAttrs": "黑色&gt;180/54",
+    "priceAmount": 1,
+    "skuId": 5590933552047,
+    "isPromotionSku": true
+   },
+   "米白&gt;170/50": {
+    "specId": "0e5628666b8238c74e320a5a9869a7d4",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 771,
+    "specAttrs": "米白&gt;170/50",
+    "priceAmount": 1,
+    "skuId": 5590933552051,
+    "isPromotionSku": true
+   },
+   "藏青&gt;175/52": {
+    "specId": "07de8ed89ff6ae022de8ec5dc23b68d8",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 848,
+    "specAttrs": "藏青&gt;175/52",
+    "priceAmount": 1,
+    "skuId": 5590933552022,
+    "isPromotionSku": true
+   },
+   "绣红&gt;190/58": {
+    "specId": "eed769d90ed6a6041d639da43b00da6e",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 986,
+    "specAttrs": "绣红&gt;190/58",
+    "priceAmount": 1,
+    "skuId": 5590933552043,
+    "isPromotionSku": true
+   },
+   "咖啡&gt;170/50": {
+    "specId": "ce21e1aa8708d0fc8438d74ef85941ee",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 949,
+    "specAttrs": "咖啡&gt;170/50",
+    "priceAmount": 1,
+    "skuId": 5590933552033,
+    "isPromotionSku": true
+   },
+   "豆绿&gt;175/52": {
+    "specId": "fc7f83af65cd381896688f6a2f09d00f",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 849,
+    "specAttrs": "豆绿&gt;175/52",
+    "priceAmount": 1,
+    "skuId": 5590933552028,
+    "isPromotionSku": true
+   },
+   "豆绿&gt;170/50": {
+    "specId": "131f1c842b7ab21eb5d0196d0282c272",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 893,
+    "specAttrs": "豆绿&gt;170/50",
+    "priceAmount": 1,
+    "skuId": 5590933552027,
+    "isPromotionSku": true
+   },
+   "咖啡&gt;175/52": {
+    "specId": "c9af03c5b58aa2465c62a037d55d40b9",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 903,
+    "specAttrs": "咖啡&gt;175/52",
+    "priceAmount": 1,
+    "skuId": 5590933552034,
+    "isPromotionSku": true
+   },
+   "藏青&gt;165/48": {
+    "specId": "3e3a524783a02a941880a34e87c5d8c3",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 971,
+    "specAttrs": "藏青&gt;165/48",
+    "priceAmount": 1,
+    "skuId": 5590933552021,
+    "isPromotionSku": true
+   },
+   "豆绿&gt;180/54": {
+    "specId": "31d421b4253ad223282e1fdcfa3dbae7",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 834,
+    "specAttrs": "豆绿&gt;180/54",
+    "priceAmount": 1,
+    "skuId": 5590933552029,
+    "isPromotionSku": true
+   },
+   "咖啡&gt;185/56": {
+    "specId": "9198e8622f69150c6f7048f71f11614d",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 948,
+    "specAttrs": "咖啡&gt;185/56",
+    "priceAmount": 1,
+    "skuId": 5590933552036,
+    "isPromotionSku": true
+   },
+   "米白&gt;165/48": {
+    "specId": "d3df3a8a226e4d674b528f86d8f73c91",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 885,
+    "specAttrs": "米白&gt;165/48",
+    "priceAmount": 1,
+    "skuId": 5590933552050,
+    "isPromotionSku": true
+   },
+   "黑色&gt;175/52": {
+    "specId": "5ba52f5f9388367f9b3e2b03a4271672",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 852,
+    "specAttrs": "黑色&gt;175/52",
+    "priceAmount": 1,
+    "skuId": 5590933552046,
+    "isPromotionSku": true
+   },
+   "藏青&gt;185/56": {
+    "specId": "6902a8260eb5f9d2fc68da3c12c7eba2",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 954,
+    "specAttrs": "藏青&gt;185/56",
+    "priceAmount": 1,
+    "skuId": 5590933552024,
+    "isPromotionSku": true
+   },
+   "米白&gt;185/56": {
+    "specId": "1855099cbbb82455da1fd6d6b2eecece",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 861,
+    "specAttrs": "米白&gt;185/56",
+    "priceAmount": 1,
+    "skuId": 5590933552054,
+    "isPromotionSku": true
+   },
+   "藏青&gt;180/54": {
+    "specId": "7e1174049ee08db7635e9b54cd07e81d",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 776,
+    "specAttrs": "藏青&gt;180/54",
+    "priceAmount": 1,
+    "skuId": 5590933552023,
+    "isPromotionSku": true
+   },
+   "黑色&gt;165/48": {
+    "specId": "25d30310b13029a22ccd3a198c98120e",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 956,
+    "specAttrs": "黑色&gt;165/48",
+    "priceAmount": 1,
+    "skuId": 5590933552044,
+    "isPromotionSku": true
+   },
+   "豆绿&gt;190/58": {
+    "specId": "b7820c8910397a017e75e337d4af4e7e",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 937,
+    "specAttrs": "豆绿&gt;190/58",
+    "priceAmount": 1,
+    "skuId": 5590933552031,
+    "isPromotionSku": true
+   },
+   "黑色&gt;185/56": {
+    "specId": "bc2fe747a3b7181c3bc99d77ce282ae9",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 920,
+    "specAttrs": "黑色&gt;185/56",
+    "priceAmount": 1,
+    "skuId": 5590933552048,
+    "isPromotionSku": true
+   },
+   "绣红&gt;175/52": {
+    "specId": "a84ef1c3a4bddb1d2dd611f2489417c0",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 880,
+    "specAttrs": "绣红&gt;175/52",
+    "priceAmount": 1,
+    "skuId": 5590933552040,
+    "isPromotionSku": true
+   },
+   "咖啡&gt;190/58": {
+    "specId": "561fd2e7371fc4be0d7b0a9fa07fde66",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 992,
+    "specAttrs": "咖啡&gt;190/58",
+    "priceAmount": 1,
+    "skuId": 5590933552037,
+    "isPromotionSku": true
+   },
+   "藏青&gt;170/50": {
+    "specId": "22f34650d0b688e764ffb90d448df36a",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 892,
+    "specAttrs": "藏青&gt;170/50",
+    "priceAmount": 1,
+    "skuId": 5590933552020,
+    "isPromotionSku": true
+   },
+   "米白&gt;190/58": {
+    "specId": "8e7037ef68f9e8fdc29a1631a3d7b3c7",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 959,
+    "specAttrs": "米白&gt;190/58",
+    "priceAmount": 1,
+    "skuId": 5590933552055,
+    "isPromotionSku": true
+   },
+   "藏青&gt;190/58": {
+    "specId": "10249f1ac24c25277e750c170b40bfe9",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 971,
+    "specAttrs": "藏青&gt;190/58",
+    "priceAmount": 1,
+    "skuId": 5590933552025,
+    "isPromotionSku": true
+   },
+   "黑色&gt;170/50": {
+    "specId": "7eec254e3398aeefd9243740a0be6aea",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 914,
+    "specAttrs": "黑色&gt;170/50",
+    "priceAmount": 1,
+    "skuId": 5590933552045,
+    "isPromotionSku": true
+   },
+   "米白&gt;175/52": {
+    "specId": "964c71c0a4a31fa244bc97583953490e",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 721,
+    "specAttrs": "米白&gt;175/52",
+    "priceAmount": 1,
+    "skuId": 5590933552052,
+    "isPromotionSku": true
+   },
+   "咖啡&gt;180/54": {
+    "specId": "d4975435d7e2ee2326c4e5d2041e666f",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 922,
+    "specAttrs": "咖啡&gt;180/54",
+    "priceAmount": 1,
+    "skuId": 5590933552035,
+    "isPromotionSku": true
+   },
+   "绣红&gt;185/56": {
+    "specId": "6319a96549b3e9a998878e93f74cf9e7",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 945,
+    "specAttrs": "绣红&gt;185/56",
+    "priceAmount": 1,
+    "skuId": 5590933552042,
+    "isPromotionSku": true
+   },
+   "豆绿&gt;185/56": {
+    "specId": "897cb4d680020eaa6062b6d808f382e6",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 881,
+    "specAttrs": "豆绿&gt;185/56",
+    "priceAmount": 1,
+    "skuId": 5590933552030,
+    "isPromotionSku": true
+   },
+   "绣红&gt;165/48": {
+    "specId": "d5a0787a7484943dfc8ae45e00a02b53",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 971,
+    "specAttrs": "绣红&gt;165/48",
+    "priceAmount": 1,
+    "skuId": 5590933552038,
+    "isPromotionSku": true
+   },
+   "米白&gt;180/54": {
+    "specId": "8d0b943c7efad9f61a96de4f21dbce87",
+    "saleCount": 0,
+    "discountPrice": "17.28",
+    "canBookCount": 788,
+    "specAttrs": "米白&gt;180/54",
+    "priceAmount": 1,
+    "skuId": 5590933552053,
+    "isPromotionSku": true
+   }
+  },
+  "result.data.Root.fields.dataJson.skuModel.skuInfoMapOriginal": {
+   "藏青&gt;175/52": {
+    "specId": "07de8ed89ff6ae022de8ec5dc23b68d8",
+    "saleCount": 0,
+    "canBookCount": 848,
+    "specAttrs": "藏青&gt;175/52",
+    "priceAmount": 1,
+    "skuId": 5590933552022,
+    "isPromotionSku": false
+   },
+   "黑色&gt;185/56": {
+    "specId": "bc2fe747a3b7181c3bc99d77ce282ae9",
+    "saleCount": 0,
+    "canBookCount": 920,
+    "specAttrs": "黑色&gt;185/56",
+    "priceAmount": 1,
+    "skuId": 5590933552048,
+    "isPromotionSku": false
+   },
+   "黑色&gt;165/48": {
+    "specId": "25d30310b13029a22ccd3a198c98120e",
+    "saleCount": 0,
+    "canBookCount": 956,
+    "specAttrs": "黑色&gt;165/48",
+    "priceAmount": 1,
+    "skuId": 5590933552044,
+    "isPromotionSku": false
+   },
+   "米白&gt;165/48": {
+    "specId": "d3df3a8a226e4d674b528f86d8f73c91",
+    "saleCount": 0,
+    "canBookCount": 885,
+    "specAttrs": "米白&gt;165/48",
+    "priceAmount": 1,
+    "skuId": 5590933552050,
+    "isPromotionSku": false
+   },
+   "米白&gt;185/56": {
+    "specId": "1855099cbbb82455da1fd6d6b2eecece",
+    "saleCount": 0,
+    "canBookCount": 861,
+    "specAttrs": "米白&gt;185/56",
+    "priceAmount": 1,
+    "skuId": 5590933552054,
+    "isPromotionSku": false
+   },
+   "豆绿&gt;190/58": {
+    "specId": "b7820c8910397a017e75e337d4af4e7e",
+    "saleCount": 0,
+    "canBookCount": 937,
+    "specAttrs": "豆绿&gt;190/58",
+    "priceAmount": 1,
+    "skuId": 5590933552031,
+    "isPromotionSku": false
+   },
+   "黑色&gt;175/52": {
+    "specId": "5ba52f5f9388367f9b3e2b03a4271672",
+    "saleCount": 0,
+    "canBookCount": 852,
+    "specAttrs": "黑色&gt;175/52",
+    "priceAmount": 1,
+    "skuId": 5590933552046,
+    "isPromotionSku": false
+   },
+   "咖啡&gt;190/58": {
+    "specId": "561fd2e7371fc4be0d7b0a9fa07fde66",
+    "saleCount": 0,
+    "canBookCount": 992,
+    "specAttrs": "咖啡&gt;190/58",
+    "priceAmount": 1,
+    "skuId": 5590933552037,
+    "isPromotionSku": false
+   },
+   "咖啡&gt;175/52": {
+    "specId": "c9af03c5b58aa2465c62a037d55d40b9",
+    "saleCount": 0,
+    "canBookCount": 903,
+    "specAttrs": "咖啡&gt;175/52",
+    "priceAmount": 1,
+    "skuId": 5590933552034,
+    "isPromotionSku": false
+   },
+   "豆绿&gt;175/52": {
+    "specId": "fc7f83af65cd381896688f6a2f09d00f",
+    "saleCount": 0,
+    "canBookCount": 849,
+    "specAttrs": "豆绿&gt;175/52",
+    "priceAmount": 1,
+    "skuId": 5590933552028,
+    "isPromotionSku": false
+   },
+   "咖啡&gt;180/54": {
+    "specId": "d4975435d7e2ee2326c4e5d2041e666f",
+    "saleCount": 0,
+    "canBookCount": 922,
+    "specAttrs": "咖啡&gt;180/54",
+    "priceAmount": 1,
+    "skuId": 5590933552035,
+    "isPromotionSku": false
+   },
+   "米白&gt;175/52": {
+    "specId": "964c71c0a4a31fa244bc97583953490e",
+    "saleCount": 0,
+    "canBookCount": 721,
+    "specAttrs": "米白&gt;175/52",
+    "priceAmount": 1,
+    "skuId": 5590933552052,
+    "isPromotionSku": false
+   },
+   "绣红&gt;185/56": {
+    "specId": "6319a96549b3e9a998878e93f74cf9e7",
+    "saleCount": 0,
+    "canBookCount": 945,
+    "specAttrs": "绣红&gt;185/56",
+    "priceAmount": 1,
+    "skuId": 5590933552042,
+    "isPromotionSku": false
+   },
+   "绣红&gt;165/48": {
+    "specId": "d5a0787a7484943dfc8ae45e00a02b53",
+    "saleCount": 0,
+    "canBookCount": 971,
+    "specAttrs": "绣红&gt;165/48",
+    "priceAmount": 1,
+    "skuId": 5590933552038,
+    "isPromotionSku": false
+   },
+   "豆绿&gt;165/48": {
+    "specId": "b717bcd1a672012fd5453b06dc4b9391",
+    "saleCount": 0,
+    "canBookCount": 950,
+    "specAttrs": "豆绿&gt;165/48",
+    "priceAmount": 1,
+    "skuId": 5590933552026,
+    "isPromotionSku": false
+   },
+   "黑色&gt;180/54": {
+    "specId": "8c4cac1219334dc84ddff624348a4ce6",
+    "saleCount": 0,
+    "canBookCount": 861,
+    "specAttrs": "黑色&gt;180/54",
+    "priceAmount": 1,
+    "skuId": 5590933552047,
+    "isPromotionSku": false
+   },
+   "豆绿&gt;185/56": {
+    "specId": "897cb4d680020eaa6062b6d808f382e6",
+    "saleCount": 0,
+    "canBookCount": 881,
+    "specAttrs": "豆绿&gt;185/56",
+    "priceAmount": 1,
+    "skuId": 5590933552030,
+    "isPromotionSku": false
+   },
+   "绣红&gt;170/50": {
+    "specId": "356142e46cdc94899d94c1e14f573dcf",
+    "saleCount": 0,
+    "canBookCount": 929,
+    "specAttrs": "绣红&gt;170/50",
+    "priceAmount": 1,
+    "skuId": 5590933552039,
+    "isPromotionSku": false
+   },
+   "米白&gt;190/58": {
+    "specId": "8e7037ef68f9e8fdc29a1631a3d7b3c7",
+    "saleCount": 0,
+    "canBookCount": 959,
+    "specAttrs": "米白&gt;190/58",
+    "priceAmount": 1,
+    "skuId": 5590933552055,
+    "isPromotionSku": false
+   },
+   "藏青&gt;180/54": {
+    "specId": "7e1174049ee08db7635e9b54cd07e81d",
+    "saleCount": 0,
+    "canBookCount": 776,
+    "specAttrs": "藏青&gt;180/54",
+    "priceAmount": 1,
+    "skuId": 5590933552023,
+    "isPromotionSku": false
+   },
+   "咖啡&gt;170/50": {
+    "specId": "ce21e1aa8708d0fc8438d74ef85941ee",
+    "saleCount": 0,
+    "canBookCount": 949,
+    "specAttrs": "咖啡&gt;170/50",
+    "priceAmount": 1,
+    "skuId": 5590933552033,
+    "isPromotionSku": false
+   },
+   "豆绿&gt;170/50": {
+    "specId": "131f1c842b7ab21eb5d0196d0282c272",
+    "saleCount": 0,
+    "canBookCount": 893,
+    "specAttrs": "豆绿&gt;170/50",
+    "priceAmount": 1,
+    "skuId": 5590933552027,
+    "isPromotionSku": false
+   },
+   "黑色&gt;190/58": {
+    "specId": "0e45219943ff7301f54c44ff437e7b63",
+    "saleCount": 0,
+    "canBookCount": 969,
+    "specAttrs": "黑色&gt;190/58",
+    "priceAmount": 1,
+    "skuId": 5590933552049,
+    "isPromotionSku": false
+   },
+   "藏青&gt;170/50": {
+    "specId": "22f34650d0b688e764ffb90d448df36a",
+    "saleCount": 0,
+    "canBookCount": 892,
+    "specAttrs": "藏青&gt;170/50",
+    "priceAmount": 1,
+    "skuId": 5590933552020,
+    "isPromotionSku": false
+   },
+   "黑色&gt;170/50": {
+    "specId": "7eec254e3398aeefd9243740a0be6aea",
+    "saleCount": 0,
+    "canBookCount": 914,
+    "specAttrs": "黑色&gt;170/50",
+    "priceAmount": 1,
+    "skuId": 5590933552045,
+    "isPromotionSku": false
+   },
+   "绣红&gt;180/54": {
+    "specId": "8ef5b8799f62f8b77e1135c4df32ced0",
+    "saleCount": 0,
+    "canBookCount": 904,
+    "specAttrs": "绣红&gt;180/54",
+    "priceAmount": 1,
+    "skuId": 5590933552041,
+    "isPromotionSku": false
+   },
+   "藏青&gt;165/48": {
+    "specId": "3e3a524783a02a941880a34e87c5d8c3",
+    "saleCount": 0,
+    "canBookCount": 971,
+    "specAttrs": "藏青&gt;165/48",
+    "priceAmount": 1,
+    "skuId": 5590933552021,
+    "isPromotionSku": false
+   },
+   "米白&gt;170/50": {
+    "specId": "0e5628666b8238c74e320a5a9869a7d4",
+    "saleCount": 0,
+    "canBookCount": 771,
+    "specAttrs": "米白&gt;170/50",
+    "priceAmount": 1,
+    "skuId": 5590933552051,
+    "isPromotionSku": false
+   },
+   "米白&gt;180/54": {
+    "specId": "8d0b943c7efad9f61a96de4f21dbce87",
+    "saleCount": 0,
+    "canBookCount": 788,
+    "specAttrs": "米白&gt;180/54",
+    "priceAmount": 1,
+    "skuId": 5590933552053,
+    "isPromotionSku": false
+   },
+   "绣红&gt;190/58": {
+    "specId": "eed769d90ed6a6041d639da43b00da6e",
+    "saleCount": 0,
+    "canBookCount": 986,
+    "specAttrs": "绣红&gt;190/58",
+    "priceAmount": 1,
+    "skuId": 5590933552043,
+    "isPromotionSku": false
+   },
+   "藏青&gt;190/58": {
+    "specId": "10249f1ac24c25277e750c170b40bfe9",
+    "saleCount": 0,
+    "canBookCount": 971,
+    "specAttrs": "藏青&gt;190/58",
+    "priceAmount": 1,
+    "skuId": 5590933552025,
+    "isPromotionSku": false
+   },
+   "咖啡&gt;165/48": {
+    "specId": "3dcef95c55fcdf74dbf78f937a31aeb0",
+    "saleCount": 0,
+    "canBookCount": 979,
+    "specAttrs": "咖啡&gt;165/48",
+    "priceAmount": 1,
+    "skuId": 5590933552032,
+    "isPromotionSku": false
+   },
+   "绣红&gt;175/52": {
+    "specId": "a84ef1c3a4bddb1d2dd611f2489417c0",
+    "saleCount": 0,
+    "canBookCount": 880,
+    "specAttrs": "绣红&gt;175/52",
+    "priceAmount": 1,
+    "skuId": 5590933552040,
+    "isPromotionSku": false
+   },
+   "藏青&gt;185/56": {
+    "specId": "6902a8260eb5f9d2fc68da3c12c7eba2",
+    "saleCount": 0,
+    "canBookCount": 954,
+    "specAttrs": "藏青&gt;185/56",
+    "priceAmount": 1,
+    "skuId": 5590933552024,
+    "isPromotionSku": false
+   },
+   "豆绿&gt;180/54": {
+    "specId": "31d421b4253ad223282e1fdcfa3dbae7",
+    "saleCount": 0,
+    "canBookCount": 834,
+    "specAttrs": "豆绿&gt;180/54",
+    "priceAmount": 1,
+    "skuId": 5590933552029,
+    "isPromotionSku": false
+   },
+   "咖啡&gt;185/56": {
+    "specId": "9198e8622f69150c6f7048f71f11614d",
+    "saleCount": 0,
+    "canBookCount": 948,
+    "specAttrs": "咖啡&gt;185/56",
+    "priceAmount": 1,
+    "skuId": 5590933552036,
+    "isPromotionSku": false
+   }
+  },
+  "result.data.Root.fields.dataJson.orderParamModel.orderParam.beginNum": 1,
+  "result.data.Root.fields.dataJson.orderParamModel.orderParam.skuParam": {
+   "skuPriceType": "rangePrice",
+   "skuRangePrices": [
+    {
+     "price": "17.28",
+     "beginAmount": "1"
+    }
+   ]
+  },
+  "result.data.mainPrice.fields.priceModel.currentPrices": [
+   {
+    "price": "17.28",
+    "beginAmount": 1
+   }
+  ],
+  "result.data.mainPrice.fields.priceModel.originalPrices": [
+   {
+    "displayStyle": "line_price",
+    "price": "24.00",
+    "beginAmount": 1
+   }
+  ],
+  "result.data.mainPrice.fields.finalPriceModel.onHandPrice": "11.28",
+  "result.data.mainPrice.fields.finalPriceModel.onHandPriceTypeText": "新人价",
+  "result.data.mainPrice.fields.finalPriceModel.tradeWithoutPromotion.offerBeginAmount": 1,
+  "result.data.mainPrice.fields.finalPriceModel.tradeWithoutPromotion.offerPriceRanges": [
+   {
+    "price": "24.00",
+    "beginAmount": 1,
+    "discountPrice": "24.00",
+    "endAmount": 0
+   }
+  ],
+  "result.data.productTitle.fields.shopInfo.companyName": "桐乡市濮院木直服装厂",
+  "result.data.productTitle.fields.shopInfo.byrRepeatRate3m": "47.91%",
+  "result.data.productTitle.fields.shopInfo.sellerSlrServiceScore": "4.0分",
+  "result.data.productTitle.fields.rateInfo.goodRates": 91.3,
+  "result.data.shippingServices.fields.location": "浙江省嘉兴市",
+  "result.data.shippingServices.fields.deliveryLimitText": "承诺48小时发货",
+  "result.data.productPackInfo.fields.unitWeight": 0,
+  "result.global.globalData.model.consignModel.hasConsignPrice": false
+ }
+}

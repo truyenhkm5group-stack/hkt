@@ -128,9 +128,14 @@ export const SOURCING_PLATFORM_LABEL: Record<SourcingPlatform, string> = { "1688
  * Nguồn của con số — danh sách ĐÓNG, có CHECK. KHÔNG có «cũ»: cũ là hàm của THỜI GIAN, tính lúc đọc từ mốc chụp
  * (`staleness`), không lưu — lưu thì nó sai ngay ngày hôm sau (cùng lý do với leo thang SLA, AGENTS 26).
  */
-export const SOURCING_DATA_STATUSES = ["MANUAL", "API", "UNKNOWN"] as const;
+export const SOURCING_DATA_STATUSES = ["MANUAL", "API", "EXTENSION", "UNKNOWN"] as const;
 export type SourcingDataStatus = (typeof SOURCING_DATA_STATUSES)[number];
-export const SOURCING_DATA_STATUS_LABEL: Record<SourcingDataStatus, string> = { MANUAL: "Nhập tay", API: "Từ nguồn đã duyệt", UNKNOWN: "Chưa rõ nguồn" };
+export const SOURCING_DATA_STATUS_LABEL: Record<SourcingDataStatus, string> = {
+  MANUAL: "Nhập tay",
+  API: "Từ nguồn đã duyệt",
+  EXTENSION: "Lưu từ trang 1688 (tiện ích Chrome)",
+  UNKNOWN: "Chưa rõ nguồn",
+};
 
 /** Ngưỡng «cũ» DUY NHẤT cho số liệu nguồn (giá đã chụp, thông tin nhà cung cấp): quá số ngày này ⇒ in «cũ» cạnh số. */
 export const SOURCING_DATA_STALE_DAYS = 30;
@@ -219,4 +224,57 @@ export const SOURCING_TRIAL_SLA_WHY: Record<SourcingTrialWorkKind, string> = {
   RECEIVE:
     "CỐ Ý bỏ trống: chưa có hằng số đang chạy nào nói hàng mua thử được phép về chậm bao lâu, và gõ một con số mới ở đây là bịa " +
     "(AGENTS.md mục 22, 38). Chủ shop đặt được — nó đo «đã đặt bao lâu mà chưa về», tính từ lúc người bấm «đã đặt».",
+};
+
+// ─────────────────────────── LƯU MẪU TỪ TRANG 1688 (SRC-6, chủ shop chốt 25/10/2026) ───────────────────────────
+
+/**
+ * Đường một lần chụp đi vào — danh sách ĐÓNG, có CHECK (0260). `EXTENSION` = người bấm «Lưu mẫu vào ERP» trên trang chi tiết
+ * 1688 (tiện ích Chrome, `extensions/sourcing-1688/`); `API` = lời gọi chính thức (keywordQuery / chi tiết) khi chủ shop đã đăng ký
+ * 采购服务商 và uỷ quyền ứng dụng — cùng bảng, cùng bộ đọc chuẩn hoá, khác nhãn nguồn.
+ */
+export const SOURCING_CAPTURE_SOURCES = ["EXTENSION", "API"] as const;
+export type SourcingCaptureSource = (typeof SOURCING_CAPTURE_SOURCES)[number];
+
+/** Đường DUY NHẤT tiện ích gửi tới — middleware mở đúng chữ này (không tiền tố), route tự gác bằng token. */
+export const SOURCING_CAPTURE_PATH = "/api/sourcing/capture";
+
+/** Phạm vi DUY NHẤT của token tiện ích — token không mở được trang, không đọc được gì, chỉ gửi được một lần chụp. */
+export const SOURCING_CAPTURE_SCOPE = "sourcing:capture";
+
+/**
+ * Hình dạng token: `vnxs1.<mã tổ chức>.<bí mật>`. Mã tổ chức chọn CSDL (như lịch .ics — `lib/stays/feed.ts`), bí mật chỉ lưu dạng
+ * BĂM trong CSDL của chính tổ chức đó ⇒ token của tổ chức A gắn nhãn tổ chức B không khớp dòng nào. HÀM THUẦN.
+ */
+export const SOURCING_CAPTURE_TOKEN_RE = /^vnxs1\.([a-z0-9][a-z0-9-]{0,62})\.([A-Za-z0-9_-]{43})$/;
+
+export function parseCaptureToken(raw: string): { orgCode: string; secret: string } | null {
+  const m = SOURCING_CAPTURE_TOKEN_RE.exec(raw.trim());
+  return m ? { orgCode: m[1], secret: m[2] } : null;
+}
+
+/** Số token còn hiệu lực tối đa của MỘT người (mỗi máy / trình duyệt một token, thu hồi riêng được). */
+export const SOURCING_CAPTURE_TOKENS_PER_USER = 5;
+/** Trần thân yêu cầu của một lần chụp — nhánh dữ liệu sản phẩm của một trang, không phải cả trang. */
+export const SOURCING_CAPTURE_MAX_BYTES = 1_500_000;
+/** Phiên bản bộ đọc trang chi tiết — đổi bộ đọc thì tăng, dòng cũ giữ số cũ (không đọc lại ngầm, AGENTS 8.8). */
+export const SOURCING_CAPTURE_PARSER_VERSION = 1;
+
+/**
+ * Cờ của MỘT lần chụp — danh sách ĐÓNG. Mỗi cờ là một chỗ bộ đọc KHÔNG kết luận được và đã để trống (CHƯA BIẾT), không phải lỗi:
+ * lần chụp vẫn được lưu, con số tương ứng là `null`.
+ */
+export const SOURCING_CAPTURE_FLAGS = ["NO_DETAIL_PRICE", "SKU_PRICES_DIFFER", "TIERS_INVALID", "PROMO_PRICE_IGNORED", "TRANSLATED_BY_1688", "SIZE_CHART_MISSING", "SIZE_CHART_UNPARSED", "WEIGHT_UNKNOWN", "DROPSHIP_UNREAD"] as const;
+export type SourcingCaptureFlag = (typeof SOURCING_CAPTURE_FLAGS)[number];
+export const SOURCING_CAPTURE_FLAG_LABEL: Record<SourcingCaptureFlag, string> = {
+  NO_DETAIL_PRICE: "Không đọc được giá ở trang chi tiết — giá về CHƯA BIẾT (giá thẻ tìm kiếm / giá khách mới không phải giá mua).",
+  SKU_PRICES_DIFFER: "Mỗi màu × size một giá, trang không có bậc giá chung — xem giá từng SKU; giá về CHƯA BIẾT cho tới khi chọn SKU.",
+  TIERS_INVALID: "Bậc giá trên trang không hợp lệ (số lượng không tăng dần / giá ≤ 0) — không ghi bậc nào.",
+  PROMO_PRICE_IGNORED: "Trang có giá khuyến mãi / giá khách mới — đã BỎ QUA, không dùng làm giá mua.",
+  TRANSLATED_BY_1688:
+    "1688 trả dữ liệu ĐÃ DỊCH (tài khoản đặt Global / tiếng Việt) — giá vẫn lưu, nhưng tiêu đề và bảng size không phải chữ gốc nên KHÔNG đọc cân nặng. Đặt 1688 về 简体中文 rồi bấm lại.",
+  SIZE_CHART_MISSING: "Không thấy bảng size trong dữ liệu trang.",
+  SIZE_CHART_UNPARSED: "Có chữ bảng size nhưng không đọc được dòng nào — để trống, xem chữ gốc.",
+  WEIGHT_UNKNOWN: "Trang không ghi khối lượng — cước Trung Quốc → Việt Nam CHƯA BIẾT.",
+  DROPSHIP_UNREAD: "Trang có giá dropship (一件代发) nhưng con số nằm ở phần tải riêng, bộ đọc chưa đọc được — xem trên trang.",
 };

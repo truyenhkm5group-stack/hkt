@@ -77,7 +77,9 @@ function testUrls() {
 }
 
 function testStaleness() {
-  assert.deepEqual([...SOURCING_DATA_STATUSES], ["MANUAL", "API", "UNKNOWN"], "không có trạng thái «cũ» được LƯU (Tech Lead 23/10)");
+  // SRC-6 (25/10/2026) thêm EXTENSION — tiện ích «Lưu mẫu từ 1688». Vẫn KHÔNG có trạng thái «cũ» được lưu.
+  assert.deepEqual([...SOURCING_DATA_STATUSES], ["MANUAL", "API", "EXTENSION", "UNKNOWN"], "nguồn số liệu là danh sách đóng");
+  assert.ok(!(SOURCING_DATA_STATUSES as readonly string[]).includes("STALE"), "không có trạng thái «cũ» được LƯU (Tech Lead 23/10)");
   const now = new Date("2026-10-23T05:00:00Z");
   assert.equal(staleness(null, now), null, "không có mốc ⇒ chưa biết, không phải «mới»");
   assert.deepEqual(staleness(new Date(now.getTime() - 10 * 86_400_000), now), { stale: false, days: 10 });
