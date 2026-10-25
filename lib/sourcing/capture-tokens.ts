@@ -18,11 +18,12 @@ import { audit } from "@/lib/audit";
 import { activeSessionUserById, can, type SessionUser } from "@/lib/auth/session";
 import { billingWriteDenied } from "@/lib/billing/rules";
 import { orgBillingStanding } from "@/lib/billing/standing";
-import { parseCaptureToken, SOURCING_CAPTURE_PATH, SOURCING_CAPTURE_SCOPE, SOURCING_CAPTURE_TOKENS_PER_USER } from "@/lib/constants/sourcing";
+import { parseCaptureToken, SOURCING_CAPTURE_PATH, SOURCING_CAPTURE_RATE, SOURCING_CAPTURE_SCOPE, SOURCING_CAPTURE_TOKENS_PER_USER } from "@/lib/constants/sourcing";
 import { canUseModule } from "@/lib/platform/capabilities";
 import { withOrganization } from "@/lib/platform/context";
 import { findOrganization, isOperationalOrganization } from "@/lib/platform/organizations";
 import { isMissingSourcingTable } from "@/lib/queries/sourcing";
+import { takeAll } from "@/lib/rate-limit";
 import { billingLockApplies } from "@/lib/saas/policy";
 
 const NOT_MIGRATED = "CSDL của tổ chức chưa áp migration 0260 (lưu mẫu từ 1688) — báo người vận hành.";
@@ -107,7 +108,17 @@ export async function listCaptureTokens(userId: string | null): Promise<CaptureT
   }
 }
 
-export type CaptureAuthFailure = { status: 401 | 402 | 403 | 503; error: string };
+export type CaptureAuthFailure = { status: 401 | 402 | 403 | 429 | 503; error: string; retryAfterMs?: number };
+
+/** Kho xô của tiến trình — một khoá mỗi token. Giữ trên `globalThis` để nạp lại mô-đun (dev) không xoá trần. */
+const holder = globalThis as unknown as { __erpSourcingCaptureBuckets?: Map<string, number> };
+const buckets = (holder.__erpSourcingCaptureBuckets ??= new Map<string, number>());
+
+/** Lấy MỘT lượt của token. Đồng hồ là tham số (AGENTS 50) — bài kiểm dựng mốc, không chờ đồng hồ thật. */
+export function takeCaptureSlot(orgCode: string, tokenId: string, now: number = Date.now()): { ok: true } | { ok: false; retryAfterMs: number } {
+  const r = takeAll(buckets, [{ key: `${orgCode}:${tokenId}`, rule: SOURCING_CAPTURE_RATE, scope: "TOKEN" as const }], now, SOURCING_CAPTURE_RATE.maxKeys);
+  return r.ok ? { ok: true } : { ok: false, retryAfterMs: r.retryAfterMs };
+}
 export type CaptureAuthContext = { orgCode: string; tokenId: string; user: SessionUser };
 
 /** Câu DUY NHẤT cho mọi token sai: không nói tổ chức có tồn tại không, token có từng đúng không. */
@@ -140,6 +151,9 @@ export async function authenticateCaptureToken<T>(authorization: string | null, 
       throw e;
     }
     if (!row) return BAD_TOKEN;
+    // Trần đứng SAU khi token khớp: token sai không tốn lượt của ai, và không ai làm cạn xô của token người khác.
+    const slot = takeCaptureSlot(org.code, row.id);
+    if (!slot.ok) return { status: 429, error: "Gửi quá nhanh — đợi vài giây rồi bấm lại.", retryAfterMs: slot.retryAfterMs };
     const user = await activeSessionUserById(row.userId);
     if (!user) return BAD_TOKEN;
     if (!can(user, "sourcing:write")) return { status: 403, error: "Tài khoản của token không còn quyền «Tìm hàng: lưu & sửa mẫu»." };
