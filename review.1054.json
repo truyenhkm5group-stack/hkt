@@ -1,0 +1,8 @@
+{
+  "pr": 1054,
+  "sha": "e40af3a74faf63bdf7c30cadcbc6d041de93501f",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T02:16:54.601Z",
+  "note": "review lead (gốc cặp #B1135EC0/#E0663E84): markWaitingForCustomer chỉ đổi thread/WAITING khi hội thoại SỞ HỮU luồng (MOVED); EXISTING_INBOX/OPENED_NEW ghi state.carriedTo; threadOwner/ownsThread/ownsThreadSql là hàm chủ duy nhất (một công thức visitor key, bài so sha256 SQL↔TS); gửi bù/thử lại/theo dõi/health/recovery/ledger/mirror chọn chủ; bài quét chặn đọc theo thread_id mới ngoài hàm chủ. Khôn"
+}
