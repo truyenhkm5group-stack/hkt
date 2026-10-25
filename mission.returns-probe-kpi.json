@@ -3,7 +3,7 @@
   "mission_id": "returns-probe-kpi",
   "title": "returns-page-probe: mốc «KPI hiện» + câu nhỏ xếp hàng khi trang nguội (chỉ script, số «trước» cho Suspense)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-rprobekpi",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-25T09:56:01.378Z",
-  "updated_at": "2026-10-25T09:56:01.378Z",
-  "last_heartbeat": "2026-10-25T09:56:01.378Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-25T09:57:43.178Z",
+  "last_heartbeat": "2026-10-25T09:57:43.178Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/returns-probe-kpi",
+    "sha": "0671a3ceadcd41623c3114752fe6625b313706a1",
+    "at": "2026-10-25T09:57:43.178Z",
+    "actor": "DESKTOP-56TH98Y:wt-rprobekpi",
+    "title": "returns-page-probe: mốc «KPI hiện» + câu nhỏ xếp hàng khi trang nguội (chỉ script, số «trước» cho Suspense)",
+    "summary": "",
+    "tests": [
+      "cherry-pick sạch ef17d72b4 lên origin/main · tsc + eslint sạch · testReturnsPageProbe đạt trên main (chữ đánh dấu «Đơn đã gửi» là nhãn MetricCard của page.tsx bản main, không có trong khung loading)"
+    ]
+  }
 }
