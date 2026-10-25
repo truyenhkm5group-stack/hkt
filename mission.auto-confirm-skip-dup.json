@@ -3,7 +3,7 @@
   "mission_id": "auto-confirm-skip-dup",
   "title": "Công tắc tự xác nhận không nâng đơn nghi trùng",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -23,7 +23,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-25T05:03:14.276Z",
-  "updated_at": "2026-10-25T05:03:14.276Z",
-  "last_heartbeat": "2026-10-25T05:03:14.276Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-25T05:03:54.813Z",
+  "last_heartbeat": "2026-10-25T05:03:54.813Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/auto-confirm-skip-dup",
+    "sha": "b166c2a679f8800a58360ee182f148ff6516c346",
+    "at": "2026-10-25T05:03:54.813Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "Công tắc tự xác nhận không nâng đơn nghi trùng",
+    "summary": "",
+    "tests": [
+      "4/4 shard ĐẠT (trước rebase, @96e8f88b); sau rebase lên main afe05b92: tsc sạch, confirm-duplicate-ack + manual-order-outcome XONG; kiểm đột biến tắt dòng kiểm trùng ⇒ ca 7 đỏ"
+    ]
+  }
 }
