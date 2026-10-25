@@ -118,8 +118,15 @@ Chi tiết từng hạng mục Phase 2–5 ở mục 7.
 | OD-UX-02 | UI/UX | Sidebar gom theo nghiệp vụ, đọc `department-modules.ts` | — | P1 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-56` | — |
 | OD-UX-03 | UI/UX | Chỉ báo «cập nhật lúc / nguồn / trễ đối tác» cho màn hình số liệu | `code-erp-56` | P1 | DEPLOYED | #1001 | `4f4d098cb` | TEST_KHOI K01 · K03 · K04 · K06 · K07 · K11 · K15 · K17 · K18 | ✓ (run 39961732491, health d864b3332b2c) | chờ ảnh production | — | `/shipments` + `/reports/returns` xong. Bằng chứng tạm (db-query 39966275866): bảng kê COD cuối 23/10 03:08Z · Pancake SUCCESS cuối 14:00Z · webhook cuối 14:02Z. GTC + lương ở vòng sau. |
 | OD-UX-03b | UI/UX | Thẻ «Đồng bộ dữ liệu» CẢNH BÁO khi tệp «Danh sách vận đơn» lâu không nhập (trước chỉ in mốc) | `code-erp-56` | P1 | IN_REVIEW | (PR của nhánh `claude/od-ux-03b-webhook-gap` @ `10790f9809f9`) | — | TEST_KHOI K06 · K15 | — | — | — | Lead đổi thành làm NGAY 23/10. Thẻ trên `/shipments` + `/reports/returns` in «Chỗ hụt webhook: chưa đo từ <mốc> (N ngày) — nhập tệp Danh sách vận đơn để đo», có lối bấm `/import-vtp`. Hổ phách theo `VTP_ORDER_LIST_MAX_AGE_HOURS` (24 giờ, đã khai ở feed-freshness, không gõ số mới). Kèm tỷ lệ khớp webhook ↔ tệp 30 ngày (mẫu < 30 ⇒ «chưa đủ mẫu»), không tô màu. Căn cứ db-query 39966275866: APPLY tệp cuối 02/10/2026 08:13Z ⇒ 3 tuần không có phép đo (AGENTS 51). |
-| OD-UX-04 | UI/UX | KPI bấm được xuống dữ liệu cấu thành (`/reports/returns`, trang chủ) | `cc2379e4` | P1 | IN_REVIEW | (PR của nhánh `claude/od-ux-04-returns-kpi-drill`) | — | `tests/returns-kpi-drill.test.ts` (K01): 144 phép so — số thẻ y hệt bản trước refactor · danh sách = thẻ ở 8 nhóm × 3 mốc × 3 kỳ × 2 ô tìm · phân trang; đột biến vị từ «chờ phát lại» ⇒ đỏ · npm test · build | — | — | — | `/reports/returns` xong ở PR này. Trang chủ ở PR sau. |
-| OD-UX-05 | Tốc độ | Tối ưu 2–3 trang chậm nhất theo số nền, có đích đo được | — | P1 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-56` | — |
+| OD-UX-04 | UI/UX | KPI bấm được xuống dữ liệu cấu thành (`/reports/returns`, trang chủ) | `cc2379e4` | P1 | DEPLOYED | #1006 (chủ shop gộp 25/10) | `ead92882e` (commit gộp) | `tests/returns-kpi-drill.test.ts` (K01): 144 phép so — số thẻ y hệt bản trước refactor · danh sách = thẻ ở 8 nhóm × 3 mốc × 3 kỳ × 2 ô tìm · phân trang; đột biến vị từ «chờ phát lại» ⇒ đỏ · npm test · build | ✓ health `ead92882 · run 40181186535 · 09:56:39Z 25/10` | — · ảnh production trước/sau CHƯA CHỤP (cần phiên Chrome 9222 của chủ shop) | — | `/reports/returns` xong. Trang chủ ở PR sau. |
+| OD-UX-05 | Tốc độ | Tối ưu 2–3 trang chậm nhất theo số nền, có đích đo được | nhiều phiên | P1 | IN_PROGRESS | xem 05.1–05.4 | — | — | — | — | — | Căn cứ từng mục ở §5.4. |
+| OD-UX-05.1 | Tốc độ | `/orders` + `/shipments`: dải số tổng tắt JIT | `code-erp-56` | P1 | DEPLOYED | #1008 | `4a92d9206` | `tests/trang-cham-jit.test.ts` | ✓ run 40011916149 | ✓ perf-probe sau deploy: `orderSummary` 3.275 → 143 ms · `shipmentSummary` 4.078 → 132 ms (đích < 500); smoke `/orders` 1.590 ms (25/10) | — | — |
+| OD-UX-05.2 | Tốc độ | `/work`: hàng đợi không chạm hạn, đệm ấm | `code-erp-56` | P1 | DONE (đường ẤM) | #1016 · #1018 · #1021 · #1025 · #1035 · #1037 | `4816be1b4` · `0e93a57fa` … | trong PR | ✓ | ✓ probe ấm #1035: toàn trang 70 ms, mọi nguồn ≤ 17 ms; smoke 25/10 1.344 ms (≤ 2 s) | Đường NGUỘI sau mỗi lần xoá đệm còn mở | Đo lại sau #1036 + #1037 |
+| OD-UX-05.3 | Tốc độ | Trang chủ: khử trùng đọc khoá cấu hình theo request | `code-erp-56` | P2 | DEPLOYED (đích KHÔNG đạt nhờ mục này) | #1033 | `4eeb7751f` | trong PR | ✓ | Chỉ bớt khoảng 1 lượt (6 lượt / 5 khoá) ⇒ đích −30 % KHÔNG đạt nhờ cái này | — | — |
+| OD-UX-05.3b | Tốc độ | Đối soát lương · bảng lương · `/ads` · `/work` đọc cấu hình theo phạm vi | `code-erp-56` | P1 | DEPLOYED | #1037 | `0e93a57fa` | trong PR | ✓ `6ca3af26` | ✓ `getReconCenter` 202 → 18 lượt / 10 khoá · `getMyWork` 17 → 12 · `getPayrollReport` 15 → 9 · `getAdsPerformance` 11 → 6 | — | — |
+| OD-UX-05.3c | Tốc độ | Hai đường đọc thô (xác nhận trọng số mã · chữ ký đối soát) qua `readSettingValue` | `code-erp-56` | P1 | DEPLOYED | #1043 | `7d59abf7` (commit gộp) | K06 · K10 · K14 · K24 | ✓ run 40086846234 · health `5d4997bb` (11:13:45Z 24/10) | — CHƯA đo riêng sau #1043 (số 202 → 18 lượt của `getReconCenter` là đo sau #1037) | — | Đo `getReconCenter` sau #1043 — đích ≈ 10–12 lượt / 10 khoá |
+| OD-UX-05.4 | Tốc độ | `/reports/returns`: thân nguội (câu lý do hoàn ×3 → ×1 · `careRows` chỉ kiện có care) + hồi quy đường ấm (đệm theo tổ chức) | `cc2379e4` | P1 | DEPLOYED (đích ≥ 40 % CHƯA ĐẠT) | #1030 · #1036 | `65883e6be` · `6ca3af26b` | `tests/returns-body.test.ts` · `tests/memo-org-scope.test.ts` | ✓ `6ca3af26` | Smoke cùng công cụ: 12.556 → 8.347 ms (−34 % so lượt 1 nền; −23 % so trung bình nền 10,8 s); ấm 618 ms | — | 05.4b, rồi `with don` ×2 trong `getReturnRateByVariant` nếu probe thấy nó trên đường găng |
+| OD-UX-05.4b | Tốc độ | `/reports/returns`: KPI hiện trước — mỗi khối một `<Suspense>`, thẻ đồng bộ gọi `vtpWebhookHealth` một lần; probe thêm mốc «KPI hiện» + phép đo câu nhỏ chờ bể | `cc2379e4` | P1 | IN_REVIEW | (nhánh `claude/returns-suspense`) | — | build · K06 · K08 · K12 · K21 | — | — | — | Đích (Lead 25/10): «thời gian tới khi thấy KPI»; đầu phản hồi là chỉ số phụ (bị chặn ở layout — xem §5.4) |
 | OD-UX-06 | UI/UX | Kiểm mobile cho 5 màn hình dùng nhiều | — | P2 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-56` | — |
 | OD-P3-01 | Inventory | Phiếu kiểm kê (đếm thực tế vs sổ) ⇒ mở được `inventory_accuracy` | — | P1 | BACKLOG | — | — | — | — | — | Chủ shop chốt cách kiểm kê (§7.6) | — |
 | OD-P3-02 | Inventory | Kiểm kê xoay vòng (cycle count) theo nhóm mẫu mã | — | P2 | BACKLOG | — | — | — | — | — | Phụ thuộc OD-P3-01 | — |
@@ -138,6 +145,133 @@ Chi tiết từng hạng mục Phase 2–5 ở mục 7.
 |---|---|---|---|---|
 | OD-MISC-01 | `AGENTS.md` dùng số mục **70 hai lần**: «đơn chờ hàng là kết quả phân bổ» và «thưởng % lợi nhuận đi qua cổng lỗ lũy kế». | `AGENTS.md:573` và `AGENTS.md:672` | BACKLOG | Lead 23/10: KHÔNG sửa AGENTS lượt này. Đánh số lại phải giữ nguyên MỌI chỗ đang trích "AGENTS 70" (grep cả `lib/`, `docs/`, `tests/`). |
 | OD-MISC-02 | Khối drill «đơn của mẫu mã» trên `/reports/returns` (`?variant=`) in SĐT khách cho MỌI người có `reports:returns`, không gác quyền xem đơn. | `app/(dashboard)/reports/returns/page.tsx` (khối `variantOrders`) | IN_REVIEW | PR riêng `returns-drill-phone-gate`: SĐT chỉ hiện khi có `orders:read` (chuẩn bảng đơn), thiếu quyền in «— (cần quyền xem đơn)». THU HẸP, không mở quyền (luật 30). Theo bộ quyền MẶC ĐỊNH không vai trò nào mất; production phải đo vì vai trò có mảng ghi đè. |
+
+### 5.4 Bằng chứng đo của nhánh tốc độ (OD-UX-05)
+
+Số đo lấy từ log ops của Lead (`code-erp-11`); máy chủ 2 nhân, nên mọi số nguội phải đọc cùng tải lúc đo. Bảng §5.2 giữ
+trạng thái; mục này giữ căn cứ (chuyển từ nhật ký tạm §7.2.1 ngày 25/10/2026, sau khi #1006 vào `main`).
+
+**OD-UX-05 mục 1 · `/orders` + `/shipments`: dải số tổng tắt JIT — DONE.** #1008 `4a92d9206`, owner `code-erp-56`,
+deploy run 40011916149 (health `c7d87cb0`, 23/10 19:59Z). perf-probe nguội, trung vị:
+
+| Câu | Trước | Sau | Đích |
+|---|---|---|---|
+| `orderSummary` | 3.275 ms | 143 ms | < 500 ms |
+| `shipmentSummary` | 4.078 ms | 132 ms | < 500 ms |
+| smoke `/orders` | 8.930 / 8.990 ms | 1.028 / 2.050 ms | < 2 s |
+
+EXPLAIN xen kẽ JIT bật ↔ tắt: 10.907 ↔ 168,6 ms và 5.382 ↔ 59,6 ms. `/shipments` không hồi quy (902 ms ở lượt máy
+rảnh). Chốt bằng `tests/trang-cham-jit.test.ts`.
+
+**OD-UX-05 mục 2 · `/work` (owner `code-erp-56`) — DONE ở đường ẤM (Lead chốt 24/10).** Căn cứ: `getReconCenter` nguội 22,5 s, 857 câu, giữ 3,1–3,7 trên 5
+kết nối của bể; ba nguồn chạm hạn chậm ở cả 3/3 lượt nguội.
+
+| Việc | PR | Trạng thái |
+|---|---|---|
+| Hàng đợi báo «thiếu nguồn» thay vì «Không còn việc nào» khi một phần nguồn chưa có số | #1016 `bfc3e4a9f` | MERGED |
+| perf-probe liệt kê từng câu của ba nguồn chạm hạn | #1018 `e5a2cb026` | MERGED |
+| `PAYROLL_RECON` chỉ đọc đệm; job giữ ấm là đường tính duy nhất | #1021 `7c081caea` | MERGED |
+| Ba khoá riêng của `/work` giữ số CŨ khi người dùng ghi; `clearMemoAll` cho nút «Làm mới số liệu» | #1025 `4816be1b4` | MERGED |
+| perf-probe đo lại từng nguồn của `/work` khi đệm đã ấm | #1035 `4ee3c8f2e` | MERGED |
+| Đối soát lương / bảng lương / `/ads` / `/work` đọc khoá cấu hình theo phạm vi (thôi xin 202 lần kết nối cho 10 khoá) | #1037 `0e93a57fa` | MERGED |
+
+Bằng chứng DONE (perf-probe khối ấm, #1035, `perf2410/probe-work-am.log`): `/work` toàn trang ấm 70 ms · 603 việc · không
+nguồn nào chạm hạn hay lỗi · mọi nguồn ≤ 17 ms. Trước đó: smoke `/work` 1,8–4,9 s, 3–4/14 nguồn chạm hạn 2,5 s.
+
+Còn mở (ngoài phần DONE): chi phí NGUỘI sau mỗi lần xoá đệm, và tập nền dùng chung (kết quả theo vận đơn · danh mục mẫu
+mã · doanh thu đơn). Đo lại sau khi #1036 (đệm theo tổ chức) và #1037 đã lên production.
+
+**OD-UX-05 mục 3 · trang chủ:** khử trùng `getSettingJson` theo request — #1033 `4eeb7751f` MERGED. Đo: chỉ bớt được
+khoảng 1 lượt đọc (6 lượt cho 5 khoá) ⇒ đích −30 % KHÔNG đạt nhờ thay đổi này. Owner `code-erp-56`.
+
+**Hạ tầng đo và giao dịch (owner `cc2379e4`):**
+
+| Việc | PR | Ghi chú |
+|---|---|---|
+| Trong một giao dịch các câu chạy nối tiếp (bỏ `Promise.all` trên client của `chayKhongJit`) | #1013 `d143c7143` | MERGED |
+| Một giao dịch = một client: `theoClient` + lá chắn lúc chạy (`ERP_TX_GUARD=1` chỉ bật trong bộ kiểm thử) + lương / bảng tên tính trước giao dịch | #1020 `0002422cf` | MERGED. Lá chắn bắt thêm đường `dimensionKeys → marketerNames → getDb` mà máy quét mã nguồn bỏ sót. |
+| Ops `returns-page-probe`: đo vòng sự kiện bị chặn + đầu phản hồi thật (chỉ đọc) | #1015 `219e916ad` · #1019 `89d931e57` | MERGED |
+| Deploy làm ấm 8 trang nặng NGAY sau health, TRƯỚC smoke | #1024 `321f70901` | DEPLOYED. Làm ấm chạy 42,7 s trong lượt deploy `c6968e7e`. |
+| perf-probe liệt kê câu bên trong các hàm nặng của `/reports/returns` | #1026 `2aad88b48` | MERGED |
+
+**`/reports/returns`: số nền và hai phép đo đầu phản hồi.**
+
+Số nền: đo 23/10 17:05–17:35Z (`code-erp-56`), 5 lượt perf-probe nguội + 2 lượt smoke, tải máy 1,70 → 3,00 trên 2
+nhân, lấy trung vị:
+
+| Phép đo | Giá trị |
+|---|---|
+| `getReturnIntelligence` | p50 7.294 ms (max 9.284) |
+| `getReturnRateByVariant` | 3.776 ms |
+| `getReturnRateSummary` | 3.264 ms |
+| `getReturnReasonReport` | 1.780 ms |
+| smoke, tổng | 12.556 / 9.016 ms |
+| smoke, đầu phản hồi | 3.787 / 3.341 ms |
+| kích thước trang | 694 kB |
+
+`settings where key=$1` tốn 2.389 ms trong `getReturnIntelligence`: đó là chờ bể kết nối, không phải câu chậm.
+
+Đầu phản hồi, hai lượt đo:
+
+| Lượt | Lượt 1 sau khởi động | Module ấm, dữ liệu nguội (`?period=30d`) | Ấm cả hai |
+|---|---|---|---|
+| returns-probe-2 | đầu 5.559 ms | đầu 1.026 ms | đầu 285 ms |
+| returns-probe-4 (sau `c6968e7e` có làm ấm, tải 3,0–3,5) | đầu 4.390 · thân 12.882 ms | đầu 2.643 · thân 9.470 ms | đầu 228 · thân 446 ms |
+
+Đọc của Lead: TTL đệm dữ liệu (90–120 s) đã hết khi probe tới, mà đầu phản hồi vẫn 4,4 s ⇒ «chỉ do nạp module» chưa
+đủ giải thích; có thứ phụ thuộc DỮ LIỆU đang được `await` trước khi khung trang được gửi đi. Chỗ sửa là Suspense ở
+`page.tsx`, làm sau khi #1006 vào `main` (tệp của #1006). Làm ấm vẫn giữ, vì nó cứu lượt đầu sau deploy.
+
+**Hướng (b), chờ chủ shop:** healthcheck chờ làm ấm xong + Caddy chờ container `healthy` rồi mới mở lưu lượng, để lượt
+đầu sau deploy không rơi vào người dùng. Lead đưa lên khi có đủ số của hướng (a).
+
+**`/reports/returns`: thân nguội (`returns-body-dedupe`, owner `cc2379e4`) — DEPLOYED #1030 `65883e6be` (04:57Z 24/10).**
+Căn cứ trước khi sửa: probe-rb-1..3, ba lượt nguội đo lúc có deploy chạy song
+song. Thời gian tuyệt đối lệch 2–4 lần giữa các lượt nên KHÔNG dùng làm số trước/sau; cấu trúc câu thì giống hệt ở cả
+3 lượt.
+
+1. **`baseRows` chạy 3 lần → 1 lần.** Câu lý do hoàn chạy 3 lần cho kỳ này · kỳ trước · `problemByProduct` với ĐÚNG
+   một bộ tham số, vì câu SQL không lọc kỳ. perf-probe ghi «câu chạy lại nhiều nhất ×3, tốn 6.284–12.208 ms». Nay phần
+   SQL được đệm theo khoá không có kỳ, TTL 90 s.
+   - RAM: câu trả 3.544 dòng (đếm production 24/10), khoảng 836 B/dòng ⇒ khoảng 3 MB, lớn dần theo số đơn.
+   - Phía máy chủ câu này chỉ khoảng 0,2 s, nên phần còn lại của 2,0–2,2 s mỗi lượt chưa được giải thích (nghi chờ bể
+     / xếp hàng).
+2. **`careRows` chỉ tính kiện có đợt care.** EXPLAIN ANALYZE production, kỳ 90 ngày: cùng 1.202 dòng; nhánh nặng
+   khoảng 1,04 s → khoảng 0,52 s; cost 1,2M → 323k.
+
+Đích: thân giảm ≥ 40%, không đổi số nào (returns-parity / outcome-parity xanh).
+
+**Hồi quy đường ẤM sau deploy, gốc KHÔNG phải #1030 — sửa ở #1036 `6ca3af26b` (deploy 09:38Z 24/10).**
+- Triệu chứng (returns-page-probe ~05:50Z, `perf2410/returns-1.log`): mở lần hai — đáng ra trúng đệm — đầu 3.472 · thân
+  9.250 ms; buổi sáng cùng ngày 228 / 446 ms. Trong chính tiến trình probe, lượt ấm vẫn 2–4 ms.
+- Gốc: kho đệm là MỘT cho cả tiến trình, mà mọi lượt `audit()` (và các nơi gọi thẳng `clearMemo()`) xoá đệm của MỌI tổ
+  chức. CSDL nhà 05:40–06:00Z chỉ có 3 dòng nhật ký (db-query 40069757141), còn giờ trưa bot HSLC ghi liên tục vào
+  CSDL của HSLC. Lượt tính đang chạy gặp lượt xoá thì kết quả còn bị vứt. Đường ấm không chạm phần #1030 sửa, nên
+  Lead quyết KHÔNG revert #1030.
+- Sửa (#1036): `clearMemo(scope)` xoá theo tổ chức; `audit()` tự phân giải tổ chức; vết rào bot
+  `SALES_CHAT_DUPLICATE_ORDER_BLOCKED` thôi xoá đệm; xuất bản tổ chức (ghi CSDL nền tảng) xoá `"ALL"`; hợp đồng
+  `docs/platform/shared-contracts.md` §9 sửa theo.
+- Còn mở: 16 chỗ gọi thẳng `clearMemo()` khi chạy THEO PHIÊN (người của tổ chức khác thao tác trên trình duyệt) vẫn
+  xoá `"ALL"`, vì hàm đồng bộ không đọc được phiên. PR sau nếu số còn hụt.
+
+**Đo sau #1036 (returns-page-probe ngay sau deploy, `perf2410/returns-2.log`):**
+
+| Lượt | Trước hồi quy | Lúc hồi quy (trưa) | Sau #1036 |
+|---|---|---|---|
+| Lượt 1 (dữ liệu nguội) | — | đầu 6.285 · thân 20.087 ms | đầu 3.445 · thân 8.272 ms |
+| 30 ngày (dữ liệu nguội) | — | đầu 3.015 · thân 16.525 ms | đầu 2.060 · thân 7.149 ms |
+| Ấm | đầu 228 · thân 446 ms | đầu 3.472 · thân 9.250 ms | đầu 270 · thân 618 ms |
+| Tham số mặc định ghi rõ | — | đầu 513 · thân 15.269 ms | đầu 229 · thân 768 ms |
+
+Đọc: đường ấm đã về lại. Thân nguội lượt 1 còn 8,3 s, so với smoke nền 23/10 là 12,6 s (khoảng −34 %). Hai số này đo bằng
+hai công cụ khác nhau (smoke ↔ returns-page-probe) và ở hai mức tải khác nhau, nên đích ≥ 40 % CHƯA được xác nhận. Cần một
+lượt perf-probe cùng công cụ với số nền. Chưa đạt thì việc kế là câu `with don` của dự báo GTC chạy hai lần trong
+`getReturnRateByVariant` (bậc VARIANT + bậc PRODUCT, cùng tập đơn), ở `lib/queries/projected-delivery.ts`. Suspense theo khối
+(«KPI hiện trước») — xem OD-UX-05.4b ở §5.2.
+
+**Bài học đo (ghi để phiên sau khỏi lặp):** brief đầu tiên của mục trên đoán «~10⁵ dòng» từ TỔNG số dòng mọi câu của
+`getReturnIntelligence`, rồi chọn phương án theo con số đoán đó. Lead đếm thật bằng `db-query` ra 3.544 dòng. Trước khi
+chọn phương án theo kích thước dữ liệu, gửi Lead một câu `count(*)` của đúng câu đó.
 
 ## 6. Audit theo module
 
@@ -635,134 +769,6 @@ không ghi ai mở (chủ ý của #338).
 | 4 | OD-UX-04 | KPI bấm được xuống dữ liệu cấu thành, bắt đầu ở `/reports/returns` và trang chủ | Danh sách đích dùng LẠI đúng điều kiện của KPI (`ORDER_OUTCOME`, rổ `fulfillmentBucketSql`). | Danh sách phải ra ĐÚNG số đơn bằng con số trên thẻ. Có bài kiểm so hai đường. Không viết lại điều kiện. |
 | 5 | OD-UX-05 | Tối ưu 2–3 trang chậm nhất theo số nền | Kinh nghiệm cũ: trang chậm chưa chắc do SQL; JIT và VPS bão hoà là hai bẫy đo. | Đích đo được, ghi TRƯỚC khi sửa. Đo trước/sau trên production. Không đổi số liệu (so từng cột). |
 | 6 | OD-UX-06 | Kiểm mobile cho 5 màn hình dùng nhiều (chọn theo số nền) | Bảng phải vừa một màn hình; ô hai tầng. | Ghi tap target < 32px và cuộn ngang. Mỗi màn hình sửa là một PR riêng nếu lớn. |
-
-#### 7.2.1 Nhật ký nhánh tốc độ (ghi 24/10/2026, chờ đồng bộ vào bảng §5.2)
-
-Mục này chỉ được CHÈN thêm trong lúc #1006 (OD-UX-04) còn mở và đang sửa bảng §5.2. Khi #1006 vào `main`, người giữ tệp
-(`cc2379e4`) chuyển từng dòng dưới đây vào đúng hàng của §5.2 rồi gỡ mục này. Số đo lấy từ log ops của Lead
-(`code-erp-11`); máy chủ 2 nhân, nên mọi số nguội phải đọc cùng tải lúc đo.
-
-**OD-UX-05 mục 1 · `/orders` + `/shipments`: dải số tổng tắt JIT — DONE.** #1008 `4a92d9206`, owner `code-erp-56`,
-deploy run 40011916149 (health `c7d87cb0`, 23/10 19:59Z). perf-probe nguội, trung vị:
-
-| Câu | Trước | Sau | Đích |
-|---|---|---|---|
-| `orderSummary` | 3.275 ms | 143 ms | < 500 ms |
-| `shipmentSummary` | 4.078 ms | 132 ms | < 500 ms |
-| smoke `/orders` | 8.930 / 8.990 ms | 1.028 / 2.050 ms | < 2 s |
-
-EXPLAIN xen kẽ JIT bật ↔ tắt: 10.907 ↔ 168,6 ms và 5.382 ↔ 59,6 ms. `/shipments` không hồi quy (902 ms ở lượt máy
-rảnh). Chốt bằng `tests/trang-cham-jit.test.ts`.
-
-**OD-UX-05 mục 2 · `/work` (owner `code-erp-56`) — DONE ở đường ẤM (Lead chốt 24/10).** Căn cứ: `getReconCenter` nguội 22,5 s, 857 câu, giữ 3,1–3,7 trên 5
-kết nối của bể; ba nguồn chạm hạn chậm ở cả 3/3 lượt nguội.
-
-| Việc | PR | Trạng thái |
-|---|---|---|
-| Hàng đợi báo «thiếu nguồn» thay vì «Không còn việc nào» khi một phần nguồn chưa có số | #1016 `bfc3e4a9f` | MERGED |
-| perf-probe liệt kê từng câu của ba nguồn chạm hạn | #1018 `e5a2cb026` | MERGED |
-| `PAYROLL_RECON` chỉ đọc đệm; job giữ ấm là đường tính duy nhất | #1021 `7c081caea` | MERGED |
-| Ba khoá riêng của `/work` giữ số CŨ khi người dùng ghi; `clearMemoAll` cho nút «Làm mới số liệu» | #1025 `4816be1b4` | MERGED |
-| perf-probe đo lại từng nguồn của `/work` khi đệm đã ấm | #1035 `4ee3c8f2e` | MERGED |
-| Đối soát lương / bảng lương / `/ads` / `/work` đọc khoá cấu hình theo phạm vi (thôi xin 202 lần kết nối cho 10 khoá) | #1037 `0e93a57fa` | MERGED |
-
-Bằng chứng DONE (perf-probe khối ấm, #1035, `perf2410/probe-work-am.log`): `/work` toàn trang ấm 70 ms · 603 việc · không
-nguồn nào chạm hạn hay lỗi · mọi nguồn ≤ 17 ms. Trước đó: smoke `/work` 1,8–4,9 s, 3–4/14 nguồn chạm hạn 2,5 s.
-
-Còn mở (ngoài phần DONE): chi phí NGUỘI sau mỗi lần xoá đệm, và tập nền dùng chung (kết quả theo vận đơn · danh mục mẫu
-mã · doanh thu đơn). Đo lại sau khi #1036 (đệm theo tổ chức) và #1037 đã lên production.
-
-**OD-UX-05 mục 3 · trang chủ:** khử trùng `getSettingJson` theo request — #1033 `4eeb7751f` MERGED. Đo: chỉ bớt được
-khoảng 1 lượt đọc (6 lượt cho 5 khoá) ⇒ đích −30 % KHÔNG đạt nhờ thay đổi này. Owner `code-erp-56`.
-
-**Hạ tầng đo và giao dịch (owner `cc2379e4`):**
-
-| Việc | PR | Ghi chú |
-|---|---|---|
-| Trong một giao dịch các câu chạy nối tiếp (bỏ `Promise.all` trên client của `chayKhongJit`) | #1013 `d143c7143` | MERGED |
-| Một giao dịch = một client: `theoClient` + lá chắn lúc chạy (`ERP_TX_GUARD=1` chỉ bật trong bộ kiểm thử) + lương / bảng tên tính trước giao dịch | #1020 `0002422cf` | MERGED. Lá chắn bắt thêm đường `dimensionKeys → marketerNames → getDb` mà máy quét mã nguồn bỏ sót. |
-| Ops `returns-page-probe`: đo vòng sự kiện bị chặn + đầu phản hồi thật (chỉ đọc) | #1015 `219e916ad` · #1019 `89d931e57` | MERGED |
-| Deploy làm ấm 8 trang nặng NGAY sau health, TRƯỚC smoke | #1024 `321f70901` | DEPLOYED. Làm ấm chạy 42,7 s trong lượt deploy `c6968e7e`. |
-| perf-probe liệt kê câu bên trong các hàm nặng của `/reports/returns` | #1026 `2aad88b48` | MERGED |
-
-**`/reports/returns`: số nền và hai phép đo đầu phản hồi.**
-
-Số nền: đo 23/10 17:05–17:35Z (`code-erp-56`), 5 lượt perf-probe nguội + 2 lượt smoke, tải máy 1,70 → 3,00 trên 2
-nhân, lấy trung vị:
-
-| Phép đo | Giá trị |
-|---|---|
-| `getReturnIntelligence` | p50 7.294 ms (max 9.284) |
-| `getReturnRateByVariant` | 3.776 ms |
-| `getReturnRateSummary` | 3.264 ms |
-| `getReturnReasonReport` | 1.780 ms |
-| smoke, tổng | 12.556 / 9.016 ms |
-| smoke, đầu phản hồi | 3.787 / 3.341 ms |
-| kích thước trang | 694 kB |
-
-`settings where key=$1` tốn 2.389 ms trong `getReturnIntelligence`: đó là chờ bể kết nối, không phải câu chậm.
-
-Đầu phản hồi, hai lượt đo:
-
-| Lượt | Lượt 1 sau khởi động | Module ấm, dữ liệu nguội (`?period=30d`) | Ấm cả hai |
-|---|---|---|---|
-| returns-probe-2 | đầu 5.559 ms | đầu 1.026 ms | đầu 285 ms |
-| returns-probe-4 (sau `c6968e7e` có làm ấm, tải 3,0–3,5) | đầu 4.390 · thân 12.882 ms | đầu 2.643 · thân 9.470 ms | đầu 228 · thân 446 ms |
-
-Đọc của Lead: TTL đệm dữ liệu (90–120 s) đã hết khi probe tới, mà đầu phản hồi vẫn 4,4 s ⇒ «chỉ do nạp module» chưa
-đủ giải thích; có thứ phụ thuộc DỮ LIỆU đang được `await` trước khi khung trang được gửi đi. Chỗ sửa là Suspense ở
-`page.tsx`, làm sau khi #1006 vào `main` (tệp của #1006). Làm ấm vẫn giữ, vì nó cứu lượt đầu sau deploy.
-
-**Hướng (b), chờ chủ shop:** healthcheck chờ làm ấm xong + Caddy chờ container `healthy` rồi mới mở lưu lượng, để lượt
-đầu sau deploy không rơi vào người dùng. Lead đưa lên khi có đủ số của hướng (a).
-
-**`/reports/returns`: thân nguội (`returns-body-dedupe`, owner `cc2379e4`) — DEPLOYED #1030 `65883e6be` (04:57Z 24/10).**
-Căn cứ trước khi sửa: probe-rb-1..3, ba lượt nguội đo lúc có deploy chạy song
-song. Thời gian tuyệt đối lệch 2–4 lần giữa các lượt nên KHÔNG dùng làm số trước/sau; cấu trúc câu thì giống hệt ở cả
-3 lượt.
-
-1. **`baseRows` chạy 3 lần → 1 lần.** Câu lý do hoàn chạy 3 lần cho kỳ này · kỳ trước · `problemByProduct` với ĐÚNG
-   một bộ tham số, vì câu SQL không lọc kỳ. perf-probe ghi «câu chạy lại nhiều nhất ×3, tốn 6.284–12.208 ms». Nay phần
-   SQL được đệm theo khoá không có kỳ, TTL 90 s.
-   - RAM: câu trả 3.544 dòng (đếm production 24/10), khoảng 836 B/dòng ⇒ khoảng 3 MB, lớn dần theo số đơn.
-   - Phía máy chủ câu này chỉ khoảng 0,2 s, nên phần còn lại của 2,0–2,2 s mỗi lượt chưa được giải thích (nghi chờ bể
-     / xếp hàng).
-2. **`careRows` chỉ tính kiện có đợt care.** EXPLAIN ANALYZE production, kỳ 90 ngày: cùng 1.202 dòng; nhánh nặng
-   khoảng 1,04 s → khoảng 0,52 s; cost 1,2M → 323k.
-
-Đích: thân giảm ≥ 40%, không đổi số nào (returns-parity / outcome-parity xanh).
-
-**Hồi quy đường ẤM sau deploy, gốc KHÔNG phải #1030 — sửa ở #1036 `6ca3af26b` (deploy 09:38Z 24/10).**
-- Triệu chứng (returns-page-probe ~05:50Z, `perf2410/returns-1.log`): mở lần hai — đáng ra trúng đệm — đầu 3.472 · thân
-  9.250 ms; buổi sáng cùng ngày 228 / 446 ms. Trong chính tiến trình probe, lượt ấm vẫn 2–4 ms.
-- Gốc: kho đệm là MỘT cho cả tiến trình, mà mọi lượt `audit()` (và các nơi gọi thẳng `clearMemo()`) xoá đệm của MỌI tổ
-  chức. CSDL nhà 05:40–06:00Z chỉ có 3 dòng nhật ký (db-query 40069757141), còn giờ trưa bot HSLC ghi liên tục vào
-  CSDL của HSLC. Lượt tính đang chạy gặp lượt xoá thì kết quả còn bị vứt. Đường ấm không chạm phần #1030 sửa, nên
-  Lead quyết KHÔNG revert #1030.
-- Sửa (#1036): `clearMemo(scope)` xoá theo tổ chức; `audit()` tự phân giải tổ chức; vết rào bot
-  `SALES_CHAT_DUPLICATE_ORDER_BLOCKED` thôi xoá đệm; xuất bản tổ chức (ghi CSDL nền tảng) xoá `"ALL"`; hợp đồng
-  `docs/platform/shared-contracts.md` §9 sửa theo.
-- Còn mở: 16 chỗ gọi thẳng `clearMemo()` khi chạy THEO PHIÊN (người của tổ chức khác thao tác trên trình duyệt) vẫn
-  xoá `"ALL"`, vì hàm đồng bộ không đọc được phiên. PR sau nếu số còn hụt.
-
-**Đo sau #1036 (returns-page-probe ngay sau deploy, `perf2410/returns-2.log`):**
-
-| Lượt | Trước hồi quy | Lúc hồi quy (trưa) | Sau #1036 |
-|---|---|---|---|
-| Lượt 1 (dữ liệu nguội) | — | đầu 6.285 · thân 20.087 ms | đầu 3.445 · thân 8.272 ms |
-| 30 ngày (dữ liệu nguội) | — | đầu 3.015 · thân 16.525 ms | đầu 2.060 · thân 7.149 ms |
-| Ấm | đầu 228 · thân 446 ms | đầu 3.472 · thân 9.250 ms | đầu 270 · thân 618 ms |
-| Tham số mặc định ghi rõ | — | đầu 513 · thân 15.269 ms | đầu 229 · thân 768 ms |
-
-Đọc: đường ấm đã về lại. Thân nguội lượt 1 còn 8,3 s, so với smoke nền 23/10 là 12,6 s (khoảng −34 %). Hai số này đo bằng
-hai công cụ khác nhau (smoke ↔ returns-page-probe) và ở hai mức tải khác nhau, nên đích ≥ 40 % CHƯA được xác nhận. Cần một
-lượt perf-probe cùng công cụ với số nền. Chưa đạt thì việc kế là câu `with don` của dự báo GTC chạy hai lần trong
-`getReturnRateByVariant` (bậc VARIANT + bậc PRODUCT, cùng tập đơn), ở `lib/queries/projected-delivery.ts`. Suspense ở
-`page.tsx` (đầu phản hồi) làm sau khi #1006 vào `main`.
-
-**Bài học đo (ghi để phiên sau khỏi lặp):** brief đầu tiên của mục trên đoán «~10⁵ dòng» từ TỔNG số dòng mọi câu của
-`getReturnIntelligence`, rồi chọn phương án theo con số đoán đó. Lead đếm thật bằng `db-query` ra 3.544 dòng. Trước khi
-chọn phương án theo kích thước dữ liệu, gửi Lead một câu `count(*)` của đúng câu đó.
 
 ### 7.3 Phase 3: kho và mua hàng đúng chuẩn
 
