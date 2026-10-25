@@ -665,6 +665,8 @@ const PREP_IMPORT_ALLOWLIST: Record<string, readonly string[]> = {
  */
 const E2E_OPS_IMPORT_ALLOWLIST: Record<string, readonly string[]> = {
   "drizzle-orm": ["and", "eq", "sql"],
+  // Hàm THUẦN đọc cảnh báo trùng từ lỗi máy chủ — C15 bấm nút nhanh hai bước như người thật (25/10/2026); không ghi gì.
+  "@/lib/constants/order-duplicate": ["duplicateAckWarnings"],
   "@/db": ["getDb", "schema"],
   "@/lib/constants/public-chat-limits": ["PUBLIC_CHAT_LIMIT_MESSAGES"],
   "@/lib/constants/order-review": ["orderReviewLogOf", "orderReviewOf", "reviewSeenOf"],

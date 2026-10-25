@@ -8,6 +8,7 @@
  *     công nợ tách phải thu (đã giao) / đã chốt chưa giao, quá hạn theo ngày giao + số ngày được nợ, khách chưa khai số
  *     ngày ⇒ chưa biết; thu nợ gộp ghi đúng các phiếu thu theo từng đơn, không thu vượt nợ, không nhận COD.
  */
+import { duplicateAckWarnings } from "@/lib/constants/order-duplicate";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { eq } from "drizzle-orm";
@@ -149,7 +150,11 @@ export async function testPriceListsReceivables() {
       assert.ok(o2.ok, "đơn Mới không chấm hạn mức");
       assert.deepEqual(fieldsOf(await updateManualOrderCore(admin, o2.id, { customerId: ca.id, stage: "CONFIRMED", lines: line(3) })), ["customerId"], "sửa sang Đã xác nhận cũng bị chấm");
       assert.ok((await recordManualPaymentCore(admin, o1.id, { kind: "RECEIPT", method: "CASH", amount: 100_000, paidAt: new Date().toISOString() })).ok);
-      assert.ok((await updateManualOrderCore(admin, o2.id, { customerId: ca.id, stage: "CONFIRMED", lines: line(3) })).ok, "thu 100k ⇒ 170k + 270k = 440k ≤ 500k");
+      // o2 cùng khách + cùng món với o1 ⇒ có thể trùng ⇒ xác nhận tay đi HAI bước (từ 25/10/2026 — tests/confirm-duplicate-ack.test.ts);
+      // lượt chấm hạn mức ở dòng trên vẫn báo TRƯỚC cảnh báo trùng.
+      const up0 = await updateManualOrderCore(admin, o2.id, { customerId: ca.id, stage: "CONFIRMED", lines: line(3) });
+      const up = up0.ok ? up0 : await updateManualOrderCore(admin, o2.id, { customerId: ca.id, stage: "CONFIRMED", lines: line(3) }, { duplicateAck: duplicateAckWarnings(up0.errors).map((w) => w.key) });
+      assert.ok(up.ok, `thu 100k ⇒ 170k + 270k = 440k ≤ 500k: ${JSON.stringify(up)}`);
       assert.ok((await updateManualOrderCore(admin, o1.id, { customerId: ca.id, stage: "CONFIRMED", lines: line(3) })).ok, "sửa lại đơn đã thu một phần: phần đã thu của CHÍNH đơn không bị đếm hai lần");
 
       // ── Công nợ: giao o1 mười ngày trước, được nợ 7 ngày ⇒ quá 3 ngày.

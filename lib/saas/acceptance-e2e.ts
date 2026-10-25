@@ -50,6 +50,7 @@ import { AI_STOP_MESSAGE } from "@/lib/pricing/ai-entitlement";
 import { readAiCustomerCounts } from "@/lib/pricing/ai-customer";
 import { loadAiEntitlement } from "@/lib/pricing/ai-gate";
 import { usagePeriodOf } from "@/lib/pricing/meter";
+import { duplicateAckWarnings } from "@/lib/constants/order-duplicate";
 import { confirmOrderReviewCore, loadAutoConfirmComplete } from "@/lib/records/order-create";
 import { acceptanceRuntimeRefusal, acceptanceWorkspaceOwned, ACCEPTANCE_NOT_OWNED_REFUSAL } from "@/lib/saas/acceptance-guard";
 import { ownerSessionUser } from "@/lib/saas/acceptance-prep";
@@ -213,7 +214,12 @@ class OpsRun {
     if (!this.orderId) return { status: "SKIPPED", why: "C14 không dựng được đơn chờ người" };
     const before = await this.readOrder(this.orderId);
     const entries = orderReviewOf(before?.raw)?.entries ?? [];
-    const r = await confirmOrderReviewCore(this.owner, this.orderId, reviewSeenOf(entries));
+    const seen = reviewSeenOf(entries);
+    // Nút nhanh đi HAI bước khi đơn có thể trùng (25/10/2026 — components/orders/duplicate-ack.tsx): workspace thử giữ đơn của các lượt
+    // trước (cùng SĐT, cùng món) nên lượt 1 thường nhận cảnh báo trùng; lượt 2 gửi lại ĐÚNG các khoá đã thấy — như người bấm thật.
+    const first = await confirmOrderReviewCore(this.owner, this.orderId, seen);
+    const dupKeys = first.ok ? [] : duplicateAckWarnings(first.errors).map((w) => w.key);
+    const r = dupKeys.length ? await confirmOrderReviewCore(this.owner, this.orderId, { ...seen, duplicates: dupKeys }) : first;
     if (!r.ok) return { status: "FAIL", why: `lõi «Xác nhận đơn» từ chối (${r.code}): ${r.errors.map((e) => e.message).join(" · ").slice(0, 300)}` };
     const after = await this.readOrder(this.orderId);
     const last = orderReviewLogOf(after?.raw)[0] ?? null;
@@ -222,7 +228,7 @@ class OpsRun {
     if (orderReviewOf(after?.raw)) bad.push("cờ cần người kiểm vẫn mở");
     if (!last || last.action !== "CONFIRMED" || last.byUserId !== this.owner.id) bad.push(`lượt kiểm không mang khoá tài khoản người bấm (${last ? `${last.action} · ${last.byUserId ?? "máy"}` : "không có"})`);
     if (bad.length) return { status: "FAIL", why: `${bad.join(" · ")} · đơn ${this.orderId}` };
-    return { status: "PASS", why: `đơn ${this.orderId} «Mới» ⇒ CONFIRMED · cờ gỡ · lượt kiểm đứng tên tài khoản ${this.owner.id}` };
+    return { status: "PASS", why: `đơn ${this.orderId} «Mới» ⇒ CONFIRMED · cờ gỡ · lượt kiểm đứng tên tài khoản ${this.owner.id}${dupKeys.length ? ` · hai bước (cảnh báo có thể trùng: ${dupKeys.length})` : ""}` };
   }
 
   /** C17 — gửi đôi nút xác nhận + phát lại cùng ý định khách ⇒ đúng một đơn. */

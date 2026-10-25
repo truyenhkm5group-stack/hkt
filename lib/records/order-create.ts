@@ -93,6 +93,8 @@ import { normalizePhone as pancakePhone } from "@/lib/integrations/http";
 import { orderCancellationOf, withCancelOutcome, type CancelActor, type CancelRequester, type RescueResult } from "@/lib/constants/order-cancel";
 import { canFlagOrderForReview, MACHINE_ADDRESS_NOTE_PREFIX, ORDER_REVIEW_HOLD_CODES, orderReviewOf, reviewConflictMessage, reviewResolveReason, unseenReviewEntries, withAddressCandidates, withAddressSettled, withCustomerReconfirm, withReviewEntry, withReviewResolved, type OrderReviewEntry, type OrderReviewResolution, type ReviewSeen } from "@/lib/constants/order-review";
 import { CONVERSATION_ORDER_FIELD, ConversationOrderExistsError, otherConversationOrders, type ConversationOrderScope } from "@/lib/sales-chatbot/conversation-order-guard";
+import { DUPLICATE_ACK_FIELD, DUPLICATE_VERDICT_LABEL, type DuplicateAckWarning } from "@/lib/constants/order-duplicate";
+import { duplicateFlagsFor } from "@/lib/queries/order-duplicate";
 
 export type OrderGate = { allowed: true } | { allowed: false; code: "FORBIDDEN" | "NOT_SUPPORTED" | "MODULE_DISABLED"; reason: string };
 
@@ -723,10 +725,40 @@ async function itemsSnapshot(orderId: string) {
   return rows.map((r) => ({ variantId: r.variantId, quantity: r.quantity, unitPrice: r.unitPrice, discount: r.totalDiscount }));
 }
 
-export async function updateManualOrderCore(user: SessionUser, orderId: unknown, rawInput: unknown): Promise<ManualOrderResult> {
+/**
+ * ═══ XÁC NHẬN TAY ĐƠN CÓ THỂ TRÙNG — HAI BƯỚC (P0 HSLC 25/10/2026: #E0663E84 mang cờ «có thể cùng khách» mà vẫn bị xác nhận tay) ═══
+ * Tín hiệu trùng của MỘT đơn: cờ POSSIBLE_SAME_CUSTOMER đang mở + cặp `duplicateFlagsFor` (CHÍNH assessDuplicate, cùng cửa sổ, đơn
+ * kia còn sống). Người bấm chưa gửi đúng các khoá đã thấy ⇒ CONFLICT, mỗi tín hiệu một lỗi `duplicateAck:<khoá>`; đã thấy ⇒ đi tiếp
+ * và một dòng nhật ký ORDER_CONFIRM_DUPLICATE_ACK. Không chặn hẳn, không gỡ cờ thay người — người quyết, máy chỉ bắt người NHÌN.
+ */
+async function duplicateWarningsOf(row: { id: string; raw: unknown; insertedAt: Date; billPhone: string | null }): Promise<DuplicateAckWarning[]> {
+  const out: DuplicateAckWarning[] = [];
+  for (const e of orderReviewOf(row.raw)?.entries ?? []) if (e.code === "POSSIBLE_SAME_CUSTOMER") out.push({ key: `flag:${e.at}`, otherId: null, label: e.note });
+  const flags = (await duplicateFlagsFor([{ id: row.id, insertedAt: row.insertedAt, billPhone: row.billPhone }])).get(row.id) ?? [];
+  for (const f of flags) out.push({ key: `dup:${f.otherId}`, otherId: f.otherId, label: `${DUPLICATE_VERDICT_LABEL[f.verdict]} với đơn #${f.otherCode} (đơn kia đặt ${f.role === "SUSPECT" ? "TRƯỚC" : "SAU"} đơn này) — ${f.why}` });
+  return out;
+}
+
+async function duplicateAckGate(row: { id: string; raw: unknown; insertedAt: Date; billPhone: string | null }, ack: readonly string[] | undefined): Promise<{ failure: MetaFailure | null; acknowledged: DuplicateAckWarning[] }> {
+  const warnings = await duplicateWarningsOf(row);
+  const missing = warnings.filter((w) => !(ack ?? []).includes(w.key));
+  if (missing.length) return { failure: fail("CONFLICT", missing.map((w) => ({ field: `${DUPLICATE_ACK_FIELD}:${w.key}`, message: w.label }))), acknowledged: [] };
+  return { failure: null, acknowledged: warnings };
+}
+
+async function auditDuplicateAck(user: { userId: string | null; email: string }, orderId: string, acknowledged: readonly DuplicateAckWarning[], via: "QUICK_CONFIRM" | "EDIT_FORM"): Promise<void> {
+  if (!acknowledged.length) return;
+  await audit({ userId: user.userId, userEmail: user.email, action: "ORDER_CONFIRM_DUPLICATE_ACK", entity: "ORDER", entityId: orderId, after: { via, acknowledged: acknowledged.map((w) => w.key), others: acknowledged.map((w) => w.otherId).filter(Boolean) }, reason: "Người xác nhận đơn đã thấy cảnh báo có thể trùng đơn" });
+}
+
+const ackZ = z.array(z.string().trim().min(1).max(120)).max(20);
+
+export async function updateManualOrderCore(user: SessionUser, orderId: unknown, rawInput: unknown, opts: { duplicateAck?: unknown } = {}): Promise<ManualOrderResult> {
   const gate = await manualOrderGate(user);
   if (!gate.allowed) return fail(gate.code, gate.reason);
-  return updateOrder(userWriter(user), orderId, rawInput);
+  // Form sửa đơn đổi «Mới» / «Chờ hàng» ⇒ «Đã xác nhận»: cùng rào hai bước với nút nhanh (chạy trong updateOrder, SAU kiểm tra nghiệp vụ).
+  const ack = ackZ.safeParse(opts.duplicateAck ?? []);
+  return updateOrder(userWriter(user), orderId, rawInput, undefined, { duplicateAck: { keys: ack.success ? ack.data : [], via: "EDIT_FORM" } });
 }
 
 export async function updateOrderAsAgent(agent: OrderAgent, orderId: unknown, rawInput: unknown, opts: AgentOrderOptions): Promise<ManualOrderResult> {
@@ -744,7 +776,7 @@ function storedRecipient(row: typeof schema.orders.$inferSelect): Recipient {
  * `resolveReview` = lượt này là NGƯỜI kiểm và xác nhận đơn (nút nhanh «Xác nhận đơn») ⇒ gỡ cờ CẦN NGƯỜI KIỂM trong cùng giao dịch —
  * CHỈ khi dòng đã khoá không có lý do nào người bấm chưa thấy (`seen`); có ⇒ CONFLICT, không ghi gì.
  */
-async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agentOpts?: AgentOrderOptions, opts: { resolveReview?: { seen: ReviewSeen } } = {}): Promise<ManualOrderResult> {
+async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agentOpts?: AgentOrderOptions, opts: { resolveReview?: { seen: ReviewSeen }; duplicateAck?: { keys: readonly string[]; via: "QUICK_CONFIRM" | "EDIT_FORM" } } = {}): Promise<ManualOrderResult> {
   const existing = await loadEditable(orderId);
   if (!existing.ok) return existing;
   const prep = await prepare(rawInput);
@@ -761,6 +793,14 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
   if (agentOpts && !agentOpts.allowShortStock && p !== prep.p && (await agentStockFailure(await getDb(), p, [], false))) p = prep.p;
   const credit = await creditGate(p, row.id);
   if (credit) return credit;
+  // Xác nhận TAY «Mới» / «Chờ hàng» ⇒ «Đã xác nhận» mà đơn có thể trùng ⇒ hai bước. Đứng SAU mọi kiểm tra nghiệp vụ (giá · hạn mức nợ…):
+  // lỗi nghiệp vụ báo trước, cảnh báo trùng là câu «chắc chưa?» cuối cùng trước khi ghi.
+  let dupAcknowledged: DuplicateAckWarning[] = [];
+  if (opts.duplicateAck && p.stage === "CONFIRMED" && (row.stage === "NEW" || row.stage === "WAITING")) {
+    const g = await duplicateAckGate(row, opts.duplicateAck.keys);
+    if (g.failure) return g.failure;
+    dupAcknowledged = g.acknowledged;
+  }
   const beforeItems = await itemsSnapshot(row.id);
   const now = new Date();
   const db = await getDb();
@@ -846,6 +886,7 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
   if (flagged.changed) await auditReview(w, row.id, "FLAG", { entries: orderReviewOf(flagged.raw)?.entries ?? [] });
   if (flagged.settled.length) await auditReview(w, row.id, "RESOLVE", { entries: flagged.settled, action: "ADDRESS_SETTLED" });
   if (resolved.changed) await auditReview(w, row.id, "RESOLVE", { entries: resolved.resolved, action: "CONFIRMED" });
+  if (opts.duplicateAck) await auditDuplicateAck(w, row.id, dupAcknowledged, opts.duplicateAck.via);
   if (event) await kickWorkflows();
   announceOrder(row.id, "updated");
   return { ok: true, id: row.id };
@@ -1045,7 +1086,8 @@ export async function noteCustomerReconfirmAsAgent(agent: OrderAgent, orderId: s
   return changed;
 }
 
-const seenZ = z.object({ count: z.number().int().min(0).max(1000), latestAt: z.string().max(40).nullable() }).strict();
+/** `duplicates` = khoá cảnh báo trùng người bấm đã thấy (xác nhận tay hai bước — `duplicateAckGate`). */
+const seenZ = z.object({ count: z.number().int().min(0).max(1000), latestAt: z.string().max(40).nullable(), duplicates: ackZ.optional() }).strict();
 
 /**
  * NÚT NHANH «XÁC NHẬN ĐƠN» (hộp thư · danh sách đơn · trang đơn). Cùng cổng với sửa đơn (`manualOrderGate` — `orders:write`):
@@ -1065,7 +1107,7 @@ export async function confirmOrderReviewCore(user: SessionUser, orderId: unknown
   if (!seen.success) return fail("INVALID", "Thiếu dấu vết lý do cần kiểm đã xem — tải lại trang rồi bấm lại.");
   const db = await getDb();
   const o = schema.orders;
-  const [row] = await db.select({ id: o.id, stage: o.stage, raw: o.raw, phone: o.shipPhone, address: o.shipAddress, province: o.shipProvince, ward: o.shipCommune, lines: o.itemsCount }).from(o).where(eq(o.id, orderId)).limit(1);
+  const [row] = await db.select({ id: o.id, stage: o.stage, raw: o.raw, phone: o.shipPhone, address: o.shipAddress, province: o.shipProvince, ward: o.shipCommune, lines: o.itemsCount, insertedAt: o.insertedAt, billPhone: o.billPhone }).from(o).where(eq(o.id, orderId)).limit(1);
   if (!row) return fail("NOT_FOUND", "Không có đơn này.");
   if (!isManualOrderId(row.id) || !manualOrderRaw(row.raw)) return fail("NOT_SUPPORTED", "Đơn đồng bộ từ nguồn khác — xác nhận ở nguồn.");
   if (row.stage === "CANCELLED" || row.stage === "DELETED") return fail("CONFLICT", "Đơn đã huỷ — không xác nhận được.");
@@ -1075,11 +1117,19 @@ export async function confirmOrderReviewCore(user: SessionUser, orderId: unknown
   if (kind === "RESOLVE" && !orderReviewOf(row.raw)) return { ok: true, id: row.id };
   const gaps = manualOrderGaps({ phone: row.phone, address: row.address, province: row.province, ward: row.ward }, row.lines);
   if (gaps.length) return fail("CONFLICT", `Đơn còn thiếu ${gaps.join(", ")} — sửa đơn trước rồi xác nhận.`);
+  // Lý do cần kiểm MỚI chưa thấy (bot vừa gắn «khách huỷ»…) báo TRƯỚC cảnh báo trùng — gấp hơn, và là câu người bấm cần đọc trước.
+  // Lượt ghi bên dưới vẫn kiểm lại trong giao dịch đã khoá; đây chỉ là thứ tự câu trả lời.
+  const unseenEarly = unseenReviewEntries(orderReviewOf(row.raw), { count: seen.data.count, latestAt: seen.data.latestAt });
+  if (unseenEarly.length) return fail("CONFLICT", reviewConflictMessage(unseenEarly));
   if (kind === "CONFIRM") {
     const values = await manualOrderFormValues(row.id);
     if (!values) return fail("CONFLICT", "Đơn vừa đổi trạng thái — tải lại trang rồi thử lại.");
-    return updateOrder(w, row.id, { ...values, stage: "CONFIRMED" }, undefined, { resolveReview: { seen: seen.data } });
+    // Có thể trùng ⇒ hai bước — rào trong updateOrder, SAU hạn mức nợ; nút nhanh gửi lại khoá đã thấy ở lượt hai.
+    return updateOrder(w, row.id, { ...values, stage: "CONFIRMED" }, undefined, { resolveReview: { seen: { count: seen.data.count, latestAt: seen.data.latestAt } }, duplicateAck: { keys: seen.data.duplicates ?? [], via: "QUICK_CONFIRM" } });
   }
+  // GỠ CỜ trên đơn đã xác nhận (gỡ «có thể cùng khách» CHÍNH LÀ quyết định không trùng) ⇒ cùng rào hai bước.
+  const dupGate = await duplicateAckGate(row, seen.data.duplicates);
+  if (dupGate.failure) return dupGate.failure;
   const now = new Date();
   let out: { changed: boolean; resolved: OrderReviewEntry[] } = { changed: false, resolved: [] };
   try {
@@ -1097,6 +1147,7 @@ export async function confirmOrderReviewCore(user: SessionUser, orderId: unknown
   }
   if (out.changed) {
     await auditReview(w, row.id, "RESOLVE", { entries: out.resolved, action: "CONFIRMED" });
+    await auditDuplicateAck(w, row.id, dupGate.acknowledged, "QUICK_CONFIRM");
     announceOrder(row.id, "updated");
   }
   return { ok: true, id: row.id };

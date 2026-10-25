@@ -9,6 +9,7 @@
  *     tài khoản), chạy lại / chạy song song không đẻ vận đơn thứ hai, đơn cũ không bị kéo sang hãng; hãng từ chối ⇒ ghi lỗi,
  *     chờ 30 phút, bỏ cuộc sau 3 lần, sửa đơn ⇒ thử lại ngay; gán người giao bằng khoá tài khoản; «Đã giao» đi qua phiếu giao.
  */
+import { duplicateAckWarnings } from "@/lib/constants/order-duplicate";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { and, eq } from "drizzle-orm";
@@ -278,7 +279,12 @@ async function testFlow() {
       assert.ok(bulk.ok && bulk.rows[0]?.ok === false && bulk.rows[0].message === ADDRESS_REVIEW_BLOCK, JSON.stringify(bulk));
       assert.equal((await db.select().from(schema.shipments).where(eq(schema.shipments.orderId, flaggedId))).length, 0);
       const [fr] = await db.select({ raw: schema.orders.raw }).from(schema.orders).where(eq(schema.orders.id, flaggedId));
-      assert.ok((await confirmOrderReviewCore(admin, flaggedId, reviewSeenOf(orderReviewOf(fr!.raw)!.entries))).ok, "người gỡ cờ");
+      // Từ 25/10/2026 xác nhận / gỡ cờ tay đơn có thể trùng là HAI bước (tests/confirm-duplicate-ack.test.ts) — bộ ca dùng chung SĐT + món.
+      const seenF = reviewSeenOf(orderReviewOf(fr!.raw)!.entries);
+      const firstF = await confirmOrderReviewCore(admin, flaggedId, seenF);
+      const keysF = firstF.ok ? [] : duplicateAckWarnings(firstF.errors).map((w) => w.key);
+      const unflag = keysF.length ? await confirmOrderReviewCore(admin, flaggedId, { ...seenF, duplicates: keysF }) : firstF;
+      assert.ok(unflag.ok, `người gỡ cờ: ${JSON.stringify(unflag)}`);
       const go = await runShippingRoutes({}, { fetch: ghn.fetch });
       assert.ok(!go.skipped && go.created === 1, JSON.stringify(go));
       assert.equal((await db.select().from(schema.shipments).where(eq(schema.shipments.orderId, flaggedId))).length, 1, "gỡ cờ ⇒ đi hãng đúng một vận đơn");

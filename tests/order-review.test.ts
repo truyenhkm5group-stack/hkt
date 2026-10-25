@@ -14,6 +14,7 @@
  * Phần thuần: `quotedInText` (≥ 2 chữ / số sau gấp dấu, ranh giới từ), các hàm `order-review.ts`; hợp đồng mã nguồn: nút nhanh
  * chỉ gọi hai server action có sẵn, lõi xác nhận không tự ghi stage.
  */
+import { duplicateAckWarnings } from "@/lib/constants/order-duplicate";
 import assert from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";
 import { and, eq } from "drizzle-orm";
@@ -150,6 +151,17 @@ async function testOrg() {
         return r;
       };
       const auditCount = async (action: string, id: string) => (await db.select({ id: schema.auditLogs.id }).from(schema.auditLogs).where(and(eq(schema.auditLogs.action, action), eq(schema.auditLogs.entityId, id)))).length;
+      /*
+        Từ 25/10/2026 xác nhận tay đơn CÓ THỂ TRÙNG là hai bước (tests/confirm-duplicate-ack.test.ts). Bộ ca này dùng chung SĐT khách +
+        món cho nhiều đơn độc lập, nên các lượt bấm KỲ VỌNG THÀNH CÔNG đi đúng hai bước: lượt 1 nhận cảnh báo trùng, lượt 2 gửi lại ĐÚNG
+        các khoá đã thấy. Lượt kỳ vọng bị từ chối vì lý do khác (quyền, thiếu dấu vết, chỗ thiếu, lý do mới) vẫn gọi thẳng — lõi báo các
+        lý do đó TRƯỚC cảnh báo trùng.
+      */
+      const confirmTwoStep = async (id: string, seen: ReturnType<typeof reviewSeenOf>) => {
+        const first = await confirmOrderReviewCore(admin, id, seen);
+        const keys = first.ok ? [] : duplicateAckWarnings(first.errors).map((w) => w.key);
+        return keys.length ? confirmOrderReviewCore(admin, id, { ...seen, duplicates: keys }) : first;
+      };
       const confirmedEvents = async (id: string) => (await db.select({ id: schema.domainEvents.id }).from(schema.domainEvents).where(and(eq(schema.domainEvents.name, "order.confirmed"), eq(schema.domainEvents.subjectId, id)))).length;
 
       // ① SĐT chuẩn hoá ở đường ghi: khách gõ «0919.000.808» ⇒ đơn lưu «0919000808».
@@ -214,7 +226,7 @@ async function testOrg() {
       assert.equal(codeOf(await confirmOrderReviewCore(admin, draft.id, undefined)), "INVALID", "thiếu dấu vết đã xem ⇒ không đoán");
       assert.equal((await row(draft.id)).stage, "NEW");
       // Đơn «Mới» mang cờ ⇒ «Đã xác nhận» qua đường sửa đơn (sự kiện order.confirmed) + cờ gỡ trong cùng lượt ghi.
-      const qc = await confirmOrderReviewCore(admin, draft.id, seenDraft);
+      const qc = await confirmTwoStep(draft.id, seenDraft);
       assert.ok(qc.ok, JSON.stringify(qc));
       const d2 = await row(draft.id);
       assert.equal(d2.stage, "CONFIRMED");
@@ -245,7 +257,8 @@ async function testOrg() {
       assert.ok(!stale.ok && stale.code === "CONFLICT" && stale.errors.some((e) => e.message.includes("Khách vừa báo huỷ")), JSON.stringify(stale));
       assert.deepEqual(reviewCodes(orderReviewOf((await row(amb.id)).raw)), ["ADDRESS_UNRESOLVED", "CUSTOMER_CANCELLED"], "từ chối ⇒ không gỡ cờ nào");
       // Tải lại (thấy đủ hai lý do) ⇒ gỡ được; đơn đã xác nhận ⇒ chỉ gỡ cờ, không order.confirmed lần hai.
-      assert.ok((await confirmOrderReviewCore(admin, amb.id, reviewSeenOf(orderReviewOf((await row(amb.id)).raw)?.entries ?? []))).ok);
+      const reAmb = await confirmTwoStep(amb.id, reviewSeenOf(orderReviewOf((await row(amb.id)).raw)?.entries ?? []));
+      assert.ok(reAmb.ok, JSON.stringify(reAmb));
       const a3 = await row(amb.id);
       assert.deepEqual([a3.stage, orderReviewOf(a3.raw)], ["CONFIRMED", null]);
       assert.equal(await confirmedEvents(amb.id), 1, "gỡ cờ không phát order.confirmed lần hai");

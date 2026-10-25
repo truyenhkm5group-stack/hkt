@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { createManualOrderAction, updateManualOrderAction } from "@/lib/actions/manual-orders";
+import { DuplicateAckBox } from "@/components/orders/duplicate-ack";
+import { duplicateAckWarnings, type DuplicateAckWarning } from "@/lib/constants/order-duplicate";
 import { manualOrderStageLabel, manualOrderTotals, MANUAL_ORDER_STAGE_HINT, MANUAL_ORDER_STAGES, type ManualOrderCustomerOption, type ManualOrderStage, type ManualOrderVariantOption } from "@/lib/constants/manual-orders";
 import { formatVND } from "@/lib/format";
 import { PRICE_SOURCE_LABEL, quoteUnitPrice, type PriceListBook, type PriceQuote } from "@/lib/constants/price-lists";
@@ -63,6 +65,8 @@ export function ManualOrderForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // Lưu đơn sang «Đã xác nhận» mà máy chủ thấy có thể trùng ⇒ hộp cảnh báo, lượt hai gửi lại khoá đã thấy (hai bước).
+  const [dupWarnings, setDupWarnings] = useState<DuplicateAckWarning[]>([]);
   const variantById = useMemo(() => new Map(variants.map((v) => [v.id, v])), [variants]);
 
   const payload = () => ({
@@ -97,13 +101,17 @@ export function ManualOrderForm({
   const removeLine = (i: number) => setValues((prev) => ({ ...prev, lines: prev.lines.filter((_, j) => j !== i) }));
   const err = (key: string) => (errors[key] ? <p className="text-[11px] font-medium text-destructive">{errors[key]}</p> : null);
 
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
+  const save = async (ack?: readonly string[]) => {
     setFormError(null);
     setPending(true);
     try {
-      const res = mode === "create" ? await createManualOrderAction(payload()) : await updateManualOrderAction(orderId ?? "", payload());
+      const res = mode === "create" ? await createManualOrderAction(payload()) : await updateManualOrderAction(orderId ?? "", payload(), ack ? [...ack] : undefined);
       if (!("ok" in res)) {
+        const dup = duplicateAckWarnings(res.errors);
+        if (dup.length) {
+          setDupWarnings(dup);
+          return;
+        }
         const map: Record<string, string> = {};
         for (const x of res.errors) if (!(x.field in map)) map[x.field] = x.message;
         setErrors(map);
@@ -111,11 +119,16 @@ export function ManualOrderForm({
         return;
       }
       setErrors({});
+      setDupWarnings([]);
       toast.success(res.message);
       router.push(res.redirectTo);
     } finally {
       setPending(false);
     }
+  };
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    await save();
   };
 
   return (
@@ -284,6 +297,7 @@ export function ManualOrderForm({
 
       {formError ? <p className="text-sm font-medium text-destructive">{formError}</p> : null}
       <div className="flex justify-end">
+        <DuplicateAckBox warnings={dupWarnings} pending={pending} confirmLabel="Vẫn lưu và xác nhận" onCancel={() => setDupWarnings([])} onConfirm={() => void save(dupWarnings.map((w) => w.key))} />
         <Button type="submit" disabled={pending}>
           {pending ? <Loader2 className="size-4 animate-spin" /> : null}
           {mode === "create" ? "Tạo đơn hàng" : "Lưu đơn hàng"}

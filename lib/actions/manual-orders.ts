@@ -29,9 +29,10 @@ export async function createManualOrderAction(input: unknown): Promise<Success |
   return { ok: true, id: r.id, redirectTo: `/orders/${encodeURIComponent(r.id)}`, message: "Đã tạo đơn hàng" };
 }
 
-export async function updateManualOrderAction(orderId: string, input: unknown): Promise<Success | Failure> {
+/** `duplicateAck` = khoá cảnh báo trùng người lưu đã thấy (đổi sang «Đã xác nhận» — hai bước, lõi `duplicateAckGate`). */
+export async function updateManualOrderAction(orderId: string, input: unknown, duplicateAck?: unknown): Promise<Success | Failure> {
   const user = await requireUser();
-  const r = await updateManualOrderCore(user, orderId, input);
+  const r = await updateManualOrderCore(user, orderId, input, { duplicateAck });
   if (!r.ok) return failure(r);
   revalidatePath("/orders");
   revalidatePath(`/orders/${encodeURIComponent(r.id)}`);
