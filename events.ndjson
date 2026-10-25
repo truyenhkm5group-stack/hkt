@@ -1,4 +1,3 @@
-{"at":"2026-10-22T14:45:57.202Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#976 @ a44933f43fc6 · review lead: CHỈ-SCRIPT, chỉ đọc. conv-money-trace: nhãn lượt kiểm đúng bốn action (ADDRESS_SETTLED = máy ghép phường, CUSTOMER_RECONFIRMED, người chỉ CONFIRMED/CANCELLED); --order thêm dòng tóm tắt máy ánh xạ (trạng thái · bậc · nguồn chữ · số ứng viên · khớp/KHÁC ô xã · Google có gọi · số lần) — chỉ mã/số, tên xã/ứng viên chỉ ở phần mã hoá."}
 {"at":"2026-10-22T14:51:01.148Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"qty-leak-detector","detail":"#975 @ ebd1412ce912 → 63303e94f876 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-22T15:10:39.883Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DEPLOY_DISPATCHED","detail":"63303e94f876 · run 39802211235 https://github.com/truyenhkm5group-stack/hkt/actions/runs/39802211235"}
 {"at":"2026-10-22T15:24:46.230Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"qty-leak-detector","detail":"PASS 63303e94f87614ea7415837a92811cd2b90c5dcd 2026-10-22T15:24:21.235Z"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-25T15:17:32.895Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"returns-kpi-first","detail":"#1073 @ 4d92188f971c → 1ba7550320ea (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-25T15:39:19.555Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_FAIL","mission":"src-6-capture-hardening","detail":"FAIL 1ba7550320ea1f47401cb784a6175153e41f3da6 2026-10-25T15:38:16.280Z"}
 {"at":"2026-10-25T15:55:53.935Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"src-6-capture-hardening","detail":"PASS 1ba7550320ea1f47401cb784a6175153e41f3da6 2026-10-25T15:54:30.603Z"}
+{"at":"2026-10-25T15:56:52.744Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"returns-kpi-first","detail":"PASS 1ba7550320ea1f47401cb784a6175153e41f3da6 2026-10-25T15:56:03.459Z"}

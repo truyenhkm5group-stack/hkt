@@ -3,7 +3,7 @@
   "mission_id": "returns-kpi-first",
   "title": "/reports/returns: KPI khởi chạy trước (sau cờ, mặc định tắt) — câu đếm ‖ dự báo, 7 nhánh nặng chờ KPI hoặc trần 800 ms",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-kpifirst",
@@ -24,11 +24,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T14:33:18.935Z",
-  "updated_at": "2026-10-25T15:17:32.791Z",
+  "updated_at": "2026-10-25T15:56:52.677Z",
   "last_heartbeat": "2026-10-25T14:34:39.025Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1073 → 1ba7550320ea1f47401cb784a6175153e41f3da6"
+    "merged": "#1073 → 1ba7550320ea1f47401cb784a6175153e41f3da6",
+    "verify": "PASS 1ba7550320ea1f47401cb784a6175153e41f3da6 2026-10-25T15:56:03.459Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40208054374"
   },
   "handoff": {
     "branch": "claude/returns-kpi-first",
