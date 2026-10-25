@@ -1,0 +1,8 @@
+{
+  "pr": 1074,
+  "sha": "0768538b8d26940903eea69f626d95c64fabc4ad",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T16:36:44.779Z",
+  "note": "review lead: COLOR_PROP/SIZE_PROP nhận thêm tên thuộc tính 1688 đã dịch (màu / kích cỡ / kích thước); fixture 951023546393 bậc 1/30/100, MOQ 2 từ beginNum, onHandPrice bị bỏ, TRANSLATED không đọc cân nặng; README ghi «L ⇒ tôi»."
+}
