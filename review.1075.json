@@ -1,0 +1,8 @@
+{
+  "pr": 1075,
+  "sha": "08ae1130be510d4ce8bc2f5881420f6448b77a1f",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T17:05:52.260Z",
+  "note": "review lead: startReturnsPage(p, opts?) — kpiFirst chỉ cho probe, thiếu ⇒ đọc cờ (trang/job không truyền, có bài quét mã); probe 1d xen kẽ tắt/bật × 3, bản chưa hỗ trợ ⇒ CHƯA ĐO ĐƯỢC. Cờ production giữ tắt."
+}
