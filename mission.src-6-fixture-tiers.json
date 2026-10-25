@@ -3,7 +3,7 @@
   "mission_id": "src-6-fixture-tiers",
   "title": "SRC-6: fixture 951023546393 (bậc giá thật, dữ liệu đã dịch) + nhận tên thuộc tính đã dịch",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -25,9 +25,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T16:31:44.923Z",
-  "updated_at": "2026-10-25T16:36:31.711Z",
+  "updated_at": "2026-10-25T16:58:49.450Z",
   "last_heartbeat": "2026-10-25T16:32:39.484Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1074 → c3226461bf23c4753d158dda0d571cb128118e5a"
+  },
   "handoff": {
     "branch": "claude/src-6-fixture-tiers",
     "sha": "0768538b8d26940903eea69f626d95c64fabc4ad",
