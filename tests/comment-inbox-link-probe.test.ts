@@ -5,7 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { commonPrefix, emptyLegacyTally, idShape, keyVerdict, legacyVerdict, messageText, parseLinkArgs, LEGACY_DEFAULT_DAYS, LEGACY_MAX_DAYS, LINK_MAX_CONVS } from "../scripts/comment-inbox-link-probe";
+import { commonPrefix, emptyDupTally, emptyLegacyTally, idShape, keyVerdict, legacyVerdict, messageText, parseLinkArgs, tallyDupThread, LEGACY_DEFAULT_DAYS, LEGACY_MAX_DAYS, LINK_MAX_CONVS } from "../scripts/comment-inbox-link-probe";
 
 export function testCommentInboxLinkProbe() {
   // Bốn phán quyết: không dòng dấu ⇒ không biết Pancake trả gì; có dấu chưa có tiếng vọng ⇒ chưa kết luận; còn lại so luồng.
@@ -47,6 +47,16 @@ export function testCommentInboxLinkProbe() {
   assert.equal(legacyVerdict("p_1", null), "INBOX_NO_CONVERSATION");
   assert.equal(legacyVerdict(null, null), "ECHO_NOT_FOUND", "không có dòng mang đúng mã tin ⇒ không đoán");
   assert.deepEqual(emptyLegacyTally().byVerdict, { TWO_CONVERSATIONS: 0, INBOX_NO_CONVERSATION: 0, ECHO_NOT_FOUND: 0 });
+  // Chạy thử luồng có > 1 hội thoại (gốc cặp #B1135EC0 / #E0663E84): tham số + bộ đếm.
+  const dp = parseLinkArgs(["--all", "--dup-threads"]);
+  assert.ok(!("error" in dp) && dp.dup && dp.all && !dp.legacy && dp.days === LEGACY_DEFAULT_DAYS, JSON.stringify(dp));
+  assert.ok("error" in parseLinkArgs(["--all", "--dup-threads", "--legacy-keys"]), "hai lượt riêng");
+  const t2 = tallyDupThread(emptyDupTally(), [
+    { id: "a", status: "WAITING", owner: false, carried: false, live: 1 },
+    { id: "b", status: "OPEN", owner: true, carried: false, live: 1 },
+  ]);
+  assert.deepEqual(t2, { threads: 1, rows: 2, noOwner: 0, nonOwnerWaiting: 1, nonOwnerLive: 1, ownerLive: 1, bothLive: 1 }, "ca #B1135EC0 / #E0663E84: hai bên cùng có đơn sống");
+  assert.equal(tallyDupThread(emptyDupTally(), [{ id: "a", status: "OPEN", owner: false, carried: false, live: 0 }, { id: "b", status: "OPEN", owner: false, carried: false, live: 0 }]).noOwner, 1);
 
   const src = readFileSync("scripts/comment-inbox-link-probe.ts", "utf8");
   const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
