@@ -45,6 +45,7 @@ import { testShipmentStateApi } from "./shipment-state-api.test";
 import { testHomeBotCommentInbox } from "./home-bot-comment-inbox.test";
 import { testHomeBotHealth } from "./home-bot-health.test";
 import { testShipmentStateProbe } from "./shipment-state-probe.test";
+import { testAppLogEvtCount } from "./app-log-evt-count.test";
 import { testPayrollCodeLedger } from "./payroll-code-ledger.test";
 import { testPayrollReconciliationPure } from "./payroll-reconciliation.test";
 import { testPayrollReconCenter } from "./payroll-recon-center.test";
@@ -2635,6 +2636,8 @@ async function main() {
     // Sức khoẻ bot nhà vào chuỗi báo vận hành (24/10/2026 — bot nhà im 6 giờ vì Gemini 403).
     await testHomeBotHealth();
     testShipmentStateProbe();
+    // ops app-log-evt-count: đếm dòng sự kiện JSON trong log app (hàng rào chặn câu bot không để lại dòng CSDL) — chỉ tên + số.
+    testAppLogEvtCount();
     testOpsScriptSize();
     testPerfProbePages();
     await testDataTruth(db);
