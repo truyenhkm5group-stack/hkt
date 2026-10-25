@@ -34,6 +34,7 @@ import {
   type RescueCandidate,
   type ResponseOwnerState,
 } from "@/lib/sales-chatbot/response-ownership";
+import { ownsThreadSql } from "@/lib/sales-chatbot/thread-owner";
 
 /** Ghi chú tin khách KHÔNG phải câu cần trả lời (nhãn dán / ghi âm) và chữ giữ chỗ ảnh phía page — bản sao chữ của fanpage.ts. */
 export const LEDGER_MEDIA_ONLY_NOTE = "MEDIA_ONLY";
@@ -416,7 +417,7 @@ async function threadsInWindow(since: Date, until: Date, now: Date): Promise<Own
     const [conv] = await db
       .select({ id: c.id, status: c.status, handoffReason: c.handoffReason, state: c.state, updatedAt: c.updatedAt, humanCooldownUntil: c.humanCooldownUntil })
       .from(c)
-      .where(and(eq(c.channel, "FANPAGE"), eq(c.pageId, th.pageId), eq(c.threadId, th.threadId)))
+      .where(and(eq(c.channel, "FANPAGE"), eq(c.pageId, th.pageId), eq(c.threadId, th.threadId), ownsThreadSql('"sales_chat_conversations"')))
       .limit(1);
     const owner: ResponseOwnerState = conv ? ownerOfConversation(conv, ledger, now).state : "AI_ACTIVE";
     const st = (conv?.state ?? {}) as { declined?: unknown; draft?: { total?: unknown } };

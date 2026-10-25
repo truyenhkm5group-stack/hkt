@@ -15,6 +15,7 @@ import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { DEAD_AI_DOWN_NOTE, INBOUND_RETRY_WINDOW_MINUTES } from "@/lib/sales-chatbot/inbound-retry";
 import { rowsOf } from "@/lib/sql-rows";
+import { ownsThreadSql } from "@/lib/sales-chatbot/thread-owner";
 
 export type MissedClass = "HAS_ORDER" | "STAFF_HANDLED" | "AI_SAFE_RESUME" | "HUMAN_REVIEW";
 export const MISSED_CLASS_LABEL: Record<MissedClass, string> = {
@@ -55,7 +56,7 @@ export async function findMissedConversations(from: Date, to: Date, now: Date = 
         exists (select 1 from sales_chat_inbound d where d.page_id = k.page_id and d.thread_id = k.thread_id and d.status = 'DEAD' and d.note = ${DEAD_AI_DOWN_NOTE}) as dead_ai,
         exists (select 1 from orders o where c.id is not null and o.sales_conversation_id = c.id and o.inserted_at >= ${from} and o.stage is distinct from 'DELETED') as order_after
       from khach k
-      left join sales_chat_conversations c on c.page_id = k.page_id and c.thread_id = k.thread_id
+      left join sales_chat_conversations c on c.page_id = k.page_id and c.thread_id = k.thread_id and ${ownsThreadSql("c")}
       order by k.last_at desc
       limit ${limit}
     `),

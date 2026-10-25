@@ -73,6 +73,7 @@ import { findReturningCustomer, isRepeatBuyer, returningCustomerPrompt } from "@
 import { stripPrices } from "@/lib/sales-chatbot/playbook-shared";
 import { SALES_STAGE_LABEL } from "@/lib/sales-chatbot/stages";
 import type { ChatState } from "@/lib/sales-chatbot/tools";
+import { ownsThreadSql } from "@/lib/sales-chatbot/thread-owner";
 
 export { followupSendPermanent } from "@/lib/sales-chatbot/followup-shared";
 
@@ -189,7 +190,8 @@ export async function runSalesFollowups(deps: FanpageDeps = {}): Promise<Followu
   const due = await db
     .select(compatTableColumns(c))
     .from(c)
-    .where(and(eq(c.channel, "FANPAGE"), eq(c.status, "WAITING"), lte(c.nextFollowupAt, now)))
+    // Chỉ CHỦ luồng nhận tin theo dõi (thread-owner.ts) — hội thoại bình luận bị đè luồng hộp thư (dữ liệu trước 24/10/2026) không nhắc.
+    .where(and(eq(c.channel, "FANPAGE"), eq(c.status, "WAITING"), lte(c.nextFollowupAt, now), ownsThreadSql('"sales_chat_conversations"')))
     .orderBy(asc(c.nextFollowupAt))
     .limit(BATCH);
   out.due = due.length;

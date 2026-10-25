@@ -28,6 +28,7 @@ import { PANCAKE_POLL_SETTING_KEY } from "@/lib/sales-chatbot/pancake-poll";
 import { notifySalesHealth } from "@/lib/sales-chatbot/alerts";
 import { DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX } from "@/lib/sales-chatbot/inbound-retry";
 import { rowsOf } from "@/lib/sql-rows";
+import { ownsThreadSql } from "@/lib/sales-chatbot/thread-owner";
 
 export const SALES_HEALTH_STATE_KEY = "ai.salesHealth.state";
 
@@ -248,7 +249,7 @@ export async function salesHealthDrilldown(now: Date = new Date(), limit = 30): 
     await db.execute(sql`
       select i.status, i.created_at, i.page_id, i.thread_id, i.customer_name, left(i.text, 160) as text, left(i.note, 200) as note, c.id as conversation_id, c.handoff_reason
       from sales_chat_inbound i
-      left join sales_chat_conversations c on c.page_id = i.page_id and c.thread_id = i.thread_id
+      left join sales_chat_conversations c on c.page_id = i.page_id and c.thread_id = i.thread_id and ${ownsThreadSql("c")}
       where ${sql.raw(`coalesce(i.note, '') not in ('BOT_SENT', 'PAGE_REPLY') and i.message_id not like 'bot-out:%' and i.message_id not like 'staff-out:%' and i.imported_at is null`)}
         and i.created_at >= ${new Date(now.getTime() - 86_400_000)}
         and (i.status in ('PENDING', 'DEAD') or (i.status = 'DONE' and i.note ~* ${SEND_ERROR_NOTE_RE}) or (c.handoff_reason = ${AI_DOWN_HANDOFF_REASON} and i.status = 'DONE'))

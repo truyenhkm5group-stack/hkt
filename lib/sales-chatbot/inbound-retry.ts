@@ -19,6 +19,7 @@ import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { rowsOf } from "@/lib/sql-rows";
 import { HANDOFF_QUEUE_CLEAR } from "@/lib/sales-chatbot/handoff-routing-shared";
+import { ownsThreadSql } from "@/lib/sales-chatbot/thread-owner";
 
 /** Số lượt xử lý tối đa của MỘT tin khách (lượt đầu + thử lại). */
 export const INBOUND_MAX_ATTEMPTS = 3;
@@ -146,7 +147,7 @@ export async function requeueAiDownDeadLetters(aiDownReason: string, providerRec
                  where o.page_id = i.page_id and o.thread_id = i.thread_id and o.note in ('BOT_SENT', 'PAGE_REPLY') and o.created_at >= max(i.created_at)
                ) as answered
         from sales_chat_inbound i
-        left join sales_chat_conversations c on c.page_id = i.page_id and c.thread_id = i.thread_id
+        left join sales_chat_conversations c on c.page_id = i.page_id and c.thread_id = i.thread_id and ${ownsThreadSql("c")}
         where i.status = 'DEAD' and i.note = ${DEAD_AI_DOWN_NOTE} and i.imported_at is null
           and i.created_at >= ${new Date(now.getTime() - INBOUND_RETRY_WINDOW_MINUTES * 60_000)}
         group by i.page_id, i.thread_id, c.id, c.status, c.handoff_reason
