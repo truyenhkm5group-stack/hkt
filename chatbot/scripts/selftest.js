@@ -2472,9 +2472,10 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   const { offCatalogPage } = await import("../src/orders.js");
   const ten = "Jax Shop - Chuyên hàng US UK chính hãng giá tốt";
   assert.equal(offCatalogPage([ten]), true, "Jax khong dung danh muc dam");
+  assert.equal(offCatalogPage(["Jax Shop – Chuyên hàng US UK"]), true, "ten khac dau gach van khop");
   const ob = bot.orderBot;
   ob._save = () => {};
-  bot.pageNames.set("PJAX", ten);
+  bot.pageNames.set("PJAX", "Jax Shop – Chuyên hàng US-UK chính hãng");
   settings.update("PJAX", { extraPrompt: "" });
   ob.seedDefaultProducts();
   const st = settings.get("PJAX");

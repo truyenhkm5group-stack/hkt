@@ -39,6 +39,7 @@ export const PAGE_PROFILE_SEED = [
   {
     key: "jax-2026-10-25",
     page: "jax shop - chuyen hang us uk chinh hang gia tot",
+    prefix: "jax shop", // ten Pancake co the khac dau gach / phan duoi — khop theo dau ten
     set: {
       ownPrompt: true,
       customerTitle: "anh",
@@ -615,7 +616,7 @@ export class OrderBot {
       const cacTen = [ten, this.bot.pancakeNames?.get(pid)].map(khongDau);
       for (const pr of PAGE_PROFILE_SEED) {
         const k = `${pid}:profile:${pr.key}`;
-        if (daAp[k] || !cacTen.includes(pr.page)) continue;
+        if (daAp[k] || !(cacTen.includes(pr.page) || (pr.prefix && cacTen.some((t) => t.startsWith(pr.prefix))))) continue;
         daAp[k] = Date.now();
         const cur = settings.get(pid);
         const them = { ...pr.set };
