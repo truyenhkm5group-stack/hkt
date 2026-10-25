@@ -1,0 +1,8 @@
+{
+  "pr": 1070,
+  "sha": "f751e38218bde7e17142487bfd681bd907e66f9c",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T12:46:35.814Z",
+  "note": "review lead: trần GCRA 30 lượt/token SAU khi token khớp (token sai không tốn lượt) ⇒ 429 + Retry-After; route đọc thân dạng luồng, dừng khi vượt 1,5 MB kể cả thiếu/sai content-length; README ghi rủi ro nonce đã chấp nhận. Không đổi kỳ vọng cũ."
+}
