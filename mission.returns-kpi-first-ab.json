@@ -3,7 +3,7 @@
   "mission_id": "returns-kpi-first-ab",
   "title": "returns-page-probe 1d: KPI-trước tắt ↔ bật xen kẽ × 3 cặp (tham số kpiFirst chỉ cho probe)",
   "business_goal": "",
-  "status": "RUNNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-kpiab",
@@ -22,7 +22,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-25T17:01:42.336Z",
-  "updated_at": "2026-10-25T17:01:42.336Z",
-  "last_heartbeat": "2026-10-25T17:01:42.336Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-25T17:02:30.618Z",
+  "last_heartbeat": "2026-10-25T17:02:30.618Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/returns-kpi-first-ab",
+    "sha": "08ae1130be510d4ce8bc2f5881420f6448b77a1f",
+    "at": "2026-10-25T17:02:30.618Z",
+    "actor": "DESKTOP-56TH98Y:wt-kpiab",
+    "title": "returns-page-probe 1d: KPI-trước tắt ↔ bật xen kẽ × 3 cặp (tham số kpiFirst chỉ cho probe)",
+    "summary": "",
+    "tests": [
+      "tsc + eslint sạch · K08 xanh (returns-kpi-first: thiếu tham số / object rỗng ⇒ đọc cờ · tham số thắng cờ cả hai chiều · trang + job gọi không tham số; bài bật/tắt ⇒ cùng dữ liệu vẫn xanh) · K21 xanh (returns-page-probe)"
+    ]
+  }
 }
