@@ -1,3 +1,4 @@
+import { ordersForReferences } from "@/lib/integrations/viettelpost/order-reference";
 import { createHash } from "node:crypto";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
@@ -200,8 +201,12 @@ export type OrderListMatch = VtpOrderListRow & {
    *          (lib/integrations/viettelpost/reship.ts — cùng luật với webhook, P0 22/10/2026).
    * new    = mã CHƯA có, không gắn được đơn nào ⇒ đường ghi TẠO dòng mồ côi từ chính chứng từ ĐVVC (trước đây bị
    *          bỏ qua — kiện mà webhook rơi thì tệp cũng không cứu được). Mang `reship` HOLD thì kèm lý do.
+   * orderRef = mã CHƯA có, "Mã đơn hàng" là MÃ ĐƠN ERP (orders.id · custom_id · số đơn POS «6277» — order-reference.ts, cùng hàm
+   *          với webhook, vtp-direct-sync (4) 25/10/2026) ⇒ đường ghi TẠO lần gửi mới cho đơn đó. SĐT tệp khác SĐT đơn ⇒ dừng cho người.
    */
-  matchKind: "direct" | "leg" | "phone" | "reship" | "new" | null;
+  matchKind: "direct" | "leg" | "phone" | "reship" | "orderRef" | "new" | null;
+  /** Đơn ERP mà "Mã đơn hàng" trỏ tới (chỉ khi `matchKind = "orderRef"`). */
+  orderRef?: { orderId: string };
   /** Phán quyết của luật gửi lại (chỉ khi mã chưa có trong ERP và có "Mã đơn hàng"). */
   reship?: ReshipVerdict;
   /** Mã vận đơn gốc khi đây là vận đơn chiều về */
@@ -214,7 +219,7 @@ export type OrderListMatch = VtpOrderListRow & {
  * và màn hình xem trước — hai bước không được lệch nhau vì hai luật (AGENTS 49). HÀM THUẦN.
  */
 export function orderListRowCreatable(m: Pick<OrderListMatch, "matchKind" | "mapped" | "statusAt" | "statusDate" | "cod" | "fee">): boolean {
-  if (m.matchKind !== "reship" && m.matchKind !== "new") return false;
+  if (m.matchKind !== "reship" && m.matchKind !== "orderRef" && m.matchKind !== "new") return false;
   if (m.mapped.stage === "UNKNOWN") return false;
   const at = m.statusAt ? new Date(m.statusAt) : m.statusDate ? vnStartOfDay(m.statusDate) : null;
   if (!at || !Number.isFinite(at.getTime())) return false;
@@ -358,6 +363,11 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
     db,
     rows.filter((r) => !legBaseCode(r.trackingCode) && !byCode.has(up(r.trackingCode)) && r.orderCode).map((r) => r.orderCode),
   );
+  // Vận đơn tạo thẳng trên VTP mà "Mã đơn hàng" là MÃ ĐƠN ERP (order-reference.ts — cùng hàm với webhook).
+  const orderRefs = await ordersForReferences(
+    db,
+    rows.filter((r) => !legBaseCode(r.trackingCode) && !byCode.has(up(r.trackingCode)) && r.orderCode).map((r) => r.orderCode),
+  );
   const byPhone = new Map<string, typeof codeless>();
   for (const c of codeless) {
     const list = byPhone.get(c.phone) ?? [];
@@ -383,7 +393,19 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
       ? reshipParentOf({ orderNumber: r.trackingCode, orderReference: r.orderCode, receiverPhone: r.receiverPhone }, reshipPool.get(up(r.orderCode)) ?? [])
       : undefined;
     const reshipFound = reship && reship.kind !== "NONE" ? reship : undefined;
-    if (!matchIssue && !direct && !leg && !isLeg && !reshipFound) {
+    // Mã đơn ERP — sau reship (mã vận đơn cũ là bằng chứng của CHÍNH kiện), trước SĐT (mã là bằng chứng mạnh hơn SĐT).
+    let orderRef: { orderId: string } | undefined;
+    if (!matchIssue && !direct && !isLeg && !reshipFound && r.orderCode) {
+      const hit = orderRefs.byRef.get(up(r.orderCode));
+      if (orderRefs.ambiguous.has(up(r.orderCode))) matchIssue = `Mã đơn hàng ${r.orderCode} khớp nhiều đơn ERP; cần đối chiếu`;
+      else if (hit) {
+        const a = phoneKey(r.receiverPhone);
+        const b = phoneKey(hit.phone ?? "");
+        if (a && b && a !== b) matchIssue = `Mã đơn hàng ${r.orderCode} trỏ tới một đơn ERP nhưng SĐT trên tệp khác SĐT của đơn; cần đối chiếu`;
+        else orderRef = { orderId: hit.orderId };
+      }
+    }
+    if (!matchIssue && !direct && !leg && !isLeg && !reshipFound && !orderRef) {
       const key = phoneKey(r.receiverPhone);
       const all = key ? byPhone.get(key) ?? [] : [];
       // Nhiều đơn cùng SĐT thì lấy đúng đơn có COD khai báo trùng khít; vẫn nhập nhằng thì không đoán.
@@ -412,8 +434,9 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
       // HOÀN với "Chờ xử lý" = chưa lấy hàng (xem `mapVtpStatusText`). Trước bản này nó được đọc
       // và lưu vào `snapshot` nhưng không ảnh hưởng một quyết định nào.
       mapped: resolveVtpStatus({ code: r.statusCode ?? null, text: r.statusText, returnFlag: r.returnFlag ?? false }),
-      matchKind: f ? (direct ? "direct" : leg ? "leg" : "phone") : matchIssue || isLeg ? null : reshipFound?.kind === "ATTEMPT" ? "reship" : "new",
+      matchKind: f ? (direct ? "direct" : leg ? "leg" : "phone") : matchIssue || isLeg ? null : reshipFound?.kind === "ATTEMPT" ? "reship" : orderRef ? "orderRef" : "new",
       ...(reshipFound ? { reship: reshipFound } : {}),
+      ...(orderRef ? { orderRef } : {}),
       legOf: leg ? (leg.vtp ?? base) : null,
       matchIssue,
     };
@@ -530,7 +553,8 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
     */
     if (!m.shipmentId && orderListRowCreatable(m)) {
       const v = m.reship;
-      const attempt = v?.kind === "ATTEMPT" ? { orderId: v.orderId, attemptNo: await nextAttemptNo(db, v.orderId), direction: "OUTBOUND" as const } : {};
+      const dichDon = v?.kind === "ATTEMPT" ? v.orderId : m.orderRef?.orderId ?? null;
+      const attempt = dichDon ? { orderId: dichDon, attemptNo: await nextAttemptNo(db, dichDon), direction: "OUTBOUND" as const } : {};
       const [row] = await db
         .insert(schema.shipments)
         .values({
@@ -544,7 +568,7 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
           receiverName: m.receiverName ?? "",
           receiverPhone: m.receiverPhone ?? "",
           receiverAddress: m.receiverAddress ?? "",
-          ...(v ? { raw: reshipTrace(v, "VTP_IMPORT", now) } : {}),
+          ...(v ? { raw: reshipTrace(v, "VTP_IMPORT", now) } : m.orderRef ? { raw: { orderRef: { orderId: m.orderRef.orderId, ref: m.orderCode, by: "VTP_IMPORT", at: now.toISOString() } } } : {}),
         })
         .onConflictDoNothing({ target: schema.shipments.vtpOrderNumber })
         .returning({ id: schema.shipments.id });
@@ -553,7 +577,7 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
         m.shipmentId = id;
         createdHere.add(id);
         if (row) {
-          if (m.matchKind === "reship") reshipped++;
+          if (m.matchKind === "reship" || m.matchKind === "orderRef") reshipped++;
           else orphansCreated++;
         }
       }

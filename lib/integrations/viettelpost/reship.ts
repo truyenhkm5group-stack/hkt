@@ -190,3 +190,52 @@ export async function relinkOrphanShipment(
   });
   return out;
 }
+
+export type LinkOrphanResult = { ok: true; orderId: string; attemptNo: number } | { ok: false; why: "NOT_FOUND" | "ALREADY_LINKED" | "RETURN_LEG" | "PHONE_MISMATCH" | "ORDER_NOT_FOUND" };
+
+/**
+ * NGƯỜI GẮN TAY một vận đơn mồ côi vào một đơn (vtp-direct-sync (4), 25/10/2026 — nút «Gắn đơn» trên /shipments). Cùng luật với
+ * `relinkOrphanShipment`: khoá dòng, chỉ ghi khi còn `order_id IS NULL`, chiều hoàn không bao giờ gắn, đánh số lần gửi kế, dựng lại
+ * trạng thái + kết quả đơn, một dòng `audit_logs` mang khoá NGƯỜI bấm. Khác ở chỗ đơn do người chọn (không cần vận đơn gốc) nên chặn
+ * thêm một vế: SĐT người nhận của vận đơn và SĐT của đơn đều có mà KHÁC nhau ⇒ không gắn (webhook không mang SĐT, nên thiếu một bên
+ * thì người bấm là bằng chứng). Không bao giờ ghép theo tên.
+ */
+export async function linkOrphanToOrder(
+  db: Db,
+  p: { shipmentId: string; orderId: string; actor: { id: string | null; email: string }; reason: string; now?: Date },
+): Promise<LinkOrphanResult> {
+  const now = p.now ?? new Date();
+  const out = await db.transaction(async (tx): Promise<LinkOrphanResult> => {
+    const s = schema.shipments;
+    const o = schema.orders;
+    const [row] = await tx.select({ id: s.id, orderId: s.orderId, code: s.vtpOrderNumber, phone: s.receiverPhone }).from(s).where(sql`${s.id} = ${p.shipmentId}`).limit(1).for("update");
+    if (!row) return { ok: false, why: "NOT_FOUND" };
+    if (row.orderId !== null) return { ok: false, why: "ALREADY_LINKED" };
+    if (legBaseCode(row.code ?? "")) return { ok: false, why: "RETURN_LEG" };
+    const [don] = await tx.select({ id: o.id, ship: o.shipPhone, bill: o.billPhone }).from(o).where(sql`${o.id} = ${p.orderId}`).limit(1);
+    if (!don) return { ok: false, why: "ORDER_NOT_FOUND" };
+    const mine = phoneTail(row.phone);
+    const theirs = phoneTail(don.ship) || phoneTail(don.bill);
+    if (mine && theirs && mine !== theirs) return { ok: false, why: "PHONE_MISMATCH" };
+    const attemptNo = await nextAttemptNo(tx, don.id);
+    await tx
+      .update(s)
+      .set({ orderId: don.id, attemptNo, direction: "OUTBOUND", raw: sql`coalesce(${s.raw}, '{}'::jsonb) || ${JSON.stringify({ manualLink: { orderId: don.id, by: p.actor.email, at: now.toISOString() } })}::jsonb`, updatedAt: now })
+      .where(sql`${s.id} = ${row.id} and ${s.orderId} is null`);
+    return { ok: true, orderId: don.id, attemptNo };
+  });
+  if (!out.ok) return out;
+  await materializeShipmentState(db, p.shipmentId);
+  await rematerializeOutcomes([out.orderId]);
+  await audit({
+    userId: p.actor.id,
+    userEmail: p.actor.email,
+    action: "SHIPMENT_MANUAL_LINK",
+    entity: "SHIPMENT",
+    entityId: p.shipmentId,
+    before: { orderId: null },
+    after: { orderId: out.orderId, attemptNo: out.attemptNo },
+    reason: p.reason,
+  });
+  return out;
+}
