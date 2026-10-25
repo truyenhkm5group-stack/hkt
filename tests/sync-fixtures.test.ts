@@ -83,6 +83,7 @@ import { testOrderValueFilter } from "./order-value-filter.test";
 import { testCanonicalTruth } from "./canonical-truth.test";
 import { testVtpIngestion } from "./vtp-ingestion.test";
 import { testVtpSourceOfTruth } from "./vtp-source-of-truth.test";
+import { testVtpPickupStalled } from "./vtp-pickup-stalled.test";
 import { testWebhookGapSkew } from "./webhook-gap-skew.test";
 import { testVtpReshipRelink } from "./vtp-reship-relink.test";
 import { testVtpOrderRef } from "./vtp-order-ref.test";
@@ -2669,6 +2670,8 @@ async function main() {
     await testVtpState(db);
     await testVtpIngestion(db);
     await testVtpSourceOfTruth(db);
+    // vtp-direct-sync (3) 25/10/2026: chờ lấy quá hạn DWELL_SLA ⇒ hàng đợi đối chiếu (đồng hồ tuổi chặng, không phải im lặng).
+    await testVtpPickupStalled();
     // 25/10/2026: lệch đồng hồ tệp ↔ webhook ≤ 120 giây không phải rơi gói — đo lúc ghi + đọc lại sổ cũ, không sửa dòng.
     await testWebhookGapSkew(db);
     // P0 22/10/2026: vận đơn tạo lại trên web VTP ⇒ lần gửi kế của đơn gốc (webhook + nhập tệp, một luật). Tự dọn dữ liệu gieo.
