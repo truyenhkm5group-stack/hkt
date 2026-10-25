@@ -1,0 +1,8 @@
+{
+  "pr": 1060,
+  "sha": "15be35b90c2d6dded36e0a50ac0e7700f550ef48",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T05:37:20.395Z",
+  "note": "review lead (P0 Ngọc bước 3): hộp thư tra hội thoại bình luận cùng khách VERIFIED (identity-link) ≤7 ngày, chép hồ sơ nhận hàng nguồn COMMENT khi hộp thư chưa có, nêu đơn đang mở trong lời nhắc (không hỏi gộp/tách — khớp pha 3); chặn máy chủ commentContactHeld bỏ câu xin SĐT/địa chỉ khi đã có từ bình luận và khách vẫn cùng đơn; đổi người nhận/nơi giao vẫn hỏi. Không đổi kỳ vọng cũ."
+}
