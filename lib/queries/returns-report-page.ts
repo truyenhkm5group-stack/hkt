@@ -26,6 +26,7 @@ import { listProductCodes } from "@/lib/queries/product-code";
 import { POST_OFFICE_QUERY_MAX, REASON_FILTER_KEYS, REASON_OUTCOME_FILTERS } from "@/lib/constants/return-reason-filters";
 import type { OutcomeGroup } from "@/lib/constants/truth";
 import { reasonFiltersActive, type ReasonFilterSelection } from "@/lib/returns/reason-filters";
+import { collectAsOf } from "@/lib/cache";
 
 /**
  * 2b — bộ lọc của khối lý do hoàn đọc từ URL. Giá trị là đầu vào của người ngoài: trạng thái chỉ nhận nhóm trong danh sách đóng; các ô
@@ -136,8 +137,12 @@ export function returnsPageParams(raw: SearchParams) {
 
 export type ReturnsPageParams = ReturnType<typeof returnsPageParams>;
 
-/** Mọi truy vấn của trang — một lượt song song. Xem chú thích trong thân về vì sao song song không phải chỗ sửa. */
-export async function loadReturnsPage(p: ReturnsPageParams) {
+/**
+ * Mọi truy vấn của trang — một lượt song song — nhưng trả về TỪNG LỜI HỨA, chưa chờ. Trang dùng nó để vẽ từng khối ngay khi
+ * dữ liệu của khối đó xong (Suspense, 25/10/2026): KPI chỉ cần `summary`, không phải đứng chờ tầng quyết định ~7 s nguội.
+ * Cùng lời gọi, cùng tham số, cùng khoá đệm với `loadReturnsPage` — hàm đó chỉ là «chờ hết các lời hứa này».
+ */
+export function startReturnsPage(p: ReturnsPageParams) {
   const { params, minShipped, variantKey, giaTriDon, basis, codes, marketerIds, trendGrain, previous, reasonFilter, reasonFilterBase, reasonFiltered, kpiBucket, kpiPage } = p;
 
   /*
@@ -157,7 +162,6 @@ export async function loadReturnsPage(p: ReturnsPageParams) {
     `chayKhongJit` — chúng đi `Client.query`, bộ đếm "CSDL" chỉ bọc `Pool.query`. Từng đọc cột ấy
     thành "Node một luồng đang bận"; EXPLAIN cho thấy đó là SQL.)
 
-    Mọi lời hứa nằm trong CÙNG một `Promise.all`: không lời hứa nào bị bỏ lơ nếu một nhánh khác lỗi trước.
   */
   // Không bật bộ lọc 2b ⇒ MỘT báo cáo (cùng khoá job giữ ấm); bật ⇒ thêm đúng một báo cáo đã lọc cho E / E2.
   const reasonBaseP = getReturnReasonReport(reasonFilterBase);
@@ -171,20 +175,59 @@ export async function loadReturnsPage(p: ReturnsPageParams) {
     const truoc = previous ? await getReturnReasonReport({ ...reasonFilter, period: { ...params.period, from: previous.from, to: previous.to } }) : null;
     return buildCauseBoard(bc, truoc && truoc.taxonomy === "EVIDENCE" ? truoc : null);
   });
-  const [{ rows, total, pageCount, all, productRows, projectionError: loiBang }, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia, causeBoard, kpiOrders] = await Promise.all([
-    getReturnRateByVariant({ period: params.period, basis, value: giaTriDon, q: params.q, minShipped, sort: params.sort, dir: params.dir, page: params.page, pageSize: params.pageSize }),
-    getReturnRateSummary(params.period, params.q, basis, giaTriDon),
-    variantKey ? listOrdersForVariant(variantKey, params.period) : Promise.resolve([]),
-    getReturnRateBySource(params.period, params.q, giaTriDon),
-    reasonP,
-    listProductCodes(),
-    listAttributedMarketers(),
-    logisticsPerformance(params.period, giaTriDon),
-    reasonBaseP.then((baoCaoLyDo) => getReturnIntelligence({ period: params.period, previous, basis, codes, marketerIds, trendGrain, reasonReport: baoCaoLyDo, value: giaTriDon })),
-    getReturnRateByTier(params.period, params.q, basis),
-    causeP,
+  return {
+    variant: getReturnRateByVariant({ period: params.period, basis, value: giaTriDon, q: params.q, minShipped, sort: params.sort, dir: params.dir, page: params.page, pageSize: params.pageSize }),
+    summary: getReturnRateSummary(params.period, params.q, basis, giaTriDon),
+    variantOrders: variantKey ? listOrdersForVariant(variantKey, params.period) : Promise.resolve([]),
+    theoNguon: getReturnRateBySource(params.period, params.q, giaTriDon),
+    reasonReport: reasonP,
+    danhMucMa: listProductCodes(),
+    danhSachMarketer: listAttributedMarketers(),
+    logistics: logisticsPerformance(params.period, giaTriDon),
+    intel: reasonBaseP.then((baoCaoLyDo) => getReturnIntelligence({ period: params.period, previous, basis, codes, marketerIds, trendGrain, reasonReport: baoCaoLyDo, value: giaTriDon })),
+    theoBacGia: getReturnRateByTier(params.period, params.q, basis),
+    causeBoard: causeP,
     // CÙNG bốn tham số với `getReturnRateSummary` ngay trên — danh sách ra đúng số trên thẻ (OD-UX-04).
-    kpiBucket ? listReturnSummaryOrders(params.period, params.q, basis, giaTriDon, kpiBucket, kpiPage) : Promise.resolve(null),
+    kpiOrders: kpiBucket ? listReturnSummaryOrders(params.period, params.q, basis, giaTriDon, kpiBucket, kpiPage) : Promise.resolve(null),
+  };
+}
+
+export type ReturnsPageParts = ReturnType<typeof startReturnsPage>;
+
+/**
+ * ĐƯỜNG CỦA TRANG (Suspense theo khối, 25/10/2026): bắt đầu mọi lời hứa BÊN TRONG bộ gom mốc của OD-UX-03, nên mốc in trên
+ * thẻ đồng bộ vẫn là mốc CŨ NHẤT của MỌI khối — dù từng khối được vẽ riêng ngay khi dữ liệu của nó xong.
+ *
+ * `collectAsOf` gọi hàm truyền vào ĐỒNG BỘ (trong `AsyncLocalStorage.run`), nên các lời hứa đã có ngay khi hàm này trả về;
+ * bộ gom thì chờ `allSettled` — một khối lỗi không làm mốc của các khối khác biến mất, và không lời hứa nào bị bỏ lơ.
+ */
+export function streamReturnsPage(p: ReturnsPageParams): { parts: ReturnsPageParts; asOf: Promise<{ asOf: Date; cached: boolean }> } {
+  const giu: { parts?: ReturnsPageParts } = {};
+  const asOf = collectAsOf(async () => {
+    giu.parts = startReturnsPage(p);
+    await Promise.allSettled(Object.values(giu.parts));
+  }).then(({ asOf: moc, cached }) => ({ asOf: moc, cached }));
+  if (!giu.parts) throw new Error("streamReturnsPage: collectAsOf phải gọi hàm đồng bộ");
+  return { parts: giu.parts, asOf };
+}
+
+/** Mọi truy vấn của trang, chờ hết — đường của job giữ ấm, probe và script (cùng lời hứa của `startReturnsPage`). */
+export async function loadReturnsPage(p: ReturnsPageParams) {
+  const s = startReturnsPage(p);
+  // Mọi lời hứa nằm trong CÙNG một `Promise.all`: không lời hứa nào bị bỏ lơ nếu một nhánh khác lỗi trước.
+  const [{ rows, total, pageCount, all, productRows, projectionError: loiBang }, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia, causeBoard, kpiOrders] = await Promise.all([
+    s.variant,
+    s.summary,
+    s.variantOrders,
+    s.theoNguon,
+    s.reasonReport,
+    s.danhMucMa,
+    s.danhSachMarketer,
+    s.logistics,
+    s.intel,
+    s.theoBacGia,
+    s.causeBoard,
+    s.kpiOrders,
   ]);
   return { rows, total, pageCount, all, productRows, loiBang, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer, logistics, intel, theoBacGia, causeBoard, kpiOrders };
 }
