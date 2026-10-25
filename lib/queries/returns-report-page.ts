@@ -27,6 +27,8 @@ import { POST_OFFICE_QUERY_MAX, REASON_FILTER_KEYS, REASON_OUTCOME_FILTERS } fro
 import type { OutcomeGroup } from "@/lib/constants/truth";
 import { reasonFiltersActive, type ReasonFilterSelection } from "@/lib/returns/reason-filters";
 import { collectAsOf } from "@/lib/cache";
+import { getSettingJson } from "@/lib/settings";
+import { getProjectedDeliveryMetrics } from "@/lib/queries/projected-delivery";
 
 /**
  * 2b — bộ lọc của khối lý do hoàn đọc từ URL. Giá trị là đầu vào của người ngoài: trạng thái chỉ nhận nhóm trong danh sách đóng; các ô
@@ -138,6 +140,54 @@ export function returnsPageParams(raw: SearchParams) {
 export type ReturnsPageParams = ReturnType<typeof returnsPageParams>;
 
 /**
+ * ═══════ KPI KHỞI CHẠY TRƯỚC (hướng B — Lead duyệt 25/10/2026) · SAU CỜ, MẶC ĐỊNH TẮT ═══════
+ *
+ * Đo production 25/10 (returns-page-probe 1c, kỳ 30 ngày, kho học ấm): KPI chạy MỘT MÌNH 1.142 ms (câu đếm 657 + dự báo
+ * PRODUCT 592, NỐI ĐUÔI trong `getReturnRateSummary`), chạy CHUNG cả trang 2.356 ms (2,1×) — 11 nhánh khác cùng khởi chạy
+ * và tranh đúng bể 5 kết nối. Ba thứ còn lại mà thân trang chờ đều nhanh kể cả nguội (danh mục mã 18 · marketer 361 ·
+ * hồ sơ hiển thị 2 ms), nên chỗ sửa là THỨ TỰ KHỞI CHẠY, không phải bớt việc.
+ *
+ * Cờ bật (`settings` khoá `KPI_FIRST_SETTING_KEY`, giá trị `{"on": true}` — `set-setting` gộp object):
+ *  1. `summary` + hai danh mục của thanh lọc khởi chạy NGAY;
+ *  2. dự báo PRODUCT khởi chạy NGAY với ĐÚNG tham số mà `getReturnRateSummary` sẽ gọi (cùng khoá đệm ⇒ summary gộp vào
+ *     lượt đang chạy, KHÔNG có phép tính thêm — bảng theo mẫu mã vốn cũng gọi đúng khoá ấy), nên câu đếm và dự báo chạy
+ *     SONG SONG thay vì nối đuôi;
+ *  3. mọi nhánh còn lại khởi chạy khi `summary` xong HOẶC sau `KPI_FIRST_CAP_MS`, cái nào tới trước.
+ * Lời gọi, tham số, khoá đệm không đổi một chữ ⇒ không con số nào đổi, `ORDER_OUTCOME` không bị chạm.
+ *
+ * Vì sao SAU CỜ: probe của ops chạy script từ `main` nhưng mã thư viện từ container đang chạy, nên số «sau» chỉ có khi đã
+ * deploy. Cờ cho đo trước/sau trên CÙNG một bản (bật / tắt bằng `set-setting`, không deploy lại) và lùi được ngay nếu thân
+ * tổng xấu đi. Cờ tắt (mặc định, hoặc đọc cờ lỗi) ⇒ mọi nhánh khởi chạy ngay như bản trước; chỉ thêm đúng một lượt đọc cờ.
+ */
+export const KPI_FIRST_SETTING_KEY = "reports.returns-kpi-first";
+/**
+ * Trần chờ KPI trước khi thả các nhánh khác. KPI một mình đo 1.142 ms khi câu đếm và dự báo NỐI ĐUÔI; chạy song song (bước
+ * 2) thì cỡ max(657, 592) ≈ 0,7 s. 800 ms phủ được lượt KPI bình thường mà không bắt 11 nhánh còn lại đợi một summary
+ * nguội bất thường (kho học hết hạn ⇒ summary vài giây): quá trần là thả, thân tổng chịu tối đa ngần ấy.
+ */
+export const KPI_FIRST_CAP_MS = 800;
+
+/** Mở khi `kpi` xong (kể cả lỗi — lỗi của KPI không được chặn các khối khác) HOẶC sau `tranMs`, cái nào tới trước. HÀM THUẦN. */
+export function choKpiHoacTran(kpi: Promise<unknown>, tranMs: number): Promise<void> {
+  return new Promise((mo) => {
+    const hen = setTimeout(mo, tranMs);
+    const tha = () => {
+      clearTimeout(hen);
+      mo();
+    };
+    kpi.then(tha, tha);
+  });
+}
+
+async function kpiTruocBat(): Promise<boolean> {
+  try {
+    return (await getSettingJson<{ on?: unknown }>(KPI_FIRST_SETTING_KEY, {})).on === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Mọi truy vấn của trang — một lượt song song — nhưng trả về TỪNG LỜI HỨA, chưa chờ. Trang dùng nó để vẽ từng khối ngay khi
  * dữ liệu của khối đó xong (Suspense, 25/10/2026): KPI chỉ cần `summary`, không phải đứng chờ tầng quyết định ~7 s nguội.
  * Cùng lời gọi, cùng tham số, cùng khoá đệm với `loadReturnsPage` — hàm đó chỉ là «chờ hết các lời hứa này».
@@ -163,9 +213,20 @@ export function startReturnsPage(p: ReturnsPageParams) {
     thành "Node một luồng đang bận"; EXPLAIN cho thấy đó là SQL.)
 
   */
+  // KPI + hai danh mục của thanh lọc khởi chạy NGAY; mọi nhánh khác đi qua `sau(…)` (xem «KPI KHỞI CHẠY TRƯỚC»).
+  const summary = getReturnRateSummary(params.period, params.q, basis, giaTriDon);
+  const danhMucMa = listProductCodes();
+  const danhSachMarketer = listAttributedMarketers();
+  const mo = kpiTruocBat().then((bat) => {
+    if (!bat) return;
+    // ĐÚNG tham số `getReturnRateSummary` truyền cho dự báo ⇒ cùng khoá đệm, summary gộp vào lượt này.
+    getProjectedDeliveryMetrics(params.period, basis, "PRODUCT", giaTriDon).catch(() => undefined);
+    return choKpiHoacTran(summary, KPI_FIRST_CAP_MS);
+  });
+  const sau = <T>(viec: () => Promise<T>): Promise<T> => mo.then(viec);
   // Không bật bộ lọc 2b ⇒ MỘT báo cáo (cùng khoá job giữ ấm); bật ⇒ thêm đúng một báo cáo đã lọc cho E / E2.
-  const reasonBaseP = getReturnReasonReport(reasonFilterBase);
-  const reasonP = reasonFiltered ? getReturnReasonReport(reasonFilter) : reasonBaseP;
+  const reasonBaseP = sau(() => getReturnReasonReport(reasonFilterBase));
+  const reasonP = reasonFiltered ? sau(() => getReturnReasonReport(reasonFilter)) : reasonBaseP;
   /*
     BẢNG NGUYÊN NHÂN THEO CHỨNG CỨ (P0 21/10/2026, `lib/returns/cause-board.ts`): CHỈ khi cờ cách xếp = EVIDENCE — cờ còn LEGACY thì không
     dựng (hai cách xếp không đứng chung một trang). Kỳ trước dùng ĐÚNG bộ lọc của khối intelligence nên đọc lại cùng bản nhớ đệm.
@@ -176,19 +237,19 @@ export function startReturnsPage(p: ReturnsPageParams) {
     return buildCauseBoard(bc, truoc && truoc.taxonomy === "EVIDENCE" ? truoc : null);
   });
   return {
-    variant: getReturnRateByVariant({ period: params.period, basis, value: giaTriDon, q: params.q, minShipped, sort: params.sort, dir: params.dir, page: params.page, pageSize: params.pageSize }),
-    summary: getReturnRateSummary(params.period, params.q, basis, giaTriDon),
-    variantOrders: variantKey ? listOrdersForVariant(variantKey, params.period) : Promise.resolve([]),
-    theoNguon: getReturnRateBySource(params.period, params.q, giaTriDon),
+    variant: sau(() => getReturnRateByVariant({ period: params.period, basis, value: giaTriDon, q: params.q, minShipped, sort: params.sort, dir: params.dir, page: params.page, pageSize: params.pageSize })),
+    summary,
+    variantOrders: variantKey ? sau(() => listOrdersForVariant(variantKey, params.period)) : Promise.resolve([]),
+    theoNguon: sau(() => getReturnRateBySource(params.period, params.q, giaTriDon)),
     reasonReport: reasonP,
-    danhMucMa: listProductCodes(),
-    danhSachMarketer: listAttributedMarketers(),
-    logistics: logisticsPerformance(params.period, giaTriDon),
+    danhMucMa,
+    danhSachMarketer,
+    logistics: sau(() => logisticsPerformance(params.period, giaTriDon)),
     intel: reasonBaseP.then((baoCaoLyDo) => getReturnIntelligence({ period: params.period, previous, basis, codes, marketerIds, trendGrain, reasonReport: baoCaoLyDo, value: giaTriDon })),
-    theoBacGia: getReturnRateByTier(params.period, params.q, basis),
+    theoBacGia: sau(() => getReturnRateByTier(params.period, params.q, basis)),
     causeBoard: causeP,
     // CÙNG bốn tham số với `getReturnRateSummary` ngay trên — danh sách ra đúng số trên thẻ (OD-UX-04).
-    kpiOrders: kpiBucket ? listReturnSummaryOrders(params.period, params.q, basis, giaTriDon, kpiBucket, kpiPage) : Promise.resolve(null),
+    kpiOrders: kpiBucket ? sau(() => listReturnSummaryOrders(params.period, params.q, basis, giaTriDon, kpiBucket, kpiPage)) : Promise.resolve(null),
   };
 }
 
