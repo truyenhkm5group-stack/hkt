@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "returns-suspense",
+  "title": "/reports/returns: KPI hiện trước (Suspense theo khối) + probe mốc «KPI hiện» và chờ bể",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-rsusp",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/returns-suspense",
+  "base_sha": "ead92882eeb483bd5dbc3d734a4da19f4825326d",
+  "domains": [],
+  "owned_paths": [
+    "app/(dashboard)/reports/returns/page.tsx",
+    "lib/queries/returns-report-page.ts",
+    "tests/company-os-warm.test.ts",
+    "scripts/returns-page-probe.ts",
+    "tests/returns-page-probe.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-25T09:48:07.475Z",
+  "updated_at": "2026-10-25T09:48:07.475Z",
+  "last_heartbeat": "2026-10-25T09:48:07.475Z",
+  "definition_of_done": []
+}
