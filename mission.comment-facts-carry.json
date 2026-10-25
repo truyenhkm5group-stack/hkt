@@ -3,7 +3,7 @@
   "mission_id": "comment-facts-carry",
   "title": "P2-3/P2-4: dữ kiện + đơn của bình luận cùng khách sang hộp thư",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-hbci",
@@ -26,9 +26,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T05:16:26.716Z",
-  "updated_at": "2026-10-25T05:37:15.799Z",
+  "updated_at": "2026-10-25T05:58:32.267Z",
   "last_heartbeat": "2026-10-25T05:34:56.642Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1060 → 30a907c3d36726b39c1c90007da49ff1e1f79dba"
+  },
   "handoff": {
     "branch": "claude/comment-facts-carry",
     "sha": "15be35b90c2d6dded36e0a50ac0e7700f550ef48",
