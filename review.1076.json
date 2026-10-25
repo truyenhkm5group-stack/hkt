@@ -1,0 +1,8 @@
+{
+  "pr": 1076,
+  "sha": "226bc0ed8e3bba5cc12b62ddbc4d99c1187ee665",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T17:22:38.564Z",
+  "note": "review lead: WEBHOOK_CLOCK_SKEW_SECONDS=120 (căn cứ 358/366 ≤ 120 s) áp ở measureWebhookGap + đọc lại vtp_webhook_gaps (SQL ≡ TS, bí danh kiểm regex); cố ý không áp verdictOf (39 bản vá có ích); không sửa 358 dòng đã ghi."
+}
