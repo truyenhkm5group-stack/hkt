@@ -3,7 +3,7 @@
   "mission_id": "comment-facts-carry",
   "title": "P2-3/P2-4: dữ kiện + đơn của bình luận cùng khách sang hộp thư",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-hbci",
@@ -24,7 +24,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-25T05:16:26.716Z",
-  "updated_at": "2026-10-25T05:16:26.716Z",
-  "last_heartbeat": "2026-10-25T05:16:26.716Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-25T05:17:02.457Z",
+  "last_heartbeat": "2026-10-25T05:17:02.457Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/comment-facts-carry",
+    "sha": "a68a4be7c3db2438fb55df3fcaac9d20d64aeca6",
+    "at": "2026-10-25T05:17:02.457Z",
+    "actor": "DESKTOP-56TH98Y:wt-hbci",
+    "title": "P2-3/P2-4: dữ kiện + đơn của bình luận cùng khách sang hộp thư",
+    "summary": "Hộp thư fanpage tra hội thoại bình luận cùng khách (identity-link VERIFIED, 7 ngày, tra lại 10′ khi chưa thấy); chép hồ sơ nhận hàng nguồn COMMENT khi hộp thư chưa có; lời nhắc nêu đơn (chỉ nêu, không gộp — pha 3); điểm chặn cuối bỏ câu xin lại SĐT/địa chỉ khi hồ sơ bình luận còn đứng (continuesSameOrder). Không ghi vào hội thoại bình luận, không chạm otherConversationOrders.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint 4 tệp: sạch",
+      "TEST_KHOI=K01,K20,K21,K22 npm test: TẤT CẢ ĐẠT (4/24 khối + phần chung)"
+    ]
+  }
 }
