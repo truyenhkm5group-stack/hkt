@@ -148,12 +148,25 @@ async function main() {
     const duBao = await doMs(() => duBaoPRODUCT(p30, ts30.basis, "PRODUCT", ts30.giaTriDon));
     const phanConLai = await doMs(() => getReturnRateSummary(p30, ts30.params.q, ts30.basis, ts30.giaTriDon));
     await nguoiTruKhoHoc();
+    const { readDisplayProfile } = await import("@/lib/experience/profile");
     const t0 = performance.now();
     const ca = startReturnsPage(ts30);
-    let kpiChung: number | null = null;
-    ca.summary.then(() => (kpiChung = Math.round(performance.now() - t0))).catch(() => undefined);
-    await Promise.allSettled(Object.values(ca));
+    /*
+      MỐC XONG CỦA TỪNG LỜI HỨA (Lead 25/10): qua HTTP, thân chính (KPI) resolve ở ~5,6 s trong khi summary trong tiến trình
+      xong ở ~2,9 s. Thân chính chờ summary + danhMucMa + danhSachMarketer + readDisplayProfile (page.tsx) — ghi mốc của cả
+      bốn, và của mọi lời hứa còn lại, để biết thứ nào giữ thân chính.
+    */
+    const xong: Record<string, number> = {};
+    const ghi = (ten: string, p: Promise<unknown>) => p.then(() => (xong[ten] = Math.round(performance.now() - t0))).catch(() => (xong[`${ten} (LỖI)`] = Math.round(performance.now() - t0)));
+    const hoSo = readDisplayProfile();
+    const choGhi = [...Object.entries(ca).map(([ten, p]) => ghi(ten, p)), ghi("readDisplayProfile", hoSo)];
+    await Promise.allSettled([...Object.values(ca), hoSo, ...choGhi]);
     const caTrang = Math.round(performance.now() - t0);
+    const kpiChung: number | null = xong.summary ?? null;
+    const THAN_CHINH = ["summary", "danhMucMa", "danhSachMarketer", "readDisplayProfile"];
+    const thanChinh = Math.max(...THAN_CHINH.map((k) => xong[k] ?? 0));
+    console.log(`  thân chính (KPI) resolve lúc ${thanChinh} ms = muộn nhất của: ${THAN_CHINH.map((k) => `${k} ${xong[k] ?? "?"}`).join(" · ")}`);
+    console.log(`  mốc xong từng lời hứa: ${Object.entries(xong).sort((a, b) => a[1] - b[1]).map(([k, v]) => `${k} ${v}`).join(" · ")}`);
     console.log(`  kỳ ${p30.label} · mốc ${ts30.basis}`);
     console.log(`  KPI (getReturnRateSummary) MỘT MÌNH: ${motMinh} ms  =  dự báo PRODUCT một mình ${duBao} ms  +  phần còn lại (câu đếm) ${phanConLai} ms`);
     console.log(`  KPI khi CHUNG cả trang (startReturnsPage, 12 nhánh cùng lúc): ${kpiChung ?? "?"} ms · cả trang xong ${caTrang} ms`);
