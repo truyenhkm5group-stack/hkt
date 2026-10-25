@@ -3,7 +3,7 @@
   "mission_id": "confirm-dup-warning",
   "title": "Xác nhận tay đơn có thể trùng: hai bước, hộp cảnh báo + nhật ký",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "CRITICAL",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -29,9 +29,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T02:20:33.664Z",
-  "updated_at": "2026-10-25T03:44:57.519Z",
+  "updated_at": "2026-10-25T04:08:48.809Z",
   "last_heartbeat": "2026-10-25T03:44:57.519Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1055 → e0ecbf414415b641b7451dcf53fee46da280bfd5"
+  },
   "handoff": {
     "branch": "claude/confirm-dup-warning",
     "sha": "b909073dcb4cf45c6cf623e19435c98f1dc98d4f",
