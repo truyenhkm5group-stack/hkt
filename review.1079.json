@@ -1,0 +1,8 @@
+{
+  "pr": 1079,
+  "sha": "213a3e2b36b4b953d23acc28614ecdd3b6499316",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T19:08:42.501Z",
+  "note": "review lead: supersededAttemptSql/supersededBy đọc lúc xem, dẫn xuất từ PRIMARY_ATTEMPT qua PRIMARY_ATTEMPT_ORDER_BY (return-rate.ts chỉ tách hằng, chuỗi giữ nguyên, ORDER_OUTCOME không đổi); không ghi cột/backfill, cod_status và chứng từ ĐVVC giữ nguyên; áp 7 chỗ + /orders «POS huỷ — hàng vẫn đang đi»; SQL ≡ TS (K13); production 549 PENDING · 320,6 triệu + 363 CANCELLED · 163,9 triệu ra khỏi các "
+}
