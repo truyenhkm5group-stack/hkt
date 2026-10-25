@@ -3,7 +3,7 @@
   "mission_id": "returns-kpi-first",
   "title": "/reports/returns: KPI khởi chạy trước (sau cờ, mặc định tắt) — câu đếm ‖ dự báo, 7 nhánh nặng chờ KPI hoặc trần 800 ms",
   "business_goal": "",
-  "status": "VERIFYING",
+  "status": "DONE",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-kpifirst",
@@ -24,13 +24,14 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T14:33:18.935Z",
-  "updated_at": "2026-10-25T15:56:52.677Z",
-  "last_heartbeat": "2026-10-25T14:34:39.025Z",
+  "updated_at": "2026-10-25T17:03:21.038Z",
+  "last_heartbeat": "2026-10-25T17:03:21.038Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#1073 → 1ba7550320ea1f47401cb784a6175153e41f3da6",
     "verify": "PASS 1ba7550320ea1f47401cb784a6175153e41f3da6 2026-10-25T15:56:03.459Z",
-    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40208054374"
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40208054374",
+    "done": "#1073 1ba75503 lên production 15:54Z 25/10, verify PASS; cờ reports.returns-kpi-first giữ TẮT (Lead 16:10Z) — cặp đo set-setting không so được (máy bận); đo xen kẽ chuyển sang returns-kpi-first-ab"
   },
   "handoff": {
     "branch": "claude/returns-kpi-first",
