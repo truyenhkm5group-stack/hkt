@@ -3,7 +3,7 @@
   "mission_id": "returns-suspense",
   "title": "/reports/returns: KPI hiện trước (Suspense theo khối) + probe mốc «KPI hiện» và chờ bể",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-rsusp",
@@ -26,11 +26,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T09:48:07.475Z",
-  "updated_at": "2026-10-25T10:47:11.000Z",
+  "updated_at": "2026-10-25T11:19:05.957Z",
   "last_heartbeat": "2026-10-25T10:12:05.524Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1065 → 5ff9266a8ce1460be25d965dad79b9242e151a61"
+    "merged": "#1065 → 5ff9266a8ce1460be25d965dad79b9242e151a61",
+    "verify": "PASS 5ff9266a8ce1460be25d965dad79b9242e151a61 2026-10-25T11:18:28.554Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40186205989"
   },
   "handoff": {
     "branch": "claude/returns-suspense",
