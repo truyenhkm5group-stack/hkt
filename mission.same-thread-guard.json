@@ -3,7 +3,7 @@
   "mission_id": "same-thread-guard",
   "title": "Hai hàng hội thoại ERP cùng một luồng Pancake là MỘT hội thoại cho rào trùng đơn + khoá giao dịch",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -25,9 +25,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T01:48:21.263Z",
-  "updated_at": "2026-10-25T01:51:48.693Z",
+  "updated_at": "2026-10-25T02:15:39.448Z",
   "last_heartbeat": "2026-10-25T01:49:00.783Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1053 → b8e4aa5afaae723eadc70d428f6da8b55275ba1d"
+  },
   "handoff": {
     "branch": "claude/same-thread-guard",
     "sha": "7bab1295db9773db0fdfd08d79414687f7b00d59",
