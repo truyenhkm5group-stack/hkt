@@ -518,9 +518,9 @@ export class Bot {
    * Sua moi cau HEN SO NGAY GIAO HANG trong tra loi ve dung thoi gian shop dat (settings.deliveryDays). Chi dung vao
    * khoang "N–M ngay" nam cung cau voi tu chi giao hang, de khong sua nham "doi tra trong 7 ngay"...
    */
-  fixDeliveryDays(reply) {
+  fixDeliveryDays(reply, pageId) {
     const t = String(reply || "");
-    const dung = settings.deliveryDays();
+    const dung = settings.deliveryDays(pageId);
     const [a, b] = dung.split("–");
     let doi = 0;
     const moi = t.replace(/[^.?!\n]*[.?!\n]?/g, (cau) => {
@@ -1409,7 +1409,7 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
     prompt += `
 
 ## THỜI GIAN GIAO HÀNG (shop vừa cập nhật — dùng con số này, bỏ mọi con số khác trong hướng dẫn)
-- Giao hàng toàn quốc ${settings.deliveryDays()} ngày.`;
+- Giao hàng toàn quốc ${settings.deliveryDays(pageId)} ngày.`;
     return prompt;
   }
 
@@ -2085,7 +2085,7 @@ ${Xung} lấy màu nào để em lên đơn cho mình ạ?`;
       if (orders.length) {
         // Chặng theo chứng từ VTP của ERP (lỗi / chậm ⇒ rỗng ⇒ câu như cũ) — chatbot/src/orders.js erpOrderView.
         const erpView = await erpOrderView(orders, { pageId });
-        systemPrompt += `\n\n## ĐƠN HÀNG CỦA KHÁCH TRÊN HỆ THỐNG POS (dữ liệu thật, hãy dùng để trả lời)\n${orders.map((o) => "- " + describeOrder(o, erpView)).join("\n")}\n- Khách hỏi đã gửi chưa / bao giờ nhận / đơn tới đâu: trả lời ĐÚNG theo trạng thái trên (nêu trạng thái, đơn vị vận chuyển, mã vận đơn, ngày gửi), TUYỆT ĐỐI không nói chung chung "giao toàn quốc ${settings.deliveryDays()} ngày". Trả lời 1–2 câu, không hỏi lại, không mời mua thêm.\n- Đơn "Đã gửi hàng"/"Đang giao": nhắc khách để ý điện thoại, bưu tá sẽ gọi. Đơn "Giao không thành công"/"Đang hoàn": xin lỗi, thêm [[HANDOFF]] để nhân viên xử lý.`;
+        systemPrompt += `\n\n## ĐƠN HÀNG CỦA KHÁCH TRÊN HỆ THỐNG POS (dữ liệu thật, hãy dùng để trả lời)\n${orders.map((o) => "- " + describeOrder(o, erpView)).join("\n")}\n- Khách hỏi đã gửi chưa / bao giờ nhận / đơn tới đâu: trả lời ĐÚNG theo trạng thái trên (nêu trạng thái, đơn vị vận chuyển, mã vận đơn, ngày gửi), TUYỆT ĐỐI không nói chung chung "giao toàn quốc ${settings.deliveryDays(pageId)} ngày". Trả lời 1–2 câu, không hỏi lại, không mời mua thêm.\n- Đơn "Đã gửi hàng"/"Đang giao": nhắc khách để ý điện thoại, bưu tá sẽ gọi. Đơn "Giao không thành công"/"Đang hoàn": xin lỗi, thêm [[HANDOFF]] để nhân viên xử lý.`;
         log.info(`[${pageId}] ${conversationId}: kem ${orders.length} don POS vao prompt (${orders.map((o) => "#" + o.id + " st" + o.status).join(", ")})`);
       }
     }
@@ -2319,7 +2319,7 @@ Câu trả lời trước của bạn là bản tóm tắt chốt đơn nhưng c
 ${eff.afterOrderText.trim()}`;
       daChaoChotDon = true;
     }
-    if (reply) reply = this.fixDeliveryDays(reply);
+    if (reply) reply = this.fixDeliveryDays(reply, pageId);
     // Moi tin phai ket thuc bang mot cau hoi de dan khach di tiep; bot hay quen nen tu them
     if (reply && !handoff && !daChaoChotDon) reply = this.ensureEndsWithQuestion(reply, pageId, messages);
     const nImages = history.reduce((n, h) => n + (h.images?.length || 0), 0);

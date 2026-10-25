@@ -179,7 +179,10 @@ export const PAGE_BLOCKED_CODES = [{ page: "aura - thoi trang nu cao cap", codes
 
 // Page ban MAU MOI CHUA CO TREN POS: khong dung danh muc POS (khong ma, mau, size, anh cua mau khac), khong len don POS
 // tu dong. Chu shop 13/10/2026 (AURA): sau khi chan Q005 bot lai chot "Dam Q004 mau Do" + anh Q004 — page chi co mau moi.
+// Jax Shop (chu shop 25/10/2026): page ban do the thao nam hang US/UK order, khong co mau nao trong danh muc dam POS.
 export const PAGE_OFF_CATALOG = ["aura - thoi trang nu cao cap"];
+// Khop theo DAU ten (ten tren Pancake co the khac dau gach / khoang trang o phan duoi): page bat dau bang "jax shop"
+export const PAGE_OFF_CATALOG_PREFIX = ["jax shop"];
 
 // Page chi ban MOT mau dam (chu shop 17/10/2026, Hoa Tra Fashion CS1: "page nay rep Q002 giong page Linh Tay Luxury").
 // Moi ma DAM khac (Q…) bi chan o page do: anh khach gui nhan dien ra mau dam khac (Q005 trong giong Q002) thi hieu la ma nay,
@@ -191,7 +194,7 @@ const khongDauTen = (n) => String(n || "").toLowerCase().normalize("NFD").replac
 /** Page ban mau moi chua co tren POS (theo ten page / ten Pancake). */
 export function offCatalogPage(names) {
   const ten = (names || []).map(khongDauTen);
-  return PAGE_OFF_CATALOG.some((p) => ten.includes(p));
+  return PAGE_OFF_CATALOG.some((p) => ten.includes(p)) || PAGE_OFF_CATALOG_PREFIX.some((p) => ten.some((t) => t.startsWith(p)));
 }
 
 /** Ma DUY NHAT page ban (theo ten page / ten Pancake), hoac "". */

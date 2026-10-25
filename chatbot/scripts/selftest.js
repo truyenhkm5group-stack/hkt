@@ -2466,5 +2466,40 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 58: page Hoa Tra Fashion CS1 chi ban Q002 — chan dam khac, doi mau chu luc mot lan, anh khop Q005 hieu la Q002");
 }
 
+// ---- 59: page Jax Shop (chu shop 25/10/2026) — set gio NIKE tuyen Anh: bang size form US, giao 7–9 ngay rieng page,
+// xung "anh", khong dung danh muc dam POS
+{
+  const { offCatalogPage } = await import("../src/orders.js");
+  const ten = "Jax Shop - Chuyên hàng US UK chính hãng giá tốt";
+  assert.equal(offCatalogPage([ten]), true, "Jax khong dung danh muc dam");
+  assert.equal(offCatalogPage(["Jax Shop – Chuyên hàng US UK"]), true, "ten khac dau gach van khop");
+  const ob = bot.orderBot;
+  ob._save = () => {};
+  bot.pageNames.set("PJAX", "Jax Shop – Chuyên hàng US-UK chính hãng");
+  settings.update("PJAX", { extraPrompt: "" });
+  ob.seedDefaultProducts();
+  const st = settings.get("PJAX");
+  assert.equal(st.customerTitle, "anh/chị", "cau mau trung tinh");
+  assert.match(st.extraPrompt, /XƯNG HÔ ĐÚNG GIỚI TÍNH KHÁCH/);
+  assert.equal(st.ownPrompt, true);
+  assert.match(st.extraPrompt, /799\.000đ/);
+  assert.equal(settings.deliveryDays("PJAX"), "7–9", "giao rieng page");
+  assert.notEqual(settings.deliveryDays("PAGE1"), "7–9", "page khac van theo cai dat chung");
+  assert.match(bot.fixDeliveryDays("Dạ hàng giao tới anh khoảng 5–7 ngày ạ", "PJAX"), /7–9 ngày/);
+  const khach = (t) => ({ from: { id: "KHACH" }, message: t });
+  assert.equal(bot.customerFacts("PJAX", [khach("1m65, 53kg mặc sz j shop")]).size, "XS", "1m65 53kg -> XS (nhu nhan vien tu van)");
+  assert.equal(bot.customerFacts("PJAX", [khach("cao 1m72 nặng 70kg")]).size, "S");
+  assert.equal(bot.customerFacts("PJAX", [khach("cao 1m70 nặng 80kg")]).size, "M", "nang hon bang chieu cao -> lay size lon hon");
+  // Nguoi sua lai sau do khong bi ghi de
+  settings.update("PJAX", { deliveryDays: "8–10" });
+  ob.seedDefaultProducts();
+  assert.equal(settings.deliveryDays("PJAX"), "8–10");
+  const sp = bot.buildSystemPrompt("PJAX", { customerName: "Anh", type: "INBOX" });
+  assert.ok(!/Đầm Q00/.test(sp) && /Giao hàng toàn quốc 8–10 ngày/.test(sp), "prompt khong co danh muc dam, giao theo page");
+  bot.pageNames.delete("PJAX");
+  delete ob._save;
+  console.log("OK 59: page Jax Shop — bang size form US, giao rieng page, xung anh, khong danh muc dam");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);
