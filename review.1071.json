@@ -1,0 +1,8 @@
+{
+  "pr": 1071,
+  "sha": "9d44858b7747e7424deafad41c73f9e68d91141f",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T12:54:01.366Z",
+  "note": "review lead: chỉ scripts/returns-page-probe.ts; 1c in thêm mốc resolve thân chính = muộn nhất của summary/danh mục mã/marketer/hồ sơ hiển thị; chỉ đọc."
+}
