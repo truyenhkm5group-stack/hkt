@@ -3,7 +3,7 @@
   "mission_id": "app-log-evt-count",
   "title": "ops app-log-evt-count: đếm dòng sự kiện JSON trong log app (lần hàng rào chặn câu bot)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-logevt",
@@ -26,9 +26,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T06:55:35.319Z",
-  "updated_at": "2026-10-25T06:59:36.391Z",
+  "updated_at": "2026-10-25T07:21:04.667Z",
   "last_heartbeat": "2026-10-25T06:56:18.746Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1061 → 4babf8ffce0b6f58ad4fd5309297fa974f35a207"
+  },
   "handoff": {
     "branch": "claude/app-log-evt-count",
     "sha": "2f87bb78df49e681c850b2ab1eda5ad7158391ab",
