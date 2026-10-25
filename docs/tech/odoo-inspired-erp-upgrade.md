@@ -125,8 +125,9 @@ Chi tiết từng hạng mục Phase 2–5 ở mục 7.
 | OD-UX-05.3 | Tốc độ | Trang chủ: khử trùng đọc khoá cấu hình theo request | `code-erp-56` | P2 | DEPLOYED (đích KHÔNG đạt nhờ mục này) | #1033 | `4eeb7751f` | trong PR | ✓ | Chỉ bớt khoảng 1 lượt (6 lượt / 5 khoá) ⇒ đích −30 % KHÔNG đạt nhờ cái này | — | — |
 | OD-UX-05.3b | Tốc độ | Đối soát lương · bảng lương · `/ads` · `/work` đọc cấu hình theo phạm vi | `code-erp-56` | P1 | DEPLOYED | #1037 | `0e93a57fa` | trong PR | ✓ `6ca3af26` | ✓ `getReconCenter` 202 → 18 lượt / 10 khoá · `getMyWork` 17 → 12 · `getPayrollReport` 15 → 9 · `getAdsPerformance` 11 → 6 | — | — |
 | OD-UX-05.3c | Tốc độ | Hai đường đọc thô (xác nhận trọng số mã · chữ ký đối soát) qua `readSettingValue` | `code-erp-56` | P1 | DEPLOYED | #1043 | `7d59abf7` (commit gộp) | K06 · K10 · K14 · K24 | ✓ run 40086846234 · health `5d4997bb` (11:13:45Z 24/10) | — CHƯA đo riêng sau #1043 (số 202 → 18 lượt của `getReconCenter` là đo sau #1037) | — | Đo `getReconCenter` sau #1043 — đích ≈ 10–12 lượt / 10 khoá |
-| OD-UX-05.4 | Tốc độ | `/reports/returns`: thân nguội (câu lý do hoàn ×3 → ×1 · `careRows` chỉ kiện có care) + hồi quy đường ấm (đệm theo tổ chức) | `cc2379e4` | P1 | DEPLOYED (đích ≥ 40 % CHƯA ĐẠT) | #1030 · #1036 | `65883e6be` · `6ca3af26b` | `tests/returns-body.test.ts` · `tests/memo-org-scope.test.ts` | ✓ `6ca3af26` | Smoke cùng công cụ: 12.556 → 8.347 ms (−34 % so lượt 1 nền; −23 % so trung bình nền 10,8 s); ấm 618 ms | — | 05.4b, rồi `with don` ×2 trong `getReturnRateByVariant` nếu probe thấy nó trên đường găng |
-| OD-UX-05.4b | Tốc độ | `/reports/returns`: KPI hiện trước — mỗi khối một `<Suspense>`, thẻ đồng bộ gọi `vtpWebhookHealth` một lần; probe thêm mốc «KPI hiện» + phép đo câu nhỏ chờ bể | `cc2379e4` | P1 | IN_REVIEW | (nhánh `claude/returns-suspense`) | — | build · K06 · K08 · K12 · K21 | — | — | — | Đích (Lead 25/10): «thời gian tới khi thấy KPI»; đầu phản hồi là chỉ số phụ (bị chặn ở layout — xem §5.4) |
+| OD-UX-05.4 | Tốc độ | `/reports/returns`: thân nguội (câu lý do hoàn ×3 → ×1 · `careRows` chỉ kiện có care) + hồi quy đường ấm (đệm theo tổ chức) | `cc2379e4` | P1 | DEPLOYED (đích ≥ 40 % ĐẠT sau 05.4b + 05.4c — Lead chốt) | #1030 · #1036 | `65883e6be` · `6ca3af26b` | `tests/returns-body.test.ts` · `tests/memo-org-scope.test.ts` | ✓ `6ca3af26` | Riêng mục này — smoke cùng công cụ: 12.556 → 8.347 ms (−34 % so lượt 1 nền; −23 % so trung bình nền 10,8 s); ấm 618 ms. Sau 05.4b + 05.4c: xem hai dòng dưới | — | `with don` ×2 trong `getReturnRateByVariant` chỉ khi probe thấy nó trên đường găng |
+| OD-UX-05.4b | Tốc độ | `/reports/returns`: KPI hiện trước — mỗi khối một `<Suspense>`, thẻ đồng bộ gọi `vtpWebhookHealth` một lần; probe thêm mốc «KPI hiện» + phép đo câu nhỏ chờ bể | `cc2379e4` | P1 | DEPLOYED · VERIFIED | #1065 (+ probe #1063) | `5ff9266a8` | build · K06 · K08 · K12 · K21 | ✓ `5ff9266a` (11:18Z 25/10) | ✓ returns-page-probe, 1 mẫu mỗi bên: lượt 1 nguội KPI hiện 11.491 → 4.219 ms (−63 %), thân 11.672 → 7.407; kỳ 30 ngày KPI 6.604 → 6.120 (−7 % — KPI xếp hàng, xem 05.4c); ấm ~0,3 s | — | Đích (Lead 25/10): «thời gian tới khi thấy KPI»; đầu phản hồi là chỉ số phụ |
+| OD-UX-05.4c | Tốc độ | `/reports/returns`: KPI khởi chạy TRƯỚC 7 nhánh nặng (chờ KPI hoặc trần 800 ms), câu đếm ‖ dự báo PRODUCT song song — sau cờ `reports.returns-kpi-first` | `cc2379e4` | P1 | DEPLOYED · cờ BẬT | #1073 (+ đo #1067 · #1069 · #1071 · #1075) | `1ba755032` · `7aaa60f26` | `tests/returns-kpi-first.test.ts` (bật / tắt ⇒ cùng dữ liệu, so nguyên khối 17 trường · cờ hỏng ⇒ TẮT) | ✓ `1ba75503` (15:54Z 25/10) · cờ bật 18:27Z 26/10, giữ từ 18:49:05Z | ✓ xen kẽ: probe 1d KPI 2.366 → 686 ms (−71 %), cả trang ×1,06 (< 1,10); HTTP kỳ 30 ngày dữ liệu nguội — KPI 4.728 · 8.127 → 3.217 · 3.610 ms, thân 7.317 · 9.190 → 3.544 · 5.230 ms; ấm như nhau (185–290 ms) | — | Tắt bằng `set-setting reports.returns-kpi-first {"on":false}` nếu số người dùng xấu đi; cờ đệm 30 s |
 | OD-UX-06 | UI/UX | Kiểm mobile cho 5 màn hình dùng nhiều | — | P2 | BACKLOG | — | — | — | — | — | Số nền của `code-erp-56` | — |
 | OD-P3-01 | Inventory | Phiếu kiểm kê (đếm thực tế vs sổ) ⇒ mở được `inventory_accuracy` | — | P1 | BACKLOG | — | — | — | — | — | Chủ shop chốt cách kiểm kê (§7.6) | — |
 | OD-P3-02 | Inventory | Kiểm kê xoay vòng (cycle count) theo nhóm mẫu mã | — | P2 | BACKLOG | — | — | — | — | — | Phụ thuộc OD-P3-01 | — |
@@ -272,6 +273,24 @@ lượt perf-probe cùng công cụ với số nền. Chưa đạt thì việc k
 **Bài học đo (ghi để phiên sau khỏi lặp):** brief đầu tiên của mục trên đoán «~10⁵ dòng» từ TỔNG số dòng mọi câu của
 `getReturnIntelligence`, rồi chọn phương án theo con số đoán đó. Lead đếm thật bằng `db-query` ra 3.544 dòng. Trước khi
 chọn phương án theo kích thước dữ liệu, gửi Lead một câu `count(*)` của đúng câu đó.
+
+**`/reports/returns` sau Suspense (05.4b) và «KPI khởi chạy trước» (05.4c) — căn cứ từng bước (25–26/10/2026).**
+
+| Bước | Phép đo | Số | Đọc |
+|---|---|---|---|
+| Suspense #1065 | returns-page-probe, 1 mẫu / bên | lượt 1 KPI 11.491 → 4.219 ms; kỳ 30 ngày KPI 6.604 → 6.120 ms | Lượt 1 đạt; kỳ 30 ngày chưa được lợi |
+| 1b (#1063) | `select 1` mỗi 100 ms trong lúc trang nguội | trung vị 1 ms (= lúc rảnh) · p90 34–67 · max 713–936 ms | Chờ bể CÓ nhưng hiếm ⇒ không giải thích đầu phản hồi 2–3 s |
+| 1c (#1067) | KPI kỳ 30 ngày một mình ↔ chung cả trang | 1.090 ↔ 2.172 ms (2,0×) | KPI XẾP HÀNG sau các nhánh khác |
+| Dòng thời gian xả (#1069) | lúc chữ KPI / từng ranh giới Suspense tới | KPI tới CÙNG lượt với thân chính (8 ranh giới ở 5.594 ms), không sau khối phân tích | Lượt xả không bị giữ; thân chính resolve muộn |
+| Mốc từng lời hứa (#1071) | 4 thứ thân chính chờ | summary 2.356 · danh mục mã 18 · marketer 361 · hồ sơ hiển thị 2 ms | Thân chính = CHÍNH summary ⇒ hướng (B) |
+| Cờ bật / tắt bằng set-setting (#1073) | 1 cặp, 15:5xZ | KHÔNG so được: dự báo gọi thẳng (không qua cờ) cũng chậm 2,3× ở lượt «sau» | Máy bận lên giữa hai lượt ⇒ cờ giữ TẮT, đo lại xen kẽ |
+| 1d (#1075) | tắt/bật xen kẽ × 3 trong cùng lượt script | KPI trung vị 2.366 → 686 ms · cả trang 3.937 → 4.173 (×1,06) | Dưới ngưỡng 1,10 ⇒ bật cờ |
+| HTTP xen kẽ | tắt/bật × 2 cặp, kỳ 30 ngày nguội | KPI 4.728 · 8.127 → 3.217 · 3.610 ms; thân 7.317 · 9.190 → 3.544 · 5.230 ms | BẬT tốt hơn cả KPI lẫn thân ⇒ giữ cờ BẬT |
+
+Quyết định của Lead đi kèm (25/10): rút giả thuyết «layout xếp hàng trên bể»; KHÔNG làm cổng đếm kết nối cho trang; KHÔNG đưa
+lượt đọc layout qua đệm; CHƯA ghi dòng thời gian vòng sự kiện phía app (đụng mã production) — chỉ mở lại khi chủ shop hoặc số
+đo người dùng cho thấy còn đau. Bài học đo của bước có cờ: so một mẫu «sau» với một mẫu «trước» ở khung giờ khác là đo tải máy,
+không đo thay đổi — đo xen kẽ trong cùng khung giờ, lấy trung vị.
 
 ## 6. Audit theo module
 
