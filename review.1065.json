@@ -1,0 +1,8 @@
+{
+  "pr": 1065,
+  "sha": "ef17d72b4ddf09b95ad8a133bb2bec7feb45d667",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T10:25:44.971Z",
+  "note": "review lead: KPI trang Hàng hoàn dựng trước trong Suspense, phần bảng/biểu đồ chảy sau; cùng loadReturnsPage, không đổi công thức ORDER_OUTCOME hay số liệu; đo trước 3fc6431 (KPI hiện 11,5 s nguội) để so sau deploy."
+}
