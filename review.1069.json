@@ -1,0 +1,8 @@
+{
+  "pr": 1069,
+  "sha": "9cdc9f9df713c57e3860c9a9d8af941528397291",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T12:10:27.032Z",
+  "note": "review lead: chỉ scripts/returns-page-probe.ts, đo dòng thời gian xả (mốc chữ KPI, khối phân tích, dấu $RC/$RS) trên lượt HTTP; chỉ đọc."
+}
