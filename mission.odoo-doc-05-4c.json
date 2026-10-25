@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "odoo-doc-05-4c",
+  "title": "Tệp tiến độ Odoo: 05.4b VERIFIED + 05.4c KPI-trước (cờ bật) + căn cứ §5.4",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-odoo54c",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/odoo-doc-05-4c",
+  "base_sha": "cd91574bae3282ddf04880d6a9b7c0c1e9a88e05",
+  "domains": [],
+  "owned_paths": [
+    "docs/tech/odoo-inspired-erp-upgrade.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-25T18:59:58.588Z",
+  "updated_at": "2026-10-25T18:59:58.588Z",
+  "last_heartbeat": "2026-10-25T18:59:58.588Z",
+  "definition_of_done": []
+}
