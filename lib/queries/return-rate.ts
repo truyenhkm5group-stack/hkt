@@ -1169,13 +1169,15 @@ export type ReturnRateSummary = {
   provisional: number;
 };
 
-/** Tổng hợp ở cấp đơn (mỗi đơn tính một lần) với cùng bộ lọc kỳ / tìm kiếm */
-export async function getReturnRateSummary(period: Period, q: string, basis: TimeBasis = "SHIPPED", value: OrderValueFilter = NO_ORDER_VALUE_FILTER): Promise<ReturnRateSummary> {
-  return memo(["return-rate-summary", khoaKy(period), q, basis, orderValueKey(value)].join(":"), 90_000, () => getReturnRateSummaryUncached(period, q, basis, value));
-}
-
-async function getReturnRateSummaryUncached(period: Period, q: string, basis: TimeBasis, value: OrderValueFilter): Promise<ReturnRateSummary> {
-  const db = await getDb();
+/**
+ * PHẠM VI ĐƠN CỦA KHỐI KPI `/reports/returns` — MỘT bản cho cả ĐẾM (`getReturnRateSummary`) lẫn DANH SÁCH
+ * bấm xuống (`listReturnSummaryOrders`, OD-UX-04). Danh sách đi qua đúng các điều kiện này thì ra đúng số
+ * trên thẻ theo cách dựng, không phải nhờ hai bản viết tay tình cờ khớp nhau.
+ *
+ * CHỈ những bộ lọc thẻ áp: kỳ · mốc · ô tìm · giá trị đơn. Mã hàng / marketer / bộ lọc lý do hoàn (2b)
+ * KHÔNG nằm ở đây — chúng không áp lên thẻ, nên cũng không được áp lên danh sách.
+ */
+export function returnSummaryScope(period: Period, q: string, basis: TimeBasis, value: OrderValueFilter): { conds: SQL[]; moc: SQL; shipmentJoin: SQL } {
   /*
     CÙNG MỐC VỚI BẢNG BÊN DƯỚI — nếu không thì khối tổng đầu trang và bảng theo mã nói hai con số
     khác nhau trong cùng một màn hình, và người đọc không có cách nào biết cái nào đúng. Đây đúng
@@ -1197,6 +1199,40 @@ async function getReturnRateSummaryUncached(period: Period, q: string, basis: Ti
     const like = `%${term}%`;
     conds.push(sql`exists (select 1 from order_items oi where oi.order_id = ${o.id} and oi.is_bonus = false and (oi.sku ilike ${like} or oi.product_name ilike ${like} or oi.variation_detail ilike ${like}))`);
   }
+  // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
+  const shipmentJoin = and(eq(s.orderId, o.id), PRIMARY_ATTEMPT)!;
+  return { conds, moc, shipmentJoin };
+}
+
+/**
+ * TÁM NHÓM ĐƠN mà khối KPI in ra (bốn thẻ + các số ở dòng ghi chú). Một vị từ cho một nhóm, đọc cột
+ * `outcome` (= `ORDER_OUTCOME`, tính một lần trong bảng dẫn xuất) và chặng vận đơn chính. Đếm và lọc
+ * danh sách dùng CHÍNH hàm này — không có bản điều kiện thứ hai.
+ */
+export const RETURN_SUMMARY_BUCKETS = ["shipped", "delivered", "returned", "returnedByRule", "inTransit", "failed", "pending", "cancelled"] as const;
+export type ReturnSummaryBucket = (typeof RETURN_SUMMARY_BUCKETS)[number];
+
+export function returnSummaryBucketWhere(outcome: SQLWrapper, shipmentStage: SQLWrapper): Record<ReturnSummaryBucket, SQL> {
+  return {
+    shipped: sql`${outcome} in (${sql.raw(ELIGIBLE_SENT_SQL)})`,
+    delivered: sql`${outcome} = 'DELIVERED'`,
+    returned: sql`${outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`,
+    returnedByRule: sql`${outcome} = 'RETURNED_BY_RULE'`,
+    inTransit: sql`${outcome} = 'IN_TRANSIT'`,
+    failed: sql`${outcome} = 'IN_TRANSIT' and ${shipmentStage} = 'DELIVERY_FAILED'`,
+    pending: sql`${outcome} = 'NOT_SHIPPED'`,
+    cancelled: sql`${outcome} = 'CANCELLED'`,
+  };
+}
+
+/** Tổng hợp ở cấp đơn (mỗi đơn tính một lần) với cùng bộ lọc kỳ / tìm kiếm */
+export async function getReturnRateSummary(period: Period, q: string, basis: TimeBasis = "SHIPPED", value: OrderValueFilter = NO_ORDER_VALUE_FILTER): Promise<ReturnRateSummary> {
+  return memo(["return-rate-summary", khoaKy(period), q, basis, orderValueKey(value)].join(":"), 90_000, () => getReturnRateSummaryUncached(period, q, basis, value));
+}
+
+async function getReturnRateSummaryUncached(period: Period, q: string, basis: TimeBasis, value: OrderValueFilter): Promise<ReturnRateSummary> {
+  const db = await getDb();
+  const { conds, shipmentJoin } = returnSummaryScope(period, q, basis, value);
   // 13 cột gộp ⇒ trước đây `ORDER_OUTCOME` bị nội tuyến 13 lần cho mỗi đơn. Bảng dẫn xuất tính
   // đúng một lần (xem OUTCOME_FENCE ở đầu file); công thức và con số không đổi.
   const base = db
@@ -1209,8 +1245,7 @@ async function getReturnRateSummaryUncached(period: Period, q: string, basis: Ti
       outcome: outcomeColumn(),
     })
     .from(o)
-    // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
-    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+    .leftJoin(s, shipmentJoin)
     .where(conds.length ? and(...conds) : undefined)
     .offset(OUTCOME_FENCE)
     .as("gtc_base");
@@ -1226,18 +1261,19 @@ async function getReturnRateSummaryUncached(period: Period, q: string, basis: Ti
     như nhau; hợp đồng ước tính bên dưới tự mở kết nối riêng nên PHẢI nằm ngoài giao dịch —
     bọc nó vào là khoá chết (đã dẫm phải một lần ở báo cáo lương).
   */
+  const nhom = returnSummaryBucketWhere(base.outcome, base.shipmentStage);
   const [row] = await chayKhongJit(db, (tx) => tx
     .select({
       orders: sql<number>`count(*)`,
-      shipped: sql<number>`count(*) filter (where ${base.outcome} in (${sql.raw(ELIGIBLE_SENT_SQL)}))`,
-      delivered: sql<number>`count(*) filter (where ${base.outcome} = 'DELIVERED')`,
-      returned: sql<number>`count(*) filter (where ${base.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
-      returnedByRule: sql<number>`count(*) filter (where ${base.outcome} = 'RETURNED_BY_RULE')`,
-      inTransit: sql<number>`count(*) filter (where ${base.outcome} = 'IN_TRANSIT')`,
-      failed: sql<number>`count(*) filter (where ${base.outcome} = 'IN_TRANSIT' and ${base.shipmentStage} = 'DELIVERY_FAILED')`,
-      pending: sql<number>`count(*) filter (where ${base.outcome} = 'NOT_SHIPPED')`,
-      cancelled: sql<number>`count(*) filter (where ${base.outcome} = 'CANCELLED')`,
-      lostRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${base.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)`,
+      shipped: sql<number>`count(*) filter (where ${nhom.shipped})`,
+      delivered: sql<number>`count(*) filter (where ${nhom.delivered})`,
+      returned: sql<number>`count(*) filter (where ${nhom.returned})`,
+      returnedByRule: sql<number>`count(*) filter (where ${nhom.returnedByRule})`,
+      inTransit: sql<number>`count(*) filter (where ${nhom.inTransit})`,
+      failed: sql<number>`count(*) filter (where ${nhom.failed})`,
+      pending: sql<number>`count(*) filter (where ${nhom.pending})`,
+      cancelled: sql<number>`count(*) filter (where ${nhom.cancelled})`,
+      lostRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${nhom.returned}), 0)`,
       // vận đơn đã kết thúc theo Pancake nhưng chưa có trạng thái Viettel Post thật (webhook / tra cứu / nhập danh sách vận đơn)
       finishedNoVtp: sql<number>`count(*) filter (where ${base.shipmentId} is not null and ${base.vtpStatusDate} is null and ${base.outcome} in (${sql.raw(FINISHED_OUTCOMES_SQL)}))`,
       provisional: sql<number>`count(*) filter (where ${base.provisional})`,
@@ -1328,6 +1364,94 @@ export type VariantOrderRow = {
   shipmentStage: (typeof schema.shipments.$inferSelect)["stage"] | null;
   returnedReason: string | null;
 };
+
+export type ReturnSummaryOrderRow = {
+  id: string;
+  systemId: number | null;
+  billFullName: string | null;
+  billPhone: string | null;
+  shipProvince: string | null;
+  stage: (typeof o.$inferSelect)["stage"];
+  outcome: OrderOutcome;
+  revenue: number;
+  vtpOrderNumber: string | null;
+  /** Mốc mà kỳ đang lọc theo (`basis`). `null` = đơn chưa có mốc đó (chỉ xảy ra khi xem "toàn bộ"). */
+  at: string | null;
+  provisional: boolean;
+};
+
+/**
+ * DANH SÁCH ĐƠN CẤU THÀNH MỘT SỐ TRÊN THẺ KPI (OD-UX-04).
+ *
+ * Cùng phạm vi (`returnSummaryScope`), cùng phép nối (vận đơn chính — `PRIMARY_ATTEMPT`), cùng cột kết
+ * quả (`outcomeColumn`), cùng vị từ nhóm (`returnSummaryBucketWhere`) với `getReturnRateSummary` ⇒
+ * `total` bằng con số trên thẻ. Phân trang ở máy chủ; không nhớ đệm — chỉ chạy khi người bấm.
+ */
+export async function listReturnSummaryOrders(
+  period: Period,
+  q: string,
+  basis: TimeBasis,
+  value: OrderValueFilter,
+  bucket: ReturnSummaryBucket,
+  page = 1,
+  pageSize = 100,
+): Promise<{ total: number; page: number; pageCount: number; rows: ReturnSummaryOrderRow[] }> {
+  const db = await getDb();
+  const { conds, moc, shipmentJoin } = returnSummaryScope(period, q, basis, value);
+  const base = db
+    .select({
+      id: o.id,
+      systemId: o.systemId,
+      billFullName: o.billFullName,
+      billPhone: o.billPhone,
+      shipProvince: o.shipProvince,
+      // Bí danh riêng: bảng dẫn xuất còn cột chặng VẬN ĐƠN, hai cột cùng tên `stage` là mơ hồ.
+      stage: sql<(typeof o.$inferSelect)["stage"]>`${o.stage}`.as("order_stage"),
+      revenue: o.totalPriceAfterDiscount,
+      vtpOrderNumber: s.vtpOrderNumber,
+      shipmentStage: s.stage,
+      at: sql<string | null>`${moc}`.as("moc"),
+      provisional: sql<boolean>`${IS_PROVISIONAL}`.as("provisional"),
+      outcome: outcomeColumn(),
+    })
+    .from(o)
+    .leftJoin(s, shipmentJoin)
+    .where(conds.length ? and(...conds) : undefined)
+    .offset(OUTCOME_FENCE)
+    .as("gtc_drill");
+  const loc = returnSummaryBucketWhere(base.outcome, base.shipmentStage)[bucket];
+  const trang = Math.max(1, Math.floor(page) || 1);
+  const [dem, rows] = await chayKhongJit(db, async (tx) => [
+    await tx.select({ n: sql<number>`count(*)` }).from(base).where(loc),
+    await tx
+      .select()
+      .from(base)
+      .where(loc)
+      // Mốc mới nhất trước; đơn chưa có mốc (chỉ khi xem "toàn bộ") xuống cuối; mã đơn để thứ tự ỔN ĐỊNH giữa các trang.
+      .orderBy(sql`${base.at} desc nulls last`, desc(base.id))
+      .limit(pageSize)
+      .offset((trang - 1) * pageSize),
+  ] as const);
+  const total = Number(dem[0]?.n ?? 0);
+  return {
+    total,
+    page: trang,
+    pageCount: Math.max(1, Math.ceil(total / pageSize)),
+    rows: rows.map((r) => ({
+      id: r.id,
+      systemId: r.systemId,
+      billFullName: r.billFullName,
+      billPhone: r.billPhone,
+      shipProvince: r.shipProvince,
+      stage: r.stage,
+      outcome: r.outcome as OrderOutcome,
+      revenue: Number(r.revenue ?? 0),
+      vtpOrderNumber: r.vtpOrderNumber,
+      at: r.at ? new Date(r.at).toISOString() : null,
+      provisional: Boolean(r.provisional),
+    })),
+  };
+}
 
 /** Danh sách đơn của một mẫu mã trong kỳ kèm kết quả, để đối chiếu (tối đa 300 đơn, hoàn xếp trước) */
 export async function listOrdersForVariant(key: string, period: Period): Promise<VariantOrderRow[]> {
