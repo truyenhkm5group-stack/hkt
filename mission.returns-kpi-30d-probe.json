@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "mission_id": "returns-kpi-30d-probe",
+  "title": "returns-page-probe 1c: KPI kỳ 30 ngày một mình ↔ chung trang (phân định trước khi sửa)",
+  "business_goal": "",
+  "status": "RUNNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-kpi30",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/returns-kpi-30d-probe",
+  "base_sha": "15f65d25ce50276854a86dad7714e9636af5e568",
+  "domains": [],
+  "owned_paths": [
+    "scripts/returns-page-probe.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-25T11:30:26.029Z",
+  "updated_at": "2026-10-25T11:30:26.029Z",
+  "last_heartbeat": "2026-10-25T11:30:26.029Z",
+  "definition_of_done": []
+}
