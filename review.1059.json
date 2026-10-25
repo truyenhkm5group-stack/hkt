@@ -1,0 +1,8 @@
+{
+  "pr": 1059,
+  "sha": "b166c2a679f8800a58360ee182f148ff6516c346",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T05:06:17.161Z",
+  "note": "review lead (quyết định lead): công tắc «đủ thông tin = đã xác nhận» ở lượt người không tự nâng đơn có cặp nghi trùng (duplicateDraftFlags dùng CHÍNH assessDuplicate + orderPair, cùng cửa sổ); duplicateFlagsFor không đổi hành vi; lượt bot không đổi; bật công tắc nâng hàng loạt cũng giữ đơn nghi trùng. Kỳ vọng đổi: ca #1055 về công tắc (theo quyết định mới); manual-order-outcome tách SĐT các đơn kh"
+}
