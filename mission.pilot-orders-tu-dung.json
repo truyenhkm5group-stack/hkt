@@ -3,7 +3,7 @@
   "mission_id": "pilot-orders-tu-dung",
   "title": "pilot-orders tự đứng khi chạy riêng (tiền điều kiện 3.9)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T02:32:23.699Z",
-  "updated_at": "2026-10-25T02:34:40.131Z",
+  "updated_at": "2026-10-25T02:49:57.297Z",
   "last_heartbeat": "2026-10-25T02:32:59.165Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1056 → d374abb463ef8706c01a3c49401512e4c78107f2"
+  },
   "handoff": {
     "branch": "claude/pilot-orders-tu-dung",
     "sha": "d4bb08cc0ec09086a53533e8d4afd423f749db3d",
