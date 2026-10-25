@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "app-log-evt-count",
+  "title": "ops app-log-evt-count: đếm dòng sự kiện JSON trong log app (lần hàng rào chặn câu bot)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-logevt",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/app-log-evt-count",
+  "base_sha": "30a907c3d36726b39c1c90007da49ff1e1f79dba",
+  "domains": [],
+  "owned_paths": [
+    "scripts/app-log-evt-count.ts",
+    "tests/app-log-evt-count.test.ts",
+    "tests/sync-fixtures.test.ts",
+    ".github/workflows/ops-vps.yml",
+    "docs/ops-vps-script-notes.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-25T06:55:35.319Z",
+  "updated_at": "2026-10-25T06:55:35.319Z",
+  "last_heartbeat": "2026-10-25T06:55:35.319Z",
+  "definition_of_done": []
+}
