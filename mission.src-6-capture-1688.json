@@ -3,7 +3,7 @@
   "mission_id": "src-6-capture-1688",
   "title": "SRC-6: Lưu mẫu từ trang 1688 (tiện ích Chrome + API token)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -42,7 +42,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-25T11:58:26.238Z",
-  "updated_at": "2026-10-25T11:58:26.238Z",
-  "last_heartbeat": "2026-10-25T11:58:26.238Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-25T11:59:04.298Z",
+  "last_heartbeat": "2026-10-25T11:59:04.298Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/src-6-capture-1688",
+    "sha": "553d051d1cf7df5b1fd10dcddcb123cf0706ac4d",
+    "at": "2026-10-25T11:59:04.298Z",
+    "actor": "DESKTOP-56TH98Y:wt-payroll-gate",
+    "title": "SRC-6: Lưu mẫu từ trang 1688 (tiện ích Chrome + API token)",
+    "summary": "",
+    "tests": [
+      "4/4 shard ĐẠT (shard 3 trên bản đầu, 1/2/4 sau các sửa sổ đăng ký); npm run build ĐẠT; tsc + eslint sạch; sourcing-capture XONG sau rebase lên main 15f65d25c; kiểm đột biến onHandPrice làm bậc giá ⇒ đỏ"
+    ]
+  }
 }
