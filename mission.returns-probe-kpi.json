@@ -3,7 +3,7 @@
   "mission_id": "returns-probe-kpi",
   "title": "returns-page-probe: mốc «KPI hiện» + câu nhỏ xếp hàng khi trang nguội (chỉ script, số «trước» cho Suspense)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-rprobekpi",
@@ -23,9 +23,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T09:56:01.378Z",
-  "updated_at": "2026-10-25T10:00:50.165Z",
+  "updated_at": "2026-10-25T10:21:10.843Z",
   "last_heartbeat": "2026-10-25T09:57:43.178Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1063 → 3fc6431c29481e9cf4bcb477bff28c95fad8b584"
+  },
   "handoff": {
     "branch": "claude/returns-probe-kpi",
     "sha": "0671a3ceadcd41623c3114752fe6625b313706a1",
