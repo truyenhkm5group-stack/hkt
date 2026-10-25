@@ -143,6 +143,8 @@ export type ChatState = {
   directOffer?: import("@/lib/sales-chatbot/short-accept").DirectOffer;
   /** Kết quả đưa lời mua của bình luận sang hộp thư (`recordCommentCarry` — engine.ts), chỉ trên hội thoại BÌNH LUẬN. */
   commentCarry?: { outcome: string; copied: number; at: string; inboxSource?: "PANCAKE_CONV_ID" | "DERIVED_PAGE_PSID" | "NONE" };
+  /** Hội thoại bình luận đã chuyển sang hội thoại hộp thư RIÊNG (lib/sales-chatbot/thread-owner.ts, P0 24/10/2026). */
+  carriedTo?: { conversationId: string; at: string };
   /** Mọi TỔNG / tiền hàng máy chủ đã tính cho các giỏ / đơn nháp trong hội thoại (`noteSeenTotals`) — hàng rào chặn nói lại tổng của giỏ CŨ. */
   seenTotals?: number[];
   /**

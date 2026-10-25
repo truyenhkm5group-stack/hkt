@@ -2477,13 +2477,14 @@ export const COMMENT_CARRY_OUTCOMES = ["MOVED", "EXISTING_INBOX", "OPENED_NEW", 
 export type CommentCarryOutcome = (typeof COMMENT_CARRY_OUTCOMES)[number];
 
 /** Ghi kết quả vào `state.commentCarry` của hội thoại bình luận (qua `writeConversation`). Lỗi không làm hỏng lượt trả lời. */
-export async function recordCommentCarry(conversationId: string, outcome: CommentCarryOutcome, copied: number, now: Date, inboxSource?: "PANCAKE_CONV_ID" | "DERIVED_PAGE_PSID" | "NONE"): Promise<void> {
+export async function recordCommentCarry(conversationId: string, outcome: CommentCarryOutcome, copied: number, now: Date, inboxSource?: "PANCAKE_CONV_ID" | "DERIVED_PAGE_PSID" | "NONE", carriedTo?: string): Promise<void> {
   const conv = await loadConversation(conversationId);
   if (!conv) return;
   const st = (conv.state ?? {}) as ChatState;
   // `inboxSource` (P0 24/10/2026): mã hộp thư lấy từ đâu — `PANCAKE_CONV_ID` (Pancake trả đúng dạng page_PSID) · `DERIVED_PAGE_PSID` (dựng
   // từ page + from_id) · `NONE` (không ra được ⇒ không chép). Đo được bằng ops comment-inbox-link-probe / conv-money-trace --scan.
-  await writeConversation(conversationId, { state: { ...st, commentCarry: { outcome, copied, at: now.toISOString(), ...(inboxSource ? { inboxSource } : {}) } } as Record<string, unknown> }, now);
+  // `carriedTo` (P0 24/10/2026, thread-owner.ts): hộp thư có hội thoại RIÊNG ⇒ hội thoại bình luận «đã chuyển» sang đó.
+  await writeConversation(conversationId, { state: { ...st, commentCarry: { outcome, copied, at: now.toISOString(), ...(inboxSource ? { inboxSource } : {}) }, ...(carriedTo ? { carriedTo: { conversationId: carriedTo, at: now.toISOString() } } : {}) } as Record<string, unknown> }, now);
 }
 
 /** Tin lưu trữ ⇒ dạng `customerTextsSince` đọc (chữ thô, mốc, cờ kết quả công cụ). HÀM THUẦN. */

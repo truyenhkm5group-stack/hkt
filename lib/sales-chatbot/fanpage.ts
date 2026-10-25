@@ -27,7 +27,7 @@ import { applyConversationControl, controlOf, controlSkipNote } from "@/lib/sale
 import { botMaySend, captureSendSnapshot, holdGate, startHumanCooldown } from "@/lib/sales-chatbot/conversation-control";
 import { aiHoldOf, FANPAGE_STAFF_REASON, HUMAN_COOLDOWN_MINUTES } from "@/lib/sales-chatbot/ai-hold-shared";
 import { DUPLICATE_SOURCE_REASON, insertCustomerInbound, loadTransportFacts, MESSENGER_OWNS_PAGE_REASON, NON_CANONICAL_NOTE, pageRouteChangedAt, routeVerdict, type RouteVerdict } from "@/lib/sales-chatbot/channel-ownership";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { and, asc, eq, gte, inArray, isNotNull, isNull, like, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { messagingConnectionSummaries, openActiveConnection } from "@/lib/connectors/service";
@@ -64,6 +64,7 @@ import { recordConversationEvent } from "@/lib/sales-chatbot/events";
 import { notifySalesChatHandoff } from "@/lib/sales-chatbot/alerts";
 import { CONTROL_HUMAN_NOTE, NEEDS_HUMAN_NOTE, TAKEOVER_REASON } from "@/lib/sales-chatbot/conversation-control-shared";
 import { HANDOFF_QUEUE_CLEAR } from "@/lib/sales-chatbot/handoff-routing-shared";
+import { fanpageVisitorKey, ownsThreadSql } from "@/lib/sales-chatbot/thread-owner";
 
 export const FANPAGE_CONNECTOR = "pancake-fanpage";
 /** Nhân viên thật vừa trả lời trên fanpage ⇒ bot im lặng chừng này phút cho hội thoại đó. */
@@ -394,9 +395,8 @@ async function directOfferPending(pageId: string, threadId: string): Promise<boo
   return Boolean(o && !o.ambiguous);
 }
 
-export function fanpageVisitorKey(pageId: string, threadId: string): string {
-  return createHash("sha256").update(`fanpage:${pageId}:${threadId}`).digest("hex");
-}
+// Khoá hội thoại của một luồng — MỘT chỗ ở thread-owner.ts (chủ luồng, P0 24/10/2026); xuất lại để nơi gọi cũ giữ nguyên.
+export { fanpageVisitorKey };
 
 export type ReceiveResult = { queued: boolean; reason: string };
 
@@ -942,8 +942,16 @@ export async function conversationFor(pageId: string, threadId: string): Promise
 export async function markWaitingForCustomer(conversationId: string, now: Date, threadId?: string): Promise<void> {
   const db = await getDb();
   const c = schema.salesChatConversations;
-  const [row] = await db.select({ status: c.status, state: c.state }).from(c).where(eq(c.id, conversationId)).limit(1);
+  const [row] = await db.select({ status: c.status, state: c.state, visitorKey: c.visitorKey, pageId: c.pageId }).from(c).where(eq(c.id, conversationId)).limit(1);
   if (!row) return;
+  // MỘT LUỒNG MỘT HỘI THOẠI (P0 HSLC 24/10/2026, cặp #B1135EC0 / #E0663E84 — lib/sales-chatbot/thread-owner.ts): chỉ hội thoại SỞ HỮU luồng
+  // (khoá khách = khoá của luồng ấy, tức lượt chép MOVED) mới được nhận `thread_id` mới + WAITING + lịch nhắc. Lượt chép EXISTING_INBOX /
+  // OPENED_NEW: hộp thư đã có hội thoại riêng — hội thoại bình luận GIỮ luồng bình luận, không chờ khách, không nhắc (state.carriedTo trỏ
+  // sang hội thoại hộp thư). Trước đây nó nhận luồng hộp thư ⇒ hai hàng cùng (page, thread), hai bot cùng trả lời, mỗi bên một đơn.
+  if (threadId && row.visitorKey !== fanpageVisitorKey(row.pageId ?? "", threadId)) {
+    await db.update(c).set({ lastBotAt: now }).where(eq(c.id, conversationId));
+    return;
+  }
   const st = (row.state ?? {}) as ChatState;
   // Khách đang XIN HUỶ (lượt giữ đơn đã gửi — P0 #863): không xếp lịch nhắc. Một lần huỷ chỉ có ĐÚNG MỘT lượt giữ đơn; tin nhắc tự động
   // sau đó là lượt giữ đơn thứ hai.
@@ -1081,7 +1089,8 @@ async function carryIntoInbox(pageId: string, inboxId: string, commentConversati
       copied = r.copied;
       outcome = r.already ? "ALREADY_COPIED" : found ? "EXISTING_INBOX" : "OPENED_NEW";
     }
-    await recordCommentCarry(commentConversationId, outcome, copied, now, source);
+    // Hộp thư có hội thoại RIÊNG ⇒ hội thoại bình luận «đã chuyển» sang đó (thread-owner.ts) — không bao giờ nhận luồng hộp thư.
+    await recordCommentCarry(commentConversationId, outcome, copied, now, source, inbox && inbox.id !== commentConversationId ? inbox.id : undefined);
   } catch (e) {
     await recordCommentCarry(commentConversationId, "FAILED", 0, now, source).catch(() => undefined);
     // Chỉ tên lỗi: thông điệp lỗi Drizzle mang cả tham số câu SQL (chữ khách) — không đưa vào log.
@@ -1709,7 +1718,7 @@ export async function resendPendingFanpageReplies(deps: FanpageDeps = {}): Promi
     const rows = await db
       .select({ id: c.id, threadId: c.threadId, status: c.status, state: c.state, pending: sql<string>`(${c.state}->'pendingSend')::text` })
       .from(c)
-      .where(and(eq(c.channel, "FANPAGE"), eq(c.pageId, pageId), isNotNull(c.threadId), sql`${c.state} ? 'pendingSend'`))
+      .where(and(eq(c.channel, "FANPAGE"), eq(c.pageId, pageId), isNotNull(c.threadId), sql`${c.state} ? 'pendingSend'`, ownsThreadSql('"sales_chat_conversations"')))
       .limit(20);
     for (const row of rows) {
       out.checked += 1;

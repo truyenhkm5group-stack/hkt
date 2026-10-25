@@ -34,6 +34,7 @@ import { DEAD_AI_DOWN_NOTE, DEAD_SEND_NOTE_PREFIX } from "@/lib/sales-chatbot/in
 import { messengerTokenFor } from "@/lib/sales-chatbot/messenger";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { rowsOf } from "@/lib/sql-rows";
+import { threadOwner } from "@/lib/sales-chatbot/thread-owner";
 
 export const WEBHOOK_CHECK_SETTING_KEY = "ai.salesHealth.webhookChecks";
 export const WEBHOOK_CHECK_EVERY_MINUTES = 360;
@@ -243,9 +244,8 @@ const PLAN_NOTES = AI_STOP_REASONS.map((r) => AI_STOP_NOTE[r]);
 const planReasonOf = (note: string | null): AiStopReason | null => (note ? (AI_STOP_REASONS.find((r) => AI_STOP_NOTE[r] === note) ?? null) : null);
 
 async function conversationOf(pageId: string, threadId: string): Promise<string | null> {
-  const c = schema.salesChatConversations;
-  const [row] = await (await getDb()).select({ id: c.id }).from(c).where(and(eq(c.pageId, pageId), eq(c.threadId, threadId))).limit(1);
-  return row?.id ?? null;
+  // Chủ luồng (thread-owner.ts) — không lấy nhầm hội thoại bình luận bị đè luồng hộp thư (P0 24/10/2026).
+  return (await threadOwner(pageId, threadId))?.id ?? null;
 }
 
 async function readInbound(now: Date) {
