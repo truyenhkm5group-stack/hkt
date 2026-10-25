@@ -98,7 +98,9 @@ export type ChatState = {
    * (review bảo mật 08/10/2026). `savedAddress` = địa chỉ / tên do MÁY CHỦ điền từ
    * hồ sơ chủ SĐT — mọi màn đọc cho khách phải che.
    */
-  customer?: { id: string | null; name: string; phone: string; address: string; province: string; simulated: boolean; at?: string; savedAddress?: boolean; verifiedIdentity?: boolean };
+  customer?: { id: string | null; name: string; phone: string; address: string; province: string; simulated: boolean; at?: string; savedAddress?: boolean; verifiedIdentity?: boolean; source?: "COMMENT"; sourceConversationId?: string };
+  /** Hội thoại bình luận CÙNG KHÁCH (identity-link VERIFIED) — lib/sales-chatbot/comment-facts.ts, P0 24/10/2026. */
+  linkedComment?: import("@/lib/sales-chatbot/comment-facts").LinkedComment;
   /**
    * `shownTurn` = lượt (seq tin khách) bot lên / sửa đơn nháp và đọc tóm tắt; `firstShownTurn` = lượt khách thấy tóm tắt LẦN
    * ĐẦU. Chưa từng thấy tóm tắt ⇒ chốt chỉ ở lượt SAU; đã thấy ở lượt trước rồi đồng ý thêm / sửa món ⇒ sửa và chốt luôn.
