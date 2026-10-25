@@ -1,0 +1,8 @@
+{
+  "pr": 1063,
+  "sha": "0671a3ceadcd41623c3114752fe6625b313706a1",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T10:00:56.968Z",
+  "note": "review lead: chỉ-script đo; mốc «KPI hiện» trên luồng thân + đo câu nhỏ xếp hàng (select 1 mỗi 100 ms) lúc rảnh và trong lượt nguội."
+}
