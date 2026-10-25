@@ -1,0 +1,8 @@
+{
+  "pr": 1056,
+  "sha": "d4bb08cc0ec09086a53533e8d4afd423f749db3d",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-25T02:34:44.870Z",
+  "note": "review lead: bài pilot-orders tự gieo tiền điều kiện (đơn Pancake xác nhận) và assert ORG_HAS_SYNCED_ORDERS/ORG_DECLARED_ERP_NATIVE bằng đúng vị ngữ của mã; export hai hằng, không đổi logic; không đổi kỳ vọng."
+}
