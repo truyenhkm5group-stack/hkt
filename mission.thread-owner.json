@@ -3,7 +3,7 @@
   "mission_id": "thread-owner",
   "title": "Một luồng một hội thoại: EXISTING_INBOX thôi đè luồng hộp thư (gốc #B1135EC0/#E0663E84)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-hbci",
@@ -24,11 +24,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T02:13:55.696Z",
-  "updated_at": "2026-10-25T02:38:21.524Z",
+  "updated_at": "2026-10-25T03:46:26.480Z",
   "last_heartbeat": "2026-10-25T02:14:38.865Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1054 → ca0992dd072fc88fd2e4cd551a0e239785ab3877"
+    "merged": "#1054 → ca0992dd072fc88fd2e4cd551a0e239785ab3877",
+    "verify": "PASS 80a9f0dfde3f0d51b7fbf9f971ea83cfa8546ade 2026-10-25T03:45:36.433Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40157145737"
   },
   "handoff": {
     "branch": "claude/thread-owner",
