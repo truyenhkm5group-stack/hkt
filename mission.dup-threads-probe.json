@@ -3,7 +3,7 @@
   "mission_id": "dup-threads-probe",
   "title": "Chạy thử đếm luồng có > 1 hội thoại (gốc #B1135EC0/#E0663E84)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-ckl",
@@ -21,7 +21,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-25T01:53:25.958Z",
-  "updated_at": "2026-10-25T01:53:25.958Z",
-  "last_heartbeat": "2026-10-25T01:53:25.958Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-25T01:54:13.526Z",
+  "last_heartbeat": "2026-10-25T01:54:13.526Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/dup-threads-probe",
+    "sha": "fab356afd22c51afdac2b698af65dff2feba90db",
+    "at": "2026-10-25T01:54:13.526Z",
+    "actor": "DESKTOP-56TH98Y:wt-ckl",
+    "title": "Chạy thử đếm luồng có > 1 hội thoại (gốc #B1135EC0/#E0663E84)",
+    "summary": "(4) chạy thử chỉ script: --dup-threads [--all] luồng >1 hội thoại, chủ vs bị đè, WAITING, đơn sống mỗi bên",
+    "tests": [
+      "tsc · eslint sạch · chạy thẳng ops-log-leak · comment-inbox-link-probe · ops-script-size ĐẠT"
+    ]
+  }
 }
