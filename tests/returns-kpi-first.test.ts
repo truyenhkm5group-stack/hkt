@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { clearMemo } from "@/lib/cache";
 import { setSettingJson } from "@/lib/settings";
-import { choKpiHoacTran, KPI_FIRST_CAP_MS, KPI_FIRST_SETTING_KEY, loadReturnsPage, returnsPageParams } from "@/lib/queries/returns-report-page";
+import { choKpiHoacTran, KPI_FIRST_CAP_MS, KPI_FIRST_FLAG_TTL_MS, KPI_FIRST_SETTING_KEY, kpiFirstEnabled, loadReturnsPage, returnsPageParams } from "@/lib/queries/returns-report-page";
 
 /*
   ═══ /reports/returns: KPI KHỞI CHẠY TRƯỚC (hướng B, 25/10/2026) ═══
@@ -66,10 +66,21 @@ export async function testReturnsKpiFirstDb() {
   try {
     const tat = await chup(false);
     const bat = await chup(true);
+    assert.equal(await kpiFirstEnabled(), true, "lượt bật thật sự đi nhánh bật — nếu không phép so dưới so hai lượt TẮT");
+    // So NGUYÊN KHỐI: đủ 17 trường của loadReturnsPage (bảng mẫu mã · tóm tắt · nguồn đơn · lý do · intel · bậc giá · nguyên nhân …).
+    assert.deepEqual(Object.keys(bat).sort(), Object.keys(tat).sort());
     assert.deepEqual(bat, tat, "bật cờ KPI-trước chỉ đổi THỨ TỰ khởi chạy — dữ liệu trang phải y hệt");
+
+    // Cờ hỏng ⇒ TẮT: chuỗi trần, số, mảng, object thiếu `on` / `on` không phải true.
+    for (const hong of ["true", 1, [true], {}, { on: "true" }, { on: 1 }]) {
+      await setSettingJson(KPI_FIRST_SETTING_KEY, hong);
+      clearMemo();
+      assert.equal(await kpiFirstEnabled(), false, `cờ ${JSON.stringify(hong)} ⇒ TẮT`);
+    }
+    assert.ok(KPI_FIRST_FLAG_TTL_MS > 0 && KPI_FIRST_FLAG_TTL_MS <= 60_000, "TTL cờ ngắn — người đo phải chờ đủ TTL sau set-setting");
   } finally {
     await setSettingJson(KPI_FIRST_SETTING_KEY, { on: false });
     clearMemo();
   }
-  console.log("  ✓ KPI khởi chạy trước: bật / tắt cờ ⇒ loadReturnsPage ra cùng một dữ liệu (mọi khối, mọi số)");
+  console.log(`  ✓ KPI khởi chạy trước: bật / tắt cờ ⇒ loadReturnsPage ra cùng một dữ liệu (mọi khối, mọi số) · cờ hỏng ⇒ TẮT · đệm cờ ${KPI_FIRST_FLAG_TTL_MS / 1000} s`);
 }

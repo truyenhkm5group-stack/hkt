@@ -26,7 +26,7 @@ import { listProductCodes } from "@/lib/queries/product-code";
 import { POST_OFFICE_QUERY_MAX, REASON_FILTER_KEYS, REASON_OUTCOME_FILTERS } from "@/lib/constants/return-reason-filters";
 import type { OutcomeGroup } from "@/lib/constants/truth";
 import { reasonFiltersActive, type ReasonFilterSelection } from "@/lib/returns/reason-filters";
-import { collectAsOf } from "@/lib/cache";
+import { collectAsOf, memo } from "@/lib/cache";
 import { getSettingJson } from "@/lib/settings";
 import { getProjectedDeliveryMetrics } from "@/lib/queries/projected-delivery";
 
@@ -179,9 +179,24 @@ export function choKpiHoacTran(kpi: Promise<unknown>, tranMs: number): Promise<v
   });
 }
 
-async function kpiTruocBat(): Promise<boolean> {
+/**
+ * Đệm lượt đọc cờ — trang này không chạy trong `withSettingsScope`, nên không đệm thì MỖI lượt mở trang thêm một lượt đọc
+ * `settings`. Hệ quả cho người đo: `set-setting` chạy ở TIẾN TRÌNH KHÁC (không xoá được đệm của app), nên cờ mới có hiệu
+ * lực sau tối đa `KPI_FIRST_FLAG_TTL_MS` + MỘT lượt mở trang (lượt đầu sau TTL vẫn nhận giá trị cũ rồi làm mới phía sau —
+ * ngữ nghĩa trả-số-cũ của `memo`). Đo «sau» thì: set-setting → chờ ≥ 30 s → mở trang một lần → mới đo.
+ */
+export const KPI_FIRST_FLAG_TTL_MS = 30_000;
+
+/**
+ * Cờ bật CHỈ khi giá trị là object có `on === true` (`{"on": true}`). Chuỗi trần, số, thiếu khoá, đọc lỗi ⇒ TẮT — `set-setting`
+ * từng băm chuỗi trần rồi để màn hình đọc ra mặc định trong im lặng (20/10/2026), nên ở đây «không chắc» luôn là «tắt».
+ */
+export async function kpiFirstEnabled(): Promise<boolean> {
   try {
-    return (await getSettingJson<{ on?: unknown }>(KPI_FIRST_SETTING_KEY, {})).on === true;
+    return await memo(`returns-kpi-first-flag`, KPI_FIRST_FLAG_TTL_MS, async () => {
+      const v = await getSettingJson<{ on?: unknown }>(KPI_FIRST_SETTING_KEY, {});
+      return typeof v === "object" && v !== null && !Array.isArray(v) && v.on === true;
+    });
   } catch {
     return false;
   }
@@ -217,7 +232,7 @@ export function startReturnsPage(p: ReturnsPageParams) {
   const summary = getReturnRateSummary(params.period, params.q, basis, giaTriDon);
   const danhMucMa = listProductCodes();
   const danhSachMarketer = listAttributedMarketers();
-  const mo = kpiTruocBat().then((bat) => {
+  const mo = kpiFirstEnabled().then((bat) => {
     if (!bat) return;
     // ĐÚNG tham số `getReturnRateSummary` truyền cho dự báo ⇒ cùng khoá đệm, summary gộp vào lượt này.
     getProjectedDeliveryMetrics(params.period, basis, "PRODUCT", giaTriDon).catch(() => undefined);
