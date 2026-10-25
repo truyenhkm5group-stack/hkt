@@ -53,6 +53,26 @@
 | Điều kiện cấp AppKey (pháp nhân, tài khoản 1688, phí, quota, điều khoản dùng xuyên biên giới / bán lại dữ liệu) | CHƯA KIỂM CHỨNG — là blocker B1 (§6) |
 | Mua cho Việt Nam | Theo trang OT Commerce (bên thứ ba, ĐÃ ĐỌC https://otcommerce.com/1688-com/): «Items from 1688.com are for purchase within China only» ⇒ mua thật phải qua đơn vị mua hộ / vận chuyển. CHƯA KIỂM CHỨNG trên trang 1688. |
 
+### 2.1b Cập nhật 25/10/2026 — ứng viên đường API chính thức cho SRC-6 / SRC-7
+
+Nghiên cứu web công khai do Tech Lead tổng hợp ngày 25/10/2026, **chưa có truy cập trình duyệt của chủ shop**, chưa ai trong nhóm
+kỹ thuật đọc được trang gốc trên open.1688.com (cần đăng nhập). Mọi dòng dưới đây là **CHƯA KIỂM CHỨNG trên tài liệu gốc** — đủ để
+biết phải hỏi gì ở B1, chưa đủ để viết connector.
+
+| Mục | Điều đã biết | Nguồn · mức tin |
+|---|---|---|
+| Đường hợp lệ duy nhất | API chính thức của 1688, cổng `gw.open.1688.com`, nhóm `com.alibaba.fenxiao.crossborder` (phân phối xuyên biên giới) | Skill ClawHub `1688aiinfra/1688-product-search` · CHƯA đối chiếu tài liệu gốc |
+| Các lời gọi ứng viên | `product.search.keywordQuery` (tìm từ khoá) · `product.search.imageQuery` (tìm bằng ảnh) · `product.image.upload` (tải ảnh lên trước khi tìm ảnh) · `product.search.queryProductDetail` (chi tiết) · `querySellerOfferList` (hàng của một NCC) … | Như trên · tên lời gọi CHƯA đối chiếu |
+| Điều kiện gọi | AppKey + AppSecret + OAuth refresh token của một ứng dụng đã đăng ký **«gói giải pháp ERP xuyên biên giới»** | Như trên · điều kiện pháp nhân / phí / hạn mức vẫn là B1 |
+| Ngôn ngữ trả về | Mặc định tiếng Anh (`en`), không phải tiếng Trung | Như trên ⇒ bộ sinh truy vấn (SRC-2) và màn so sánh phải đọc được tiêu đề tiếng Anh, không giả định chữ Hán |
+| Tìm bằng ảnh | Ảnh ngoài 1688 (ảnh tự chụp, ảnh từ trang khác) **có thể không tìm được** | Như trên ⇒ SRC-7 phải in «không tìm thấy» là kết quả thật, không phải lỗi; không tự lùi về cào trang |
+| Giá | Giá trả về là **giá gốc, chưa trừ khuyến mãi** | Như trên ⇒ công thức giá về (§3.3) vẫn ghi «ƯỚC TÍNH» và lấy giá này làm trần, không làm giá mua |
+| Ánh xạ trường (bậc giá, MOQ, «入驻N年» số năm hoạt động, «源头工厂» xưởng nguồn, «回头率» tỷ lệ khách quay lại) | Tham khảo cách đặt tên trường ở `jackwener/opencli` `clis/1688/shared.js` | **CHỈ THAM KHẢO** cách gọi tên trường — kho đó đọc trang (cào), KHÔNG đưa mã hay cách lấy dữ liệu của nó vào ERP |
+
+**Tránh:** mọi kho mã cào trang 1688 / Taobao hoặc gọi giao thức nội bộ `mtop` của Alibaba — vi phạm điều khoản, vượt chống bot, và
+đúng loại nguồn §5 đã loại. Một connector SRC-6 chỉ được viết khi chủ shop xác nhận điều kiện tài khoản ở B1 và đối chiếu được tên lời
+gọi trên trang gốc; lúc đó tên lời gọi mới được đưa vào thiết kế (§3).
+
 ### 2.2 Alibaba.com (ICBU) và Alibaba Cloud
 
 | Mục | Kết quả |
@@ -184,7 +204,7 @@ Mỗi PR nhỏ, có bài kiểm, theo AGENTS §6; P1 có thể chạy ngay khi c
   đó: ERP chỉ đọc chữ của link người dán, ảnh do trình duyệt người xem tải. Ngày nối API thật (B1) PHẢI gỡ miễn trừ và khai nhà cung
   cấp dữ liệu vào sổ bên xử lý phụ (`lib/constants/legal-registers.ts` + `docs/legal/SUBPROCESSOR_REGISTER.md`).
 
-- **Pháp lý dữ liệu:** dùng dữ liệu 1688 / Taobao không có quyền là rủi ro của SHOP (điều khoản TMAPI nói rõ như vậy). Không phương án nào ở đây cào hay vượt chống bot.
+- **Pháp lý dữ liệu:** dùng dữ liệu 1688 / Taobao không có quyền là rủi ro của SHOP (điều khoản TMAPI nói rõ như vậy). Không phương án nào ở đây cào hay vượt chống bot — kể cả các kho mã nguồn mở đọc trang hoặc gọi `mtop` (§2.1b): chỉ được mượn TÊN TRƯỜNG để đặt tên, không mượn cách lấy dữ liệu.
 - **Mua thật:** 1688 bán nội địa Trung Quốc; mua cho Việt Nam phải qua đơn vị mua hộ — ERP không tự đặt và không trả tiền.
 - **Số «ước tính» bị đọc như số thật:** mọi giá về VN mang nhãn, lưu tham số, và so với giá nhập thật khi hàng về.
 - **Chi phí AI:** có trần theo tổ chức; vượt trần chỉ chạy phần cố định.
@@ -195,7 +215,7 @@ Mỗi PR nhỏ, có bài kiểm, theo AGENTS §6; P1 có thể chạy ngay khi c
 
 | # | Việc | Ai làm | Vì sao | Chi phí ước tính |
 |---|---|---|---|---|
-| B1 | Đăng nhập https://open.1688.com bằng tài khoản 1688 của shop (hoặc tạo), chụp màn hình trang **điều kiện nhà phát triển / xin AppKey**: loại pháp nhân được phép (có nhận công ty Việt Nam không), có cần giấy phép kinh doanh Trung Quốc, phí, hạn mức, điều khoản về dùng xuyên biên giới / lưu trữ dữ liệu. Làm tương tự ở https://open.alibaba.com nếu muốn Alibaba.com | Chủ shop (hoặc người được ủy quyền giữ tài khoản) | Trang chính thức chỉ hiện sau khi chạy JavaScript / đăng nhập; máy kỹ thuật không đọc được | Chưa biết — phụ thuộc kết quả B1 |
+| B1 | Đăng nhập https://open.1688.com bằng tài khoản 1688 của shop (hoặc tạo), chụp màn hình trang **điều kiện nhà phát triển / xin AppKey**: loại pháp nhân được phép (có nhận công ty Việt Nam không), có cần giấy phép kinh doanh Trung Quốc, phí, hạn mức, điều khoản về dùng xuyên biên giới / lưu trữ dữ liệu. Cụ thể (§2.1b): có đăng ký được **«gói giải pháp ERP xuyên biên giới»** (`com.alibaba.fenxiao.crossborder`) không, nhận được AppKey + AppSecret + OAuth refresh token không, và trang tài liệu có đúng các lời gọi `product.search.keywordQuery` / `imageQuery` / `queryProductDetail` không. Làm tương tự ở https://open.alibaba.com nếu muốn Alibaba.com | Chủ shop (hoặc người được ủy quyền giữ tài khoản) | Trang chính thức chỉ hiện sau khi chạy JavaScript / đăng nhập; máy kỹ thuật không đọc được | Chưa biết — phụ thuộc kết quả B1 |
 | B2 | Nếu B1 không khả thi: chọn một đơn vị mua hộ / đối tác có API CHÍNH THỨC với 1688 và xin **văn bản xác nhận quyền dùng dữ liệu** + điều khoản lưu trữ. OT Commerce có bảng giá công khai (gói 150–600 $, 0,001–0,012 $/lượt, duy trì tối thiểu 5 $/ngày — ĐÃ ĐỌC https://otcommerce.com/key-payments/) nhưng chưa chứng minh quyền dùng dữ liệu | Chủ shop | Không dùng nguồn không chứng minh được quyền | Khoảng 150 $/tháng trở lên nếu chọn OT Commerce (theo bảng giá đọc được) |
 | B3 | Chốt trần chi phí AI cho sourcing (lượt / ngày / tổ chức) | Chủ shop | Tránh hết tiền AI trả trước (đã xảy ra 06/10 và 19/10) | Dưới 0,02 USD / lượt (ước tính) |
 | B4 | Cung cấp tham số giá về: nguồn tỷ giá CNY→VND, báo giá cước TQ→VN theo kg của đơn vị vận chuyển đang dùng, phí mua hộ %, thuế / phí % theo nhóm hàng | Chủ shop + đơn vị vận chuyển | Công thức không hard-code; thiếu tham số ⇒ không tính | Không |
