@@ -3,7 +3,7 @@
   "mission_id": "vtp-gap-skew",
   "title": "vtp-direct-sync (1): lệch đồng hồ tệp ↔ webhook ≤ 120 s không phải rơi gói",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-vds",
@@ -28,11 +28,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T17:18:44.166Z",
-  "updated_at": "2026-10-25T17:42:30.112Z",
+  "updated_at": "2026-10-25T18:28:45.801Z",
   "last_heartbeat": "2026-10-25T17:19:33.513Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1076 → b65521872fcc11610c616df82fb263592ba9a1e5"
+    "merged": "#1076 → b65521872fcc11610c616df82fb263592ba9a1e5",
+    "verify": "PASS cd91574bae3282ddf04880d6a9b7c0c1e9a88e05 2026-10-25T18:28:11.848Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40219617079"
   },
   "handoff": {
     "branch": "claude/vtp-gap-skew",
