@@ -1,8 +1,8 @@
 {
   "pr": 1055,
-  "sha": "e898c57825aca1245f327fc47066b1622340db96",
+  "sha": "b909073dcb4cf45c6cf623e19435c98f1dc98d4f",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-25T02:23:42.205Z",
-  "note": "review lead: hai đường xác nhận tay (nút nhanh + form) có rào hai bước do máy chủ ép khi đơn có tín hiệu trùng/cờ POSSIBLE_SAME_CUSTOMER; khoá duplicateAck, tín hiệu mới chưa thấy ⇒ từ chối lại; audit ORDER_CONFIRM_DUPLICATE_ACK; rào sau giá/hạn mức nợ; gỡ cờ cũng rào; đường bot không qua rào; không đổi kỳ vọng bài cũ (các lượt đi hai bước)."
+  "at": "2026-10-25T03:45:38.829Z",
+  "note": "review lead (lại): rào đọc stage NGƯỜI xin (không phải stage sau công tắc tự nâng) ⇒ sửa giữ «Mới» không bị rào; thêm ca + đột biến; không đổi kỳ vọng."
 }
