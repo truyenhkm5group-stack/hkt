@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "mission_id": "thread-owner",
+  "title": "Một luồng một hội thoại: EXISTING_INBOX thôi đè luồng hộp thư (gốc #B1135EC0/#E0663E84)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-hbci",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/thread-owner",
+  "base_sha": "2e38cf17c0e8a448a7ca3619e79b2b10a52dc25f",
+  "domains": [],
+  "owned_paths": [
+    "lib/sales-chatbot/",
+    "tests/sync-fixtures.test.ts",
+    "tests/thread-owner.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-25T02:13:55.696Z",
+  "updated_at": "2026-10-25T02:13:55.696Z",
+  "last_heartbeat": "2026-10-25T02:13:55.696Z",
+  "definition_of_done": []
+}
