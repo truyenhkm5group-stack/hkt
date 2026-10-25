@@ -107,8 +107,10 @@ function hundredthsOf(v: unknown, max: number): number | null {
   return typeof r === "number" ? r : null;
 }
 
-const COLOR_PROP = /颜色|色/;
-const SIZE_PROP = /尺码|尺寸|码数|size/i;
+// Tên thuộc tính theo cả chữ Trung gốc lẫn chữ 1688 đã DỊCH (tài khoản Global / tiếng Việt: «màu sắc», «kích cỡ» — đo 25/10 trên
+// 951023546393). Không nhận ra size ⇒ cả khoá SKU dồn vào ô màu (vd «rượu vang đỏ / S.»), nhãn sai dù giá vẫn đúng.
+const COLOR_PROP = /颜色|色|màu/i;
+const SIZE_PROP = /尺码|尺寸|码数|size|kích cỡ|kích thước/i;
 const WEIGHT_UNIT = /斤|公斤|千克|kg/i;
 
 type SkuEntry = { price?: unknown; discountPrice?: unknown };

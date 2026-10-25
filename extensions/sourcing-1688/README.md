@@ -38,6 +38,10 @@ Vì sao: khi tài khoản đặt **tiếng Việt / Global**, chính 1688 dịch
 «M (khuyến nghị 90 ~ 100 kg)» thật ra là 90–100 斤 = **45–50 kg**. Khi đó ERP vẫn lưu được giá (số không bị dịch) nhưng **không đọc
 bảng size** và gắn cờ «1688 trả dữ liệu đã dịch».
 
+Bản dịch của 1688 còn hỏng cả TÊN SIZE và tên thuộc tính: đo 25/10/2026 trên 951023546393, size «L» bị dịch thành **«tôi»**, «S» thành
+«S.», «尺码» thành «kích cỡ». ERP vẫn tách đúng màu với size (nhận cả tên thuộc tính đã dịch) và vẫn lưu giá, nhưng tên size bạn thấy
+trong ERP là chữ 1688 đã dịch — đặt 1688 về 简体中文 rồi bấm lại để có tên gốc và bảng size quy kg.
+
 Lưu ý của 1688: chọn tiếng Việt thì 1688 bắt bỏ «中国大陆» khỏi 主营国家. Đặt lại 简体中文 là đủ.
 
 Muốn đọc trang bằng tiếng Việt: dùng **Dịch trang** của Chrome (chuột phải ⇒ Dịch sang tiếng Việt). Dịch của Chrome chỉ đổi chữ

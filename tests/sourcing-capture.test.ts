@@ -29,7 +29,7 @@ import { parseSizeChart } from "@/lib/sourcing/size-chart";
 
 const ORG_A = "cap-a";
 const ORG_B = "cap-b";
-const IDS = ["683567693110", "815636568273", "835865258913"] as const;
+const IDS = ["683567693110", "815636568273", "835865258913", "951023546393"] as const;
 
 type Fixture = { offerId: string; picks: Record<string, unknown> };
 const fixture = (id: string): Fixture => JSON.parse(readFileSync(`tests/fixtures/sourcing-1688/${id}.json`, "utf8")) as Fixture;
@@ -82,6 +82,22 @@ function testParser() {
   const dTr = deriveCapture(tr.facts, tr.extraFlags);
   assert.deepEqual([dTr.flags, dTr.sizeChart, tr.facts.titleZh, tr.facts.titleTranslated], [["TRANSLATED_BY_1688"], null, "", "Váy dài quây ngực kiểu Pháp size lớn"], "dữ liệu đã dịch ⇒ cờ, không bảng size, tiêu đề dịch không nằm ở ô chữ Trung");
   assert.deepEqual(dTr.tiers, [{ fromQty: 1, priceFen: 2400 }], "giá là số — không bị dịch, vẫn lưu");
+
+  // 951023546393 — trang THẬT ở chế độ tiếng Việt (1688 dịch ở máy chủ, đo 25/10): BẬC GIÁ THẬT 1 / 30 / 100 ⇒ ¥288 / ¥278 / ¥258,
+  // MOQ 2 (beginNum) dù bậc đầu từ 1, có giá khuyến mãi ¥263 ⇒ cờ, không vào bậc. Tên thuộc tính đã dịch («màu sắc» / «kích cỡ»)
+  // vẫn phải tách đúng màu với size; tên size dịch hỏng («L» ⇒ «tôi») là thêm một lý do không đọc cân nặng từ bản dịch.
+  const r951 = parse1688Detail(fixture("951023546393").picks, "951023546393");
+  assert.ok(r951.ok, JSON.stringify(r951));
+  const d951 = deriveCapture(r951.facts, r951.extraFlags);
+  assert.deepEqual(d951.tiers, [{ fromQty: 1, priceFen: 28800 }, { fromQty: 30, priceFen: 27800 }, { fromQty: 100, priceFen: 25800 }], "ba bậc giá thật, đúng thứ tự, fen nguyên");
+  assert.ok(!JSON.stringify(d951.tiers).includes("26300"), "giá khuyến mãi ¥263 không vào bậc");
+  assert.equal(r951.facts.moq, 2, "MOQ đọc từ beginNum (2), không suy từ bậc đầu (1)");
+  assert.deepEqual(d951.flags, ["TRANSLATED_BY_1688", "PROMO_PRICE_IGNORED"], "dữ liệu đã dịch + khuyến mãi; bảng size không đọc (không cờ «không có bảng size»)");
+  assert.deepEqual([r951.facts.titleZh, d951.sizeChart, r951.facts.weightGrams], ["", null, 1200], "tiêu đề dịch không vào ô chữ Trung; 1,2 kg ⇒ 1200 g");
+  assert.ok(r951.facts.titleTranslated?.startsWith("Đầm dài xếp ly"));
+  assert.deepEqual([...new Set(r951.facts.skus.map((x) => x.size))].sort(), ["M", "S.", "XL.", "tôi"], "thuộc tính «kích cỡ» (đã dịch) vẫn nhận ra là size");
+  assert.ok(r951.facts.skus.every((x) => !x.color.includes(" / ")), "màu không bị dồn cả khoá SKU");
+  assert.equal(r951.facts.supplier.shopUrl, "https://shop9965249769491.1688.com");
 
   // Mã trên đường dẫn khác mã trong dữ liệu ⇒ từ chối; không có tiêu đề ⇒ «không đọc được», không lấy gì thay.
   assert.ok(!parse1688Detail(fixture("815636568273").picks, "835865258913").ok, "dữ liệu của trang khác ⇒ từ chối");

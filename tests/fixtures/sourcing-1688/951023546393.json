@@ -1,0 +1,369 @@
+{
+ "offerId": "951023546393",
+ "capturedAt": "2026-10-25T12:45:00.831Z",
+ "source": "window.context — đi qua PICK_PATHS_1688 (đúng thứ tiện ích gửi)",
+ "language": "tiếng Việt · GLOBAL · VND (1688 dịch ở máy chủ: tiêu đề, tên thuộc tính và tên SKU đã dịch)",
+ "picks": {
+  "result.data.gallery.fields.subject": "Đầm dài xếp ly phối màu độc đáo, thiết kế thanh lịch, tôn dáng, màu xanh, chất liệu voan.",
+  "result.data.gallery.fields.mainImage": [
+   "https://cbu01.alicdn.com/img/ibank/O1CN01KHyDKm2BPCIvo86ZG_!!2215335488330-0-cib.jpg",
+   "https://cbu01.alicdn.com/img/ibank/O1CN01UTwA0N2BPCIunhuqm_!!2215335488330-0-cib.jpg",
+   "https://cbu01.alicdn.com/img/ibank/O1CN01QQ6clZ2BPCIvnf8V9_!!2215335488330-0-cib.jpg",
+   "https://cbu01.alicdn.com/img/ibank/O1CN01jFYihP2BPCIwEiSjC_!!2215335488330-0-cib.jpg",
+   "https://cbu01.alicdn.com/img/ibank/O1CN01RzuSnA2BPCIu10SoI_!!2215335488330-0-cib.jpg"
+  ],
+  "result.data.Root.fields.dataJson.tempModel.offerId": 951023546393,
+  "result.data.Root.fields.dataJson.tempModel.offerTitle": "Đầm dài xếp ly phối màu độc đáo, thiết kế thanh lịch, tôn dáng, màu xanh, chất liệu voan.",
+  "result.data.Root.fields.dataJson.tempModel.companyName": "深圳市澜夕科技有限公司",
+  "result.data.Root.fields.dataJson.offerBaseInfo.sellerWinportUrl": "https://shop9965249769491.1688.com",
+  "result.data.Root.fields.dataJson.skuModel.skuProps": [
+   {
+    "fid": 3216,
+    "prop": "màu sắc",
+    "value": [
+     {
+      "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01AyKG6F2BPCIullYBG_!!2215335488330-0-cib.jpg",
+      "name": "rượu vang đỏ"
+     },
+     {
+      "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01oEEA8Y2BPCIvo0Fgh_!!2215335488330-0-cib.jpg",
+      "name": "hồng"
+     },
+     {
+      "imageUrl": "https://cbu01.alicdn.com/img/ibank/O1CN01vsCEqZ2BPCIvo2Ke7_!!2215335488330-0-cib.jpg",
+      "name": "trời xanh"
+     }
+    ]
+   },
+   {
+    "fid": 450,
+    "prop": "kích cỡ",
+    "value": [
+     {
+      "name": "S."
+     },
+     {
+      "name": "M"
+     },
+     {
+      "name": "tôi"
+     },
+     {
+      "name": "XL."
+     }
+    ]
+   }
+  ],
+  "result.data.Root.fields.dataJson.skuModel.skuInfoMap": {
+   "rượu vang đỏ&gt;S.": {
+    "specId": "5d917f47659ba44e329deb8023af029c",
+    "saleCount": 0,
+    "discountPrice": "288.00",
+    "canBookCount": 0,
+    "specAttrs": "rượu vang đỏ&gt;S.",
+    "priceAmount": 2,
+    "skuId": 6034447379879,
+    "isPromotionSku": true
+   },
+   "rượu vang đỏ&gt;XL.": {
+    "specId": "1ea824504f300d9d7996f9bdb9f37775",
+    "saleCount": 0,
+    "discountPrice": "288.00",
+    "canBookCount": 4,
+    "specAttrs": "rượu vang đỏ&gt;XL.",
+    "priceAmount": 2,
+    "skuId": 6034447379881,
+    "isPromotionSku": true
+   },
+   "rượu vang đỏ&gt;M": {
+    "specId": "03d8335e1082916bafba4b37313f464a",
+    "saleCount": 0,
+    "discountPrice": "288.00",
+    "canBookCount": 0,
+    "specAttrs": "rượu vang đỏ&gt;M",
+    "priceAmount": 2,
+    "skuId": 5867054196067,
+    "isPromotionSku": true
+   },
+   "rượu vang đỏ&gt;tôi": {
+    "specId": "38eeca666d39a0d56aa19bbbf970ca93",
+    "saleCount": 0,
+    "discountPrice": "288.00",
+    "canBookCount": 5,
+    "specAttrs": "rượu vang đỏ&gt;tôi",
+    "priceAmount": 2,
+    "skuId": 6034447379880,
+    "isPromotionSku": true
+   },
+   "trời xanh&gt;tôi": {
+    "specId": "502a9864e52c3472300cf10174dd634e",
+    "saleCount": 0,
+    "discountPrice": "288.00",
+    "canBookCount": 0,
+    "specAttrs": "trời xanh&gt;tôi",
+    "priceAmount": 2,
+    "skuId": 6034447379886,
+    "isPromotionSku": true
+   },
+   "trời xanh&gt;M": {
+    "specId": "701ec5a8554da5c468e09384714398be",
+    "saleCount": 0,
+    "discountPrice": "288.00",
+    "canBookCount": 0,
+    "specAttrs": "trời xanh&gt;M",
+    "priceAmount": 2,
+    "skuId": 5867054196069,
+    "isPromotionSku": true
+   },
+   "trời xanh&gt;XL.": {
+    "specId": "7a7a00ceb725a09d5d80ce473489b575",
+    "saleCount": 0,
+    "discountPrice": "288.00",
+    "canBookCount": 2,
+    "specAttrs": "trời xanh&gt;XL.",
+    "priceAmount": 2,
+    "skuId": 6034447379887,
+    "isPromotionSku": true
+   },
+   "hồng&gt;S.": {
+    "specId": "b62f8cf15ebfd0ebe619bb120121c7b5",
+    "saleCount": 0,
+    "discountPrice": "288.00",
+    "canBookCount": 9,
+    "specAttrs": "hồng&gt;S.",
+    "priceAmount": 2,
+    "skuId": 6034447379882,
+    "isPromotionSku": true
+   },
+   "trời xanh&gt;S.": {
+    "specId": "442b6942b9d1090a3ac367057b08ead4",
+    "saleCount": 0,
+    "discountPrice": "288.00",
+    "canBookCount": 0,
+    "specAttrs": "trời xanh&gt;S.",
+    "priceAmount": 2,
+    "skuId": 6034447379885,
+    "isPromotionSku": true
+   },
+   "hồng&gt;M": {
+    "specId": "960881b9de420d47ceb5886aaf5631cd",
+    "saleCount": 0,
+    "discountPrice": "288.00",
+    "canBookCount": 9,
+    "specAttrs": "hồng&gt;M",
+    "priceAmount": 2,
+    "skuId": 5867054196068,
+    "isPromotionSku": true
+   },
+   "hồng&gt;tôi": {
+    "specId": "bac5730e3701938ad70cccfd0c2d9680",
+    "saleCount": 0,
+    "discountPrice": "288.00",
+    "canBookCount": 9,
+    "specAttrs": "hồng&gt;tôi",
+    "priceAmount": 2,
+    "skuId": 6034447379883,
+    "isPromotionSku": true
+   },
+   "hồng&gt;XL.": {
+    "specId": "44834412eebc8b0c536933575a1ec62e",
+    "saleCount": 0,
+    "discountPrice": "288.00",
+    "canBookCount": 10,
+    "specAttrs": "hồng&gt;XL.",
+    "priceAmount": 2,
+    "skuId": 6034447379884,
+    "isPromotionSku": true
+   }
+  },
+  "result.data.Root.fields.dataJson.skuModel.skuInfoMapOriginal": {
+   "rượu vang đỏ&gt;M": {
+    "specId": "03d8335e1082916bafba4b37313f464a",
+    "saleCount": 0,
+    "canBookCount": 0,
+    "specAttrs": "rượu vang đỏ&gt;M",
+    "priceAmount": 2,
+    "skuId": 5867054196067,
+    "isPromotionSku": false
+   },
+   "hồng&gt;S.": {
+    "specId": "b62f8cf15ebfd0ebe619bb120121c7b5",
+    "saleCount": 0,
+    "canBookCount": 9,
+    "specAttrs": "hồng&gt;S.",
+    "priceAmount": 2,
+    "skuId": 6034447379882,
+    "isPromotionSku": false
+   },
+   "hồng&gt;tôi": {
+    "specId": "bac5730e3701938ad70cccfd0c2d9680",
+    "saleCount": 0,
+    "canBookCount": 9,
+    "specAttrs": "hồng&gt;tôi",
+    "priceAmount": 2,
+    "skuId": 6034447379883,
+    "isPromotionSku": false
+   },
+   "trời xanh&gt;S.": {
+    "specId": "442b6942b9d1090a3ac367057b08ead4",
+    "saleCount": 0,
+    "canBookCount": 0,
+    "specAttrs": "trời xanh&gt;S.",
+    "priceAmount": 2,
+    "skuId": 6034447379885,
+    "isPromotionSku": false
+   },
+   "trời xanh&gt;M": {
+    "specId": "701ec5a8554da5c468e09384714398be",
+    "saleCount": 0,
+    "canBookCount": 0,
+    "specAttrs": "trời xanh&gt;M",
+    "priceAmount": 2,
+    "skuId": 5867054196069,
+    "isPromotionSku": false
+   },
+   "rượu vang đỏ&gt;XL.": {
+    "specId": "1ea824504f300d9d7996f9bdb9f37775",
+    "saleCount": 0,
+    "canBookCount": 4,
+    "specAttrs": "rượu vang đỏ&gt;XL.",
+    "priceAmount": 2,
+    "skuId": 6034447379881,
+    "isPromotionSku": false
+   },
+   "hồng&gt;M": {
+    "specId": "960881b9de420d47ceb5886aaf5631cd",
+    "saleCount": 0,
+    "canBookCount": 9,
+    "specAttrs": "hồng&gt;M",
+    "priceAmount": 2,
+    "skuId": 5867054196068,
+    "isPromotionSku": false
+   },
+   "trời xanh&gt;tôi": {
+    "specId": "502a9864e52c3472300cf10174dd634e",
+    "saleCount": 0,
+    "canBookCount": 0,
+    "specAttrs": "trời xanh&gt;tôi",
+    "priceAmount": 2,
+    "skuId": 6034447379886,
+    "isPromotionSku": false
+   },
+   "rượu vang đỏ&gt;tôi": {
+    "specId": "38eeca666d39a0d56aa19bbbf970ca93",
+    "saleCount": 0,
+    "canBookCount": 5,
+    "specAttrs": "rượu vang đỏ&gt;tôi",
+    "priceAmount": 2,
+    "skuId": 6034447379880,
+    "isPromotionSku": false
+   },
+   "trời xanh&gt;XL.": {
+    "specId": "7a7a00ceb725a09d5d80ce473489b575",
+    "saleCount": 0,
+    "canBookCount": 2,
+    "specAttrs": "trời xanh&gt;XL.",
+    "priceAmount": 2,
+    "skuId": 6034447379887,
+    "isPromotionSku": false
+   },
+   "hồng&gt;XL.": {
+    "specId": "44834412eebc8b0c536933575a1ec62e",
+    "saleCount": 0,
+    "canBookCount": 10,
+    "specAttrs": "hồng&gt;XL.",
+    "priceAmount": 2,
+    "skuId": 6034447379884,
+    "isPromotionSku": false
+   },
+   "rượu vang đỏ&gt;S.": {
+    "specId": "5d917f47659ba44e329deb8023af029c",
+    "saleCount": 0,
+    "canBookCount": 0,
+    "specAttrs": "rượu vang đỏ&gt;S.",
+    "priceAmount": 2,
+    "skuId": 6034447379879,
+    "isPromotionSku": false
+   }
+  },
+  "result.data.Root.fields.dataJson.orderParamModel.orderParam.beginNum": 2,
+  "result.data.Root.fields.dataJson.orderParamModel.orderParam.skuParam": {
+   "skuPriceType": "rangePrice",
+   "skuRangePrices": [
+    {
+     "price": "288.00",
+     "beginAmount": "1"
+    },
+    {
+     "price": "278.00",
+     "beginAmount": "30"
+    },
+    {
+     "price": "258.00",
+     "beginAmount": "100"
+    }
+   ]
+  },
+  "result.data.mainPrice.fields.priceModel.currentPrices": [
+   {
+    "price": "288.00",
+    "beginAmount": 1
+   },
+   {
+    "price": "278.00",
+    "beginAmount": 30
+   },
+   {
+    "price": "258.00",
+    "beginAmount": 100
+   }
+  ],
+  "result.data.mainPrice.fields.priceModel.originalPrices": [
+   {
+    "displayStyle": "line_price",
+    "price": "288.00",
+    "beginAmount": 2
+   },
+   {
+    "displayStyle": "line_price",
+    "price": "278.00",
+    "beginAmount": 30
+   },
+   {
+    "displayStyle": "line_price",
+    "price": "258.00",
+    "beginAmount": 100
+   }
+  ],
+  "result.data.mainPrice.fields.finalPriceModel.onHandPrice": "263",
+  "result.data.mainPrice.fields.finalPriceModel.onHandPriceTypeText": "红包价",
+  "result.data.mainPrice.fields.finalPriceModel.tradeWithoutPromotion.offerBeginAmount": 2,
+  "result.data.mainPrice.fields.finalPriceModel.tradeWithoutPromotion.offerPriceRanges": [
+   {
+    "price": "288.00",
+    "beginAmount": 2,
+    "discountPrice": "288.00",
+    "endAmount": 29
+   },
+   {
+    "price": "278.00",
+    "beginAmount": 30,
+    "discountPrice": "278.00",
+    "endAmount": 99
+   },
+   {
+    "price": "258.00",
+    "beginAmount": 100,
+    "discountPrice": "258.00",
+    "endAmount": 0
+   }
+  ],
+  "result.data.productTitle.fields.shopInfo.companyName": "深圳市澜夕科技有限公司",
+  "result.data.productTitle.fields.shopInfo.byrRepeatRate3m": "59.13%",
+  "result.data.productTitle.fields.shopInfo.sellerSlrServiceScore": "4.0分",
+  "result.data.productTitle.fields.rateInfo.goodRates": 99.8,
+  "result.data.shippingServices.fields.location": "广东省深圳市",
+  "result.data.productPackInfo.fields.unitWeight": 1.2,
+  "result.global.globalData.model.consignModel.hasConsignPrice": false
+ }
+}
