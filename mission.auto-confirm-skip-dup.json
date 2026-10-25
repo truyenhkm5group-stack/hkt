@@ -3,7 +3,7 @@
   "mission_id": "auto-confirm-skip-dup",
   "title": "Công tắc tự xác nhận không nâng đơn nghi trùng",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
@@ -25,11 +25,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T05:03:14.276Z",
-  "updated_at": "2026-10-25T05:27:51.035Z",
+  "updated_at": "2026-10-25T05:44:46.448Z",
   "last_heartbeat": "2026-10-25T05:03:54.813Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1059 → a8988a6df5ea85ee92119a919fcc069e5d87d2e8"
+    "merged": "#1059 → a8988a6df5ea85ee92119a919fcc069e5d87d2e8",
+    "verify": "PASS a8988a6df5ea85ee92119a919fcc069e5d87d2e8 2026-10-25T05:44:12.974Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40165629035"
   },
   "handoff": {
     "branch": "claude/auto-confirm-skip-dup",
