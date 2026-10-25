@@ -284,3 +284,26 @@ export function assessDuplicate(a: DuplicateCandidate, b: DuplicateCandidate): D
 
   return mo("POSSIBLE_DUPLICATE", "Cùng SĐT và có mẫu mã chung nhưng không giống hệt — có thể là đặt thêm, có thể là lên đơn lại.");
 }
+
+/* ═══════════════════ XÁC NHẬN TAY ĐƠN CÓ THỂ TRÙNG — HAI BƯỚC (P0 HSLC 25/10/2026, #E0663E84) ═══════════════════ */
+
+/**
+ * Nhân viên xác nhận tay một đơn đang mang tín hiệu trùng (cờ POSSIBLE_SAME_CUSTOMER, hoặc `assessDuplicate` ≠ DISTINCT với một đơn
+ * còn sống) ⇒ MÁY CHỦ từ chối lượt đầu (CONFLICT), mỗi tín hiệu một lỗi `duplicateAck:<khoá>` (thông điệp = câu cảnh báo); lượt sau
+ * gửi lại đúng các khoá đã thấy mới đi tiếp — cùng mẫu «dấu vết đã xem» của cờ cần kiểm. Không chặn hẳn: người quyết. Khoá:
+ * `dup:<mã đơn kia>` (cặp nghi trùng) · `flag:<mốc cờ>` (cờ «có thể cùng khách»). Tệp này chạy được ở client.
+ */
+export const DUPLICATE_ACK_FIELD = "duplicateAck";
+
+export type DuplicateAckWarning = { key: string; otherId: string | null; label: string };
+
+/** Đọc cảnh báo trùng từ lỗi máy chủ trả (rỗng ⇒ lỗi khác, xử lý như cũ). HÀM THUẦN. */
+export function duplicateAckWarnings(errors: readonly { field: string; message: string }[] | undefined): DuplicateAckWarning[] {
+  const prefix = `${DUPLICATE_ACK_FIELD}:`;
+  return (errors ?? [])
+    .filter((e) => e.field.startsWith(prefix))
+    .map((e) => {
+      const key = e.field.slice(prefix.length);
+      return { key, otherId: key.startsWith("dup:") ? key.slice(4) : null, label: e.message };
+    });
+}

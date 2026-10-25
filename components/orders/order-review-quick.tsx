@@ -8,7 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cancelManualOrderAction, confirmOrderReviewAction } from "@/lib/actions/manual-orders";
 import { ORDER_REVIEW_CANCEL_REASON, ORDER_REVIEW_HINT, ORDER_REVIEW_LABEL, quickConfirmKind, reviewSeenOf, type OrderReviewEntry, type OrderReviewResolution } from "@/lib/constants/order-review";
+import { duplicateAckWarnings, type DuplicateAckWarning } from "@/lib/constants/order-duplicate";
 import { formatDateTime } from "@/lib/format";
+import { DuplicateAckBox } from "@/components/orders/duplicate-ack";
 import { cn } from "@/lib/utils";
 
 /**
@@ -82,6 +84,8 @@ export function OrderQuickDecision({ orderId, stage, entries, gaps = [], size = 
   const [cancelOpen, setCancelOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Lượt 1 bị máy chủ trả cảnh báo trùng ⇒ hộp cảnh báo; «Vẫn xác nhận» gửi lại đúng các khoá đã thấy (hai bước).
+  const [dupWarnings, setDupWarnings] = useState<DuplicateAckWarning[]>([]);
   const kind = quickConfirmKind(stage, entries.length > 0);
   const canCancel = CANCELLABLE.has(stage);
   // Chỉ hiện khi có việc cho người: đơn còn «Mới» / «Chờ hàng», hoặc đang mang cờ cần kiểm. Đơn đã xác nhận bình thường không mang
@@ -90,16 +94,22 @@ export function OrderQuickDecision({ orderId, stage, entries, gaps = [], size = 
   const h = size === "xs" ? "h-7 px-2 text-[11.5px]" : "h-8";
   const hint = entries.length ? ORDER_REVIEW_CANCEL_REASON[entries[entries.length - 1].code] : "khách đổi ý, trùng đơn, hết hàng…";
 
-  const confirm = async () => {
+  const confirm = async (ack?: readonly string[]) => {
     setPending("confirm");
     setError(null);
     try {
-      const r = await confirmOrderReviewAction(orderId, reviewSeenOf(entries));
+      const r = await confirmOrderReviewAction(orderId, { ...reviewSeenOf(entries), ...(ack ? { duplicates: [...ack] } : {}) });
       if (!("ok" in r)) {
+        const dup = duplicateAckWarnings(r.errors);
+        if (dup.length) {
+          setDupWarnings(dup);
+          return;
+        }
         setError(r.error);
         toast.error(r.error);
         return;
       }
+      setDupWarnings([]);
       toast.success(r.message);
     } finally {
       setPending(null);
@@ -156,6 +166,7 @@ export function OrderQuickDecision({ orderId, stage, entries, gaps = [], size = 
           </div>
         </div>
       ) : null}
+      <DuplicateAckBox warnings={dupWarnings} pending={pending === "confirm"} onCancel={() => setDupWarnings([])} onConfirm={() => void confirm(dupWarnings.map((w) => w.key))} />
       {error ? <p className="text-[11.5px] font-medium text-destructive">{error}</p> : null}
     </div>
   );

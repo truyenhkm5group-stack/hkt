@@ -587,6 +587,7 @@ import { testZaloOa } from "./zalo-oa.test";
 import { testSalesEvents } from "./sales-events.test";
 import { testChatAdAttribution } from "./chat-ad-attribution.test";
 import { testConversationOrderGuard } from "./conversation-order-guard.test";
+import { testConfirmDuplicateAck } from "./confirm-duplicate-ack.test";
 import { testOrderMerge } from "./order-merge.test";
 import { testOrderAttribution } from "./order-attribution.test";
 import { testLostReasons } from "./lost-reasons.test";
@@ -3250,6 +3251,8 @@ async function main() {
     await testChatAdAttribution();
     // Hội thoại đã có đơn của người ⇒ bot không tạo / không chốt đơn thứ hai (P0 HSLC 24/10/2026) — tổ chức THẬT `dup-guard`, tự dọn.
     await testConversationOrderGuard();
+    // Xác nhận tay đơn có thể trùng = hai bước (nút nhanh + form sửa đơn) — tổ chức THẬT `dup-ack`, tự dọn.
+    await testConfirmDuplicateAck();
     // Pha 3: mua bổ sung gộp vào đơn bot đang mở của cùng danh tính (vụ Ngọc) — tổ chức THẬT `dup-merge`, tự dọn.
     await testOrderMerge();
     await testOrderAttribution();

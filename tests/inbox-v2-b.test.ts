@@ -10,6 +10,7 @@
  *    phí ship «CHƯA BÁO» ⇒ «—» (luật 42); xã chưa ghép ⇒ nút tắt và lõi cũng từ chối; hai đơn đang mở ⇒ CẦN XÁC THỰC; xác nhận qua lõi
  *    ⇒ ĐÃ XÁC NHẬN; quyền `ai_sales:view`; hội thoại khung thử / không có.
  */
+import { duplicateAckWarnings } from "@/lib/constants/order-duplicate";
 import assert from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";
 import { eq } from "drizzle-orm";
@@ -300,7 +301,12 @@ async function testOrg() {
       assert.deepEqual([s5.orderId, s5.otherActive, orderVerification(s5).state], [draft.id, 0, "ĐỦ THÔNG TIN"]);
 
       // ⑤ Bấm «Xác nhận & tạo đơn» = lõi có sẵn ⇒ ĐÃ XÁC NHẬN; nút biến mất (không còn gì để xác nhận).
-      const confirmed = await confirmOrderReviewCore(admin, s5.orderId, reviewSeenOf(s5.review));
+      // Từ 25/10/2026 nút nhanh đi HAI bước khi đơn có thể trùng (tests/confirm-duplicate-ack.test.ts) — bộ ca dùng chung SĐT + món
+      // cho nhiều đơn nên lượt 1 có thể nhận cảnh báo; lượt 2 gửi lại đúng các khoá đã thấy, như người bấm thật.
+      const seen5 = reviewSeenOf(s5.review);
+      const first5 = await confirmOrderReviewCore(admin, s5.orderId, seen5);
+      const keys5 = first5.ok ? [] : duplicateAckWarnings(first5.errors).map((w) => w.key);
+      const confirmed = keys5.length ? await confirmOrderReviewCore(admin, s5.orderId, { ...seen5, duplicates: keys5 }) : first5;
       assert.ok(confirmed.ok, JSON.stringify(confirmed));
       const s6 = await load(conv1);
       assert.ok(s6);
