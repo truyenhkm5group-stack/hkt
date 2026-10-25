@@ -17,7 +17,11 @@
  *      ≥ 50 ms (đồng hồ 10 ms trôi lệch bao nhiêu) + biểu đồ `monitorEventLoopDelay`.
  *   2. Từng nhánh nặng của intelligence, mỗi nhánh nguội riêng, cùng hai số đó.
  *   3. Qua HTTP tới chính máy chủ: đầu phản hồi + thân của /reports/returns (lượt 1, lượt 2, và URL
- *      ghi rõ tham số mặc định), kèm /operations làm đối chứng.
+ *      ghi rõ tham số mặc định), kèm /operations làm đối chứng — và mốc «KPI hiện» (25/10/2026): thân đọc theo
+ *      luồng, ghi lúc chữ của thẻ KPI đầu tiên tới. Khung loading.tsx không mang chữ đó, nên mốc này là lúc người
+ *      dùng THẤY con số, không phải lúc byte đầu tới.
+ *   1b. Câu nhỏ (`select 1`, cùng bể kết nối) chờ bao lâu khi trang đang dựng NGUỘI, so với lúc máy rảnh —
+ *      đúng chỗ các câu nhỏ của layout xếp hàng nếu trang chiếm hết bể (giả thuyết của đầu phản hồi nguội 2–3 s).
  *
  * Số ở (1)–(2) là của TIẾN TRÌNH SCRIPT, không phải tiến trình Next: cùng mã, cùng dữ liệu, nên nó nói
  * mã đó chặn vòng sự kiện bao lâu; không nói máy chủ đang bận việc gì khác. (3) là số người dùng thật.
@@ -92,6 +96,31 @@ async function main() {
   await doVongSuKien("nguội (xoá đệm)", () => loadReturnsPage(thamSo));
   await doVongSuKien("ấm (đệm còn nguyên)", () => loadReturnsPage(thamSo));
 
+  console.log("── 1b. CÂU NHỎ CHỜ BAO LÂU KHI TRANG ĐANG DỰNG NGUỘI (cùng bể kết nối — chỗ layout xếp hàng) ──");
+  const cauNho = async () => {
+    const t = performance.now();
+    await db.execute(sql`select 1`);
+    return performance.now() - t;
+  };
+  /** Bắn `select 1` mỗi 100 ms trong suốt `nen` (hoặc 2 s nếu không có việc nền) — số câu, trung vị, p90, max. */
+  const doCauNho = async (nhan: string, nen: (() => Promise<unknown>) | null) => {
+    const mau: number[] = [];
+    let xong = false;
+    const viec = nen ? nen().finally(() => (xong = true)) : null;
+    const het = Date.now() + (viec ? 120_000 : 2_000);
+    while (Date.now() < het && !xong) {
+      mau.push(await cauNho());
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    if (viec) await viec;
+    mau.sort((a, b) => a - b);
+    const q = (x: number) => (mau.length ? Math.round(mau[Math.min(mau.length - 1, Math.floor(x * mau.length))]) : null);
+    console.log(`  ${nhan}: ${mau.length} câu select 1 · trung vị ${q(0.5)} ms · p90 ${q(0.9)} ms · max ${q(1)} ms`);
+  };
+  await doCauNho("máy rảnh (không việc nền)", null);
+  clearMemo();
+  await doCauNho("trong lúc loadReturnsPage NGUỘI", () => loadReturnsPage(thamSo));
+
   console.log("── 2. TỪNG NHÁNH NẶNG CỦA INTELLIGENCE, mỗi nhánh nguội riêng ──");
   clearMemo();
   const baoCao = await doVongSuKien("getReturnReasonReport · kỳ này (trang truyền sẵn cho intelligence)", () => getReturnReasonReport(reasonFilterBase));
@@ -119,13 +148,32 @@ async function main() {
   }
   const key = new TextEncoder().encode(secret);
   const mint = () => new SignJWT({ email: admin.email, name: admin.name, role: "ADMIN" }).setProtectedHeader({ alg: "HS256" }).setSubject(admin.id).setIssuedAt().setExpirationTime("10m").sign(key);
+  /** Chữ của thẻ KPI đầu tiên trên /reports/returns (`MetricCard label="Đơn đã gửi"`) — khung loading.tsx không có nó. */
+  const DAU_KPI = "Đơn đã gửi";
   const mo = async (duongDan: string, nhan: string) => {
     const t0 = Date.now();
     try {
       const r = await fetch(`${BASE}${duongDan}`, { headers: { cookie: `erp_session=${await mint()}` }, redirect: "manual", signal: AbortSignal.timeout(90_000) });
       const dau = Date.now() - t0;
-      const than = await r.arrayBuffer();
-      console.log(`  HTTP ${r.status} · đầu phản hồi ${String(dau).padStart(5)} ms · thân ${String(Date.now() - t0).padStart(6)} ms · ${Math.round(than.byteLength / 1024)} kB${r.headers.get("location") ? ` · chuyển tới ${r.headers.get("location")}` : ""} · ${nhan}`);
+      // Đọc THEO LUỒNG để biết lúc con số hiện, không chỉ lúc byte cuối tới. Giữ 64 ký tự đuôi để chữ cắt ngang hai mảnh vẫn khớp.
+      let kpi: number | null = null;
+      let bytes = 0;
+      let duoi = "";
+      const giai = new TextDecoder();
+      const doc = r.body?.getReader();
+      for (;;) {
+        if (!doc) break;
+        const { done, value } = await doc.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (kpi === null && duongDan.startsWith("/reports/returns")) {
+          const chu = duoi + giai.decode(value, { stream: true });
+          if (chu.includes(DAU_KPI)) kpi = Date.now() - t0;
+          duoi = chu.slice(-64);
+        }
+      }
+      const moc = duongDan.startsWith("/reports/returns") ? ` · KPI hiện ${kpi === null ? "KHÔNG THẤY" : `${String(kpi).padStart(5)} ms`}` : "";
+      console.log(`  HTTP ${r.status} · đầu phản hồi ${String(dau).padStart(5)} ms${moc} · thân ${String(Date.now() - t0).padStart(6)} ms · ${Math.round(bytes / 1024)} kB${r.headers.get("location") ? ` · chuyển tới ${r.headers.get("location")}` : ""} · ${nhan}`);
     } catch (e) {
       console.log(`  LỖI sau ${Date.now() - t0} ms · ${nhan}: ${e instanceof Error ? e.message : String(e)}`);
     }

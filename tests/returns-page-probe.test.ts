@@ -21,6 +21,12 @@ export function testReturnsPageProbe() {
   assert.match(src, /loadReturnsPage\(thamSo\)/, "đo bằng CHÍNH hàm trang gọi");
   assert.match(src, /reasonReport: baoCao/, "intelligence đo trên đường trang (nhận sẵn báo cáo kỳ này)");
   assert.match(src, /monitorEventLoopDelay/);
+  // Mốc «KPI hiện» (25/10/2026): chữ đánh dấu phải TRÙNG nhãn thẻ KPI thật — đổi nhãn mà quên probe thì mốc in «KHÔNG THẤY» mãi.
+  const dauKpi = /const DAU_KPI = "([^"]+)"/.exec(src)?.[1];
+  assert.ok(dauKpi, "probe có chữ đánh dấu thẻ KPI");
+  assert.ok(readFileSync("app/(dashboard)/reports/returns/page.tsx", "utf8").includes(`label="${dauKpi}"`), `chữ đánh dấu «${dauKpi}» phải là nhãn một MetricCard của trang`);
+  assert.ok(!readFileSync("components/skeletons.tsx", "utf8").includes(dauKpi), "khung loading không được mang chữ đánh dấu — nếu không mốc KPI = mốc khung");
+  assert.match(src, /select 1/, "1b: đo câu nhỏ xếp hàng khi trang dựng nguội");
   assert.doesNotMatch(src, /\binsert\s+into\b|\.insert\(|\.update\(|\.delete\(/i, "không ghi gì");
 
   const wf = readFileSync(".github/workflows/ops-vps.yml", "utf8");
