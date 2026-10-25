@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "auto-confirm-skip-dup",
+  "title": "Công tắc tự xác nhận không nâng đơn nghi trùng",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-payroll-gate",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/auto-confirm-skip-dup",
+  "base_sha": "afe05b9246c6ba34cc7530c830b55babf016194e",
+  "domains": [],
+  "owned_paths": [
+    "lib/queries/",
+    "lib/records/",
+    "tests/confirm-duplicate-ack.test.ts",
+    "tests/manual-order-outcome.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-25T05:03:14.276Z",
+  "updated_at": "2026-10-25T05:03:14.276Z",
+  "last_heartbeat": "2026-10-25T05:03:14.276Z",
+  "definition_of_done": []
+}
