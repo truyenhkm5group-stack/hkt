@@ -191,13 +191,27 @@ async function main() {
   const mint = () => new SignJWT({ email: admin.email, name: admin.name, role: "ADMIN" }).setProtectedHeader({ alg: "HS256" }).setSubject(admin.id).setIssuedAt().setExpirationTime("10m").sign(key);
   /** Chữ của thẻ KPI đầu tiên trên /reports/returns (`MetricCard label="Đơn đã gửi"`) — khung loading.tsx không có nó. */
   const DAU_KPI = "Đơn đã gửi";
+  /** Chữ đầu của khối phân tích (`IntelSection title="Rủi ro theo mã hàng"`, khối Suspense chờ tầng quyết định). */
+  const DAU_PHAN_TICH = "Rủi ro theo mã hàng";
+  /** React đánh dấu một ranh giới Suspense vừa xong bằng lời gọi `$RC(…)` (hoặc `$RS(…)` cho một đoạn) trong HTML luồng. */
+  const DAU_RANH_GIOI = /\$R[CS]\(/g;
   const mo = async (duongDan: string, nhan: string) => {
     const t0 = Date.now();
     try {
       const r = await fetch(`${BASE}${duongDan}`, { headers: { cookie: `erp_session=${await mint()}` }, redirect: "manual", signal: AbortSignal.timeout(90_000) });
       const dau = Date.now() - t0;
       // Đọc THEO LUỒNG để biết lúc con số hiện, không chỉ lúc byte cuối tới. Giữ 64 ký tự đuôi để chữ cắt ngang hai mảnh vẫn khớp.
+      /*
+        DÒNG THỜI GIAN CỦA LƯỢT XẢ (25/10/2026): khối 1c đo KPI xong ở ~2,2 s trong tiến trình, mà qua HTTP chữ KPI tới ở
+        ~6,1 s. Ghi lúc chữ KPI tới, lúc chữ khối phân tích tới, và lúc TỪNG ranh giới Suspense xong: KPI tới cùng lúc các
+        ranh giới cuối ⇒ lượt xả bị giữ (KPI dính vào một cha đang chờ thứ khác); KPI tới sớm rõ ⇒ khoảng hở là dữ liệu /
+        CPU, không phải lượt xả.
+      */
+      const laTrang = duongDan.startsWith("/reports/returns");
       let kpi: number | null = null;
+      let phanTich: number | null = null;
+      const ranhGioi: number[] = [];
+      const manh: string[] = [];
       let bytes = 0;
       let duoi = "";
       const giai = new TextDecoder();
@@ -206,15 +220,24 @@ async function main() {
         if (!doc) break;
         const { done, value } = await doc.read();
         if (done) break;
+        const luc = Date.now() - t0;
         bytes += value.byteLength;
-        if (kpi === null && duongDan.startsWith("/reports/returns")) {
-          const chu = duoi + giai.decode(value, { stream: true });
-          if (chu.includes(DAU_KPI)) kpi = Date.now() - t0;
-          duoi = chu.slice(-64);
-        }
+        if (!laTrang) continue;
+        if (manh.length < 40) manh.push(`${luc}:${Math.round(value.byteLength / 1024)}k`);
+        // Giữ 64 ký tự đuôi để chữ cắt ngang hai mảnh vẫn khớp.
+        const chu = duoi + giai.decode(value, { stream: true });
+        if (kpi === null && chu.includes(DAU_KPI)) kpi = luc;
+        if (phanTich === null && chu.includes(DAU_PHAN_TICH)) phanTich = luc;
+        // Chỉ quét phần MỚI + 3 ký tự đuôi của mảnh trước: dấu `$RC(` dài 4 ký tự nên một dấu nằm trọn trong mảnh trước đã
+        // được đếm ở đó, còn dấu bị cắt ngang hai mảnh thì chỉ hiện đủ ở lượt này — không đếm hai lần, không sót.
+        const soMoi = (chu.slice(Math.max(0, duoi.length - 3)).match(DAU_RANH_GIOI) ?? []).length;
+        for (let i = 0; i < soMoi; i += 1) ranhGioi.push(luc);
+        duoi = chu.slice(-64);
       }
-      const moc = duongDan.startsWith("/reports/returns") ? ` · KPI hiện ${kpi === null ? "KHÔNG THẤY" : `${String(kpi).padStart(5)} ms`}` : "";
+      const ms = (x: number | null) => (x === null ? "KHÔNG THẤY" : `${String(x).padStart(5)} ms`);
+      const moc = laTrang ? ` · KPI hiện ${ms(kpi)} · khối phân tích ${ms(phanTich)}` : "";
       console.log(`  HTTP ${r.status} · đầu phản hồi ${String(dau).padStart(5)} ms${moc} · thân ${String(Date.now() - t0).padStart(6)} ms · ${Math.round(bytes / 1024)} kB${r.headers.get("location") ? ` · chuyển tới ${r.headers.get("location")}` : ""} · ${nhan}`);
+      if (laTrang) console.log(`         ranh giới Suspense xong (${ranhGioi.length}): ${ranhGioi.join(" · ") || "—"} ms · mảnh (ms:kB): ${manh.join(" ")}`);
     } catch (e) {
       console.log(`  LỖI sau ${Date.now() - t0} ms · ${nhan}: ${e instanceof Error ? e.message : String(e)}`);
     }
