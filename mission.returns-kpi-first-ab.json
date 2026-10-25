@@ -3,7 +3,7 @@
   "mission_id": "returns-kpi-first-ab",
   "title": "returns-page-probe 1d: KPI-trước tắt ↔ bật xen kẽ × 3 cặp (tham số kpiFirst chỉ cho probe)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-kpiab",
@@ -24,9 +24,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T17:01:42.336Z",
-  "updated_at": "2026-10-25T17:05:44.283Z",
+  "updated_at": "2026-10-25T17:27:44.514Z",
   "last_heartbeat": "2026-10-25T17:02:30.618Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1075 → 7aaa60f265ea0f67e0b942604f420582576bb07f"
+  },
   "handoff": {
     "branch": "claude/returns-kpi-first-ab",
     "sha": "08ae1130be510d4ce8bc2f5881420f6448b77a1f",
