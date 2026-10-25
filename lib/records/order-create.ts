@@ -795,8 +795,10 @@ async function updateOrder(w: Writer, orderId: unknown, rawInput: unknown, agent
   if (credit) return credit;
   // Xác nhận TAY «Mới» / «Chờ hàng» ⇒ «Đã xác nhận» mà đơn có thể trùng ⇒ hai bước. Đứng SAU mọi kiểm tra nghiệp vụ (giá · hạn mức nợ…):
   // lỗi nghiệp vụ báo trước, cảnh báo trùng là câu «chắc chưa?» cuối cùng trước khi ghi.
+  // Rào hỏi NGƯỜI nên đọc stage NGƯỜI XIN (`prep.p`), không phải stage sau `autoConfirmComplete`: lượt sửa giữ «Mới» mà công
+  // tắc tự nâng là quyết định của MÁY (như lượt tạo), không phải một cú bấm «Đã xác nhận» cần hỏi lại.
   let dupAcknowledged: DuplicateAckWarning[] = [];
-  if (opts.duplicateAck && p.stage === "CONFIRMED" && (row.stage === "NEW" || row.stage === "WAITING")) {
+  if (opts.duplicateAck && prep.p.stage === "CONFIRMED" && (row.stage === "NEW" || row.stage === "WAITING")) {
     const g = await duplicateAckGate(row, opts.duplicateAck.keys);
     if (g.failure) return g.failure;
     dupAcknowledged = g.acknowledged;

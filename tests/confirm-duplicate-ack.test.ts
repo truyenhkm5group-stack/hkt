@@ -17,6 +17,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import { resolvePermissions } from "@/lib/auth/permissions";
 import type { SessionUser } from "@/lib/auth/session";
+import { AUTO_CONFIRM_COMPLETE_SETTING_KEY } from "@/lib/constants/manual-orders";
 import { DUPLICATE_ACK_FIELD, duplicateAckWarnings } from "@/lib/constants/order-duplicate";
 import { reviewSeenOf, withReviewEntry, orderReviewOf } from "@/lib/constants/order-review";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
@@ -27,6 +28,7 @@ import { createOrderFromChatCore } from "@/lib/records/chat-order";
 import { confirmOrderReviewCore, manualOrderFormValues, updateManualOrderCore } from "@/lib/records/order-create";
 import { createProductCore } from "@/lib/records/product-create";
 import { conversationFor } from "@/lib/sales-chatbot/fanpage";
+import { setSettingJson } from "@/lib/settings";
 
 const ORG = "dup-ack";
 const ADMIN_EMAIL = "chu@dup-ack.local";
@@ -125,6 +127,17 @@ async function testRealOrg() {
     assert.ok(dv);
     const e3 = await updateManualOrderCore(admin, d, { ...dv, stage: "NEW", note: "khách hẹn chiều" });
     assert.ok(e3.ok, `sửa giữ «Mới» ⇒ không hỏi: ${JSON.stringify(e3)}`);
+    // Công tắc «đơn đủ thông tin = đã xác nhận» BẬT: lượt sửa giữ «Mới» được MÁY tự nâng — không phải người bấm xác nhận
+    // ⇒ không rào hai bước (CI #1055: `tests/manual-order-outcome.test.ts` đỏ trong chuỗi vì rào đọc stage SAU khi tự nâng).
+    await setSettingJson(AUTO_CONFIRM_COMPLETE_SETTING_KEY, { enabled: true });
+    try {
+      const e4 = await updateManualOrderCore(admin, d, { ...dv, stage: "NEW", note: "khách hẹn tối" });
+      assert.ok(e4.ok, `tự nâng ở lượt sửa ⇒ không hỏi: ${JSON.stringify(e4)}`);
+      assert.equal(await stageOf(d), "CONFIRMED", "công tắc vẫn tự nâng như trước");
+      assert.equal(await acks(d), 0, "không có người thấy cảnh báo ⇒ không nhật ký");
+    } finally {
+      await setSettingJson(AUTO_CONFIRM_COMPLETE_SETTING_KEY, { enabled: false });
+    }
 
     // ── 3 · Cờ POSSIBLE_SAME_CUSTOMER đang mở ⇒ khoá flag:<mốc> (đơn khác SĐT, khác món — không cặp nghi trùng) ──
     const f = await order("f", "0909111222", v2.id);
@@ -169,5 +182,5 @@ export async function testConfirmDuplicateAck() {
     await cleanupOrg(ORG);
   }
   testUiFences();
-  console.log("  ✓ xác nhận tay đơn có thể trùng: nút nhanh + form sửa đơn hai bước (lượt 1 cảnh báo, không ghi · lượt 2 đúng khoá ⇒ xác nhận + nhật ký) · khoá cũ không thay khoá mới · cờ «có thể cùng khách» · đơn không trùng một bước · sửa giữ «Mới» không hỏi");
+  console.log("  ✓ xác nhận tay đơn có thể trùng: nút nhanh + form sửa đơn hai bước (lượt 1 cảnh báo, không ghi · lượt 2 đúng khoá ⇒ xác nhận + nhật ký) · khoá cũ không thay khoá mới · cờ «có thể cùng khách» · đơn không trùng một bước · sửa giữ «Mới» không hỏi, kể cả khi công tắc tự nâng");
 }
