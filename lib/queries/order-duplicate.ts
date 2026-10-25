@@ -346,11 +346,27 @@ export async function duplicateFlagsFor(orders: readonly { id: string; insertedA
   if (!rule.enabled) return out;
   const win = rule.windowHours * 3_600_000;
   const times = keyed.map((o) => o.insertedAt.getTime());
-  const from = new Date(Math.min(...times) - win);
-  const to = new Date(Math.max(...times) + win);
   const keys = [...new Set(keyed.map((o) => phoneKey(o.billPhone)!))];
+  const full = await candidatesNear(keys, new Date(Math.min(...times) - win), new Date(Math.max(...times) + win), keyed.map((k) => k.id));
+  if (full.size < 2) return out;
+  for (const o of keyed) {
+    const me = full.get(o.id);
+    if (!me) continue;
+    const flags = flagsAgainst(me, full, win);
+    if (flags.length) out.set(o.id, flags);
+  }
+  return out;
+}
+
+type FlagCandidate = DuplicateCandidate & { stage: OrderStage; code: string };
+
+/** Đơn còn sống cùng SĐT trong khoảng [from, to] kèm dòng hàng — nền chung của cờ trang đơn và cờ bản nháp. `firstIds` đứng đầu khi vượt trần. */
+async function candidatesNear(keys: readonly string[], from: Date, to: Date, firstIds: readonly string[]): Promise<Map<string, FlagCandidate>> {
+  const full = new Map<string, FlagCandidate>();
+  if (!keys.length) return full;
   const dead = DEAD_ORDER_STAGES.map((s) => `'${s}'`).join(",");
   const db = await getDb();
+  const first = firstIds.length ? sql`(o.id in (${sql.join(firstIds.map((id) => sql`${id}`), sql`, `)})) desc,` : sql``;
   const rows = rowsOf<OrderRaw>(
     await db.execute(sql`
       select o.id, o.system_id, o.bill_full_name, o.bill_phone, o.ship_address, o.total_price_after_discount as total,
@@ -360,11 +376,11 @@ export async function duplicateFlagsFor(orders: readonly { id: string; insertedA
          and o.stage::text not in (${sql.raw(dead)})
          and right(regexp_replace(coalesce(o.bill_phone, ''), '[^0-9]', '', 'g'), 9) in (${sql.join(keys.map((k) => sql`${k}`), sql`, `)})
        -- Đơn của CHÍNH trang đứng đầu: vượt trần thì cắt phần đọc thêm, không cắt đơn đang hiện.
-       order by (o.id in (${sql.join(keyed.map((k) => sql`${k.id}`), sql`, `)})) desc, o.inserted_at desc
+       order by ${first} o.inserted_at desc
        limit ${MAX_FLAG_SCAN}
     `),
   );
-  if (rows.length < 2) return out;
+  if (!rows.length) return full;
   const items = rowsOf<ItemRaw>(
     await db.execute(sql`
       select i.order_id, i.variant_id, i.sku, i.product_name, i.variation_detail, i.quantity
@@ -374,27 +390,44 @@ export async function duplicateFlagsFor(orders: readonly { id: string; insertedA
   );
   const byOrder = new Map<string, ItemLike[]>();
   for (const it of items) byOrder.set(it.order_id, [...(byOrder.get(it.order_id) ?? []), { variantId: it.variant_id, sku: it.sku ?? "", productName: it.product_name ?? "", variationDetail: it.variation_detail ?? "", quantity: Number(it.quantity ?? 0) || 0 }]);
-  type Full = DuplicateCandidate & { stage: OrderStage; code: string };
-  const full = new Map<string, Full>();
   for (const r of rows) {
     const insertedAt = toDate(r.inserted_at);
     if (!insertedAt) continue;
     full.set(r.id, { orderId: r.id, insertedAt, phone: r.bill_phone, receiverName: r.bill_full_name ?? "", address: r.ship_address ?? "", total: Number(r.total ?? 0) || 0, items: byOrder.get(r.id) ?? [], stage: r.stage, code: r.system_id !== null && r.system_id !== undefined ? String(r.system_id) : manualOrderShortCode(r.id) });
   }
-  for (const o of keyed) {
-    const me = full.get(o.id);
-    if (!me) continue;
-    const flags: DuplicateFlag[] = [];
-    for (const other of full.values()) {
-      if (other.orderId === me.orderId || phoneKey(other.phone) !== phoneKey(me.phone)) continue;
-      const gap = Math.abs(other.insertedAt.getTime() - me.insertedAt.getTime());
-      if (gap > win) continue;
-      const a = assessDuplicate(me, other);
-      if (a.verdict === "DISTINCT") continue;
-      const pair = orderPair(me, other);
-      flags.push({ otherId: other.orderId, otherCode: other.code, otherStage: other.stage, otherInsertedAt: other.insertedAt, verdict: a.verdict, role: pair.suspect.orderId === me.orderId ? "SUSPECT" : "KEEPER", why: a.why, gapHours: gap / 3_600_000 });
-    }
-    if (flags.length) out.set(o.id, flags.sort((x, y) => STRENGTH[y.verdict] - STRENGTH[x.verdict] || x.gapHours - y.gapHours));
+  return full;
+}
+
+/** Cặp của MỘT đơn với mọi đơn khác trong `full` — CHÍNH `assessDuplicate` + `orderPair`, cùng cửa sổ. HÀM THUẦN. */
+function flagsAgainst(me: DuplicateCandidate, full: ReadonlyMap<string, FlagCandidate>, win: number): DuplicateFlag[] {
+  const flags: DuplicateFlag[] = [];
+  for (const other of full.values()) {
+    if (other.orderId === me.orderId || phoneKey(other.phone) !== phoneKey(me.phone)) continue;
+    const gap = Math.abs(other.insertedAt.getTime() - me.insertedAt.getTime());
+    if (gap > win) continue;
+    const a = assessDuplicate(me, other);
+    if (a.verdict === "DISTINCT") continue;
+    const pair = orderPair(me, other);
+    flags.push({ otherId: other.orderId, otherCode: other.code, otherStage: other.stage, otherInsertedAt: other.insertedAt, verdict: a.verdict, role: pair.suspect.orderId === me.orderId ? "SUSPECT" : "KEEPER", why: a.why, gapHours: gap / 3_600_000 });
   }
-  return out;
+  return flags.sort((x, y) => STRENGTH[y.verdict] - STRENGTH[x.verdict] || x.gapHours - y.gapHours);
+}
+
+/**
+ * Bản SẮP GHI của một đơn — lượt tạo (`id` null, chưa có dòng nào) hoặc lượt sửa (`id` = đơn đang sửa; dòng CŨ của nó bị bỏ, bản mới
+ * đứng thay). Để công tắc «đơn đủ thông tin = đã xác nhận» hỏi CÙNG luật nghi trùng TRƯỚC khi ghi (Tech Lead 25/10/2026: công tắc không
+ * được là lối vòng qua rào hai bước xác nhận tay).
+ */
+export type DuplicateDraft = { id: string | null; insertedAt: Date; billPhone: string | null; receiverName: string; address: string; total: number; items: ItemLike[] };
+
+export async function duplicateDraftFlags(draft: DuplicateDraft): Promise<DuplicateFlag[]> {
+  const key = phoneKey(draft.billPhone);
+  if (!key) return [];
+  const rule = await getDuplicateRule();
+  if (!rule.enabled) return [];
+  const win = rule.windowHours * 3_600_000;
+  const at = draft.insertedAt.getTime();
+  const full = await candidatesNear([key], new Date(at - win), new Date(at + win), []);
+  const me: DuplicateCandidate = { orderId: draft.id ?? "(bản nháp)", insertedAt: draft.insertedAt, phone: draft.billPhone ?? "", receiverName: draft.receiverName, address: draft.address, total: draft.total, items: draft.items };
+  return flagsAgainst(me, full, win);
 }
