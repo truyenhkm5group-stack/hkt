@@ -3,13 +3,13 @@
   "mission_id": "vtp-order-ref",
   "title": "vtp-direct-sync (4a): mã đơn ERP / số đơn POS trên vận đơn tạo thẳng ở VTP — một hàm khớp, lần gửi mới, gắn tay (lõi)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-ref",
   "worker": null,
   "worktree": null,
-  "branch": "claude/vtp-order-ref",
+  "branch": "claude/vtp-order-ref-4a",
   "base_sha": "eff16b09e24a67603b510c37bafc09426a0d06a4",
   "domains": [],
   "owned_paths": [
@@ -27,7 +27,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-26T10:06:09.474Z",
-  "updated_at": "2026-10-26T10:06:09.474Z",
-  "last_heartbeat": "2026-10-26T10:06:09.474Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-26T10:07:42.314Z",
+  "last_heartbeat": "2026-10-26T10:07:42.314Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/vtp-order-ref-4a",
+    "sha": "92dd2771cf655408800fd30ccb2c4eed6fb652c6",
+    "at": "2026-10-26T10:07:42.314Z",
+    "actor": "DESKTOP-56TH98Y:wt-ref",
+    "title": "vtp-direct-sync (4a): mã đơn ERP / số đơn POS trên vận đơn tạo thẳng ở VTP — một hàm khớp, lần gửi mới, gắn tay (lõi)",
+    "summary": "order-reference.ts: orders.id · custom_id · số POS ^#?\\d{1,7}$ (không gom chữ số), nhiều đơn ⇒ không ghép; webhook: mã vận đơn mới của đơn đã có lần gửi ⇒ lần gửi mới (không gộp vào lần mới nhất); tệp: nhánh orderRef, SĐT lệch ⇒ dừng; reship.ts linkOrphanToOrder (lõi gắn tay, chặn chiều hoàn / SĐT lệch, audit SHIPMENT_MANUAL_LINK). Ca reship PKE cũ không đổi (có bài kiểm). ĐƯỜNG BẤM gắn tay có ở (4b), chờ #1079 — tính năng CHƯA dùng được trên giao diện. Nhánh cũ claude/vtp-order-ref (WIP trước rebase) bỏ, không force push.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint: sạch",
+      "TEST_SHARD=1/4 2/4 3/4 4/4 trên origin/main eff16b09e: TẤT CẢ ĐẠT"
+    ]
+  }
 }
