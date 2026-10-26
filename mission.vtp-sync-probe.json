@@ -3,7 +3,7 @@
   "mission_id": "vtp-sync-probe",
   "title": "ops vtp-direct-sync-probe: SAU / TRƯỚC của #1079 bằng đúng hàm của trang (chỉ đọc)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-vp",
@@ -26,9 +26,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-26T15:09:16.518Z",
-  "updated_at": "2026-10-26T15:12:44.417Z",
+  "updated_at": "2026-10-26T15:33:29.182Z",
   "last_heartbeat": "2026-10-26T15:09:59.665Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1083 → 0a5f49d4e43890a0c38dd422685532127e7444b0"
+  },
   "handoff": {
     "branch": "claude/vtp-sync-probe",
     "sha": "d4920abe5381a9dbc921741c33ae6c3e7cf1708a",
