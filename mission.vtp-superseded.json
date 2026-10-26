@@ -3,7 +3,7 @@
   "mission_id": "vtp-superseded",
   "title": "vtp-direct-sync (2): vận đơn bị thay thế ra khỏi đếm chờ lấy / COD chưa thu / hàng đợi",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "CRITICAL",
   "owner": "DESKTOP-56TH98Y:wt-sup",
@@ -37,9 +37,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-25T19:05:49.130Z",
-  "updated_at": "2026-10-25T19:08:37.491Z",
+  "updated_at": "2026-10-26T13:37:37.120Z",
   "last_heartbeat": "2026-10-25T19:06:24.798Z",
   "definition_of_done": [],
+  "evidence": {
+    "verify": "PASS 63eb5c8238c64b84102cb4b035d6c6a820eed655 2026-10-26T13:36:53.856Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40328119062"
+  },
   "handoff": {
     "branch": "claude/vtp-superseded",
     "sha": "213a3e2b36b4b953d23acc28614ecdd3b6499316",
