@@ -566,6 +566,16 @@ Mọi cụm chú thích từ 4 dòng liền nhau trở lên chuyển NGUYÊN VĂ
 # CHÍNH mã tin riêng; KHÔNG ghi, KHÔNG đổi khoá, KHÔNG gộp. Tóm tắt chỉ số gộp, không mã tổ chức.
 ```
 
+### `vtp-direct-sync-probe)`
+
+```
+# SAU / TRƯỚC CỦA vtp-direct-sync (2) — #1079 thôi đếm vận đơn BỊ THAY THẾ (scripts/vtp-direct-sync-probe.ts, 26/10/2026). CHỈ ĐỌC
+# (script tự đặt ERP_READ_ONLY=1 trước khi nạp @/db). Số SAU = CHÍNH các hàm trang gọi (shipmentFacets · shipmentSummary ·
+# getVtpReconcileQueue · getDeliveryTower · listOrders) với tham số mặc định của trang; số TRƯỚC = SAU + phần bị loại, đo bằng CÙNG
+# mệnh đề supersededAttemptSql. Tóm tắt chỉ số đếm / tiền; mã vận đơn / mã đơn chỉ ở phần MÃ HOÁ.
+# arg: "[--order=<số đơn POS>]" (mặc định 6571 — đơn mẫu «POS huỷ — hàng vẫn đang đi»).
+```
+
 ### `app-log-evt-count)`
 
 ```

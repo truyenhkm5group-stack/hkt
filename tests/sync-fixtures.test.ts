@@ -48,6 +48,7 @@ import { testHomeBotCommentInbox } from "./home-bot-comment-inbox.test";
 import { testHomeBotHealth } from "./home-bot-health.test";
 import { testShipmentStateProbe } from "./shipment-state-probe.test";
 import { testAppLogEvtCount } from "./app-log-evt-count.test";
+import { testVtpDirectSyncProbe } from "./vtp-direct-sync-probe.test";
 import { testPayrollCodeLedger } from "./payroll-code-ledger.test";
 import { testPayrollReconciliationPure } from "./payroll-reconciliation.test";
 import { testPayrollReconCenter } from "./payroll-recon-center.test";
@@ -2649,6 +2650,8 @@ async function main() {
     testShipmentStateProbe();
     // ops app-log-evt-count: đếm dòng sự kiện JSON trong log app (hàng rào chặn câu bot không để lại dòng CSDL) — chỉ tên + số.
     testAppLogEvtCount();
+    // ops vtp-direct-sync-probe: số SAU / TRƯỚC của #1079 bằng đúng hàm của trang — chỉ đọc, mã hoá.
+    testVtpDirectSyncProbe();
     testOpsScriptSize();
     testPerfProbePages();
     await testDataTruth(db);
