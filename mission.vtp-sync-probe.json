@@ -3,7 +3,7 @@
   "mission_id": "vtp-sync-probe",
   "title": "ops vtp-direct-sync-probe: SAU / TRƯỚC của #1079 bằng đúng hàm của trang (chỉ đọc)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-vp",
@@ -24,7 +24,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-26T15:09:16.518Z",
-  "updated_at": "2026-10-26T15:09:16.518Z",
-  "last_heartbeat": "2026-10-26T15:09:16.518Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-26T15:09:59.665Z",
+  "last_heartbeat": "2026-10-26T15:09:59.665Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/vtp-sync-probe",
+    "sha": "d4920abe5381a9dbc921741c33ae6c3e7cf1708a",
+    "at": "2026-10-26T15:09:59.665Z",
+    "actor": "DESKTOP-56TH98Y:wt-vp",
+    "title": "ops vtp-direct-sync-probe: SAU / TRƯỚC của #1079 bằng đúng hàm của trang (chỉ đọc)",
+    "summary": "Script ops chỉ đọc: gọi shipmentFacets/shipmentSummary (tham số /shipments 30 ngày), getVtpReconcileQueue (theo lý do + tách PICKUP_STALLED theo dạng mã / lý do đầu), getDeliveryTower (AWAITING_PICKUP), listOrders (đơn 6571), đếm VTP_ORDER_LIST_DUE; TRƯỚC = SAU + phần bị loại đo bằng supersededAttemptSql; kèm 549/363 toàn kho. Mã chỉ ở phần MÃ HOÁ.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint: sạch",
+      "TEST_KHOI=K10,K15,K17,K18: TẤT CẢ ĐẠT",
+      "TEST_KHOI=K20,K22: TẤT CẢ ĐẠT"
+    ]
+  }
 }
