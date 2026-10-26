@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "mission_id": "vtp-link-ui",
+  "title": "vtp-direct-sync (4b): nút «Gắn đơn» cho vận đơn chưa gắn đơn + care theo từng vận đơn",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-4b",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/vtp-link-ui",
+  "base_sha": "094ba1e6d6cdd36a4bdee782f975ef663565482f",
+  "domains": [],
+  "owned_paths": [
+    "lib/actions/shipment-link.ts",
+    "app/(dashboard)/shipments/",
+    "lib/queries/shipments.ts",
+    "lib/care/lifecycle.ts",
+    "lib/queries/vtp-sync-coverage.ts",
+    "tests/vtp-link-ui.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-26T16:30:09.328Z",
+  "updated_at": "2026-10-26T16:30:09.328Z",
+  "last_heartbeat": "2026-10-26T16:30:09.328Z",
+  "definition_of_done": []
+}
