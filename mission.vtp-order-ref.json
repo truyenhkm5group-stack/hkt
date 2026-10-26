@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "mission_id": "vtp-order-ref",
+  "title": "vtp-direct-sync (4a): mã đơn ERP / số đơn POS trên vận đơn tạo thẳng ở VTP — một hàm khớp, lần gửi mới, gắn tay (lõi)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-ref",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/vtp-order-ref",
+  "base_sha": "eff16b09e24a67603b510c37bafc09426a0d06a4",
+  "domains": [],
+  "owned_paths": [
+    "lib/integrations/viettelpost/order-reference.ts",
+    "lib/integrations/viettelpost/sync.ts",
+    "lib/integrations/viettelpost/statement-db.ts",
+    "lib/integrations/viettelpost/import-preview.ts",
+    "lib/integrations/viettelpost/reship.ts",
+    "lib/connectors/registry.ts",
+    "tests/vtp-order-ref.test.ts",
+    "tests/sync-fixtures.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-26T10:06:09.474Z",
+  "updated_at": "2026-10-26T10:06:09.474Z",
+  "last_heartbeat": "2026-10-26T10:06:09.474Z",
+  "definition_of_done": []
+}
