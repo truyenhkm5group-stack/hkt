@@ -1,0 +1,8 @@
+{
+  "pr": 1084,
+  "sha": "40f44095c834f597de65b64870f6714e560c53e0",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-26T16:33:23.562Z",
+  "note": "review lead: nút «Gắn đơn» trên /shipments cho vận đơn chưa gắn đơn (không phải chiều hoàn) → action requireUser + can(shipments:manage) + zod → orderForReference (ĐÚNG MỘT đơn) → linkOrphanToOrder (chặn chiều hoàn / SĐT lệch, audit SHIPMENT_MANUAL_LINK) → revalidatePath; reconcileCareCoverage mở ca cho vận đơn mồ côi; build OK."
+}
