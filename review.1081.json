@@ -1,0 +1,8 @@
+{
+  "pr": 1081,
+  "sha": "92dd2771cf655408800fd30ccb2c4eed6fb652c6",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-26T10:12:07.516Z",
+  "note": "review lead: order-reference.ts — một hàm khớp cho webhook + tệp: orders.id / custom_id / số POS ^#?d{1,7}$ (bỏ gom chữ số), khớp ≥ 2 đơn ⇒ không ghép; đo trước 0 liên kết qua system_id ⇒ không gỡ gì; ca reship PKE giữ nguyên (bài kiểm khoá); tệp: SĐT lệch ⇒ dừng; linkOrphanToOrder lõi, action + nút ở (4b). MEDIUM."
+}
