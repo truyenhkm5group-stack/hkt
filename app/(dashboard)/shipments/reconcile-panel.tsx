@@ -323,6 +323,11 @@ function Dong({ row, checked, onToggle }: { row: ReconcileRow; checked: boolean;
         <div className="text-[11.5px] text-muted-foreground">
           {row.hoursSilent === null ? "chưa có mốc ĐVVC nào" : `im ${formatNumber(row.hoursSilent)} giờ · ngưỡng ${formatNumber(row.criticalHours)} giờ`}
         </div>
+        {row.pickupAgeHours !== null ? (
+          <div className="text-[11.5px] text-orange-700 dark:text-orange-300">
+            chờ lấy {formatNumber(Math.floor(row.pickupAgeHours / 24))} ngày{row.pickupAssignments > 0 ? ` · bưu tá được phân công ${formatNumber(row.pickupAssignments)} lần` : ""}
+          </div>
+        ) : null}
       </td>
       <td className="numeric px-2 py-2 text-right">{formatVND(row.codAmount)}</td>
     </tr>

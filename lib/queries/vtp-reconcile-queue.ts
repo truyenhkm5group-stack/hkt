@@ -6,6 +6,9 @@ import { rowsOf } from "@/lib/sql-rows";
 import { effectiveThresholdFor, FRESHNESS_BY_STAGE, FRESHNESS_DEFAULT } from "@/lib/constants/logistics-freshness";
 import { getFreshnessConfig } from "@/lib/queries/logistics-config";
 import { gapWithinSkewSql } from "@/lib/constants/webhook-gap";
+import { carrierHandoffKnownSqlFor } from "@/lib/constants/carrier-handoff";
+import { thresholdOf } from "@/lib/constants/shipment-status-age";
+import { getDwellOverrides } from "@/lib/queries/shipment-status-age";
 import {
   CARE_SILENCE_HOURS,
   GAP_QUEUE_DAYS,
@@ -41,6 +44,10 @@ export type ReconcileRow = {
   vtpLastError: string | null;
   lastCarrierAt: Date | null;
   hoursSilent: number | null;
+  /** Tuổi chặng chờ lấy (giờ, từ lúc tạo vận đơn) khi lý do PICKUP_STALLED bật — `null` ở mọi dòng khác. */
+  pickupAgeHours: number | null;
+  /** Số lần ĐVVC báo «Giao cho bưu tá đi nhận» (mã 104) — bưu tá được phân công đi lấy bao nhiêu lần. */
+  pickupAssignments: number;
   /** Ngưỡng "cũ nghiêm trọng" ĐANG CÓ HIỆU LỰC của chặng này — để màn hình in được "68h / ngưỡng 48h". */
   criticalHours: number;
   codAmount: number | null;
@@ -100,6 +107,13 @@ function viNguImLang(overrides: Awaited<ReturnType<typeof getFreshnessConfig>>) 
 
 export async function getVtpReconcileQueue(trang = 1): Promise<ReconcileQueue> {
   const overrides = await getFreshnessConfig();
+  /*
+    PICKUP_STALLED dùng đồng hồ TUỔI CHẶNG, không phải đồng hồ im lặng (AGENTS 54): ĐVVC gửi 102 / 104 mỗi ngày cho kiện chưa lấy được,
+    nên đồng hồ im lặng không bao giờ chạm ngưỡng. Đo 25/10/2026: 35 vận đơn 12 chữ chờ lấy 4–10 ngày, 425 + 425 sự kiện 102 ↔ 104 trong
+    10 ngày, 0 kiện nào vào hàng đợi. Ngưỡng = mức «ngoại lệ» của DWELL_SLA.PENDING sau ghi đè `logistics.dwell-sla`; chủ shop tắt hạn
+    chặng chờ lấy (null) ⇒ lý do tắt theo, không gõ số thứ hai.
+  */
+  const pickupHours = thresholdOf("PENDING", await getDwellOverrides())?.exception ?? null;
   // Trang là một con số đến từ đường dẫn: kẹp nó lại NGAY, trước khi nó thành một phần của câu SQL
   // và của khoá đệm. `?dc=999999` không được phép trở thành một lượt quét cả bảng.
   const soTrang = Math.min(QUEUE_MAX_PAGES, Math.max(1, Number.isFinite(trang) ? Math.trunc(trang) : 1));
@@ -107,7 +121,7 @@ export async function getVtpReconcileQueue(trang = 1): Promise<ReconcileQueue> {
   // Cache 60 s: hàng đợi này quét toàn bộ kiện đang chạy và người trực mở nó vài lần một ca. Khoá
   // cache mang bộ ngưỡng VÀ số trang — thiếu số trang thì bấm "Xem thêm" xong vẫn nhận lại đúng
   // trang cũ trong suốt 60 giây, và nút trông như hỏng.
-  return memo(`vtp-reconcile-queue:${soDong}:${JSON.stringify(overrides)}`, 60_000, async () => {
+  return memo(`vtp-reconcile-queue:${soDong}:${JSON.stringify(overrides)}:${pickupHours ?? "off"}`, 60_000, async () => {
     const db = await getDb();
     const nguong = viNguImLang(overrides);
     const rows = await db.execute<{
@@ -132,6 +146,9 @@ export async function getVtpReconcileQueue(trang = 1): Promise<ReconcileQueue> {
       r_contradiction: boolean;
       r_care_silent: boolean;
       r_stale: boolean;
+      r_pickup: boolean;
+      pickup_age_hours: number | null;
+      pickup_assignments: number | null;
       total: string | number;
     }>(sql`
       with base as (
@@ -149,6 +166,9 @@ export async function getVtpReconcileQueue(trang = 1): Promise<ReconcileQueue> {
           s.receiver_name,
           s.receiver_phone,
           s.is_final,
+          s.created_at,
+          ${sql.raw(carrierHandoffKnownSqlFor("s.id", "s.picked_up_at"))} as da_ban_giao,
+          (select count(*) from shipment_events e104 where e104.shipment_id = s.id and e104.status = '104')::int as pickup_assignments,
           ${MOC_DVVC} as last_carrier_at,
           ${nguong} as critical_hours,
           -- Ca care ĐANG MỞ, kèm mốc mở: dùng cho lý do "đội đang care mà ĐVVC không nhúc nhích".
@@ -217,18 +237,24 @@ export async function getVtpReconcileQueue(trang = 1): Promise<ReconcileQueue> {
           (
             d.dang_chay
             and (d.last_carrier_at is null or extract(epoch from (now() - d.last_carrier_at)) / 3600.0 >= d.critical_hours)
-          ) as r_stale
+          ) as r_stale,
+          (
+            ${pickupHours !== null} and d.stage = 'PENDING' and not d.is_final and not d.da_ban_giao
+            and extract(epoch from (now() - d.created_at)) / 3600.0 >= ${pickupHours ?? 0}
+          ) as r_pickup,
+          extract(epoch from (now() - d.created_at)) / 3600.0 as pickup_age_hours
         from danh_gia d
       ),
       loc as (
         select * from cham
-        where r_sync_error or r_unmapped or r_gap or r_contradiction or r_care_silent or r_stale
+        where r_sync_error or r_unmapped or r_gap or r_contradiction or r_care_silent or r_pickup or r_stale
       )
       select
         l.id, l.tracking_code, l.vtp_order_number, l.stage, l.vtp_status_name, l.vtp_raw_status_name,
         l.vtp_sync_source, l.vtp_last_error, l.last_carrier_at, l.hours_silent, l.critical_hours,
         l.cod_amount, l.receiver_name, l.receiver_phone, l.care_open,
-        l.r_sync_error, l.r_unmapped, l.r_gap, l.r_contradiction, l.r_care_silent, l.r_stale,
+        l.r_sync_error, l.r_unmapped, l.r_gap, l.r_contradiction, l.r_care_silent, l.r_stale, l.r_pickup,
+        l.pickup_age_hours, l.pickup_assignments,
         /*
           ĐẾM TRÊN TOÀN BỘ TẬP, KHÔNG TRÊN TRANG ĐANG HIỆN.
 
@@ -243,12 +269,13 @@ export async function getVtpReconcileQueue(trang = 1): Promise<ReconcileQueue> {
         count(*) filter (where l.r_gap) over () as c_gap,
         count(*) filter (where l.r_contradiction) over () as c_contradiction,
         count(*) filter (where l.r_care_silent) over () as c_care_silent,
+        count(*) filter (where l.r_pickup) over () as c_pickup,
         count(*) filter (where l.r_stale) over () as c_stale
       from loc l
       order by
         -- Xếp theo LÝ DO MẠNH NHẤT (số nhỏ đứng trước), rồi tới kiện im lặng lâu nhất.
         (case when l.r_sync_error then 1 when l.r_unmapped then 2 when l.r_contradiction then 3
-              when l.r_gap then 4 when l.r_care_silent then 5 else 6 end),
+              when l.r_gap then 4 when l.r_care_silent then 5 when l.r_pickup then 6 else 7 end),
         l.last_carrier_at asc nulls first
       limit ${soDong}
     `);
@@ -263,6 +290,7 @@ export async function getVtpReconcileQueue(trang = 1): Promise<ReconcileQueue> {
       CONTRADICTION: so("c_contradiction"),
       WEBHOOK_GAP: so("c_gap"),
       CARE_WITHOUT_MOVEMENT: so("c_care_silent"),
+      PICKUP_STALLED: so("c_pickup"),
       STALE_NO_NEWS: so("c_stale"),
     };
     const total = so("total");
@@ -274,6 +302,7 @@ export async function getVtpReconcileQueue(trang = 1): Promise<ReconcileQueue> {
       if (raw.r_contradiction) reasons.push("CONTRADICTION");
       if (raw.r_gap) reasons.push("WEBHOOK_GAP");
       if (raw.r_care_silent) reasons.push("CARE_WITHOUT_MOVEMENT");
+      if (raw.r_pickup) reasons.push("PICKUP_STALLED");
       if (raw.r_stale) reasons.push("STALE_NO_NEWS");
       if (!reasons.length) continue;
       reasons.sort((a, b) => RECONCILE_REASON_RANK[a] - RECONCILE_REASON_RANK[b]);
@@ -291,6 +320,8 @@ export async function getVtpReconcileQueue(trang = 1): Promise<ReconcileQueue> {
         // Số giờ im lặng là CHƯA BIẾT khi chưa có mốc ĐVVC nào — không phải 0 giờ.
         hoursSilent: gio === null || !Number.isFinite(gio) ? null : Math.round(gio),
         criticalHours: Number(raw.critical_hours ?? FRESHNESS_DEFAULT.critical),
+        pickupAgeHours: raw.r_pickup ? Math.round(Number(raw.pickup_age_hours)) : null,
+        pickupAssignments: Number(raw.pickup_assignments ?? 0),
         codAmount: raw.cod_amount === null || raw.cod_amount === undefined ? null : Number(raw.cod_amount),
         receiverName: String(raw.receiver_name ?? ""),
         receiverPhone: String(raw.receiver_phone ?? ""),

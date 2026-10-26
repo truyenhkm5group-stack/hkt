@@ -31,6 +31,7 @@ export const RECONCILE_REASONS = [
   "WEBHOOK_GAP",
   "CONTRADICTION",
   "CARE_WITHOUT_MOVEMENT",
+  "PICKUP_STALLED",
   "STALE_NO_NEWS",
 ] as const;
 export type ReconcileReason = (typeof RECONCILE_REASONS)[number];
@@ -41,6 +42,7 @@ export const RECONCILE_REASON_LABEL: Record<ReconcileReason, string> = {
   WEBHOOK_GAP: "Webhook đã rơi gói tin",
   CONTRADICTION: "Dữ liệu tự mâu thuẫn",
   CARE_WITHOUT_MOVEMENT: "Đội đang care mà ĐVVC không nhúc nhích",
+  PICKUP_STALLED: "ĐVVC chưa báo lấy được hàng",
   STALE_NO_NEWS: "Im lặng quá ngưỡng của chặng",
 };
 
@@ -51,6 +53,7 @@ export const RECONCILE_REASON_FIX: Record<ReconcileReason, string> = {
   WEBHOOK_GAP: "Lần nhập tệp gần đây phát hiện ERP đi sau ĐVVC ở kiện này. Trạng thái đã được vá bằng tệp — việc còn lại là xem có kiện nào khác cùng đợt bị rơi mà chưa nhập tệp không.",
   CONTRADICTION: "ERP đang giữ hai điều không thể cùng đúng (ví dụ: cờ 'đã kết thúc' bật nhưng chặng vẫn đang chạy). Phải tra tay trên viettelpost.vn rồi nhập tệp đè lại.",
   CARE_WITHOUT_MOVEMENT: "Đội đã mở ca chăm sóc nhưng từ đó tới nay ĐVVC không gửi thêm mốc nào. Hoặc ĐVVC thật sự đứng im (phải giục bưu cục), hoặc webhook đang rơi cho kiện này.",
+  PICKUP_STALLED: "ĐVVC chưa báo lấy được — webhook không gửi «lấy không thành công», kiểm trên app VTP. Bưu tá được phân công nhiều lần mà kiện vẫn chờ lấy thường là shop chưa giao hàng hoặc vận đơn trùng chưa huỷ.",
   STALE_NO_NEWS: "Kiện im lặng lâu hơn ngưỡng của chặng nó đang đứng. Với kiện chỉ nhận webhook thì im lặng KHÔNG chứng minh được là không có gì xảy ra — phải tra lại.",
 };
 
@@ -68,7 +71,8 @@ export const RECONCILE_REASON_RANK: Record<ReconcileReason, number> = {
   CONTRADICTION: 3,
   WEBHOOK_GAP: 4,
   CARE_WITHOUT_MOVEMENT: 5,
-  STALE_NO_NEWS: 6,
+  PICKUP_STALLED: 6,
+  STALE_NO_NEWS: 7,
 };
 
 export const RECONCILE_REASON_TONE: Record<ReconcileReason, string> = {
@@ -77,6 +81,7 @@ export const RECONCILE_REASON_TONE: Record<ReconcileReason, string> = {
   CONTRADICTION: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
   WEBHOOK_GAP: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
   CARE_WITHOUT_MOVEMENT: "bg-sky-100 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300",
+  PICKUP_STALLED: "bg-orange-100 text-orange-800 dark:bg-orange-950/60 dark:text-orange-300",
   STALE_NO_NEWS: "bg-muted text-muted-foreground",
 };
 
