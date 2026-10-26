@@ -3,7 +3,7 @@
   "mission_id": "vtp-pickup-stalled",
   "title": "vtp-direct-sync (3): PICKUP_STALLED — chờ lấy quá hạn DWELL_SLA vào hàng đợi đối chiếu",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-pk",
@@ -26,11 +26,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-26T14:24:39.122Z",
-  "updated_at": "2026-10-26T14:49:53.723Z",
+  "updated_at": "2026-10-26T15:04:13.925Z",
   "last_heartbeat": "2026-10-26T14:25:17.982Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1082 → 094ba1e6d6cdd36a4bdee782f975ef663565482f"
+    "merged": "#1082 → 094ba1e6d6cdd36a4bdee782f975ef663565482f",
+    "verify": "PASS 094ba1e6d6cdd36a4bdee782f975ef663565482f 2026-10-26T15:03:26.001Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40343357098"
   },
   "handoff": {
     "branch": "claude/vtp-pickup-stalled-2",
