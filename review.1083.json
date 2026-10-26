@@ -1,0 +1,8 @@
+{
+  "pr": 1083,
+  "sha": "d4920abe5381a9dbc921741c33ae6c3e7cf1708a",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-26T15:13:12.991Z",
+  "note": "review lead: script ops chỉ đọc vtp-direct-sync-probe gọi đúng hàm trang (shipmentFacets/Summary, getVtpReconcileQueue, getDeliveryTower, listOrders); ops-vps.yml chỉ thêm action theo mẫu (MÃ HOÁ, DOC_NANG, case), không đổi bước chung/quyền/secret."
+}
