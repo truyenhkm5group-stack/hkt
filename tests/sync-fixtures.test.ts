@@ -88,6 +88,7 @@ import { testVtpPickupStalled } from "./vtp-pickup-stalled.test";
 import { testWebhookGapSkew } from "./webhook-gap-skew.test";
 import { testVtpReshipRelink } from "./vtp-reship-relink.test";
 import { testVtpOrderRef } from "./vtp-order-ref.test";
+import { testVtpLinkUi } from "./vtp-link-ui.test";
 import { testWebhookLatency } from "./webhook-latency.test";
 import { testReconciliation } from "./reconciliation.test";
 import { testMetricsContract } from "./metrics-contract.test";
@@ -2681,6 +2682,8 @@ async function main() {
     await testVtpReshipRelink(db);
     // vtp-direct-sync (4) 25/10/2026: mã đơn ERP / số đơn POS trên vận đơn tạo thẳng ở VTP ⇒ lần gửi mới; gắn tay có audit.
     await testVtpOrderRef(db);
+    // vtp-direct-sync (4b) 26/10/2026: vận đơn chưa gắn đơn — care theo vận đơn + nút «Gắn đơn».
+    await testVtpLinkUi(db);
     // Độ trễ webhook: hàm thuần + một lượt đọc truy vấn thật. KHÔNG gieo dòng nào vào
     // `webhook_events`, nên nó không đổi tổng của bài nào khác.
     await testWebhookLatency();
