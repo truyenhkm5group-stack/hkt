@@ -40,6 +40,10 @@ export async function testVtpPickupStalled() {
     const moi = await mk("155999000002", { createdAt: new Date(now - (nguong - 24) * H) }, 1);
     const daLay = await mk("155999000003", { createdAt: new Date(now - (nguong + 48) * H), pickedUpAt: new Date(now - 24 * H) }, 2);
     const daHuy = await mk("155999000004", { createdAt: new Date(now - (nguong + 48) * H), stage: "CANCELLED", isFinal: true }, 2);
+    // Vận đơn BỊ THAY THẾ (#1079): PKE chờ lấy quá hạn mà đơn đã đi bằng lần gửi khác ⇒ KHÔNG phải kiện chưa lấy được.
+    await db.insert(schema.orders).values({ id: "pk-sup-1", status: 6, statusName: "Đã hủy", stage: "CANCELLED", insertedAt: new Date(now - 10 * 24 * H) });
+    const biThay = await mk("PKEPKSUP0001", { orderId: "pk-sup-1", attemptNo: 1, createdAt: new Date(now - (nguong + 48) * H) }, 3);
+    await mk("155999000005", { orderId: "pk-sup-1", attemptNo: 2, stage: "IN_TRANSIT", createdAt: new Date(now - (nguong + 24) * H), pickedUpAt: new Date(now - (nguong + 20) * H) }, 0);
 
     clearMemo();
     const q = await getVtpReconcileQueue();
@@ -49,7 +53,7 @@ export async function testVtpPickupStalled() {
     assert.equal(dong.pickupAssignments, 3, "số lần phân công bưu tá (104)");
     assert.ok(dong.pickupAgeHours !== null && dong.pickupAgeHours >= nguong, "tuổi chặng in ra được");
     assert.ok(q.counts.PICKUP_STALLED >= 1, "chip đếm có lý do mới");
-    for (const [id, vi] of [[moi, "còn trong hạn"], [daLay, "đã bàn giao"], [daHuy, "đã chốt"]] as const) {
+    for (const [id, vi] of [[moi, "còn trong hạn"], [daLay, "đã bàn giao"], [daHuy, "đã chốt"], [biThay, "bị thay thế bằng lần gửi đang đi"]] as const) {
       assert.ok(!q.rows.some((r) => r.id === id && r.reasons.includes("PICKUP_STALLED")), `${vi} ⇒ không PICKUP_STALLED`);
     }
 
@@ -67,6 +71,7 @@ export async function testVtpPickupStalled() {
     await setSettingJson(DWELL_SLA_SETTING_KEY, truoc ?? {});
     await db.delete(schema.shipmentEvents).where(inArray(schema.shipmentEvents.shipmentId, ids));
     await db.delete(schema.shipments).where(inArray(schema.shipments.id, ids));
+    await db.delete(schema.orders).where(inArray(schema.orders.id, ["pk-sup-1"]));
     clearMemo();
   }
   console.log("✓ PICKUP_STALLED: chờ lấy quá mức ngoại lệ DWELL_SLA, chưa bàn giao ⇒ vào hàng đợi kèm số lần phân công bưu tá, không gắn «im lặng» · trong hạn / đã lấy / đã chốt ⇒ không · ngưỡng theo logistics.dwell-sla");
