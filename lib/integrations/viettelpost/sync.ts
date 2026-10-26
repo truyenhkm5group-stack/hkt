@@ -18,6 +18,7 @@ import { afterShipmentStateChange } from "@/lib/care/lifecycle";
 import { resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
 import { carrierCodeObservation, carrierEventObservations, ghiQuanSat, type QuanSatMoi } from "@/lib/returns/reason-observe";
 import { nextAttemptNo, reshipCandidates, reshipParentOf, reshipTrace } from "@/lib/integrations/viettelpost/reship";
+import { orderForReference } from "@/lib/integrations/viettelpost/order-reference";
 
 /**
  * `changed: false` KHÔNG có nghĩa là xử lý thành công. Có hai lý do rất khác nhau:
@@ -39,13 +40,10 @@ export async function findShipmentForVtp(db: Db, record: VtpTrackingRecord): Pro
   }
   const ref = record.orderReference;
   if (ref) {
-    const systemId = Number(ref.replace(/\D/g, ""));
-    const conditions = [eq(schema.orders.id, ref), eq(schema.orders.customId, ref)];
-    // orders.system_id là int4. Mã tham chiếu của Viettel Post có thể dài hơn (webhook thử của
-    // họ gửi ORDER_REFERENCE = 123456789101112), so sánh thẳng sẽ làm Postgres báo lỗi "value out
-    // of range for type integer" và cả gói tin hỏng. Chỉ so khi số nằm trong phạm vi.
-    if (Number.isSafeInteger(systemId) && systemId > 0 && systemId <= 2_147_483_647) conditions.push(eq(schema.orders.systemId, systemId));
-    const order = await db.query.orders.findFirst({ where: or(...conditions), with: { attempts: true } });
+    // Mã đơn ERP: orders.id · custom_id · SỐ ĐƠN POS viết đúng dạng «6277» / «#6277» (order-reference.ts — vtp-direct-sync (4),
+    // 25/10/2026). Bản cũ gom MỌI chữ số trong ô rồi so system_id; nhiều đơn khớp ⇒ không ghép. System_id 1–7 chữ số nên không
+    // bao giờ vượt int4 (webhook thử của VTP gửi ORDER_REFERENCE = 123456789101112).
+    const order = await orderForReference(db, ref);
     /*
       TỚI ĐÂY NGHĨA LÀ MÃ VẬN ĐƠN KHÔNG KHỚP DÒNG NÀO — nên đây là đường CUỐI, tra theo mã tham
       chiếu của đơn. Một đơn có thể có nhiều lần gửi, và quan hệ `one(...)` cũ trả về MỘT dòng bất
@@ -56,16 +54,26 @@ export async function findShipmentForVtp(db: Db, record: VtpTrackingRecord): Pro
       Dùng `chonVanDonDeGhep` chứ KHÔNG dùng `vanDonDaiDien`: bản tin đang mô tả tình trạng HIỆN
       THỜI của kiện, nên nó thuộc về lần gửi đang chạy — không phải lần gửi đã tới tay khách.
     */
-    const khop = order ? chonVanDonDeGhep(order.attempts, { vtpOrderNumber: orderNumber || null, trackingCode: orderNumber || null }) : null;
+    /*
+      MÃ VẬN ĐƠN MỚI CỦA MỘT ĐƠN ĐÃ CÓ LẦN GỬI ⇒ LẦN GỬI MỚI, không gộp vào lần mới nhất (vtp-direct-sync (4)). `chonVanDonDeGhep`
+      lùi về lần gửi mới nhất khi không trùng mã — đúng cho bản tin KHÔNG mang mã (Pancake), sai cho gói tin VTP mang mã KHÁC: sự kiện
+      của vận đơn mới bị ghi lên dòng của vận đơn cũ. Lần gửi chưa có mã nào (dòng Pancake tạo trước khi đẩy sang ĐVVC) thì vẫn nhận
+      mã ấy như cũ.
+    */
+    const coMa = (a: { vtpOrderNumber: string | null; trackingCode: string | null }) => Boolean(a.vtpOrderNumber?.trim() || a.trackingCode?.trim());
+    const ungVien = order && orderNumber ? order.attempts.filter((a) => (a.direction ?? "OUTBOUND") !== "RETURN" && (!coMa(a) || a.vtpOrderNumber === orderNumber || a.trackingCode === orderNumber)) : order?.attempts ?? [];
+    const khop = order ? chonVanDonDeGhep(ungVien, { vtpOrderNumber: orderNumber || null, trackingCode: orderNumber || null }) : null;
     if (khop) return khop;
     if (order) {
       const [created] = await db
         .insert(schema.shipments)
         .values({
           orderId: order.id,
+          ...(order.attempts.length ? { attemptNo: await nextAttemptNo(db, order.id), direction: "OUTBOUND" as const } : {}),
           carrier: "Viettel Post",
           vtpOrderNumber: orderNumber || null,
           trackingCode: orderNumber || null,
+          orderReference: ref,
           codAmount: order.moneyToCollect,
           receiverName: order.shipFullName,
           receiverPhone: order.shipPhone,

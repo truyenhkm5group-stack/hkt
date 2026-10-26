@@ -400,6 +400,7 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
       "lib/integrations/viettelpost/import-preview.ts",
       // Luật vận đơn tạo lại trên web VTP ⇒ lần gửi kế của đơn gốc (P0 22/10/2026) — dùng chung webhook + nhập tệp.
       "lib/integrations/viettelpost/reship.ts",
+      "lib/integrations/viettelpost/order-reference.ts",
       "lib/integrations/viettelpost/import-run.ts",
     ],
     consumers: [],

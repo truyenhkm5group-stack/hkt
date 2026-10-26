@@ -166,10 +166,11 @@ function verdictOf(
     // CÙNG điều kiện với đường ghi (`orderListRowCreatable`) — hai bước không lệch nhau vì hai luật (AGENTS 49).
     if (orderListRowCreatable(m)) {
       if (m.matchKind === "reship") return { verdict: "RESHIP_ATTEMPT", note: `Vận đơn tạo lại trên web VTP — sẽ tạo lần gửi kế của đơn có vận đơn gốc ${m.orderCode}` };
+      if (m.matchKind === "orderRef") return { verdict: "RESHIP_ATTEMPT", note: `Mã đơn hàng ${m.orderCode} là mã đơn ERP — sẽ tạo lần gửi mới cho đơn đó` };
       const hold = m.reship?.kind === "HOLD" ? ` (${RESHIP_HOLD_TEXT[m.reship.reason]})` : "";
       return { verdict: "NEW_ORPHAN", note: `Chưa gắn được đơn nào — sẽ tạo vận đơn không đơn từ dòng tệp${hold}` };
     }
-    return { verdict: "UNMATCHED", note: m.matchKind === "reship" || m.matchKind === "new" ? "ERP chưa có vận đơn mang mã này — dòng thiếu thu hộ / cước / mốc nên không tạo" : "ERP chưa có vận đơn mang mã này" };
+    return { verdict: "UNMATCHED", note: m.matchKind === "reship" || m.matchKind === "orderRef" || m.matchKind === "new" ? "ERP chưa có vận đơn mang mã này — dòng thiếu thu hộ / cước / mốc nên không tạo" : "ERP chưa có vận đơn mang mã này" };
   }
   if (m.mapped.stage === "UNKNOWN") {
     return { verdict: "UNKNOWN_STATUS", note: `Chữ của ĐVVC được ghi vào sổ trạng thái để bổ sung bảng mã; trạng thái vận đơn giữ nguyên` };
