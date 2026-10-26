@@ -1,0 +1,8 @@
+{
+  "pr": 1082,
+  "sha": "856a20921651121129ba813393d8949125a74271",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-26T14:28:36.673Z",
+  "note": "review lead: lý do PICKUP_STALLED trong hàng đợi đối chiếu — PENDING chưa bàn giao, tuổi ≥ mức ngoại lệ DWELL_SLA.PENDING (đọc settings, tắt hạn ⇒ tắt lý do, ngưỡng trong khoá đệm), loại dòng bị thay thế (#1079), hạng 6, in số lần mã 104; không chạm ORDER_OUTCOME."
+}
