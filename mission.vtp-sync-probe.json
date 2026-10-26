@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "vtp-sync-probe",
+  "title": "ops vtp-direct-sync-probe: SAU / TRƯỚC của #1079 bằng đúng hàm của trang (chỉ đọc)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "HIGH",
+  "owner": "DESKTOP-56TH98Y:wt-vp",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/vtp-sync-probe",
+  "base_sha": "63eb5c8238c64b84102cb4b035d6c6a820eed655",
+  "domains": [],
+  "owned_paths": [
+    "scripts/vtp-direct-sync-probe.ts",
+    "tests/vtp-direct-sync-probe.test.ts",
+    "tests/sync-fixtures.test.ts",
+    ".github/workflows/ops-vps.yml",
+    "docs/ops-vps-script-notes.md"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-26T15:09:16.518Z",
+  "updated_at": "2026-10-26T15:09:16.518Z",
+  "last_heartbeat": "2026-10-26T15:09:16.518Z",
+  "definition_of_done": []
+}
