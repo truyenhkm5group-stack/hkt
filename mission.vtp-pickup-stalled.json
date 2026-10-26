@@ -3,7 +3,7 @@
   "mission_id": "vtp-pickup-stalled",
   "title": "vtp-direct-sync (3): PICKUP_STALLED — chờ lấy quá hạn DWELL_SLA vào hàng đợi đối chiếu",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-pk",
@@ -24,7 +24,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-26T14:24:39.122Z",
-  "updated_at": "2026-10-26T14:24:39.122Z",
-  "last_heartbeat": "2026-10-26T14:24:39.122Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-26T14:25:17.982Z",
+  "last_heartbeat": "2026-10-26T14:25:17.982Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/vtp-pickup-stalled-2",
+    "sha": "856a20921651121129ba813393d8949125a74271",
+    "at": "2026-10-26T14:25:17.982Z",
+    "actor": "DESKTOP-56TH98Y:wt-pk",
+    "title": "vtp-direct-sync (3): PICKUP_STALLED — chờ lấy quá hạn DWELL_SLA vào hàng đợi đối chiếu",
+    "summary": "Lý do PICKUP_STALLED: PENDING · chưa bàn giao · tuổi từ lúc tạo ≥ mức ngoại lệ DWELL_SLA.PENDING (getDwellOverrides / logistics.dwell-sla; tắt hạn ⇒ tắt lý do). Dòng in «chờ lấy N ngày · bưu tá được phân công M lần». Hạng 6. Vận đơn bị thay thế đã ra khỏi base từ #1079 (có bài kiểm). Nhánh claude/vtp-pickup-stalled cũ là WIP trước rebase.",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint: sạch",
+      "TEST_SHARD=1/4 2/4 3/4 4/4 trên origin/main 63eb5c82: TẤT CẢ ĐẠT"
+    ]
+  }
 }
