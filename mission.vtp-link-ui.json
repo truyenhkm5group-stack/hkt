@@ -3,7 +3,7 @@
   "mission_id": "vtp-link-ui",
   "title": "vtp-direct-sync (4b): nút «Gắn đơn» cho vận đơn chưa gắn đơn + care theo từng vận đơn",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-4b",
@@ -26,7 +26,21 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-26T16:30:09.328Z",
-  "updated_at": "2026-10-26T16:30:09.328Z",
-  "last_heartbeat": "2026-10-26T16:30:09.328Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-26T16:30:48.239Z",
+  "last_heartbeat": "2026-10-26T16:30:48.239Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/vtp-link-ui",
+    "sha": "40f44095c834f597de65b64870f6714e560c53e0",
+    "at": "2026-10-26T16:30:48.239Z",
+    "actor": "DESKTOP-56TH98Y:wt-4b",
+    "title": "vtp-direct-sync (4b): nút «Gắn đơn» cho vận đơn chưa gắn đơn + care theo từng vận đơn",
+    "summary": "/shipments: vận đơn chưa gắn đơn (không phải chiều hoàn, cờ linkable dùng legBaseCode) hiện «Chưa gắn đơn» + nút «Gắn đơn» (shipments:manage) nhập mã đơn ERP / số POS → lib/actions/shipment-link.ts → orderForReference + linkOrphanToOrder (4a; chặn chiều hoàn / SĐT lệch, audit). reconcileCareCoverage mở ca cho vận đơn mồ côi (không chiều hoàn — RETURN_LEG_SQL). Đây là ĐƯỜNG BẤM của (4a).",
+    "tests": [
+      "tsc --noEmit: sạch",
+      "eslint: sạch",
+      "TEST_SHARD=1/4 2/4 3/4 4/4 trên origin/main 094ba1e6: TẤT CẢ ĐẠT",
+      "NODE_OPTIONS=--max-old-space-size=6144 npm run build: Compiled successfully"
+    ]
+  }
 }
