@@ -360,7 +360,7 @@ const legacyLine = (t: LegacyTally) =>
   `${t.conversations} hội thoại mang khoá mã tin «m_…» · khách đang có HAI hội thoại ${t.byVerdict.TWO_CONVERSATIONS} (trong đó còn đơn sống ${t.twoWithOpenOrders}) · có luồng hộp thư, chưa có hội thoại ${t.byVerdict.INBOX_NO_CONVERSATION} · không xác định được luồng thật ${t.byVerdict.ECHO_NOT_FOUND} · đơn còn sống ${t.openOrders}`;
 
 /** Một luồng có > 1 hội thoại FANPAGE: dòng chủ / bị đè. HÀM THUẦN. */
-export type DupRow = { id: string; status: string; owner: boolean; carried: boolean; live: number };
+export type DupRow = { id: string; status: string; owner: boolean; carried: boolean; live: number; created?: string; updated?: string };
 export type DupTally = { threads: number; rows: number; noOwner: number; nonOwnerWaiting: number; nonOwnerLive: number; ownerLive: number; bothLive: number };
 export const emptyDupTally = (): DupTally => ({ threads: 0, rows: 0, noOwner: 0, nonOwnerWaiting: 0, nonOwnerLive: 0, ownerLive: 0, bothLive: 0 });
 export function tallyDupThread(t: DupTally, rows: readonly DupRow[]): DupTally {
@@ -391,6 +391,8 @@ async function dupThreads(db: Db, days: number): Promise<DupTally> {
           'id', c.id, 'status', c.status::text,
           'owner', c.visitor_key = encode(sha256(convert_to('fanpage:' || c.page_id || ':' || c.thread_id, 'UTF8')), 'hex'),
           'carried', c.state ? 'carriedTo',
+          'created', to_char(c.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI"Z"'),
+          'updated', to_char(c.updated_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI"Z"'),
           'live', (select count(*) from orders o where o.sales_conversation_id = c.id and o.stage::text not in ('CANCELLED', 'DELETED'))
         ) order by c.created_at) as rows
       from sales_chat_conversations c
@@ -401,9 +403,11 @@ async function dupThreads(db: Db, days: number): Promise<DupTally> {
   );
   let t = emptyDupTally();
   for (const g of groups) {
-    const rows = (Array.isArray(g.rows) ? g.rows : []).map((r) => ({ id: String(r.id), status: String(r.status), owner: Boolean(r.owner), carried: Boolean(r.carried), live: Number(r.live) || 0 }));
+    const rows = (Array.isArray(g.rows) ? g.rows : []).map((r) => ({ id: String(r.id), status: String(r.status), owner: Boolean(r.owner), carried: Boolean(r.carried), live: Number(r.live) || 0, created: r.created ? String(r.created) : undefined, updated: r.updated ? String(r.updated) : undefined }));
     t = tallyDupThread(t, rows);
-    console.log(`  luồng dáng ${idShape(g.thread_id)} · ${rows.map((r) => `${r.id.slice(0, 8)} ${r.status}${r.owner ? " CHỦ" : " bị đè"}${r.carried ? " carriedTo" : ""} · đơn sống ${r.live}`).join(" | ")}`);
+    // Phần MÃ HOÁ: mã hội thoại ĐẦY ĐỦ (để tra tiếp bằng --conv) + mốc tạo / cập nhật — trả lời «dòng trùng MỚI hay dòng cũ nổi lên
+    // vì chủ luồng vừa hoạt động» (đo 24 giờ sau #1054, 26/10/2026). Tóm tắt công khai vẫn chỉ số đếm.
+    console.log(`  luồng dáng ${idShape(g.thread_id)} · ${rows.map((r) => `${r.id} ${r.status}${r.owner ? " CHỦ" : " bị đè"}${r.carried ? " carriedTo" : ""} · đơn sống ${r.live} · tạo ${r.created ?? "?"} · cập nhật ${r.updated ?? "?"}`).join(" | ")}`);
   }
   return t;
 }
