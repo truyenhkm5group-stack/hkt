@@ -6,6 +6,7 @@
  *  2. Webhook: ORDER_REFERENCE = số đơn POS của đơn đã có lần gửi PKE, mã vận đơn MỚI ⇒ LẦN GỬI MỚI của đơn đó (attempt_no + 1), dòng
  *     PKE cũ giữ nguyên mã — trước đây sự kiện bị gộp vào lần gửi mới nhất · mã gom chữ số ⇒ mồ côi · khớp hai đơn ⇒ mồ côi, không đoán.
  *  3. Tệp «Danh sách vận đơn»: cùng hàm — «Mã đơn hàng» = số đơn POS ⇒ orderRef; SĐT tệp khác SĐT đơn ⇒ dừng cho người.
+ *  2b. Ca reship hiện có (ORDER_REFERENCE = mã PKE cũ) không đổi hành vi: lần gửi kế + raw.reship.of.
  *  4. Gắn tay (`linkOrphanToOrder`): gắn đúng một lần + audit mang người bấm · SĐT lệch ⇒ chặn · chiều hoàn ⇒ chặn.
  * Dữ liệu dựng (không PII): SĐT 0961008xxx.
  */
@@ -51,6 +52,13 @@ export async function testVtpOrderRef(db: Db) {
     assert.deepEqual(lan.map((r) => [r.code, r.n]).sort(), [["155990777001", 2], ["PKEOREF00001", 1]], `mã mới ⇒ lần gửi 2, dòng PKE giữ mã: ${JSON.stringify(lan)}`);
     await applyVtpTracking(track("155990777001", "990771", "2026-10-24T11:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
     assert.equal((await db.select().from(schema.shipments).where(eq(schema.shipments.orderId, "oref-1"))).length, 2, "gói kế của cùng mã ⇒ vẫn hai dòng");
+    // Ca reship HIỆN CÓ không đổi hành vi (214/214 ca dạng 155555577235 ↔ PKE1555563080, 25/10/2026): ORDER_REFERENCE = mã PKE
+    // CŨ của đơn ⇒ không phải mã đơn ERP (không khớp id / custom_id / số POS) ⇒ đường reshipParentOf như trước: lần gửi kế + vết.
+    const [pke] = await db.select({ id: schema.shipments.id }).from(schema.shipments).where(eq(schema.shipments.vtpOrderNumber, "PKEOREF00001"));
+    await applyVtpTracking(track("155990777006", "PKEOREF00001", "2026-10-24T12:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
+    codes.push("155990777006");
+    const [rs] = await db.select({ order: schema.shipments.orderId, n: schema.shipments.attemptNo, raw: schema.shipments.raw }).from(schema.shipments).where(eq(schema.shipments.vtpOrderNumber, "155990777006"));
+    assert.deepEqual([rs?.order, rs?.n, (rs?.raw as { reship?: { of?: string } } | null)?.reship?.of], ["oref-1", 3, pke.id], `tham chiếu = mã PKE cũ ⇒ lần gửi kế của CÙNG đơn + raw.reship.of như hôm nay: ${JSON.stringify(rs)}`);
     // gom chữ số ⇒ mồ côi.
     await applyVtpTracking(track("155990777002", "HD-990771", "2026-10-24T10:09:00Z"), "VTP_WEBHOOK", { allowCreate: true });
     const [mc] = await db.select({ order: schema.shipments.orderId }).from(schema.shipments).where(eq(schema.shipments.vtpOrderNumber, "155990777002"));
@@ -73,7 +81,7 @@ export async function testVtpOrderRef(db: Db) {
     assert.deepEqual(await linkOrphanToOrder(db, { shipmentId: o1.id, orderId: "oref-1", actor, reason: "t" }), { ok: false, why: "PHONE_MISMATCH" }, "SĐT lệch ⇒ chặn");
     await db.update(schema.shipments).set({ receiverPhone: "" }).where(eq(schema.shipments.id, o1.id));
     const r = await linkOrphanToOrder(db, { shipmentId: o1.id, orderId: "oref-1", actor, reason: "t" });
-    assert.deepEqual(r, { ok: true, orderId: "oref-1", attemptNo: 3 }, "thiếu SĐT một bên ⇒ người bấm là bằng chứng, gắn thành lần gửi 3");
+    assert.deepEqual(r, { ok: true, orderId: "oref-1", attemptNo: 4 }, "thiếu SĐT một bên ⇒ người bấm là bằng chứng, gắn thành lần gửi kế (4)");
     assert.deepEqual(await linkOrphanToOrder(db, { shipmentId: o1.id, orderId: "oref-1", actor, reason: "t" }), { ok: false, why: "ALREADY_LINKED" });
     const [leg] = await db.insert(schema.shipments).values({ vtpOrderNumber: "PKEOREF000011P1", carrier: "Viettel Post", stage: "RETURNED", codAmount: 0 }).returning({ id: schema.shipments.id });
     codes.push("PKEOREF000011P1");
