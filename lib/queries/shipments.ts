@@ -11,6 +11,7 @@ import { carrierSubstateSql } from "@/lib/queries/carrier-substate-sql";
 import type { ListParams } from "@/lib/search-params";
 import { orderHasProductCode, variantIdsOfCodes } from "@/lib/queries/product-code";
 import { parseSearchTerm } from "@/lib/queries/search-terms";
+import { supersededAttemptSql, supersedingCodeSql } from "@/lib/queries/shipment-superseded";
 
 export const SHIPMENT_SORTABLE = ["createdAt", "vtpStatusDate", "codAmount", "deliveredAt"];
 
@@ -23,6 +24,16 @@ export const SHIPMENT_LINKED_OPTIONS = [
   { value: "pancake", label: "Có đơn Pancake" },
   { value: "external", label: "Ngoài Pancake" },
 ];
+/**
+ * Bộ lọc LẦN GỬI (vtp-direct-sync 25/10/2026 — lib/queries/shipment-superseded.ts). Mặc định (không chọn) = như «Lần gửi chính»:
+ * vận đơn BỊ THAY THẾ (PKE chưa từng bàn giao mà đơn đã có lần gửi khác đang đi / đã giao) không vào danh sách, đếm «chờ lấy», COD
+ * chưa thu. Chọn «Đã bị thay thế» thì chỉ chúng hiện ra — dòng không bị xoá, chỉ ra khỏi phép đếm.
+ */
+export const SHIPMENT_ATTEMPT_OPTIONS = [
+  { value: "primary", label: "Không tính vận đơn bị thay thế" },
+  { value: "superseded", label: "Đã bị thay thế" },
+];
+const SUPERSEDED = sql.raw(supersededAttemptSql("shipments"));
 
 /** Sắp xếp theo cột, đẩy NULL xuống cuối ở cả hai chiều */
 export function orderByNullsLast(column: AnyPgColumn, dir: "asc" | "desc") {
@@ -103,9 +114,14 @@ export function shipmentSearchCondition(q: string): SQL | undefined {
  * Hàm thành `async` vì phải tra danh mục mã hàng. Danh mục được đệm 5 phút nên hầu hết lượt gọi
  * không chạm CSDL.
  */
-export async function shipmentListWhere(params: ListParams) {
+export async function shipmentListWhere(params: ListParams, opts: { attempt?: "ANY" } = {}) {
   const conds: (SQL | undefined)[] = [];
   const { period, filters, q } = params;
+  // Tìm theo mã / SĐT thì KHÔNG giấu dòng bị thay thế: người gõ đúng mã PKE cũ phải thấy nó (kèm nhãn «Đã thay bằng …»).
+  if (opts.attempt !== "ANY") {
+    if (filters.attempt?.includes("superseded")) conds.push(SUPERSEDED);
+    else if (!q?.trim()) conds.push(sql`not ${SUPERSEDED}`);
+  }
   if (period.from) conds.push(gte(schema.shipments.createdAt, period.from));
   if (period.to) conds.push(lte(schema.shipments.createdAt, period.to));
   if (filters.stage?.length) conds.push(inArray(schema.shipments.stage, filters.stage as ShipmentStage[]));
@@ -231,13 +247,13 @@ export async function listShipments(params: ListParams) {
   const ids = rows.map((r) => r.id);
   const outcomeRows = ids.length
     ? await db
-        .select({ id: schema.shipments.id, outcome: ORDER_OUTCOME })
+        .select({ id: schema.shipments.id, outcome: ORDER_OUTCOME, supersededBy: sql<string | null>`case when ${SUPERSEDED} then ${sql.raw(supersedingCodeSql("shipments"))} end` })
         .from(schema.shipments)
         .leftJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
         .where(inArray(schema.shipments.id, ids))
     : [];
-  const outcomeById = new Map(outcomeRows.map((r) => [r.id, r.outcome]));
-  const withOutcome = rows.map((r) => ({ ...r, outcome: outcomeById.get(r.id) ?? null }));
+  const outcomeById = new Map(outcomeRows.map((r) => [r.id, r]));
+  const withOutcome = rows.map((r) => ({ ...r, outcome: outcomeById.get(r.id)?.outcome ?? null, supersededBy: outcomeById.get(r.id)?.supersededBy ?? null }));
   return { rows: withOutcome, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
 }
 
@@ -251,7 +267,8 @@ export async function shipmentFacets(params: ListParams) {
 async function shipmentFacetsUncached(params: ListParams) {
   const db = await getDb();
   const base = await shipmentListWhere({ ...params, filters: {} });
-  const [stages, carriers, cods, finals, linked] = await Promise.all([
+  const baseAnyAttempt = await shipmentListWhere({ ...params, filters: {} }, { attempt: "ANY" });
+  const [stages, carriers, cods, finals, linked, attempts] = await Promise.all([
     db.select({ value: schema.shipments.stage, count: count() }).from(schema.shipments).where(base).groupBy(schema.shipments.stage),
     db.select({ value: schema.shipments.carrier, count: count() }).from(schema.shipments).where(base).groupBy(schema.shipments.carrier).orderBy(desc(count())),
     db.select({ value: schema.shipments.codStatus, count: count() }).from(schema.shipments).where(base).groupBy(schema.shipments.codStatus),
@@ -261,7 +278,10 @@ async function shipmentFacetsUncached(params: ListParams) {
       .from(schema.shipments)
       .where(base)
       .groupBy(sql`${schema.shipments.orderId} is null`),
+    db.select({ value: sql<boolean>`${SUPERSEDED}`, count: count() }).from(schema.shipments).where(baseAnyAttempt).groupBy(sql`1`),
   ]);
+  const attemptCount = { primary: 0, superseded: 0 };
+  for (const a of attempts) attemptCount[a.value ? "superseded" : "primary"] += Number(a.count);
   const stageCount = Object.fromEntries(stages.map((s) => [s.value, Number(s.count)]));
   const codCount = Object.fromEntries(cods.map((s) => [s.value, Number(s.count)]));
   const finalCount = { active: 0, done: 0 };
@@ -336,6 +356,7 @@ async function shipmentFacetsUncached(params: ListParams) {
     codStatuses: codOrder.map((status) => ({ value: status, label: COD_STATUS_LABEL[status], count: codCount[status] ?? 0 })).filter((s) => s.count > 0 || params.filters.cod?.includes(s.value)),
     finals: SHIPMENT_FINAL_OPTIONS.map((o) => ({ ...o, count: finalCount[o.value as keyof typeof finalCount] })),
     linked: SHIPMENT_LINKED_OPTIONS.map((o) => ({ ...o, count: linkedCount[o.value as keyof typeof linkedCount] })),
+    attempts: SHIPMENT_ATTEMPT_OPTIONS.map((o) => ({ ...o, count: attemptCount[o.value as keyof typeof attemptCount] })),
   };
 }
 
@@ -355,8 +376,10 @@ async function shipmentSummaryUncached(params: ListParams) {
     tx
       .select({
         total: count(),
-      codPending: sql<number>`coalesce(sum(case when ${s.codStatus} = 'PENDING' then ${s.codAmount} else 0 end), 0)`,
-      codPendingCount: sql<number>`coalesce(sum(case when ${s.codStatus} = 'PENDING' then 1 else 0 end), 0)`,
+      // Vận đơn BỊ THAY THẾ không bao giờ thu COD (hàng đi bằng lần gửi khác) — ra khỏi «COD chưa thu» kể cả khi đang lọc riêng
+      // chúng; cột cod_status trong CSDL KHÔNG đổi (shipment-superseded.ts).
+      codPending: sql<number>`coalesce(sum(case when ${s.codStatus} = 'PENDING' and not ${SUPERSEDED} then ${s.codAmount} else 0 end), 0)`,
+      codPendingCount: sql<number>`coalesce(sum(case when ${s.codStatus} = 'PENDING' and not ${SUPERSEDED} then 1 else 0 end), 0)`,
       delivering: sql<number>`coalesce(sum(case when ${s.stage} in ('PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY') then 1 else 0 end), 0)`,
       // Giao thành công / hoàn tính theo DOANH THU COD (>100K là thành công, ≤100K là hàng hoàn) chứ không chỉ theo trạng thái VTP:
       // vận đơn chiều về và đơn khách trả hàng đều được Viettel Post ghi "Giao thành công" nhưng không thu được tiền.

@@ -156,3 +156,17 @@ export function vanDonDaiDien<T extends VanDonDaiDienUngVien>(rows: readonly T[]
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   })[0];
 }
+
+/**
+ * VẬN ĐƠN BỊ THAY THẾ — bản TypeScript của `supersededAttemptSql` (lib/queries/shipment-superseded.ts, 25/10/2026). Trả lần gửi chính
+ * đã thay dòng `id`, hoặc `null`. Bị thay thế ⇔ không phải lần gửi chính (`vanDonDaiDien`) ∧ chưa từng bàn giao ∧ chưa giao ∧ lần gửi
+ * chính đã bàn giao và chưa huỷ. `handedOff` phải nạp sẵn (`withHandoff`) — thiếu thì coi là CHƯA bàn giao, nên không ai bị thay.
+ * HÀM THUẦN; tests/shipment-superseded.test.ts so từng dòng với bản SQL.
+ */
+export function supersededBy<T extends VanDonDaiDienUngVien>(rows: readonly T[], id: string): T | null {
+  const self = rows.find((r) => r.id === id);
+  if (!self || self.handedOff === true || self.stage === "DELIVERED") return null;
+  const chinh = vanDonDaiDien(rows);
+  if (!chinh || chinh.id === id) return null;
+  return chinh.handedOff === true && chinh.stage !== "CANCELLED" ? chinh : null;
+}

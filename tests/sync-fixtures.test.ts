@@ -137,6 +137,7 @@ import { testSuaCongTrongLuot } from "./sua-cong-trong-luot.test";
 import { testLoiGoiHongVanGiuTien, testNganSachDocTep } from "./agent-read-budget.test";
 import { cleanupViecDiTiepFixtures, testDispatchKemMaViec, testGiaoLaiSuaTuErp, testIngestGhiNhanhViec, testNhanhVeToiViecPure, testViecDiTiepGuards } from "./viec-di-tiep.test";
 import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa, testHaiLuatKhongTroiXaNhau, testKhongCoOneTrenKhoaNgoaiKhongDuyNhat } from "./shipment-pick.test";
+import { testShipmentSuperseded } from "./shipment-superseded.test";
 import { testVtpReshipOutcome } from "./vtp-reship-outcome.test";
 import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, testTaskAdvancePure } from "./task-advance.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
@@ -2863,6 +2864,8 @@ async function main() {
     /* NẤC 4 — đẩy trạng thái việc theo bằng chứng GitHub. Tự dọn bằng tiền tố `ADV-`. */
     await testGuiLaiKhongDamKhoa();
     await testHaiLuatKhongTroiXaNhau();
+    // vtp-direct-sync 25/10/2026: vận đơn bị thay thế — đọc lúc xem, dẫn xuất từ PRIMARY_ATTEMPT (SQL ≡ TS).
+    await testShipmentSuperseded();
     await cleanupShipmentPickFixtures();
     // P0 22/10/2026 — gửi lại trên web VTP: lần gửi chính còn sống · Pancake huỷ + lần thay thế đang đi · sổ kho theo đơn. Tự dọn `vro-`.
     await testVtpReshipOutcome();

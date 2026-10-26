@@ -172,7 +172,11 @@ export async function listOrders(params: ListParams) {
     const chat = chatLinkOf(chats.get(r.id), inboxOn, { pageId: r.pageId, conversationId: r.conversationId });
     // Chỗ còn thiếu của đơn tay — nút nhanh «Xác nhận đơn» không chốt đơn thiếu xã / SĐT / địa chỉ, dẫn sang sửa đơn (review #675, L2).
     const gaps = isManualOrderId(r.id) ? manualOrderGaps({ phone: r.shipPhone, address: r.shipAddress, province: r.shipProvince, ward: r.shipCommune }, r.itemsCount) : [];
-    return { ...r, review: reviewFromValue(r.review)?.entries ?? [], gaps, shipment: vanDonDaiDien(withHandoff(r.attempts, handed)), risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null, payment: payStates.get(r.id) ?? null, noCodPayment: noCodPaymentState(r), chatUrl: chat?.href ?? null, chatInternal: chat?.internal ?? false, duplicate: strongestFlag(dups.get(r.id)) };
+    const shipment = vanDonDaiDien(withHandoff(r.attempts, handed));
+    // POS HUỶ MÀ HÀNG VẪN ĐI (vtp-direct-sync 25/10/2026, mẫu đơn 6571): shop tạo lại vận đơn trên VTP rồi huỷ đơn POS — lần gửi chính
+    // đã bàn giao và chưa huỷ thì trạng thái POS «Đã huỷ» không phải sự thật về gói hàng (ORDER_OUTCOME mục 12 đã đúng ở chiều kết quả).
+    const shippingDespitePosCancel = (r.stage === "CANCELLED" || r.stage === "DELETED") && shipment?.handedOff === true && shipment.stage !== "CANCELLED" ? (shipment.vtpOrderNumber || shipment.trackingCode || "") : null;
+    return { ...r, review: reviewFromValue(r.review)?.entries ?? [], gaps, shipment, shippingDespitePosCancel, risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null, payment: payStates.get(r.id) ?? null, noCodPayment: noCodPaymentState(r), chatUrl: chat?.href ?? null, chatInternal: chat?.internal ?? false, duplicate: strongestFlag(dups.get(r.id)) };
   });
 
   return { rows, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };

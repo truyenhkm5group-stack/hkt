@@ -1,3 +1,4 @@
+import { supersededAttemptSql } from "@/lib/queries/shipment-superseded";
 import { sql } from "drizzle-orm";
 import { careEntryFor, LEFT_WAREHOUSE_EVENT_STAGES } from "@/lib/care/entry";
 import { getDb } from "@/db";
@@ -298,6 +299,8 @@ export async function getDeliveryTower(): Promise<DeliveryTower> {
           left join cham on cham.sid = s.id
           left join nguoi on nguoi.sid = s.id
          where s.order_id is not null
+           -- Vận đơn BỊ THAY THẾ không phải một gói hàng đang chờ ai (shipment-superseded.ts, 25/10/2026).
+           and not ${sql.raw(supersededAttemptSql("s"))}
            /*
              ═══ AI VÀO THÁP ═══
 

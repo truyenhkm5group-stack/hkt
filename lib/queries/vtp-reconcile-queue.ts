@@ -1,3 +1,4 @@
+import { supersededAttemptSql } from "@/lib/queries/shipment-superseded";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
@@ -165,6 +166,9 @@ export async function getVtpReconcileQueue(trang = 1): Promise<ReconcileQueue> {
         -- không thuộc đây. Lọc theo MÃ chứ không theo tên hãng: tên hãng là một ô chữ do nhiều
         -- đường ghi đặt, còn mã là thứ người trực thật sự dán vào ô tra cứu.
         where s.vtp_order_number is not null and s.vtp_order_number <> ''
+          -- Vận đơn BỊ THAY THẾ (shipment-superseded.ts, 25/10/2026): đơn đã đi bằng lần gửi khác, ĐVVC không gửi lệnh huỷ dòng
+          -- cũ — tra lại nó trên viettelpost.vn không đổi được gì. Đo 25/10: 545 dòng như vậy chôn mọi lý do khác.
+          and not ${sql.raw(supersededAttemptSql("s"))}
       ),
       danh_gia as (
         select

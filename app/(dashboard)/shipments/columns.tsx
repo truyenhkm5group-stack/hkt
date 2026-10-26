@@ -162,6 +162,10 @@ export const shipmentColumns: ColumnDef<ShipmentListRow, unknown>[] = [
       return (
         <div className="min-w-[140px] space-y-1" title={label}>
           <ShipmentStageBadge stage={s.stage} label={short} />
+          {s.supersededBy ? (
+            // vtp-direct-sync 25/10/2026: chưa từng bàn giao, đơn đã đi bằng lần gửi khác — ĐVVC không gửi lệnh huỷ dòng này.
+            <div className="text-[10.5px] font-medium text-amber-700 dark:text-amber-400">Đã thay bằng vận đơn {s.supersededBy}</div>
+          ) : null}
           {fake ? (
             <div className="text-[10.5px] font-medium text-rose-600 dark:text-rose-400">
               {s.outcome === "RETURNED" ? "Thực tế: hoàn (hàng đã quay về shop)" : "Thực tế: không thành công"}

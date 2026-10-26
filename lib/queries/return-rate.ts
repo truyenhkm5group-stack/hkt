@@ -425,12 +425,19 @@ export const OUTCOME_FENCE = sql`0` as unknown as number;
  */
 const ATTEMPT_ALIVE_SH = `(${carrierHandoffKnownSqlFor("sh.id", "sh.picked_up_at")} and sh.stage::text <> 'CANCELLED')`;
 
+/**
+ * THỨ TỰ CHỌN LẦN GỬI CHÍNH trên bí danh `sh` — MỘT chuỗi cho `PRIMARY_ATTEMPT` và mọi câu cần hỏi «lần gửi chính của đơn này là
+ * dòng nào» (vận đơn BỊ THAY THẾ — lib/queries/shipment-superseded.ts, 25/10/2026). Viết lại thứ tự ở chỗ thứ hai là mở đường
+ * cho hai luật lặng lẽ chọn hai dòng khác nhau.
+ */
+export const PRIMARY_ATTEMPT_ORDER_BY = `(sh.stage = 'DELIVERED') desc, ${ATTEMPT_ALIVE_SH} desc, sh.attempt_no desc nulls last, sh.created_at desc, sh.id`;
+
 export const PRIMARY_ATTEMPT = sql`(
   not exists (select 1 from shipments sh0 where sh0.order_id = ${o.id} and sh0.id <> ${s.id})
   or ${s.id} = (
     select sh.id from shipments sh
     where sh.order_id = ${o.id}
-    order by (sh.stage = 'DELIVERED') desc, ${sql.raw(ATTEMPT_ALIVE_SH)} desc, sh.attempt_no desc nulls last, sh.created_at desc, sh.id
+    order by ${sql.raw(PRIMARY_ATTEMPT_ORDER_BY)}
     limit 1
   )
 )`;
