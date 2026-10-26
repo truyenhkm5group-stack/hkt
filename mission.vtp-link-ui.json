@@ -3,7 +3,7 @@
   "mission_id": "vtp-link-ui",
   "title": "vtp-direct-sync (4b): nút «Gắn đơn» cho vận đơn chưa gắn đơn + care theo từng vận đơn",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-4b",
@@ -28,9 +28,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-26T16:30:09.328Z",
-  "updated_at": "2026-10-26T16:33:17.929Z",
+  "updated_at": "2026-10-26T16:52:11.502Z",
   "last_heartbeat": "2026-10-26T16:30:48.239Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1084 → 0b3bd5605e45ecbd0752af838219d68c57111b91"
+  },
   "handoff": {
     "branch": "claude/vtp-link-ui",
     "sha": "40f44095c834f597de65b64870f6714e560c53e0",
