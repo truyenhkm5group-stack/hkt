@@ -61,6 +61,14 @@ async function main() {
   // Trang tối đa (hàm tự kẹp ở QUEUE_MAX_PAGES = 20) — bộ đếm theo lý do là của TOÀN tập, không phải trang đang tải.
   const q = await getVtpReconcileQueue(20);
   tomTat(`hàng đợi đối chiếu SAU · ${q.total} kiện · ${Object.entries(q.counts).map(([k, n]) => `${k} ${n}`).join(" · ")}`);
+  // PICKUP_STALLED (vtp-direct-sync (3)) tách theo DẠNG MÃ và LÝ DO ĐỨNG ĐẦU — so với kỳ vọng 5 PKE (B1) + 35 vận đơn 12 chữ (B2)
+  // của phép đo 25/10. Đọc chuỗi, không đọc kiểu: script chạy được cả trước lẫn sau khi lý do này có trong mã của container.
+  const pk = q.rows.filter((r) => (r.reasons as string[]).includes("PICKUP_STALLED"));
+  const dang = (c: string | null) => (/^PKE/i.test(c ?? "") ? "PKE" : /^[0-9]{12}$/.test(c ?? "") ? "SO12" : "KHAC");
+  const theoDang = new Map<string, number>();
+  for (const r of pk) theoDang.set(`${dang(r.vtpOrderNumber)}·${r.topReason}`, (theoDang.get(`${dang(r.vtpOrderNumber)}·${r.topReason}`) ?? 0) + 1);
+  tomTat(`PICKUP_STALLED · ${pk.length} dòng trong trang đã tải (${q.rows.length}/${q.total}) · ${[...theoDang].map(([k, n]) => `${k} ${n}`).join(" · ") || "—"}`);
+  for (const r of pk) console.log(`  PICKUP_STALLED ${r.vtpOrderNumber ?? r.trackingCode ?? r.id} · hạng đầu ${r.topReason} · chờ lấy ${String((r as Record<string, unknown>).pickupAgeHours ?? "?")} giờ · phân công ${String((r as Record<string, unknown>).pickupAssignments ?? "?")} lần`);
   const [hdTruoc] = rowsOf<{ n: number }>(
     await db.execute(sql`select count(*)::int as n from shipments s where ${SUP} and s.vtp_order_number is not null and s.vtp_order_number <> ''
       and s.stage in ('PENDING','PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','RETURNING')`),
@@ -79,7 +87,8 @@ async function main() {
   const o = await listOrders(parseListParams({ q: String(so), period: "all" }, { defaultSort: "insertedAt", filterKeys: [], sortable: ORDER_SORTABLE, defaultPeriod: "30d" }));
   const don = o.rows.find((r) => r.systemId === so);
   console.log(`đơn #${so}: ${don ? `stage ${don.stage} · lần gửi chính ${don.shipment?.vtpOrderNumber ?? "—"} (${don.shipment?.stage ?? "—"}) · dòng «POS huỷ — hàng vẫn đang đi» ${don.shippingDespitePosCancel ?? "không"}` : "không tìm thấy"}`);
-  tomTat(`/orders đơn mẫu · ${don ? (don.shippingDespitePosCancel !== null ? "CÓ dòng «POS huỷ — hàng vẫn đang đi»" : `KHÔNG có dòng (stage ${don.stage})`) : "không tìm thấy đơn"}`);
+  const coDong = don ? don.shippingDespitePosCancel !== null : null;
+  tomTat(`/orders đơn mẫu · ${coDong === null ? "không tìm thấy đơn" : coDong ? "CÓ dòng «POS huỷ — hàng vẫn đang đi»" : `KHÔNG có dòng (stage ${don?.stage})`}`);
   process.stdout.write("", () => process.exit(0));
 }
 
