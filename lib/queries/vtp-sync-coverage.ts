@@ -53,7 +53,7 @@ export const STATEMENT_FILE_SEEN_AT = sql`greatest(${schema.vtpStatementFiles.re
 export const VTP_CARRIER_TOTAL_UNKNOWN = "chưa đo được — cần tệp «Danh sách vận đơn» xuất từ viettelpost.vn";
 
 /** Chiều hoàn `[số]P[số]` — cùng hình dạng với `legBaseCode` (lib/integrations/viettelpost/statement.ts). */
-const RETURN_LEG_SQL = `s.vtp_order_number ~* '^[a-z0-9]{8,}[0-9]?p[0-9]+$'`;
+export const RETURN_LEG_SQL = `s.vtp_order_number ~* '^[a-z0-9]{8,}[0-9]?p[0-9]+$'`;
 const CANCELLED_BY_CARRIER_SQL = `exists (select 1 from shipment_events ev where ev.shipment_id = s.id and ev.status in ('101','107','201'))`;
 
 export async function getVtpSyncCoverage(period: { from: Date | null; to: Date | null }): Promise<VtpSyncCoverage> {

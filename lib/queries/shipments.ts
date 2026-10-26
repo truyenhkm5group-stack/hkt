@@ -1,3 +1,4 @@
+import { legBaseCode } from "@/lib/integrations/viettelpost/statement";
 import { listKey, memo } from "@/lib/cache";
 import { and, count, desc, eq, exists, gte, ilike, inArray, isNotNull, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
@@ -253,7 +254,13 @@ export async function listShipments(params: ListParams) {
         .where(inArray(schema.shipments.id, ids))
     : [];
   const outcomeById = new Map(outcomeRows.map((r) => [r.id, r]));
-  const withOutcome = rows.map((r) => ({ ...r, outcome: outcomeById.get(r.id)?.outcome ?? null, supersededBy: outcomeById.get(r.id)?.supersededBy ?? null }));
+  // GẮN TAY ĐƯỢC (vtp-direct-sync (4b)): vận đơn chưa có đơn, KHÔNG phải chiều hoàn (`legBaseCode` — cùng luật với linkOrphanToOrder).
+  const withOutcome = rows.map((r) => ({
+    ...r,
+    outcome: outcomeById.get(r.id)?.outcome ?? null,
+    supersededBy: outcomeById.get(r.id)?.supersededBy ?? null,
+    linkable: r.orderId === null && !legBaseCode(r.vtpOrderNumber ?? r.trackingCode ?? ""),
+  }));
   return { rows: withOutcome, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
 }
 

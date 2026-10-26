@@ -1,5 +1,6 @@
 "use client";
 
+import { LinkOrderButton } from "@/app/(dashboard)/shipments/link-order-button";
 import type { ColumnDef } from "@tanstack/react-table";
 import { SHIPMENT_DIRECTION_LABEL } from "@/lib/constants/viettelpost";
 import { timelineSourceLabel } from "@/lib/constants/shipment-timeline";
@@ -44,8 +45,43 @@ export function buildShipmentColumns(opts: {
         />
       ),
     },
-    ...shipmentColumns,
+    // Cột «Đơn hàng» cần quyền thao tác (nút «Gắn đơn» cho vận đơn chưa gắn đơn) nên dựng lại ở đây, cùng vị trí.
+    ...shipmentColumns.map((c) => (c.id === "order" && opts.canManage ? { ...c, cell: orderCell(true) } : c)),
   ];
+}
+
+/** Ô «Đơn hàng». `canLink` ⇒ vận đơn chưa gắn đơn (không phải chiều hoàn) có nút «Gắn đơn» (vtp-direct-sync (4b)). */
+function orderCell(canLink: boolean): NonNullable<ColumnDef<ShipmentListRow, unknown>["cell"]> {
+  return function OrderCell({ row }) {
+    const o = row.original.order;
+    if (!o) {
+      return (
+        <div className="min-w-[96px] space-y-1">
+          {row.original.linkable ? (
+            <span className="inline-flex items-center rounded-md bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">Chưa gắn đơn</span>
+          ) : (
+            <span className="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">Ngoài Pancake</span>
+          )}
+          {row.original.orderReference ? <div className="font-mono text-[11px] text-muted-foreground">{row.original.orderReference}</div> : null}
+          {canLink && row.original.linkable ? <LinkOrderButton shipmentId={row.original.id} /> : null}
+        </div>
+      );
+    }
+    return (
+      <div className="min-w-[96px]">
+        <RowLink href={`/orders/${o.id}`}>#{o.systemId ?? o.id}</RowLink>
+        <div className="text-xs text-muted-foreground">
+          {o.source}
+          {o.totalPriceAfterDiscount ? (
+            <>
+              {" · "}
+              <Money value={o.totalPriceAfterDiscount} compact />
+            </>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
 }
 
 export const shipmentColumns: ColumnDef<ShipmentListRow, unknown>[] = [
@@ -98,31 +134,7 @@ export const shipmentColumns: ColumnDef<ShipmentListRow, unknown>[] = [
     id: "order",
     header: "Đơn hàng",
     enableSorting: false,
-    cell: ({ row }) => {
-      const o = row.original.order;
-      if (!o) {
-        return (
-          <div className="min-w-[96px]">
-            <span className="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">Ngoài Pancake</span>
-            {row.original.orderReference ? <div className="mt-0.5 font-mono text-[11px] text-muted-foreground">{row.original.orderReference}</div> : null}
-          </div>
-        );
-      }
-      return (
-        <div className="min-w-[96px]">
-          <RowLink href={`/orders/${o.id}`}>#{o.systemId ?? o.id}</RowLink>
-          <div className="text-xs text-muted-foreground">
-            {o.source}
-            {o.totalPriceAfterDiscount ? (
-              <>
-                {" · "}
-                <Money value={o.totalPriceAfterDiscount} compact />
-              </>
-            ) : null}
-          </div>
-        </div>
-      );
-    },
+    cell: orderCell(false),
   },
   {
     id: "receiver",

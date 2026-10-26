@@ -1,3 +1,4 @@
+import { RETURN_LEG_SQL } from "@/lib/queries/vtp-sync-coverage";
 import { supersededAttemptSql } from "@/lib/queries/shipment-superseded";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
@@ -533,7 +534,9 @@ export async function reconcileCareCoverage(db: Db, now = new Date(), scope: { s
              s.stage::text as stage, s.vtp_status, s.vtp_status_name, s.vtp_status_date,
              ${chungTuRoiKho} as da_roi_kho
         from shipments s
-       where s.order_id is not null
+       -- Vận đơn CHƯA GẮN ĐƠN (shop tạo thẳng trên VTP, không tham chiếu được — vtp-direct-sync (4b) 25/10/2026) vẫn là gói hàng
+       -- thật của shop: care theo TỪNG VẬN ĐƠN như đường sự kiện vốn đã làm. Chỉ chiều hoàn (dòng riêng không có đơn — luật 3.7) bị loại.
+       where (s.order_id is not null or (s.vtp_order_number is not null and not (${sql.raw(RETURN_LEG_SQL)})))
          and s.is_final = false
          and s.stage::text not in ${[...CARE_TERMINAL_STAGES, "RETURNING"]}
          and ${con} in ${["WAITING_PROCESSING", "WAITING_REDELIVERY", "DELIVERY_EXCEPTION"]}
