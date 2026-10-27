@@ -11930,7 +11930,14 @@ export const wholesaleLeadActivities = pgTable(
     actorName: text("actor_name").notNull().default(""),
     createdAt: createdAt(),
   },
-  (t) => [index("wholesale_lead_activities_lead_idx").on(t.leadId, t.createdAt)],
+  (t) => [
+    index("wholesale_lead_activities_lead_idx").on(t.leadId, t.createdAt),
+    // Khai ở 0197 / 0210 / 0218 mà lược đồ chưa ghi; 0261 thêm 'CONSENT' (nhật ký đồng ý liên hệ).
+    check(
+      "wholesale_lead_activities_kind_check",
+      sql`${t.kind} IN ('DISCOVERED','IMPORTED','ENRICHED','SCORED','NOTE','CALL','CALL_INITIATED','ZALO','ZALO_OPENED','STATUS','ASSIGN','OUTREACH','OPPORTUNITY','CONVERT','EDIT','CAMPAIGN','CONSENT')`,
+    ),
+  ],
 );
 
 export const wholesaleLeadEnrichments = pgTable(

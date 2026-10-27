@@ -2,12 +2,17 @@
 --
 -- CSDL của tổ chức. Viết tay, idempotent. Không đổi / xoá cột nào mã đang đọc; không gieo dòng nào; không backfill.
 --  · wholesale_suppressions.kind nhận thêm 'EMAIL' — chỉ NỚI, mọi dòng cũ vẫn hợp lệ.
+--  · wholesale_lead_activities.kind nhận thêm 'CONSENT' (ghi / thu hồi đồng ý vào lịch sử lead) — chỉ NỚI, giữ đủ 16 giá trị của 0218.
 --  · wholesale_leads: chỉ mục biểu thức lower(btrim(email)) cho khử trùng theo email (dòng cũ có thể còn chữ hoa).
 --  · wholesale_contact_consents: bằng chứng cho phép liên hệ, CHỈ THÊM; thu hồi = điền revoked_at + lý do (không xoá).
 --    Căn cứ là danh sách đóng; không có 'NONE' và không có "email công khai trên website".
 ALTER TABLE "wholesale_suppressions" DROP CONSTRAINT IF EXISTS "wholesale_suppressions_kind_check";
 --> statement-breakpoint
 ALTER TABLE "wholesale_suppressions" ADD CONSTRAINT "wholesale_suppressions_kind_check" CHECK ("kind" IN ('PHONE','DOMAIN','PLACE','EMAIL'));
+--> statement-breakpoint
+ALTER TABLE "wholesale_lead_activities" DROP CONSTRAINT IF EXISTS "wholesale_lead_activities_kind_check";
+--> statement-breakpoint
+ALTER TABLE "wholesale_lead_activities" ADD CONSTRAINT "wholesale_lead_activities_kind_check" CHECK ("wholesale_lead_activities"."kind" IN ('DISCOVERED','IMPORTED','ENRICHED','SCORED','NOTE','CALL','CALL_INITIATED','ZALO','ZALO_OPENED','STATUS','ASSIGN','OUTREACH','OPPORTUNITY','CONVERT','EDIT','CAMPAIGN','CONSENT'));
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "wholesale_leads_email_idx" ON "wholesale_leads" USING btree (lower(btrim("email")));
 --> statement-breakpoint
