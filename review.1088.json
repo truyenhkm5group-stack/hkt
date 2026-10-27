@@ -3,6 +3,6 @@
   "sha": "9825d19d85ba62a201cd90b579b68048bb62343e",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-27T09:18:56.757Z",
+  "at": "2026-10-27T09:20:01.616Z",
   "note": "review lead (lượt 2: khai website.ts vào GOI_MANG_KHONG_CREDENTIAL — chỉ đọc website công khai qua fetchPublicUrl, không secret): tìm email chỉ trên website CÔNG KHAI của lead, robots.txt, không theo sang tên miền khác (bộ gác bọc fetch, rào SSRF vẫn một bản), MX kiểm DNS, vai trò email; KHÔNG gửi thư, không coi email công khai là đồng ý; lưu ở enrichments kind EMAIL + meta hoạt động."
 }
