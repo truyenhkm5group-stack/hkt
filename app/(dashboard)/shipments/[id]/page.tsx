@@ -25,6 +25,9 @@ import { EVIDENCE_TIER_LABEL, reasonPickerGroups } from "@/lib/constants/return-
 import { RETURN_REASONS } from "@/lib/constants/return-reason";
 import { getShipmentDwell } from "@/lib/queries/shipment-status-age";
 import { getShipmentTimeline } from "@/lib/queries/shipment-timeline";
+import { returnArrivalOf } from "@/lib/queries/shipment-return-arrival";
+import { RETURN_ARRIVAL_LABEL, returnArrivalDetail } from "@/lib/constants/return-arrival";
+import { ReturnArrivalTag } from "@/components/return-arrival-tag";
 import { timelineSourceLabel } from "@/lib/constants/shipment-timeline";
 import { DWELL_BASIS_LABEL, DWELL_LEVEL_LABEL, DWELL_LEVEL_TONE, DWELL_UNRATED_HINT, DWELL_UNRATED_LABEL } from "@/lib/constants/shipment-status-age";
 import { ageLabel } from "@/lib/constants/action-queue";
@@ -62,7 +65,8 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
     chút nào. Đặc tả mục 6 gộp `RETURNED` và `RETURNED_BY_RULE` là hoàn.
   */
   // Hồ sơ ngành chỉ để đổi NHÃN chữ biến thể khi in (shop thực phẩm: «Size: 1kg» ⇒ «Quy cách: 1kg»); lỗi ⇒ in nguyên chữ đã lưu.
-  const [outcome, dwell, nhatKy, hasCashEvidence, displayProfile] = await Promise.all([outcomeOfShipment(s.id), getShipmentDwell(s.id), getShipmentTimeline(s.id), shipmentHasCashEvidence(s.id), readDisplayProfile()]);
+  // «Hoàn về shop» (chiều LOGISTICS — lib/queries/shipment-return-arrival.ts): VTP ghi 501 chiều đi trên mã gốc khi kiện hoàn về tới shop.
+  const [outcome, dwell, nhatKy, hasCashEvidence, displayProfile, hoanVe] = await Promise.all([outcomeOfShipment(s.id), getShipmentDwell(s.id), getShipmentTimeline(s.id), shipmentHasCashEvidence(s.id), readDisplayProfile(), s.stage === "DELIVERED" ? returnArrivalOf(s.id) : Promise.resolve(null)]);
   // «Đã thu» chỉ in số khi có bằng chứng tiền — `cod_collected` mặc định 0 nên 0 trần là CHƯA BIẾT.
   const codCollectedShown = collectedCodShown(s.codCollected, hasCashEvidence);
   const daHoan = outcome === "RETURNED" || outcome === "RETURNED_BY_RULE";
@@ -87,6 +91,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
             <span className="font-mono">{number ?? "Chưa có mã"}</span>
             {number ? <CopyButton value={number} what="mã vận đơn" /> : null}
             <ShipmentStageBadge stage={s.stage} label={s.vtpStatusName ?? undefined} className="text-xs" />
+            <ReturnArrivalTag value={hoanVe} />
             {s.isFinal ? <span className="rounded-md bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">Đã kết thúc</span> : null}
           </span>
         }
@@ -124,6 +129,20 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
         kết luận), nên ô trạng thái ở trên vẫn hiện câu CŨ. Trước bản này người trực không có cách
         nào biết điều đó — họ đọc một trạng thái cũ và tưởng đó là tin mới nhất.
       */}
+      {/*
+        «PHÁT THÀNH CÔNG» TRÊN MÃ GỐC NHƯNG HÀNG ĐÃ HOÀN VỀ SHOP. Nhãn chứng từ ở trên giữ nguyên câu của
+        VTP (AGENTS 47); dải này nói kết luận của ERP về chiều logistics và căn cứ của nó.
+      */}
+      {hoanVe ? (
+        <div className="rounded-lg border border-rose-300 bg-rose-50 px-4 py-3 text-sm dark:border-rose-900/60 dark:bg-rose-950/40">
+          <p className="font-semibold text-rose-900 dark:text-rose-200">{RETURN_ARRIVAL_LABEL} — không phải giao tới khách</p>
+          <p className="mt-0.5 text-[12.5px] text-rose-800 dark:text-rose-300">
+            {returnArrivalDetail(hoanVe)}. Viettel Post gửi 501 không mang cờ chiều hoàn khi kiện hoàn về tới shop, nên chứng từ ghi «Phát thành công»;
+            ERP không sửa chứng từ, chỉ suy ra từ kiện chiều hoàn. Kết quả đơn vẫn đọc từ luật kết quả đơn.
+          </p>
+        </div>
+      ) : null}
+
       {!s.vtpRawMapped && s.vtpRawStatusName ? (
         <div className="rounded-lg border border-violet-300 bg-violet-50 px-4 py-3 text-sm dark:border-violet-900/60 dark:bg-violet-950/40">
           <p className="font-semibold text-violet-900 dark:text-violet-200">Viettel Post: &ldquo;{s.vtpRawStatusName}&rdquo;{s.vtpRawStatusCode !== null ? ` (mã ${s.vtpRawStatusCode})` : ""}</p>

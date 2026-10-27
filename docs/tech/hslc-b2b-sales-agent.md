@@ -1,0 +1,180 @@
+# AI B2B Sales Agent cho HSLC — tài liệu trạng thái chung
+
+> **Nguồn sự thật cho mọi phiên** làm chương trình này. Phiên nào nhận / xong việc thì sửa **Sổ việc** (mục 6) và
+> **Bàn giao** (mục 10) trong cùng PR. Tổ chức thật: HSLC «Hải Sản Làng Chài», mã `hslc-hmt-shop` (CSDL riêng qua `getDb()`).
+> Mở rộng module **Săn khách sỉ** (`wholesale_leads`, `docs/verticals/wholesale-lead-hunter.md`) — **KHÔNG** dựng hệ
+> thống song song, KHÔNG dựng CRM thứ hai.
+
+## 1. Mục tiêu & định nghĩa hoàn thành
+
+**Mục tiêu.** Một tác tử AI giúp HSLC tìm và chốt khách sỉ (quán, nhà hàng, cửa hàng đặc sản…) từ lead thật tới đơn thật
+trên ERP, với người duyệt ở mọi bước có rủi ro (gửi thật, mặc cả, chốt đơn).
+
+**Hoàn thành (end-to-end) chỉ khi đo được trên production đủ chuỗi:**
+
+| # | Bước | Bằng chứng phải có |
+|---|---|---|
+| 1 | Lead thật đã xác minh | `wholesale_leads` có SĐT `VERIFIED_CALL` hoặc email xác minh, không trùng (PHONE/DOMAIN/NAME) |
+| 2 | Liên hệ hợp lệ | kênh có đồng ý (consent) hoặc cơ sở hợp lệ, không nằm trong danh sách chặn; dòng `wholesale_lead_activities` |
+| 3 | Phản hồi | `first_response_at` của lead, nội dung phản hồi lưu được |
+| 4 | Báo giá đúng | báo giá văn bản do **máy tất định** tính từ `quoteUnitPrice` (không LLM tính tiền), lưu lại, truy được |
+| 5 | Khách chấp nhận | trạng thái báo giá `ACCEPTED` kèm mốc + người/kênh |
+| 6 | Đơn hợp lệ trên ERP | `createOrderAsAgent` (idempotency `agentKey`), giá khớp `agentPriceProblems` = rỗng |
+| 7 | Thanh toán / vận chuyển đồng bộ | phiếu thu `order_payments` / đối soát chuyển khoản; vận đơn qua đường giao có sẵn |
+| 8 | KPI đúng | phễu B2B đọc từ chứng từ, doanh thu theo `ORDER_OUTCOME` (docs/business-rules/ORDER_OUTCOME.md) |
+
+Chưa có đơn sỉ thật đi qua đủ 8 bước ⇒ trạng thái chương trình ghi **«pilot chưa chứng minh hiệu quả kinh doanh»**,
+kể cả khi mọi bài kiểm xanh.
+
+**Trạng thái hiện tại (27/10/2026):** pilot chưa chứng minh hiệu quả kinh doanh. Chưa có email, consent, báo giá văn
+bản, đối soát chuyển khoản–đơn.
+
+## 2. Kiến trúc (sơ đồ khối)
+
+```
+ discovery (Google Places · CSV · NV nhập)          lib/wholesale/engine.ts · providers.ts
+      │
+      ▼
+ scoring A–D + khử trùng PHONE/DOMAIN/NAME          lib/wholesale/scoring.ts · dedupe.ts
+      │
+      ▼
+ consent / suppression (PHONE·DOMAIN·PLACE → +EMAIL) wholesale_suppressions  ── P1a
+      │
+      ▼
+ outreach / email (người duyệt, cờ gửi thật OFF)    wholesale_outreach_items · opener.ts  ── P2 · P4
+      │
+      ▼
+ reply agent (đọc phản hồi → đề nghị bước tiếp)     ── P3 (chỉ ĐỀ NGHỊ, không tự gửi)
+      │
+      ▼
+ quotation engine — TẤT ĐỊNH, không LLM tính tiền   quoteUnitPrice · agentUnitQuote · bảng quotations  ── P1b
+      │        ▲ cổng sẵn sàng danh mục (P1c): giá sỉ · MOQ · khối lượng · ảnh · mô tả · tồn
+      ▼
+ order (createOrderAsAgent, agentKey)               lib/records/order-create.ts
+      │
+      ▼
+ payment (phiếu thu · đối soát chuyển khoản)        order_payments · bank_transaction_links (+ORDER)  ── P5
+      │
+      ▼
+ fulfillment (giao hàng có sẵn)                     lib/carriers/engine.ts · lib/shipping/*
+      │
+      ▼
+ reorder (nhắc mua lại → /work)                     lib/queries/reorder.ts  ── P6
+      │
+      ▼
+ dashboard phễu B2B                                 lib/queries/wholesale.ts::wholesaleDashboard  ── P7
+      │
+      └──► self-improvement (học từ kết cục, có cổng người duyệt)  ── P8
+```
+
+## 3. REUSE / EXTEND / BUILD NEW theo 16 khối
+
+Tệp:dòng đo trên `origin/main` 0b3bd5605 (27/10/2026) — dòng trôi theo thời gian, tìm lại theo tên hàm.
+
+| # | Khối | Quyết định | Ở đâu (tệp:dòng) | Ghi chú |
+|---|---|---|---|---|
+| 1 | Discovery lead | REUSE | `lib/wholesale/engine.ts:919` `runLeadHunterTick` · `providers.ts` | Google Places qua trạm Cloud Run; trần ngân sách cứng |
+| 2 | Khử trùng | REUSE | `lib/wholesale/dedupe.ts:25` `websiteDomain` · `:52` `nameAddressKey` · `phone.ts` | Place ID → SĐT → tên miền → tên+số nhà |
+| 3 | Chấm điểm A–D | REUSE | `lib/wholesale/scoring.ts:211` `scoreLead` · `:29` `gradeOf` | AI không chấm điểm |
+| 4 | Nhiệt độ HOT/WARM/COLD | BUILD NEW (P1a) | — | suy từ hoạt động, không thay hạng A–D |
+| 5 | Consent / suppression | EXTEND (P1a) | `db/schema.ts` `wholesale_suppressions` (kind `PHONE·DOMAIN·PLACE`) · `lib/wholesale/store.ts:83` `suppressionHit` · `leads.ts:78` `suppressLead` | thêm `EMAIL` + bảng đồng ý — **migration** |
+| 6 | Outreach / hàng đợi | REUSE | `lib/wholesale/outreach.ts:172` `queueOutreachCore` · `:143` `prepareOutreachCore` · `opener.ts:123` `channelAction` | mọi kênh hiện là thủ công |
+| 7 | Email gửi thật | BUILD NEW (P2) | `lib/wholesale/config.ts:78` (`AUTO_SEND` đang khoá) | **BLOCKER** chủ shop (mục 8) |
+| 8 | Reply agent | BUILD NEW (P3) | — | chỉ đề nghị; dữ kiện từ `openerLooksInvented` (`opener.ts:60`) làm mẫu chặn bịa |
+| 9 | Bảng giá sỉ / bậc / MOQ | REUSE | `lib/constants/price-lists.ts:33` `quoteUnitPrice` · `lib/queries/price-lists.ts:38` `priceBooksFor` · `lib/commerce/pricing.ts:34` `agentUnitQuote` · `:75` `agentPriceProblems` | bậc nhỏ nhất = MOQ |
+| 10 | Báo giá văn bản (quotation) | BUILD NEW (P1b) | mẫu kiểm giá: `lib/sales-chatbot/quote.ts:436` `verifyAgentQuote` | bảng `quotations` — **migration**, sau P1a |
+| 11 | Catalog readiness | BUILD NEW — **xong ở PR này (P1c)** | `lib/wholesale/catalog-readiness.ts` · `lib/queries/wholesale-readiness.ts` · `/wholesale/readiness` | chỉ đọc, không bảng mới |
+| 12 | Tồn kho | REUSE (HIGH — chỉ đọc qua hàm có sẵn) | `lib/queries/stock.ts:381` `stockKnownExpr` · `:389` `erpStockExpr` · `:394` `availableStockExpr` | chưa phiếu nhập = CHƯA BIẾT |
+| 13 | Tạo đơn | REUSE | `lib/records/order-create.ts:599` `createOrderAsAgent` (idempotency `raw.agentKey`, `:677`) | giá do máy chủ tính lại |
+| 14 | Chuyển lead → khách | REUSE | `lib/wholesale/leads.ts:422` `convertLeadCore` → `lib/records/customer-create.ts:182` `createCustomerAsAgent` | ghép theo SĐT 9 số cuối, **không theo tên** |
+| 15 | Thanh toán / đối soát | EXTEND (P5, HIGH) | `lib/records/order-payments.ts:94` `recordManualPaymentCore` · `db/schema.ts` `bank_transaction_links` (target chưa có `ORDER`) | thêm `ORDER` = **migration** + luật 17 |
+| 16 | Reorder · dashboard | EXTEND (P6 · P7) | `lib/queries/reorder.ts:33` `loadReorderBoard` · `lib/constants/work-sources.ts:33` · `lib/queries/wholesale.ts:627` `wholesaleDashboard` | việc vào `/work` là phép chiếu (luật 19) |
+
+## 4. Roadmap (có phụ thuộc)
+
+| Phase | Nội dung | Phụ thuộc | Migration | Rủi ro |
+|---|---|---|---|---|
+| **P1a** | consent + suppression `EMAIL` + nhiệt độ HOT/WARM/COLD | — | có | trung bình |
+| **P1b** | quotation engine tất định + bảng `quotations` | P1a (số migration nối sau) · P1c | có | cao (tiền) |
+| **P1c** | catalog readiness + export readiness gate (chỉ đọc) | — | không | thấp |
+| **P1d** | probe production HSLC (đo danh mục, bảng giá, lead thật) — chỉ đọc qua ops | P1c (đọc cùng câu hỏi) | không | thấp |
+| **P2** | kết nối email (gửi thật sau cờ) | **BLOCKER chủ shop** (mục 8) · P1a | có thể | cao |
+| **P3** | reply agent (đọc phản hồi → đề nghị) | P2 | có thể | trung bình |
+| **P4** | sequences D0 / D3 / D7 / D14 | P2 · P1a | có thể | trung bình |
+| **P5** | chốt đơn + đối soát chuyển khoản (`ORDER` trong `bank_transaction_links`) | P1b | có | **HIGH** (luật 17) |
+| **P6** | nhắc mua lại vào `/work` | P5 | không | thấp |
+| **P7** | dashboard phễu B2B (lead → báo giá → đơn → tiền) | P1b · P5 | không | thấp |
+| **P8** | self-improvement (học từ kết cục, người duyệt) | P7 + ≥ 20 kết cục/nhóm | không | trung bình |
+
+## 5. Quyết định đã chốt
+
+| # | Quyết định |
+|---|---|
+| D1 | Feature flag **mặc định OFF** cho: gửi thật (email/Zalo/SMS) · tự mặc cả (auto-negotiation) · tự chốt đơn (auto-order). Bật = quyết định của chủ shop, ghi ngày. |
+| D2 | **Không ghép khách theo tên.** Chỉ SĐT chuẩn hoá (9 số cuối) / tên miền / Place ID. |
+| D3 | **Email công khai ≠ đồng ý.** Email tìm thấy trên website là kênh liên hệ, không phải consent để gửi chuỗi tự động. |
+| D4 | **Không bịa** giá / chứng nhận / tồn / hạn dùng. Giá từ `quoteUnitPrice`; tồn chưa biết thì nói «nhân viên sẽ kiểm»; hạng mục không có nguồn là `UNAVAILABLE`. |
+| D5 | LLM **không tính tiền**: số trên báo giá do máy tất định tính, LLM chỉ diễn đạt. |
+| D6 | Bậc giá cho khách sỉ mới đọc ở **bảng mặc định** (chế độ `DEFAULT_BOOK`): bậc chỉ ở bảng riêng ⇒ khách mới nhận giá lẻ ⇒ chưa sẵn sàng. |
+| D7 | Không hệ thống song song: mọi ghi đi qua lõi có sẵn (`convertLeadCore`, `createOrderAsAgent`, `recordManualPaymentCore`). |
+
+## 6. Sổ việc
+
+| Mã | Nhánh | Phạm vi tệp | Trạng thái | PR |
+|---|---|---|---|---|
+| b2b-p1a-consent | `claude/b2b-p1a-consent` | `db/schema.ts` · `drizzle/` · `lib/wholesale/*` (suppression, consent, nhiệt độ) | đang làm (phiên khác) | — |
+| b2b-p1-readiness | `claude/b2b-p1-readiness` | `docs/tech/hslc-b2b-sales-agent.md` · `lib/wholesale/catalog-readiness.ts` · `lib/queries/wholesale-readiness.ts` · `app/(dashboard)/wholesale/readiness/*` · `app/(dashboard)/wholesale/wholesale-nav.tsx` · `tests/wholesale-catalog-readiness.test.ts` · `tests/sync-fixtures.test.ts` (đăng ký) · `tests/ui-consistency.test.ts` (miễn menu) | xong, chờ gộp | — |
+| b2b-p1d-probe | `claude/b2b-p1d-probe` | script ops chỉ đọc | đang làm (phiên khác) | — |
+| b2b-p1b-quotation | — | `db/schema.ts` · `drizzle/` · `lib/wholesale/quotation*` | chưa nhận (sau P1a) | — |
+| b2b-p2-email | — | kết nối email | **chặn** — chờ chủ shop (mục 8) | — |
+
+## 7. P1c — cổng sẵn sàng (đã làm ở PR này)
+
+Trang `/wholesale/readiness` (tab «Sẵn sàng bán sỉ», quyền `wholesale:view`, module `wholesale_leads`). Chỉ đọc.
+
+| Kiểm | Nguồn | Thiếu khi |
+|---|---|---|
+| Bậc giá sỉ | `price_list_items` của bảng **mặc định** đang bật | không có bảng mặc định, hoặc mẫu mã không có bậc ở đó |
+| MOQ | bậc «mua từ» nhỏ nhất của bảng mặc định | chưa có bậc |
+| Khối lượng | `product_variants.weight` | 0 / trống (= chưa nhập, không phải 0 g) |
+| Ảnh | `product_variants.images[0]` → `products.image` | cả hai trống |
+| Mô tả | field sản phẩm đã khai ∩ khoá mẫu ngành (`DESCRIPTION_FIELD_KEYS`) | tổ chức chưa khai field nào, hoặc mọi field trống |
+| Tồn | sổ kho `stockKnownExpr` / `availableStockExpr` | chưa có phiếu nhập (= CHƯA BIẾT). Tồn đã biết = 0 chỉ là cảnh báo |
+
+**Xuất khẩu** — cổng chung, không bao giờ «sẵn sàng» khi còn một hạng mục `UNAVAILABLE`:
+
+| Hạng mục | Trạng thái hôm nay | Thiếu gì |
+|---|---|---|
+| Chứng nhận | `UNAVAILABLE` | không bảng/cột/field nào lưu giấy chứng nhận |
+| Điều kiện xuất khẩu | `UNAVAILABLE` | không lưu Incoterms / cảng / chứng từ; chủ shop chưa quyết có xuất khẩu |
+| Mã HS | `UNAVAILABLE` | không có cột `hs_code`; máy không suy mã HS từ tên |
+| Hạn dùng | theo lô (`stock_lots.expires_on`) — `AVAILABLE`/`PARTIAL`/`MISSING` | là hạn của LÔ, chưa có «thời hạn sử dụng» chuẩn của sản phẩm |
+| Bảo quản | field `bao_quan` / `storage_instruction`; chưa khai field ⇒ `UNAVAILABLE` | nhập field cho từng sản phẩm |
+
+## 8. Blockers cần chủ shop
+
+| # | Cần quyết | Chặn phase |
+|---|---|---|
+| B1 | Chọn nhà cung cấp gửi email (vd Resend / SES / Gmail Workspace) | P2 · P3 · P4 |
+| B2 | Tên miền gửi (SPF/DKIM/DMARC) + hộp thư nhận phản hồi | P2 · P3 |
+| B3 | Bảng giá **mặc định** cho khách sỉ mới + bậc/MOQ từng mẫu (xem `/wholesale/readiness`) | P1b |
+| B4 | Có bán xuất khẩu không; có thì chứng nhận / HS / điều kiện xuất khẩu | hạng mục xuất khẩu |
+| B5 | Ngày mở từng cờ: gửi thật · tự mặc cả · tự chốt đơn | P2 · P3 · P5 |
+
+## 9. Acceptance tests
+
+| Phase | Bài kiểm | Trạng thái |
+|---|---|---|
+| P1c | `tests/wholesale-catalog-readiness.test.ts` (K21): đủ ⇒ READY · thiếu từng trường · bậc chỉ ở bảng riêng vẫn thiếu · tồn chưa biết ≠ 0 · xuất khẩu `UNAVAILABLE` kèm `missingWhat` · null đứng cuối khi xếp | ĐẠT |
+| P1a | email bị chặn ⇒ không vào hàng đợi; email công khai không tự thành consent | chưa |
+| P1b | báo giá = `quoteUnitPrice` từng dòng; LLM không đổi được số; bậc/MOQ đúng ranh giới | chưa |
+| P2–P4 | cờ gửi thật OFF ⇒ không một lượt gửi nào ra ngoài; idempotent khi chạy lại | chưa |
+| P5 | đối soát ORDER không nhân đôi tiền khi nhập lại sao kê (luật 17) | chưa |
+| E2E | một đơn sỉ thật đi đủ 8 bước mục 1 trên production | chưa |
+
+## 10. Bàn giao & việc tiếp theo
+
+- **P1c xong** (nhánh `claude/b2b-p1-readiness`). Việc tiếp: P1d dùng `wholesaleReadinessBoard()` (hoặc cùng câu hỏi) để đo danh
+  mục HSLC thật — bao nhiêu mẫu READY, bao nhiêu thiếu bậc giá ở bảng mặc định — rồi ghi số vào mục này.
+- P1b nối sau P1a (số migration theo thứ tự gộp); báo giá phải gọi cổng P1c trước khi cho máy báo giá một mẫu mã.
+- Không phase nào bật gửi thật / tự mặc cả / tự chốt đơn khi B5 chưa có ngày quyết.

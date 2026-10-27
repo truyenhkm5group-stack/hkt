@@ -13,6 +13,7 @@ import type { ListParams } from "@/lib/search-params";
 import { orderHasProductCode, variantIdsOfCodes } from "@/lib/queries/product-code";
 import { parseSearchTerm } from "@/lib/queries/search-terms";
 import { supersededAttemptSql, supersedingCodeSql } from "@/lib/queries/shipment-superseded";
+import { returnArrivalsOf } from "@/lib/queries/shipment-return-arrival";
 
 export const SHIPMENT_SORTABLE = ["createdAt", "vtpStatusDate", "codAmount", "deliveredAt"];
 
@@ -246,19 +247,25 @@ export async function listShipments(params: ListParams) {
   // tính lại theo tiền ở phía trình duyệt. Trước đây trang Vận đơn có bộ luật riêng nên cùng một
   // vận đơn hiện "hoàn" ở đây mà "giao thành công" ở báo cáo (ca thật PKE1508909064).
   const ids = rows.map((r) => r.id);
-  const outcomeRows = ids.length
-    ? await db
-        .select({ id: schema.shipments.id, outcome: ORDER_OUTCOME, supersededBy: sql<string | null>`case when ${SUPERSEDED} then ${sql.raw(supersedingCodeSql("shipments"))} end` })
-        .from(schema.shipments)
-        .leftJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
-        .where(inArray(schema.shipments.id, ids))
-    : [];
+  // «HOÀN VỀ SHOP» (chiều LOGISTICS): VTP ghi 501 chiều đi trên mã gốc khi kiện hoàn về tới shop — luật một chỗ ở
+  // lib/queries/shipment-return-arrival.ts, chỉ tra vận đơn đang `DELIVERED` của trang. Chạy song song với câu kết quả đơn.
+  const [outcomeRows, returnArrivals] = await Promise.all([
+    ids.length
+      ? db
+          .select({ id: schema.shipments.id, outcome: ORDER_OUTCOME, supersededBy: sql<string | null>`case when ${SUPERSEDED} then ${sql.raw(supersedingCodeSql("shipments"))} end` })
+          .from(schema.shipments)
+          .leftJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
+          .where(inArray(schema.shipments.id, ids))
+      : Promise.resolve([]),
+    returnArrivalsOf(rows.filter((r) => r.stage === "DELIVERED").map((r) => r.id)),
+  ]);
   const outcomeById = new Map(outcomeRows.map((r) => [r.id, r]));
   // GẮN TAY ĐƯỢC (vtp-direct-sync (4b)): vận đơn chưa có đơn, KHÔNG phải chiều hoàn (`legBaseCode` — cùng luật với linkOrphanToOrder).
   const withOutcome = rows.map((r) => ({
     ...r,
     outcome: outcomeById.get(r.id)?.outcome ?? null,
     supersededBy: outcomeById.get(r.id)?.supersededBy ?? null,
+    returnArrival: returnArrivals.get(r.id) ?? null,
     linkable: r.orderId === null && !legBaseCode(r.vtpOrderNumber ?? r.trackingCode ?? ""),
   }));
   return { rows: withOutcome, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };

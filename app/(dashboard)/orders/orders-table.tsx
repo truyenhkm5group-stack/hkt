@@ -6,6 +6,7 @@ import { orderColumns } from "@/app/(dashboard)/orders/columns";
 import { DataTable } from "@/components/data-table/data-table";
 import { columnsWithListView, type ListMetadataProps } from "@/components/metadata/custom-columns";
 import { OrderStageBadge, ShipmentStageBadge } from "@/components/status-badge";
+import { ReturnArrivalTag } from "@/components/return-arrival-tag";
 import { Money } from "@/components/ui-bits";
 import { ORDER_LIST_REF_COLUMNS } from "@/lib/constants/metadata-list-columns";
 import { formatTimeAgo } from "@/lib/format";
@@ -87,6 +88,7 @@ function OrderMobileCard({ row, stageLabel, canDecide }: { row: OrderListRow; st
       <div className="flex flex-wrap items-center gap-1.5">
         <OrderStageBadge stage={row.stage} label={stageLabel} />
         {row.shipment ? <ShipmentStageBadge stage={row.shipment.stage} label={row.shipment.vtpStatusName ?? undefined} /> : <span className="text-xs text-muted-foreground">Chưa gửi ĐVVC</span>}
+        <ReturnArrivalTag value={row.shipment?.returnArrival} />
         {row.lastUpdateStatusAt ? <span className="ml-auto text-xs text-muted-foreground">{formatTimeAgo(row.lastUpdateStatusAt)}</span> : null}
       </div>
       {row.shippingDespitePosCancel !== null ? <div className="text-[11px] font-medium text-amber-700 dark:text-amber-400">POS huỷ — hàng vẫn đang đi bằng vận đơn {row.shippingDespitePosCancel}</div> : null}

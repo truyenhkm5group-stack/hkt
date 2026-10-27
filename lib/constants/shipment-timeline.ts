@@ -73,6 +73,7 @@ export const TIMELINE_EVENT_TYPES = [
   "CASE_REOPENED",
   "SLA_BREACHED",
   "KPI_OUTCOME",
+  "RETURN_ARRIVAL",
 ] as const;
 export type TimelineEventType = (typeof TIMELINE_EVENT_TYPES)[number];
 
@@ -97,6 +98,7 @@ export const TIMELINE_EVENT_LABEL: Record<TimelineEventType, string> = {
   CASE_REOPENED: "Mở lại đợt",
   SLA_BREACHED: "Vỡ hạn xử lý",
   KPI_OUTCOME: "Kết quả đơn theo luật của shop",
+  RETURN_ARRIVAL: "Hoàn về shop (ERP suy ra từ kiện chiều hoàn)",
 };
 
 export const EVENT_LANE: Record<TimelineEventType, TimelineLane> = {
@@ -122,6 +124,9 @@ export const EVENT_LANE: Record<TimelineEventType, TimelineLane> = {
   CASE_REOPENED: "SYSTEM",
   SLA_BREACHED: "SYSTEM",
   KPI_OUTCOME: "DERIVED",
+  // «Hoàn về shop» khi VTP ghi 501 chiều đi trên mã gốc (lib/constants/return-arrival.ts): kết luận
+  // của ERP về chiều LOGISTICS, đứng CẠNH dòng chứng từ «Phát thành công», không sửa nó (AGENTS 47).
+  RETURN_ARRIVAL: "DERIVED",
 };
 
 /**
@@ -149,6 +154,7 @@ export const TIMELINE_SOURCE_LABEL: Record<string, string> = {
   VTP_UI_MANUAL_VERIFICATION: "Người tra tay",
   MANUAL: "Ghi tay",
   PANCAKE: "Pancake",
+  RETURN_LEG: "Vận đơn chiều hoàn",
 };
 
 export function timelineSourceLabel(source: string): string {
