@@ -1,0 +1,8 @@
+{
+  "pr": 1092,
+  "sha": "d2164f423e729c9304fcaa305fddb0ab2bd6e943",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-27T08:35:42.561Z",
+  "note": "review lead: ops wholesale-b2b-probe CHỈ ĐỌC — ERP_READ_ONLY + getDbForInspection + kiểm default_transaction_read_only=on trước khi đọc; không ghi, không gọi mạng; ops-vps.yml chỉ thêm 1 lựa chọn + mã hoá + DOC_NANG + 1 nhánh case theo mẫu cart-unit-probe (không đổi quyền/secret); tóm tắt chỉ số đếm/tiền, mẫu dòng ở phần mã hoá đã che; lead→đơn ghi rõ chưa đối chiếu tiền thật."
+}
