@@ -1,4 +1,3 @@
-{"at":"2026-10-23T11:56:42.192Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"src-1-module-shell","detail":"#1000 @ 134e923c7926 → eda7121e5299 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-23T12:02:16.944Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"od-doc-p2-04-stop","detail":"#999 @ 7adf026b978c → 28b80053b0f5 (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-23T12:10:45.195Z","actor":"DESKTOP-56TH98Y:wt-asof","kind":"HANDOFF","mission":"od-ux-03-as-of","detail":"claude/od-ux-03-as-of @ 13d5477889b7 · 4 lệnh kiểm thử"}
 {"at":"2026-10-23T12:44:57.201Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"src-1-module-shell","detail":"PASS 28b80053b0f5c4611810e0c2e8d3c13ec2100d3e 2026-10-23T12:44:17.597Z"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-27T09:15:13.632Z","actor":"DESKTOP-56TH98Y:wt-b2b-email","kind":"HANDOFF","mission":"b2b-email-discovery","detail":"claude/b2b-email-discovery @ 9825d19d85ba · 8 lệnh kiểm thử"}
 {"at":"2026-10-27T09:18:30.368Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_LINKED","mission":"b2b-email-discovery","detail":"#1088 cho claude/b2b-email-discovery @ 9825d19d85ba"}
 {"at":"2026-10-27T09:19:34.570Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_LINKED","mission":"b2b-email-discovery","detail":"#1088 cho claude/b2b-email-discovery @ 9825d19d85ba"}
+{"at":"2026-10-27T09:20:36.825Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#1088 @ 9825d19d85ba · review lead (lượt 2: khai website.ts vào GOI_MANG_KHONG_CREDENTIAL — chỉ đọc website công khai qua fetchPublicUrl, không secret): tìm email chỉ trên website CÔNG KHAI của lead, robots.txt, không theo sang tên miền khác (bộ gác bọc fetch, rào SSRF vẫn một bản), MX kiểm DNS, vai trò email; KHÔNG gửi thư, không coi email công khai là đồng ý; lưu ở enrichments kind EMAIL + meta hoạt động."}
