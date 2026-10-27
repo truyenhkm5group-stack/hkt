@@ -11,6 +11,7 @@ import { addLeadsToCampaignAction, assignLeadsAction, markQualifiedAction, queue
 import { formatDate, formatNumber, formatTimeAgo } from "@/lib/format";
 import type { LeadListRow } from "@/lib/queries/wholesale";
 import { CALL_OUTCOME_LABEL, type CallOutcome, FILTER_REASON_LABEL, LEAD_STATUS_TONE, OUTREACH_CHANNEL_LABEL, OUTREACH_CHANNELS, type OutreachChannel } from "@/lib/wholesale/constants";
+import { LEAD_TEMPERATURE_LABEL, type LeadTemperature } from "@/lib/wholesale/temperature";
 import { cn } from "@/lib/utils";
 import { LeadQuickLog } from "@/app/(dashboard)/wholesale/leads/lead-quick-log";
 import type { FieldHandoffOptions } from "@/lib/wholesale/field-handoff";
@@ -37,6 +38,25 @@ export function GradeBadge({ grade, score }: { grade: string | null; score: numb
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
       <span className={cn("inline-flex size-6 items-center justify-center rounded-md text-xs font-bold", GRADE_TONE[grade] ?? "bg-muted")}>{grade}</span>
       <span className="tabular-nums text-sm font-semibold">{score}</span>
+    </span>
+  );
+}
+
+const TEMPERATURE_TONE: Record<LeadTemperature, string> = {
+  HOT: "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-200",
+  WARM: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
+  COLD: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200",
+};
+
+/** Nhãn Nóng / Ấm / Nguội kèm lý do (di chuột để đọc). `null` = không áp dụng (đã thành khách) ⇒ không vẽ gì. */
+export function TemperatureBadge({ temperature, reasons, showReasons = false }: { temperature: LeadTemperature | null; reasons: string[]; showReasons?: boolean }) {
+  if (!temperature) return showReasons ? <span className="text-xs text-muted-foreground">{reasons.join(" ")}</span> : null;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <span title={reasons.join(" ")} className={cn("inline-flex rounded px-1.5 py-0.5 text-[11px] font-semibold", TEMPERATURE_TONE[temperature])}>
+        {LEAD_TEMPERATURE_LABEL[temperature]}
+      </span>
+      {showReasons ? <span className="text-xs text-muted-foreground">{reasons.join(" ")}</span> : null}
     </span>
   );
 }
@@ -101,7 +121,12 @@ const columns: ColumnDef<LeadListRow, unknown>[] = [
   {
     id: "leadScore",
     header: "Điểm",
-    cell: ({ row }) => <GradeBadge grade={row.original.grade} score={row.original.score} />,
+    cell: ({ row }) => (
+      <div className="space-y-1">
+        <GradeBadge grade={row.original.grade} score={row.original.score} />
+        <TemperatureBadge temperature={row.original.temperature} reasons={row.original.temperatureReasons} />
+      </div>
+    ),
   },
   {
     id: "status",

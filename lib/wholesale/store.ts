@@ -6,6 +6,7 @@ import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { vnDateKey, vnStartOfDay } from "@/lib/format";
 import { LEAD_HUNTER_SETTING_KEY, mergeLeadHunterConfig, paidCostMicros, PLACES_SKUS, type LeadHunterConfig, type PlacesSku } from "@/lib/wholesale/config";
 import { RESOLVED_STATUSES } from "@/lib/wholesale/constants";
+import { normalizeEmail } from "@/lib/wholesale/contactability";
 import type { SegmentOutcomeStats } from "@/lib/wholesale/scoring";
 import { isLeadSegmentKey } from "@/lib/wholesale/segments";
 
@@ -77,15 +78,20 @@ export async function recordUsage(row: UsageRow): Promise<void> {
   await db.insert(schema.wholesaleApiUsage).values({ ...row, error: row.error ? row.error.slice(0, 500) : null, query: row.query ? row.query.slice(0, 300) : null });
 }
 
-export type SuppressionProbe = { placeId?: string | null; phone?: string | null; domain?: string | null };
+export type SuppressionProbe = { placeId?: string | null; phone?: string | null; domain?: string | null; email?: string | null };
 
-/** Khớp danh sách không liên hệ theo BẤT KỲ khoá nào. Trả lý do đầu tiên khớp, `null` = không bị chặn. */
+/**
+ * Khớp danh sách không liên hệ theo BẤT KỲ khoá nào (Place ID · SĐT · tên miền · email). Email được chuẩn hoá ở đây
+ * (`normalizeEmail`) nên người gọi đưa thẳng ô `email` của lead. Trả lý do đầu tiên khớp, `null` = không bị chặn.
+ */
 export async function suppressionHit(p: SuppressionProbe): Promise<string | null> {
   const conds = [];
   const s = schema.wholesaleSuppressions;
+  const email = normalizeEmail(p.email);
   if (p.placeId) conds.push(and(eq(s.kind, "PLACE"), eq(s.value, p.placeId)));
   if (p.phone) conds.push(and(eq(s.kind, "PHONE"), eq(s.value, p.phone)));
   if (p.domain) conds.push(and(eq(s.kind, "DOMAIN"), eq(s.value, p.domain)));
+  if (email) conds.push(and(eq(s.kind, "EMAIL"), eq(s.value, email)));
   if (!conds.length) return null;
   const db = await getDb();
   const [row] = await db.select({ reason: s.reason }).from(s).where(or(...conds)).limit(1);

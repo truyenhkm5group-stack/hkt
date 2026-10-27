@@ -67,7 +67,7 @@ async function contactOf(lead: Lead) {
 async function blockedReason(lead: Lead): Promise<string | null> {
   if (lead.contactStatus === "DO_NOT_CONTACT") return "Lead ở danh sách KHÔNG LIÊN HỆ.";
   const { view } = await contactOf(lead);
-  const hit = await suppressionHit({ placeId: lead.placeId, phone: view.phone, domain: lead.websiteDomain });
+  const hit = await suppressionHit({ placeId: lead.placeId, phone: view.phone, domain: lead.websiteDomain, email: lead.email });
   return hit ? `Khớp danh sách không liên hệ: ${hit}` : null;
 }
 

@@ -137,6 +137,7 @@ export const FILTER_REASON_LABEL: Record<string, string> = {
   PLACE_NOT_FOUND: "Google không còn địa điểm này",
   DUPLICATE_PHONE: "Trùng SĐT với lead đã có",
   DUPLICATE_DOMAIN: "Trùng website với lead đã có",
+  DUPLICATE_EMAIL: "Trùng email với lead đã có",
   DUPLICATE_NAME: "Trùng tên + địa chỉ với lead đã có",
   DETAILS_FAILED: "Lấy chi tiết lỗi nhiều lần",
   CHAIN: "Chuỗi lớn (thường mua theo hợp đồng, đòi hoá đơn VAT)",
@@ -356,6 +357,7 @@ export const ACTIVITY_KIND_LABEL: Record<string, string> = {
   CONVERT: "Chuyển thành khách",
   EDIT: "Sửa thông tin",
   CAMPAIGN: "Chiến dịch",
+  CONSENT: "Đồng ý liên hệ",
 };
 
 /**
