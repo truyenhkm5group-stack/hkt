@@ -103,14 +103,30 @@ export function ReconcilePanel({ queue, nguong, canAdmin }: { queue: ReconcileQu
 
   if (!queue.total) {
     return (
-      <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-6 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200">
-        Không kiện nào cần đối chiếu. ERP đang hiểu mọi câu Viettel Post đã nói, không kiện đang chạy nào im lặng quá ngưỡng của chặng, và lượt hỏi lại gần nhất không lỗi.
+      <div className="space-y-3">
+      {queue.channelBlock ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+          <strong>API tra cứu Viettel Post đang chặn máy chủ</strong> (HTTP 403 + trang HTML) từ {vnShortStamp(new Date(queue.channelBlock.openSince))} và chưa cập nhật kiện nào từ 20/09 · webhook vẫn chạy và là nguồn tin duy nhất · không cần làm gì trên từng kiện.
+          {queue.channelBlock.kienMangLoiCu ? ` ${formatNumber(queue.channelBlock.kienMangLoiCu)} kiện còn mang câu lỗi này từ trước — đã loại khỏi «Lỗi đối chiếu».` : ""}
+          {queue.channelBlock.lastProbeAt ? ` Lần thử kênh gần nhất ${vnShortStamp(new Date(queue.channelBlock.lastProbeAt))}.` : ""}
+        </div>
+      ) : null}
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-6 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-200">
+          Không kiện nào cần đối chiếu. ERP đang hiểu mọi câu Viettel Post đã nói, không kiện đang chạy nào im lặng quá ngưỡng của chặng, và lượt hỏi lại gần nhất không lỗi.
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-3">
+      {queue.channelBlock ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+          <strong>API tra cứu Viettel Post đang chặn máy chủ</strong> (HTTP 403 + trang HTML) từ {vnShortStamp(new Date(queue.channelBlock.openSince))} và chưa cập nhật kiện nào từ 20/09 · webhook vẫn chạy và là nguồn tin duy nhất · không cần làm gì trên từng kiện.
+          {queue.channelBlock.kienMangLoiCu ? ` ${formatNumber(queue.channelBlock.kienMangLoiCu)} kiện còn mang câu lỗi này từ trước — đã loại khỏi «Lỗi đối chiếu».` : ""}
+          {queue.channelBlock.lastProbeAt ? ` Lần thử kênh gần nhất ${vnShortStamp(new Date(queue.channelBlock.lastProbeAt))}.` : ""}
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"

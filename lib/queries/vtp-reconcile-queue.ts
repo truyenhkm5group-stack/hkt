@@ -1,3 +1,6 @@
+import { CHANNEL_BLOCK_FIRST_SEEN, channelBlockMessageSql, VTP_API_BREAKER_KEY, type VtpApiBreakerState } from "@/lib/constants/vtp-api-breaker";
+import { sqlIsTestTracking } from "@/lib/constants/truth";
+import { getSyncState } from "@/lib/sync/runner";
 import { supersededAttemptSql } from "@/lib/queries/shipment-superseded";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -68,6 +71,11 @@ export type ReconcileQueue = {
   /** Trang đang tải (cộng dồn: trang 2 nghĩa là đang có 2 × `pageSize` dòng đầu). */
   page: number;
   pageSize: number;
+  /**
+   * Cầu chì kênh API tra cứu (lib/constants/vtp-api-breaker.ts). `null` = kênh dùng được. Khi mở: một băng rôn cho cả hàng đợi —
+   * lỗi «403 + trang HTML» trên từng kiện bị lọc khỏi SYNC_ERROR lúc đọc (dòng CSDL giữ nguyên).
+   */
+  channelBlock: { openSince: string; lastProbeAt: string | null; kienMangLoiCu: number } | null;
 };
 
 /**
@@ -186,6 +194,9 @@ export async function getVtpReconcileQueue(trang = 1): Promise<ReconcileQueue> {
         -- không thuộc đây. Lọc theo MÃ chứ không theo tên hãng: tên hãng là một ô chữ do nhiều
         -- đường ghi đặt, còn mã là thứ người trực thật sự dán vào ô tra cứu.
         where s.vtp_order_number is not null and s.vtp_order_number <> ''
+          -- Mã vận đơn THỬ của ĐVVC (gói tin thử khi bấm «Kiểm tra» webhook) không phải kiện hàng — cùng định nghĩa với dwell /
+          -- control-tower (lib/constants/truth.ts). Đo 26/10/2026: 123456789101112 lọt vào PICKUP_STALLED.
+          and not (${sql.raw(sqlIsTestTracking("s.vtp_order_number"))})
           -- Vận đơn BỊ THAY THẾ (shipment-superseded.ts, 25/10/2026): đơn đã đi bằng lần gửi khác, ĐVVC không gửi lệnh huỷ dòng
           -- cũ — tra lại nó trên viettelpost.vn không đổi được gì. Đo 25/10: 545 dòng như vậy chôn mọi lý do khác.
           and not ${sql.raw(supersededAttemptSql("s"))}
@@ -211,7 +222,9 @@ export async function getVtpReconcileQueue(trang = 1): Promise<ReconcileQueue> {
             Một hàng đợi mà dòng đầu tiên không làm được gì là hàng đợi không ai mở lần thứ hai.
             Phán quyết ấy đã có nhà riêng ở cột tracking_capability; ở đây nó bị loại ra.
           */
-          (b.vtp_last_error is not null and b.vtp_last_error <> '' and b.vtp_last_error not like ${"%không thấy vận đơn này%"}) as r_sync_error,
+          (b.vtp_last_error is not null and b.vtp_last_error <> '' and b.vtp_last_error not like ${"%không thấy vận đơn này%"}
+            -- Kênh bị chặn (403 + trang HTML) là phán quyết của KÊNH, in một băng rôn — không phải việc trên từng kiện (vtp-api-breaker.ts).
+            and not ${sql.raw(channelBlockMessageSql("b.vtp_last_error"))}) as r_sync_error,
           (b.vtp_raw_mapped = false) as r_unmapped
         from base b
       ),
@@ -330,7 +343,12 @@ export async function getVtpReconcileQueue(trang = 1): Promise<ReconcileQueue> {
         topReason: reasons[0],
       });
     }
-    return { rows: out, total, counts, truncated: Math.max(0, total - out.length), page: soTrang, pageSize: QUEUE_PAGE_ROWS };
+    const cauChi = await getSyncState<VtpApiBreakerState>(VTP_API_BREAKER_KEY);
+    const [loiCu] = rowsOf<{ n: number }>(await db.execute(sql`select count(*)::int as n from shipments s where ${sql.raw(channelBlockMessageSql("s.vtp_last_error"))}`));
+    const kienMangLoiCu = Number(loiCu?.n ?? 0);
+    // Băng rôn hiện khi cầu chì MỞ, hoặc khi còn kiện mang câu lỗi kênh cũ (trước khi cầu chì có) — không để chúng biến mất im lặng.
+    const channelBlock = cauChi?.openSince || kienMangLoiCu > 0 ? { openSince: cauChi?.openSince ?? CHANNEL_BLOCK_FIRST_SEEN, lastProbeAt: cauChi?.lastProbeAt ?? null, kienMangLoiCu } : null;
+    return { rows: out, total, counts, truncated: Math.max(0, total - out.length), page: soTrang, pageSize: QUEUE_PAGE_ROWS, channelBlock };
   });
 }
 

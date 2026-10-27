@@ -71,6 +71,7 @@ import { testPayrollAuthorization } from "./payroll-authorization.test";
 import { testCodPaymentStatement, testCodStatusMeaning, testStatementDedupAcrossFilenames, testStatementIdentityByCash, testVtpCodPaymentColumn, testStatementDetailMatching, testStatementLedgerOrderIndependent, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
 import { testVtpCapability } from "./vtp-capability.test";
+import { testVtpApiBreaker } from "./vtp-api-breaker.test";
 import { testVtpEditCodGuardDb, testVtpEditDefaultsPure } from "./vtp-edit-cod.test";
 import { testCareWorkbench } from "./care-workbench.test";
 import { testCareClosedAssign } from "./care-closed-assign.test";
@@ -2691,6 +2692,8 @@ async function main() {
     await testLogisticsPerformance(db);
     await testVtpHealth(db);
     await testVtpCapability(db);
+    // vtp-direct-sync (A) 26/10/2026: cầu chì kênh API tra cứu VTP (403 + HTML) + mã thử không vào hàng đợi đối chiếu.
+    await testVtpApiBreaker(db);
     // Sửa đơn VTP: tự dọn mọi dòng đã gieo (đơn, vận đơn, bảng kê, nhật ký) nên không đổi tổng bài nào khác.
     testVtpEditDefaultsPure();
     await testVtpEditCodGuardDb(db);
