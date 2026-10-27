@@ -2,6 +2,7 @@ import { and, count, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { SyncTrigger } from "@/lib/sync/runner";
 import { runSyncJob } from "@/lib/sync/runner";
+import { runEmailOutboxJob } from "@/lib/wholesale/email-outbox";
 import { runLeadHunterTick, type TickDeps, type TickResult } from "@/lib/wholesale/engine";
 import { autoPrepareForLead } from "@/lib/wholesale/outreach";
 import { getLeadHunterConfig } from "@/lib/wholesale/store";
@@ -12,6 +13,9 @@ import { getLeadHunterConfig } from "@/lib/wholesale/store";
  * Bộ lịch gọi mỗi 3 phút cho từng tổ chức khách (fan-out tầng tự động). Không có việc ⇒ trả `IDLE` mà KHÔNG ghi
  * `sync_runs` (480 dòng rỗng mỗi ngày không nói gì với ai). Có việc ⇒ `runSyncJob` giữ khoá theo tổ chức + job, nên lượt
  * của bộ lịch và lượt «Chạy ngay» do người bấm không chồng nhau.
+ *
+ * Hộp thư đi email (E1) đi KÈM lượt này thay vì một job riêng — không phải sửa lịch scheduler: `runEmailOutboxJob` chạy TRƯỚC
+ * phần quét, có khoá riêng (`wholesale-email`), không có thư tới hạn / email TẮT ⇒ một câu đọc, không ghi `sync_runs`.
  */
 
 export type WholesaleJobOutcome = { skipped: "IDLE"; detail: string } | { skipped: "RUNNING"; detail: string } | TickResult;
@@ -31,7 +35,9 @@ export async function leadHunterHasWork(now = new Date()): Promise<boolean> {
 }
 
 export async function runWholesaleLeadsJob(o: { trigger: SyncTrigger; actor: string; budgetMs?: number }, deps: TickDeps = {}): Promise<WholesaleJobOutcome> {
-  if (!(await leadHunterHasWork())) return { skipped: "IDLE", detail: "Không chiến dịch nào đang chạy, không lead nào chờ bổ sung." };
+  const mail = await runEmailOutboxJob({ trigger: o.trigger, actor: o.actor });
+  const mailNote = "sent" in mail ? ` · ${mail.detail}` : "";
+  if (!(await leadHunterHasWork())) return { skipped: "IDLE", detail: `Không chiến dịch nào đang chạy, không lead nào chờ bổ sung.${mailNote}` };
   const r = await runSyncJob({ source: "ERP", job: "wholesale-leads", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
     const tick = await runLeadHunterTick({ budgetMs: o.budgetMs ?? 50_000 }, deps);
     const cfg = await getLeadHunterConfig();
