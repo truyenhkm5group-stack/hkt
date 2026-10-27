@@ -33,10 +33,12 @@
   ],
   "dependencies": [],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    1091
+  ],
   "migration_reservations": [],
   "created_at": "2026-10-27T04:40:36.652Z",
-  "updated_at": "2026-10-27T08:09:25.120Z",
+  "updated_at": "2026-10-27T08:12:14.357Z",
   "last_heartbeat": "2026-10-27T08:09:25.120Z",
   "definition_of_done": [],
   "handoff": {
