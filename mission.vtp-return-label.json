@@ -3,7 +3,7 @@
   "mission_id": "vtp-return-label",
   "title": "Nhãn «Hoàn về shop» khi VTP ghi Phát thành công trên mã gốc",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-rl",
@@ -34,7 +34,24 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-27T04:16:22.372Z",
-  "updated_at": "2026-10-27T04:16:22.372Z",
-  "last_heartbeat": "2026-10-27T04:16:22.372Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-27T04:17:42.281Z",
+  "last_heartbeat": "2026-10-27T04:17:42.281Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/vtp-return-label",
+    "sha": "bee3dbdb3e1aca1e1263c0cf88c02702ce5869c8",
+    "at": "2026-10-27T04:17:42.281Z",
+    "actor": "DESKTOP-56TH98Y:wt-rl",
+    "title": "VTP ghi «Phát thành công» trên mã gốc khi hàng hoàn về shop nay hiện «Thực tế: hoàn về shop»",
+    "summary": "Một luật TS+SQL (lib/queries/shipment-return-arrival.ts): DELIVERED + 501 chiều đi + kiện chiều hoàn (order_reference=mã gốc, legBaseCode=mã gốc) DELIVERED trong [501−120s, 501+3 ngày]. Áp vào nhật ký (dòng DERIVED RETURN_ARRIVAL, CARRIER giữ nguyên), /shipments, /shipments/[id], /orders, /orders/[id]. Không chạm ORDER_OUTCOME/tiền/tồn, không ghi cột. Ghi chú docs/tech/order-outcome-branch-order.md.",
+    "tests": [
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "TEST_KHOI=K12 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K12 ĐẠT (gồm bài mới shipment-return-arrival)",
+      "TEST_SHARD=1/4 npm test: ĐẠT (10/24 khối, chứa K12)",
+      "TEST_SHARD=2/4 npm test: ĐẠT (5/24 khối)",
+      "TEST_SHARD=3/4, 4/4: KHÔNG chạy cục bộ (luật mới của lead) — 4 shard đầy đủ: để gates CI",
+      "npm run build: ĐẠT (NODE_OPTIONS=--max-old-space-size=6144)"
+    ]
+  }
 }
