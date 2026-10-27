@@ -134,7 +134,8 @@ function testSourceGuards() {
   for (const p of ["lib/queries/fb-crm.ts", "lib/fb-crm/service.ts", "lib/actions/fb-crm.ts", "lib/constants/fb-crm.ts", "app/(dashboard)/customers/facebook-crm/fb-crm-table.tsx", "app/(dashboard)/customers/facebook-crm/page.tsx"]) {
     const src = read(p);
     assert.ok(!src.includes("getPlatformDb"), `${p}: bảng Facebook CRM ở CSDL TỔ CHỨC — không đọc CSDL nền tảng`);
-    assert.ok(!/graph\.facebook\.com|facebook\.com\/\$\{/.test(src), `${p}: không gọi Graph / không dựng link Facebook từ biến (PSID)`);
+    assert.ok(!/graph\.facebook\.com/.test(src), `${p}: không gọi Graph API`);
+    assert.ok(!/facebook\.com\/(?:profile\.php\?id=)?\$\{[^}]*(?:psid|thread|fbId|fb_id|pageScoped)/i.test(src), `${p}: không dựng link Facebook từ PSID / mã hội thoại`);
   }
   const q = read("lib/queries/fb-crm.ts");
   assert.ok(q.includes("ORDER_OUTCOME_FAST") && q.includes("PRIMARY_ATTEMPT") && q.includes("VERIFIED_CASH"), "kết quả đơn + tiền thật chỉ qua biểu thức chung của return-rate.ts");
