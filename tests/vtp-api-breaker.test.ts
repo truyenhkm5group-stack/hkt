@@ -82,9 +82,16 @@ export async function testVtpApiBreaker(db: Db) {
     await syncViettelPostShipments({ trigger: "CRON", actor: "test" });
     assert.equal(goi, 1, "cầu chì mở < 6 giờ ⇒ không hỏi kiện nào");
     // Quá 6 giờ ⇒ thử đúng một kiện; trả bản ghi thật ⇒ đóng.
-    await setSyncState(VTP_API_BREAKER_KEY, { ...s1, lastProbeAt: new Date(Date.now() - (BREAKER_RETRY_HOURS + 1) * 3_600_000).toISOString() });
+    const quaHan: VtpApiBreakerState = { ...s1, lastProbeAt: new Date(Date.now() - (BREAKER_RETRY_HOURS + 1) * 3_600_000).toISOString() };
+    await setSyncState(VTP_API_BREAKER_KEY, quaHan);
     let thu = 0;
     setViettelPostClientForTests({ getOrderDetail: async (n: string) => { thu += 1; return record(n); } });
+    // Tới giờ thử mà KHÔNG kiện nào tới hạn ⇒ chưa gọi API lần nào ⇒ cầu chì giữ nguyên (không được ghi là «JSON rỗng»).
+    await db.execute(sql`update shipments set vtp_next_sync_at = now() + interval '100 days' where id = ${a.id}`);
+    await syncViettelPostShipments({ trigger: "CRON", actor: "test" });
+    assert.equal(thu, 0, "không kiện nào tới hạn ⇒ không gọi API");
+    assert.deepEqual(await getSyncState<VtpApiBreakerState>(VTP_API_BREAKER_KEY), quaHan, "chưa gọi API thì chưa phải một lượt thử");
+    await db.execute(sql`update shipments set vtp_next_sync_at = null where id = ${a.id}`);
     await syncViettelPostShipments({ trigger: "CRON", actor: "test" });
     assert.equal(thu, 1, "lượt thử: đúng MỘT kiện");
     assert.deepEqual(await getSyncState<VtpApiBreakerState>(VTP_API_BREAKER_KEY), BREAKER_CLOSED, "bản ghi thật ⇒ đóng cầu chì");

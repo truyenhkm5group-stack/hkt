@@ -491,6 +491,8 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
     let kenhBiChan = false;
     let coBanGhi = false;
     let loiKhac = false;
+    /** Số lần THẬT SỰ gọi API trong lượt — lượt thử không có kiện nào tới hạn thì chưa thử gì, không được ghi là «JSON rỗng». */
+    let daHoi = 0;
     for (const shipment of shipments) {
       const orderNumber = shipment.vtpOrderNumber ?? shipment.trackingCode;
       if (!orderNumber) {
@@ -498,6 +500,7 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
         continue;
       }
       try {
+        daHoi += 1;
         const record = await client.getOrderDetail(orderNumber);
         if (!record) {
           /*
@@ -558,7 +561,7 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
     }
     const found = shipments.length - notFound - ctx.summary.failed;
     if (!selected || kenhBiChan || coBanGhi) {
-      const sau = nextBreakerState(breaker, { blocked: kenhBiChan, gotRecord: coBanGhi, probed: quyet === "PROBE_ONE", otherError: loiKhac }, new Date());
+      const sau = nextBreakerState(breaker, { blocked: kenhBiChan, gotRecord: coBanGhi, probed: quyet === "PROBE_ONE" && daHoi > 0, otherError: loiKhac }, new Date());
       if (JSON.stringify(sau) !== JSON.stringify(breaker ?? BREAKER_CLOSED)) await setSyncState(VTP_API_BREAKER_KEY, sau);
     }
     if (!selected && !kenhBiChan) {
