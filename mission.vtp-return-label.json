@@ -34,24 +34,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-27T04:16:22.372Z",
-  "updated_at": "2026-10-27T04:17:42.281Z",
-  "last_heartbeat": "2026-10-27T04:17:42.281Z",
+  "updated_at": "2026-10-27T04:57:17.837Z",
+  "last_heartbeat": "2026-10-27T04:57:17.837Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/vtp-return-label",
-    "sha": "bee3dbdb3e1aca1e1263c0cf88c02702ce5869c8",
-    "at": "2026-10-27T04:17:42.281Z",
+    "sha": "3adbbea1ef85ca5e555ebba93bd2c6e4fb190ee4",
+    "at": "2026-10-27T04:57:17.837Z",
     "actor": "DESKTOP-56TH98Y:wt-rl",
-    "title": "VTP ghi «Phát thành công» trên mã gốc khi hàng hoàn về shop nay hiện «Thực tế: hoàn về shop»",
-    "summary": "Một luật TS+SQL (lib/queries/shipment-return-arrival.ts): DELIVERED + 501 chiều đi + kiện chiều hoàn (order_reference=mã gốc, legBaseCode=mã gốc) DELIVERED trong [501−120s, 501+3 ngày]. Áp vào nhật ký (dòng DERIVED RETURN_ARRIVAL, CARRIER giữ nguyên), /shipments, /shipments/[id], /orders, /orders/[id]. Không chạm ORDER_OUTCOME/tiền/tồn, không ghi cột. Ghi chú docs/tech/order-outcome-branch-order.md.",
+    "title": "Nhãn «Hoàn về shop» khi VTP ghi Phát thành công trên mã gốc",
+    "summary": "",
     "tests": [
-      "npm run typecheck: sạch",
-      "npm run lint: sạch",
-      "TEST_KHOI=K12 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K12 ĐẠT (gồm bài mới shipment-return-arrival)",
-      "TEST_SHARD=1/4 npm test: ĐẠT (10/24 khối, chứa K12)",
-      "TEST_SHARD=2/4 npm test: ĐẠT (5/24 khối)",
-      "TEST_SHARD=3/4, 4/4: KHÔNG chạy cục bộ (luật mới của lead) — 4 shard đầy đủ: để gates CI",
-      "npm run build: ĐẠT (NODE_OPTIONS=--max-old-space-size=6144)"
+      "npm run typecheck (tsc --noEmit): sạch @3adbbea1e",
+      "npm run lint (eslint): sạch @3adbbea1e",
+      "TEST_KHOI=K12 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K12 ĐẠT @3adbbea1e (13 ca, gồm chiều hoàn RETURNED ⇒ có, RETURNING ⇒ không)",
+      "TEST_SHARD=1/4, 2/4: ĐẠT ở bee3dbdb3 (lượt trước)",
+      "npm run build: ĐẠT ở bee3dbdb3 (commit mới không chạm client)",
+      "4 shard đầy đủ: để gates CI"
     ]
   }
 }
