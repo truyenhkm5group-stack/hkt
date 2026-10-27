@@ -3,7 +3,7 @@
   "mission_id": "b2b-p1d-probe",
   "title": "Ops wholesale-b2b-probe: đo nền Săn khách sỉ + giá sỉ (chỉ đọc)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-b2b-probe",
@@ -25,7 +25,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-27T08:28:49.658Z",
-  "updated_at": "2026-10-27T08:28:49.658Z",
-  "last_heartbeat": "2026-10-27T08:28:49.658Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-27T08:31:32.528Z",
+  "last_heartbeat": "2026-10-27T08:31:32.528Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/b2b-p1d-probe",
+    "sha": "d2164f423e729c9304fcaa305fddb0ab2bd6e943",
+    "at": "2026-10-27T08:31:32.528Z",
+    "actor": "DESKTOP-56TH98Y:wt-b2b-probe",
+    "title": "Ops wholesale-b2b-probe: đo nền Săn khách sỉ + giá sỉ (chỉ đọc)",
+    "summary": "Ops CHỈ ĐỌC wholesale-b2b-probe (arg \"[--org=<mã tổ chức>]\", mặc định hslc-hmt-shop): nền Săn khách sỉ + giá sỉ cho AI B2B Sales Agent; tóm tắt chỉ số đếm + tiền, mẫu dòng trong phần mã hoá.",
+    "tests": [
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "TEST_KHOI=K09,K10,K15,K17,K18 npm test: K09 (wholesale-b2b-probe ✓), K10 (ops-script-size 91.561/125.000 byte), K15, K17 (platform-isolation-static) ĐẠT; K18 đỏ ở ops-log-leak (chú thích đầu tệp nhắc tên trường cạnh nhãn kênh tóm tắt) ⇒ sửa ở commit d2164f4",
+      "TEST_KHOI=K18 npm test (sau sửa): TẤT CẢ KIỂM THỬ CỦA chỉ K18 ĐẠT",
+      "4 shard đầy đủ: để gates CI",
+      "build: không chạy (không chạm ranh giới client/server)"
+    ]
+  }
 }
