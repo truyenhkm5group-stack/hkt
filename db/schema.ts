@@ -12687,3 +12687,66 @@ export const platformOperatorAlerts = pgTable(
     check("platform_operator_alerts_attempts_check", sql`${t.attempts} >= 1`),
   ],
 );
+
+/**
+ * FACEBOOK FRIEND CRM (0262 · docs/verticals/facebook-friend-crm.md) — MỘT dòng mỗi khách: link trang Facebook cá nhân do NGƯỜI
+ * dán, trạng thái kết bạn với nick chăm sóc của shop, nhân viên phụ trách, ngày chăm sóc tiếp, cờ «không liên hệ».
+ *
+ * `fb_profile_url` KHÔNG BAO GIỜ suy từ PSID / `customers.fb_id` (mã THEO PAGE — `lib/sales-chatbot/avatar-profile.ts`
+ * `FACEBOOK_ID_SOURCES`): chỉ khách tự gửi (`CUSTOMER_PROVIDED`) hoặc nhân viên tự mở hội thoại Pancake, bấm avatar và dán
+ * lại (`STAFF_VERIFIED_FROM_PANCAKE`). Chưa có link ⇒ `NONE`. ERP KHÔNG tự kết bạn, KHÔNG tự nhắn từ nick cá nhân, KHÔNG
+ * quét Facebook — bảng này chỉ GHI LẠI việc người đã làm. Người làm đi bằng khoá `users.id` (luật 34).
+ */
+export const customerFbConnections = pgTable(
+  "customer_fb_connections",
+  {
+    id: id(),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    fbProfileUrl: text("fb_profile_url"),
+    fbUrlSource: text("fb_url_source").notNull().default("NONE"),
+    fbUrlSetByUserId: text("fb_url_set_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    fbUrlSetAt: ts("fb_url_set_at"),
+    connectionStatus: text("connection_status").notNull().default("NOT_ASKED"),
+    careOwnerUserId: text("care_owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    nextCareOn: date("next_care_on", { mode: "string" }),
+    doNotContact: boolean("do_not_contact").notNull().default(false),
+    doNotContactReason: text("do_not_contact_reason"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("customer_fb_connections_customer_uq").on(t.customerId),
+    index("customer_fb_connections_owner_idx").on(t.careOwnerUserId),
+    check("customer_fb_connections_source_check", sql`${t.fbUrlSource} IN ('CUSTOMER_PROVIDED', 'STAFF_VERIFIED_FROM_PANCAKE', 'NONE')`),
+    check("customer_fb_connections_url_source_check", sql`(${t.fbProfileUrl} IS NULL) = (${t.fbUrlSource} = 'NONE')`),
+    check("customer_fb_connections_status_check", sql`${t.connectionStatus} IN ('NOT_ASKED', 'CONSENTED', 'INVITE_SENT', 'FRIENDS', 'DECLINED')`),
+    check("customer_fb_connections_dnc_check", sql`NOT ${t.doNotContact} OR length(btrim(coalesce(${t.doNotContactReason}, ''))) > 0`),
+  ],
+);
+
+/** Nhật ký CHỈ THÊM của Facebook Friend CRM — mỗi thay đổi thật một dòng; bấm lại cùng trạng thái KHÔNG ghi (luật 61). */
+export const customerFbConnectionEvents = pgTable(
+  "customer_fb_connection_events",
+  {
+    id: id(),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customers.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    fromValue: text("from_value"),
+    toValue: text("to_value"),
+    note: text("note").notNull().default(""),
+    /** `users.id` của người bấm (luật 34); `NULL` = MÁY làm. */
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("customer_fb_connection_events_customer_idx").on(t.customerId, t.createdAt),
+    check(
+      "customer_fb_connection_events_kind_check",
+      sql`${t.kind} IN ('URL_SET', 'URL_CLEARED', 'STATUS_CHANGED', 'OWNER_CHANGED', 'NEXT_CARE_SET', 'DNC_SET', 'DNC_CLEARED', 'CONSENT_RECORDED')`,
+    ),
+  ],
+);
