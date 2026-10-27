@@ -1,0 +1,8 @@
+{
+  "pr": 1088,
+  "sha": "6da15eb937971aebf1f5578d51cdae84866fd681",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-27T05:10:45.974Z",
+  "note": "review lead: thu thập email B2B — đọc sâu có giới hạn (cấu hình maxPages), robots, chỉ cùng website qua fetchPublicUrl; trích mailto/che/JSON-LD; phân vai trò; chỉ DNS MX (không SMTP); lưu wholesale_lead_enrichments EMAIL + source_url, meta ở nhật ký ENRICHED (migration bổ sung để sau); không đè staff_edited_fields; hàng đợi có cờ; «email công khai ≠ đồng ý». accept-overlap duyệt — nhánh gộp sau r"
+}
