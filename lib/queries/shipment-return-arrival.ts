@@ -17,9 +17,17 @@ import { RETURN_ARRIVAL_MAX_DAYS, RETURN_ARRIVAL_SKEW_SECONDS, type ReturnArriva
  *     lùi về giờ hiện tại);
  *  3. có một dòng CHIỀU HOÀN của chính mã đó — `order_reference` = mã gốc (đúng vế `HAS_RETURN_LEG`
  *     của `ORDER_OUTCOME`) VÀ mã có dạng chiều hoàn `legBaseCode(mã) = mã gốc` (regex lười giữ nguyên)
- *     — đứng ở chặng `DELIVERED`, mốc giao về (`delivered_at`, thiếu thì `vtp_status_date`) nằm
- *     trong [mốc 501 gốc − RETURN_ARRIVAL_SKEW_SECONDS, mốc 501 gốc + RETURN_ARRIVAL_MAX_DAYS] (hai
- *     đầu đều tính).
+ *     — đứng ở chặng `DELIVERED` HOẶC `RETURNED`, mốc giao về nằm trong
+ *     [mốc 501 gốc − RETURN_ARRIVAL_SKEW_SECONDS, mốc 501 gốc + RETURN_ARRIVAL_MAX_DAYS] (hai đầu
+ *     đều tính). MỐC GIAO VỀ CHỌN THEO CHẶNG của dòng chiều hoàn:
+ *       · `DELIVERED` (VTP gửi 501 trên kiện chiều hoàn KHÔNG mang cờ IS_RETURNING — ca đo 25/10)
+ *         ⇒ `delivered_at`, thiếu thì `vtp_status_date`;
+ *       · `RETURNED` (VTP gửi 501 trên kiện chiều hoàn CÓ cờ IS_RETURNING — ERP dịch thành
+ *         «hàng về shop», xem tests/vtp-source-of-truth.test.ts mục 9) ⇒ `returned_at`, thiếu thì
+ *         `vtp_status_date`.
+ *     `RETURNING` (chiều hoàn còn trên đường) KHÔNG được nhận: hàng chưa về tới shop.
+ *     Lead chốt 27/10/2026 nhận cả hai chặng — cùng một sự việc «kiện chiều hoàn đã phát về shop»,
+ *     chỉ khác cờ VTP gửi kèm.
  *
  * Vế «mã có dạng chiều hoàn» chặn vận đơn GỬI LẠI tạo trên web VTP: chúng cũng mang
  * `order_reference` = mã gốc (22/10/2026) nhưng là một kiện đi tới khách, không phải kiện về shop.
@@ -38,8 +46,19 @@ export type ReturnLegCandidate = {
   orderReference: string | null;
   stage: string | null;
   deliveredAt: Date | null;
+  returnedAt: Date | null;
   vtpStatusDate: Date | null;
 };
+
+/** Chặng của dòng chiều hoàn được coi là «đã phát về shop». */
+export const RETURN_LEG_ARRIVED_STAGES = ["DELIVERED", "RETURNED"] as const;
+
+/** Mốc giao về của dòng chiều hoàn — chọn cột theo chặng (xem chú thích đầu tệp). HÀM THUẦN. */
+export function returnLegArrivedAt(leg: Pick<ReturnLegCandidate, "stage" | "deliveredAt" | "returnedAt" | "vtpStatusDate">): Date | null {
+  if (leg.stage === "DELIVERED") return leg.deliveredAt ?? leg.vtpStatusDate;
+  if (leg.stage === "RETURNED") return leg.returnedAt ?? leg.vtpStatusDate;
+  return null;
+}
 
 export type ReturnArrivalInput = {
   id: string;
@@ -65,9 +84,10 @@ export function detectReturnArrival(input: ReturnArrivalInput): ReturnArrival | 
   const hi = anchor + RETURN_ARRIVAL_MAX_DAYS * DAY_MS;
   let best: { code: string; at: Date } | null = null;
   for (const leg of input.legs) {
-    if (leg.id === input.id || leg.stage !== "DELIVERED" || leg.orderReference !== input.vtpOrderNumber) continue;
+    if (leg.id === input.id || leg.orderReference !== input.vtpOrderNumber) continue;
+    if (!(RETURN_LEG_ARRIVED_STAGES as readonly (string | null)[]).includes(leg.stage)) continue;
     if (!leg.vtpOrderNumber || !isReturnLegCodeOf(leg.vtpOrderNumber, input.vtpOrderNumber)) continue;
-    const at = leg.deliveredAt ?? leg.vtpStatusDate;
+    const at = returnLegArrivedAt(leg);
     if (!at || at.getTime() < lo || at.getTime() > hi) continue;
     if (!best || at.getTime() < best.at.getTime() || (at.getTime() === best.at.getTime() && leg.vtpOrderNumber < best.code)) best = { code: leg.vtpOrderNumber, at };
   }
@@ -100,9 +120,11 @@ function outbound501Sql(alias: string): string {
 
 /** Kiện chiều hoàn khớp luật của vận đơn bí danh `alias`, mốc 501 gốc ở `anchor` (giao về sớm nhất trước). */
 function returnLegSql(alias: string, anchor: string): string {
-  const legAt = `coalesce(ra_l.delivered_at, ra_l.vtp_status_date)`;
+  // Mốc giao về theo chặng — bản SQL của `returnLegArrivedAt`.
+  const legAt = `(case when ra_l.stage = 'RETURNED' then coalesce(ra_l.returned_at, ra_l.vtp_status_date) else coalesce(ra_l.delivered_at, ra_l.vtp_status_date) end)`;
+  const stages = RETURN_LEG_ARRIVED_STAGES.map((st) => `'${st}'`).join(", ");
   return `select ra_l.vtp_order_number as code, ${legAt} as at from shipments ra_l
-    where ra_l.order_reference = ${alias}.vtp_order_number and ra_l.id <> ${alias}.id and ra_l.stage = 'DELIVERED'
+    where ra_l.order_reference = ${alias}.vtp_order_number and ra_l.id <> ${alias}.id and ra_l.stage in (${stages})
       and ra_l.vtp_order_number is not null and ${legShapeSql("ra_l.vtp_order_number", `${alias}.vtp_order_number`)}
       and ${legAt} >= ${anchor} - interval '${RETURN_ARRIVAL_SKEW_SECONDS} seconds'
       and ${legAt} <= ${anchor} + interval '${RETURN_ARRIVAL_MAX_DAYS} days'

@@ -54,6 +54,10 @@ const CA: Ca[] = [
   { key: "j-retleg", outbound501: T, leg501: "RETURN", codCollected: 30_000, leg: { stage: "DELIVERED", at: giay(6) } },
   // Không có mốc 501 nào (chặng DELIVERED từ nguồn khác) ⇒ không kết luận.
   { key: "k-noanchor", outbound501: null, codCollected: 30_000, leg: { stage: "DELIVERED", at: giay(6) } },
+  // Kiện chiều hoàn ở chặng RETURNED (VTP gửi 501 trên kiện chiều hoàn CÓ cờ IS_RETURNING) — lead chốt 27/10: cũng là «đã về shop».
+  { key: "l-returned", outbound501: T, codCollected: 30_000, leg: { stage: "RETURNED", at: giay(8) } },
+  // ...nhưng RETURNED ngoài cửa sổ 3 ngày thì vẫn không.
+  { key: "m-returned-late", outbound501: T, codCollected: 30_000, leg: { stage: "RETURNED", at: giay(4 * NGAY) } },
 ];
 
 /** Mã gốc: PKE + 10 chữ số, tận cùng bằng chữ số — đúng dạng production. */
@@ -71,6 +75,8 @@ const KY_VONG: Record<string, boolean> = {
   "i-reship": false,
   "j-retleg": false,
   "k-noanchor": false,
+  "l-returned": true,
+  "m-returned-late": false,
 };
 
 export async function testShipmentReturnArrival(db: Db) {
@@ -137,7 +143,9 @@ export async function testShipmentReturnArrival(db: Db) {
         codAmount: 0,
         shippingFee: 15_000,
         deliveredAt: c.leg.stage === "DELIVERED" ? c.leg.at : null,
-        vtpStatusDate: c.leg.at,
+        returnedAt: c.leg.stage === "RETURNED" ? c.leg.at : null,
+        // Mốc ảnh chụp KHÁC mốc chặng cho kiện RETURNED: nếu luật đọc nhầm cột, ca biên sẽ đỏ.
+        vtpStatusDate: c.leg.stage === "RETURNED" ? new Date(c.leg.at.getTime() + 5 * NGAY * 1000) : c.leg.at,
       });
     }
   }
@@ -154,11 +162,15 @@ export async function testShipmentReturnArrival(db: Db) {
   assert.equal(a.outbound501At.getTime(), T.getTime(), "mốc 501 gốc là mốc SỚM NHẤT trong các chứng từ 501 chiều đi");
   assert.equal(a.legCode, `${maGoc(0)}1P1`);
   assert.equal(a.legDeliveredAt.getTime(), giay(7).getTime());
+  const l = sqlMap.get(ids["l-returned"]);
+  assert.ok(l, "kiện chiều hoàn RETURNED trong cửa sổ ⇒ hoàn về shop");
+  assert.equal(l.legDeliveredAt.getTime(), giay(8).getTime(), "kiện RETURNED: mốc về shop đọc `returned_at`, không phải `vtp_status_date`");
+  assert.equal(sqlMap.has(ids["e-ret"]), false, "kiện chiều hoàn RETURNING (còn trên đường) ⇒ vẫn KHÔNG");
 
   /* ═════════ 3 · SQL ≡ TYPESCRIPT TRÊN CÙNG DỮ LIỆU, TỪNG VẬN ĐƠN ═════════ */
   const ships = await db.select().from(schema.shipments).where(like(schema.shipments.id, `${P}%`));
   const ev = await db.select().from(schema.shipmentEvents).where(inArray(schema.shipmentEvents.shipmentId, ships.map((s) => s.id)));
-  const legs: ReturnLegCandidate[] = ships.map((s) => ({ id: s.id, vtpOrderNumber: s.vtpOrderNumber, orderReference: s.orderReference, stage: s.stage, deliveredAt: s.deliveredAt, vtpStatusDate: s.vtpStatusDate }));
+  const legs: ReturnLegCandidate[] = ships.map((s) => ({ id: s.id, vtpOrderNumber: s.vtpOrderNumber, orderReference: s.orderReference, stage: s.stage, deliveredAt: s.deliveredAt, returnedAt: s.returnedAt, vtpStatusDate: s.vtpStatusDate }));
   for (const s of ships) {
     const moc = ev
       .filter((e) => e.shipmentId === s.id && e.status === "501" && e.legType === "OUTBOUND" && ["VTP_WEBHOOK", "VTP_POLL", "VTP_IMPORT"].includes(e.source))
@@ -237,10 +249,11 @@ export async function testShipmentReturnArrival(db: Db) {
   assert.equal(await outcomeOfShipment(ids.b2d), "RETURNED", "ca 2 ngày: ORDER_OUTCOME vẫn RETURNED");
   assert.equal(await outcomeOfShipment(ids.d0), "DELIVERED", "giao thật, thu 499.000 ₫, không chiều hoàn ⇒ vẫn DELIVERED");
   assert.equal(await outcomeOfShipment(ids.c3d1), "RETURNED", "nhãn logistics bỏ sót (quá 3 ngày) không làm kết quả đơn đổi — vẫn RETURNED");
+  assert.equal(await outcomeOfShipment(ids["l-returned"]), "RETURNED", "kiện chiều hoàn RETURNED: ORDER_OUTCOME vẫn RETURNED");
 
   /* ═════════ DỌN ═════════ */
   await db.delete(schema.shipmentEvents).where(inArray(schema.shipmentEvents.shipmentId, ships.map((s) => s.id)));
   await db.delete(schema.shipments).where(like(schema.shipments.id, `${P}%`));
   await db.delete(schema.orders).where(like(schema.orders.id, `${P}%`));
-  console.log("✓ «Hoàn về shop»: 11 ca luật (kể cả biên ±120 s / 3 ngày), SQL ≡ TS, dạng mã ≡ legBaseCode, nhật ký DERIVED, ORDER_OUTCOME không đổi");
+  console.log("✓ «Hoàn về shop»: 13 ca luật (kể cả biên ±120 s / 3 ngày, chiều hoàn DELIVERED hoặc RETURNED), SQL ≡ TS, dạng mã ≡ legBaseCode, nhật ký DERIVED, ORDER_OUTCOME không đổi");
 }

@@ -50,7 +50,7 @@ export type ReturnArrival = {
   outbound501At: Date;
   /** Mã vận đơn chiều hoàn đã giao về. */
   legCode: string;
-  /** Mốc giao về của kiện chiều hoàn (`delivered_at`, thiếu thì `vtp_status_date`). */
+  /** Mốc kiện chiều hoàn phát về shop — theo chặng của nó: `DELIVERED` ⇒ `delivered_at`, `RETURNED` ⇒ `returned_at`; thiếu thì `vtp_status_date`. */
   legDeliveredAt: Date;
 };
 
