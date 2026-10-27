@@ -1,0 +1,8 @@
+{
+  "pr": 1086,
+  "sha": "3adbbea1ef85ca5e555ebba93bd2c6e4fb190ee4",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-27T05:01:07.885Z",
+  "note": "review lead: nhãn «Hoàn về shop» đọc lúc xem — gốc DELIVERED có 501 OUTBOUND + chiều hoàn (legBaseCode = mã gốc, chặng DELIVERED hoặc RETURNED, mốc theo chặng) trong [501−120 s, 501+3 ngày]; một luật TS + SQL (bài tương đương); dòng DERIVED trong nhật ký, dòng CARRIER giữ nguyên; nhãn đứng cạnh, không đổi số đếm; không chạm ORDER_OUTCOME / return-rate.ts; lời khai accept-overlap được duyệt."
+}
