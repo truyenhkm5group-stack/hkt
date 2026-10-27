@@ -242,17 +242,35 @@ async function call(
   return { ok: false, kind: last.kind, message: last.message, meta: { sku, httpStatus: lastStatus, durationMs: now() - started, attempts, billable: false } };
 }
 
+/**
+ * Ngôn ngữ kết quả + vùng thiên vị của một lượt gọi. Thiếu ⇒ `vi` / `VN` (mọi lượt quét trong nước, đúng như trước 27/10/2026).
+ * Ô quốc tế truyền mã của nước (lib/wholesale/areas-intl.ts). Chỉ nhận dạng mã ngắn an toàn — giá trị lạ rơi về mặc định,
+ * không đi nguyên văn sang Google.
+ */
+export type PlacesLocale = { languageCode?: string | null; regionCode?: string | null };
+
+const LANGUAGE_CODE_PATTERN = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$/;
+const REGION_CODE_PATTERN = /^[A-Z]{2}$/;
+
+/** `{ languageCode, regionCode }` đã kiểm dạng; sai dạng / thiếu ⇒ `vi` / `VN`. HÀM THUẦN. */
+export function placesLocale(locale?: PlacesLocale | null): { languageCode: string; regionCode: string } {
+  const lang = locale?.languageCode ?? "";
+  const region = locale?.regionCode ?? "";
+  return { languageCode: LANGUAGE_CODE_PATTERN.test(lang) ? lang : "vi", regionCode: REGION_CODE_PATTERN.test(region) ? region : "VN" };
+}
+
 export type TextSearchInput = {
   textQuery: string;
   tier: DiscoveryTier;
   pageToken?: string | null;
   /** Thiên vị kết quả quanh một điểm (không phải giới hạn cứng). */
   bias?: { lat: number; lng: number; radiusM: number } | null;
+  locale?: PlacesLocale | null;
 };
 
 export async function textSearch(opts: PlacesClientOptions, input: TextSearchInput, deps: PlacesClientDeps = {}): Promise<PlacesResult<{ places: PlaceRecord[]; nextPageToken: string | null }>> {
   const sku = searchSku("TEXT", input.tier);
-  const body: Record<string, unknown> = { textQuery: input.textQuery, languageCode: "vi", regionCode: "VN", pageSize: 20 };
+  const body: Record<string, unknown> = { textQuery: input.textQuery, ...placesLocale(input.locale), pageSize: 20 };
   if (input.pageToken) body.pageToken = input.pageToken;
   if (input.bias) body.locationBias = { circle: { center: { latitude: input.bias.lat, longitude: input.bias.lng }, radius: Math.min(50_000, Math.max(100, input.bias.radiusM)) } };
   const r = await call(opts, deps, sku, { url: `${PLACES_HOST}/v1/places:searchText`, method: "POST", fieldMask: searchFieldMask(input.tier), body });
@@ -283,12 +301,13 @@ export async function nearbySearch(opts: PlacesClientOptions, input: NearbySearc
   return { ok: true, places, meta: r.meta };
 }
 
-export async function placeDetails(opts: PlacesClientOptions, input: { placeId: string; full: boolean }, deps: PlacesClientDeps = {}): Promise<PlacesResult<{ place: PlaceRecord }>> {
+export async function placeDetails(opts: PlacesClientOptions, input: { placeId: string; full: boolean; locale?: PlacesLocale | null }, deps: PlacesClientDeps = {}): Promise<PlacesResult<{ place: PlaceRecord }>> {
   const sku: PlacesSku = "DETAILS_ENTERPRISE";
   if (!/^[A-Za-z0-9_-]{10,300}$/.test(input.placeId)) {
     return { ok: false, kind: "INVALID", message: "Place ID không hợp lệ", meta: { sku, httpStatus: null, durationMs: 0, attempts: 0, billable: false } };
   }
-  const url = `${PLACES_HOST}/v1/places/${encodeURIComponent(input.placeId)}?languageCode=vi&regionCode=VN`;
+  const loc = placesLocale(input.locale);
+  const url = `${PLACES_HOST}/v1/places/${encodeURIComponent(input.placeId)}?languageCode=${encodeURIComponent(loc.languageCode)}&regionCode=${loc.regionCode}`;
   const r = await call(opts, deps, sku, { url, method: "GET", fieldMask: detailsFieldMask(input.full) });
   if (!r.ok) return r;
   const place = parsePlace(r.json);

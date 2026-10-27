@@ -617,6 +617,7 @@ import { testChatOrder } from "./chat-order.test";
 import { testCarrierGhtk } from "./carrier-ghtk.test";
 import { testFashionCodF3 } from "./fashion-cod-f3.test";
 import { testWholesaleLeadHunter } from "./wholesale-lead-hunter.test";
+import { testWholesaleIntlDiscovery } from "./wholesale-intl-discovery.test";
 import { testRestaurantTemplate } from "./restaurant.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testTriggerProposals } from "./trigger-proposals.test";
@@ -3306,6 +3307,7 @@ async function main() {
     await testShippingRouting();
     await testFashionCodF3();
     await testWholesaleLeadHunter();
+    await testWholesaleIntlDiscovery();
     await testRestaurantTemplate();
     testTriggerProposals();
     await testSelfServiceJourney();

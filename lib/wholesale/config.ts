@@ -84,7 +84,12 @@ export const OUTREACH_AUTOMATION_LABEL: Record<OutreachAutomationLevel, string> 
   AUTO_SEND: "Tự gửi sau khi soạn (CHƯA MỞ — chưa có kênh gửi tự động nào được kết nối)",
 };
 
-export type KeywordGroup = { key: string; label: string; keywords: string[]; enabled: boolean };
+/**
+ * `lang`: ngôn ngữ của từ khoá (`vi`, `en`, `ja`…). Có `lang` ⇒ chỉ sinh ô ở khu vực có ngôn ngữ ấy trong
+ * `SearchLocale.keywordLangs` (areas.ts) — «quán nhậu» không quét Tokyo, «水産卸» không quét Sydney. Thiếu `lang` (từ khoá tự
+ * khai, ảnh chụp chiến dịch cũ) ⇒ áp mọi khu vực, đúng hành vi trước 27/10/2026.
+ */
+export type KeywordGroup = { key: string; label: string; keywords: string[]; enabled: boolean; lang?: string };
 
 /**
  * Bộ từ khoá mặc định theo DANH MỤC THẬT của HSLC (đọc 05/10/2026: chả mực giã tay, chả cá thu, nem hải sản tôm bề bề,
@@ -98,15 +103,15 @@ export type KeywordGroup = { key: string; label: string; keywords: string[]; ena
  */
 export const DEFAULT_KEYWORD_GROUPS: readonly KeywordGroup[] = [
   // «chả mực Hạ Long» đã BỎ (05/10/2026): từ khoá ấy kéo về cơ sở làm chả mực — đối thủ, không phải khách (xem competitor.ts).
-  { key: "dac-san", label: "Cửa hàng đặc sản / quà biếu", keywords: ["cửa hàng đặc sản"], enabled: true },
-  { key: "thuc-pham", label: "Thực phẩm sạch / đồ khô", keywords: ["cửa hàng thực phẩm sạch"], enabled: true },
-  { key: "me-be", label: "Mẹ & bé (ruốc cho bé)", keywords: ["cửa hàng mẹ và bé"], enabled: true },
-  { key: "tap-hoa", label: "Tạp hoá", keywords: ["tạp hoá"], enabled: true },
-  { key: "hai-san", label: "Quán hải sản", keywords: ["quán hải sản"], enabled: true },
-  { key: "nhau", label: "Quán nhậu", keywords: ["quán nhậu"], enabled: true },
-  { key: "quan-an", label: "Quán bún chả cá / quán cơm", keywords: ["bún chả cá"], enabled: true },
-  { key: "mo-rong", label: "Mở rộng (bật khi còn lượt)", keywords: ["đặc sản Quảng Ninh", "cửa hàng hải sản khô", "thực phẩm đông lạnh", "minimart", "quán cơm", "nhà hàng hải sản", "bia hơi", "quán lẩu"], enabled: false },
-  { key: "lon", label: "Nhà hàng lớn / khách sạn / tiệc (thường đòi hoá đơn VAT)", keywords: ["nhà hàng", "buffet", "khách sạn", "catering"], enabled: false },
+  { key: "dac-san", label: "Cửa hàng đặc sản / quà biếu", keywords: ["cửa hàng đặc sản"], enabled: true, lang: "vi" },
+  { key: "thuc-pham", label: "Thực phẩm sạch / đồ khô", keywords: ["cửa hàng thực phẩm sạch"], enabled: true, lang: "vi" },
+  { key: "me-be", label: "Mẹ & bé (ruốc cho bé)", keywords: ["cửa hàng mẹ và bé"], enabled: true, lang: "vi" },
+  { key: "tap-hoa", label: "Tạp hoá", keywords: ["tạp hoá"], enabled: true, lang: "vi" },
+  { key: "hai-san", label: "Quán hải sản", keywords: ["quán hải sản"], enabled: true, lang: "vi" },
+  { key: "nhau", label: "Quán nhậu", keywords: ["quán nhậu"], enabled: true, lang: "vi" },
+  { key: "quan-an", label: "Quán bún chả cá / quán cơm", keywords: ["bún chả cá"], enabled: true, lang: "vi" },
+  { key: "mo-rong", label: "Mở rộng (bật khi còn lượt)", keywords: ["đặc sản Quảng Ninh", "cửa hàng hải sản khô", "thực phẩm đông lạnh", "minimart", "quán cơm", "nhà hàng hải sản", "bia hơi", "quán lẩu"], enabled: false, lang: "vi" },
+  { key: "lon", label: "Nhà hàng lớn / khách sạn / tiệc (thường đòi hoá đơn VAT)", keywords: ["nhà hàng", "buffet", "khách sạn", "catering"], enabled: false, lang: "vi" },
 ];
 
 /**

@@ -1,5 +1,5 @@
 import { searchSku } from "@/lib/integrations/google-places/client";
-import type { SearchProvince } from "@/lib/wholesale/areas";
+import { searchLocaleOf, type SearchProvince } from "@/lib/wholesale/areas";
 import { type DiscoveryTier, type KeywordGroup, type LeadHunterConfig, skuCostMicros } from "@/lib/wholesale/config";
 import { foldVietnamese } from "@/lib/wholesale/segments";
 
@@ -22,21 +22,53 @@ export type PlannedCell = {
   searchMode: "TEXT" | "NEARBY";
 };
 
-export function enabledKeywords(groups: readonly KeywordGroup[], extra: readonly string[] = []): string[] {
-  const out: string[] = [];
+/**
+ * Khoá so sánh của một từ khoá: bỏ dấu Latin + chữ thường + ký tự không phải chữ / số thành khoảng trắng. Với từ khoá chỉ
+ * có chữ Việt / Latin, kết quả TRÙNG KHÍT `foldVietnamese(k).trim()` (khoá ô cũ không đổi — có bài kiểm); khác ở chỗ GIỮ
+ * chữ ngoài a–z (CJK, Hangul, ß…), vì `foldVietnamese` biến cả «水産卸» lẫn «食品卸» thành chuỗi rỗng — hai từ khoá khác nhau
+ * sẽ chung một ô và một từ bị bỏ khi khử trùng.
+ */
+export function keywordFold(keyword: string): string {
+  return keyword
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .normalize("NFC")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Một từ khoá + ngôn ngữ của nhóm mang nó (`null` = áp mọi khu vực, xem `KeywordGroup.lang`). */
+export type KeywordEntry = { text: string; lang: string | null };
+
+export function enabledKeywordEntries(groups: readonly KeywordGroup[], extra: readonly string[] = []): KeywordEntry[] {
+  const out: KeywordEntry[] = [];
   const seen = new Set<string>();
-  for (const k of [...groups.filter((g) => g.enabled).flatMap((g) => g.keywords), ...extra]) {
+  const all = [...groups.filter((g) => g.enabled).flatMap((g) => g.keywords.map((k) => ({ k, lang: g.lang ?? null }))), ...extra.map((k) => ({ k, lang: null }))];
+  for (const { k, lang } of all) {
     const t = k.trim().replace(/\s+/g, " ");
-    const f = foldVietnamese(t).trim();
-    if (!t || t.length > 80 || seen.has(f)) continue;
+    const f = keywordFold(t);
+    if (!t || !f || t.length > 80 || seen.has(f)) continue;
     seen.add(f);
-    out.push(t);
+    out.push({ text: t, lang });
   }
   return out;
 }
 
+export function enabledKeywords(groups: readonly KeywordGroup[], extra: readonly string[] = []): string[] {
+  return enabledKeywordEntries(groups, extra).map((e) => e.text);
+}
+
+/** Từ khoá có sinh ô ở tỉnh / nước này không: không mang `lang` ⇒ có; mang `lang` ⇒ chỉ khi khu vực dùng ngôn ngữ ấy. */
+export function keywordAppliesTo(entry: KeywordEntry, province: Pick<SearchProvince, "key" | "locale">): boolean {
+  return entry.lang == null || searchLocaleOf(province).keywordLangs.includes(entry.lang);
+}
+
 export function cellKeyOf(mode: "TEXT" | "NEARBY", keyword: string, provinceKey: string, areaCode: string): string {
-  return `${mode}|${foldVietnamese(keyword).trim().replace(/\s+/g, "-")}|${provinceKey.replace(/\s+/g, "-")}|${areaCode}`;
+  return `${mode}|${keywordFold(keyword).replace(/\s+/g, "-")}|${provinceKey.replace(/\s+/g, "-")}|${areaCode}`;
 }
 
 export function queryTextOf(keyword: string, areaName: string, provinceQueryName: string): string {
@@ -46,13 +78,18 @@ export function queryTextOf(keyword: string, areaName: string, provinceQueryName
   return `${keyword} ${areaName} ${provinceQueryName}`;
 }
 
-/** Dựng toàn bộ ô cho chiến dịch TEXT. Trần `maxCells` để một form gõ nhầm không sinh 100.000 truy vấn. */
-export function planTextCells(keywords: readonly string[], provinces: readonly SearchProvince[], maxCells = 20_000): { cells: PlannedCell[]; truncated: boolean } {
+/**
+ * Dựng toàn bộ ô cho chiến dịch TEXT. Trần `maxCells` để một form gõ nhầm không sinh 100.000 truy vấn. Từ khoá dạng chuỗi
+ * trơn (chiến dịch cũ, bài kiểm cũ) áp mọi khu vực; dạng `KeywordEntry` có `lang` chỉ áp khu vực cùng ngôn ngữ.
+ */
+export function planTextCells(keywords: readonly (string | KeywordEntry)[], provinces: readonly SearchProvince[], maxCells = 20_000): { cells: PlannedCell[]; truncated: boolean } {
   const cells: PlannedCell[] = [];
   const seen = new Set<string>();
+  const entries: KeywordEntry[] = keywords.map((k) => (typeof k === "string" ? { text: k, lang: null } : k));
   for (const prov of provinces) {
+    const own = entries.filter((e) => keywordAppliesTo(e, prov)).map((e) => e.text);
     for (const area of prov.areas) {
-      for (const keyword of keywords) {
+      for (const keyword of own) {
         const cellKey = cellKeyOf("TEXT", keyword, prov.key, area.code);
         if (seen.has(cellKey)) continue;
         seen.add(cellKey);
