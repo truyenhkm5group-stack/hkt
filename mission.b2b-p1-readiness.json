@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "mission_id": "b2b-p1-readiness",
+  "title": "AI B2B P1c: cổng sẵn sàng danh mục bán sỉ + xuất khẩu, tài liệu trạng thái chung",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-b2b-ready",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/b2b-p1-readiness",
+  "base_sha": "0b3bd5605e45ecbd0752af838219d68c57111b91",
+  "domains": [],
+  "owned_paths": [
+    "docs/tech/hslc-b2b-sales-agent.md",
+    "lib/wholesale/catalog-readiness.ts",
+    "lib/queries/wholesale-readiness.ts",
+    "app/(dashboard)/wholesale/readiness",
+    "app/(dashboard)/wholesale/wholesale-nav.tsx",
+    "tests/wholesale-catalog-readiness.test.ts",
+    "tests/sync-fixtures.test.ts",
+    "tests/ui-consistency.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-27T05:25:10.712Z",
+  "updated_at": "2026-10-27T05:25:10.712Z",
+  "last_heartbeat": "2026-10-27T05:25:10.712Z",
+  "definition_of_done": []
+}
