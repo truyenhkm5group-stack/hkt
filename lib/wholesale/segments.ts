@@ -154,8 +154,14 @@ const TYPE_SEGMENT: Record<string, LeadSegment> = {
   donut_shop: "OTHER_FOOD",
   confectionery: "OTHER_FOOD",
   fast_food_restaurant: "OTHER_FOOD",
-  // Loại hình «wholesaler» của Google (Table A) không nói bán sỉ GÌ — chiến dịch tìm bằng từ khoá thực phẩm nên xếp vào nhóm
-  // phân phối thực phẩm chung (điểm vừa), không xếp vào nhập khẩu hải sản (điểm cao) khi tên không nói thế.
+};
+
+/**
+ * Loại hình chỉ đọc ở ô QUỐC TẾ (`classifySegment(…, { b2b: true })`). «wholesaler» của Google (Table A) không nói bán sỉ GÌ —
+ * chiến dịch tìm bằng từ khoá thực phẩm nên xếp vào nhóm phân phối thực phẩm chung (điểm vừa), không xếp vào nhập khẩu hải
+ * sản (điểm cao) khi tên không nói thế. Ô trong nước KHÔNG đọc bảng này: hành vi trong nước giữ y như trước 27/10/2026.
+ */
+const B2B_TYPE_SEGMENT: Record<string, LeadSegment> = {
   wholesaler: "FOODSERVICE_DISTRIBUTOR",
 };
 
@@ -166,9 +172,13 @@ const TYPE_SEGMENT: Record<string, LeadSegment> = {
  * Từ khoá KHÔNG dấu (vd «hai san», «buffet») khớp trên chuỗi đã bỏ dấu, nên tên có / không dấu đều nhận.
  */
 /**
- * Luật B2B / quốc tế ĐỨNG TRƯỚC mọi luật trong nước: «Ocean Seafood Trading» là nhà buôn, không phải nhà hàng hải sản; «Frozen
- * Seafood Distributor» không phải cửa hàng đông lạnh. Chỉ cụm chữ nói rõ VIỆC BUÔN (import / wholesale / distributor…) mới
- * khớp — chữ «seafood» trơn vẫn đi luật nhà hàng như cũ.
+ * Luật B2B / quốc tế — CHỈ áp cho ô quốc tế (`{ b2b: true }`), và ở đó ĐỨNG TRƯỚC mọi luật khác: «Ocean Seafood Trading» là nhà
+ * buôn, không phải nhà hàng hải sản; «Frozen Seafood Distributor» không phải cửa hàng đông lạnh. Chỉ cụm chữ nói rõ VIỆC BUÔN
+ * (import / wholesale / distributor…) mới khớp — chữ «seafood» trơn vẫn đi luật nhà hàng như cũ.
+ *
+ * Vì sao không áp trong nước (lead review 27/10/2026): bốn khoá B2B không nằm trong `DEFAULT_TARGET_SEGMENTS`, nên một nhà
+ * phân phối VN tên «… Food Distributor» — đúng khách sỉ HSLC muốn — sẽ bị lọc `SEGMENT` ở chiến dịch trong nước, trong khi
+ * trước đây nó `UNCLASSIFIED` và đi qua. Không đổi hành vi trong nước là cách ít rủi ro nhất.
  *
  * `words` khớp theo RANH GIỚI TỪ như luật trong nước (tiếng Anh, chữ Latin). `stems` khớp CHUỖI CON trên tên đã chữ thường
  * (ß ⇒ ss, ký tự không phải chữ / số ⇒ khoảng trắng): tiếng Nhật / Hàn / Trung viết liền không có khoảng trắng, tiếng Đức ghép
@@ -301,25 +311,41 @@ export function nameWordHit(name: string | null | undefined, words: readonly str
   return words.find((w) => (hasMarks(w) ? marked.includes(` ${lowerKeepMarks(w).trim()} `) : folded.includes(` ${foldVietnamese(w).trim()} `))) ?? null;
 }
 
-export function classifySegment(input: SegmentInput): SegmentResult {
-  for (const rule of B2B_RULES) {
-    const hit = nameWordHit(input.name, rule.words) ?? nameStemHit(input.name, rule.stems);
-    if (hit) return { segment: rule.segment, evidence: `tên có «${hit}»` };
+/**
+ * `opts.b2b` = ô / lead QUỐC TẾ: bật luật tên B2B (`B2B_RULES`) và loại hình `B2B_TYPE_SEGMENT`. Mặc định TẮT — mọi đường
+ * trong nước (quét tỉnh VN, nhập tệp) phân nhóm đúng như trước 27/10/2026.
+ */
+export function classifySegment(input: SegmentInput, opts: { b2b?: boolean } = {}): SegmentResult {
+  const b2b = opts.b2b === true;
+  if (b2b) {
+    for (const rule of B2B_RULES) {
+      const hit = nameWordHit(input.name, rule.words) ?? nameStemHit(input.name, rule.stems);
+      if (hit) return { segment: rule.segment, evidence: `tên có «${hit}»` };
+    }
   }
+  const typeSeg = (t: string | null | undefined): LeadSegment | undefined => (t ? (TYPE_SEGMENT[t] ?? (b2b ? B2B_TYPE_SEGMENT[t] : undefined)) : undefined);
   for (const rule of NAME_RULES) {
     const hit = nameWordHit(input.name, rule.words);
     if (hit) return { segment: rule.segment, evidence: `tên có «${hit}»` };
   }
-  const primary = input.primaryType ? TYPE_SEGMENT[input.primaryType] : undefined;
+  const primary = typeSeg(input.primaryType);
   if (primary) return { segment: primary, evidence: `loại hình chính «${input.primaryType}»` };
   let best: { segment: LeadSegment; type: string } | null = null;
   for (const t of input.types ?? []) {
-    const seg = TYPE_SEGMENT[t];
+    const seg = typeSeg(t);
     if (!seg) continue;
     if (!best || SEGMENT_POINTS[seg].fit > SEGMENT_POINTS[best.segment].fit) best = { segment: seg, type: t };
   }
   if (best) return { segment: best.segment, evidence: `loại hình «${best.type}»` };
   return { segment: "UNCLASSIFIED", evidence: "không có loại hình / từ khoá nhận ra được" };
+}
+
+/**
+ * Bộ lọc «nhóm khách mục tiêu» của chiến dịch — MỘT chỗ cho cả bước tìm lẫn bước chi tiết (engine.ts). Chiến dịch không khai
+ * nhóm ⇒ nhận mọi nhóm; `UNCLASSIFIED` luôn qua (không có chứng cứ thì không loại). HÀM THUẦN.
+ */
+export function passesTargetSegments(targets: readonly string[], segment: LeadSegment): boolean {
+  return !targets.length || segment === "UNCLASSIFIED" || targets.includes(segment);
 }
 
 /**

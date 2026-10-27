@@ -17,13 +17,13 @@ import { normalizeProvince, provinceRegion } from "@/lib/constants/vn-regions";
 import { placeDetails, placesLocale, textSearch } from "@/lib/integrations/google-places/client";
 import { parseCustomAreas, SEARCH_PROVINCES } from "@/lib/wholesale/areas";
 import { INTL_SEARCH_PROVINCES, intlCellContext, intlCountryByName, intlSearchProvince, isIntlProvinceKey } from "@/lib/wholesale/areas-intl";
-import { campaignCostEstimate, HSLC_INTL_TEMPLATE_KEY, HSLC_INTL_TEMPLATE_NAME, HSLC_TEMPLATES, intlPilotTemplateValues, resolveKeywordGroups } from "@/lib/wholesale/campaigns";
+import { campaignCostEstimate, HSLC_INTL_TEMPLATE_KEY, HSLC_INTL_TEMPLATE_NAME, HSLC_TEMPLATES, hslcTemplateValues, intlPilotTemplateValues, resolveKeywordGroups } from "@/lib/wholesale/campaigns";
 import { DEFAULT_KEYWORD_GROUPS, DEFAULT_LEAD_HUNTER_CONFIG, DEFAULT_TARGET_SEGMENTS, skuCostMicros } from "@/lib/wholesale/config";
 import { ALL_KEYWORD_GROUPS, INTL_KEYWORD_GROUPS } from "@/lib/wholesale/keywords-intl";
 import { googlePlacesProvider } from "@/lib/wholesale/providers";
 import { cellKeyOf, enabledKeywordEntries, keywordFold, planTextCells, queryTextOf } from "@/lib/wholesale/query-plan";
 import { B2B_INTENT_BONUS, DEFAULT_GRADE_THRESHOLDS, scoreLead, type ScoreInput } from "@/lib/wholesale/scoring";
-import { b2bSignal, classifySegment, foldVietnamese, LEAD_SEGMENT_LABEL, LEAD_SEGMENTS, SEGMENT_POINTS } from "@/lib/wholesale/segments";
+import { b2bSignal, classifySegment, foldVietnamese, LEAD_SEGMENT_LABEL, LEAD_SEGMENTS, passesTargetSegments, SEGMENT_POINTS } from "@/lib/wholesale/segments";
 import { handle as relayHandle } from "../deploy/places-relay/relay.js";
 
 const API_KEY = "AIzaFAKE_intl_discovery_key_0123456789abcd";
@@ -219,8 +219,8 @@ function testSegmentsAndScoring() {
     assert.ok(SEGMENT_POINTS[s].fit >= 0 && SEGMENT_POINTS[s].fit <= 30 && SEGMENT_POINTS[s].intent >= 0 && SEGMENT_POINTS[s].intent <= 15, `${s}: trong trần`);
   }
   for (const s of DEFAULT_TARGET_SEGMENTS) assert.ok(LEGACY_SEGMENTS.includes(s), "mục tiêu trong nước không đổi");
-  // Phân nhóm B2B — chứng cứ trong tên, đủ ngôn ngữ; «seafood» trơn vẫn là nhà hàng.
-  const seg = (name: string, types: string[] = []) => classifySegment({ name, types }).segment;
+  // Phân nhóm B2B (ô QUỐC TẾ) — chứng cứ trong tên, đủ ngôn ngữ; «seafood» trơn vẫn là nhà hàng.
+  const seg = (name: string, types: string[] = []) => classifySegment({ name, types }, { b2b: true }).segment;
   assert.equal(seg("Ocean Seafood Trading Pte Ltd"), "SEAFOOD_IMPORTER");
   assert.equal(seg("Frozen Seafood Distributor Sydney"), "SEAFOOD_IMPORTER", "không phải cửa hàng đông lạnh");
   assert.equal(seg("丸八水産卸株式会社"), "SEAFOOD_IMPORTER");
@@ -236,6 +236,19 @@ function testSegmentsAndScoring() {
   assert.equal(seg("Ocean Seafood Restaurant", ["restaurant"]), "SEAFOOD_RESTAURANT", "«seafood» trơn vẫn đi luật nhà hàng");
   assert.notEqual(seg("磯丸水産 新宿店", ["restaurant"]), "SEAFOOD_IMPORTER", "«水産» trơn là chuỗi quán nhậu, không phải nhà buôn");
   assert.equal(seg("Nhà hàng Hải Sản Biển Đông", ["restaurant"]), "SEAFOOD_RESTAURANT", "luật trong nước không đổi");
+  // TRONG NƯỚC (mặc định, không `b2b`): luật B2B và loại hình wholesaler KHÔNG áp — một nhà phân phối VN tên «… Food
+  // Distributor» vẫn qua bộ lọc nhóm khách của chiến dịch VN mặc định (lead review 27/10/2026: không hồi quy im lặng).
+  const vnSeg = (name: string, types: string[] = []) => classifySegment({ name, types }).segment;
+  const vnTargets = [...DEFAULT_TARGET_SEGMENTS];
+  for (const [name, types] of [["Minh Phát Food Distributor", ["wholesaler"]], ["Thực phẩm Minh Phát Foodservice", []], ["Hải Sản Minh Phát Food Distributor", ["wholesaler"]], ["Ocean Seafood Trading Hải Phòng", []]] as const) {
+    const s = vnSeg(name, [...types]);
+    assert.ok(!["SEAFOOD_IMPORTER", "ASIAN_FOOD_WHOLESALE", "FOODSERVICE_DISTRIBUTOR", "PRIVATE_LABEL_OEM"].includes(s), `${name}: ô trong nước không ra phân khúc B2B (${s})`);
+    assert.ok(passesTargetSegments(vnTargets, s), `${name}: qua bộ lọc nhóm khách mặc định trong nước (${s})`);
+    for (const t of [1, 2, 3] as const) assert.ok(passesTargetSegments(hslcTemplateValues(t).targetSegments, s), `${name}: qua bộ lọc của mẫu VN ${t}`);
+  }
+  assert.equal(vnSeg("Minh Phát Food Distributor", ["wholesaler"]), "UNCLASSIFIED", "như trước: không chứng cứ trong nước ⇒ chưa phân loại, không loại");
+  assert.equal(vnSeg("Ocean Seafood Trading Hải Phòng"), "SEAFOOD_RESTAURANT", "như trước 27/10: chữ «seafood» đi luật cũ");
+  assert.ok(passesTargetSegments([], "SEAFOOD_IMPORTER") && passesTargetSegments(["GROCERY"], "UNCLASSIFIED") && !passesTargetSegments(["GROCERY"], "SEAFOOD_IMPORTER"));
   assert.equal(seg("Hải sản khô Hạ Long Cô Lan"), "SPECIALTY_STORE");
   // Dấu hiệu buôn sỉ.
   assert.equal(b2bSignal({ name: "Ocean Seafood Importers" }), "tên có «importers»");

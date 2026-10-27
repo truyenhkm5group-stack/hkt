@@ -14,7 +14,7 @@ import { branchHint, chainBrandHit, nameAddressKey, socialKind, websiteDomain } 
 import { normalizeVnPhone, type PhoneKind } from "@/lib/wholesale/phone";
 import { googlePlacesProvider, websiteEnrichmentProvider, type DiscoveryProvider, type EnrichmentProvider } from "@/lib/wholesale/providers";
 import { learnedAdjustment, scoreLead, type ScoreResult, type SegmentOutcomeStats } from "@/lib/wholesale/scoring";
-import { b2bSignal, classifySegment, foldVietnamese, isLeadSegmentKey, type LeadSegment } from "@/lib/wholesale/segments";
+import { b2bSignal, classifySegment, foldVietnamese, isLeadSegmentKey, type LeadSegment, passesTargetSegments } from "@/lib/wholesale/segments";
 import { currentSpend, getLeadHunterConfig, notifyOwners, recordUsage, segmentOutcomeStats, suppressionHit } from "@/lib/wholesale/store";
 import type { WebsiteDeps } from "@/lib/wholesale/website";
 
@@ -460,7 +460,8 @@ async function handleDiscoveredPlace(ctx: Ctx, camp: Campaign, cell: typeof sche
     return "SUPPRESSED";
   }
 
-  const seg = classifySegment({ name: place.name, primaryType: place.primaryType, types: place.types });
+  // Luật nhận diện B2B chỉ cho ô QUỐC TẾ — ô trong nước phân nhóm đúng như trước (segments.ts::B2B_RULES).
+  const seg = classifySegment({ name: place.name, primaryType: place.primaryType, types: place.types }, { b2b: isIntlProvinceKey(cell.provinceKey) });
   if (tier !== "IDS_ONLY") {
     if (place.businessStatus === "CLOSED_PERMANENTLY" || place.businessStatus === "CLOSED_TEMPORARILY") {
       await setHit("FILTERED", place.businessStatus === "CLOSED_PERMANENTLY" ? "CLOSED" : "CLOSED_TEMPORARILY", null);
@@ -488,7 +489,7 @@ async function handleDiscoveredPlace(ctx: Ctx, camp: Campaign, cell: typeof sche
       await setHit("FILTERED", "COMPETITOR", null);
       return "FILTERED";
     }
-    if (camp.targetSegments.length && seg.segment !== "UNCLASSIFIED" && !camp.targetSegments.includes(seg.segment)) {
+    if (!passesTargetSegments(camp.targetSegments, seg.segment)) {
       await setHit("FILTERED", "SEGMENT", null);
       return "FILTERED";
     }
@@ -771,11 +772,11 @@ async function processDetails(ctx: Ctx, lead: Lead): Promise<"DID_WORK" | "STOP"
   if (lead.enrichmentStatus === "PENDING_DETAILS") {
     // Lượt tìm chỉ-ID không có tên ⇒ phân nhóm bây giờ mới làm được.
     if (!lead.segmentEvidence) {
-      const seg = classifySegment({ name: r.place.name, primaryType: r.place.primaryType, types: r.place.types });
+      const seg = classifySegment({ name: r.place.name, primaryType: r.place.primaryType, types: r.place.types }, { b2b: isIntlProvinceKey(lead.provinceKey) });
       const prov = isIntlProvinceKey(lead.provinceKey) ? null : provinceFromAddress(r.place.address);
       await db.update(l).set({ segment: seg.segment, segmentEvidence: seg.evidence, ...(prov ? { provinceKey: prov.key, provinceLabel: prov.label } : {}) }).where(eq(l.id, lead.id));
       const camp = lead.sourceCampaignId ? await db.query.wholesaleCampaigns.findFirst({ where: eq(schema.wholesaleCampaigns.id, lead.sourceCampaignId) }) : null;
-      if (camp?.targetSegments.length && seg.segment !== "UNCLASSIFIED" && !camp.targetSegments.includes(seg.segment)) {
+      if (camp && !passesTargetSegments(camp.targetSegments, seg.segment)) {
         await db.update(l).set({ enrichmentStatus: "FILTERED", filterReason: "SEGMENT", detailsNextAt: null, updatedAt: ctx.now() }).where(eq(l.id, lead.id));
         return "DID_WORK";
       }

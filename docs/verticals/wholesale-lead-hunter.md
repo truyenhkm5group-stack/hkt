@@ -168,12 +168,17 @@ hàng đợi, trần chi tiêu, khử trùng và chấm điểm đi nguyên mộ
 |---|---|---|
 | `SEAFOOD_IMPORTER` | «seafood importer / wholesaler / trading / distributor», «frozen seafood», «水産卸», «수산물 도매», «海鮮批發», «Fischgroßhandel», «grossiste produits de la mer»… | 28 / 11 |
 | `ASIAN_FOOD_WHOLESALE` | «Asian food importer», «Asian grocery wholesale», «Asia Großhandel», «grossiste asiatique»… | 27 / 11 |
-| `FOODSERVICE_DISTRIBUTOR` | «foodservice», «HORECA», «restaurant supply», «food wholesaler», «食品卸», «식자재», «grossiste alimentaire»…; loại hình Google `wholesaler` | 20 / 8 |
+| `FOODSERVICE_DISTRIBUTOR` | «foodservice», «HORECA», «restaurant supply», «food wholesaler», «食品卸», «식자재», «grossiste alimentaire»…; loại hình Google `wholesaler` (chỉ ô quốc tế) | 20 / 8 |
 | `PRIVATE_LABEL_OEM` | «private label», «OEM», «co-packer»… | 18 / 7 |
 
-- Luật B2B đứng TRƯỚC luật trong nước, và chỉ cụm chữ nói rõ việc buôn mới khớp — «Ocean Seafood Restaurant» vẫn là nhà
-  hàng hải sản; «磯丸水産» (chuỗi quán nhậu) không phải nhà buôn.
-- Chữ CJK / từ ghép tiếng Đức khớp CHUỖI CON (không có khoảng trắng để khớp ranh giới từ).
+- Luật B2B **chỉ áp cho ô / lead quốc tế** (`classifySegment(…, { b2b: true })`), và ở đó đứng trước mọi luật khác. Chỉ cụm
+  chữ nói rõ việc buôn mới khớp — «Ocean Seafood Restaurant» vẫn là nhà hàng hải sản; «磯丸水産» (chuỗi quán nhậu) không phải
+  nhà buôn.
+- Ô trong nước và nhập tệp phân nhóm đúng như trước: bốn khoá B2B không nằm trong mục tiêu mặc định trong nước, nên nếu áp
+  luật B2B ở đây thì một nhà phân phối VN tên «… Food Distributor» (khách HSLC muốn) bị lọc `SEGMENT` — trước đây nó
+  `UNCLASSIFIED` và đi qua. Có bài kiểm khoá điều này.
+- Chữ CJK / từ ghép tiếng Đức khớp CHUỖI CON (không có khoảng trắng để khớp ranh giới từ). Loại hình Google `wholesaler`
+  ⇒ `FOODSERVICE_DISTRIBUTOR` cũng chỉ ở ô quốc tế.
 - «Chuỗi nhà hàng Việt / châu Á» và «chuỗi siêu thị» không có khoá riêng: chúng vào `RESTAURANT` / `SUPERMARKET` sẵn có;
   chuỗi nhận ra bằng số điểm cùng thương hiệu như trong nước.
 - `DEFAULT_TARGET_SEGMENTS` trong nước không đổi.
