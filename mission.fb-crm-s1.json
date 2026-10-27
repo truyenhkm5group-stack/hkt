@@ -3,7 +3,7 @@
   "mission_id": "fb-crm-s1",
   "title": "Facebook Friend CRM lát 1",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-fbcrm",
@@ -36,7 +36,24 @@
     "0262": "2026-10-27T04:02:18.142Z"
   },
   "created_at": "2026-10-27T04:01:08.956Z",
-  "updated_at": "2026-10-27T04:02:18.142Z",
-  "last_heartbeat": "2026-10-27T04:01:08.956Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-27T07:51:51.145Z",
+  "last_heartbeat": "2026-10-27T07:51:51.145Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/fb-crm-s1",
+    "sha": "6dcbd63b3f38f9cfc48ab467da72d2439f9cd18c",
+    "at": "2026-10-27T07:51:51.145Z",
+    "actor": "DESKTOP-56TH98Y:wt-fbcrm",
+    "title": "Facebook Friend CRM lát 1",
+    "summary": "Bảng customer_fb_connections + nhật ký (0262), trang /customers/facebook-crm sau cờ fbCrm.enabled (mặc định tắt), luật thuần + server action customers:write, nhiệm vụ CSKH qua saveManualTask chống trùng. ERP không tự kết bạn / nhắn / quét Facebook.",
+    "tests": [
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "TEST_KHOI=K24 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K24 ĐẠT (gồm tests/fb-crm.test.ts)",
+      "quét nguồn riêng ui-consistency/nav/action-wiring/loading-ux/repo-integrity: ĐẠT",
+      "migration-journal: ĐỎ CHỜ 0261 (idx 260→262, 0261 do claude/b2b-p1a-consent giữ — gộp 0261 trước hoặc migration:renumber)",
+      "npm run build: ĐẠT (/customers/facebook-crm 10.1 kB)",
+      "4 shard đầy đủ: để gates CI"
+    ]
+  }
 }
