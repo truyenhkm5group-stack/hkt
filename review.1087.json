@@ -1,0 +1,8 @@
+{
+  "pr": 1087,
+  "sha": "802a5023641b06f4f8c442f4cbac848160b04392",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-27T05:05:42.004Z",
+  "note": "review lead: cầu chì kênh API tra cứu VTP — 403 + thân HTML ⇒ mở, không ghi vtp_last_error từng kiện, khi mở chỉ thử 1 kiện / 6 giờ, đóng chỉ khi có bản ghi vận đơn thật; hàng đợi đối chiếu lọc SYNC_ERROR do kênh lúc đọc + một băng rôn (CSDL giữ nguyên); loại mã thử; sửa thêm: lượt không gọi API không tính là lượt thử. 4 shard cục bộ đạt; accept-overlap được duyệt."
+}
