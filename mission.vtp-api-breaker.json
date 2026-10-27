@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "mission_id": "vtp-api-breaker",
+  "title": "API tra cứu VTP bị chặn (403 + HTML): cầu chì kênh, thử lại 6 giờ, hàng đợi đối chiếu lọc lỗi kênh + mã thử",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-cb",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/vtp-api-breaker",
+  "base_sha": "0b3bd5605e45ecbd0752af838219d68c57111b91",
+  "domains": [],
+  "owned_paths": [
+    "app/(dashboard)/shipments/reconcile-panel.tsx",
+    "lib/constants/vtp-api-breaker.ts",
+    "lib/integrations/viettelpost/sync.ts",
+    "lib/queries/vtp-reconcile-queue.ts",
+    "tests/sync-fixtures.test.ts",
+    "tests/vtp-api-breaker.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-27T04:58:59.609Z",
+  "updated_at": "2026-10-27T04:58:59.609Z",
+  "last_heartbeat": "2026-10-27T04:58:59.609Z",
+  "definition_of_done": []
+}
