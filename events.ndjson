@@ -1,4 +1,3 @@
-{"at":"2026-10-23T09:45:54.873Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"sourcing-p0-research","detail":"#997 @ c245437dfd60 → 3f89e379a712 (MERGE_NOW · LOW · gates success)"}
 {"at":"2026-10-23T10:44:35.583Z","actor":"DESKTOP-56TH98Y:wt-probe","kind":"HANDOFF","mission":"purchasing-leadtime-probe","detail":"claude/purchasing-leadtime-probe @ ef0f54f5d66d · 4 lệnh kiểm thử"}
 {"at":"2026-10-23T10:45:53.000Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#996 @ ef0f54f5d66d · review lead: tomTat qua splitSummaryLine chung (tiền tố đúng), bỏ cắt theo ký tự; khai bài kiểm vào DOC_MOI_TRUONG_DA_KHAI (quét mã nguồn). Script không đổi logic đo."}
 {"at":"2026-10-23T11:07:12.858Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"purchasing-leadtime-probe","detail":"#996 @ ef0f54f5d66d → 73460b03b8d0 (MERGE_ISOLATED · HIGH · gates success)"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-27T07:07:32.493Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_DETECTED","mission":"hslc-ai-wholesale-workforce","detail":"OVERLAP với b2b-p1-readiness: phạm vi docs/tech/hslc-b2b-sales-agent.md ⇒ tuần tự hoá (--after=b2b-p1-readiness) hoặc khai cách tích hợp (--accept-overlap=\"…\")"}
 {"at":"2026-10-27T07:07:32.493Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"OVERLAP_DETECTED","mission":"hslc-ai-wholesale-workforce","detail":"OVERLAP với b2b-quotation: phạm vi docs/tech/hslc-b2b-sales-agent.md ⇒ tuần tự hoá (--after=b2b-quotation) hoặc khai cách tích hợp (--accept-overlap=\"…\")"}
 {"at":"2026-10-27T07:07:32.493Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DUPLICATE_PREVENTED","mission":"hslc-ai-wholesale-workforce","detail":"DUPLICATE: intake kết luận IN_PROGRESS () ⇒ phối hợp với việc đang chạy"}
+{"at":"2026-10-27T07:45:27.397Z","actor":"DESKTOP-56TH98Y:wt-rl","kind":"HANDOFF","mission":"vtp-return-label","detail":"claude/vtp-return-label @ 3e5bb5666269 · 6 lệnh kiểm thử"}

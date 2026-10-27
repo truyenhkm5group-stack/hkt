@@ -36,22 +36,22 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-27T04:16:22.372Z",
-  "updated_at": "2026-10-27T05:01:01.902Z",
-  "last_heartbeat": "2026-10-27T04:57:17.837Z",
+  "updated_at": "2026-10-27T07:45:27.323Z",
+  "last_heartbeat": "2026-10-27T07:45:27.323Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/vtp-return-label",
-    "sha": "3adbbea1ef85ca5e555ebba93bd2c6e4fb190ee4",
-    "at": "2026-10-27T04:57:17.837Z",
+    "sha": "3e5bb56662691b9873998fd0fe453f705a358db1",
+    "at": "2026-10-27T07:45:27.323Z",
     "actor": "DESKTOP-56TH98Y:wt-rl",
     "title": "Nhãn «Hoàn về shop» khi VTP ghi Phát thành công trên mã gốc",
     "summary": "",
     "tests": [
-      "npm run typecheck (tsc --noEmit): sạch @3adbbea1e",
-      "npm run lint (eslint): sạch @3adbbea1e",
-      "TEST_KHOI=K12 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K12 ĐẠT @3adbbea1e (13 ca, gồm chiều hoàn RETURNED ⇒ có, RETURNING ⇒ không)",
-      "TEST_SHARD=1/4, 2/4: ĐẠT ở bee3dbdb3 (lượt trước)",
-      "npm run build: ĐẠT ở bee3dbdb3 (commit mới không chạm client)",
+      "npm run typecheck: sạch @3e5bb5666",
+      "npm run lint: sạch @3e5bb5666",
+      "TEST_KHOI=K12,K18 npm test: TẤT CẢ ĐẠT @3e5bb5666 (K18 chứa duplicate-metrics — đã hết trùng B/DAY_MS/returnLegSql; K12 chứa shipment-return-arrival 13 ca)",
+      "TEST_SHARD=1/4, 2/4: ĐẠT ở bee3dbdb3",
+      "npm run build: ĐẠT ở bee3dbdb3 (các commit sau không chạm client)",
       "4 shard đầy đủ: để gates CI"
     ]
   }
