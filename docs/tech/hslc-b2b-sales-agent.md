@@ -79,7 +79,7 @@ Tệp:dòng đo trên `origin/main` 0b3bd5605 (27/10/2026) — dòng trôi theo 
 | 4 | Nhiệt độ HOT/WARM/COLD | BUILD NEW (P1a) | — | suy từ hoạt động, không thay hạng A–D |
 | 5 | Consent / suppression | EXTEND (P1a) | `db/schema.ts` `wholesale_suppressions` (kind `PHONE·DOMAIN·PLACE`) · `lib/wholesale/store.ts:83` `suppressionHit` · `leads.ts:78` `suppressLead` | thêm `EMAIL` + bảng đồng ý — **migration** |
 | 6 | Outreach / hàng đợi | REUSE | `lib/wholesale/outreach.ts:172` `queueOutreachCore` · `:143` `prepareOutreachCore` · `opener.ts:123` `channelAction` | mọi kênh hiện là thủ công |
-| 7 | Email gửi thật | BUILD NEW (P2) | `lib/wholesale/config.ts:78` (`AUTO_SEND` đang khoá) | **BLOCKER** chủ shop (mục 8) |
+| 7 | Email gửi thật | BUILD NEW — **nền tảng chạy thử xong (E1)**; gửi thật P2 | `lib/wholesale/email-outbox.ts` · `email-policy.ts` · `lib/email-provider/` · `/wholesale/outbox` | adapter thật = **BLOCKER** chủ shop (mục 8) |
 | 8 | Reply agent | BUILD NEW (P3) | — | chỉ đề nghị; dữ kiện từ `openerLooksInvented` (`opener.ts:60`) làm mẫu chặn bịa |
 | 9 | Bảng giá sỉ / bậc / MOQ | REUSE | `lib/constants/price-lists.ts:33` `quoteUnitPrice` · `lib/queries/price-lists.ts:38` `priceBooksFor` · `lib/commerce/pricing.ts:34` `agentUnitQuote` · `:75` `agentPriceProblems` | bậc nhỏ nhất = MOQ |
 | 10 | Báo giá văn bản (quotation) | BUILD NEW (P1b) | mẫu kiểm giá: `lib/sales-chatbot/quote.ts:436` `verifyAgentQuote` | bảng `quotations` — **migration**, sau P1a |
@@ -98,7 +98,8 @@ Tệp:dòng đo trên `origin/main` 0b3bd5605 (27/10/2026) — dòng trôi theo 
 | **P1b** | quotation engine tất định + bảng `quotations` | P1a (số migration nối sau) · P1c | có | cao (tiền) |
 | **P1c** | catalog readiness + export readiness gate (chỉ đọc) | — | không | thấp |
 | **P1d** | probe production HSLC (đo danh mục, bảng giá, lead thật) — chỉ đọc qua ops | P1c (đọc cùng câu hỏi) | không | thấp |
-| **P2** | kết nối email (gửi thật sau cờ) | **BLOCKER chủ shop** (mục 8) · P1a | có thể | cao |
+| **E1** | nền tảng email CHẠY THỬ: hộp thư đi · cổng chính sách · huỷ đăng ký RFC 8058 · nhận phản hồi · vòng gửi | P1a (`contactability`) | có (0264) | trung bình |
+| **P2** | adapter nhà cung cấp email thật (gửi thật sau cờ) | **BLOCKER chủ shop** (mục 8) · E1 | không (E1 đã có bảng) | cao |
 | **P3** | reply agent (đọc phản hồi → đề nghị) | P2 | có thể | trung bình |
 | **P4** | sequences D0 / D3 / D7 / D14 | P2 · P1a | có thể | trung bình |
 | **P5** | chốt đơn + đối soát chuyển khoản (`ORDER` trong `bank_transaction_links`) | P1b | có | **HIGH** (luật 17) |
@@ -126,7 +127,8 @@ Tệp:dòng đo trên `origin/main` 0b3bd5605 (27/10/2026) — dòng trôi theo 
 | b2b-p1-readiness | `claude/b2b-p1-readiness` | `docs/tech/hslc-b2b-sales-agent.md` · `lib/wholesale/catalog-readiness.ts` · `lib/queries/wholesale-readiness.ts` · `app/(dashboard)/wholesale/readiness/*` · `app/(dashboard)/wholesale/wholesale-nav.tsx` · `tests/wholesale-catalog-readiness.test.ts` · `tests/sync-fixtures.test.ts` (đăng ký) · `tests/ui-consistency.test.ts` (miễn menu) | xong, chờ gộp | — |
 | b2b-p1d-probe | `claude/b2b-p1d-probe` | script ops chỉ đọc | đang làm (phiên khác) | — |
 | b2b-p1b-quotation | — | `db/schema.ts` · `drizzle/` · `lib/wholesale/quotation*` | chưa nhận (sau P1a) | — |
-| b2b-p2-email | — | kết nối email | **chặn** — chờ chủ shop (mục 8) | — |
+| b2b-email-foundation (E1) | `claude/b2b-email-foundation` | `drizzle/0264_wholesale_email_outbox.sql` · `db/schema.ts` (3 bảng) · `lib/wholesale/email-*.ts` · `lib/email-provider/*` · `lib/constants/email-unsubscribe.ts` · `lib/queries/wholesale-email.ts` · `lib/actions/wholesale-email.ts` · `app/api/wholesale/unsubscribe/[token]/route.ts` · `app/(dashboard)/wholesale/outbox/*` · `middleware.ts` (một mục) · `lib/wholesale/job.ts` · `tests/wholesale-email.test.ts` | xong, chờ gộp (sau P1a) | — |
+| b2b-p2-email | — | adapter nhà cung cấp thật (SES / Resend / Gmail) cài `EmailProvider` + khai `LIVE_EMAIL_ADAPTERS` | **chặn** — chờ chủ shop (mục 8) | — |
 
 ## 7. P1c — cổng sẵn sàng (đã làm ở PR này)
 
@@ -168,7 +170,8 @@ Trang `/wholesale/readiness` (tab «Sẵn sàng bán sỉ», quyền `wholesale:
 | P1c | `tests/wholesale-catalog-readiness.test.ts` (K21): đủ ⇒ READY · thiếu từng trường · bậc chỉ ở bảng riêng vẫn thiếu · tồn chưa biết ≠ 0 · xuất khẩu `UNAVAILABLE` kèm `missingWhat` · null đứng cuối khi xếp | ĐẠT |
 | P1a | email bị chặn ⇒ không vào hàng đợi; email công khai không tự thành consent | chưa |
 | P1b | báo giá = `quoteUnitPrice` từng dòng; LLM không đổi được số; bậc/MOQ đúng ranh giới | chưa |
-| P2–P4 | cờ gửi thật OFF ⇒ không một lượt gửi nào ra ngoài; idempotent khi chạy lại | chưa |
+| E1 | `tests/wholesale-email.test.ts` (K21): cổng chặn từng lý do · email công khai không đồng ý ⇒ chặn · OFF / DRY_RUN / LIVE-không-adapter · gửi 2 lần / 2 lượt song song ⇒ 1 SENT · List-Unsubscribe RFC 8058 · huỷ đăng ký ⇒ chặn EMAIL + dừng thư chờ · token A gắn nhãn B ⇒ 404 · trả lời ⇒ REPLY + dừng chuỗi + 1 việc | ĐẠT (cục bộ) |
+| P2–P4 | adapter thật: cờ gửi thật OFF ⇒ không một lượt gửi nào ra ngoài; idempotent khi chạy lại | chưa |
 | P5 | đối soát ORDER không nhân đôi tiền khi nhập lại sao kê (luật 17) | chưa |
 | E2E | một đơn sỉ thật đi đủ 8 bước mục 1 trên production | chưa |
 
@@ -178,3 +181,8 @@ Trang `/wholesale/readiness` (tab «Sẵn sàng bán sỉ», quyền `wholesale:
   mục HSLC thật — bao nhiêu mẫu READY, bao nhiêu thiếu bậc giá ở bảng mặc định — rồi ghi số vào mục này.
 - P1b nối sau P1a (số migration theo thứ tự gộp); báo giá phải gọi cổng P1c trước khi cho máy báo giá một mẫu mã.
 - Không phase nào bật gửi thật / tự mặc cả / tự chốt đơn khi B5 chưa có ngày quyết.
+- **E1 xong** (nhánh `claude/b2b-email-foundation`, migration 0264): hộp thư đi `/wholesale/outbox`, cổng
+  `evaluateEmailSend()` (hàm thuần), nhà cung cấp chạy thử, link huỷ đăng ký `/api/wholesale/unsubscribe/<token>`, `ingestInboundEmail()`.
+  Chi tiết vận hành: `docs/verticals/wholesale-lead-hunter.md` §4c. Việc tiếp: P2 = MỘT tệp adapter trong `lib/email-provider/`
+  + một tên trong `LIVE_EMAIL_ADAPTERS` + webhook bounce/complaint ghi vào `wholesale_email_events` (khoá `provider_event_id`);
+  P3 = bộ đọc hộp thư gọi `ingestInboundEmail()`; P4 = sinh thư nhắc (`FOLLOWUP`, bước ≥ 1) — bảng và tiêu đề luồng đã có.

@@ -4,10 +4,11 @@ import { can } from "@/lib/auth/session";
 import { cn } from "@/lib/utils";
 
 /** Thanh tab của module Săn khách sỉ — chỉ hiện tab người xem có quyền mở. */
-export function WholesaleNav({ user, active }: { user: SessionUser; active: "leads" | "outreach" | "hunter" | "dashboard" | "readiness" | "settings" }) {
+export function WholesaleNav({ user, active }: { user: SessionUser; active: "leads" | "outreach" | "outbox" | "hunter" | "dashboard" | "readiness" | "settings" }) {
   const tabs = [
     { key: "leads", href: "/wholesale/leads", label: "Khách sỉ tiềm năng", show: can(user, "wholesale:view") },
     { key: "outreach", href: "/wholesale/outreach", label: "Hàng đợi liên hệ", show: can(user, "wholesale:work") },
+    { key: "outbox", href: "/wholesale/outbox", label: "Hộp thư đi", show: can(user, "wholesale:work") },
     { key: "hunter", href: "/wholesale/lead-hunter", label: "Săn khách (quét)", show: can(user, "wholesale:scan") },
     { key: "dashboard", href: "/wholesale/dashboard", label: "Hiệu quả", show: can(user, "wholesale:view") },
     { key: "readiness", href: "/wholesale/readiness", label: "Sẵn sàng bán sỉ", show: can(user, "wholesale:view") },

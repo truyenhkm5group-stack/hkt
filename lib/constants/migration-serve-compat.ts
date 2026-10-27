@@ -185,6 +185,16 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/sourcing-capture.test.ts",
   },
+  {
+    tag: "0264_wholesale_email_outbox",
+    why:
+      "Chỉ TẠO ba bảng mới ở CSDL tổ chức (wholesale_email_outbox · wholesale_email_events · wholesale_unsubscribe_tokens) — không " +
+      "thêm / đổi / xoá cột nào. Job «wholesale-leads» hỏi `emailOutboxHasWork()` trước, và hàm đó bắt lỗi bảng chưa có (42P01) ⇒ " +
+      "`false`, phần quét chạy như cũ. Trang Hộp thư đi (`lib/queries/wholesale-email.ts`) bắt cùng lỗi ⇒ in «CSDL chưa áp 0264»; mọi " +
+      "đường GHI (`lib/wholesale/email-outbox.ts::guard`) trả câu lỗi đó; link huỷ đăng ký trả 404 như mọi token sai.",
+    addedColumns: {},
+    proof: "tests/wholesale-email.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */

@@ -6,6 +6,7 @@ import { WIDGET_EMBED_PATH, WIDGET_SCRIPT_PATH } from "@/lib/sales-chatbot/widge
 import { SHIPMENT_STATE_PATH } from "@/lib/constants/shipment-state-api";
 import { HOME_BOT_HEALTH_PATH } from "@/lib/constants/home-bot-health";
 import { SOURCING_CAPTURE_PATH } from "@/lib/constants/sourcing";
+import { WHOLESALE_UNSUBSCRIBE_PREFIX } from "@/lib/constants/email-unsubscribe";
 import {
   ERP_HEADER_PREFIX,
   ERP_HOST_SLUG_HEADER,
@@ -60,8 +61,12 @@ import {
  *
  * `/forgot` («Quên mật khẩu», PUB-07 — khai ở `PUBLIC_EXACT`): người quên mật khẩu không có phiên. Cổng của nó nằm trong lõi
  * (lib/users/forgot-password.ts): chặn dò theo định danh + máy, câu trả lời không lộ tài khoản, phiếu đặt lại chỉ phát sau mã OTP đúng.
+ *
+ * `/api/wholesale/unsubscribe/` (`WHOLESALE_UNSUBSCRIBE_PREFIX`, E1): link huỷ đăng ký trong thư bán sỉ — người nhận thư không có tài khoản.
+ * Cổng là token `vnxu1.<mã tổ chức>.<bí mật 32 byte>` trong đường dẫn: băm khớp trong CSDL của tổ chức ghi trong token
+ * (lib/wholesale/email-unsubscribe.ts); sai ⇒ cùng một 404. GET chỉ hiện trang xác nhận; POST huỷ một chạm (RFC 8058).
  */
-const PUBLIC_PREFIXES = ["/login", "/start", SITE_PAGE_PATH, ...SITE_LEGAL_PATHS, "/join/", "/reset/", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/api/tech/agent-task", "/api/tech/worker/", "/api/video-scale/public/", "/api/ical/", "/_next", "/favicon", "/icon", "/apple-icon", "/apple-touch-icon", "/manifest", "/robots", "/sitemap", BRAND_ASSET_PREFIX];
+const PUBLIC_PREFIXES = ["/login", "/start", SITE_PAGE_PATH, ...SITE_LEGAL_PATHS, "/join/", "/reset/", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/api/tech/agent-task", "/api/tech/worker/", "/api/video-scale/public/", "/api/ical/", WHOLESALE_UNSUBSCRIBE_PREFIX, "/_next", "/favicon", "/icon", "/apple-icon", "/apple-touch-icon", "/manifest", "/robots", "/sitemap", BRAND_ASSET_PREFIX];
 
 /**
  * Đường công khai khớp ĐÚNG TỪNG CHỮ (0180), không theo tiền tố — `/chat` theo tiền tố sẽ mở luôn `/chatbot` (trang bot

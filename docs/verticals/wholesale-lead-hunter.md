@@ -121,6 +121,54 @@ loại» với lý do `COMPETITOR`, không xoá. Chủ shop sửa mặt hàng / 
 
 Hai điểm bán (một chi nhánh) vẫn được coi là cơ sở vừa.
 
+## 4c. Email bán sỉ — hộp thư đi ở chế độ CHẠY THỬ (E1, 0264, 27/10/2026)
+
+Phần này là cách kỹ thuật đã làm, không phải ý kiến pháp lý. Chủ shop CHƯA chọn nhà cung cấp email (SES / Resend / Gmail) và
+CHƯA có tên miền gửi, nên bản này dựng đủ đường ống nhưng **không một thư nào rời ERP**: chế độ cao nhất chạy được là
+`DRY_RUN`, chế độ `LIVE` bị từ chối cho tới khi có bộ chuyển (adapter) thật trong `LIVE_EMAIL_ADAPTERS`.
+
+**Luồng.** Lời chào kênh «Email» ở Hàng đợi liên hệ (mẫu, hoặc AI đã qua bộ chặn câu bịa `openerLooksInvented`) → nút «Đưa
+vào hộp thư đi» ⇒ thư `DRAFT` (lời chào gốc chuyển «Đã huỷ» — một lời chào không đi hai đường) → **người** duyệt từng thư ⇒
+`APPROVED` / `QUEUED` → job `wholesale-leads` (mỗi 3 phút, không đổi lịch) chạy `runEmailOutboxTick` → cổng chính sách →
+nhà cung cấp → `SENT` · `FAILED` · `BLOCKED`. Trang `/wholesale/outbox` (tab «Hộp thư đi»).
+
+**Cổng chính sách** (`lib/wholesale/email-policy.ts::evaluateEmailSend`, hàm thuần, tất định, hỏi NGAY TRƯỚC khi gọi nhà cung
+cấp). Thư chỉ đi khi ĐỦ: chế độ tổ chức không `OFF` (LIVE cần adapter + chủ shop bật) · không bị nút dừng (tổ chức · chiến dịch ·
+tên miền nhận) · có danh tính người gửi để in chân thư · lead chưa trả lời / huỷ đăng ký / trả về vĩnh viễn / báo rác / KHÔNG
+LIÊN HỆ · `contactability(lead, …, "EMAIL", "AUTOMATED").allowed` (P1a — **email công khai trên website không phải đồng ý**) ·
+không khớp danh sách chặn · email của lead chưa đổi từ lúc soạn · đã duyệt, nội dung khớp băm lúc duyệt, lượt duyệt chưa dùng ·
+chưa có thư thật cùng khoá · chưa chạm hạn mức giờ / ngày / tên miền nhận. Hàm gom HẾT lý do. Lý do TỰ HẾT (chế độ, nút dừng,
+hạn mức, thiếu danh tính) giữ thư ở `QUEUED` và hẹn 15 phút sau; lý do khác ⇒ `BLOCKED` kèm câu lý do, mở lại = duyệt lại.
+
+**Không gửi trùng.** Khoá `idempotency_key` = lead + mẫu + bước + email, UNIQUE trừ thư chạy thử đã gửi (chạy thử không ăn mất
+lượt gửi thật). Job đổi `QUEUED → SENDING` bằng MỘT câu UPDATE có điều kiện trước khi gọi nhà cung cấp; tiến trình chết giữa
+chừng ⇒ thư nằm lại `SENDING` chờ người kiểm, không bao giờ tự gửi lại. Lỗi tạm lùi dần 5′ · 10′ · 20′ … trần 6 giờ, tối đa 5 lần.
+
+**Chạy thử ≠ liên hệ.** Thư `SENT` mode `DRY_RUN` mang mã `dryrun-…`, sự kiện SENT `meta.mode = DRY_RUN`, một dòng lịch sử lead
+ghi rõ «CHẠY THỬ», và **không** đổi trạng thái liên hệ / lượt liên hệ của lead.
+
+**Tiêu đề và chân thư** (`lib/email-provider/message.ts`). `Message-ID` tất định `<wsm-<id thư>@<tên miền gửi>>`; thư nhắc
+mang `In-Reply-To` + `References`; `List-Unsubscribe: <https://…/api/wholesale/unsubscribe/<token>>` + `List-Unsubscribe-Post:
+List-Unsubscribe=One-Click` (RFC 8058 — DKIM phủ hai tiêu đề này là việc của nhà cung cấp thật). Chân thư: tên doanh nghiệp + địa
+chỉ + lý do nhận + link huỷ; tiêu đề gắn nhãn `[QC]` (cách hiểu NĐ 91/2020 — **luật sư chưa thẩm định**).
+
+**Huỷ đăng ký.** Token `vnxu1.<mã tổ chức>.<bí mật 32 byte>`, một token một thư, chỉ lưu băm trong CSDL tổ chức của tiền tố.
+GET = trang xác nhận (email đã che, không ghi gì — máy quét link không huỷ hộ ai); POST = huỷ một chạm ⇒ dòng chặn `EMAIL` +
+sự kiện `UNSUBSCRIBE` + dừng mọi thư chưa gửi của lead + lịch sử lead. Bấm lại không ghi thêm. Mọi token sai ⇒ cùng một 404.
+Link vẫn chạy khi shop tắt module (người nhận không mất quyền huỷ). Lưu ý: theo luật P1a, dòng chặn khớp BẤT KỲ khoá nào của lead
+chặn MỌI kênh tự động — huỷ email cũng chặn Zalo / SMS tự động tới lead đó.
+
+**Nhận phản hồi** (`lib/wholesale/email-inbound.ts::ingestInboundEmail`, chưa có hộp thư thật — bộ đọc hộp thư / webhook về sau
+gọi hàm này). Idempotent theo Message-ID; nối luồng bằng `In-Reply-To` rồi `References`; không khớp luồng thì chỉ nhận khi địa
+chỉ gửi khớp ĐÚNG MỘT lead. Thư tự động (`Auto-Submitted` ≠ `no`) bỏ qua. Khớp ⇒ sự kiện `REPLY` · dừng thư chưa gửi · mốc phản
+hồi đầu · MỘT việc tay phòng Kinh doanh giao cho người phụ trách lead (`/work`).
+
+**Quyền.** `wholesale:work` soạn · duyệt từng thư · huỷ · bấm DỪNG · «Chạy thử gửi». `wholesale:config` đổi chế độ / hạn mức /
+danh tính, MỞ lại nút dừng, duyệt hàng loạt. `LIVE` chỉ chủ shop (vai trò quản trị). Không thêm khoá quyền mới.
+
+**Cấu hình** ở `settings` khoá `wholesale.email` (object; đọc thô rồi trộn từng trường, chế độ lạ ⇒ `OFF`). Hạn mức mặc định 20 thư
+/ giờ · 100 / ngày · 5 / tên miền nhận / ngày, trần cứng 200 · 1.000 · 50.
+
 ## 5. Tiết kiệm chi phí API
 
 **Chế độ chỉ dùng miễn phí** (`freeTier`, bật sẵn). Google miễn phí mỗi tháng, tính theo từng SKU trên mỗi tài khoản thanh
@@ -500,7 +548,8 @@ Phần chạy trên tổ chức thật `wl-hslc` kiểm:
 
 ## 16. Giới hạn đã biết / Phase 2
 
-- **Kênh tự gửi** (Zalo OA, SMS brandname, email) chưa có. Mức `AUTO_SEND` đã khai nhưng đang khoá.
+- **Kênh tự gửi** (Zalo OA, SMS brandname) chưa có. Mức `AUTO_SEND` đã khai nhưng đang khoá. Email có đường ống đầy đủ ở chế
+  độ CHẠY THỬ (§4c); gửi thật chờ chủ shop chọn nhà cung cấp + tên miền.
 - **DNS rebinding** khi đọc website: hệ thống kiểm DNS rồi mới tải, nên còn một khe nhỏ giữa hai bước. Rủi ro thấp vì
   phản hồi chỉ được trích chữ.
 - **Khu vực là tên quận / huyện cũ dùng để tìm.** Cấp huyện không còn từ 07/2025 nhưng Google và người dùng vẫn gọi tên

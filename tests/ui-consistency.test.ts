@@ -204,6 +204,7 @@ export function testNavigationCoverage() {
     "/ai/sales-chatbot/replay": "vào từ nút «Phát lại hội thoại cũ» ngay trên trang Chatbot bán hàng — báo cáo sẵn sàng trước khi bật tự động, không phải việc hằng ngày",
     "/ai/sales-chatbot/quality": "nút «Rà lỗi AI» ở đầu màn Hiệu quả AI bán hàng (/ai/sales-chatbot/performance) và mục «lỗi giá đã xác nhận» của bảng sẵn sàng trên /ai/sales-chatbot — công cụ của màn Hiệu quả, không phải module riêng",
     "/wholesale/settings": "tab «Cấu hình & chi phí API» trên thanh tab của Săn khách sỉ (chỉ người có wholesale:config) — không phải việc hằng ngày nên không chiếm một mục menu",
+    "/wholesale/outbox": "tab «Hộp thư đi» trên thanh tab của Săn khách sỉ (wholesale:work) và nút «Đưa vào hộp thư đi» trên thẻ lời chào kênh Email ở Hàng đợi liên hệ — một bước của luồng liên hệ, không phải một module riêng",
     "/wholesale/readiness": "tab «Sẵn sàng bán sỉ» trên thanh tab của Săn khách sỉ (wholesale:view) — cổng kiểm danh mục trước khi báo giá sỉ, không phải việc hằng ngày nên không chiếm một mục menu",
     "/wholesale/mobile/queue": "màn con của «Gọi khách sỉ (điện thoại)» — mở bằng các ô số và nút lớn trên màn Hôm nay (/wholesale/mobile)",
     "/wholesale/mobile/next": "không có giao diện — chuyển thẳng tới khách nên gọi tiếp theo; mở bằng nút «BẮT ĐẦU GỌI» / «Lưu & gọi khách tiếp theo»",

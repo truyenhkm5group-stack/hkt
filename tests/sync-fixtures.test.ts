@@ -619,6 +619,7 @@ import { testCarrierGhtk } from "./carrier-ghtk.test";
 import { testFashionCodF3 } from "./fashion-cod-f3.test";
 import { testWholesaleLeadHunter } from "./wholesale-lead-hunter.test";
 import { testWholesaleCatalogReadiness } from "./wholesale-catalog-readiness.test";
+import { testWholesaleEmail } from "./wholesale-email.test";
 import { testRestaurantTemplate } from "./restaurant.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testTriggerProposals } from "./trigger-proposals.test";
@@ -3312,6 +3313,8 @@ async function main() {
     await testWholesaleLeadHunter();
     // P1c AI B2B: cổng sẵn sàng danh mục bán sỉ + xuất khẩu — hàm thuần (lib/wholesale/catalog-readiness.ts).
     testWholesaleCatalogReadiness();
+    // E1 AI B2B: hộp thư đi email ở chế độ chạy thử — cổng chính sách, huỷ đăng ký, nhận phản hồi; tổ chức THẬT `we-a` / `we-b`.
+    await testWholesaleEmail();
     await testRestaurantTemplate();
     testTriggerProposals();
     await testSelfServiceJourney();

@@ -12017,6 +12017,125 @@ export const wholesaleApiUsage = pgTable(
   (t) => [index("wholesale_api_usage_at_idx").on(t.at), index("wholesale_api_usage_campaign_idx").on(t.campaignId, t.at)],
 );
 
+// ═══════════ EMAIL BÁN SỈ — HỘP THƯ ĐI, SỔ SỰ KIỆN, TOKEN HUỶ ĐĂNG KÝ (0264, E1 — docs/verticals/wholesale-lead-hunter.md §4c) ═══════════
+
+/**
+ * Hộp thư đi: MỘT dòng = MỘT thư tới MỘT lead. Trạng thái và luật chuyển ở `lib/wholesale/email-constants.ts`; cổng quyết định
+ * gửi hay không ở `lib/wholesale/email-policy.ts` (hàm thuần, hỏi NGAY TRƯỚC khi gọi nhà cung cấp).
+ *  · `idempotency_key` = lead + mẫu + bước + email nhận, UNIQUE trừ thư CHẠY THỬ đã gửi (chạy thử không ăn mất lượt gửi thật).
+ *  · Duyệt là của NGƯỜI (khoá tài khoản, luật 34) và gắn với BĂM nội dung lúc duyệt (`approved_hash`): sửa sau khi duyệt ⇒ phải
+ *    duyệt lại. `approval_used_at` = lượt duyệt đã dùng (thư đã ra / đã chốt) — một lượt duyệt chỉ cho MỘT lần gửi.
+ *  · `mode` ghi LÚC GỬI (DRY_RUN · LIVE), không lúc soạn. Lead không xoá được khi còn thư (`restrict`) — vết liên hệ không mất.
+ */
+export const wholesaleEmailOutbox = pgTable(
+  "wholesale_email_outbox",
+  {
+    id: id(),
+    leadId: text("lead_id")
+      .notNull()
+      .references(() => wholesaleLeads.id, { onDelete: "restrict" }),
+    campaignId: text("campaign_id").references(() => wholesaleCampaigns.id, { onDelete: "set null" }),
+    sourceOutreachId: text("source_outreach_id").references(() => wholesaleOutreachItems.id, { onDelete: "set null" }),
+    toEmail: text("to_email").notNull(),
+    recipientDomain: text("recipient_domain"),
+    subject: text("subject").notNull(),
+    bodyText: text("body_text").notNull(),
+    language: text("language").notNull().default("vi"),
+    templateKey: text("template_key").notNull(),
+    sequenceStep: integer("sequence_step").notNull().default(0),
+    status: text("status").notNull().default("DRAFT"),
+    blockedReason: text("blocked_reason"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    preparedBy: text("prepared_by").notNull(),
+    aiModel: text("ai_model"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    approvedByUserId: text("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: ts("approved_at"),
+    approvedHash: text("approved_hash"),
+    approvalUsedAt: ts("approval_used_at"),
+    mode: text("mode"),
+    provider: text("provider"),
+    providerMessageId: text("provider_message_id"),
+    messageIdHeader: text("message_id_header"),
+    threadId: text("thread_id"),
+    inReplyTo: text("in_reply_to"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: ts("next_attempt_at"),
+    lastError: text("last_error"),
+    scheduledAt: ts("scheduled_at"),
+    sentAt: ts("sent_at"),
+    cancelledByUserId: text("cancelled_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    cancelledAt: ts("cancelled_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("wholesale_email_outbox_idem_uq").on(t.idempotencyKey).where(sql`${t.mode} IS DISTINCT FROM 'DRY_RUN'`),
+    index("wholesale_email_outbox_due_idx").on(t.status, t.nextAttemptAt),
+    index("wholesale_email_outbox_lead_idx").on(t.leadId, t.createdAt),
+    index("wholesale_email_outbox_msgid_idx").on(t.messageIdHeader),
+    check("wholesale_email_outbox_status_check", sql`${t.status} IN ('DRAFT','APPROVED','QUEUED','SENDING','SENT','FAILED','CANCELLED','BLOCKED')`),
+    check("wholesale_email_outbox_prepared_check", sql`${t.preparedBy} IN ('AI','USER')`),
+    check("wholesale_email_outbox_mode_check", sql`${t.mode} IS NULL OR ${t.mode} IN ('DRY_RUN','LIVE')`),
+    check("wholesale_email_outbox_template_check", sql`${t.templateKey} IN ('OPENER_D0','FOLLOWUP')`),
+    check("wholesale_email_outbox_step_check", sql`${t.sequenceStep} >= 0 AND ${t.attempts} >= 0`),
+    check("wholesale_email_outbox_sent_check", sql`${t.status} <> 'SENT' OR (${t.sentAt} IS NOT NULL AND ${t.mode} IS NOT NULL AND ${t.approvalUsedAt} IS NOT NULL)`),
+    check("wholesale_email_outbox_blocked_check", sql`${t.status} <> 'BLOCKED' OR length(btrim(coalesce(${t.blockedReason}, ''))) > 0`),
+  ],
+);
+
+/**
+ * Sổ sự kiện thư — CHỈ THÊM (không đường nào sửa / xoá; `tests/wholesale-email.test.ts` quét mã nguồn). `provider_event_id`
+ * UNIQUE: webhook / bộ đọc hộp thư gửi lại cùng một sự kiện chỉ ghi MỘT dòng. Người thao tác (nếu có) là khoá tài khoản.
+ */
+export const wholesaleEmailEvents = pgTable(
+  "wholesale_email_events",
+  {
+    id: id(),
+    outboxId: text("outbox_id").references(() => wholesaleEmailOutbox.id, { onDelete: "restrict" }),
+    leadId: text("lead_id")
+      .notNull()
+      .references(() => wholesaleLeads.id, { onDelete: "restrict" }),
+    kind: text("kind").notNull(),
+    providerEventId: text("provider_event_id"),
+    meta: jsonb("meta"),
+    actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("wholesale_email_events_provider_uq").on(t.providerEventId),
+    index("wholesale_email_events_lead_idx").on(t.leadId, t.createdAt),
+    index("wholesale_email_events_outbox_idx").on(t.outboxId, t.createdAt),
+    check("wholesale_email_events_kind_check", sql`${t.kind} IN ('QUEUED','SENT','DELIVERED','BOUNCE_HARD','BOUNCE_SOFT','COMPLAINT','REPLY','UNSUBSCRIBE','BLOCKED','FAILED')`),
+  ],
+);
+
+/**
+ * Token huỷ đăng ký — MỘT token cho MỘT thư. Chỉ lưu BĂM sha256 của phần bí mật; token đầy đủ `vnxu1.<mã tổ chức>.<bí mật>` chỉ
+ * nằm trong thư đã gửi. Dùng rồi giữ dòng (điền `used_at` một lần) — bấm lại vẫn trả cùng trang «đã huỷ», không ghi thêm.
+ */
+export const wholesaleUnsubscribeTokens = pgTable(
+  "wholesale_unsubscribe_tokens",
+  {
+    id: id(),
+    tokenHash: text("token_hash").notNull(),
+    leadId: text("lead_id")
+      .notNull()
+      .references(() => wholesaleLeads.id, { onDelete: "restrict" }),
+    email: text("email").notNull(),
+    outboxId: text("outbox_id").references(() => wholesaleEmailOutbox.id, { onDelete: "restrict" }),
+    createdAt: createdAt(),
+    usedAt: ts("used_at"),
+    usedVia: text("used_via"),
+  },
+  (t) => [
+    uniqueIndex("wholesale_unsubscribe_tokens_hash_uq").on(t.tokenHash),
+    uniqueIndex("wholesale_unsubscribe_tokens_outbox_uq").on(t.outboxId),
+    index("wholesale_unsubscribe_tokens_lead_idx").on(t.leadId),
+    check("wholesale_unsubscribe_tokens_via_check", sql`${t.usedVia} IS NULL OR ${t.usedVia} IN ('ONE_CLICK','PAGE')`),
+  ],
+);
+
 // ═══════════ PHIẾU CÔNG VIỆC HIỆN TRƯỜNG (0200, module `field_jobs` — docs/verticals/home-service.md) ═══════════
 
 /**
