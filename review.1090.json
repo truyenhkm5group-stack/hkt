@@ -1,0 +1,8 @@
+{
+  "pr": 1090,
+  "sha": "c9224fa6e6c05b340c5213147d6652d220a4bab6",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-27T06:31:40.983Z",
+  "note": "review lead: P1a — suppression EMAIL (chuẩn hoá, kiểm ở finalize/outreach/import), bảng wholesale_contact_consents chỉ thêm (6 căn cứ đóng, thu hồi một lần, khoá users.id), contactability mặc định KHÔNG (email công khai ≠ đồng ý, chặn thắng đồng ý), dedupe email sau DOMAIN, nhiệt độ HOT/WARM/COLD đọc lúc xem có lý do; migration 0261 idempotent chỉ cộng; register D17 cập nhật mô tả, không đổi kết l"
+}
