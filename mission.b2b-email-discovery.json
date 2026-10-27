@@ -3,7 +3,7 @@
   "mission_id": "b2b-email-discovery",
   "title": "Thu thập email B2B có bằng chứng từ website công khai",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-email",
@@ -34,7 +34,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-27T05:05:32.066Z",
-  "updated_at": "2026-10-27T05:05:32.066Z",
-  "last_heartbeat": "2026-10-27T05:05:32.066Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-27T05:07:29.906Z",
+  "last_heartbeat": "2026-10-27T05:07:29.906Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/b2b-email-discovery",
+    "sha": "6da15eb937971aebf1f5578d51cdae84866fd681",
+    "at": "2026-10-27T05:07:29.906Z",
+    "actor": "DESKTOP-56TH98Y:wt-b2b-email",
+    "title": "Thu thập email B2B có bằng chứng từ website công khai",
+    "summary": "Thu thập email B2B từ website công khai: đọc sâu có ưu tiên cùng website (robots, không theo tên miền khác — bộ gác fetch trên rào SSRF duy nhất), trích mailto/chữ/dạng che/thực thể/Cloudflare/JSON-LD, lọc rác, vai trò, kiểm DNS MX→A (không SMTP), chọn email tốt nhất, không đè staff_edited_fields; vai trò+MX+ngày xác minh lưu ở meta dòng ENRICHED (không migration); nút Thu thập email xếp hàng job wholesale-leads, quét lại sau 30 ngày; UI lọc/cột/bảng email/ô dashboard; câu Email thu thập công khai ≠ đồng ý nhận tiếp thị.",
+    "tests": [
+      "npm run typecheck (tsc --noEmit): sạch phần mã của việc này — lượt chạy qua node_modules cũ chỉ báo thiếu gói qrcode (môi trường, không liên quan), đã đổi junction sang node_modules đủ gói và next build typecheck lại sạch",
+      "npm run lint: sạch",
+      "TEST_KHOI=K21 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K21 ĐẠT (gồm ✓ Săn khách sỉ cũ không đổi kỳ vọng + ✓ Thu thập email B2B mới)",
+      "NODE_OPTIONS=--max-old-space-size=6144 npm run build: ĐẠT",
+      "4 shard đầy đủ: để gates CI"
+    ]
+  }
 }
