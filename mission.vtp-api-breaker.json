@@ -3,7 +3,7 @@
   "mission_id": "vtp-api-breaker",
   "title": "API tra cứu VTP bị chặn (403 + HTML): cầu chì kênh, thử lại 6 giờ, hàng đợi đối chiếu lọc lỗi kênh + mã thử",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-cb",
@@ -27,11 +27,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-27T04:58:59.609Z",
-  "updated_at": "2026-10-27T05:26:43.594Z",
+  "updated_at": "2026-10-27T06:35:44.707Z",
   "last_heartbeat": "2026-10-27T05:00:08.963Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1087 → 3253fb4a3fd1d33ae7c13f0044005a5ce4c88c75"
+    "merged": "#1087 → 3253fb4a3fd1d33ae7c13f0044005a5ce4c88c75",
+    "verify": "PASS 74a6225c013587969ca221b158c2fbce52b906c0 2026-10-27T06:34:56.897Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40460366681"
   },
   "handoff": {
     "branch": "claude/vtp-api-breaker",
