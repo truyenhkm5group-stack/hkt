@@ -1,0 +1,8 @@
+{
+  "pr": 1089,
+  "sha": "9129c005880ad6902c9ce9dc0be66d6b905b5b25",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-27T05:31:09.650Z",
+  "note": "review lead: tài liệu trạng thái chung docs/tech/hslc-b2b-sales-agent.md + trang /wholesale/readiness chỉ đọc (bậc giá ở bảng mặc định, MOQ = bậc nhỏ nhất, tồn qua sổ kho — chưa biết ≠ 0, xuất khẩu UNAVAILABLE kèm missingWhat, không bịa); không migration; ui-consistency chỉ thêm mục miễn menu có lý do."
+}
