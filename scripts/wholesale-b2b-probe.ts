@@ -14,7 +14,7 @@
   · Doanh thu lead → đơn là DOANH THU THEO ĐƠN (tổng tiền hàng sau giảm của đơn chưa huỷ / xoá), CHƯA đối chiếu tiền thật — chỉ để
     tham khảo, không phải kết quả đơn (ORDER_OUTCOME) và không phải tiền thu được.
   · Bảng / cột chưa có ở CSDL tổ chức (chưa áp migration) ⇒ mục đó in «chưa có bảng», KHÔNG sập, KHÔNG in 0.
-  · Kênh [ops:tom-tat] CHỈ số đếm / tiền — không tên, SĐT, email, URL, địa chỉ. Mẫu dòng (đã che số dài) chỉ ở phần MÃ HOÁ.
+  · Kênh tóm tắt công khai CHỈ số đếm / tiền — không định danh người (tên, số điện thoại, thư, đường dẫn, địa chỉ). Mẫu dòng (đã che số dài) chỉ ở phần MÃ HOÁ.
 
   Mở CSDL tổ chức bằng getDbForInspection (máy chủ ép chỉ đọc, không migrate, không tạo), kiểm `default_transaction_read_only`
   trước khi đọc. Không ghi gì, không gọi API ngoài.
