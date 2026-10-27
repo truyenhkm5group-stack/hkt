@@ -80,6 +80,12 @@ const columns: ColumnDef<LeadListRow, unknown>[] = [
             <span className="text-muted-foreground">Chưa có SĐT</span>
           )}
           <div className="text-[11px] text-muted-foreground">{[r.phoneKindLabel, r.zaloStatus === "FOUND" ? "có Zalo" : r.zaloStatus === "NOT_FOUND" ? "không Zalo" : null, r.website ? "có website" : null].filter(Boolean).join(" · ") || "—"}</div>
+          {r.email ? (
+            <div className="max-w-[220px] truncate text-[11px]" title={[r.email, r.emailRoleLabel, r.emailMxLabel].filter(Boolean).join(" · ")}>
+              <span className={cn(r.emailMx === "VALID_MX" ? "text-emerald-700 dark:text-emerald-300" : r.emailMx === "NO_MX" ? "text-rose-700 line-through dark:text-rose-300" : "text-foreground/80")}>{r.email}</span>
+              <span className="text-muted-foreground">{r.emailRoleLabel ? ` · ${r.emailRoleLabel}` : ""}{r.emailMx === "VALID_MX" ? " · MX ✓" : r.emailMx === "NO_MX" ? " · không nhận thư" : r.emailMx ? " · chưa kiểm được" : ""}</span>
+            </div>
+          ) : null}
         </div>
       );
     },

@@ -8,7 +8,8 @@ import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { decideScope } from "@/lib/auth/scope-guard";
 import { requirePermission } from "@/lib/auth/session";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
-import { COMPARE_DIMENSION_LABEL, COMPARE_DIMENSIONS, wholesaleDashboard, type CompareDimension } from "@/lib/queries/wholesale";
+import { COMPARE_DIMENSION_LABEL, COMPARE_DIMENSIONS, wholesaleDashboard, wholesaleEmailCoverage, type CompareDimension } from "@/lib/queries/wholesale";
+import { EMAIL_CONSENT_NOTICE } from "@/lib/constants/wholesale-email";
 import { resolvePeriod, type SearchParams } from "@/lib/search-params";
 import { microsToVnd } from "@/lib/wholesale/config";
 import { getLeadHunterConfig } from "@/lib/wholesale/store";
@@ -34,7 +35,7 @@ export default async function WholesaleDashboardPage({ searchParams }: { searchP
   const raw = await searchParams;
   const period = resolvePeriod(raw, "all");
   const dim: CompareDimension = (COMPARE_DIMENSIONS as readonly string[]).includes(String(raw.by)) ? (raw.by as CompareDimension) : "keyword";
-  const [d, cfg] = await Promise.all([wholesaleDashboard({ from: period.from, to: period.to, dimension: dim, decision }), getLeadHunterConfig()]);
+  const [d, cfg, mail] = await Promise.all([wholesaleDashboard({ from: period.from, to: period.to, dimension: dim, decision }), getLeadHunterConfig(), wholesaleEmailCoverage(decision)]);
   const k = d.kpi;
   const vnd = (micros: number | null) => (micros == null ? null : microsToVnd(micros, cfg.usdToVnd));
   const max = Math.max(1, d.funnel.discovered);
@@ -69,6 +70,15 @@ export default async function WholesaleDashboardPage({ searchParams }: { searchP
           { label: "Quan tâm", value: formatNumber(d.funnel.interested), note: `${formatPercent(k.interestedRate == null ? null : k.interestedRate * 100)} số đã liên hệ` },
           { label: "Đã gửi catalog / giá", value: formatNumber(k.catalogSent), note: `${formatNumber(k.negotiating)} đang thương lượng` },
           { label: "Chi phí / khách sỉ chốt", value: k.costPerWonMicros == null ? "—" : formatVND(vnd(k.costPerWonMicros)) },
+        ]}
+      />
+      <StatStrip
+        columns={4}
+        items={[
+          { label: "Lead có email hợp lệ", value: formatNumber(mail.validEmail), note: `tên miền nhận thư · ${formatNumber(mail.withEmail)} lead có email` },
+          { label: "Lead có website", value: formatNumber(mail.withWebsite), note: `${formatNumber(mail.queued)} đang chờ đọc website` },
+          { label: "Tổng lead sẵn sàng", value: formatNumber(mail.total), note: "ảnh chụp hiện tại, không theo kỳ" },
+          { label: "Email thu thập", value: <Link className="text-primary hover:underline" href="/wholesale/leads?email=valid">Xem lead</Link>, note: EMAIL_CONSENT_NOTICE },
         ]}
       />
 

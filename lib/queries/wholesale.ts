@@ -3,7 +3,9 @@ import { getDb, schema } from "@/db";
 import { activeUserIdsWhoCan } from "@/lib/auth/session";
 import { andScope, type ScopeDecision } from "@/lib/auth/scope-guard";
 import { vnDateKey, vnStartOfDay } from "@/lib/format";
+import { EMAIL_MX_LABEL, EMAIL_ROLE_LABEL, isEmailMxStatus, isEmailRole, type EmailMxStatus, type EmailRole } from "@/lib/constants/wholesale-email";
 import { REVENUE_RECOGNIZED_ON_DELIVERY } from "@/lib/queries/manual-order-sql";
+import { emailFilterCond, LEAD_EMAIL_MX, LEAD_EMAIL_ROLE, LEAD_HAS_EMAIL } from "@/lib/queries/wholesale-email";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { ListParams } from "@/lib/search-params";
 import { SEARCH_PROVINCES } from "@/lib/wholesale/areas";
@@ -34,7 +36,7 @@ export const PHONE_KIND = sql<string | null>`case when ${l.normalizedPhone} is n
 const WEBSITE = sql<string | null>`coalesce(${l.website}, ${ps.websiteUri})`;
 
 export const WHOLESALE_LEAD_SORTABLE = ["leadScore", "name", "rating", "reviews", "lastContactAt", "nextFollowupAt", "firstSeenAt", "status"];
-export const WHOLESALE_LEAD_FILTERS = ["grade", "contact", "province", "segment", "campaign", "assignee", "status", "source", "view"];
+export const WHOLESALE_LEAD_FILTERS = ["grade", "contact", "email", "province", "segment", "campaign", "assignee", "status", "source", "view"];
 
 export type LeadListRow = {
   id: string;
@@ -51,6 +53,12 @@ export type LeadListRow = {
   rating: number | null;
   reviews: number | null;
   website: string | null;
+  /** Email ở hồ sơ + trạng thái của nó theo lượt quét website mới nhất (null = chưa quét / nhân viên tự gõ). */
+  email: string | null;
+  emailMx: EmailMxStatus | null;
+  emailMxLabel: string | null;
+  emailRole: EmailRole | null;
+  emailRoleLabel: string | null;
   score: number | null;
   grade: string | null;
   status: LeadStatus;
@@ -85,6 +93,10 @@ function leadConditions(params: ListParams, viewerId: string | null): SQL[] {
     if (c === "website") conds.push(sql`${WEBSITE} is not null`);
     if (c === "never") conds.push(isNull(l.firstContactAt));
     if (c === "due") conds.push(sql`${l.nextFollowupAt} <= now()`);
+  }
+  for (const e of f.email ?? []) {
+    const cond = emailFilterCond(e);
+    if (cond) conds.push(cond);
   }
   if (f.province?.length) conds.push(inArray(l.provinceKey, f.province));
   if (f.segment?.length) conds.push(inArray(l.segment, f.segment));
@@ -140,6 +152,9 @@ export async function listWholesaleLeads(params: ListParams, decision: ScopeDeci
         rating: ps.rating,
         reviews: ps.userRatingCount,
         website: WEBSITE,
+        email: l.email,
+        emailMx: LEAD_EMAIL_MX,
+        emailRole: LEAD_EMAIL_ROLE,
         score: l.leadScore,
         grade: l.leadGrade,
         status: l.contactStatus,
@@ -181,6 +196,11 @@ export async function listWholesaleLeads(params: ListParams, decision: ScopeDeci
       rating: r.rating,
       reviews: r.reviews,
       website: r.website,
+      email: r.email && r.email.trim() ? r.email : null,
+      emailMx: isEmailMxStatus(r.emailMx) ? r.emailMx : null,
+      emailMxLabel: isEmailMxStatus(r.emailMx) ? EMAIL_MX_LABEL[r.emailMx] : null,
+      emailRole: isEmailRole(r.emailRole) ? r.emailRole : null,
+      emailRoleLabel: isEmailRole(r.emailRole) ? EMAIL_ROLE_LABEL[r.emailRole] : null,
       score: r.score,
       grade: r.grade,
       status,
@@ -202,6 +222,28 @@ export async function listWholesaleLeads(params: ListParams, decision: ScopeDeci
 }
 
 export type FacetOption = { value: string; label: string; count?: number };
+
+export type WholesaleEmailCoverage = { total: number; withWebsite: number; withEmail: number; validEmail: number; queued: number };
+
+/**
+ * Độ phủ email của lead SẴN SÀNG trong phạm vi người xem — ảnh chụp HIỆN TẠI, không theo kỳ. «Hợp lệ» = email ở hồ sơ có
+ * tên miền nhận thư (MX / A) ở lượt quét mới nhất; email chưa qua lượt quét nào không được đếm là hợp lệ.
+ */
+export async function wholesaleEmailCoverage(decision: ScopeDecision): Promise<WholesaleEmailCoverage> {
+  const db = await getDb();
+  const [r] = await db
+    .select({
+      total: count(),
+      withWebsite: sql<string>`count(*) filter (where ${WEBSITE} is not null)`,
+      withEmail: sql<string>`count(*) filter (where ${LEAD_HAS_EMAIL})`,
+      validEmail: sql<string>`count(*) filter (where ${LEAD_HAS_EMAIL} and ${LEAD_EMAIL_MX} = 'VALID_MX')`,
+      queued: sql<string>`count(*) filter (where ${l.websiteStatus} = 'PENDING')`,
+    })
+    .from(l)
+    .leftJoin(ps, eq(ps.placeId, l.placeId))
+    .where(andScope(eq(l.enrichmentStatus, "READY"), decision));
+  return { total: Number(r?.total ?? 0), withWebsite: Number(r?.withWebsite ?? 0), withEmail: Number(r?.withEmail ?? 0), validEmail: Number(r?.validEmail ?? 0), queued: Number(r?.queued ?? 0) };
+}
 
 export async function wholesaleLeadFacets(decision: ScopeDecision) {
   const db = await getDb();

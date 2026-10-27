@@ -2,6 +2,9 @@ import { nearbySearch, placeDetails, textSearch, type PlaceRecord, type PlacesCa
 import { parseCsv } from "@/lib/constants/landing";
 import type { DiscoveryTier } from "@/lib/wholesale/config";
 import type { LeadSourceKey } from "@/lib/wholesale/constants";
+import { EMAIL_MX_MAX_DOMAINS } from "@/lib/constants/wholesale-email";
+import { websiteDomain } from "@/lib/wholesale/dedupe";
+import { checkEmailDomains, systemEmailDns } from "@/lib/wholesale/email-discovery";
 import { enrichFromWebsite, type EnrichResult, type WebsiteDeps } from "@/lib/wholesale/website";
 import { foldVietnamese } from "@/lib/wholesale/segments";
 
@@ -86,7 +89,10 @@ export function googlePlacesProvider(opts: PlacesClientOptions, deps: PlacesClie
   };
 }
 
-/** Website CỦA CHÍNH doanh nghiệp — chỉ trang công khai, có rào SSRF + robots.txt (website.ts). */
+/**
+ * Website CỦA CHÍNH doanh nghiệp — chỉ trang công khai, có rào SSRF + robots.txt (website.ts). Email tìm được thì hỏi DNS
+ * xem tên miền có nhận thư không (MX / A — lib/wholesale/email-discovery.ts); KHÔNG gửi thư, KHÔNG dò SMTP.
+ */
 export function websiteEnrichmentProvider(deps: WebsiteDeps = {}): EnrichmentProvider {
   return {
     key: "WEBSITE",
@@ -94,8 +100,12 @@ export function websiteEnrichmentProvider(deps: WebsiteDeps = {}): EnrichmentPro
     role: "ENRICHMENT",
     googleSourced: false,
     billable: false,
-    enrich(website, opts) {
-      return enrichFromWebsite(website, opts, deps);
+    async enrich(website, opts) {
+      const r = await enrichFromWebsite(website, opts, deps);
+      const emails = r.findings.filter((f) => f.kind === "EMAIL").map((f) => f.value);
+      if (!emails.length) return r;
+      const emailDomains = await checkEmailDomains(emails, deps.dns ?? systemEmailDns(), { siteDomain: websiteDomain(website), maxDomains: EMAIL_MX_MAX_DOMAINS });
+      return { ...r, emailDomains };
     },
   };
 }

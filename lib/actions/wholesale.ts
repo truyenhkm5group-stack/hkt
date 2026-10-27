@@ -8,6 +8,7 @@ import { changeCampaignStateCore, cloneCampaignCore, createCampaignCore, preview
 import { saveLeadHunterConfigCore } from "@/lib/wholesale/config-core";
 import type { OutreachChannel } from "@/lib/wholesale/constants";
 import { sendLeadsToFieldCore, type HandoffReport } from "@/lib/wholesale/field-handoff";
+import { queueEmailDiscoveryCore, type EmailQueueReport } from "@/lib/wholesale/email-store";
 import { runWholesaleLeadsJob } from "@/lib/wholesale/job";
 import {
   addLeadNoteCore,
@@ -97,6 +98,17 @@ export async function runLeadHunterNowAction(): Promise<CoreResult> {
   if (!can(user, "wholesale:scan")) return { error: "Bạn không có quyền chạy quét (wholesale:scan)." };
   await kickTick();
   return { ok: true };
+}
+
+/** «Thu thập email» cho lead có website mà chưa có email — chỉ XẾP HÀNG; job nền đọc dần. Không gửi thư nào. */
+export async function queueEmailDiscoveryAction(input: unknown): Promise<CoreResult<{ report: EmailQueueReport }>> {
+  const user = await requireUser();
+  const r = await queueEmailDiscoveryCore(user, input);
+  if ("ok" in r) {
+    if (r.report.queued) await kickTick();
+    refreshLead();
+  }
+  return r;
 }
 
 export async function saveLeadHunterConfigAction(input: unknown): Promise<CoreResult> {

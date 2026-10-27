@@ -1,3 +1,5 @@
+import type { EmailVia } from "@/lib/constants/wholesale-email";
+import { extractEmailCandidates } from "@/lib/wholesale/email-discovery";
 import { extractVnPhones } from "@/lib/wholesale/phone";
 
 /**
@@ -8,13 +10,8 @@ import { extractVnPhones } from "@/lib/wholesale/phone";
  * (không đọc tên người, không đọc bình luận). Mỗi phát hiện mang URL nguồn để kiểm lại được.
  */
 
-export type WebsiteFinding = { kind: "EMAIL" | "PHONE" | "FACEBOOK" | "ZALO" | "CONTACT_PAGE" | "DESCRIPTION"; value: string; sourceUrl: string };
-
-const EMAIL_RE = /[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,180}\.[A-Za-z]{2,24}/g;
-/** Đuôi tệp ảnh / tài nguyên hay lọt vào mẫu email (`logo@2x.png`). */
-const ASSET_SUFFIX = /\.(png|jpe?g|gif|webp|svg|css|js|ico|woff2?)$/i;
-/** Hộp thư hệ thống / mẫu — không phải kênh liên hệ của doanh nghiệp. */
-const JUNK_EMAIL = /^(no-?reply|noreply|example|test|user|your(name|email)?|email|name)@|@(example\.(com|org)|sentry\.io|wixpress\.com|domain\.com|email\.com)$/i;
+/** `via` chỉ có ở phát hiện EMAIL: email lấy ra từ mailto / JSON-LD / chữ / dạng che (lib/wholesale/email-discovery.ts). */
+export type WebsiteFinding = { kind: "EMAIL" | "PHONE" | "FACEBOOK" | "ZALO" | "CONTACT_PAGE" | "DESCRIPTION"; value: string; sourceUrl: string; via?: EmailVia };
 
 function decodeEntities(s: string): string {
   return s
@@ -119,15 +116,8 @@ export function extractFindings(html: string, pageUrl: string, opts: { isContact
   const text = htmlToText(html);
   const hrefs = extractHrefs(html);
 
-  const emails = new Set<string>();
-  for (const h of hrefs) if (/^mailto:/i.test(h)) emails.add(h.replace(/^mailto:/i, "").split("?")[0]!.trim());
-  for (const m of text.matchAll(EMAIL_RE)) emails.add(m[0]);
-  for (const e of emails) {
-    const v = e.toLowerCase();
-    if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,24}$/.test(v) || ASSET_SUFFIX.test(v) || JUNK_EMAIL.test(v)) continue;
-    push({ kind: "EMAIL", value: v, sourceUrl: pageUrl });
-    if (out.filter((f) => f.kind === "EMAIL").length >= 5) break;
-  }
+  // Email: bộ thu thập B2B (mailto · JSON-LD · Cloudflare · chữ · dạng che; đã lọc rác).
+  for (const c of extractEmailCandidates(html, pageUrl)) push({ kind: "EMAIL", value: c.email, sourceUrl: pageUrl, via: c.via });
 
   const telText = hrefs
     .filter((h) => /^tel:/i.test(h))
