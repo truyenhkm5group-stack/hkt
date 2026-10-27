@@ -3,7 +3,7 @@ import { getDb } from "@/db";
 import { rowsOf } from "@/lib/sql-rows";
 import { legBaseCode } from "@/lib/integrations/viettelpost/statement";
 import { VTP_DOCUMENT_SOURCES_SQL } from "@/lib/constants/truth";
-import { RETURN_ARRIVAL_MAX_DAYS, RETURN_ARRIVAL_SKEW_SECONDS, type ReturnArrival } from "@/lib/constants/return-arrival";
+import { RETURN_ARRIVAL_MAX_DAYS, RETURN_ARRIVAL_MAX_MS, RETURN_ARRIVAL_SKEW_SECONDS, type ReturnArrival } from "@/lib/constants/return-arrival";
 
 /**
  * ═══════════ VẬN ĐƠN GỐC «HOÀN VỀ SHOP» — MỘT LUẬT, HAI BẢN (TS + SQL) ═══════════
@@ -37,8 +37,6 @@ import { RETURN_ARRIVAL_MAX_DAYS, RETURN_ARRIVAL_SKEW_SECONDS, type ReturnArriva
  * KHÔNG ghi gì, KHÔNG đổi kết quả đơn: đây là nhãn của chiều LOGISTICS, đọc ra lúc xem.
  * `tests/shipment-return-arrival.test.ts` chạy cả hai bản trên cùng dữ liệu và so từng vận đơn.
  */
-
-const DAY_MS = 86_400_000;
 
 export type ReturnLegCandidate = {
   id: string;
@@ -81,7 +79,7 @@ export function detectReturnArrival(input: ReturnArrivalInput): ReturnArrival | 
   if (input.stage !== "DELIVERED" || !input.outbound501At || !input.vtpOrderNumber) return null;
   const anchor = input.outbound501At.getTime();
   const lo = anchor - RETURN_ARRIVAL_SKEW_SECONDS * 1000;
-  const hi = anchor + RETURN_ARRIVAL_MAX_DAYS * DAY_MS;
+  const hi = anchor + RETURN_ARRIVAL_MAX_MS;
   let best: { code: string; at: Date } | null = null;
   for (const leg of input.legs) {
     if (leg.id === input.id || leg.orderReference !== input.vtpOrderNumber) continue;
@@ -106,10 +104,10 @@ export function detectReturnArrival(input: ReturnArrivalInput): ReturnArrival | 
   trên một loạt mã biên.
 */
 function legShapeSql(code: string, base: string): string {
-  const B = `upper(btrim(${base}))`;
-  const C = `upper(btrim(${code}))`;
-  const rest = `substr(${C}, length(${B}) + 1)`;
-  return `(${B} ~ '^[A-Z0-9]{8,}$' and left(${C}, length(${B})) = ${B} and ${rest} ~ '^[0-9]?P[0-9]+$' and not (length(${B}) >= 9 and ${B} ~ '[0-9]$' and ${rest} ~ '^P'))`;
+  const baseUp = `upper(btrim(${base}))`;
+  const codeUp = `upper(btrim(${code}))`;
+  const rest = `substr(${codeUp}, length(${baseUp}) + 1)`;
+  return `(${baseUp} ~ '^[A-Z0-9]{8,}$' and left(${codeUp}, length(${baseUp})) = ${baseUp} and ${rest} ~ '^[0-9]?P[0-9]+$' and not (length(${baseUp}) >= 9 and ${baseUp} ~ '[0-9]$' and ${rest} ~ '^P'))`;
 }
 
 /** Mốc 501 chiều đi sớm nhất của vận đơn bí danh `alias` (một cột `at`). */
@@ -119,7 +117,7 @@ function outbound501Sql(alias: string): string {
 }
 
 /** Kiện chiều hoàn khớp luật của vận đơn bí danh `alias`, mốc 501 gốc ở `anchor` (giao về sớm nhất trước). */
-function returnLegSql(alias: string, anchor: string): string {
+function arrivedReturnLegSql(alias: string, anchor: string): string {
   // Mốc giao về theo chặng — bản SQL của `returnLegArrivedAt`.
   const legAt = `(case when ra_l.stage = 'RETURNED' then coalesce(ra_l.returned_at, ra_l.vtp_status_date) else coalesce(ra_l.delivered_at, ra_l.vtp_status_date) end)`;
   const stages = RETURN_LEG_ARRIVED_STAGES.map((st) => `'${st}'`).join(", ");
@@ -148,7 +146,7 @@ export async function returnArrivalsOf(ids: readonly string[]): Promise<Map<stri
     select s.id, (extract(epoch from a.at) * 1000)::float8 as anchor_ms, l.code as leg_code, (extract(epoch from l.at) * 1000)::float8 as leg_ms
     from shipments s
     cross join lateral (${sql.raw(outbound501Sql("s"))}) a
-    join lateral (${sql.raw(returnLegSql("s", "a.at"))}) l on true
+    join lateral (${sql.raw(arrivedReturnLegSql("s", "a.at"))}) l on true
     where s.id in (${idList}) and s.stage = 'DELIVERED' and s.vtp_order_number is not null and a.at is not null`);
   const out = new Map<string, ReturnArrival>();
   for (const r of rowsOf<Row>(res)) {

@@ -44,6 +44,9 @@ export const RETURN_ARRIVAL_SKEW_SECONDS = WEBHOOK_CLOCK_SKEW_SECONDS;
  */
 export const RETURN_ARRIVAL_MAX_DAYS = 3;
 
+/** Cùng cửa sổ, tính bằng mili giây cho bản TypeScript (bản SQL dùng `interval 'N days'`). Kho chưa có hằng số «một ngày» dùng chung nên quy đổi ngay tại đây, không khai thêm một DAY_MS nữa. */
+export const RETURN_ARRIVAL_MAX_MS = RETURN_ARRIVAL_MAX_DAYS * 86_400_000;
+
 /** Một vận đơn gốc được xác định là HOÀN VỀ SHOP — kèm hai mốc làm căn cứ. */
 export type ReturnArrival = {
   /** Mốc 501 chiều đi SỚM NHẤT của mã gốc (chứng từ VTP). */
