@@ -48,6 +48,8 @@ import { OrderQuickDecision, OrderReviewEntries } from "@/components/orders/orde
 import { getBrandCopy } from "@/lib/branding/service";
 import { displayVariationText } from "@/lib/constants/experience-profile";
 import { readDisplayProfile } from "@/lib/experience/profile";
+import { returnArrivalsOf } from "@/lib/queries/shipment-return-arrival";
+import { ReturnArrivalTag } from "@/components/return-arrival-tag";
 import { lastAddressSettledOf, lastHumanReviewOf, ORDER_REVIEW_LABEL, orderReviewOf, reconfirmsSinceOpen } from "@/lib/constants/order-review";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
@@ -74,7 +76,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     Bỏ luôn lượt truy vấn cho nhóm đó: trang chi tiết đơn là trang mở nhiều nhất sau danh sách.
   */
   const chuaGui = PRE_SHIP_STAGES.includes(order.stage);
-  const [timeline, erpHist, erpOther, prev, soat, nguoiHen, khach, dupFlags] = await Promise.all([
+  const [timeline, erpHist, erpOther, prev, soat, nguoiHen, khach, dupFlags, hoanVe] = await Promise.all([
     getOrderTimeline(order.id),
     erpHistoryByPhone([order.billPhone ?? ""], order.id),
     erpOrderCountByPhone([order.billPhone ?? ""], order.id),
@@ -95,6 +97,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     order.customer ? customerOutcomeStats(order.customer.id) : Promise.resolve(null),
     // Cờ «Nghi trùng đơn» — CHÍNH `assessDuplicate` của hàng đợi nghi trùng (P0 HSLC 24/10/2026).
     duplicateFlagsFor([{ id: order.id, insertedAt: order.insertedAt, billPhone: order.billPhone }]).then((m) => m.get(order.id) ?? []),
+    // «Hoàn về shop» (chiều LOGISTICS — lib/queries/shipment-return-arrival.ts): lần gửi VTP ghi «Phát thành công» trên mã gốc mà
+    // kiện chiều hoàn đã giao về. Chỉ tra lần gửi đang `DELIVERED`.
+    returnArrivalsOf(order.attempts.filter((a) => a.stage === "DELIVERED").map((a) => a.id)),
   ]);
   const risk = assessCustomerRisk({ succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, isBlock: Boolean(order.customer?.isBlock), erpDelivered: erpHist.delivered, erpReturned: erpHist.returned }, riskCfg);
   const newPhone = isNewPhone({ phone: order.billPhone, succeed: order.customer?.succeedOrderCount ?? 0, returned: order.customer?.returnedOrderCount ?? 0, erpOtherOrders: erpOther });
@@ -228,8 +233,9 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           <p className="text-xs font-medium text-muted-foreground">Hàng đang ở đâu</p>
           {s ? (
             <>
-              <div className="mt-0.5">
+              <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                 <ShipmentStageBadge stage={s.stage} label={s.vtpStatusName ?? undefined} />
+                <ReturnArrivalTag value={hoanVe.get(s.id)} />
               </div>
               <p className="mt-1 truncate text-[13px] text-muted-foreground">
                 {s.carrier}
@@ -589,6 +595,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                 ) : null}
                 <div className="flex flex-wrap items-center gap-3">
                   <ShipmentStageBadge stage={s.stage} label={s.vtpStatusName ?? undefined} className="text-xs" />
+                  <ReturnArrivalTag value={hoanVe.get(s.id)} />
                   <CodStatusBadge status={s.codStatus} className="text-xs" />
                   {s.vtpOrderNumber || s.trackingCode ? (
                     <span className="inline-flex items-center gap-1 rounded-md border bg-muted/40 px-2 py-0.5 font-mono text-xs">

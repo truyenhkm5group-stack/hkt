@@ -7,6 +7,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { handedOffShipmentIds, withHandoff } from "@/lib/queries/shipment-handoff";
+import { returnArrivalsOf } from "@/lib/queries/shipment-return-arrival";
 import { liveLineUnitCost, liveOrderCogs } from "@/lib/constants/live-cogs";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { manualPaymentStates } from "@/lib/queries/order-payments";
@@ -159,7 +160,11 @@ export async function listOrders(params: ListParams) {
   // Cờ «Nghi trùng đơn» (P0 HSLC 24/10/2026) — CHÍNH `assessDuplicate` của hàng đợi nghi trùng, một lượt đọc cho cả trang.
   const [chats, inboxOn, dups] = await Promise.all([orderChatThreads(rowsRaw.filter((r) => isManualOrderId(r.id)).map((r) => r.id)), salesInboxEnabled(), duplicateFlagsFor(rowsRaw.map((r) => ({ id: r.id, insertedAt: r.insertedAt, billPhone: r.billPhone })))]);
   // Chứng từ bàn giao của từng lần gửi — để lần gửi đại diện khớp TỪNG BẬC với PRIMARY_ATTEMPT (vtp-reship-outcome 22/10/2026).
-  const handed = await handedOffShipmentIds(db, rowsRaw.flatMap((r) => r.attempts.map((a) => a.id)));
+  // «Hoàn về shop» (chiều LOGISTICS — lib/queries/shipment-return-arrival.ts) cho lần gửi đang `DELIVERED`: một câu cho cả trang.
+  const [handed, returnArrivals] = await Promise.all([
+    handedOffShipmentIds(db, rowsRaw.flatMap((r) => r.attempts.map((a) => a.id))),
+    returnArrivalsOf(rowsRaw.flatMap((r) => r.attempts.filter((a) => a.stage === "DELIVERED").map((a) => a.id))),
+  ]);
   const rows = rowsRaw.map((r) => {
     const c = r.customer;
     const risk = c ? assessCustomerRisk({ succeed: c.succeedOrderCount ?? 0, returned: c.returnedOrderCount ?? 0, isBlock: Boolean(c.isBlock) }, riskCfg) : null;
@@ -172,7 +177,8 @@ export async function listOrders(params: ListParams) {
     const chat = chatLinkOf(chats.get(r.id), inboxOn, { pageId: r.pageId, conversationId: r.conversationId });
     // Chỗ còn thiếu của đơn tay — nút nhanh «Xác nhận đơn» không chốt đơn thiếu xã / SĐT / địa chỉ, dẫn sang sửa đơn (review #675, L2).
     const gaps = isManualOrderId(r.id) ? manualOrderGaps({ phone: r.shipPhone, address: r.shipAddress, province: r.shipProvince, ward: r.shipCommune }, r.itemsCount) : [];
-    const shipment = vanDonDaiDien(withHandoff(r.attempts, handed));
+    const daiDien = vanDonDaiDien(withHandoff(r.attempts, handed));
+    const shipment = daiDien ? { ...daiDien, returnArrival: returnArrivals.get(daiDien.id) ?? null } : null;
     // POS HUỶ MÀ HÀNG VẪN ĐI (vtp-direct-sync 25/10/2026, mẫu đơn 6571): shop tạo lại vận đơn trên VTP rồi huỷ đơn POS — lần gửi chính
     // đã bàn giao và chưa huỷ thì trạng thái POS «Đã huỷ» không phải sự thật về gói hàng (ORDER_OUTCOME mục 12 đã đúng ở chiều kết quả).
     const shippingDespitePosCancel = (r.stage === "CANCELLED" || r.stage === "DELETED") && shipment?.handedOff === true && shipment.stage !== "CANCELLED" ? (shipment.vtpOrderNumber || shipment.trackingCode || "") : null;

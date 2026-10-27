@@ -71,6 +71,7 @@ import { testPayrollAuthorization } from "./payroll-authorization.test";
 import { testCodPaymentStatement, testCodStatusMeaning, testStatementDedupAcrossFilenames, testStatementIdentityByCash, testVtpCodPaymentColumn, testStatementDetailMatching, testStatementLedgerOrderIndependent, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
 import { testVtpCapability } from "./vtp-capability.test";
+import { testVtpApiBreaker } from "./vtp-api-breaker.test";
 import { testVtpEditCodGuardDb, testVtpEditDefaultsPure } from "./vtp-edit-cod.test";
 import { testCareWorkbench } from "./care-workbench.test";
 import { testCareClosedAssign } from "./care-closed-assign.test";
@@ -421,6 +422,7 @@ import { testAddressWardExplicitPure, testAddressWardExplicitTools } from "./add
 import { testAddressReaskAudit } from "./address-reask-audit.test";
 import { testOrderDupScan } from "./order-dup-scan.test";
 import { testCartUnitProbe } from "./cart-unit-probe.test";
+import { testWholesaleB2bProbe } from "./wholesale-b2b-probe.test";
 import { testP0855Address } from "./p0-855-address.test";
 import { testP0871ContactMemory } from "./p0-871-contact-memory.test";
 import { testVelocityUnifyDb, testVelocityUnifyPure } from "./velocity-unify.test";
@@ -445,6 +447,7 @@ import { testCareStates } from "./care-states.test";
 import { testCareOs } from "./care-os.test";
 import { testCareEffect } from "./care-effect.test";
 import { testCareReopen } from "./care-reopen.test";
+import { testShipmentReturnArrival } from "./shipment-return-arrival.test";
 import { testCarePendingDrilldown } from "./care-pending-drilldown.test";
 import { testCareSettleClosed } from "./care-settle-closed.test";
 import { testCareFalseReopenExclusion } from "./care-false-reopen-exclusion.test";
@@ -618,6 +621,7 @@ import { testCarrierGhtk } from "./carrier-ghtk.test";
 import { testFashionCodF3 } from "./fashion-cod-f3.test";
 import { testWholesaleLeadHunter } from "./wholesale-lead-hunter.test";
 import { testWholesaleEmailDiscovery } from "./wholesale-email-discovery.test";
+import { testWholesaleCatalogReadiness } from "./wholesale-catalog-readiness.test";
 import { testRestaurantTemplate } from "./restaurant.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testTriggerProposals } from "./trigger-proposals.test";
@@ -2559,6 +2563,7 @@ async function main() {
     // P0 HSLC 24/10/2026: ops order-dup-scan — quét cặp đơn nghi trùng (form nhân viên → bot tự chốt).
     await testOrderDupScan();
     await testCartUnitProbe();
+    await testWholesaleB2bProbe(); // ops wholesale-b2b-probe (AI B2B Sales Agent HSLC P1-D): chỉ đọc, lead → đơn sau mốc chuyển, tóm tắt không định danh
     await testP0855Address(); // #855: địa giới cũ / «như cũ» / địa chỉ mới thắng / không hỏi lại SĐT · tên · địa chỉ · phường
     await testP0871ContactMemory(); // #871: SĐT + địa chỉ đã biết không hỏi lại khi đổi chủ đề · câu mẫu cũng chịu hàng rào · hẹn giờ giao = ghi chú · hậu mãi không bán tiếp · gói tin trùng
     // Company OS · Agent V: MỘT tốc độ bán (Kế hoạch SX) cho Hàng chậm / Quyết định vốn tồn / Hiệu quả mẫu mã + ops velocity-compare (mã `cos-v-` / `COSV`, tự dọn).
@@ -2692,6 +2697,8 @@ async function main() {
     await testLogisticsPerformance(db);
     await testVtpHealth(db);
     await testVtpCapability(db);
+    // vtp-direct-sync (A) 26/10/2026: cầu chì kênh API tra cứu VTP (403 + HTML) + mã thử không vào hàng đợi đối chiếu.
+    await testVtpApiBreaker(db);
     // Sửa đơn VTP: tự dọn mọi dòng đã gieo (đơn, vận đơn, bảng kê, nhật ký) nên không đổi tổng bài nào khác.
     testVtpEditDefaultsPure();
     await testVtpEditCodGuardDb(db);
@@ -2752,6 +2759,8 @@ async function main() {
     // Cùng nhóm: bài "đã duyệt hoàn" dựng kiện + đợt riêng mang tiền tố `cra-` và TỰ DỌN sạch.
     await testCareReturnApproval(db);
     testCareReturnCheckWiring();
+    // «Hoàn về shop» (chiều logistics): dựng kiện riêng mang tiền tố `vra-` và TỰ DỌN sạch.
+    await testShipmentReturnArrival(db);
     // Ngay sau đó: bài kết quả xử lý dựng kiện + đợt riêng mang tiền tố `cres-` và TỰ DỌN sạch, nên
     // không dòng nào của nó lọt vào tổng của báo cáo khác.
     await testCareResolution(db);
@@ -3308,6 +3317,8 @@ async function main() {
     await testFashionCodF3();
     await testWholesaleLeadHunter();
     await testWholesaleEmailDiscovery();
+    // P1c AI B2B: cổng sẵn sàng danh mục bán sỉ + xuất khẩu — hàm thuần (lib/wholesale/catalog-readiness.ts).
+    testWholesaleCatalogReadiness();
     await testRestaurantTemplate();
     testTriggerProposals();
     await testSelfServiceJourney();

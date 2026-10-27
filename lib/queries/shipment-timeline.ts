@@ -11,6 +11,8 @@ import { carrierStatusMeta, isOtherCarrierSource } from "@/lib/constants/carrier
 import { careSlaHours } from "@/lib/care/sla";
 import { outcomeOfShipment } from "@/lib/queries/shipments";
 import { OUTCOME_LABEL, type OrderOutcome } from "@/lib/constants/returns";
+import { returnArrivalOf } from "@/lib/queries/shipment-return-arrival";
+import { RETURN_ARRIVAL_LABEL, returnArrivalDetail } from "@/lib/constants/return-arrival";
 import type { ShipmentStage } from "@/db/schema";
 
 /**
@@ -504,6 +506,34 @@ export async function getShipmentTimeline(shipmentId: string, options: { limit?:
       before: stageLabel(chungTuCuoi.normalizedStage),
       after: nhan,
       note: "Kết luận theo luật của shop. KHÔNG sửa một chữ nào trong lịch sử của Viettel Post.",
+    });
+  }
+
+  /*
+    ═══ 7b. «HOÀN VỀ SHOP» — CHIỀU LOGISTICS, CŨNG LÀ MỘT DÒNG RIÊNG ═══
+
+    Viettel Post gửi 501 «Phát thành công» trên MÃ GỐC với IS_RETURNING = false khi kiện hoàn về tới
+    shop, nên dòng chứng từ ở trên đọc «Giao thành công». Dòng chứng từ GIỮ NGUYÊN (AGENTS 47); kết
+    luận «hoàn về shop» đứng ở chiều DERIVED, mang mốc giao về của kiện chiều hoàn — lúc đủ căn cứ.
+    Luật một chỗ: `returnArrivalOf` (lib/queries/shipment-return-arrival.ts).
+  */
+  const hoanVe = await returnArrivalOf(shipmentId);
+  if (hoanVe) {
+    entries.push({
+      id: `return-arrival-${shipmentId}`,
+      at: hoanVe.legDeliveredAt,
+      receivedAt: null,
+      eventType: "RETURN_ARRIVAL",
+      lane: EVENT_LANE.RETURN_ARRIVAL,
+      title: RETURN_ARRIVAL_LABEL,
+      detail: returnArrivalDetail(hoanVe),
+      source: "RETURN_LEG",
+      actorKind: "MACHINE",
+      actorName: "Luật hoàn về shop",
+      actorId: null,
+      before: stageLabel("DELIVERED"),
+      after: RETURN_ARRIVAL_LABEL,
+      note: "ERP suy ra từ kiện chiều hoàn. Dòng «Phát thành công» của Viettel Post ở trên KHÔNG bị sửa; kết quả đơn vẫn đọc từ ORDER_OUTCOME.",
     });
   }
 
