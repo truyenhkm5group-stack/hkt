@@ -4,6 +4,7 @@ import { LinkOrderButton } from "@/app/(dashboard)/shipments/link-order-button";
 import type { ColumnDef } from "@tanstack/react-table";
 import { SHIPMENT_DIRECTION_LABEL } from "@/lib/constants/viettelpost";
 import { timelineSourceLabel } from "@/lib/constants/shipment-timeline";
+import { ReturnArrivalTag } from "@/components/return-arrival-tag";
 import { Truck } from "lucide-react";
 import { RowLink } from "@/components/data-table/data-table";
 import { CopyButton } from "@/components/misc";
@@ -178,7 +179,13 @@ export const shipmentColumns: ColumnDef<ShipmentListRow, unknown>[] = [
             // vtp-direct-sync 25/10/2026: chưa từng bàn giao, đơn đã đi bằng lần gửi khác — ĐVVC không gửi lệnh huỷ dòng này.
             <div className="text-[10.5px] font-medium text-amber-700 dark:text-amber-400">Đã thay bằng vận đơn {s.supersededBy}</div>
           ) : null}
-          {fake ? (
+          {s.returnArrival ? (
+            // CHIỀU LOGISTICS: VTP ghi «Phát thành công» trên mã gốc lúc kiện HOÀN về tới shop (luật ở
+            // lib/queries/shipment-return-arrival.ts). Nhãn chứng từ ở trên giữ nguyên câu của VTP.
+            <div>
+              <ReturnArrivalTag value={s.returnArrival} className="px-1 py-px text-[10.5px]" />
+            </div>
+          ) : fake ? (
             <div className="text-[10.5px] font-medium text-rose-600 dark:text-rose-400">
               {s.outcome === "RETURNED" ? "Thực tế: hoàn (hàng đã quay về shop)" : "Thực tế: không thành công"}
             </div>
