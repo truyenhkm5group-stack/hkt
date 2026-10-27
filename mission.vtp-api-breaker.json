@@ -3,7 +3,7 @@
   "mission_id": "vtp-api-breaker",
   "title": "API tra cứu VTP bị chặn (403 + HTML): cầu chì kênh, thử lại 6 giờ, hàng đợi đối chiếu lọc lỗi kênh + mã thử",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-cb",
@@ -25,7 +25,26 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-27T04:58:59.609Z",
-  "updated_at": "2026-10-27T04:58:59.609Z",
-  "last_heartbeat": "2026-10-27T04:58:59.609Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-27T05:00:08.963Z",
+  "last_heartbeat": "2026-10-27T05:00:08.963Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/vtp-api-breaker",
+    "sha": "802a5023641b06f4f8c442f4cbac848160b04392",
+    "at": "2026-10-27T05:00:08.963Z",
+    "actor": "DESKTOP-56TH98Y:wt-cb",
+    "title": "API tra cứu VTP bị chặn (403 + HTML): cầu chì kênh, thử lại 6 giờ, hàng đợi đối chiếu lọc lỗi kênh + mã thử",
+    "summary": "Cầu chì kênh API tra cứu VTP: 403 + trang HTML ⇒ mở cầu chì, không ghi vtp_last_error lên kiện, dừng lượt; mở ⇒ lượt định kỳ không hỏi API; mỗi 6 giờ thử MỘT kiện, chỉ đóng khi có bản ghi vận đơn thật. Hàng đợi đối chiếu lọc lỗi kênh lúc đọc (không xoá dữ liệu) + một băng rôn; loại mã vận đơn thử bằng sqlIsTestTracking. Commit thêm 802a50236: lượt thử mà không gọi API lần nào (không kiện tới hạn) không được ghi là JSON_EMPTY.",
+    "tests": [
+      "npm run typecheck: ĐẠT (máy Windows cần NODE_OPTIONS=--max-old-space-size=8192, mặc định hết heap)",
+      "npm run lint: ĐẠT",
+      "TEST_SHARD=1/4 npm test: ĐẠT (exit 0, chứa K11 = bài vtp-api-breaker)",
+      "TEST_SHARD=2/4 npm test: ĐẠT",
+      "TEST_SHARD=3/4 npm test: ĐẠT",
+      "TEST_SHARD=4/4 npm test: ĐẠT",
+      "TEST_KHOI=K01,K11: bài cầu chì in đủ hai dòng ✓, sau đó testReturnInspection đỏ «fixture: phải còn kiện chờ đếm» vì chạy thiếu khối gieo dữ liệu (đã biết, chạy cả shard 1 thì đạt)",
+      "npm run build: không chạy (không thêm import nào vào client component)",
+      "4 shard chạy trên HEAD 802a50236 trước khi đẩy; gates CI vẫn là cổng chính"
+    ]
+  }
 }
