@@ -71,6 +71,7 @@ import { testPayrollAuthorization } from "./payroll-authorization.test";
 import { testCodPaymentStatement, testCodStatusMeaning, testStatementDedupAcrossFilenames, testStatementIdentityByCash, testVtpCodPaymentColumn, testStatementDetailMatching, testStatementLedgerOrderIndependent, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
 import { testVtpCapability } from "./vtp-capability.test";
+import { testVtpApiBreaker } from "./vtp-api-breaker.test";
 import { testVtpEditCodGuardDb, testVtpEditDefaultsPure } from "./vtp-edit-cod.test";
 import { testCareWorkbench } from "./care-workbench.test";
 import { testCareClosedAssign } from "./care-closed-assign.test";
@@ -618,6 +619,7 @@ import { testCarrierGhtk } from "./carrier-ghtk.test";
 import { testFashionCodF3 } from "./fashion-cod-f3.test";
 import { testWholesaleLeadHunter } from "./wholesale-lead-hunter.test";
 import { testWholesaleConsent } from "./wholesale-consent.test";
+import { testWholesaleCatalogReadiness } from "./wholesale-catalog-readiness.test";
 import { testRestaurantTemplate } from "./restaurant.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testTriggerProposals } from "./trigger-proposals.test";
@@ -2692,6 +2694,8 @@ async function main() {
     await testLogisticsPerformance(db);
     await testVtpHealth(db);
     await testVtpCapability(db);
+    // vtp-direct-sync (A) 26/10/2026: cầu chì kênh API tra cứu VTP (403 + HTML) + mã thử không vào hàng đợi đối chiếu.
+    await testVtpApiBreaker(db);
     // Sửa đơn VTP: tự dọn mọi dòng đã gieo (đơn, vận đơn, bảng kê, nhật ký) nên không đổi tổng bài nào khác.
     testVtpEditDefaultsPure();
     await testVtpEditCodGuardDb(db);
@@ -3308,6 +3312,8 @@ async function main() {
     await testFashionCodF3();
     await testWholesaleLeadHunter();
     await testWholesaleConsent();
+    // P1c AI B2B: cổng sẵn sàng danh mục bán sỉ + xuất khẩu — hàm thuần (lib/wholesale/catalog-readiness.ts).
+    testWholesaleCatalogReadiness();
     await testRestaurantTemplate();
     testTriggerProposals();
     await testSelfServiceJourney();

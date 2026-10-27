@@ -1,3 +1,4 @@
+import { BREAKER_CLOSED, BREAKER_RETRY_HOURS, breakerDecision, isChannelBlockError, nextBreakerState, VTP_API_BREAKER_KEY, type VtpApiBreakerState } from "@/lib/constants/vtp-api-breaker";
 import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { moTaLoiCsdl } from "@/lib/db/error-message";
 import { getDb, schema, type Db } from "@/db";
@@ -416,7 +417,19 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
     // Tra cứu chọn tay là yêu cầu rõ ràng của người dùng — không bị chế độ chỉ dò chặn.
     const selected = Boolean(options.shipmentIds?.length);
     const scope = (await getSyncState<ApiScopeState>(API_SCOPE_KEY)) ?? { missingStreak: 0, lastFoundAt: null, lastCheckedAt: null };
-    const probing = !selected && scope.missingStreak >= SCOPE_PROBE_AFTER;
+    /*
+      CẦU CHÌ KÊNH (lib/constants/vtp-api-breaker.ts — vtp-direct-sync (A), 26/10/2026): API trả «403 + trang HTML» từ 23/09 và
+      tracking_poll cập nhật 0 kiện / ngày từ 20/09 mà sinh ~3.000–5.000 lượt hỏi lỗi / ngày. Cầu chì mở ⇒ lượt định kỳ không hỏi kiện
+      nào; cứ BREAKER_RETRY_HOURS thử MỘT kiện. Tra cứu chọn tay vẫn chạy (yêu cầu tường minh) nhưng cũng không ghi lỗi kênh lên kiện.
+    */
+    const now0 = new Date();
+    const breaker = await getSyncState<VtpApiBreakerState>(VTP_API_BREAKER_KEY);
+    const quyet = selected ? "RUN" : breakerDecision(breaker, now0);
+    if (quyet === "SKIP") {
+      ctx.summary.detail = `Cầu chì kênh đang mở: API tra cứu Viettel Post chặn máy chủ (HTTP 403 + trang HTML) từ ${breaker?.openSince ?? "?"} — không hỏi kiện nào; thử lại một kiện sau ${BREAKER_RETRY_HOURS} giờ kể từ ${breaker?.lastProbeAt ?? breaker?.openSince ?? "?"}. Webhook vẫn là nguồn tin.`;
+      return 0;
+    }
+    const probing = !selected && (quyet === "PROBE_ONE" || scope.missingStreak >= SCOPE_PROBE_AFTER);
     const where = options.shipmentIds?.length
       ? inArray(schema.shipments.id, options.shipmentIds)
       : and(
@@ -467,13 +480,19 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
         Hạn hỏi lại đã mang sẵn độ nóng trong nó (xem lib/constants/vtp-reconcile.ts).
       */
       .orderBy(sql`${schema.shipments.vtpNextSyncAt} asc nulls first`, sql`${schema.shipments.lastVtpSyncAt} asc nulls first`, asc(schema.shipments.createdAt))
-      .limit(probing ? SCOPE_PROBE_SIZE : options.limit ?? 300);
+      .limit(quyet === "PROBE_ONE" ? 1 : probing ? SCOPE_PROBE_SIZE : options.limit ?? 300);
     ctx.summary.detail = `Kiểm tra ${shipments.length} vận đơn`;
     let notFound = 0;
     /** Vận đơn ĐÃ TỪNG tra được qua API mà nay API không thấy — lỗ hổng đối chiếu thật. */
     let notFoundTrackable = 0;
     /** Vận đơn vừa được kết luận WEBHOOK_ONLY trong lượt này. */
     let concluded = 0;
+    /** Lượt này gặp kênh bị chặn ⇒ dừng ngay, không hỏi kiện kế tiếp. */
+    let kenhBiChan = false;
+    let coBanGhi = false;
+    let loiKhac = false;
+    /** Số lần THẬT SỰ gọi API trong lượt — lượt thử không có kiện nào tới hạn thì chưa thử gì, không được ghi là «JSON rỗng». */
+    let daHoi = 0;
     for (const shipment of shipments) {
       const orderNumber = shipment.vtpOrderNumber ?? shipment.trackingCode;
       if (!orderNumber) {
@@ -481,6 +500,7 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
         continue;
       }
       try {
+        daHoi += 1;
         const record = await client.getOrderDetail(orderNumber);
         if (!record) {
           /*
@@ -510,6 +530,7 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
           }).catch(() => undefined);
           continue;
         }
+        coBanGhi = true;
         // Tra được ⇒ bằng chứng dứt khoát theo hướng ngược lại: vận đơn này đối chiếu API được.
         if (shipment.trackingCapability !== "API_TRACKABLE") {
           await db
@@ -522,6 +543,13 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
         else ctx.summary.skipped += 1;
       } catch (error) {
         ctx.summary.failed += 1;
+        if (isChannelBlockError(error)) {
+          // Phán quyết của KÊNH, không phải của kiện: không ghi vtp_last_error, không lùi lịch kiện — dừng lượt.
+          kenhBiChan = true;
+          ctx.log(`${orderNumber}: API tra cứu Viettel Post trả HTTP 403 + trang HTML — mở cầu chì kênh, dừng lượt`);
+          break;
+        }
+        loiKhac = true;
         const cauLoi = moTaLoiCsdl(error);
         ctx.log(`${orderNumber}: ${cauLoi}`);
         await db.update(schema.shipments).set({ lastVtpSyncAt: new Date() }).where(eq(schema.shipments.id, shipment.id)).catch(() => undefined);
@@ -532,7 +560,11 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
       await ctx.progress();
     }
     const found = shipments.length - notFound - ctx.summary.failed;
-    if (!selected) {
+    if (!selected || kenhBiChan || coBanGhi) {
+      const sau = nextBreakerState(breaker, { blocked: kenhBiChan, gotRecord: coBanGhi, probed: quyet === "PROBE_ONE" && daHoi > 0, otherError: loiKhac }, new Date());
+      if (JSON.stringify(sau) !== JSON.stringify(breaker ?? BREAKER_CLOSED)) await setSyncState(VTP_API_BREAKER_KEY, sau);
+    }
+    if (!selected && !kenhBiChan) {
       const allMissing = shipments.length > 0 && notFound === shipments.length;
       await setSyncState(API_SCOPE_KEY, {
         missingStreak: allMissing ? scope.missingStreak + 1 : 0,
@@ -558,7 +590,8 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
       (concluded ? ` (${concluded} vừa kết luận chỉ nhận webhook)` : "") +
       ` · lỗi ${ctx.summary.failed}` +
       (webhookOnlyOpen ? ` · ${webhookOnlyOpen} vận đơn đang chạy chỉ nhận webhook — ngoài phạm vi tài khoản API, không cần đối chiếu API` : "") +
-      (probing ? ` · đang chỉ dò ${SCOPE_PROBE_SIZE} vận đơn vì ${scope.missingStreak} lượt liên tiếp API không thấy gì` : "");
+      (quyet === "PROBE_ONE" ? ` · cầu chì kênh đang mở — lượt thử một kiện${coBanGhi ? ": kênh SỐNG lại, đóng cầu chì" : ""}` : probing ? ` · đang chỉ dò ${SCOPE_PROBE_SIZE} vận đơn vì ${scope.missingStreak} lượt liên tiếp API không thấy gì` : "") +
+      (kenhBiChan ? " · API tra cứu chặn máy chủ (HTTP 403 + trang HTML) — mở cầu chì kênh, dừng lượt, không ghi lỗi lên kiện" : "");
     return shipments.length;
   });
 }
