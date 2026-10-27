@@ -1,4 +1,3 @@
-{"at":"2026-10-23T10:45:53.000Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#996 @ ef0f54f5d66d · review lead: tomTat qua splitSummaryLine chung (tiền tố đúng), bỏ cắt theo ký tự; khai bài kiểm vào DOC_MOI_TRUONG_DA_KHAI (quét mã nguồn). Script không đổi logic đo."}
 {"at":"2026-10-23T11:07:12.858Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"purchasing-leadtime-probe","detail":"#996 @ ef0f54f5d66d → 73460b03b8d0 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-23T11:09:17.291Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"od-p2-03-lead-time","detail":"#998 cho claude/od-p2-03-lead-time @ 46c4866752ee"}
 {"at":"2026-10-23T11:09:58.666Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#998 @ 46c4866752ee · review lead (OD-P2-03): lead time xưởng đọc received_at — mốc thật thắng phép ghép phiếu; đủ 3 lô mốc thật ⇒ trung vị chỉ mốc thật, thiếu ⇒ bù ước tính có nhãn; mốc mâu thuẫn đếm riêng; phép ghép giữ một-một; độ phủ trên trang. Chỉ báo cáo."}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-27T07:07:32.493Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"DUPLICATE_PREVENTED","mission":"hslc-ai-wholesale-workforce","detail":"DUPLICATE: intake kết luận IN_PROGRESS () ⇒ phối hợp với việc đang chạy"}
 {"at":"2026-10-27T07:45:27.397Z","actor":"DESKTOP-56TH98Y:wt-rl","kind":"HANDOFF","mission":"vtp-return-label","detail":"claude/vtp-return-label @ 3e5bb5666269 · 6 lệnh kiểm thử"}
 {"at":"2026-10-27T07:51:51.255Z","actor":"DESKTOP-56TH98Y:wt-fbcrm","kind":"HANDOFF","mission":"fb-crm-s1","detail":"claude/fb-crm-s1 @ 6dcbd63b3f38 · 7 lệnh kiểm thử"}
+{"at":"2026-10-27T07:53:03.220Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_LINKED","mission":"vtp-return-label","detail":"#1086 cho claude/vtp-return-label @ 3e5bb5666269"}
