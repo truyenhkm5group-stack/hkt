@@ -41,7 +41,16 @@ export default async function WholesaleLeadPage({ params }: { params: Promise<{ 
         eyebrow="Khách sỉ tiềm năng"
         title={v.name ?? "Lead chưa có tên (dữ liệu Google đã hết hạn lưu)"}
         description={`${LEAD_SEGMENT_LABEL[segment]}${lead.areaName || lead.provinceLabel ? ` · ${[lead.areaName, lead.provinceLabel].filter(Boolean).join(", ")}` : ""}`}
-        actions={<Link href="/wholesale/leads" className="text-sm text-muted-foreground hover:underline">← Danh sách</Link>}
+        actions={
+          <span className="flex items-center gap-3">
+            {canWork && status !== "DO_NOT_CONTACT" ? (
+              <Link href={`/wholesale/quotations/new?lead=${encodeURIComponent(lead.id)}`} className="rounded-md border px-2.5 py-1 text-sm font-medium hover:bg-muted">
+                Tạo báo giá
+              </Link>
+            ) : null}
+            <Link href="/wholesale/leads" className="text-sm text-muted-foreground hover:underline">← Danh sách</Link>
+          </span>
+        }
       />
       <WholesaleNav user={user} active="leads" />
 

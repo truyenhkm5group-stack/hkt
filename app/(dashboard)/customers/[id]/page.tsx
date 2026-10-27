@@ -128,6 +128,12 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
         actions={
           <>
             <ModuleSyncButton viewer={user} job="pancake-customers" label="Đồng bộ khách hàng" />
+            {/* Báo giá sỉ (P1b): `can` đã gồm cổng module Săn khách sỉ — tổ chức không bật module không thấy nút. */}
+            {can(user, "wholesale:work") ? (
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/wholesale/quotations/new?customer=${encodeURIComponent(customer.id)}`}>Tạo báo giá sỉ</Link>
+              </Button>
+            ) : null}
             {customer.conversationLink ? (
               <Button asChild variant="outline" size="sm">
                 <a href={customer.conversationLink} target="_blank" rel="noreferrer">

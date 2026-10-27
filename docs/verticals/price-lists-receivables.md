@@ -82,7 +82,21 @@ Khách trả một khoản cho nhiều đơn:
 - `/customers/receivables`: bảng công nợ toàn tổ chức, có nhóm tuổi nợ.
 - Hai mục menu mới mang cờ `tenantOnly`, nên chỉ hiện ở tổ chức khách.
 
-## 7. Bước sau
+## 7. Báo giá sỉ (0263 · docs/tech/hslc-b2b-sales-agent.md mục 11)
+
+Báo giá văn bản gửi khách sỉ dùng CÙNG luật chọn giá ở mục 1 (`quoteUnitPrice`), với hai khác biệt:
+- Chỉ nhận giá từ BẢNG (bảng riêng của khách hoặc bảng mặc định). Dòng rơi về giá lẻ thì bị chặn, vì giá lẻ không phải giá sỉ.
+- MOQ của một mẫu mã là bậc «mua từ» nhỏ nhất trong các bảng hiệu lực. Số lượng dưới MOQ thì bị chặn.
+
+Lead chưa thành khách chỉ đọc bảng mặc định. Khách đã gán bảng thì đọc bảng của khách trước, rồi tới bảng mặc định.
+
+Mỗi phiên bản báo giá lưu ẢNH CHỤP các bậc đã dùng và một dấu phiên bản giá (`price_version`). Sửa bảng giá về sau KHÔNG đổi số
+của báo giá đã lập. Đây cùng nguyên tắc với «đơn cũ giữ giá đã lưu» ở mục 1.
+
+Chiết khấu, biên lợi nhuận tối thiểu và thuế đọc ở `settings["wholesale.quotation"]`. Chưa khai thì mọi chiết khấu đều cần người
+duyệt, và giá ghi «chưa gồm thuế». Không có số mặc định.
+
+## 8. Bước sau
 
 - Chatbot báo giá sỉ theo bảng giá. Mặc định TẮT, vì chủ shop chưa quyết cho bot tự báo giá sỉ (xem PR #450).
 - Bán theo cân (kg) + cân lại khi đóng hàng.

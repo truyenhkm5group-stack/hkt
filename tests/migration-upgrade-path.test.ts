@@ -208,6 +208,7 @@ const MOI = [
   "0258_sourcing_trials",
   "0259_platform_operator_alerts",
   "0260_sourcing_capture",
+  "0263_wholesale_quotations",
 ] as const;
 
 /*

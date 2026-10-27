@@ -1821,6 +1821,13 @@
       "when": 1792487587372,
       "tag": "0260_sourcing_capture",
       "breakpoints": true
+    },
+    {
+      "idx": 263,
+      "version": "7",
+      "when": 1792487950509,
+      "tag": "0263_wholesale_quotations",
+      "breakpoints": true
     }
   ]
 }

@@ -185,6 +185,16 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/sourcing-capture.test.ts",
   },
+  {
+    tag: "0263_wholesale_quotations",
+    why:
+      "Chỉ TẠO hai bảng mới ở CSDL tổ chức (wholesale_quotations · wholesale_quotation_lines) + hai trigger bất biến của chính chúng — " +
+      "không thêm / đổi / xoá cột nào mã đang đọc. Mọi đường ĐỌC (`lib/queries/wholesale-quotations.ts`) bắt lỗi bảng chưa có (42P01) ⇒ " +
+      "trang Báo giá sỉ in «CSDL chưa áp 0263», phần còn lại của Săn khách sỉ chạy như cũ. Mọi đường GHI (`lib/wholesale/quotation.ts`) " +
+      "bắt cùng lỗi và trả câu lỗi, không ghi gì ở bảng khác.",
+    addedColumns: {},
+    proof: "tests/wholesale-quotation.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */
