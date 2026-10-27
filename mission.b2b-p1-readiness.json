@@ -3,7 +3,7 @@
   "mission_id": "b2b-p1-readiness",
   "title": "AI B2B P1c: cổng sẵn sàng danh mục bán sỉ + xuất khẩu, tài liệu trạng thái chung",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-ready",
@@ -27,7 +27,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-27T05:25:10.712Z",
-  "updated_at": "2026-10-27T05:25:10.712Z",
-  "last_heartbeat": "2026-10-27T05:25:10.712Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-27T05:27:50.663Z",
+  "last_heartbeat": "2026-10-27T05:27:50.663Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/b2b-p1-readiness",
+    "sha": "9129c005880ad6902c9ce9dc0be66d6b905b5b25",
+    "at": "2026-10-27T05:27:50.663Z",
+    "actor": "DESKTOP-56TH98Y:wt-b2b-ready",
+    "title": "AI B2B P1c: cổng sẵn sàng danh mục bán sỉ + xuất khẩu, tài liệu trạng thái chung",
+    "summary": "P1c AI B2B HSLC: trang /wholesale/readiness (chỉ đọc) — READY/MISSING từng mẫu mã (bậc giá bảng mặc định · MOQ · khối lượng · ảnh · mô tả · tồn chưa biết ≠ 0) + cổng xuất khẩu (chứng nhận/điều kiện/HS = UNAVAILABLE kèm missingWhat); tài liệu trạng thái chung docs/tech/hslc-b2b-sales-agent.md. Không migration, không chạm schema/auth/platform.",
+    "tests": [
+      "npm run typecheck: ĐẠT",
+      "npm run lint: ĐẠT",
+      "TEST_SHARD=1/4 npm test: ĐẠT (10/24 khối + phần chung)",
+      "TEST_KHOI=K21 npm test (khối chứa bài mới): ĐẠT",
+      "npm run build: ĐẠT (/wholesale/readiness 5.63 kB)",
+      "shard 2/3/4 chưa chạy cục bộ theo luật mới của lead — 4 shard đầy đủ: để gates CI"
+    ]
+  }
 }
