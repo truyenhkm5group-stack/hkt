@@ -16,6 +16,7 @@ import { verifiedCallPatch } from "@/lib/wholesale/field-handoff";
 import { formatVnPhone, normalizeVnPhone } from "@/lib/wholesale/phone";
 import { manualImportProvider } from "@/lib/wholesale/providers";
 import { classifySegment, isLeadSegmentKey } from "@/lib/wholesale/segments";
+import { isCheckViolation } from "@/lib/wholesale/consents";
 import { normalizeEmail } from "@/lib/wholesale/contactability";
 import { getLeadHunterConfig, segmentOutcomeStats, suppressionHit } from "@/lib/wholesale/store";
 
@@ -88,7 +89,14 @@ export async function suppressLead(user: SessionUser, lead: Lead, reason: string
   const email = normalizeEmail(lead.email);
   if (email) keys.push({ kind: "EMAIL", value: email });
   for (const k of keys) {
-    await db.insert(schema.wholesaleSuppressions).values({ ...k, reason: reason.slice(0, 300), leadId: lead.id, createdByUserId: user.id, createdByName: user.name, createdAt: now }).onConflictDoNothing();
+    try {
+      await db.insert(schema.wholesaleSuppressions).values({ ...k, reason: reason.slice(0, 300), leadId: lead.id, createdByUserId: user.id, createdByName: user.name, createdAt: now }).onConflictDoNothing();
+    } catch (e) {
+      // CSDL chưa áp 0261 (CHECK kind cũ không nhận EMAIL): bỏ RIÊNG dòng email; SĐT / tên miền / địa điểm vẫn vào danh sách
+      // và lead vẫn ở trạng thái KHÔNG LIÊN HỆ — một migration chậm không được làm hỏng nút «Không liên hệ».
+      if (k.kind === "EMAIL" && isCheckViolation(e, "wholesale_suppressions_kind_check")) continue;
+      throw e;
+    }
   }
   await db
     .update(schema.wholesaleOutreachItems)
@@ -577,11 +585,17 @@ export async function addEmailSuppressionCore(user: SessionUser, raw: unknown, n
   const db = await getDb();
   const l = schema.wholesaleLeads;
   const matched = await db.select({ id: l.id }).from(l).where(sql`lower(btrim(${l.email})) = ${email}`).limit(50);
-  const inserted = await db
-    .insert(schema.wholesaleSuppressions)
-    .values({ kind: "EMAIL", value: email, reason: parsed.data.reason, leadId: matched[0]?.id ?? null, createdByUserId: user.id, createdByName: user.name, createdAt: now })
-    .onConflictDoNothing()
-    .returning({ id: schema.wholesaleSuppressions.id });
+  let inserted: { id: string }[];
+  try {
+    inserted = await db
+      .insert(schema.wholesaleSuppressions)
+      .values({ kind: "EMAIL", value: email, reason: parsed.data.reason, leadId: matched[0]?.id ?? null, createdByUserId: user.id, createdByName: user.name, createdAt: now })
+      .onConflictDoNothing()
+      .returning({ id: schema.wholesaleSuppressions.id });
+  } catch (e) {
+    if (isCheckViolation(e, "wholesale_suppressions_kind_check")) return { error: "CSDL của tổ chức chưa áp migration 0261 — chưa chặn được theo email. Nút «Không liên hệ» trên lead vẫn chặn SĐT / website / địa điểm." };
+    throw e;
+  }
   if (matched.length) {
     await db
       .update(schema.wholesaleOutreachItems)

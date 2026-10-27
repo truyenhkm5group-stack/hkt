@@ -34,6 +34,25 @@ import { leadView } from "@/lib/wholesale/engine";
 
 const FORBIDDEN = "Bạn không có quyền chăm lead khách sỉ (wholesale:work).";
 
+/** Câu báo khi CSDL tổ chức chưa áp 0261 (phục vụ bằng lược đồ cũ — `lib/constants/migration-serve-compat.ts`). */
+export const CONSENT_SCHEMA_MISSING = "CSDL của tổ chức chưa áp migration 0261 (nhật ký đồng ý liên hệ) — chưa ghi được. Máy vẫn KHÔNG tự liên hệ kênh nào.";
+
+function pgCodeOf(error: unknown): { code?: string; constraint?: string } {
+  const e = error as { code?: string; constraint?: string; cause?: { code?: string; constraint?: string } } | null;
+  return { code: e?.code ?? e?.cause?.code, constraint: e?.constraint ?? e?.cause?.constraint };
+}
+
+/** Bảng chưa tồn tại (SQLSTATE 42P01) — drizzle bọc lỗi pg trong `cause`. */
+export function isMissingTable(error: unknown): boolean {
+  return pgCodeOf(error).code === "42P01";
+}
+
+/** Vi phạm đúng một ràng buộc CHECK (23514 + tên) — dấu hiệu CSDL còn định nghĩa CHECK trước 0261. */
+export function isCheckViolation(error: unknown, constraint: string): boolean {
+  const c = pgCodeOf(error);
+  return c.code === "23514" && c.constraint === constraint;
+}
+
 type Lead = typeof schema.wholesaleLeads.$inferSelect;
 type Snap = typeof schema.wholesalePlaceSnapshots.$inferSelect;
 
@@ -95,10 +114,16 @@ export async function recordConsentCore(user: SessionUser, leadId: string, raw: 
   if (d.evidenceUrl && !url) return { error: "Link bằng chứng phải là địa chỉ http(s)." };
   if (CONSENT_BASES_NEED_URL.includes(d.basis) && !url) return { error: `Căn cứ «${CONSENT_BASIS_LABEL[d.basis]}» cần link tới chính lời mời chào hàng.` };
   const db = await getDb();
-  const [row] = await db
-    .insert(schema.wholesaleContactConsents)
-    .values({ leadId, channel: d.channel, contactValue: value, basis: d.basis, evidenceText: d.evidenceText, evidenceUrl: url, source: "STAFF", recordedByUserId: user.id, recordedByName: user.name, recordedAt: now })
-    .returning({ id: schema.wholesaleContactConsents.id });
+  let row: { id: string } | undefined;
+  try {
+    [row] = await db
+      .insert(schema.wholesaleContactConsents)
+      .values({ leadId, channel: d.channel, contactValue: value, basis: d.basis, evidenceText: d.evidenceText, evidenceUrl: url, source: "STAFF", recordedByUserId: user.id, recordedByName: user.name, recordedAt: now })
+      .returning({ id: schema.wholesaleContactConsents.id });
+  } catch (e) {
+    if (isMissingTable(e)) return { error: CONSENT_SCHEMA_MISSING };
+    throw e;
+  }
   await db.insert(schema.wholesaleLeadActivities).values({ leadId, kind: "CONSENT", channel: d.channel, note: `Ghi đồng ý liên hệ ${CONSENT_CHANNEL_LABEL[d.channel]} (${value}) — ${CONSENT_BASIS_LABEL[d.basis]}: ${d.evidenceText}`.slice(0, 2000), actorId: user.id, actorName: user.name });
   await audit({ userId: user.id, userEmail: user.email, action: "WHOLESALE_CONSENT_RECORD", entity: "WHOLESALE_LEAD", entityId: leadId, after: { consentId: row!.id, channel: d.channel, value, basis: d.basis }, reason: d.evidenceText.slice(0, 300) });
   return { ok: true, id: row!.id };
@@ -113,7 +138,13 @@ export async function revokeConsentCore(user: SessionUser, consentId: string, ra
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   const db = await getDb();
   const c = schema.wholesaleContactConsents;
-  const row = await db.query.wholesaleContactConsents.findFirst({ where: eq(c.id, consentId) });
+  let row: ConsentRow | undefined;
+  try {
+    row = await db.query.wholesaleContactConsents.findFirst({ where: eq(c.id, consentId) });
+  } catch (e) {
+    if (isMissingTable(e)) return { error: CONSENT_SCHEMA_MISSING };
+    throw e;
+  }
   if (!row) return { error: "Không tìm thấy dòng đồng ý." };
   const g = await leadInScope(user, row.leadId);
   if ("error" in g) return g;
@@ -131,11 +162,19 @@ export async function revokeConsentCore(user: SessionUser, consentId: string, ra
 
 export type ConsentRow = typeof schema.wholesaleContactConsents.$inferSelect;
 
-/** Mọi dòng đồng ý của một lead, mới nhất trước (cả dòng đã thu hồi — nhật ký không giấu gì). */
-export async function consentsOfLead(leadId: string): Promise<ConsentRow[]> {
+/**
+ * Mọi dòng đồng ý của một lead, mới nhất trước (cả dòng đã thu hồi — nhật ký không giấu gì). `null` = CSDL chưa áp 0261:
+ * không phải "đã biết là không có đồng ý", nhưng kết luận vẫn rơi về phía hẹp (máy không tự liên hệ).
+ */
+export async function consentsOfLead(leadId: string): Promise<ConsentRow[] | null> {
   const db = await getDb();
   const c = schema.wholesaleContactConsents;
-  return db.select().from(c).where(eq(c.leadId, leadId)).orderBy(desc(c.recordedAt));
+  try {
+    return await db.select().from(c).where(eq(c.leadId, leadId)).orderBy(desc(c.recordedAt));
+  } catch (e) {
+    if (isMissingTable(e)) return null;
+    throw e;
+  }
 }
 
 /** Dòng chặn khớp BẤT KỲ khoá nào của lead (Place ID · SĐT · tên miền · email). */
@@ -154,9 +193,10 @@ export async function suppressionsOfLead(key: ContactabilityLead): Promise<{ kin
 }
 
 /** Liên hệ được không — cho cả ba kênh, ở một chế độ. Đọc CSDL rồi giao cho hàm thuần. */
-export async function leadContactability(lead: Lead, snap: Snap | null, mode: ContactMode = "AUTOMATED"): Promise<{ consents: ConsentRow[]; byChannel: Record<ConsentChannel, Contactability> }> {
+export async function leadContactability(lead: Lead, snap: Snap | null, mode: ContactMode = "AUTOMATED"): Promise<{ consents: ConsentRow[]; schemaReady: boolean; byChannel: Record<ConsentChannel, Contactability> }> {
   const key = contactabilityLeadOf(lead, snap);
-  const [consents, suppressions] = await Promise.all([consentsOfLead(lead.id), suppressionsOfLead(key)]);
+  const [found, suppressions] = await Promise.all([consentsOfLead(lead.id), suppressionsOfLead(key)]);
+  const consents = found ?? [];
   const byChannel = Object.fromEntries(CONSENT_CHANNELS.map((ch) => [ch, contactability(key, consents, suppressions, ch, mode)])) as Record<ConsentChannel, Contactability>;
-  return { consents, byChannel };
+  return { consents, schemaReady: found !== null, byChannel };
 }

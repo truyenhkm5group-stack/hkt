@@ -32,7 +32,7 @@ const sel = "h-8 rounded-md border bg-background px-2 text-sm";
  * Khối «Đồng ý liên hệ» của trang lead (0261): máy có được TỰ liên hệ từng kênh không (kết luận của `contactability`, chế
  * độ AUTOMATED), nhật ký bằng chứng (cả dòng đã thu hồi), form ghi / thu hồi. Không có nút xoá — nhật ký chỉ thêm.
  */
-export function ConsentPanel({ leadId, verdicts, rows, canWork }: { leadId: string; verdicts: ChannelVerdict[]; rows: ConsentPanelRow[]; canWork: boolean }) {
+export function ConsentPanel({ leadId, verdicts, rows, canWork, schemaReady = true }: { leadId: string; verdicts: ChannelVerdict[]; rows: ConsentPanelRow[]; canWork: boolean; schemaReady?: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
@@ -112,7 +112,9 @@ export function ConsentPanel({ leadId, verdicts, rows, canWork }: { leadId: stri
         <p className="text-muted-foreground">Chưa có bằng chứng đồng ý nào.</p>
       )}
 
-      {canWork ? (
+      {!schemaReady ? (
+        <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">CSDL của tổ chức chưa áp migration 0261 — chưa ghi được bằng chứng đồng ý. Máy vẫn KHÔNG tự liên hệ kênh nào.</p>
+      ) : canWork ? (
         open ? (
           <form
             className="space-y-2 rounded-md border p-2"

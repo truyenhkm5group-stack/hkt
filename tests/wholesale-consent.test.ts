@@ -6,11 +6,12 @@
  *     các ca biên (7 / 8 / 30 / 31 ngày, hẹn gọi lại, không có mốc, WON = không áp dụng).
  *  2. TỔ CHỨC THẬT `wl-consent`: chặn EMAIL chặn finalizeLead / soạn lời chào / huỷ lời chào đang chờ; nút «Không liên hệ»
  *     đưa cả email vào danh sách; khử trùng theo email (finalizeLead và đọc website) đúng thứ tự PHONE → DOMAIN → EMAIL → NAME,
- *     không gộp lead đã có người chăm; ghi / thu hồi đồng ý (quyền, phạm vi, căn cứ, chỉ thêm).
+ *     không gộp lead đã có người chăm; ghi / thu hồi đồng ý (quyền, phạm vi, căn cứ, chỉ thêm); và CHỨNG MINH SỔ TƯƠNG THÍCH
+ *     cho 0261: CSDL chưa áp ⇒ đọc rơi về phía hẹp, ghi trả lỗi, nút «Không liên hệ» vẫn chạy.
  */
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabilities";
@@ -290,6 +291,33 @@ async function testDb() {
       assert.equal(view.byChannel.EMAIL.reason, "SUPPRESSED", "danh sách chặn thắng đồng ý mới");
       // Lead KHÔNG LIÊN HỆ ⇒ không ghi đồng ý.
       assert.ok("error" in (await recordConsentCore(admin, k.id, evidence)));
+
+      // ── SERVE-COMPAT 0261 (lib/constants/migration-serve-compat.ts): CSDL như TRƯỚC 0261 — bảng đồng ý chưa có, CHECK kind cũ.
+      await db.execute(sql.raw(`ALTER TABLE wholesale_contact_consents RENAME TO wholesale_contact_consents_tam`));
+      await db.execute(sql.raw(`ALTER TABLE wholesale_suppressions DROP CONSTRAINT wholesale_suppressions_kind_check`));
+      await db.execute(sql.raw(`ALTER TABLE wholesale_suppressions ADD CONSTRAINT wholesale_suppressions_kind_check CHECK (kind IN ('PHONE','DOMAIN','PLACE')) NOT VALID`));
+      try {
+        const old = await leadContactability(await get(q.id), null);
+        assert.equal(old.schemaReady, false, "thiếu bảng ⇒ biết là CHƯA ÁP, không giả là đã đọc");
+        assert.deepEqual([old.byChannel.EMAIL.allowed, old.byChannel.EMAIL.reason], [false, "SUPPRESSED"], "danh sách chặn vẫn đọc được");
+        const r2 = await mk({ businessName: "Quán Cũ Lược Đồ", email: "cu@luocdo.vn", phoneRaw: "0905454545", normalizedPhone: "+84905454545", phoneKind: "MOBILE", phoneSource: "IMPORT", firstSeenAt: at(95) });
+        const oldView = await leadContactability(r2, null);
+        assert.deepEqual([oldView.schemaReady, oldView.byChannel.EMAIL.allowed, oldView.byChannel.EMAIL.reason], [false, false, "NO_CONSENT"], "thiếu bảng ⇒ rơi về phía HẸP");
+        const rec2 = await recordConsentCore(admin, r2.id, evidence);
+        assert.ok("error" in rec2 && /0261/.test(rec2.error), JSON.stringify(rec2));
+        const rev2 = await revokeConsentCore(admin, consentId, { reason: "thử trên lược đồ cũ" });
+        assert.ok("error" in rev2 && /0261/.test(rev2.error), JSON.stringify(rev2));
+        const sup2 = await addEmailSuppressionCore(admin, { email: "cu@luocdo.vn", reason: "khách xin ngừng gửi" });
+        assert.ok("error" in sup2 && /0261/.test(sup2.error), JSON.stringify(sup2));
+        // Nút «Không liên hệ» vẫn chạy: bỏ riêng dòng email, SĐT vẫn vào danh sách.
+        assert.ok("ok" in (await updateLeadStatusCore(admin, r2.id, { status: "DO_NOT_CONTACT", note: "khách từ chối" })));
+        assert.ok(await suppressionHit({ phone: "+84905454545" }), "SĐT vẫn vào danh sách");
+        assert.equal(await suppressionHit({ email: "cu@luocdo.vn" }), null, "dòng email bị bỏ (CHECK cũ), không làm hỏng lượt ghi");
+      } finally {
+        await db.execute(sql.raw(`ALTER TABLE wholesale_contact_consents_tam RENAME TO wholesale_contact_consents`));
+        await db.execute(sql.raw(`ALTER TABLE wholesale_suppressions DROP CONSTRAINT wholesale_suppressions_kind_check`));
+        await db.execute(sql.raw(`ALTER TABLE wholesale_suppressions ADD CONSTRAINT wholesale_suppressions_kind_check CHECK (kind IN ('PHONE','DOMAIN','PLACE','EMAIL'))`));
+      }
     });
   } finally {
     await cleanupOrg();

@@ -193,6 +193,7 @@ export default async function WholesaleLeadPage({ params }: { params: Promise<{ 
             <ConsentPanel
               leadId={lead.id}
               canWork={canWork}
+              schemaReady={contact.schemaReady}
               verdicts={CONSENT_CHANNELS.map((ch) => ({ channel: ch, allowed: contact.byChannel[ch].allowed, detail: contact.byChannel[ch].detail }))}
               rows={contact.consents.map((c) => ({ id: c.id, channel: c.channel, contactValue: c.contactValue, basis: c.basis, evidenceText: c.evidenceText, evidenceUrl: c.evidenceUrl, recordedByName: c.recordedByName, recordedAt: c.recordedAt.toISOString(), revokedAt: c.revokedAt ? c.revokedAt.toISOString() : null, revokeReason: c.revokeReason, revokedByName: c.revokedByName }))}
             />
