@@ -3,7 +3,7 @@
   "mission_id": "b2b-p1-readiness",
   "title": "AI B2B P1c: cổng sẵn sàng danh mục bán sỉ + xuất khẩu, tài liệu trạng thái chung",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-ready",
@@ -29,11 +29,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-27T05:25:10.712Z",
-  "updated_at": "2026-10-27T05:52:09.476Z",
+  "updated_at": "2026-10-27T06:37:10.756Z",
   "last_heartbeat": "2026-10-27T05:27:50.663Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1089 → 74a6225c013587969ca221b158c2fbce52b906c0"
+    "merged": "#1089 → 74a6225c013587969ca221b158c2fbce52b906c0",
+    "verify": "PASS 74a6225c013587969ca221b158c2fbce52b906c0 2026-10-27T06:36:26.061Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40460366681"
   },
   "handoff": {
     "branch": "claude/b2b-p1-readiness",
