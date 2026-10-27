@@ -1,0 +1,8 @@
+{
+  "pr": 1091,
+  "sha": "f13ea0d740cab8e395fdeafdceaaf4b52bd17049",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-27T08:12:40.202Z",
+  "note": "review lead (lượt 2): luật tên B2B + loại hình wholesaler CHỈ áp ô quốc tế (classifySegment opts.b2b theo isIntlProvinceKey); ô trong nước + nhập CSV phân nhóm y như trước 27/10, có bài 4 tên VN không ra B2B; passesTargetSegments gom hai bản chép bộ lọc nhóm; không gửi gì, không gọi API trả phí mới."
+}
