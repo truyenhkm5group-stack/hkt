@@ -3,7 +3,7 @@
   "mission_id": "vtp-return-label",
   "title": "Nhãn «Hoàn về shop» khi VTP ghi Phát thành công trên mã gốc",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-rl",
@@ -36,9 +36,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-27T04:16:22.372Z",
-  "updated_at": "2026-10-27T07:53:03.139Z",
+  "updated_at": "2026-10-27T07:57:04.715Z",
   "last_heartbeat": "2026-10-27T07:45:27.323Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1086 → a929516a7dfb46d39694965943e491d0cd6b7341"
+  },
   "handoff": {
     "branch": "claude/vtp-return-label",
     "sha": "3e5bb56662691b9873998fd0fe453f705a358db1",
