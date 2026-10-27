@@ -445,6 +445,7 @@ import { testCareStates } from "./care-states.test";
 import { testCareOs } from "./care-os.test";
 import { testCareEffect } from "./care-effect.test";
 import { testCareReopen } from "./care-reopen.test";
+import { testShipmentReturnArrival } from "./shipment-return-arrival.test";
 import { testCarePendingDrilldown } from "./care-pending-drilldown.test";
 import { testCareSettleClosed } from "./care-settle-closed.test";
 import { testCareFalseReopenExclusion } from "./care-false-reopen-exclusion.test";
@@ -2751,6 +2752,8 @@ async function main() {
     // Cùng nhóm: bài "đã duyệt hoàn" dựng kiện + đợt riêng mang tiền tố `cra-` và TỰ DỌN sạch.
     await testCareReturnApproval(db);
     testCareReturnCheckWiring();
+    // «Hoàn về shop» (chiều logistics): dựng kiện riêng mang tiền tố `vra-` và TỰ DỌN sạch.
+    await testShipmentReturnArrival(db);
     // Ngay sau đó: bài kết quả xử lý dựng kiện + đợt riêng mang tiền tố `cres-` và TỰ DỌN sạch, nên
     // không dòng nào của nó lọt vào tổng của báo cáo khác.
     await testCareResolution(db);
