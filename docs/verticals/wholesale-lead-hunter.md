@@ -29,8 +29,8 @@ Hệ thống không bao giờ tự gửi tin. Lead chỉ vào hàng đợi khi n
 | Client Places API (New) | `lib/integrations/google-places/client.ts` |
 | Nguồn lead (abstraction) | `lib/wholesale/providers.ts`: `DiscoveryProvider` (Google Places) · `EnrichmentProvider` (website) · `ImportProvider` (CSV) |
 | Lõi quét nền | `lib/wholesale/engine.ts` (`runLeadHunterTick`) · job `wholesale-leads` (`lib/wholesale/job.ts`, `lib/sync/jobs.ts`) |
-| Hàm thuần | `phone.ts` · `segments.ts` · `scoring.ts` · `query-plan.ts` · `areas.ts` · `dedupe.ts` · `website-parse.ts` · `opener.ts` · `config.ts` |
-| Lõi ghi (quyền → zod → ghi → audit) | `campaigns.ts` · `leads.ts` · `outreach.ts` · `config-core.ts`; vỏ server action `lib/actions/wholesale.ts` |
+| Hàm thuần | `phone.ts` · `segments.ts` · `scoring.ts` · `query-plan.ts` · `areas.ts` · `dedupe.ts` · `website-parse.ts` · `opener.ts` · `config.ts` · `contactability.ts` · `temperature.ts` |
+| Lõi ghi (quyền → zod → ghi → audit) | `campaigns.ts` · `leads.ts` · `outreach.ts` · `consents.ts` · `config-core.ts`; vỏ server action `lib/actions/wholesale.ts` |
 | Truy vấn | `lib/queries/wholesale.ts` · `lib/queries/wholesale-export.ts` |
 | Trang | `/wholesale/leads` · `/wholesale/leads/[id]` · `/wholesale/outreach` · `/wholesale/lead-hunter` · `/wholesale/dashboard` · `/wholesale/settings` · `GET /api/wholesale/export` |
 
@@ -53,7 +53,8 @@ cộng `REVENUE_RECOGNIZED_ON_DELIVERY`).
 | `wholesale_lead_activities` | HSLC | Lịch sử: tìm thấy, gọi, ghi chú, trạng thái, giao việc, liên hệ, chuyển đổi. Người làm lưu bằng khoá tài khoản (luật 34). |
 | `wholesale_lead_enrichments` | HSLC | Phát hiện từ website, mỗi dòng kèm `source_url`. |
 | `wholesale_outreach_items` | HSLC | Hàng đợi liên hệ. Chỉ mục duy nhất bảo đảm mỗi lead chỉ có một lời chào đang mở trên mỗi kênh. |
-| `wholesale_suppressions` | HSLC | Danh sách KHÔNG LIÊN HỆ, khoá theo SĐT, tên miền và Place ID. |
+| `wholesale_suppressions` | HSLC | Danh sách KHÔNG LIÊN HỆ, khoá theo SĐT, tên miền, Place ID và email (email từ 0261, lưu dạng chuẩn hoá). |
+| `wholesale_contact_consents` | HSLC | Nhật ký ĐỒNG Ý LIÊN HỆ (0261): bằng chứng khách cho phép liên hệ một kênh, chỉ thêm. Mục 4b. |
 | `wholesale_api_usage` | HSLC | Mỗi lượt gọi API một dòng: phương thức, SKU, mã HTTP, số kết quả, số lead mới, số trùng, thời gian, chi phí ước tính (micro-USD). |
 
 Màn hình hiển thị theo thứ tự: dữ liệu của tổ chức trước, sau đó tới snapshot Google còn hạn. Snapshot đã xoá thì ô
@@ -73,6 +74,58 @@ Phần này là cách kỹ thuật đã làm. Nó không phải ý kiến pháp 
 - Khi khách xác nhận SĐT hoặc chuyển thành khách hàng, SĐT trở thành dữ liệu của HSLC (`phone_source = VERIFIED_CALL`).
 - **Đọc website** đi qua rào SSRF dùng chung của kho (`lib/net/public-url.ts::fetchPublicUrl`), chỉ chạm trang công khai và tôn trọng `robots.txt`. Hệ thống không đăng nhập, không vượt captcha hay
   tường phí, và chỉ trích kênh liên hệ doanh nghiệp tự công bố.
+
+## 4b. Tuân thủ liên hệ: danh sách chặn email và nhật ký đồng ý (0261, 27/10/2026)
+
+Phần này là cách kỹ thuật đã làm, không phải ý kiến pháp lý. Kết luận pháp lý vẫn ở `docs/legal/DATA_PROCESSING_REGISTER.md`
+D17: tiếp thị tới người chưa đồng ý là rủi ro, và luật sư chưa thẩm định.
+
+**Danh sách chặn có thêm EMAIL.** Email được chuẩn hoá trước khi lưu và so (`normalizeEmail`):
+
+- bỏ khoảng trắng hai đầu và tiền tố `mailto:`, rồi đổi sang chữ thường;
+- KHÔNG bỏ dấu chấm của Gmail, KHÔNG bỏ phần `+nhãn`. Đó là luật riêng của từng nhà cung cấp; đoán sai thì hai người bị gộp
+  làm một.
+
+Mọi chỗ kiểm danh sách chặn đều kiểm cả email khi lead có email: lọc ở `finalizeLead`, soạn / duyệt / gửi lời chào, nhập
+tệp. Nút «Không liên hệ» trên lead đưa cả email vào danh sách. Ở `/wholesale/settings` có ô thêm email tay, dùng cho thư
+«xin ngừng gửi» chưa gắn được với lead nào. Khi thêm, lời chào đang chờ của các lead mang email đó bị huỷ. Gỡ vẫn cần
+`wholesale:config` và lý do.
+
+**Nhật ký đồng ý** (`wholesale_contact_consents`) là bằng chứng khách cho phép liên hệ. Mỗi dòng ghi:
+
+- lead, kênh (`EMAIL` · `PHONE` · `ZALO`) và địa chỉ đã chuẩn hoá;
+- căn cứ và mô tả bằng chứng (bắt buộc), kèm link nếu có;
+- người ghi, lưu bằng khoá tài khoản (luật 34), và mốc ghi.
+
+Bảng chỉ thêm. Thu hồi là điền một lần `revoked_at` cùng lý do và người thu hồi, không xoá dòng. Lead còn bằng chứng thì
+không xoá được.
+
+Căn cứ là danh sách đóng (`CONSENT_BASES`, chú thích từng giá trị trong `lib/wholesale/contactability.ts`):
+
+| Căn cứ | Khi nào dùng |
+|---|---|
+| Tự đăng ký qua form | Khách tự điền form hoặc đăng ký nhận báo giá |
+| Khách chủ động liên hệ / trả lời | Khách nhắn / gọi / gửi mail tới trước trên đúng kênh đó |
+| Đồng ý bằng lời khi gọi | Ghi ngày gọi, người nghe máy, câu khách nói |
+| Đã là khách hàng | Chỉ nhận khi lead đã chuyển thành khách hàng ERP |
+| Lời mời chào hàng công khai | Doanh nghiệp công bố mời báo giá cho đúng nhóm hàng; bắt buộc link tới chính lời mời |
+| Chủ shop xác nhận căn cứ khác | Hợp đồng giấy, thoả thuận đối tác; bắt buộc mô tả |
+
+Không có giá trị «không có căn cứ»: không có căn cứ thì không có dòng nào. Cũng không có căn cứ «email công khai trên
+website». Bộ đọc website không bao giờ ghi một dòng đồng ý.
+
+**Ai được tự liên hệ** — hàm thuần `contactability(lead, consents, suppressions, channel, mode)` quyết định:
+
+1. Lead ở trạng thái KHÔNG LIÊN HỆ ⇒ không.
+2. Thiếu địa chỉ cho kênh đó ⇒ không.
+3. Khớp danh sách chặn ở BẤT KỲ khoá nào ⇒ không, trên mọi kênh. Danh sách chặn thắng mọi đồng ý.
+4. Chế độ `AUTOMATED` (máy tự gửi) cần một đồng ý còn hiệu lực, đúng kênh, đúng địa chỉ. Đồng ý ghi cho địa chỉ khác không
+   tính. Đồng ý đã thu hồi cho kết quả `CONSENT_REVOKED`, không có đồng ý cho `NO_CONSENT`.
+5. Chế độ `MANUAL` (nhân viên tự gọi, tự bấm gửi từng tin) giữ quy trình cũ: chỉ bước 1–3 chặn.
+
+Hôm nay chưa có kênh tự gửi nào (mức `AUTO_SEND` vẫn khoá). Kênh tự gửi viết sau PHẢI gọi `leadContactability(…,
+"AUTOMATED")` trước mỗi lượt gửi. Trang lead có khối «Đồng ý liên hệ»: kết luận của từng kênh, nhật ký (kể cả dòng đã thu
+hồi), form ghi và nút thu hồi. Quyền ghi / thu hồi là `wholesale:work` cộng phạm vi dữ liệu của lead; không có khoá quyền mới.
 
 ## 4a. Khách hợp với HSLC lúc này (chủ shop chốt 05/10/2026)
 
@@ -232,6 +285,23 @@ Lượt quét an toàn khi chạy lại, tạm dừng hay chết giữa chừng,
 
 Hạng: A ≥ 80 · B ≥ 65 · C ≥ 45 · D < 45 (sửa được). Quán đã đóng cửa vĩnh viễn bị chặn ở tối đa 20 điểm.
 
+**Nhiệt độ Nóng / Ấm / Nguội** (`lib/wholesale/temperature.ts`, 0261) trả lời một câu khác hạng: có nên ưu tiên lead này
+ngay bây giờ không. Nó không đổi điểm A–D. Nhiệt độ được tính lúc xem từ hạng, trạng thái và mốc tương tác gần nhất (liên
+hệ, phản hồi, ghi chú); không lưu cột nào, vì nó đổi theo thời gian.
+
+| Lead | Nhiệt độ |
+|---|---|
+| Đã thành khách | không áp dụng |
+| Không liên hệ / Mất | Nguội |
+| Đã phản hồi, tương tác ≤ `TEMPERATURE_HOT_DAYS` (7) ngày | Nóng |
+| Đã phản hồi, tương tác ≤ `TEMPERATURE_WARM_DAYS` (30) ngày, hoặc lâu hơn nhưng đã hẹn gọi lại | Ấm |
+| Đã phản hồi, im quá 30 ngày | Nguội |
+| Đã phản hồi nhưng chưa có mốc nào | Ấm, kèm câu «chưa có mốc» |
+| Chưa phản hồi, hạng A/B | Ấm (không bao giờ Nóng) |
+| Chưa phản hồi, hạng khác hoặc chưa chấm; «Không nghe máy» từ 3 lần | Nguội |
+
+Nhãn hiện ở cột Điểm của danh sách (di chuột để đọc lý do) và ở khối «Điểm & lý do» của trang lead, kèm từng lý do.
+
 AI không tham gia chấm điểm. Mỗi thành phần có một câu lý do ghép từ dữ liệu có thật; dữ liệu nào chưa có thì câu lý do
 ghi «chưa có …», không in 0.
 
@@ -252,7 +322,16 @@ Theo thứ tự:
 1. **Place ID** (UNIQUE).
 2. **SĐT chuẩn hoá**.
 3. **Tên miền website.** Các host dùng chung (Facebook, Linktree, business.site…) bị bỏ qua.
-4. **Tên + số nhà / đường.** Tên đã bỏ từ chung; thiếu số nhà thì không gộp.
+4. **Email chuẩn hoá** (0261). Đứng sau tên miền: hai cơ sở cùng website là chứng cứ mạnh hơn cùng hộp thư, vì chuỗi hay
+   dùng chung mail kế toán. Đứng trước khoá tên vì email là định danh chính xác. Chỉ so với email của tổ chức (snapshot
+   Google không có email), trên dạng `lower(btrim(email))` nên dòng cũ còn chữ hoa vẫn khớp.
+5. **Tên + số nhà / đường.** Tên đã bỏ từ chung; thiếu số nhà thì không gộp.
+
+Khi bộ đọc website điền một email đã thuộc lead khác, lead MỚI HƠN được đánh dấu `DUPLICATE_EMAIL` và trỏ về lead lâu đời
+hơn. Máy không tự gộp trong hai trường hợp, chỉ ghi một dòng lịch sử để người xem:
+
+- lead đã có người chăm;
+- lead kia mới hơn.
 
 Lead trùng được đánh dấu `DUPLICATE` và trỏ về lead gốc (`duplicate_of_lead_id`). Lead gốc được cộng điểm quy mô
 (nhiều chi nhánh). Lead do nhân viên đã chăm không bao giờ bị máy ghi đè.
@@ -392,7 +471,7 @@ chỉ thấy và chỉ chạm được lead giao cho mình. Phạm vi được k
 
 Nhật ký ghi các hành động: `WHOLESALE_CAMPAIGN_CREATE`, `WHOLESALE_SCAN_START/PAUSE/RESUME/STOP`,
 `WHOLESALE_LEAD_IMPORT`, `WHOLESALE_LEAD_STATUS/EDIT/ASSIGN/CONTACT/DNC/OPPORTUNITY/CONVERT/EXPORT/CAMPAIGN/HANDOFF`,
-`WHOLESALE_OUTREACH_QUEUE`, `WHOLESALE_CONFIG_UPDATE`, `WHOLESALE_SUPPRESSION_REMOVE`.
+`WHOLESALE_OUTREACH_QUEUE`, `WHOLESALE_CONFIG_UPDATE`, `WHOLESALE_SUPPRESSION_ADD/REMOVE`, `WHOLESALE_CONSENT_RECORD/REVOKE`.
 
 ## 13. Cách lấy khoá Google Places API
 
@@ -475,7 +554,8 @@ xuống trình duyệt và luôn đi trong tiêu đề `X-Goog-Api-Key`, không 
 
 ## 15. Kiểm thử
 
-`tests/wholesale-lead-hunter.test.ts`, đăng ký trong `tests/sync-fixtures.test.ts`. Bài kiểm dùng Google giả (thay
+`tests/wholesale-lead-hunter.test.ts` và `tests/wholesale-consent.test.ts` (0261: chặn email, nhật ký đồng ý, khử trùng
+email, nhiệt độ), cả hai đăng ký trong `tests/sync-fixtures.test.ts`. Bài kiểm dùng Google giả (thay
 `fetch`) và không gọi mạng thật. Các phần được kiểm:
 
 - chuẩn hoá SĐT, phân nhóm, chấm điểm xác định;

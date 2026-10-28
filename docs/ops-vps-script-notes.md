@@ -453,6 +453,22 @@ Mọi cụm chú thích từ 4 dòng liền nhau trở lên chuyển NGUYÊN VĂ
 # arg: "<mã tổ chức> [--days=1..90]".
 ```
 
+### `wholesale-b2b-probe)`
+
+```
+# SĂN KHÁCH SỈ + GIÁ SỈ CỦA MỘT TỔ CHỨC (scripts/wholesale-b2b-probe.ts — chương trình AI B2B Sales Agent HSLC, P1-D 27/10/2026) —
+# CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1 trước khi nạp @/db và hỏi lại Postgres; CSDL tổ chức mở bằng getDbForInspection — không
+# migrate, không tạo; cấu hình module + platform_ai_usage đọc ở CSDL nhà, sổ AI lọc ĐÚNG org_code). Đếm: module wholesale_leads
+# bật chưa · cấu hình wholesale.leadHunter (mức tự động, ngân sách, hạn mức miễn phí — không lời chào / chat ID / bí mật) ·
+# chiến dịch + ô quét theo trạng thái · wholesale_api_usage 30 ngày (lượt, tính tiền, ước tính US$) · lead theo hạng / trạng thái /
+# tuần, có SĐT / email / website, trùng, không liên hệ, WON, có khách · tiếp cận kênh × trạng thái · hoạt động 30 ngày · danh sách
+# không liên hệ · lead → đơn SAU mốc chuyển (doanh thu THEO ĐƠN, chưa đối chiếu tiền thật; lead thiếu mốc chuyển đếm riêng, không
+# gán đơn) · bảng giá đang bật / bậc giá / biến thể có bậc trên tổng đang bán · customer_trade_terms · AI lead_hunter 30 ngày.
+# Bảng / cột chưa có ⇒ «chưa có bảng», không sập. Tóm tắt chỉ số đếm + tiền, mỗi dòng ≤ 280 byte; mẫu dòng (che số dài / thư /
+# URL) chỉ trong bản MÃ HOÁ. Không ghi gì, không gọi API ngoài.
+# arg: "[--org=<mã tổ chức>]" (mặc định hslc-hmt-shop).
+```
+
 ### `order-dup-scan)`
 
 ```
