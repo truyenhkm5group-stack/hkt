@@ -38,23 +38,23 @@
     "0261": "2026-10-27T02:31:44.290Z"
   },
   "created_at": "2026-10-27T02:30:56.048Z",
-  "updated_at": "2026-10-27T06:31:13.379Z",
-  "last_heartbeat": "2026-10-27T05:59:48.647Z",
+  "updated_at": "2026-10-28T14:27:09.350Z",
+  "last_heartbeat": "2026-10-28T14:27:09.350Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/b2b-p1a-consent",
-    "sha": "c9224fa6e6c05b340c5213147d6652d220a4bab6",
-    "at": "2026-10-27T05:59:48.647Z",
+    "sha": "465df2e1f009f7bf71460a3aa74d3a266bd003c4",
+    "at": "2026-10-28T14:27:09.350Z",
     "actor": "DESKTOP-56TH98Y:wt-b2b-consent",
-    "title": "Săn khách sỉ P1a: chặn EMAIL, nhật ký đồng ý liên hệ, khử trùng theo email, nhiệt độ lead",
-    "summary": "Migration 0261 (viết tay): suppression kind EMAIL; wholesale_lead_activities.kind thêm CONSENT; chỉ mục lower(btrim(email)); bảng wholesale_contact_consents (chỉ thêm, thu hồi để lại vết, căn cứ danh sách đóng). contactability() thuần: mặc định KHÔNG tự liên hệ khi thiếu đồng ý, email công khai không phải đồng ý, chặn thắng đồng ý. Ghi/thu hồi đồng ý bằng wholesale:work (không thêm quyền). Khử trùng EMAIL sau DOMAIN. Nhiệt độ Nóng/Ấm/Nguội đọc lúc xem. UI: ô thêm email chặn ở /wholesale/settings, khối Đồng ý liên hệ + nhãn nhiệt độ ở trang lead và bảng lead.",
+    "title": "Săn khách sỉ P1a: chặn EMAIL, nhật ký đồng ý liên hệ, khử trùng email, nhiệt độ lead",
+    "summary": "",
     "tests": [
-      "npm run typecheck: sạch (trước và sau khi gộp origin/main)",
-      "npm run lint: sạch",
-      "TEST_KHOI=K21 npm test: ĐẠT (TẤT CẢ KIỂM THỬ CỦA chỉ K21 ĐẠT, gồm tests/wholesale-consent.test.ts mới; chạy trước khi gộp origin/main)",
-      "npm run build: ĐẠT",
+      "npm run typecheck: sạch (ở 465df2e1f, sau khi gộp origin/main 4dce707a)",
+      "npm run lint: sạch (ở 465df2e1f)",
+      "TEST_KHOI=K20,K21 npm test: ĐẠT ở 465df2e1f (TẤT CẢ KIỂM THỬ CỦA chỉ K20,K21 ĐẠT — gồm «Phục vụ bằng lược đồ cũ (DEGRADED_MIGRATION)» đã đỏ ở gates và tests/wholesale-consent.test.ts)",
+      "npm run build: ĐẠT ở c9224fa6e (lần sửa sau không đổi ranh giới client/server ngoài một prop)",
       "4 shard đầy đủ: để gates CI",
-      "lần chạy shard 3/4 đầu tiên ĐỎ vì CHECK wholesale_lead_activities_kind_check thiếu CONSENT — đã sửa ở commit 0f0e29f46 rồi K21 xanh"
+      "sửa gates đỏ: 0261 khai vào MIGRATION_SERVE_COMPAT + đường đọc/ghi chịu được CSDL chưa áp 0261 (commit 3da499dee)"
     ]
   }
 }
