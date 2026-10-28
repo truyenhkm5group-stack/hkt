@@ -33,6 +33,7 @@ import { getBrandCopy } from "@/lib/branding/service";
 import { displayVariationText } from "@/lib/constants/experience-profile";
 import { readDisplayProfile } from "@/lib/experience/profile";
 import { moduleOn } from "@/lib/platform-ui/module-visibility";
+import { shellAllows } from "@/lib/constants/saas-nav";
 import { customerBasicsGate } from "@/lib/records/customer-create";
 import { manualOrderOrgGate } from "@/lib/records/order-create";
 import { CustomerTradeSection } from "@/components/trade/customer-trade-section";
@@ -128,8 +129,8 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
         actions={
           <>
             <ModuleSyncButton viewer={user} job="pancake-customers" label="Đồng bộ khách hàng" />
-            {/* Báo giá sỉ (P1b): `can` đã gồm cổng module Săn khách sỉ — tổ chức không bật module không thấy nút. */}
-            {can(user, "wholesale:work") ? (
+            {/* Báo giá sỉ (P1b): `can` đã gồm cổng module Săn khách sỉ; `shellAllows` ẩn nút trong vỏ Chốt Đơn (route bị chặn ⇒ lối cụt). */}
+            {can(user, "wholesale:work") && shellAllows(user, "/wholesale/quotations/new") ? (
               <Button asChild variant="outline" size="sm">
                 <Link href={`/wholesale/quotations/new?customer=${encodeURIComponent(customer.id)}`}>Tạo báo giá sỉ</Link>
               </Button>
