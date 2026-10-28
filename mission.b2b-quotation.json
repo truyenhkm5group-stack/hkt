@@ -14,16 +14,23 @@
   "domains": [],
   "owned_paths": [
     "db/schema.ts",
-    "drizzle/0264_wholesale_quotations.sql",
+    "drizzle/0263_wholesale_quotations.sql",
     "drizzle/meta/_journal.json",
+    "lib/constants/migration-serve-compat.ts",
     "lib/wholesale/quotation-engine.ts",
     "lib/wholesale/quotation.ts",
     "lib/queries/wholesale-quotations.ts",
     "lib/actions/wholesale-quotations.ts",
     "app/(dashboard)/wholesale/quotations",
+    "app/wholesale/quotations",
     "app/(dashboard)/wholesale/wholesale-nav.tsx",
+    "app/(dashboard)/wholesale/leads/*/page.tsx",
+    "app/(dashboard)/customers/*/page.tsx",
     "tests/wholesale-quotation.test.ts",
     "tests/sync-fixtures.test.ts",
+    "tests/migration-upgrade-path.test.ts",
+    "tests/ui-consistency.test.ts",
+    "tests/loading-ux-contract.test.ts",
     "docs/tech/hslc-b2b-sales-agent.md",
     "docs/verticals/price-lists-receivables.md"
   ],
@@ -37,7 +44,7 @@
     "0263": "2026-10-27T07:01:43.325Z"
   },
   "created_at": "2026-10-27T06:58:57.050Z",
-  "updated_at": "2026-10-27T07:01:43.325Z",
-  "last_heartbeat": "2026-10-27T06:58:57.050Z",
+  "updated_at": "2026-10-28T14:59:11.088Z",
+  "last_heartbeat": "2026-10-28T14:59:11.088Z",
   "definition_of_done": []
 }
