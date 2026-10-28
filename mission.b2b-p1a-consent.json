@@ -3,7 +3,7 @@
   "mission_id": "b2b-p1a-consent",
   "title": "Săn khách sỉ P1a: chặn EMAIL, nhật ký đồng ý liên hệ, khử trùng email, nhiệt độ lead",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-b2b-consent",
@@ -38,9 +38,12 @@
     "0261": "2026-10-27T02:31:44.290Z"
   },
   "created_at": "2026-10-27T02:30:56.048Z",
-  "updated_at": "2026-10-28T14:29:36.138Z",
+  "updated_at": "2026-10-28T14:48:52.422Z",
   "last_heartbeat": "2026-10-28T14:27:09.350Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1090 → 2c5a83ae6e39e716d8fbbf48ea4a970ac48005eb"
+  },
   "handoff": {
     "branch": "claude/b2b-p1a-consent",
     "sha": "465df2e1f009f7bf71460a3aa74d3a266bd003c4",
