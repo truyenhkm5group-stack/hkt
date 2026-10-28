@@ -1,8 +1,8 @@
 {
   "pr": 1090,
-  "sha": "c9224fa6e6c05b340c5213147d6652d220a4bab6",
+  "sha": "465df2e1f009f7bf71460a3aa74d3a266bd003c4",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-27T06:31:40.983Z",
-  "note": "review lead: P1a — suppression EMAIL (chuẩn hoá, kiểm ở finalize/outreach/import), bảng wholesale_contact_consents chỉ thêm (6 căn cứ đóng, thu hồi một lần, khoá users.id), contactability mặc định KHÔNG (email công khai ≠ đồng ý, chặn thắng đồng ý), dedupe email sau DOMAIN, nhiệt độ HOT/WARM/COLD đọc lúc xem có lý do; migration 0261 idempotent chỉ cộng; register D17 cập nhật mô tả, không đổi kết l"
+  "at": "2026-10-28T14:30:01.735Z",
+  "note": "review lead (lượt 2: khai 0261 vào MIGRATION_SERVE_COMPAT; CSDL chưa áp 0261 ⇒ đọc đồng ý null, kết luận rơi về phía HẸP — máy không tự liên hệ; ghi/thu hồi trả lỗi; email chặn tay bị CHECK cũ ⇒ trả lỗi, các khoá khác vẫn chặn): migration 0261 chỉ tạo bảng + nới CHECK + chỉ mục; email công khai KHÔNG là đồng ý; consent có căn cứ + bằng chứng + người ghi (users.id); nhiệt độ lead hàm thuần."
 }
