@@ -5,6 +5,7 @@ import { ExternalLink, Truck } from "lucide-react";
 import { CareDrawer } from "@/app/(dashboard)/shipments/care-drawer";
 import { RowLink } from "@/components/data-table/data-table";
 import { CodStatusBadge, OrderStageBadge, ShipmentStageBadge, SourceBadge } from "@/components/status-badge";
+import { ReturnArrivalTag } from "@/components/return-arrival-tag";
 import { Money } from "@/components/ui-bits";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
@@ -137,6 +138,7 @@ export const orderColumns: ColumnDef<OrderListRow, unknown>[] = [
           </div>
           <div className="flex items-center gap-1.5">
             <ShipmentStageBadge stage={s.stage} label={s.vtpStatusName ?? undefined} />
+            <ReturnArrivalTag value={s.returnArrival} className="px-1 py-px text-[10.5px]" />
             {/* Mở kiện hàng ngay trên danh sách (khách, ĐVVC nói gì, ai đã chăm) — không rời trang. */}
             <CareDrawer shipmentId={s.id} className="rounded border px-1.5 py-px text-[11px] font-medium text-muted-foreground hover:bg-accent hover:no-underline">
               Tra nhanh
