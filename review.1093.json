@@ -1,0 +1,8 @@
+{
+  "pr": 1093,
+  "sha": "93aae795095d4f8f434355f1d0ecf21cf2963e3a",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-28T15:10:01.974Z",
+  "note": "review lead: Facebook Friend CRM lát 1 — migration 0262 chỉ tạo 2 bảng (CHECK nguồn link ↔ link, không liên hệ bắt buộc lý do), link FB chỉ do NGƯỜI dán, chặn profile.php?id trùng PSID (không suy từ PSID); không tự kết bạn / nhắn / quét; lõi kiểm customers:write + zod + luật thuần, nhật ký actor_id = users.id; cờ fbCrm.enabled mặc định TẮT; đã mua theo ORDER_OUTCOME, doanh thu thực = VERIFIED_CASH"
+}
