@@ -238,6 +238,16 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/wholesale-email-ai-draft.test.ts",
   },
+  {
+    tag: "0266_daily_reports",
+    why:
+      "Chỉ TẠO một bảng mới ở CSDL tổ chức (daily_reports) + trigger chặn sửa — không thêm / đổi / xoá cột nào của bảng đang có. " +
+      "Đường ĐỌC (`listDailyReports` — lib/queries/daily-report.ts) bắt 42P01 ⇒ trang /daily-report in «CSDL chưa áp 0266», không in " +
+      "danh sách rỗng. Đường GHI duy nhất (`runDailyReport` — lib/daily-report/service.ts) bắt cùng lỗi TRƯỚC khi gom số / gọi AI ⇒ bỏ " +
+      "qua lượt, không tốn tiền AI, không gửi tin. Cờ dailyReport.config mặc định tắt nên tổ chức chưa bật không chạm tới bảng.",
+    addedColumns: {},
+    proof: "tests/daily-report.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */
