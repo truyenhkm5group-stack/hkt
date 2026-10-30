@@ -3,7 +3,7 @@
   "mission_id": "b2b-viet-kieu",
   "title": "Săn khách sỉ Việt Kiều: phân khúc chợ / nhà phân phối thực phẩm Việt ở nước ngoài, mẫu 18 thành phố, đọc website tìm email trước",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-vk",
@@ -32,11 +32,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-30T11:00:56.464Z",
-  "updated_at": "2026-10-30T19:06:21.432Z",
+  "updated_at": "2026-10-30T19:55:58.295Z",
   "last_heartbeat": "2026-10-30T17:14:24.254Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1105 → beb5411a403ddd8d001d9fb6e7a25195a9b184d8"
+    "merged": "#1105 → beb5411a403ddd8d001d9fb6e7a25195a9b184d8",
+    "verify": "PASS beb5411a403ddd8d001d9fb6e7a25195a9b184d8 2026-10-30T19:54:37.271Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/41112611841"
   },
   "handoff": {
     "branch": "claude/b2b-viet-kieu",
