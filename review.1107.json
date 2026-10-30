@@ -1,8 +1,8 @@
 {
   "pr": 1107,
-  "sha": "0613708cbac5c2fb9571dee7535bd599ddcf0833",
+  "sha": "dc177a4f3b08e0aa688c3a8f6950eefb334aed2b",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-30T22:10:44.578Z",
+  "at": "2026-10-30T23:38:59.675Z",
   "note": "review lead: chốt đơn sỉ — chỉ báo giá ACCEPTED, đi createManualOrderCore với giá từ ảnh chụp báo giá, khoá chống trùng agentKey, báo giá có thuế bị từ chối, lead WON qua convertLeadCore; sổ ngân hàng thêm đích ORDER (0267 chỉ nới 2 CHECK như 0131) — nối là ĐỐI CHIẾU: không tạo order_payments, không đổi công nợ/doanh thu, LINK_TARGET_DOMAIN không có người tiêu thụ nào cộng tiền; đề nghị chỉ khi số"
 }
