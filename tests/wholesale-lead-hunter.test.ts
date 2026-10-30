@@ -46,6 +46,8 @@ import { cellKeyOf, estimateCost, planTextCells, queryTextOf } from "@/lib/whole
 import { gradeOf, learnedAdjustment, scoreLead, type ScoreInput } from "@/lib/wholesale/scoring";
 import { classifySegment, SEGMENT_POINTS } from "@/lib/wholesale/segments";
 import { getLeadHunterConfig, saveLeadHunterConfig } from "@/lib/wholesale/store";
+import { saveMessageTemplatesCore } from "@/lib/wholesale/config-core";
+import { activityLog, emailEventLog, outboxRunStats, outreachRunStats } from "@/lib/queries/wholesale-activity";
 import { isPrivateAddress } from "@/lib/net/public-url";
 import { allowed as relayAllowed, handle as relayHandle } from "../deploy/places-relay/relay.js";
 import { enrichFromWebsite } from "@/lib/wholesale/website";
@@ -1224,6 +1226,27 @@ async function testDb() {
       assert.ok((vkProg.estimate?.cellsToScan ?? 0) > 0, "nháp Việt Kiều in ước tính trước khi bấm");
       await db.update(schema.wholesaleLeads).set({ websiteStatus: "DONE" }).where(eq(schema.wholesaleLeads.id, vnHigh.id));
       assert.equal(seen.length, intlCallsBefore, "không lượt gọi Google nào");
+
+      // ── Giao diện mới (30/10/2026): nhật ký KHÔNG lộ SĐT / email; tiến độ hôm nay đọc được; lưu mẫu chỉ đổi ba trường chữ ──
+      const allScope = await decideScope("WHOLESALE_LEADS", admin);
+      const logRows = await activityLog(allScope, ["DISCOVERED", "ENRICHED", "ZALO", "CALL", "OUTREACH", "STATUS"], 100);
+      assert.ok(logRows.length > 0, "có dòng nhật ký để kiểm");
+      assert.ok(logRows.every((r) => r.contact === "—" || r.contact.includes("*")), "liên hệ trong nhật ký luôn đã che");
+      const dump = JSON.stringify(logRows);
+      for (const raw of ["+84905123456", "0905123456", "einkauf@saigonmarket-berlin.de"]) assert.ok(!dump.includes(raw), `nhật ký không chứa ${raw}`);
+      const run = await outreachRunStats(allScope);
+      assert.ok(run.total >= run.processed && run.processed === run.success + run.failed + run.skipped);
+      const mailRun = await outboxRunStats(allScope);
+      assert.ok(mailRun && mailRun.total >= mailRun.processed);
+      assert.ok((await emailEventLog(allScope, 50)).every((r) => r.contact === "—" || r.contact.includes("***@")));
+      const cfgBefore = await getLeadHunterConfig();
+      assert.ok("error" in (await saveMessageTemplatesCore(sales, { zaloTemplate: cfgBefore.outreach.zaloTemplate, openerTemplate: cfgBefore.outreach.openerTemplate, extraTemplates: [] })), "không có wholesale:config ⇒ không sửa mẫu");
+      const tplSave = await saveMessageTemplatesCore(admin, { zaloTemplate: cfgBefore.outreach.zaloTemplate, openerTemplate: cfgBefore.outreach.openerTemplate, extraTemplates: [{ id: "t1", label: "Nhắc giá sỉ", body: "Dạ em gửi lại bảng giá sỉ ạ", channel: "ZALO" }] });
+      assert.ok("ok" in tplSave, JSON.stringify(tplSave));
+      const cfgAfter = await getLeadHunterConfig();
+      assert.equal(cfgAfter.outreach.extraTemplates.length, 1);
+      assert.deepEqual([cfgAfter.budget, cfgAfter.serviceAreas, cfgAfter.outreach.shopName], [cfgBefore.budget, cfgBefore.serviceAreas, cfgBefore.outreach.shopName], "lưu mẫu không đụng trần chi tiêu / vùng phục vụ");
+      assert.ok("error" in (await saveMessageTemplatesCore(admin, { zaloTemplate: cfgBefore.outreach.zaloTemplate, openerTemplate: cfgBefore.outreach.openerTemplate, extraTemplates: [{ id: "t1", label: "A", body: "Dạ em chào anh", channel: "ZALO" }, { id: "t1", label: "B", body: "Dạ em chào chị", channel: "ZALO" }] })), "hai mẫu trùng mã bị chặn");
     });
   } finally {
     globalThis.fetch = savedFetch;

@@ -20,7 +20,7 @@ export default async function WholesaleSettingsPage() {
     <div className="space-y-4">
       <PageHeader
         eyebrow="Săn khách sỉ"
-        title="Cấu hình & chi phí API"
+        title="Cấu hình & chi phí"
         description="Trần chi tiêu, đơn giá Google, vùng phục vụ, ngưỡng hạng, lời chào — và danh sách KHÔNG LIÊN HỆ."
         hint="Khoá Google Places nằm ở Cài đặt → Kết nối (mã hoá trong CSDL của tổ chức, không bao giờ xuống trình duyệt). Chạm trần ngày / tháng ⇒ mọi chiến dịch tự tạm dừng và chủ shop nhận thông báo; trần ngày tự mở lại từ 0 giờ hôm sau."
       />

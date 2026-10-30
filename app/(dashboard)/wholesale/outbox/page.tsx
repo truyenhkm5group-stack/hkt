@@ -16,6 +16,10 @@ import { EmailCountriesPanel } from "@/app/(dashboard)/wholesale/outbox/email-co
 import { EMAIL_COUNTRY_CHOICES } from "@/lib/wholesale/email-countries";
 import { AiDraftSettings, AiDraftsPanel } from "@/app/(dashboard)/wholesale/outbox/ai-drafts-panel";
 import { listAiDrafts } from "@/lib/queries/wholesale-email-ai-drafts";
+import { emailEventLog, outboxRunStats } from "@/lib/queries/wholesale-activity";
+import { ActivityLog, ProgressCard, ResultTiles } from "@/app/(dashboard)/wholesale/run-widgets";
+import { TemplatesPanel } from "@/app/(dashboard)/wholesale/templates-panel";
+import { getLeadHunterConfig } from "@/lib/wholesale/store";
 import { getEmailAiSettings } from "@/lib/wholesale/email-ai-draft";
 import { SequencePanel, SequenceSettingsForm } from "@/app/(dashboard)/wholesale/outbox/sequence-panel";
 import { loadSequenceBoard } from "@/lib/wholesale/email-sequence-core";
@@ -38,7 +42,7 @@ export default async function WholesaleOutboxPage({ searchParams }: { searchPara
   if (decision.allow === "NONE") return <ScopeDenied title="Hộp thư đi sỉ" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const view: OutboxView = (OUTBOX_VIEWS as readonly string[]).includes(String(raw.view)) ? (raw.view as OutboxView) : "open";
-  const [settings, rows, counts, candidates, campaigns, aiDrafts, aiSettings, sequence] = await Promise.all([
+  const [settings, rows, counts, candidates, campaigns, aiDrafts, aiSettings, sequence, run, events, cfg] = await Promise.all([
     getEmailSettings(),
     listOutbox(decision, view),
     outboxCounts(decision),
@@ -47,6 +51,9 @@ export default async function WholesaleOutboxPage({ searchParams }: { searchPara
     listAiDrafts(decision),
     getEmailAiSettings(),
     loadSequenceBoard(decision),
+    outboxRunStats(decision),
+    emailEventLog(decision, 30),
+    getLeadHunterConfig(),
   ]);
   const unavailable = "unavailable" in rows;
   const list = unavailable ? [] : rows;
@@ -69,6 +76,29 @@ export default async function WholesaleOutboxPage({ searchParams }: { searchPara
         {settings.mode === "OFF" ? "Thư xếp gửi nằm chờ, không lượt nào chạy." : settings.mode === "DRY_RUN" ? "Thư «đã gửi» ở chế độ này mang mã dryrun-…, không rời ERP." : LIVE_EMAIL_ADAPTERS.length ? "Thư ĐƯỢC GỬI THẬT tới khách." : "Chưa có nhà cung cấp — cổng chặn mọi thư."}
         {settings.paused ? <span className="ml-2 font-semibold text-rose-700 dark:text-rose-300">NÚT DỪNG KHẨN ĐANG BẬT{settings.pausedReason ? `: ${settings.pausedReason}` : ""}.</span> : null}
         {missing.length ? <span className="ml-2">Thiếu danh tính người gửi ({missing.join(", ")}) — thư sẽ nằm chờ.</span> : null}
+      </div>
+
+      {run ? (
+        <>
+          <ProgressCard title="Hộp thư đi hôm nay" p={run} unit="thư" note="đã xử lý (gửi · lỗi · chặn / giữ lại) / cả thư đã duyệt chờ gửi" />
+          <ResultTiles
+            ok={{ label: run.dryRun ? "Chạy thử (không rời ERP)" : "Đã gửi", value: run.success, of: run.processed }}
+            fail={{ label: "Lỗi gửi", value: run.failed, of: run.processed }}
+            skip={{ label: "Chặn / giữ lại", value: run.skipped, of: run.processed, hint: run.skippedReasons.map((x) => `${x.label} (${x.count})`).join(" · ") || undefined }}
+          />
+        </>
+      ) : null}
+      {/* CÀI ĐẶT GỬI — một hàng, đọc đúng cài đặt email đang có; sửa ở khung «Cấu hình & nút dừng» bên dưới. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border px-3 py-2 text-xs">
+        <span>
+          <b>Cài đặt gửi:</b> {EMAIL_MODE_LABEL[settings.mode]}
+        </span>
+        <span>Giới hạn: {settings.limits.perHour} thư / giờ · {settings.limits.perDay} thư / ngày · {settings.limits.perRecipientDomainPerDay} thư / tên miền / ngày</span>
+        <span>Khung giờ gửi: chưa có trong cài đặt (máy gửi theo lượt 3 phút)</span>
+        <span>Gửi thật: chỉ quản trị bật</span>
+        <a href="#cai-dat-gui" className="ml-auto underline">
+          Sửa cài đặt gửi
+        </a>
       </div>
 
       {unavailable ? (
@@ -101,7 +131,13 @@ export default async function WholesaleOutboxPage({ searchParams }: { searchPara
           ) : (
             <EmptyState title={view === "open" ? "Không có thư nào đang chờ" : "Chưa có thư nào ở mục này"} description="Soạn lời chào kênh «Email» cho lead ở hàng đợi liên hệ, rồi bấm «Đưa vào hộp thư đi»." />
           )}
-          <SectionCard title="Cấu hình & nút dừng" description="Chế độ gửi, danh tính người gửi in ở chân thư, hạn mức, và nút dừng khẩn. Ai chăm lead cũng bấm DỪNG được; chỉ người cấu hình mở lại.">
+          <SectionCard title="Mẫu nội dung" description="Câu mở Zalo, lời chào và các mẫu sao chép nhanh khi soạn thư tay. Thư nhắc của chuỗi theo dõi soạn từ cấu hình chuỗi bên dưới.">
+            <TemplatesPanel zaloTemplate={cfg.outreach.zaloTemplate} openerTemplate={cfg.outreach.openerTemplate} extraTemplates={cfg.outreach.extraTemplates} canEdit={isConfig} />
+          </SectionCard>
+          <SectionCard title="Nhật ký hoạt động" description="Sự kiện thư (xếp gửi · đã gửi / chạy thử · chặn · trả về · trả lời) — mới nhất trên cùng. Email người nhận đã che.">
+            <ActivityLog rows={events} empty="Chưa có sự kiện thư nào." />
+          </SectionCard>
+          <SectionCard id="cai-dat-gui" title="Cấu hình & nút dừng" description="Chế độ gửi, danh tính người gửi in ở chân thư, hạn mức, và nút dừng khẩn. Ai chăm lead cũng bấm DỪNG được; chỉ người cấu hình mở lại.">
             <EmailSettingsPanel settings={settings} campaigns={campaigns} canConfigure={isConfig} isOwner={user.role === "ADMIN"} liveAvailable={LIVE_EMAIL_ADAPTERS.length > 0} />
             {isConfig ? (
               <div className="mt-4 border-t pt-3">

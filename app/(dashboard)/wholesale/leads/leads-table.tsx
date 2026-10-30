@@ -199,7 +199,7 @@ export function LeadsTable(props: { rows: LeadListRow[]; pageCount: number; tota
       defaultPageSize={50}
       dense
       emptyTitle="Chưa có lead nào khớp bộ lọc"
-      emptyDescription="Chạy một chiến dịch ở tab «Săn khách (quét)» hoặc nhập tệp CSV để có lead đầu tiên."
+      emptyDescription="Chạy một chiến dịch ở bước «Săn khách» hoặc bấm «Nhập từ tệp» ở trên để có lead đầu tiên."
     />
   );
 }

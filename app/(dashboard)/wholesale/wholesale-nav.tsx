@@ -1,28 +1,42 @@
 import Link from "next/link";
+import { Settings } from "lucide-react";
 import type { SessionUser } from "@/lib/auth/session";
 import { can } from "@/lib/auth/session";
+import { wholesaleNavModel, type WholesaleTabKey } from "@/lib/constants/wholesale-nav";
 import { cn } from "@/lib/utils";
 
-/** Thanh tab của module Săn khách sỉ — chỉ hiện tab người xem có quyền mở. */
-export function WholesaleNav({ user, active }: { user: SessionUser; active: "leads" | "outreach" | "outbox" | "quotations" | "hunter" | "dashboard" | "readiness" | "settings" }) {
-  const tabs = [
-    { key: "leads", href: "/wholesale/leads", label: "Khách sỉ tiềm năng", show: can(user, "wholesale:view") },
-    { key: "outreach", href: "/wholesale/outreach", label: "Hàng đợi liên hệ", show: can(user, "wholesale:work") },
-    { key: "outbox", href: "/wholesale/outbox", label: "Hộp thư đi", show: can(user, "wholesale:work") },
-    { key: "quotations", href: "/wholesale/quotations", label: "Báo giá sỉ", show: can(user, "wholesale:view") },
-    { key: "hunter", href: "/wholesale/lead-hunter", label: "Săn khách (quét)", show: can(user, "wholesale:scan") },
-    { key: "dashboard", href: "/wholesale/dashboard", label: "Hiệu quả", show: can(user, "wholesale:view") },
-    { key: "readiness", href: "/wholesale/readiness", label: "Sẵn sàng bán sỉ", show: can(user, "wholesale:view") },
-    { key: "settings", href: "/wholesale/settings", label: "Cấu hình & chi phí API", show: can(user, "wholesale:config") },
-  ].filter((t) => t.show);
+/**
+ * Thanh tab của module Săn khách sỉ — NĂM bước theo thứ tự công việc + bánh răng cấu hình (lib/constants/wholesale-nav.ts).
+ * Chỉ hiện tab người xem có quyền mở; nhóm nhiều trang (Liên hệ · Hiệu quả) có hàng tab con.
+ */
+export function WholesaleNav({ user, active }: { user: SessionUser; active: WholesaleTabKey }) {
+  const m = wholesaleNavModel((perm) => can(user, perm), active);
   return (
-    <nav className="flex flex-wrap gap-1 border-b pb-px text-sm" aria-label="Săn khách sỉ">
-      {tabs.map((t) => (
-        <Link key={t.key} href={t.href} className={cn("-mb-px rounded-t-md border-b-2 px-3 py-1.5", t.key === active ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
-          {t.label}
-        </Link>
-      ))}
-    </nav>
+    <div className="space-y-1">
+      <nav className="flex flex-wrap items-end gap-1 border-b pb-px text-sm" aria-label="Săn khách sỉ">
+        {m.tabs.map((t, i) => (
+          <Link key={t.key} href={t.href} aria-current={t.active ? "page" : undefined} className={cn("-mb-px rounded-t-md border-b-2 px-3 py-1.5", t.active ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
+            <span className="mr-1 text-[11px] tabular-nums text-muted-foreground">{i + 1}.</span>
+            {t.label}
+          </Link>
+        ))}
+        {m.gear ? (
+          <Link href={m.gear.href} title={m.gear.label} aria-label={m.gear.label} aria-current={m.gear.active ? "page" : undefined} className={cn("-mb-px ml-auto inline-flex items-center gap-1 rounded-t-md border-b-2 px-2.5 py-1.5", m.gear.active ? "border-primary font-medium text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
+            <Settings className="h-4 w-4" aria-hidden />
+            <span className="hidden sm:inline">{m.gear.label}</span>
+          </Link>
+        ) : null}
+      </nav>
+      {m.subTabs.length ? (
+        <nav className="flex flex-wrap gap-1 text-xs" aria-label="Tab con">
+          {m.subTabs.map((t) => (
+            <Link key={t.key} href={t.href} aria-current={t.active ? "page" : undefined} className={cn("rounded-full border px-2.5 py-1", t.active ? "border-primary bg-primary/10 font-medium text-foreground" : "text-muted-foreground hover:text-foreground")}>
+              {t.label}
+            </Link>
+          ))}
+        </nav>
+      ) : null}
+    </div>
   );
 }
 

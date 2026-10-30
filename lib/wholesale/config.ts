@@ -192,6 +192,16 @@ export const DEFAULT_OPENER_TEMPLATE =
 
 const usd = z.number().min(0).max(100_000);
 
+export const MESSAGE_TEMPLATE_CHANNELS = ["ZALO", "EMAIL", "ANY"] as const;
+export const MAX_EXTRA_TEMPLATES = 30;
+export const messageTemplateSchema = z.object({
+  id: z.string().trim().min(1).max(40),
+  label: z.string().trim().min(1, "Cần tên mẫu").max(80),
+  body: z.string().trim().min(5, "Nội dung mẫu quá ngắn").max(2000),
+  channel: z.enum(MESSAGE_TEMPLATE_CHANNELS),
+});
+export type MessageTemplate = z.infer<typeof messageTemplateSchema>;
+
 export const leadHunterConfigSchema = z.object({
   budget: z.object({
     dailyUsd: usd,
@@ -269,6 +279,11 @@ export const leadHunterConfigSchema = z.object({
     zaloTemplate: z.string().min(10).max(2000),
     /** Ảnh gửi kèm tin Zalo (https, tối đa 10) — nhân viên chia sẻ sang Zalo bằng nút chia sẻ của điện thoại. */
     zaloImages: z.array(z.string().trim().max(1000).regex(/^https:\/\/\S+$/, "Ảnh phải là link https")).max(10),
+    /**
+     * Mẫu nội dung THÊM (khung «Mẫu nội dung» ở tab Liên hệ, 30/10/2026): câu nhân viên sao chép khi nhắn / gửi thư tay. Chỉ là
+     * chữ để sao chép — không job nào đọc trường này để tự gửi, không xoay vòng / «spin» nội dung.
+     */
+    extraTemplates: z.array(messageTemplateSchema).max(MAX_EXTRA_TEMPLATES),
   }),
 });
 
@@ -322,6 +337,7 @@ export const DEFAULT_LEAD_HUNTER_CONFIG: LeadHunterConfig = {
     openerTemplate: DEFAULT_OPENER_TEMPLATE,
     zaloTemplate: DEFAULT_ZALO_TEMPLATE,
     zaloImages: [],
+    extraTemplates: [],
     callScript:
       "1. Chào, giới thiệu {{ten_shop}}.\n2. Hỏi bên mình đang nhập hải sản ở đâu, tần suất bao lâu một lần.\n3. Xin Zalo để gửi bảng giá sỉ / catalog.\n4. Hẹn ngày gọi lại hoặc gửi mẫu thử.",
   },

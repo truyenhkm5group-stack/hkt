@@ -5,7 +5,7 @@ import { after } from "next/server";
 import { can, requireUser } from "@/lib/auth/session";
 import { bindOrganization } from "@/lib/platform/background";
 import { changeCampaignStateCore, cloneCampaignCore, createCampaignCore, previewCampaignCore, startCampaignCore, type CoreResult, type CampaignPreview } from "@/lib/wholesale/campaigns";
-import { saveLeadHunterConfigCore } from "@/lib/wholesale/config-core";
+import { saveLeadHunterConfigCore, saveMessageTemplatesCore } from "@/lib/wholesale/config-core";
 import type { OutreachChannel } from "@/lib/wholesale/constants";
 import { sendLeadsToFieldCore, type HandoffReport } from "@/lib/wholesale/field-handoff";
 import { queueEmailDiscoveryCore, type EmailQueueReport } from "@/lib/wholesale/email-store";
@@ -119,6 +119,17 @@ export async function saveLeadHunterConfigAction(input: unknown): Promise<CoreRe
   if ("ok" in r) {
     revalidatePath("/wholesale/settings");
     refreshHunter();
+  }
+  return r;
+}
+
+export async function saveMessageTemplatesAction(input: unknown): Promise<CoreResult> {
+  const user = await requireUser();
+  const r = await saveMessageTemplatesCore(user, input);
+  if ("ok" in r) {
+    revalidatePath("/wholesale/outreach");
+    revalidatePath("/wholesale/outbox");
+    revalidatePath("/wholesale/settings");
   }
   return r;
 }
