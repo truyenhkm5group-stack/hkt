@@ -1,0 +1,8 @@
+{
+  "pr": 1104,
+  "sha": "84654217c2510d0039f87903e2e06a1eda152a00",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-30T17:15:56.474Z",
+  "note": "review lead: E2 Google Workspace SMTP — connector PER_ORG gws-smtp, App Password mã hoá AES-256-GCM trong org_connections, chỉ hiện dạng che, testConnection = SMTP verify không gửi thư; STARTTLS bắt buộc TLS≥1.2, From = hộp thư đăng nhập, thiếu List-Unsubscribe/Message-ID ⇒ không gửi, lỗi đăng nhập dừng lượt, câu lỗi che mật khẩu; chế độ mặc định vẫn TẮT, bật Gửi thật chỉ quản trị + kết nối đã kiể"
+}
