@@ -3,7 +3,7 @@
   "mission_id": "b2b-email-inbound",
   "title": "Đọc & phân loại thư trả lời khách sỉ (E3)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-inbound",
@@ -26,11 +26,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-30T18:34:39.493Z",
-  "updated_at": "2026-10-30T20:34:07.152Z",
+  "updated_at": "2026-10-30T21:41:39.516Z",
   "last_heartbeat": "2026-10-30T20:06:07.448Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1108 → 7652b0ebffaf5bb571222aed25634713a46e44c3"
+    "merged": "#1108 → 7652b0ebffaf5bb571222aed25634713a46e44c3",
+    "verify": "PASS 6d7b7e3ffaa6928928b7e6be815ac812711dd92d 2026-10-30T21:38:38.985Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/41125096701"
   },
   "handoff": {
     "branch": "claude/b2b-email-inbound",
