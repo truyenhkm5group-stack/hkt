@@ -17,6 +17,8 @@ import { EMAIL_COUNTRY_CHOICES } from "@/lib/wholesale/email-countries";
 import { AiDraftSettings, AiDraftsPanel } from "@/app/(dashboard)/wholesale/outbox/ai-drafts-panel";
 import { listAiDrafts } from "@/lib/queries/wholesale-email-ai-drafts";
 import { getEmailAiSettings } from "@/lib/wholesale/email-ai-draft";
+import { SequencePanel, SequenceSettingsForm } from "@/app/(dashboard)/wholesale/outbox/sequence-panel";
+import { loadSequenceBoard } from "@/lib/wholesale/email-sequence-core";
 
 export const metadata = { title: "Hộp thư đi sỉ" };
 
@@ -36,7 +38,7 @@ export default async function WholesaleOutboxPage({ searchParams }: { searchPara
   if (decision.allow === "NONE") return <ScopeDenied title="Hộp thư đi sỉ" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const view: OutboxView = (OUTBOX_VIEWS as readonly string[]).includes(String(raw.view)) ? (raw.view as OutboxView) : "open";
-  const [settings, rows, counts, candidates, campaigns, aiDrafts, aiSettings] = await Promise.all([
+  const [settings, rows, counts, candidates, campaigns, aiDrafts, aiSettings, sequence] = await Promise.all([
     getEmailSettings(),
     listOutbox(decision, view),
     outboxCounts(decision),
@@ -44,6 +46,7 @@ export default async function WholesaleOutboxPage({ searchParams }: { searchPara
     campaignOptions(),
     listAiDrafts(decision),
     getEmailAiSettings(),
+    loadSequenceBoard(decision),
   ]);
   const unavailable = "unavailable" in rows;
   const list = unavailable ? [] : rows;
@@ -80,6 +83,11 @@ export default async function WholesaleOutboxPage({ searchParams }: { searchPara
             ))}
           </div>
           {view === "open" && candidates.length ? <EmailCandidates rows={candidates} /> : null}
+          {view === "open" && !("unavailable" in sequence) ? (
+            <SectionCard title="Lần nhắc đến hạn" description="Chuỗi thư theo dõi: thư nhắc khi khách chưa phản hồi sau số ngày đã khai. Dừng ngay khi khách trả lời, huỷ đăng ký, bounce cứng, bị chặn / không liên hệ, hoặc lead đã Thắng / Mất. Chỉ soạn NHÁP — không tự gửi.">
+              <SequencePanel due={sequence.due} waiting={sequence.waiting} stopped={sequence.stopped} configured={sequence.configured} settings={sequence.settings} />
+            </SectionCard>
+          ) : null}
           {view === "open" ? (
             <SectionCard
               title="Nháp AI (chưa ở hộp thư đi)"
@@ -99,6 +107,12 @@ export default async function WholesaleOutboxPage({ searchParams }: { searchPara
               <div className="mt-4 border-t pt-3">
                 <div className="mb-2 text-sm font-semibold">AI soạn email (mặc định TẮT — bật phải khai trần nháp và chi phí / ngày)</div>
                 <AiDraftSettings settings={aiSettings} />
+              </div>
+            ) : null}
+            {isConfig && !("unavailable" in sequence) ? (
+              <div className="mt-4 border-t pt-3">
+                <div className="mb-2 text-sm font-semibold">Chuỗi thư nhắc (không có số mặc định — trống = không nhắc)</div>
+                <SequenceSettingsForm settings={sequence.settings} />
               </div>
             ) : null}
           </SectionCard>
