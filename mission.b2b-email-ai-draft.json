@@ -3,7 +3,7 @@
   "mission_id": "b2b-email-ai-draft",
   "title": "AI soạn email chào hàng cá nhân hoá (nháp, có hàng rào bịa đặt)",
   "business_goal": "",
-  "status": "FAILED",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-b2b-email-ai",
@@ -43,12 +43,12 @@
     "0265": "2026-10-30T10:38:30.292Z"
   },
   "created_at": "2026-10-30T10:37:31.404Z",
-  "updated_at": "2026-10-30T12:50:28.905Z",
+  "updated_at": "2026-10-30T13:07:49.744Z",
   "last_heartbeat": "2026-10-30T11:39:39.680Z",
   "definition_of_done": [],
   "evidence": {
     "merged": "#1100 → 99f2d58274793308ae7ab32c04c946c070f59701",
-    "verify": "FAIL 99f2d58274793308ae7ab32c04c946c070f59701 2026-10-30T12:49:40.341Z",
+    "verify": "PASS 99f2d58274793308ae7ab32c04c946c070f59701 2026-10-30T13:06:41.046Z",
     "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/41052869736"
   },
   "handoff": {
