@@ -177,6 +177,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   WHOLESALE_EMAIL_AI_DRAFT: "AI soạn nháp email chào hàng sỉ",
   WHOLESALE_EMAIL_AI_PROMOTE: "Duyệt nháp email AI vào hộp thư đi",
   WHOLESALE_EMAIL_AI_CONFIG: "Sửa cấu hình AI soạn email (bật / trần / ngày)",
+  WHOLESALE_EMAIL_SEQUENCE_CONFIG: "Sửa chuỗi thư nhắc (số lần · số ngày chờ · mẫu)",
+  WHOLESALE_EMAIL_FOLLOWUP_DRAFT: "Soạn thư nhắc của chuỗi theo dõi (mẫu)",
 };
 
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {
