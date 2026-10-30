@@ -1216,9 +1216,9 @@ async function testDb() {
       const webQ = (await websiteEnrichQueue(50)).map((x) => x.id);
       assert.ok(webQ.includes(vkShop.id) && webQ.includes(vnHigh.id));
       assert.ok(webQ.indexOf(vkShop.id) < webQ.indexOf(vnHigh.id), "nhóm Việt Kiều được đọc trước lead trong nước điểm 99");
-      const vkEnricher: EnrichmentProvider = { key: "WEBSITE", label: "giả", role: "ENRICHMENT", googleSourced: false, billable: false, enrich: async (site) => ({ status: "DONE", pagesRead: 1, note: "Đọc 1 trang", findings: [{ kind: "EMAIL", value: "info@saigonmarket-berlin.de", sourceUrl: `${site}/impressum`, via: "MAILTO" }], emailDomains: { "saigonmarket-berlin.de": { mx: "VALID_MX", mxVia: "MX" } } }) };
+      const vkEnricher: EnrichmentProvider = { key: "WEBSITE", label: "giả", role: "ENRICHMENT", googleSourced: false, billable: false, enrich: async (site) => ({ status: "DONE", pagesRead: 1, note: "Đọc 1 trang", findings: [{ kind: "EMAIL", value: "einkauf@saigonmarket-berlin.de", sourceUrl: `${site}/impressum`, via: "MAILTO" }], emailDomains: { "saigonmarket-berlin.de": { mx: "VALID_MX", mxVia: "MX" } } }) };
       await enrichLeadWebsite({ ...webCtx, enricher: vkEnricher }, (await db.query.wholesaleLeads.findFirst({ where: eq(schema.wholesaleLeads.id, vkShop.id) }))!);
-      assert.equal((await db.query.wholesaleLeads.findFirst({ where: eq(schema.wholesaleLeads.id, vkShop.id) }))!.email, "info@saigonmarket-berlin.de");
+      assert.equal((await db.query.wholesaleLeads.findFirst({ where: eq(schema.wholesaleLeads.id, vkShop.id) }))!.email, "einkauf@saigonmarket-berlin.de");
       const vkProg = (await campaignProgressList(await getLeadHunterConfig())).find((x) => x.id === vkCamp.id)!;
       assert.deepEqual([vkProg.withEmail, vkProg.withWebsite, vkProg.noWebsite], [1, 1, 1], `có email / có website / không website: ${vkNoWeb.id}`);
       assert.ok((vkProg.estimate?.cellsToScan ?? 0) > 0, "nháp Việt Kiều in ước tính trước khi bấm");

@@ -371,7 +371,7 @@ tiền thật là 0. Trần ngày / tháng vẫn chặn bất kể ước tính.
 **Trạm chuyển tiếp** (`deploy/places-relay`) chuyển nguyên thân yêu cầu POST và nguyên chuỗi truy vấn GET, nên
 `languageCode` / `regionCode` / `locationBias` của ô quốc tế tới Google mà không cần sửa trạm (có bài kiểm).
 
-## 4e. Khách sỉ Việt Kiều (chủ shop chốt 30/10/2026)
+## 4f. Khách sỉ Việt Kiều (chủ shop chốt 30/10/2026)
 
 «Tìm email của khách sỉ là Việt Kiều ở nước ngoài» — chạy trên đúng bộ máy quốc tế ở mục 4d, không module mới, **chưa
 gửi gì** (luồng kênh nước ngoài ⇒ email là việc của bảng liên hệ, không ở đây).
@@ -420,6 +420,11 @@ PENDING` ⇒ `enrichLeadWebsite` ⇒ email có bằng chứng, mục 4c). Hàng 
 theo `websiteEnrichRank`: **0 = nhóm Việt Kiều · 1 = lead quốc tế khác · 2 = trong nước**, trong cùng hạng theo điểm —
 trước đây xếp theo điểm thuần nên lead quốc tế (0 điểm vị trí, không SĐT) luôn đứng cuối. Thẻ chiến dịch đếm lead sẵn sàng
 theo **có email / có website / không website**.
+
+**Vai trò email đa ngữ** (`classifyEmailRole`, 30/10/2026): phần trước @ nhận thêm «mua hàng» einkauf · achat(s) ·
+compra(s) · acquisti · inkoop · caigou; «bán hàng» verkauf · vertrieb · vente(s) · commercial · ventas · comercial · vendite
+· commerciale · verkoop · xiaoshou; «liên hệ» kontakt · anfrage · contatti. Trước đó «einkauf@» ra `OTHER` và không bao
+giờ được điền vào hồ sơ. Chỉ là danh sách từ khoá — không đoán gì khác; không khai tiếng Nhật / Hàn dạng latin.
 
 ## 5. Tiết kiệm chi phí API
 
