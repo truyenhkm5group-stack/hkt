@@ -3,7 +3,7 @@
   "mission_id": "b2b-email-foundation",
   "title": "Nền tảng email bán sỉ ở chế độ chạy thử (E1)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-b2b-mail",
@@ -38,7 +38,22 @@
     "0264": "2026-10-27T07:04:58.822Z"
   },
   "created_at": "2026-10-27T07:00:19.535Z",
-  "updated_at": "2026-10-30T01:49:14.577Z",
-  "last_heartbeat": "2026-10-30T01:49:14.577Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-30T01:50:34.460Z",
+  "last_heartbeat": "2026-10-30T01:50:34.460Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/b2b-email-foundation",
+    "sha": "b445a488181d31e598f1fa8339f9e761f25c9e73",
+    "at": "2026-10-30T01:50:34.460Z",
+    "actor": "DESKTOP-56TH98Y:wt-b2b-mail",
+    "title": "Nền tảng email bán sỉ ở chế độ chạy thử (E1)",
+    "summary": "E1 nền tảng email bán sỉ ở chế độ CHẠY THỬ: migration 0264 (3 bảng), cổng chính sách thuần, nhà cung cấp chạy thử, huỷ đăng ký RFC 8058, ingestInboundEmail, vòng gửi trong job wholesale-leads, trang /wholesale/outbox",
+    "tests": [
+      "typecheck (NODE_OPTIONS 8192) trên b445a488: sạch",
+      "lint toàn kho: sạch",
+      "npm test ĐỦ 24 khối (một lượt, chế độ ẩn danh, KHÔNG phải 4 shard CI, KHÔNG chạy lượt token giả) trên cây gate = b445a488 với migration đổi TẠM thành 0262 để idx liên tục: TẤT CẢ KIỂM THỬ ĐẠT (1.246 ✓, gồm E1 email + DEGRADED_MIGRATION + access-control + platform-isolation + repo-integrity)",
+      "npm run build trên cùng cây gate: ĐẠT",
+      "LƯU Ý: trên chính nhánh (0264, khi 0262 fb-crm và 0263 quotation chưa vào main) tests/migration-journal sẽ ĐỎ vì idx 261→264 không liên tục — lead đã chấp nhận; hết khi 0262/0263 gộp trước, hoặc chạy npm run migration:renumber lúc gộp"
+    ]
+  }
 }
