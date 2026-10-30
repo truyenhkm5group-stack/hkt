@@ -3,7 +3,7 @@
   "mission_id": "mission-control",
   "title": "Mission Control: đo AI agent theo sổ department-ai + điều kiện tốt nghiệp",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-mission",
@@ -29,7 +29,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-30T10:44:00.508Z",
-  "updated_at": "2026-10-30T10:44:00.508Z",
-  "last_heartbeat": "2026-10-30T10:44:00.508Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-30T11:40:32.039Z",
+  "last_heartbeat": "2026-10-30T11:40:32.039Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/mission-control",
+    "sha": "f1ef6908e27aa015b4188f0785807e6559025ce7",
+    "at": "2026-10-30T11:40:32.039Z",
+    "actor": "DESKTOP-56TH98Y:wt-mission",
+    "title": "Mission Control: đo AI agent theo sổ department-ai + điều kiện tốt nghiệp",
+    "summary": "Trang /departments/mission-control: mỗi khoá sổ department-ai một hàng — nấc tự chủ, lượt/chi phí AI 7/30 ngày (aiUsageDaily, lọc mã tổ chức), việc máy mở trên /work, người duyệt/bác (bot bán hàng · đề xuất buồng lái · PR Tech), tiền thật (đơn giao TC + VERIFIED_CASH); chưa đo = chưa đo được + thiếu gì; điều kiện tốt nghiệp settings không mặc định, kết luận chỉ khi đủ mẫu, không đổi nấc.",
+    "tests": [
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "quét nguồn ui-consistency/nav/action-wiring/loading-ux/department-map: ĐẠT",
+      "TEST_KHOI=K24 npm test: ĐẠT (trước và sau merge main @3c3d698 — gồm mission-control + fb-crm-s2)",
+      "npm run build: ĐẠT (trước merge; merge chỉ gỡ xung đột import ở sync-fixtures)",
+      "4 shard đầy đủ: để gates CI"
+    ]
+  }
 }
