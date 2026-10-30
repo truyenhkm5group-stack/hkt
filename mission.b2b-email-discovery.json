@@ -36,22 +36,22 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-27T05:05:32.066Z",
-  "updated_at": "2026-10-30T03:15:25.353Z",
-  "last_heartbeat": "2026-10-30T03:12:42.826Z",
+  "updated_at": "2026-10-30T04:41:10.749Z",
+  "last_heartbeat": "2026-10-30T04:41:10.749Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/b2b-email-discovery",
-    "sha": "614529818642c004215e15056a2cf4c0ff88e5bb",
-    "at": "2026-10-30T03:12:42.826Z",
+    "sha": "8e31424bce1d1a2ee6197fe9cdcab86bbb6375aa",
+    "at": "2026-10-30T04:41:10.749Z",
     "actor": "DESKTOP-56TH98Y:wt-b2b-email",
     "title": "Thu thập email B2B có bằng chứng từ website công khai",
     "summary": "",
     "tests": [
-      "Merge origin/main 2c5a83ae (gồm consent #1090) giữ cả hai phía: engine dùng applyEmailDiscovery + dedupeByNewEmail/findMasterLead email của consent; hộp thư chu@/giamdoc@/owner@ xếp GENERAL (ca chu@quana.vn của bài consent)",
-      "TEST_KHOI=K17 npm test: ĐẠT",
-      "TEST_KHOI=K21 npm test: lượt 1 ĐỎ ở tests/self-service-journey.test.ts:2184 (catchUpFanpage: t-cu3 «quá mới» thành đủ tuổi giữa hai lượt quét khi máy bận — bài kiểm phụ thuộc đồng hồ, không liên quan wholesale; mọi bài wholesale gồm email-discovery + consent ĐẠT trong lượt đó), lượt 2 ĐẠT toàn khối",
+      "Merge origin/main 4243ff56 (gồm #1091 intl, #1093 fb-crm) giữ cả hai phía: engine tự gộp (classifySegment b2b + passesTargetSegments + applyEmailDiscovery), sync-fixtures giữ cả email-discovery + intl-discovery, tài liệu 4b consent · 4c email · 4d quốc tế (đánh lại số trùng 4b)",
       "npx tsc --noEmit: sạch",
       "npm run lint: sạch",
+      "TEST_KHOI=K17 npm test: ĐẠT",
+      "TEST_KHOI=K21 npm test: ĐẠT (lượt đầu, cả khối)",
       "4 shard đầy đủ: để gates CI"
     ]
   }
