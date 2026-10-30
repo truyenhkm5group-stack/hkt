@@ -13084,6 +13084,10 @@ export const wholesaleEmailAiDrafts = pgTable(
     check("wholesale_email_ai_drafts_discarded_check", sql`${t.status} <> 'DISCARDED' OR (${t.discardedAt} IS NOT NULL AND length(btrim(coalesce(${t.discardReason}, ''))) >= 3)`),
     check("wholesale_email_ai_drafts_edit_ratio_check", sql`${t.editRatio} IS NULL OR (${t.editRatio} >= 0 AND ${t.editRatio} <= 1)`),
     check("wholesale_email_ai_drafts_cost_check", sql`${t.costUsd} IS NULL OR ${t.costUsd} >= 0`),
+  ],
+);
+
+/**
  * BÁO CÁO CEO HẰNG NGÀY (0266 · docs/tech/ai-daily-report.md) — MỘT bản mỗi ngày báo cáo: khối số máy gom bằng các hàm báo cáo sẵn
  * có (`facts`), lời tóm tắt AI đã qua hàng rào số (`summary` chỉ có khi `ai_status = 'OK'`), model, chi phí USD. BẤT BIẾN: trigger
  * `daily_reports_no_update` chặn mọi UPDATE — sửa công thức ngày mai không đổi số của bản hôm qua (luật 21).

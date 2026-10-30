@@ -237,6 +237,8 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
       "trả câu lỗi, không tốn một lượt gọi AI nào và không ghi gì.",
     addedColumns: {},
     proof: "tests/wholesale-email-ai-draft.test.ts",
+  },
+  {
     tag: "0266_daily_reports",
     why:
       "Chỉ TẠO một bảng mới ở CSDL tổ chức (daily_reports) + trigger chặn sửa — không thêm / đổi / xoá cột nào của bảng đang có. " +
