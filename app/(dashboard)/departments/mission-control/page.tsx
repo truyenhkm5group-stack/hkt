@@ -145,6 +145,15 @@ export default async function MissionControlPage() {
                           {NOT_MEASURED}: {z.measure.review.kind === "NONE" ? z.measure.review.missing : ""}
                         </span>
                       )}
+                      {z.extra.map((x) => (
+                        <div key={x.label} className="mt-1 border-t border-hairline pt-1" title={x.definition}>
+                          <div className="font-medium">{x.label}</div>
+                          {MC_WINDOWS.map((w) => (
+                            <ReviewView key={w} r={x.windows[w]} w={w} />
+                          ))}
+                          {x.windows[30].pending ? <div className="text-muted-foreground">{formatNumber(x.windows[30].pending)} ảnh chưa ai xét (ngoài mẫu)</div> : null}
+                        </div>
+                      ))}
                     </td>
                     <td className="px-3 py-2" title={z.measure.outcome.kind === "NONE" ? z.measure.outcome.missing : z.measure.outcome.definition}>
                       {z.outcome ? (

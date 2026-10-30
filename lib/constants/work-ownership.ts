@@ -66,6 +66,7 @@ const SOURCE_OWNERSHIP_WHY: Record<WorkSource, string> = {
   PRODUCTION_TOPIC: "Bàn giá và phương án với xưởng là việc của nhóm Sản xuất — hôm nay nhóm đó route về Kho (TEAM_DEPARTMENT_DIVERGENCE) vì phòng Sản xuất chưa có thành viên; chuyển bằng ghi đè work.ownership.",
   SAMPLE_REVIEW: "Duyệt mẫu xưởng gửi là việc của nhóm Sản xuất — cùng lý do route về Kho như topic sản xuất cho tới khi phòng Sản xuất có người.",
   SOURCING_TRIAL: "Đặt mua thử và theo dõi hàng về là việc của nhóm Sản xuất (người quyết mẫu nào đáng nhập) — cùng lý do route về Kho như topic sản xuất cho tới khi phòng Sản xuất có người; chuyển bằng ghi đè work.ownership.",
+  CREATIVE_APPROVAL: "Duyệt ảnh quảng cáo trước khi đăng là quyết định của người tiêu tiền quảng cáo — phòng Marketing; luật chỉ trỏ tới PHÒNG.",
   FB_CRM_CARE: "Chăm khách quen trên nick Facebook của shop là việc của người bán / CSKH — cùng phòng với case CSKH; luật chỉ trỏ tới PHÒNG, người cụ thể là NV phụ trách khách ở miền.",
   PAYROLL_RECON: "Mỗi mục thiếu của kỳ lương đi về phòng GIỮ chứng từ ấy — xem bảng theo từng mục bên dưới, không phải một phòng cố định.",
   MANUAL_TASK: "Việc giao tay đi theo phòng mà người giao chọn; không có phòng mặc định nào đúng cho mọi việc.",

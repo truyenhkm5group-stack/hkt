@@ -206,8 +206,8 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
       },
       DISPATCH: {
         status: "BUILT",
-        what: "Nguồn `ADS_DECISION` đưa từng khuyến nghị đã chín thành một dòng việc của phòng Marketing trong `/work`.",
-        evidence: ["lib/constants/work-sources.ts", "lib/queries/work-adapters.ts"],
+        what: "Nguồn `ADS_DECISION` đưa từng khuyến nghị đã chín thành một dòng việc của phòng Marketing trong `/work`. Từ 31/10/2026 nguồn `CREATIVE_APPROVAL` đưa ảnh quảng cáo AI vẽ đang chờ duyệt thành việc của phòng (chỉ nút MỞ «② Duyệt ảnh»); Mission Control đo tỷ lệ người duyệt / bác ảnh đó.",
+        evidence: ["lib/constants/work-sources.ts", "lib/queries/work-adapters.ts", "lib/constants/mission-control.ts", "lib/queries/mission-control.ts"],
       },
       ACT: {
         status: "PARTIAL",

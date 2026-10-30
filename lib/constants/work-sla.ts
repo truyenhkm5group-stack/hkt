@@ -326,6 +326,18 @@ const SOURCE_RULES: SlaRule[] = [
     alsoShownOn: "Tìm hàng nguồn · Mua thử",
   })),
 
+  /* ───── Marketing — ảnh quảng cáo AI vẽ chờ duyệt ───── */
+  {
+    key: "CREATIVE_APPROVAL",
+    label: "Ảnh quảng cáo AI vẽ chờ duyệt",
+    hours: WORK_SOURCE_SPEC.CREATIVE_APPROVAL.slaHours,
+    why:
+      "CỐ Ý bỏ trống: không có hằng số đang chạy nào nói ảnh AI được phép chờ duyệt bao lâu (luật 22). Việc hiện từ lúc ảnh đầu tiên của " +
+      "lượt vẽ xong; chủ shop đặt số giờ ở đây nếu muốn đo «ảnh đã chờ bao lâu».",
+    department: WORK_SOURCE_SPEC.CREATIVE_APPROVAL.department,
+    alsoShownOn: "Thư viện Media · ② Duyệt ảnh",
+  },
+
   /* ───── Facebook CRM — hẹn chăm sóc khách (lát 2) ───── */
   {
     key: "FB_CRM_CARE",

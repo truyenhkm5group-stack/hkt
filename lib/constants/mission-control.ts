@@ -34,7 +34,16 @@ export type ReviewSpec =
 
 export type OutcomeSpec = { kind: "BOT_CASH"; definition: string } | { kind: "NONE"; missing: string };
 
+/**
+ * Chỉ số duyệt / bác PHỤ của một agent — đứng CẠNH chỉ số chính (chỉ số chính mới dùng cho điều kiện tốt nghiệp).
+ * `AI_IMAGES`: ảnh quảng cáo AI vẽ (bỏ ảnh tải tay) đã được người xét trong kỳ (`reviewed_at`); ĐÚNG = duyệt / đã đưa đi đăng, BÁC = bác.
+ * Ảnh chưa ai xét KHÔNG vào mẫu (đếm riêng) — chưa xét không phải bị bác.
+ */
+export type ExtraReviewSpec = { kind: "AI_IMAGES"; label: string; definition: string };
+
 export type ZoneMeasure = {
+  /** Chỉ số duyệt / bác phụ (không dùng cho tốt nghiệp). */
+  extraReviews?: ExtraReviewSpec[];
   /** Tính năng của sổ dùng AI thuộc agent này. Rỗng ⇒ `usageNone` nói vì sao (không phải «chưa đo»). */
   usageFeatures: AiUsageFeature[];
   usageNone?: string;
@@ -60,7 +69,13 @@ export const MC_MEASURES: Record<AgentZone, ZoneMeasure> = {
   MARKETING: {
     usageFeatures: ["creative_image", "creative_copy"],
     review: { kind: "OWNER_DECISIONS", decisionKinds: ["ADS_CUT", "SCALE_STOCK_RISK", "STOCK_PUSH"], definition: "Đề xuất quảng cáo của buồng lái (cắt · rủi ro tồn khi tăng · đẩy tồn); ĐÚNG = người chấp nhận, BÁC = bỏ qua." },
-    outcome: { kind: "NONE", missing: "Chưa nối được đề xuất ĐÃ CHẤP NHẬN với tiền quảng cáo tiết kiệm / doanh thu giao thành công sau đó — cần ảnh chụp chi tiêu trước/sau cho từng đề xuất." },
+    // marketing-agent-rung (31/10/2026): ảnh AI vẽ chờ duyệt lên /work (nguồn CREATIVE_APPROVAL) — đo người duyệt / bác ảnh đó.
+    extraReviews: [{ kind: "AI_IMAGES", label: "Ảnh AI vẽ", definition: "Ảnh quảng cáo AI vẽ (không tính ảnh tải tay) người đã xét trong kỳ; ĐÚNG = duyệt / đã đưa đi đăng, BÁC = bác. Ảnh chưa ai xét đứng ngoài mẫu." }],
+    outcome: {
+      kind: "NONE",
+      missing:
+        "Chưa đo được tiền sau khi làm theo: sổ ghi Facebook (`ads_budget_changes`, `creative_fb_actions`) chưa có lượt ghi thành công nào để neo «trước / sau» (đo 24/09/2026), và chưa có ảnh chụp chi tiêu / doanh thu giao thành công trước–sau cho từng đề xuất đã chấp nhận.",
+    },
   },
   LOGISTICS: {
     usageFeatures: [],

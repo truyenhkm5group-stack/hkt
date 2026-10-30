@@ -57,6 +57,8 @@ export const WORK_SOURCES = [
   "SOURCING_TRIAL",
   // Facebook CRM lát 2 (30/10/2026) — khách tới ngày hẹn chăm sóc (`customer_fb_connections.next_care_on`) — lib/queries/fb-crm.ts.
   "FB_CRM_CARE",
+  // Marketing (31/10/2026) — ảnh quảng cáo AI vẽ đang chờ người duyệt ở «② Duyệt ảnh» (lib/queries/work-adapters.ts::adaptCreativeApprovals).
+  "CREATIVE_APPROVAL",
   "MANUAL_TASK",
   "RECURRING_TASK",
   // Phase 3 · W9 — việc do LUẬT TỰ ĐỘNG tạo (hành động `create_task`).
@@ -503,6 +505,30 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     slaHours: null,
     // Khách có quay lại mua hay không do khách quyết (mục 24) — người được ghi nhận ở trục SLA / năng suất.
     outcomeAttributable: false,
+    actions: ["OPEN_SOURCE"],
+  },
+  /*
+    ═══ ẢNH QUẢNG CÁO AI VẼ CHỜ DUYỆT — PHÉP CHIẾU (marketing-agent-rung, chủ shop duyệt 31/10/2026) ═══
+
+    PHÉP CHIẾU lên `creative_manual_gen_images` (luật 19): một lượt tạo ảnh (`creative_manual_gens`, KHÔNG tính lượt tải ảnh lên tay
+    `UPLOAD`) còn ít nhất một ảnh `GENERATED` ⇒ một dòng việc phòng MARKETING. Việc rời hàng đợi khi người duyệt / bác ảnh ở «② Duyệt
+    ảnh» (/marketing/creatives?tab=duyet — `reviewManualGenImageAction`); nút trên /work chỉ MỞ chỗ đó, không có nút duyệt hay «xong».
+    Không đường ghi Facebook nào ở đây: ảnh đã duyệt vẫn phải qua «③ Hàng đợi & Đăng» với lượt bấm của người.
+
+    KHÔNG trùng độ mịn với cảnh báo nào: ảnh chờ duyệt không sinh `notifications` dạng cảnh báo vận hành ⇒ `ALERT_KINDS_OWNED_ELSEWHERE`
+    không cần thêm gì. Lô hằng ngày (`creative_batches` LOOP) đã bỏ từ 26/09/2026, nên không chiếu nó.
+  */
+  CREATIVE_APPROVAL: {
+    key: "CREATIVE_APPROVAL",
+    label: "Ảnh quảng cáo AI vẽ chờ duyệt",
+    why: "Ảnh AI đã vẽ (đã tốn tiền) mà không ai duyệt thì không đăng được — mẫu mới đứng chờ trong khi camp cũ mỏi dần.",
+    statusAuthority: "SOURCE",
+    assigneeAuthority: "WORK",
+    department: "MARKETING",
+    businessEntity: "CREATIVE",
+    // Không có hằng số đang chạy nào cho hạn duyệt ảnh (luật 22) — chủ shop đặt ở `work.sla` nếu muốn.
+    slaHours: null,
+    outcomeAttributable: true,
     actions: ["OPEN_SOURCE"],
   },
   MANUAL_TASK: {
