@@ -3,7 +3,7 @@
   "mission_id": "fb-crm-s1",
   "title": "Facebook Friend CRM lát 1",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-fbcrm",
@@ -38,9 +38,12 @@
     "0262": "2026-10-27T04:02:18.142Z"
   },
   "created_at": "2026-10-27T04:01:08.956Z",
-  "updated_at": "2026-10-30T02:50:22.927Z",
+  "updated_at": "2026-10-30T03:11:08.729Z",
   "last_heartbeat": "2026-10-30T02:47:20.778Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1093 → 2f539578018ee9a4591ffe0682953cd1194a46c1"
+  },
   "handoff": {
     "branch": "claude/fb-crm-s1",
     "sha": "b644f77d9afef33e6adc0b66196368413d1ab169",
