@@ -44,24 +44,25 @@
     "0263": "2026-10-27T07:01:43.325Z"
   },
   "created_at": "2026-10-27T06:58:57.050Z",
-  "updated_at": "2026-10-30T02:29:36.851Z",
-  "last_heartbeat": "2026-10-30T02:29:36.851Z",
+  "updated_at": "2026-10-30T04:07:49.207Z",
+  "last_heartbeat": "2026-10-30T04:07:49.207Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/b2b-quotation",
-    "sha": "2bee8612f806d2710815952d5ccd63e8d217551a",
-    "at": "2026-10-30T02:29:36.851Z",
+    "sha": "d9be693b82f09cb14f8fe9bd9b83e404d9820dbd",
+    "at": "2026-10-30T04:07:49.207Z",
     "actor": "DESKTOP-56TH98Y:wt-b2b-quote",
     "title": "Báo giá sỉ tất định (P1b · 0263)",
     "summary": "",
     "tests": [
-      "npm run typecheck (sau merge main 2c5a83ae6): sạch",
-      "eslint các tệp chạm: sạch",
-      "tests/wholesale-quotation.test.ts (K21, thuần + tổ chức thật bg-si): ĐẠT",
-      "ui-consistency + nav, repo-integrity/append/unique, migration-serve-compat (có mục 0263), loading-ux-contract, saas-shell, migration-upgrade-path: ĐẠT (chạy riêng sau merge)",
-      "migration-journal: ĐỎ CHẤP NHẬN ĐƯỢC — idx nhảy 0261→0263 vì 0262 fb-crm chưa vào main; hết khi 0262 gộp (hoặc migration:renumber)",
-      "npm run build: ĐẠT ở d3cc1aa27 + sửa loading/shellAllows (trước merge main); sau merge chỉ chạy lại tsc",
-      "4 shard npm test: CHƯA chạy cục bộ — để gates CI"
+      "merge origin/main 2f5395780 (0261 consent + 0262 fb-crm): sổ 0261→0262→0263, MOI + serve-compat giữ cả 0262 & 0263",
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "migration-journal: ĐẠT (idx liên tục)",
+      "TEST_KHOI=K20,K21 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K20,K21 ĐẠT (gồm tests/wholesale-quotation.test.ts)",
+      "npm run build: ĐẠT (BUILD_EXIT 0)",
+      "trước đó ĐẠT riêng: ui-consistency/nav, repo-integrity, migration-serve-compat, loading-ux-contract, saas-shell, migration-upgrade-path",
+      "4 shard đủ: để gates CI"
     ]
   }
 }
