@@ -16,14 +16,14 @@ import { effectiveQuotationStatus, isQuotationStatus, type QuotationStatus } fro
  * `{ unavailable: true }` (MIGRATION_SERVE_COMPAT).
  */
 
-export type Unavailable = { unavailable: true };
-const UNAVAILABLE: Unavailable = { unavailable: true };
+export type QuotationSchemaUnavailable = { unavailable: true };
+const QUOTATION_SCHEMA_UNAVAILABLE: QuotationSchemaUnavailable = { unavailable: true };
 
-async function guard<T>(fn: () => Promise<T>): Promise<T | Unavailable> {
+async function guard<T>(fn: () => Promise<T>): Promise<T | QuotationSchemaUnavailable> {
   try {
     return await fn();
   } catch (e) {
-    if (isMissingQuotationTable(e)) return UNAVAILABLE;
+    if (isMissingQuotationTable(e)) return QUOTATION_SCHEMA_UNAVAILABLE;
     throw e;
   }
 }
@@ -65,7 +65,7 @@ export type QuotationListRow = {
 };
 
 /** Danh sách — mặc định ẩn bản «Đã có bản mới» (mỗi mã một dòng: bản mới nhất); lọc trạng thái SUPERSEDED để xem chúng. */
-export async function listQuotations(user: SessionUser, params: ListParams, now = new Date()): Promise<{ rows: QuotationListRow[]; total: number; pageCount: number; counts: Partial<Record<QuotationStatus, number>> } | Unavailable> {
+export async function listQuotations(user: SessionUser, params: ListParams, now = new Date()): Promise<{ rows: QuotationListRow[]; total: number; pageCount: number; counts: Partial<Record<QuotationStatus, number>> } | QuotationSchemaUnavailable> {
   return guard(async () => {
     const scope = await scopeWhere(user);
     if (scope === null) return { rows: [], total: 0, pageCount: 0, counts: {} };
@@ -155,7 +155,7 @@ export type QuotationDetail = {
 };
 
 /** Một phiên bản + dòng + lịch sử các phiên bản cùng mã. `null` = không có / ngoài phạm vi. */
-export async function getQuotation(user: SessionUser, id: string, now = new Date()): Promise<QuotationDetail | null | Unavailable> {
+export async function getQuotation(user: SessionUser, id: string, now = new Date()): Promise<QuotationDetail | null | QuotationSchemaUnavailable> {
   return guard(async () => {
     const scope = await scopeWhere(user);
     if (scope === null) return null;
