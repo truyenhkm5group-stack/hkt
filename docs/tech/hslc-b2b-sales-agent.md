@@ -129,6 +129,7 @@ Tệp:dòng đo trên `origin/main` 0b3bd5605 (27/10/2026) — dòng trôi theo 
 | b2b-quotation (P1b) | `claude/b2b-quotation` | `db/schema.ts` · `drizzle/0263_wholesale_quotations.sql` · `lib/wholesale/quotation-engine.ts` · `lib/wholesale/quotation.ts` · `lib/queries/wholesale-quotations.ts` · `lib/actions/wholesale-quotations.ts` · `app/(dashboard)/wholesale/quotations/*` · `app/wholesale/quotations/[id]/print` · nút trên trang lead / khách · `tests/wholesale-quotation.test.ts` | xong, chờ gộp (0261 · 0262 đã vào main) | — |
 | b2b-email-foundation (E1) | `claude/b2b-email-foundation` | `drizzle/0264_wholesale_email_outbox.sql` · `db/schema.ts` (3 bảng) · `lib/wholesale/email-*.ts` · `lib/email-provider/*` · `lib/constants/email-unsubscribe.ts` · `lib/queries/wholesale-email.ts` · `lib/actions/wholesale-email.ts` · `app/api/wholesale/unsubscribe/[token]/route.ts` · `app/(dashboard)/wholesale/outbox/*` · `middleware.ts` (một mục) · `lib/wholesale/job.ts` · `tests/wholesale-email.test.ts` | xong, chờ gộp (sau P1a) | — |
 | b2b-email-ai-draft (P2b) | `claude/b2b-email-ai-draft` | `drizzle/0265_wholesale_email_ai_drafts.sql` · `db/schema.ts` (1 bảng) · `lib/wholesale/email-ai-draft.ts` · `lib/wholesale/email-ai-draft-guard.ts` · `lib/queries/wholesale-email-ai-drafts.ts` · `lib/actions/wholesale-email-ai.ts` · `app/(dashboard)/wholesale/outbox/ai-drafts-panel.tsx` · nút trên trang lead · `lib/constants/ai-systems.ts` (AI-07 thêm feature) · `tests/wholesale-email-ai-draft.test.ts` | xong, chờ gộp | — |
+| b2b-email-sequence (P4a) | `claude/b2b-email-sequence` | `lib/wholesale/email-sequence.ts` · `lib/wholesale/email-sequence-core.ts` · `lib/actions/wholesale-email-sequence.ts` · `app/(dashboard)/wholesale/outbox/sequence-panel.tsx` · `lib/wholesale/email-ai-draft.ts` (bước nhắc) · `tests/wholesale-email-sequence.test.ts` | xong, chờ gộp (sau P2b) | — |
 | b2b-p2-email | — | adapter nhà cung cấp thật (SES / Resend / Gmail) cài `EmailProvider` + khai `LIVE_EMAIL_ADAPTERS` | **chặn** — chờ chủ shop (mục 8) | — |
 
 ## 7. P1c — cổng sẵn sàng (đã làm ở PR này)
@@ -274,4 +275,33 @@ model, chi phí và `edit_ratio` (khoảng cách theo từ / độ dài). Khối
 **Cấu hình.** `settings["wholesale.emailAiDraft"]`, mặc định TẮT. Người có `wholesale:config` bật, bắt buộc khai trần nháp / ngày
 và trần chi phí USD / ngày, kèm lý do; có audit. Hôm nay đã có một lượt chưa biết chi phí (model chưa có giá) ⇒ dừng tới mai,
 không coi chi phí đó là 0.
+
+## 13. P4a — chuỗi thư theo dõi (thư nhắc)
+
+**Luật** (`lib/wholesale/email-sequence.ts`, hàm thuần). Mỗi lead luồng email có tối đa N lần nhắc, mỗi lần sau K ngày kể từ thư
+trước mà khách không phản hồi. N và K nằm ở `settings["wholesale.emailSequence"]` và **không có số mặc định**: chưa khai ⇒ không
+lead nào có lần nhắc.
+
+Chuỗi dừng khi một trong các điều kiện sau xảy ra:
+- khách trả lời: sự kiện REPLY, gồm mọi thư vào nối luồng / khớp lead;
+- huỷ đăng ký;
+- khiếu nại;
+- bounce cứng (bounce mềm không dừng chuỗi);
+- lead khớp danh sách chặn hoặc ở trạng thái KHÔNG LIÊN HỆ;
+- lead chuyển Thắng / Mất;
+- đã đủ N lần.
+
+Lead đang có thư mở hoặc nháp AI mở thì không soạn thêm thư chồng lên. Chỉ đếm thư «đã gửi» của đúng chế độ đang chạy: chạy thử
+đếm thư chạy thử, gửi thật đếm thư thật.
+
+**Hiện ở MỘT chỗ.** Khối «Lần nhắc đến hạn» của Hộp thư đi. Đây là phép chiếu tính lúc đọc (luật 19); không chiếu thêm lên `/work`
+và không có job tự soạn.
+
+**Soạn = người bấm, chỉ khi ĐẾN HẠN** (máy chủ kiểm lại):
+- «AI soạn lần nhắc»: đi đúng đường P2b (`aiDraftEmailCore` với thư trước làm dữ kiện, lời nhắc «thư nhắc lần N», cùng hàng rào).
+  Nháp nằm ở khối «Nháp AI»; khi đưa vào hộp thư đi thành thư `FOLLOWUP` đúng bước.
+- «Dùng mẫu»: mẫu tĩnh shop khai (biến `{{ten_doanh_nghiep}}` `{{ten_shop}}` `{{lan_nhac}}`), qua cùng hàng rào, rồi thành thư
+  `DRAFT` (FOLLOWUP, nối luồng thư trước qua `thread_id` / `in_reply_to`).
+
+Không đường nào gửi: thư nhắc vẫn qua lượt duyệt E1 và cổng chính sách.
 

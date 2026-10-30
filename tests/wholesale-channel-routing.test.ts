@@ -248,6 +248,7 @@ async function testDb() {
 function testEveryEmailPathAsksLane() {
   const outbox = readFileSync("lib/wholesale/email-outbox.ts", "utf8");
   const ai = readFileSync("lib/wholesale/email-ai-draft.ts", "utf8");
+  const sequence = readFileSync("lib/wholesale/email-sequence-core.ts", "utf8");
   // Thân hàm = từ dòng khai báo tới khai báo `export` kế tiếp (kho ghim LF ở tầng .gitattributes).
   const between = (src: string, fn: string) => {
     const start = src.indexOf(`export async function ${fn}`);
@@ -258,7 +259,8 @@ function testEveryEmailPathAsksLane() {
   assert.match(between(outbox, "emailDraftFromOutreachCore"), /emailLaneRefusal\(/, "soạn từ lời chào hỏi làn");
   assert.match(between(ai, "aiDraftEmailCore"), /emailLaneRefusal\(/, "AI soạn nháp hỏi làn (trước khi tốn lượt AI)");
   assert.match(between(ai, "promoteAiDraftCore"), /emailLaneRefusal\(/, "đưa nháp AI vào hộp thư đi hỏi làn");
-  for (const src of [outbox, ai]) {
+  assert.match(sequence.slice(sequence.indexOf("insert(schema.wholesaleEmailOutbox)") - 3000, sequence.indexOf("insert(schema.wholesaleEmailOutbox)")), /emailLaneRefusal\(/, "thư nhắc từ mẫu hỏi làn trước khi tạo thư");
+  for (const src of [outbox, ai, sequence]) {
     const inserts = (src.match(/\.insert\(schema\.wholesaleEmailOutbox\)/g) ?? []).length;
     assert.ok(inserts <= 1, "mỗi tệp chỉ một chỗ tạo thư — chỗ mới phải đi qua emailLaneRefusal");
   }
