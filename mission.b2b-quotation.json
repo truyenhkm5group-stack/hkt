@@ -46,25 +46,24 @@
     "0263": "2026-10-27T07:01:43.325Z"
   },
   "created_at": "2026-10-27T06:58:57.050Z",
-  "updated_at": "2026-10-30T06:03:29.383Z",
-  "last_heartbeat": "2026-10-30T04:07:49.207Z",
+  "updated_at": "2026-10-30T07:52:04.266Z",
+  "last_heartbeat": "2026-10-30T07:52:04.266Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/b2b-quotation",
-    "sha": "d9be693b82f09cb14f8fe9bd9b83e404d9820dbd",
-    "at": "2026-10-30T04:07:49.207Z",
+    "sha": "e33154361c91095b1fe802a51a984a13e35c71e6",
+    "at": "2026-10-30T07:52:04.266Z",
     "actor": "DESKTOP-56TH98Y:wt-b2b-quote",
     "title": "Báo giá sỉ tất định (P1b · 0263)",
     "summary": "",
     "tests": [
-      "merge origin/main 2f5395780 (0261 consent + 0262 fb-crm): sổ 0261→0262→0263, MOI + serve-compat giữ cả 0262 & 0263",
+      "sửa đỏ duplicate-metrics: UNAVAILABLE → QUOTATION_SCHEMA_UNAVAILABLE (không chạm sourcing.ts)",
+      "merge origin/main (#1088 email-discovery): tự gộp, không xung đột",
       "npm run typecheck: sạch",
       "npm run lint: sạch",
-      "migration-journal: ĐẠT (idx liên tục)",
-      "TEST_KHOI=K20,K21 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K20,K21 ĐẠT (gồm tests/wholesale-quotation.test.ts)",
-      "npm run build: ĐẠT (BUILD_EXIT 0)",
-      "trước đó ĐẠT riêng: ui-consistency/nav, repo-integrity, migration-serve-compat, loading-ux-contract, saas-shell, migration-upgrade-path",
-      "4 shard đủ: để gates CI"
+      "TEST_KHOI=K18,K21 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K18,K21 ĐẠT",
+      "lượt trước: K20 ĐẠT, build ĐẠT, migration-journal ĐẠT",
+      "4 shard đủ: gates CI"
     ]
   }
 }
