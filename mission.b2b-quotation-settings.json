@@ -3,7 +3,7 @@
   "mission_id": "b2b-quotation-settings",
   "title": "Cài đặt báo giá sỉ có gợi ý từ bảng giá sỉ",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-quote-settings",
@@ -32,11 +32,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-30T07:53:39.572Z",
-  "updated_at": "2026-10-30T09:32:51.669Z",
+  "updated_at": "2026-10-30T09:49:54.109Z",
   "last_heartbeat": "2026-10-30T09:09:15.400Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1097 → 8faeeb3037c524cb851f0cae1d8a75317fc4743b"
+    "merged": "#1097 → 8faeeb3037c524cb851f0cae1d8a75317fc4743b",
+    "verify": "PASS 8faeeb3037c524cb851f0cae1d8a75317fc4743b 2026-10-30T09:49:17.547Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/41034294193"
   },
   "handoff": {
     "branch": "claude/b2b-quotation-settings",
