@@ -15,7 +15,8 @@ import {
   type QuotationParty,
   type SaveResult,
 } from "@/lib/wholesale/quotation";
-import type { QuotationResult } from "@/lib/wholesale/quotation-engine";
+import type { QuotationPolicy, QuotationResult } from "@/lib/wholesale/quotation-engine";
+import { saveQuotationPolicyCore } from "@/lib/wholesale/quotation-policy";
 
 /**
  * Vỏ Next của Báo giá sỉ. Lõi (`lib/wholesale/quotation.ts`) tự kiểm quyền (`wholesale:work` / `wholesale:config`), phạm vi
@@ -79,5 +80,12 @@ export async function recordQuotationDecisionAction(id: string, input: unknown):
   const user = await requireUser();
   const r = await recordQuotationDecisionCore(user, id, input);
   if ("ok" in r) refresh(id);
+  return r;
+}
+
+export async function saveQuotationPolicyAction(input: unknown): Promise<CoreResult<{ policy: QuotationPolicy }>> {
+  const user = await requireUser();
+  const r = await saveQuotationPolicyCore(user, input);
+  if ("ok" in r) refresh();
   return r;
 }
