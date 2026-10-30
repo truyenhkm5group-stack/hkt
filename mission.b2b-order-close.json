@@ -3,7 +3,7 @@
   "mission_id": "b2b-order-close",
   "title": "Chốt đơn sỉ từ báo giá + đối chiếu chuyển khoản + nhắc mua lại sỉ",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-b2b-order",
@@ -42,7 +42,24 @@
     "0267": "2026-10-30T14:11:02.484Z"
   },
   "created_at": "2026-10-30T14:08:57.096Z",
-  "updated_at": "2026-10-30T14:11:02.484Z",
-  "last_heartbeat": "2026-10-30T14:08:57.096Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-30T18:08:53.236Z",
+  "last_heartbeat": "2026-10-30T18:08:53.236Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/b2b-order-close",
+    "sha": "160eaea2c07fda6341957cd282d67e6ee33f68ee",
+    "at": "2026-10-30T18:08:53.236Z",
+    "actor": "DESKTOP-56TH98Y:wt-b2b-order",
+    "title": "Chốt đơn sỉ từ báo giá + đối chiếu chuyển khoản (nối ORDER, không ghi tiền) + nhắc mua lại sỉ /work · 0267",
+    "summary": "",
+    "tests": [
+      "nền origin/main 4a109710a (#1103), 1 commit 160eaea2c",
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "TEST_KHOI=K01,K05,K06,K07,K10,K13,K21 npm test (khối sổ ngân hàng + work-os + K21): TẤT CẢ ĐẠT — chạy trên cây cổng với số tạm 0266 (commit tạm KHÔNG đẩy) vì 0266 là giữ chỗ phiên khác chưa vào main",
+      "với số 0267 thật: migration-journal ĐỎ (idx 0265→0267) cho tới khi 0266 vào main hoặc migration:renumber",
+      "npm run build: ĐẠT",
+      "4 shard đủ: gates CI"
+    ]
+  }
 }
