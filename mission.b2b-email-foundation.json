@@ -3,7 +3,7 @@
   "mission_id": "b2b-email-foundation",
   "title": "Nền tảng email bán sỉ ở chế độ chạy thử (E1)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-b2b-mail",
@@ -40,9 +40,12 @@
     "0264": "2026-10-27T07:04:58.822Z"
   },
   "created_at": "2026-10-27T07:00:19.535Z",
-  "updated_at": "2026-10-30T10:06:36.075Z",
+  "updated_at": "2026-10-30T10:31:55.041Z",
   "last_heartbeat": "2026-10-30T10:04:12.679Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1098 → 7310cde367feadb386f295fc56d426014177d9af"
+  },
   "handoff": {
     "branch": "claude/b2b-email-foundation",
     "sha": "3fc16804ab4f7bcc9c7b6f745ed534daf78974f1",
