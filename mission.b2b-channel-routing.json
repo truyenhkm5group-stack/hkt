@@ -3,7 +3,7 @@
   "mission_id": "b2b-channel-routing",
   "title": "Nước ngoài — Email · Trong nước — Zalo, email dự phòng khi Zalo không gửi được + cổng nước",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-routing",
@@ -37,11 +37,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-30T12:03:36.277Z",
-  "updated_at": "2026-10-30T13:45:52.023Z",
+  "updated_at": "2026-10-30T14:49:23.454Z",
   "last_heartbeat": "2026-10-30T13:19:44.363Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1102 → d420b4cb6572b3747c92a34e2a491a13926c6903"
+    "merged": "#1102 → d420b4cb6572b3747c92a34e2a491a13926c6903",
+    "verify": "PASS 4a109710a377efede8f251d455e6fe214e372034 2026-10-30T14:48:36.195Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/41072788043"
   },
   "handoff": {
     "branch": "claude/b2b-channel-routing",
