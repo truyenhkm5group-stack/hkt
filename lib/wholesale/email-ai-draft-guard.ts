@@ -65,15 +65,12 @@ export function looksLikeLanguage(text: string, lang: DraftLanguage): boolean {
 }
 
 /**
- * Ngôn ngữ thư theo NƯỚC của lead. Trong nước / Việt Kiều ⇒ tiếng Việt; còn lại ⇒ tiếng Anh. ERP hôm nay chưa lưu nước của lead,
- * nên đọc hai dấu hiệu có thật: mã nước của SĐT và đuôi tên miền website. Không có dấu hiệu nước ngoài nào ⇒ trong nước.
+ * Ngôn ngữ thư theo NƯỚC ĐÃ BIẾT của lead (thang `leadCountryOf` — lib/wholesale/lead-country.ts; hàm này KHÔNG tự suy nước).
+ * Việt Nam / Việt Kiều ⇒ tiếng Việt; nước khác ⇒ tiếng Anh. Chưa biết nước thì người gọi phải TỪ CHỐI soạn, không gọi hàm này.
  */
-export function draftLanguageFor(lead: { phoneCountryCode: string | null; websiteDomain: string | null; diaspora?: boolean }): DraftLanguage {
-  if (lead.diaspora) return "vi";
-  if (lead.phoneCountryCode && lead.phoneCountryCode !== "84") return "en";
-  const tld = (lead.websiteDomain ?? "").toLowerCase().split(".").pop() ?? "";
-  if (tld && tld !== "vn" && tld.length === 2) return "en";
-  return "vi";
+export function draftLanguageForCountry(country: string, opts: { diaspora?: boolean } = {}): DraftLanguage {
+  if (opts.diaspora) return "vi";
+  return country === "VN" ? "vi" : "en";
 }
 
 /** Phán quyết cho một bản nháp (tiêu đề + thân). Rỗng = qua. HÀM THUẦN. */

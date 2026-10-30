@@ -31,12 +31,13 @@ import { adAccountStatusLabel, META_ADS_ORG_MAX_ACCOUNTS, META_SYSTEM_USER_TOKEN
 import { META_DATASET_ID_PATTERN } from "@/lib/constants/meta-capi";
 import { env } from "@/lib/env";
 import { GOOGLE_API_KEY_PATTERN, placesRelayOf, textSearch } from "@/lib/integrations/google-places/client";
+import { smtpCredentialsOf, verifySmtp, type SmtpTransportFactory } from "@/lib/integrations/gws-smtp/client";
 import { ZALO_ID_PATTERN, zaloGetOa } from "@/lib/integrations/zalo/oa";
 import { ensureZaloAccessToken } from "@/lib/integrations/zalo/token";
 
 export type TesterResult = { ok: boolean; message: string };
 type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
-export type TesterDeps = { fetch?: FetchLike; now?: () => Date };
+export type TesterDeps = { fetch?: FetchLike; now?: () => Date; /** Bài kiểm tiêm SMTP giả (gws-smtp) — không mở socket thật. */ smtpTransport?: SmtpTransportFactory };
 
 const TIMEOUT_MS = 10_000;
 const MAX_BODY_BYTES = 64 * 1024;
@@ -376,6 +377,16 @@ export async function testGeminiKey(input: { secrets: Record<string, string> }, 
   return probeModels(deps.fetch ?? fetch, GEMINI_MODELS_URL, { "x-goog-api-key": key }, "Gemini", [key]);
 }
 
+/**
+ * Google Workspace SMTP (E2): EHLO → STARTTLS → AUTH bằng App Password — KHÔNG gửi thư. Câu trả lời không bao giờ chứa App
+ * Password (đã che trong `verifySmtp`).
+ */
+export async function testGwsSmtp(input: { secrets: Record<string, string>; settings: Record<string, string> }, deps: TesterDeps = {}): Promise<TesterResult> {
+  const creds = smtpCredentialsOf(input.secrets, input.settings);
+  if ("error" in creds) return { ok: false, message: creds.error };
+  return verifySmtp(creds, deps.smtpTransport);
+}
+
 /** Hộp thử nhắn tin (0180): không gọi mạng — "kiểm tra" chỉ xác nhận tên kênh hợp lệ. Tin thử thật đi qua màn hình Thông báo nhóm. */
 export async function testSandboxMessaging(input: { settings: Record<string, string> }): Promise<TesterResult> {
   const name = (input.settings.channelName ?? "").trim();
@@ -695,5 +706,6 @@ export const ORG_CONNECTION_TESTERS: Readonly<Record<string, (input: { secrets: 
   "ghn-carrier": (input, deps) => testGhnCarrier(input, deps),
   "ghtk-carrier": (input, deps) => testGhtkCarrier(input, deps),
   "google-places": (input, deps) => testGooglePlaces(input, deps),
+  "gws-smtp": (input, deps) => testGwsSmtp(input, deps),
   "facebook-messenger": (input, deps) => testFacebookMessenger(input, deps),
 };

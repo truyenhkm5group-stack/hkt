@@ -283,6 +283,32 @@ danh tính, MỞ lại nút dừng, duyệt hàng loạt. `LIVE` chỉ chủ sho
 **Cấu hình** ở `settings` khoá `wholesale.email` (object; đọc thô rồi trộn từng trường, chế độ lạ ⇒ `OFF`). Hạn mức mặc định 20 thư
 / giờ · 100 / ngày · 5 / tên miền nhận / ngày, trần cứng 200 · 1.000 · 50.
 
+**Gửi thật — Google Workspace SMTP (E2, chủ shop chốt 30/10/2026).** Adapter thật đầu tiên là connector `gws-smtp`
+(`lib/integrations/gws-smtp/client.ts`, thư viện `nodemailer`): `smtp.gmail.com:587`, STARTTLS bắt buộc, đăng nhập bằng App
+Password của hộp thư (vd `truyenhk@vnxcommerce.com`). Chủ shop nhập hộp thư + App Password ở Cài đặt → Kết nối dữ liệu; App
+Password mã hoá AES-256-GCM trong `org_connections`, màn hình chỉ hiện dạng che, câu lỗi không bao giờ chứa nó. «Kiểm tra» chỉ
+đăng nhập SMTP (EHLO → STARTTLS → AUTH), không gửi thư. Bật kết nối KHÔNG đổi chế độ: email vẫn TẮT / CHẠY THỬ cho tới khi quản trị
+chọn «Gửi thật» — và lựa chọn đó bị từ chối khi kết nối chưa kiểm tra đạt + bật. Lúc chạy, kết nối tắt ⇒ thư nằm chờ kèm lý do
+(không rơi về chạy thử). From luôn là hộp thư đã đăng nhập; Message-ID ổn định, List-Unsubscribe + One-Click từ `buildOutgoingEmail`.
+Lỗi đăng nhập SMTP dừng cả lượt (không đốt hết lô); 4xx thử lại có lùi dần; 5xx ⇒ FAILED. Trước khi bật gửi thật, chủ shop thêm
+DKIM (`google._domainkey`) + DMARC cho tên miền — đo 30/10: SPF có, DKIM / DMARC chưa. Đọc thư trả lời qua IMAP / Gmail API: CHƯA
+làm (sổ việc E3).
+
+**Đọc & phân loại thư trả lời (E3, 31/10/2026 — `lib/wholesale/email-reply.ts`).** Mặc định TẮT; người cấu hình bật ở Hộp thư đi.
+Mỗi lượt job `wholesale-leads` (không đổi lịch chung; khoá riêng, ghi `sync_runs` job `wholesale-email-inbound`) mở INBOX của
+CHÍNH hộp thư Google Workspace qua `imap.gmail.com:993` (TLS) bằng CÙNG hộp thư + App Password của kết nối `gws-smtp` — không thêm
+credential; thư viện `imapflow`; hộp thư mở CHỈ ĐỌC, không log. Chỉ thư MỚI sau mốc UID đã lưu (`wholesale.emailInbound.cursor`;
+lượt đầu không đọc lùi quá 14 ngày và không trước thư thật đầu tiên). Bước 1 chỉ đọc TIÊU ĐỀ: thư tự động (Auto-Submitted,
+Precedence, «vắng mặt») bỏ; thư không nối luồng (In-Reply-To / References) với thư ERP đã gửi VÀ không khớp đúng một lead ⇒ bỏ,
+KHÔNG tải nội dung. Thư khớp ⇒ tải phần chữ (không đính kèm, chỉ đếm), cắt phần trích thư cũ, che dãy ≥ 12 chữ số, giữ ≤ 2.000 ký
+tự ⇒ `ingestInboundEmail` của E1 (REPLY · dừng thư chờ + chuỗi nhắc · việc «trả lời khách» phòng Kinh doanh). Xin ngừng bằng chữ
+(«unsubscribe», «huỷ đăng ký», «ngừng gửi», hoặc cả dòng đầu là «stop» / «huỷ») ⇒ ĐÚNG đường huỷ E1 (`applyEmailUnsubscribe`), không
+tốn lượt AI. Phân loại AI (feature `b2b_email_reply_classify`, chỉ bật được khi khai ĐỦ trần thư / ngày + USD / ngày): Quan tâm ·
+Hỏi giá · Từ chối · Huỷ đăng ký · Khác, BẮT BUỘC kèm câu trích NGUYÊN VĂN có trong thư — không có ⇒ hạ về «Khác». Hỏi giá ⇒ máy ghép
+mẫu mã khách nhắc (chỉ khi DUY NHẤT và mã / tên có trong chính thư; tên có nhiều quy cách thì phải có SKU / quy cách), số lượng chỉ
+nhận khi có trong thư (không có ⇒ MOQ của bảng giá sỉ, ghi rõ) ⇒ NHÁP báo giá qua bộ tính #1095 (`createQuotationDraftByMachine`,
+người lập = máy, DRAFT, không tự gửi); không ghép được ⇒ không có nháp, lịch sử lead nói rõ. Lead không tự đổi trạng thái trừ huỷ.
+
 ## 4f. Kế hoạch kênh: nước ngoài — Email · trong nước — Zalo (chủ shop chốt 30/10/2026)
 
 > «Tách phần tìm khách nước ngoài để gửi email với luồng khách trong nước để nhắn Zalo. Bổ sung gửi email cho cả khách trong
@@ -293,9 +319,10 @@ danh tính, MỞ lại nút dừng, duyệt hàng loạt. `LIVE` chỉ chủ sho
 
 | Làn | Khi nào |
 |---|---|
-| Nước ngoài — Email | Lead quốc tế (`isIntlProvinceKey`) có email |
+| Nước ngoài — Email | Nước của lead (thang bên dưới) khác VN, và lead có email |
 | Trong nước — Zalo | Lead trong nước nhắn Zalo được — kể cả khi có email |
 | Trong nước — chuyển sang email | Zalo KHÔNG GỬI ĐƯỢC **và** lead có email |
+| Thiếu căn cứ nước — người xác nhận | Thang nước ra CHƯA BIẾT — nhân viên chọn nước («Xác nhận nước») rồi lead mới vào làn Zalo / Email |
 | Thiếu kênh | Không có kênh dùng được — kế hoạch in «Chưa có email — chạy Thu thập email», không đoán địa chỉ |
 | Dừng liên hệ | KHÔNG LIÊN HỆ hoặc khớp danh sách chặn (cùng luật P1a: chặn thắng mọi đồng ý) |
 
@@ -315,11 +342,29 @@ nước còn nhắn Zalo được — luật nằm ở máy chủ, không chỉ 
 · hạn mức) và vẫn CHẠY THỬ.
 
 **Cổng pháp lý theo nước** (issue #1085): `wholesale.email.allowedCountries` — mã ISO2 của nước ĐÃ RÀ LUẬT thư chào hàng,
-`VN` cho khách trong nước. Mặc định RỖNG, không có nước mặc định. Nước người nhận = `recipientCountryOf(lead.provinceKey)`
-(lead quốc tế ⇒ nước của khoá tỉnh; còn lại ⇒ `VN`; không nhận ra ⇒ chưa rà). Ở chế độ GỬI THẬT, nước chưa rà ⇒ thư nằm chờ
+`VN` cho khách trong nước. Mặc định RỖNG, không có nước mặc định. Nước người nhận đọc từ thang nước dưới đây; CHƯA BIẾT ⇒
+coi như chưa rà. Ở chế độ GỬI THẬT, nước chưa rà ⇒ thư nằm chờ
 với lý do `COUNTRY_NOT_REVIEWED`; ở CHẠY THỬ thư vẫn đi hết đường ống, cảnh báo in ở Hộp thư đi và ghi vào sự kiện `SENT`.
 Chỉ QUẢN TRỊ (vai trò ADMIN, có `wholesale:config`) sửa danh sách ở trang Hộp thư đi, bắt buộc lý do, có audit
 (`WHOLESALE_EMAIL_COUNTRIES`). Đây là ghi nhận kỹ thuật, không phải ý kiến pháp lý.
+
+**Nước của lead — MỘT thang chứng cứ** (`leadCountryOf`, `lib/wholesale/lead-country.ts`; dữ kiện gom DUY NHẤT ở
+`countryInputOf` trong `contact-plan-store.ts`). Cổng nước của hộp thư đi, làn kênh và ngôn ngữ AI soạn email cùng đọc hàm
+này — trước đây có hai luật (khoá tỉnh ở cổng / làn, SĐT + tên miền ở AI) và lead `+1 · .com` bị một bên xếp Việt Nam, bên kia
+viết tiếng Anh. Thứ tự:
+
+1. **Người xác nhận** — dòng `wholesale_lead_activities` kind `EDIT`, `outcome = COUNTRY_CONFIRMED`, `meta.country`; chỉ
+   thêm, dòng mới nhất thắng; `wholesale:work` + phạm vi dữ liệu + audit `WHOLESALE_LEAD_COUNTRY`.
+2. **Khoá tỉnh** — `intl …` ⇒ nước của ô quét; tỉnh Việt Nam có trong danh sách chuẩn ⇒ VN. Khoá không nhận ra ⇒ bỏ qua.
+3. **Mã nước SĐT** — `phone_country_code = 84` / `+84…` ⇒ VN; `+<mã>` / `00<mã>` ⇒ nước của mã. Mã dùng chung nhiều nước
+   (+1 Mỹ · Canada · Caribe, +7 Nga · Kazakhstan) KHÔNG kết luận — luật thư chào hàng của Mỹ (CAN-SPAM) và Canada (CASL) khác nhau.
+4. **Đuôi tên miền quốc gia** của website rồi email (.de, .fr, .com.vn, .co.uk ⇒ GB). Đuôi chung (.com, .net…) và đuôi quốc
+   gia hay bị dùng như đuôi chung (.io, .co, .ai, .me, .tv…; .eu không phải một nước) KHÔNG kết luận.
+5. Còn lại ⇒ **CHƯA BIẾT** (`null`). Không có mặc định «trong nước».
+
+CHƯA BIẾT ⇒ cổng nước coi như chưa rà (gửi thật nằm chờ), làn «Thiếu căn cứ nước — người xác nhận», và AI soạn email TỪ CHỐI
+(trước khi tốn lượt AI) thay vì đoán ngôn ngữ. Nước đã biết: VN / Việt Kiều ⇒ tiếng Việt, nước khác ⇒ tiếng Anh
+(`draftLanguageForCountry` — chỉ ánh xạ, không suy nước).
 
 ## 4d. Khách sỉ nước ngoài và phân khúc B2B (chủ shop chốt 27/10/2026)
 
@@ -408,6 +453,61 @@ tiền thật là 0. Trần ngày / tháng vẫn chặn bất kể ước tính.
 
 **Trạm chuyển tiếp** (`deploy/places-relay`) chuyển nguyên thân yêu cầu POST và nguyên chuỗi truy vấn GET, nên
 `languageCode` / `regionCode` / `locationBias` của ô quốc tế tới Google mà không cần sửa trạm (có bài kiểm).
+
+## 4g. Khách sỉ Việt Kiều (chủ shop chốt 30/10/2026)
+
+«Tìm email của khách sỉ là Việt Kiều ở nước ngoài» — chạy trên đúng bộ máy quốc tế ở mục 4d, không module mới, **chưa
+gửi gì** (luồng kênh nước ngoài ⇒ email là việc của bảng liên hệ, không ở đây).
+
+**Phân khúc** (chỉ ô / lead quốc tế, như luật B2B — ô trong nước phân nhóm y như cũ, có bài kiểm):
+
+| Khoá | Cần đủ HAI chứng cứ | Phù hợp / ý định |
+|---|---|---|
+| `VIET_DIASPORA_GROCERY` | Tên có dấu hiệu Việt («Viet», «Vietnamese», «Saigon», «Hà Nội», «Phở», «Mekong», «vietnam…» trong tiếng Đức / Pháp / Séc, «wietnam…», «ベトナム», «베트남», «越南») **và** loại hình cửa hàng: chữ «grocery / supermarket / market / mart / épicerie / Markt / chợ / siêu thị / 食材 / 식품 / 超市…» hoặc loại hình Google grocery / supermarket / market… | 30 / 12 |
+| `VIET_FOOD_DISTRIBUTOR` | Dấu hiệu Việt **và** chữ bán sỉ («wholesale / distributor / import / trading / Großhandel / grossiste / velkoobchod / hurtownia / 卸 / 도매 / 批發») hoặc loại hình `wholesaler` | 29 / 12 |
+
+- Thiếu một chứng cứ thì không gắn: quán phở (chỉ có loại hình `restaurant`) là nhà hàng; một «Asia Markt» không có dấu
+  hiệu Việt là cửa hàng châu Á — không đoán chủ là người Việt.
+- `segmentEvidence` ghi cả hai chứng cứ, ví dụ «tên có «saigon» + «market»».
+- Luật Việt Kiều đứng trước luật B2B khác: «Saigon Asian Food Importers» ⇒ `VIET_FOOD_DISTRIBUTOR`.
+
+**Nước** — chỉ 9 nước mục 4d đã hỗ trợ: Mỹ · Úc · Canada · Đức · Pháp · Anh · Nhật · Hàn · Đài Loan
+(`VIET_DIASPORA_COUNTRIES`). **Séc và Ba Lan: chưa hỗ trợ** (`VIET_DIASPORA_UNSUPPORTED`, kèm từ khoá dự kiến «potraviny
+vietnamské», «sklep wietnamski») — thêm nước + thành phố + toạ độ là việc riêng, không đoán trong việc này.
+
+**Từ khoá** (`keywords-intl.ts`, mọi nhóm TẮT sẵn): tiếng Anh «Vietnamese grocery», «Vietnamese supermarket», «Asian
+market Vietnamese», «Vietnamese food distributor»; chữ Việt ở nước ngoài «chợ Việt», «siêu thị Việt» (ngôn ngữ từ khoá
+`vi-kieu` — chỉ 9 nước trên, KHÔNG BAO GIỜ quét tỉnh trong nước như nhóm `vi`); Đức «Asia Markt vietnamesisch»,
+«vietnamesischer Supermarkt»; Pháp «épicerie vietnamienne», «épicerie asiatique»; Nhật «ベトナム食材»; Hàn «베트남 식품»;
+Đài Loan «越南超市».
+
+**Mẫu «HSLC – Việt Kiều (cửa hàng / chợ / nhà phân phối thực phẩm Việt ở nước ngoài)»** (`hslc-intl-viet-kieu`): 18 thành
+phố đông người Việt (Westminster · San Jose · Houston · Los Angeles · Sydney · Melbourne · Toronto · Vancouver · Montreal ·
+Berlin · Leipzig · Paris · London · Tokyo · Osaka · Seoul · Taipei · New Taipei), mọi nhóm Việt Kiều bật, ENTERPRISE, tối
+đa 300 lead, không bắt buộc SĐT, **không bắt buộc website** (nhiều chợ Việt chỉ có Facebook — giữ lại để đếm đủ), DRAFT,
+không tự chạy.
+
+**Ước tính chi phí** (thẻ mẫu / nháp in sẵn, `campaignCostEstimate`): 119 ô (18 × 6 + Đức 4 + Pháp 2 + Nhật 2 + Hàn 1 +
+Đài Loan 2) × Text Search Enterprise 35 US$ / 1.000:
+
+| | Lượt | US$ | ≈ VND (26.000) |
+|---|---|---|---|
+| Ít nhất | 119 | 4,17 | 108.290 |
+| Điển hình (1,5 trang / ô) | ~179 | 6,25 | 162.435 |
+| Nhiều nhất (3 trang / ô) | 357 | 12,50 | 324.870 |
+
+Giá niêm yết; chưa trừ ô vừa quét và 1.000 lượt Enterprise miễn phí mỗi tháng. Trần ngày / tháng vẫn chặn.
+
+**Tìm email.** Lead quốc tế có website đi qua bước đọc trang công khai như mọi lead (`finalizeLead` ⇒ `website_status =
+PENDING` ⇒ `enrichLeadWebsite` ⇒ email có bằng chứng, mục 4c). Hàng đọc website (5 lead / lượt) xếp
+theo `websiteEnrichRank`: **0 = nhóm Việt Kiều · 1 = lead quốc tế khác · 2 = trong nước**, trong cùng hạng theo điểm —
+trước đây xếp theo điểm thuần nên lead quốc tế (0 điểm vị trí, không SĐT) luôn đứng cuối. Thẻ chiến dịch đếm lead sẵn sàng
+theo **có email / có website / không website**.
+
+**Vai trò email đa ngữ** (`classifyEmailRole`, 30/10/2026): phần trước @ nhận thêm «mua hàng» einkauf · achat(s) ·
+compra(s) · acquisti · inkoop · caigou; «bán hàng» verkauf · vertrieb · vente(s) · commercial · ventas · comercial · vendite
+· commerciale · verkoop · xiaoshou; «liên hệ» kontakt · anfrage · contatti. Trước đó «einkauf@» ra `OTHER` và không bao
+giờ được điền vào hồ sơ. Chỉ là danh sách từ khoá — không đoán gì khác; không khai tiếng Nhật / Hàn dạng latin.
 
 ## 5. Tiết kiệm chi phí API
 

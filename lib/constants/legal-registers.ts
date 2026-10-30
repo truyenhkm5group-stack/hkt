@@ -21,7 +21,7 @@ export const UNKNOWN = "UNKNOWN" as const;
 export type Unknown = typeof UNKNOWN;
 
 /** Tập dữ liệu theo `DATA_PROCESSING_REGISTER.md` §2. */
-export const DATASET_IDS = ["D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D17"] as const;
+export const DATASET_IDS = ["D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15", "D16", "D17", "D18"] as const;
 export type DatasetId = (typeof DATASET_IDS)[number];
 
 /** Đường chuyển xuyên biên giới theo `VIETNAM_LEGAL_COMPLIANCE.md` §7. */
@@ -582,13 +582,29 @@ export const SUBPROCESSORS: readonly SubprocessorEntry[] = [
     terms: UNKNOWN,
     dpa: UNKNOWN,
   },
+  {
+    id: "S31",
+    vendor: "Google Workspace — Gmail SMTP (smtp.gmail.com:587, STARTTLS) + IMAP (imap.gmail.com:993, TLS)",
+    legalEntity: "Google LLC",
+    role: "EMAIL",
+    purpose: "Gửi email bán sỉ từ hộp thư Google Workspace của shop (E2, chủ shop chốt 30/10/2026) — chỉ thư đã được người duyệt và qua cổng chính sách; từ E3 (31/10/2026) đọc thư TRẢ LỜI trong INBOX (chỉ đọc) bằng cùng hộp thư",
+    datasets: ["D18"],
+    dataCategories: "Email người nhận, tiêu đề, nội dung thư, tên hiển thị người gửi; App Password của hộp thư (đi tới Google để đăng nhập, lưu mã hoá trong ERP); thư trả lời ĐI VÀO: tiêu đề mọi thư mới (để lọc), phần chữ chỉ của thư nối luồng / khớp một lead — trích ≤ 2.000 ký tự, dãy số dài bị che, không đính kèm",
+    calledFrom: ["lib/integrations/gws-smtp/client.ts", "lib/integrations/gws-smtp/imap.ts"],
+    hosts: ["smtp.gmail.com", "imap.gmail.com"],
+    sdks: ["nodemailer", "imapflow"],
+    usage: "CONDITIONAL",
+    usageNote: "Chỉ khi tổ chức nối kết nối «Google Workspace — gửi email» VÀ quản trị bật chế độ email «Gửi thật» (gửi) / người cấu hình bật «đọc thư trả lời» (đọc); mặc định TẮT cả hai",
+    terms: UNKNOWN,
+    dpa: UNKNOWN,
+  },
   // ─── §5 Đã quét và KHÔNG có — canh gác để điều đó còn đúng ───
   {
     id: "N-EMAIL",
-    vendor: "Dịch vụ gửi email (SMTP / Resend / SendGrid / Gmail API…)",
+    vendor: "Dịch vụ gửi email KHÁC ngoài Gmail SMTP của S31 (Resend / SendGrid / Postmark / Mailgun / Brevo / Gmail API…)",
     legalEntity: UNKNOWN,
     role: "EMAIL",
-    purpose: "Không có — hệ thống chưa có kênh thư (docs/saas/PROVISIONING.md)",
+    purpose: "Không có — kênh thư duy nhất là Google Workspace SMTP (S31); thêm nhà cung cấp khác là khai bên mới",
     datasets: [],
     dataCategories: "—",
     calledFrom: [],
@@ -598,7 +614,7 @@ export const SUBPROCESSORS: readonly SubprocessorEntry[] = [
     usageNote: "Cam kết «báo trước qua email» ở Điều khoản chưa có kênh thực hiện (F-11)",
     terms: UNKNOWN,
     dpa: UNKNOWN,
-    watch: { hosts: ["api.sendgrid.com", "api.resend.com", "api.postmarkapp.com", "api.mailgun.net", "gmail.googleapis.com", "api.brevo.com"], sdks: ["nodemailer", "@sendgrid/mail", "resend", "postmark", "mailgun.js", "@getbrevo/brevo"] },
+    watch: { hosts: ["api.sendgrid.com", "api.resend.com", "api.postmarkapp.com", "api.mailgun.net", "gmail.googleapis.com", "api.brevo.com"], sdks: ["@sendgrid/mail", "resend", "postmark", "mailgun.js", "@getbrevo/brevo"] },
   },
   {
     id: "N-SMS",

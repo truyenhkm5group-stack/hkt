@@ -367,6 +367,14 @@ export type CampaignProgress = {
   pendingDetails: number;
   phoneFound: number;
   qualified: number;
+  /**
+   * Lead sẵn sàng (READY) của chiến dịch chia theo kênh email (chủ shop 30/10/2026 — Việt Kiều): có email · có website (đọc
+   * được trang công khai để tìm email) · không website (không có đường thu email). «Có email» là tập con của «có website»
+   * với lead máy tìm; lead nhập tay có thể có email mà không website.
+   */
+  withEmail: number;
+  withWebsite: number;
+  noWebsite: number;
   apiCalls: number;
   costMicros: number;
   /**
@@ -418,6 +426,9 @@ export async function campaignProgressList(cfg?: Pick<LeadHunterConfig, "skuPric
         dupLater: sql<string>`count(*) filter (where ${l.enrichmentStatus} = 'DUPLICATE')`,
         phone: sql<string>`count(*) filter (where ${l.enrichmentStatus} = 'READY' and ${PHONE} is not null)`,
         qualified: sql<string>`count(*) filter (where ${l.enrichmentStatus} = 'READY' and ${l.qualifiedAt} is not null)`,
+        withEmail: sql<string>`count(*) filter (where ${l.enrichmentStatus} = 'READY' and ${l.email} is not null)`,
+        withWebsite: sql<string>`count(*) filter (where ${l.enrichmentStatus} = 'READY' and coalesce(${l.website}, ${ps.websiteUri}) is not null)`,
+        noWebsite: sql<string>`count(*) filter (where ${l.enrichmentStatus} = 'READY' and coalesce(${l.website}, ${ps.websiteUri}) is null)`,
       })
       .from(l)
       .leftJoin(ps, eq(ps.placeId, l.placeId))
@@ -468,6 +479,9 @@ export async function campaignProgressList(cfg?: Pick<LeadHunterConfig, "skuPric
       pendingDetails: Number(le?.pending ?? 0),
       phoneFound: Number(le?.phone ?? 0),
       qualified: Number(le?.qualified ?? 0),
+      withEmail: Number(le?.withEmail ?? 0),
+      withWebsite: Number(le?.withWebsite ?? 0),
+      noWebsite: Number(le?.noWebsite ?? 0),
       apiCalls: Number(us?.calls ?? 0),
       costMicros: Number(us?.micros ?? 0),
       estimate: cfg && (x.isTemplate || x.status === "DRAFT") ? campaignCostEstimate(x, cfg) : null,

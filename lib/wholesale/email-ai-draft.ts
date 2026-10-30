@@ -16,10 +16,10 @@ import { getSettingJson, setSettingJson } from "@/lib/settings";
 import type { CoreResult } from "@/lib/wholesale/campaigns";
 import { normalizeEmail } from "@/lib/wholesale/contactability";
 import { emailDomain, emailIdempotencyKey } from "@/lib/wholesale/email-constants";
-import { draftLanguageFor, draftViolations, editRatio, type DraftGuardFacts, type DraftLanguage, type DraftViolation } from "@/lib/wholesale/email-ai-draft-guard";
+import { draftLanguageForCountry, draftViolations, editRatio, type DraftGuardFacts, type DraftLanguage, type DraftViolation } from "@/lib/wholesale/email-ai-draft-guard";
 import { getEmailSettings } from "@/lib/wholesale/email-outbox-store";
 import { leadView } from "@/lib/wholesale/engine";
-import { emailLaneRefusal } from "@/lib/wholesale/contact-plan-store";
+import { emailLaneRefusal, leadCountryForLead } from "@/lib/wholesale/contact-plan-store";
 import { openerVariables } from "@/lib/wholesale/opener";
 import { resolveAi } from "@/lib/wholesale/outreach";
 import { parseQuotationPolicy, QUOTATION_SETTING_KEY } from "@/lib/wholesale/quotation-engine";
@@ -102,17 +102,17 @@ async function leadInScope(user: SessionUser, leadId: string): Promise<{ lead: L
   return lead ? { lead } : { error: "Không tìm thấy lead." };
 }
 
-export type DraftFactsSnapshot = { language: DraftLanguage; factsText: string; allowedAmounts: number[]; deliveryNote: string; catalogLines: number; quotationCode: string | null };
+/** `sequenceStep` = 0 thư mở đầu, ≥ 1 lần nhắc thứ N của chuỗi (lib/wholesale/email-sequence.ts). Thiếu (dòng cũ) = 0. */
+export type DraftFactsSnapshot = { language: DraftLanguage; factsText: string; allowedAmounts: number[]; deliveryNote: string; catalogLines: number; quotationCode: string | null; sequenceStep?: number };
 
 /** Dựng dữ kiện thật cho MỘT lead — chỉ đọc. */
-export async function buildDraftFacts(lead: Lead): Promise<DraftFactsSnapshot> {
+export async function buildDraftFacts(lead: Lead, language: DraftLanguage): Promise<DraftFactsSnapshot> {
   const db = await getDb();
   const [cfg, sender, rawPolicy, books] = await Promise.all([getLeadHunterConfig(), getEmailSettings(), getSettingJson<Record<string, unknown>>(QUOTATION_SETTING_KEY, {}), priceBooksFor(lead.customerId ?? null, db)]);
   const snap = lead.placeId ? await db.query.wholesalePlaceSnapshots.findFirst({ where: eq(schema.wholesalePlaceSnapshots.placeId, lead.placeId) }) : null;
   const v = leadView(lead, snap);
   const segment = isLeadSegmentKey(lead.segment) ? lead.segment : "UNCLASSIFIED";
   const vars = openerVariables(cfg, { businessName: lead.businessName || v.name || "", segment, areaName: lead.areaName, provinceLabel: lead.provinceLabel });
-  const language = draftLanguageFor({ phoneCountryCode: lead.phoneCountryCode, websiteDomain: lead.websiteDomain });
   const allowed = new Set<number>();
 
   // Bảng giá đang áp: khách đã nối ⇒ bảng riêng → mặc định; lead chưa là khách ⇒ bảng mặc định (D6).
@@ -196,6 +196,11 @@ const SYSTEM: Record<DraftLanguage, string> = {
   ].join("\n"),
 };
 
+const FOLLOWUP_NOTE: Record<DraftLanguage, (step: number) => string> = {
+  vi: (step) => `ĐÂY LÀ THƯ NHẮC LẦN ${step} (thư thứ ${step + 1}) gửi lại cho khách CHƯA trả lời thư trước: ngắn hơn (50–110 chữ), lịch sự, nhắc lại thư trước, không lặp nguyên văn, không gây áp lực. Tiêu đề bắt đầu bằng «Re: » + tiêu đề thư trước.`,
+  en: (step) => `THIS IS FOLLOW-UP #${step} (email ${step + 1}) to a recipient who has NOT replied to the previous email: shorter (50–110 words), polite, refer back to the previous email, do not repeat it verbatim, no pressure. Subject starts with «Re: » + the previous subject.`,
+};
+
 /** Tách «SUBJECT: …» / «---» / thân. Thiếu định dạng ⇒ tiêu đề mặc định, cả chữ là thân. HÀM THUẦN. */
 export function parseDraftOutput(text: string, fallbackSubject: string): { subject: string; body: string } {
   const t = text.replace(/\r/g, "").trim();
@@ -207,6 +212,8 @@ export function parseDraftOutput(text: string, fallbackSubject: string): { subje
 // ─────────────────────────── Soạn nháp ───────────────────────────
 
 export type AiDeps = { ai?: { provider: AiProvider; source: AiBillingSource } };
+/** Lần nhắc của chuỗi thư: bước + thư ĐÃ GỬI ngay trước (người đã duyệt). Chỉ `lib/wholesale/email-sequence-core.ts` truyền vào, sau khi đã kiểm lần nhắc ĐẾN HẠN. */
+export type FollowupContext = { step: number; previousSubject: string; previousBody: string };
 export type DraftResult = { id: string; status: "DRAFT" | "BLOCKED"; violations: DraftViolation[]; language: DraftLanguage };
 
 /** Hôm nay (giờ VN) tổ chức đã soạn bao nhiêu nháp và tốn bao nhiêu — `costUnknown` = có lượt chưa biết giá. */
@@ -217,7 +224,7 @@ async function todaySpend(now: Date): Promise<{ drafts: number; costUsd: number;
 }
 
 /** «AI soạn nháp» cho MỘT lead (luồng email). Không gửi, không vào hộp thư đi. */
-export async function aiDraftEmailCore(user: SessionUser, leadId: string, now = new Date(), deps: AiDeps = {}): Promise<CoreResult<DraftResult>> {
+export async function aiDraftEmailCore(user: SessionUser, leadId: string, now = new Date(), deps: AiDeps = {}, followup: FollowupContext | null = null): Promise<CoreResult<DraftResult>> {
   try {
     const g = await leadInScope(user, leadId);
     if ("error" in g) return g;
@@ -228,13 +235,20 @@ export async function aiDraftEmailCore(user: SessionUser, leadId: string, now = 
     // Kế hoạch kênh (chủ shop 30/10): khách trong nước còn nhắn Zalo được thì không soạn email — kiểm TRƯỚC khi tốn lượt AI.
     const refusal = await emailLaneRefusal(g.lead.id);
     if (refusal) return { error: refusal };
+    // Ngôn ngữ theo nước ĐÃ BIẾT (một thang với cổng nước / làn); chưa biết ⇒ từ chối, không đoán.
+    const country = await leadCountryForLead(g.lead);
+    if (!country.country) return { error: `Chưa biết khách ở nước nào (${country.detail}) — xác nhận nước ở Hàng đợi liên hệ rồi soạn; AI không đoán ngôn ngữ.` };
     // Kiểm bảng + trần TRƯỚC khi gọi AI: chưa áp 0265 hoặc chạm trần ⇒ không tốn một lượt gọi nào.
     const spend = await todaySpend(now);
     if (spend.drafts >= (settings.dailyMaxDrafts as number)) return { error: `Đã chạm trần ${settings.dailyMaxDrafts} nháp AI hôm nay.` };
     if (spend.costUnknown) return { error: "Hôm nay có lượt AI chưa biết chi phí (model chưa có giá niêm yết) — không chứng minh được còn dưới trần chi phí, tạm dừng tới mai." };
     if (spend.costUsd >= (settings.dailyCostCapUsd as number)) return { error: `Đã chạm trần chi phí ${settings.dailyCostCapUsd} USD / ngày.` };
 
-    const facts = await buildDraftFacts(g.lead);
+    const base = await buildDraftFacts(g.lead, draftLanguageForCountry(country.country));
+    // Thư nhắc: thư trước (đã gửi, người đã duyệt) thành một phần dữ kiện — AI được nhắc lại nó, hàng rào chấp nhận đúng những gì nó đã nói.
+    const facts: DraftFactsSnapshot = followup
+      ? { ...base, sequenceStep: followup.step, factsText: `${base.factsText}\n${base.language === "vi" ? "THƯ ĐÃ GỬI TRƯỚC ĐÓ" : "PREVIOUS EMAIL SENT"} (${followup.previousSubject}):\n${followup.previousBody}` }
+      : { ...base, sequenceStep: 0 };
     const org = await currentOrganization();
     const resolved = deps.ai ? ({ ok: true, ...deps.ai } as const) : await resolveAi();
     if (!resolved.ok) return { error: `Chưa có AI của tổ chức: ${resolved.reason}` };
@@ -245,7 +259,8 @@ export async function aiDraftEmailCore(user: SessionUser, leadId: string, now = 
     const fallbackSubject = facts.language === "vi" ? `Bảng giá sỉ ${cfg.outreach.productLine || "hải sản"} — ${cfg.outreach.shopName || "bên em"}` : `Wholesale price list — ${cfg.outreach.shopName || "Vietnamese seafood supplier"}`;
     let res;
     try {
-      res = await provider.complete({ system: SYSTEM[facts.language], messages: [{ role: "user", content: [{ type: "text", text: `${facts.language === "vi" ? "DỮ KIỆN" : "FACTS"}:\n${facts.factsText}` }] }], tools: [], maxTokens: 900, reasoning: "low" });
+      const system = followup ? `${SYSTEM[facts.language]}\n${FOLLOWUP_NOTE[facts.language](followup.step)}` : SYSTEM[facts.language];
+      res = await provider.complete({ system, messages: [{ role: "user", content: [{ type: "text", text: `${facts.language === "vi" ? "DỮ KIỆN" : "FACTS"}:\n${facts.factsText}` }] }], tools: [], maxTokens: 900, reasoning: "low" });
     } catch (e) {
       await recordAiUsage({ orgCode: org.code, feature: "b2b_email_draft", workload: "lead_hunter", source: resolved.source, provider: provider.name, model: provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: user.id, ref: "email_draft" }).catch(() => undefined);
       return { error: `AI lỗi (${e instanceof Error ? e.message.slice(0, 160) : "không rõ"}) — chưa có nháp nào được lưu.` };
@@ -306,6 +321,8 @@ export async function promoteAiDraftCore(user: SessionUser, id: string, raw: unk
     const refusal = await emailLaneRefusal(g.lead.id);
     if (refusal) return { error: refusal };
     const snap = g.row.facts as DraftFactsSnapshot;
+    const step = typeof snap.sequenceStep === "number" && snap.sequenceStep > 0 ? snap.sequenceStep : 0;
+    const templateKey = step > 0 ? "FOLLOWUP" : "OPENER_D0";
     const violations = draftViolations(parsed.data.subject, parsed.data.body, guardFacts(snap));
     if (violations.length) return { error: `Bản cuối vẫn vi phạm hàng rào: ${violations.map((v) => v.detail).join(" ")}` };
     const ratio = editRatio(`${g.row.subject}\n${g.row.body}`, `${parsed.data.subject}\n${parsed.data.body}`);
@@ -313,7 +330,7 @@ export async function promoteAiDraftCore(user: SessionUser, id: string, raw: unk
     const out = await db.transaction(async (tx) => {
       const [mail] = await tx
         .insert(schema.wholesaleEmailOutbox)
-        .values({ leadId: g.lead.id, campaignId: g.lead.sourceCampaignId, toEmail: to, recipientDomain: emailDomain(to), subject: parsed.data.subject, bodyText: parsed.data.body, language: g.row.language, templateKey: "OPENER_D0", sequenceStep: 0, status: "DRAFT", idempotencyKey: emailIdempotencyKey(g.lead.id, "OPENER_D0", 0, to), preparedBy: "AI", aiModel: g.row.model, createdByUserId: user.id, createdAt: now, updatedAt: now })
+        .values({ leadId: g.lead.id, campaignId: g.lead.sourceCampaignId, toEmail: to, recipientDomain: emailDomain(to), subject: parsed.data.subject, bodyText: parsed.data.body, language: g.row.language, templateKey, sequenceStep: step, status: "DRAFT", idempotencyKey: emailIdempotencyKey(g.lead.id, templateKey, step, to), preparedBy: "AI", aiModel: g.row.model, createdByUserId: user.id, createdAt: now, updatedAt: now })
         .onConflictDoNothing()
         .returning({ id: schema.wholesaleEmailOutbox.id });
       if (!mail) return null;
@@ -325,7 +342,7 @@ export async function promoteAiDraftCore(user: SessionUser, id: string, raw: unk
       if (!moved.length) throw new Error("RACE");
       return mail.id;
     });
-    if (!out) return { error: "Lead đã có thư «Lời chào mở đầu» tới địa chỉ này (đang mở hoặc đã gửi thật) — mở Hộp thư đi." };
+    if (!out) return { error: step > 0 ? `Lead đã có thư nhắc lần ${step} tới địa chỉ này — mở Hộp thư đi.` : "Lead đã có thư «Lời chào mở đầu» tới địa chỉ này (đang mở hoặc đã gửi thật) — mở Hộp thư đi." };
     await db.insert(schema.wholesaleLeadActivities).values({ leadId: g.lead.id, kind: "OUTREACH", channel: "EMAIL", note: `Đưa nháp AI vào Hộp thư đi (thư nháp tới ${to}, sửa ${Math.round(ratio * 100)}%) — chờ duyệt gửi`, actorId: user.id, actorName: user.name, createdAt: now });
     await audit({ userId: user.id, userEmail: user.email, action: "WHOLESALE_EMAIL_AI_PROMOTE", entity: "WHOLESALE_LEAD", entityId: g.lead.id, after: { draftId: id, outboxId: out, model: g.row.model, costUsd: g.row.costUsd, editRatio: ratio, requestedBy: g.row.requestedByUserId, reviewedBy: user.id }, reason: "Duyệt nháp email AI ⇒ hộp thư đi (vẫn chờ duyệt gửi E1)" });
     return { ok: true, outboxId: out, editRatio: ratio };
