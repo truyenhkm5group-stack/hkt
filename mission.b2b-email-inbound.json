@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "mission_id": "b2b-email-inbound",
+  "title": "Đọc & phân loại thư trả lời khách sỉ (E3)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-b2b-inbound",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/b2b-email-inbound",
+  "base_sha": "e245eb2eb8ea0c81dcac119c9161f062d77ff89f",
+  "domains": [],
+  "owned_paths": [
+    "lib/integrations/gws-smtp/imap.ts",
+    "lib/wholesale/email-reply.ts",
+    "lib/actions/wholesale-email-inbound.ts",
+    "app/(dashboard)/wholesale/outbox/email-inbound-panel.tsx",
+    "tests/wholesale-email-inbound.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-30T18:34:39.493Z",
+  "updated_at": "2026-10-30T18:34:39.493Z",
+  "last_heartbeat": "2026-10-30T18:34:39.493Z",
+  "definition_of_done": []
+}
