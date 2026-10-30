@@ -1,8 +1,8 @@
 {
   "pr": 1095,
-  "sha": "d9be693b82f09cb14f8fe9bd9b83e404d9820dbd",
+  "sha": "e33154361c91095b1fe802a51a984a13e35c71e6",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-30T06:03:56.969Z",
-  "note": "review lead: báo giá sỉ P1b — engine tất định (VND số nguyên, chỉ VND do chưa có tỷ giá), ship/thuế NULL = chưa khai + bắt buộc căn cứ, người lập không tự duyệt (mã + CHECK CSDL), trigger bất biến bản đã duyệt/gửi, wholesale:work + phạm vi, audit có nhãn; migration 0263 chỉ thêm bảng, đã khai serve-compat; không gửi gì ra ngoài."
+  "at": "2026-10-30T08:34:25.722Z",
+  "note": "review lead (lượt 2: đổi tên hằng QUOTATION_SCHEMA_UNAVAILABLE hết trùng metric; merge main có #1088): báo giá sỉ P1b — engine tất định (VND số nguyên, chỉ VND do chưa có tỷ giá), ship/thuế NULL = chưa khai + bắt buộc căn cứ, người lập không tự duyệt (mã + CHECK CSDL), trigger bất biến bản đã duyệt/gửi, wholesale:work + phạm vi, audit có nhãn; migration 0263 chỉ thêm bảng, đã khai serve-compat; kh"
 }
