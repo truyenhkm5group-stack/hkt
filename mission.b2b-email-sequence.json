@@ -3,7 +3,7 @@
   "mission_id": "b2b-email-sequence",
   "title": "Chuỗi thư theo dõi (thư nhắc) — không mặc định, chỉ soạn nháp",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-email-seq",
@@ -33,9 +33,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-30T11:53:12.110Z",
-  "updated_at": "2026-10-30T14:04:33.337Z",
+  "updated_at": "2026-10-30T14:33:54.115Z",
   "last_heartbeat": "2026-10-30T14:00:21.227Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1103 → 4a109710a377efede8f251d455e6fe214e372034"
+  },
   "handoff": {
     "branch": "claude/b2b-email-sequence",
     "sha": "ab7594b4a4a42571571cc1dea5ba768819ff20c8",
