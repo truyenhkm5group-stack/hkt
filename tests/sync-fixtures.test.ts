@@ -628,6 +628,7 @@ import { testWholesaleIntlDiscovery } from "./wholesale-intl-discovery.test";
 import { testWholesaleConsent } from "./wholesale-consent.test";
 import { testWholesaleCatalogReadiness } from "./wholesale-catalog-readiness.test";
 import { testWholesaleQuotation } from "./wholesale-quotation.test";
+import { testWholesaleQuotationSettings } from "./wholesale-quotation-settings.test";
 import { testWholesaleEmail } from "./wholesale-email.test";
 import { testRestaurantTemplate } from "./restaurant.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
@@ -3333,6 +3334,8 @@ async function main() {
     testWholesaleCatalogReadiness();
     // P1b AI B2B: báo giá sỉ tất định — bộ tính thuần + lõi ghi trên tổ chức THẬT `bg-si` (lib/wholesale/quotation*.ts, 0263).
     await testWholesaleQuotation();
+    // Cài đặt báo giá sỉ: gợi ý trần CK / biên LN từ bảng giá sỉ đang bật, chỉ ghi khi người có wholesale:config bấm Lưu (tổ chức THẬT `bg-cd`).
+    await testWholesaleQuotationSettings();
     // E1 AI B2B: hộp thư đi email ở chế độ chạy thử — cổng chính sách, huỷ đăng ký, nhận phản hồi; tổ chức THẬT `we-a` / `we-b`.
     await testWholesaleEmail();
     await testRestaurantTemplate();

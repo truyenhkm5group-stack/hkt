@@ -218,6 +218,13 @@ gửi thẳng được.
 - `/wholesale/quotations/[id]/edit`: tạo phiên bản mới.
 - `/wholesale/quotations/new?lead=…|customer=…`: mở từ nút «Tạo báo giá» trên trang lead và trang khách.
 - `/wholesale/quotations/[id]/print`: bản in gửi khách. Chỉ đọc ẢNH CHỤP, không in giá vốn hay biên lợi nhuận.
+- Khung «Cài đặt báo giá» trên `/wholesale/quotations`: chỉ người có `wholesale:config` thấy. Có ba ô: trần CK %, biên LN gộp
+  tối thiểu %, thuế suất + căn cứ. Kèm GỢI Ý tính từ bảng giá sỉ đang bật (chủ shop 30/10/2026: «xem bảng giá sỉ»):
+  - Trần CK gợi ý = mức giảm sâu nhất so với giá lẻ, đo ở bậc «mua từ» lớn nhất. Màn hình in kèm bảng, mẫu mã và bậc đó.
+  - Biên LN gợi ý = biên gộp thấp nhất ở bậc sâu nhất, theo giá vốn sống (luật 3.13). Mẫu mã chưa có giá vốn hiện «chưa biết».
+  - Thuế: không gợi ý số.
+  - Gợi ý chỉ là chữ. Bấm «Lưu» (bắt buộc lý do) mới ghi `settings["wholesale.quotation"]` và vào nhật ký
+    `WHOLESALE_QUOTATION_POLICY_SET` (`lib/wholesale/quotation-settings.ts` · `quotation-policy.ts`).
 
 **Chưa làm / cố ý không làm.**
 - Tiền tệ khác VND: ERP chưa có nguồn tỷ giá có hiệu lực kèm căn cứ, nên CHECK chỉ cho `VND`.

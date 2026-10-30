@@ -170,6 +170,7 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   WHOLESALE_QUOTATION_SENT: "Đánh dấu đã gửi báo giá sỉ cho khách",
   WHOLESALE_QUOTATION_ACCEPTED: "Khách chấp nhận báo giá sỉ",
   WHOLESALE_QUOTATION_REJECTED: "Khách từ chối báo giá sỉ",
+  WHOLESALE_QUOTATION_POLICY_SET: "Sửa cài đặt báo giá sỉ (trần chiết khấu · biên LN tối thiểu · thuế)",
 };
 
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {
