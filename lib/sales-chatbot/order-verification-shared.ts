@@ -17,7 +17,7 @@
  *
  * Bốn trạng thái của đơn — KHÔNG đoán: thiếu căn cứ ⇒ `CẦN XÁC THỰC`, không bao giờ `ĐỦ THÔNG TIN`.
  */
-import { manualOrderGaps, manualOrderTotals } from "@/lib/constants/manual-orders";
+import { manualOrderGaps, manualOrderTotals, orderPhoneProblem } from "@/lib/constants/manual-orders";
 import { ORDER_REVIEW_SHORT_LABEL, quickConfirmKind, type OrderReviewEntry, type OrderReviewResolution } from "@/lib/constants/order-review";
 
 export const ORDER_VERIFICATION_STATES = ["ĐỦ THÔNG TIN", "CẦN XÁC THỰC", "ĐÃ XÁC NHẬN", "ĐÃ TẠO ĐƠN"] as const;
@@ -130,7 +130,7 @@ function addressCheck(gaps: readonly string[], review: readonly OrderReviewEntry
  */
 export function orderVerification(i: OrderVerificationInput): OrderVerification {
   const gaps = manualOrderGaps({ phone: i.recipient.phone, address: i.recipient.address, province: i.recipient.province, ward: i.recipient.ward }, i.itemsCount);
-  const phone: FieldCheck = gaps.includes("SĐT") ? { state: "THIẾU", reason: i.recipient.phone.trim() ? "SĐT không hợp lệ (cần 8–15 chữ số)" : "Chưa có SĐT" } : OK;
+  const phone: FieldCheck = gaps.includes("SĐT") ? { state: "THIẾU", reason: orderPhoneProblem(i.recipient.phone) ?? "SĐT không hợp lệ" } : OK;
   const address = addressCheck(gaps, i.review, i.recipient.address);
 
   // Dòng hàng: cùng phép kiểm của đường ghi (`manualOrderTotals`). Đơn giá chưa biết không đưa vào phép tính — báo riêng.

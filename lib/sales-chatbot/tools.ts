@@ -23,7 +23,7 @@ import { SHOP_SAID_PREFIX } from "@/lib/sales-chatbot/replay-shared";
 import { purchaseRoundStart } from "@/lib/sales-chatbot/purchase-round";
 import type { AiToolDef } from "@/lib/ai/provider";
 import { freeSlots, slotBookable, vnDayOffset, vnInstant, WEEKDAY_LABEL } from "@/lib/constants/booking";
-import { isManualOrderId, manualOrderGaps, manualOrderShortCode, manualOrderTotals } from "@/lib/constants/manual-orders";
+import { isManualOrderId, manualOrderGaps, manualOrderShortCode, manualOrderTotals, orderPhoneProblem } from "@/lib/constants/manual-orders";
 import { foldVnText, resolveRecipientPlace } from "@/lib/address/vn-address";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { handedOffShipmentIds, withHandoff } from "@/lib/queries/shipment-handoff";
@@ -1289,6 +1289,10 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const knownPhoneFill = typedPhone ? null : usableKnownPhone(ctx.knownPhone);
       const v = z.object({ name: z.string().trim().min(2).max(200), phone: z.string().trim().min(8).max(30), address: z.string().trim().min(5).max(500), province: z.string().trim().max(100).optional() }).safeParse({ name: typedName || ctx.customerName || "", phone: typedPhone || knownPhoneFill || fields.phone, address: fields.address, province: fields.province || undefined });
       if (!v.success) return err("Lưu khách: thiếu thông tin", "Cần họ tên, số điện thoại (8–15 số) và địa chỉ giao đầy đủ.", state, { reason: "MISSING_CONTACT", fields: v.error.issues.map((i) => i.path.map(String).join(".")) });
+      // SĐT SAI HÌNH DẠNG ⇒ KHÔNG lưu, KHÔNG lên đơn, hỏi lại khách (P0 HSLC 30/10/2026: «094655545» — 9 số — lọt luật 8–15 cũ, bot lên đơn
+      // và đơn tự «Đã xác nhận»). Cùng hàm với ô SĐT của panel đơn và công tắc «đơn đủ thông tin» (`orderPhoneProblem`).
+      const phoneProblem = orderPhoneProblem(v.data.phone);
+      if (phoneProblem) return err("Lưu khách: SĐT sai", `${phoneProblem}. KHÔNG lưu khách, KHÔNG lên đơn — hỏi lại khách số điện thoại đúng (nói rõ số khách gửi đang thiếu / thừa chữ số), KHÔNG tự thêm / bớt chữ số.`, state, { reason: "MISSING_CONTACT", fields: ["phone"] });
       // Giữ mốc lần đầu khi khách sửa tên / địa chỉ mà vẫn cùng SĐT — một SĐT chỉ «để lại» một lần.
       const firstAt = state.customer?.phone === v.data.phone && state.customer.at ? state.customer.at : new Date().toISOString();
       if (simulated) {
@@ -1350,6 +1354,9 @@ async function executeToolCore(name: string, rawInput: unknown, ctx: ToolContext
       const base: Recipient = existing?.recipient ?? { name: state.customer.name, phone: state.customer.phone, address: state.customer.address, province: state.customer.province };
       const lines = v.data.items ? mergeLines(v.data.items.map((i) => ({ variantId: i.variant_id, quantity: i.quantity }))) : existing!.lines;
       const recipient = recipientFrom(v.data, base);
+      // Cả SĐT khách đã lưu TRƯỚC bản vá (hội thoại đang dở) cũng đi qua cổng này — đơn không bao giờ lên với SĐT sai hình dạng.
+      const recipientPhoneProblem = orderPhoneProblem(recipient.phone);
+      if (recipientPhoneProblem) return err("Đơn nháp: SĐT người nhận sai", `${recipientPhoneProblem}. KHÔNG lên / sửa đơn — hỏi lại khách số điện thoại đúng, KHÔNG tự thêm / bớt chữ số.`, state, { reason: "BAD_INPUT", fields: ["recipient_phone"] });
       /*
         HỘI THOẠI ĐÃ CÓ ĐƠN CỦA NGƯỜI (P0 HSLC 24/10/2026 — #D2A8DE9B → #A5CC67E2, #1BFC04D7 → #6CBDB6B5): nhân viên lên đơn rồi trả hội
         thoại cho AI, bot không thấy đơn đó (chỉ nằm ở `orders.sales_conversation_id`) ⇒ tạo + tự chốt đơn thứ hai. Đơn MỚI của bot đọc

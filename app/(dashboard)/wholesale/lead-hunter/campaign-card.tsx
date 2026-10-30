@@ -21,6 +21,10 @@ const STATUS_TONE: Record<string, string> = {
   COMPLETED: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200",
 };
 
+function money(micros: number, rate: number): string {
+  return `${(micros / 1e6).toLocaleString("vi-VN", { maximumFractionDigits: 2 })} US$ ≈ ${formatNumber(Math.round((micros / 1e6) * rate))} ₫`;
+}
+
 export function CampaignCard({ c, usdToVnd }: { c: CampaignProgress; usdToVnd: number }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -78,6 +82,14 @@ export function CampaignCard({ c, usdToVnd }: { c: CampaignProgress; usdToVnd: n
             </div>
           ))}
         </dl>
+      ) : null}
+      {c.estimate ? (
+        <div className="rounded-md bg-muted/40 p-2 text-xs">
+          <div>
+            Ước tính trước khi quét: <b className="tabular-nums">{formatNumber(c.estimate.cellsToScan)}</b> truy vấn × {c.estimate.searchSku} — ít nhất <b>{money(c.estimate.minMicros, usdToVnd)}</b> · điển hình <b>{money(c.estimate.typicalMicros, usdToVnd)}</b> · nhiều nhất <b>{money(c.estimate.maxMicros, usdToVnd)}</b>
+          </div>
+          <div className="text-[11px] text-muted-foreground">{c.estimate.assumptions} Chưa trừ ô vừa quét và lượt miễn phí hằng tháng của Google; trần chi tiêu ngày / tháng vẫn chặn bất kể ước tính.</div>
+        </div>
       ) : null}
       {c.pauseReason ? <p className="text-xs text-amber-700 dark:text-amber-300">{PAUSE_REASON_LABEL[c.pauseReason as PauseReason] ?? c.pauseReason}</p> : null}
       {c.lastError && c.status !== "COMPLETED" ? <p className="truncate text-[11px] text-muted-foreground" title={c.lastError}>Lỗi gần nhất: {c.lastError}</p> : null}

@@ -1,4 +1,5 @@
 import { normalizeProvince } from "@/lib/constants/vn-regions";
+import { intlCountryByName, intlSearchProvince } from "@/lib/wholesale/areas-intl";
 import { foldVietnamese } from "@/lib/wholesale/segments";
 
 /**
@@ -28,9 +29,25 @@ import { foldVietnamese } from "@/lib/wholesale/segments";
  * coi là KHÔNG có biển — không đoán.
  */
 
-/** `coastal`: tỉnh CŨ của khu vực giáp biển — xem `scanTier`. */
-export type SearchArea = { code: string; name: string; coastal: boolean };
-export type SearchProvince = { key: string; label: string; queryName: string; areas: SearchArea[] };
+/**
+ * Ngôn ngữ / vùng của một lượt tìm Places API (New) và các ngôn ngữ TỪ KHOÁ áp được cho ô này.
+ *  · `languageCode` — ngôn ngữ của KẾT QUẢ (tên, địa chỉ) Google trả về.
+ *  · `regionCode`   — mã vùng CLDR hai chữ, thiên vị kết quả theo nước.
+ *  · `keywordLangs` — nhóm từ khoá mang `lang` chỉ sinh ô ở khu vực có ngôn ngữ ấy (từ khoá Nhật không quét Sydney).
+ *    Từ khoá KHÔNG mang `lang` (từ khoá tự khai, chiến dịch cũ) áp mọi nơi — đúng hành vi trước khi có quét quốc tế.
+ */
+export type SearchLocale = { languageCode: string; regionCode: string; keywordLangs: readonly string[] };
+
+/** Tỉnh trong nước: kết quả tiếng Việt, vùng VN, từ khoá tiếng Việt — đúng thứ client đã gửi từ ngày đầu. */
+export const VN_LOCALE: SearchLocale = { languageCode: "vi", regionCode: "VN", keywordLangs: ["vi"] };
+
+/**
+ * `coastal`: tỉnh CŨ của khu vực giáp biển — xem `scanTier`. `center`: tâm + bán kính thiên vị (`locationBias`) — chỉ khu
+ * vực quốc tế có (areas-intl.ts); khu vực trong nước tìm theo tên như trước.
+ */
+export type SearchArea = { code: string; name: string; coastal: boolean; center?: { lat: number; lng: number; radiusM: number } };
+/** `locale` thiếu ⇒ `VN_LOCALE` (mọi ảnh chụp tỉnh trong chiến dịch cũ). */
+export type SearchProvince = { key: string; label: string; queryName: string; areas: SearchArea[]; locale?: SearchLocale };
 
 /** `coastal`: các tên khu vực ven biển trong `list` (`"ALL"` = cả tỉnh); tên còn lại là KHÔNG có biển. */
 function areas(list: string[], coastal: readonly string[] | "ALL" = []): SearchArea[] {
@@ -146,6 +163,11 @@ export function searchProvince(key: string): SearchProvince | null {
   return PROVINCE_BY_KEY.get(normalizeProvince(key)) ?? null;
 }
 
+/** Ngôn ngữ / vùng của một tỉnh: ảnh chụp mang `locale` thì dùng, không thì tra nước quốc tế, còn lại là trong nước. */
+export function searchLocaleOf(p: Pick<SearchProvince, "key" | "locale">): SearchLocale {
+  return p.locale ?? intlSearchProvince(p.key)?.locale ?? VN_LOCALE;
+}
+
 // ─── Thứ tự quét ───
 
 export type ScanTier = 1 | 2 | 3;
@@ -203,20 +225,23 @@ export function parseCustomAreas(text: string | null | undefined): { provinces: 
     if (!line) continue;
     const [provPart, areaPart] = line.includes(":") ? [line.slice(0, line.indexOf(":")), line.slice(line.indexOf(":") + 1)] : [line, ""];
     const label = provPart.trim();
-    const key = normalizeProvince(label);
+    // Tên nước («Nhật Bản», «Japan»…) ⇒ khoá quốc tế, để ô mang đúng ngôn ngữ / vùng của nước đó (areas-intl.ts).
+    const key = intlCountryByName(label)?.key ?? normalizeProvince(label);
     if (!key || label.length > 60) {
       invalid.push(line.slice(0, 80));
       continue;
     }
-    const known = PROVINCE_BY_KEY.get(key);
-    const prov = out.get(key) ?? { key, label: known?.label ?? label, queryName: known?.queryName ?? label, areas: [] };
+    const known = PROVINCE_BY_KEY.get(key) ?? intlSearchProvince(key);
+    const prov: SearchProvince = out.get(key) ?? { key, label: known?.label ?? label, queryName: known?.queryName ?? label, areas: [], ...(known?.locale ? { locale: known.locale } : {}) };
     const names = areaPart
       .split(/[,;]+/)
       .map((s) => s.trim())
       .filter((s) => s.length > 0 && s.length <= 60);
     for (const name of names.length ? names : [prov.queryName]) {
       const code = areaCode(name);
-      if (code && !prov.areas.some((a) => a.code === code)) prov.areas.push({ code, name, coastal: areaIsCoastal(key, { code }) });
+      // Khu vực quốc tế có trong danh sách chuẩn ⇒ mang theo tâm thiên vị; khu vực trong nước giữ đúng tên người gõ như trước.
+      const center = known?.locale ? known.areas.find((a) => a.code === code)?.center : undefined;
+      if (code && !prov.areas.some((a) => a.code === code)) prov.areas.push({ code, name, coastal: areaIsCoastal(key, { code }), ...(center ? { center } : {}) });
     }
     out.set(key, prov);
   }

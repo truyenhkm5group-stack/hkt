@@ -1,7 +1,10 @@
-import { nearbySearch, placeDetails, textSearch, type PlaceRecord, type PlacesCallMeta, type PlacesClientDeps, type PlacesClientOptions, type PlacesErrorKind } from "@/lib/integrations/google-places/client";
+import { nearbySearch, placeDetails, textSearch, type PlaceRecord, type PlacesCallMeta, type PlacesClientDeps, type PlacesClientOptions, type PlacesErrorKind, type PlacesLocale } from "@/lib/integrations/google-places/client";
 import { parseCsv } from "@/lib/constants/landing";
 import type { DiscoveryTier } from "@/lib/wholesale/config";
 import type { LeadSourceKey } from "@/lib/wholesale/constants";
+import { EMAIL_MX_MAX_DOMAINS } from "@/lib/constants/wholesale-email";
+import { websiteDomain } from "@/lib/wholesale/dedupe";
+import { checkEmailDomains, systemEmailDns } from "@/lib/wholesale/email-discovery";
 import { enrichFromWebsite, type EnrichResult, type WebsiteDeps } from "@/lib/wholesale/website";
 import { foldVietnamese } from "@/lib/wholesale/segments";
 
@@ -27,8 +30,12 @@ export type LeadSourceProvider = {
   billable: boolean;
 };
 
+/**
+ * `locale` / `bias` chỉ có ở ô QUỐC TẾ (areas-intl.ts::intlCellContext); thiếu ⇒ nhà cung cấp gửi đúng như trước (`vi` / `VN`,
+ * không thiên vị toạ độ).
+ */
 export type DiscoveryRequest =
-  | { mode: "TEXT"; textQuery: string; tier: DiscoveryTier; pageToken: string | null }
+  | { mode: "TEXT"; textQuery: string; tier: DiscoveryTier; pageToken: string | null; locale?: PlacesLocale | null; bias?: { lat: number; lng: number; radiusM: number } | null }
   | { mode: "NEARBY"; tier: DiscoveryTier; includedTypes: string[]; center: { lat: number; lng: number }; radiusM: number };
 
 export type DiscoveryPage =
@@ -40,7 +47,7 @@ export type DetailsResult = { ok: true; place: PlaceRecord; meta: PlacesCallMeta
 export type DiscoveryProvider = LeadSourceProvider & {
   role: "DISCOVERY";
   search(req: DiscoveryRequest): Promise<DiscoveryPage>;
-  details(placeId: string, full: boolean): Promise<DetailsResult>;
+  details(placeId: string, full: boolean, locale?: PlacesLocale | null): Promise<DetailsResult>;
 };
 
 export type EnrichmentProvider = LeadSourceProvider & {
@@ -76,17 +83,20 @@ export function googlePlacesProvider(opts: PlacesClientOptions, deps: PlacesClie
     googleSourced: true,
     billable: true,
     async search(req) {
-      if (req.mode === "TEXT") return textSearch(opts, { textQuery: req.textQuery, tier: req.tier, pageToken: req.pageToken }, deps);
+      if (req.mode === "TEXT") return textSearch(opts, { textQuery: req.textQuery, tier: req.tier, pageToken: req.pageToken, locale: req.locale ?? null, bias: req.bias ?? null }, deps);
       const r = await nearbySearch(opts, { tier: req.tier, includedTypes: req.includedTypes, center: req.center, radiusM: req.radiusM }, deps);
       return r.ok ? { ok: true, places: r.places, nextPageToken: null, meta: r.meta } : r;
     },
-    details(placeId, full) {
-      return placeDetails(opts, { placeId, full }, deps);
+    details(placeId, full, locale) {
+      return placeDetails(opts, { placeId, full, locale: locale ?? null }, deps);
     },
   };
 }
 
-/** Website CỦA CHÍNH doanh nghiệp — chỉ trang công khai, có rào SSRF + robots.txt (website.ts). */
+/**
+ * Website CỦA CHÍNH doanh nghiệp — chỉ trang công khai, có rào SSRF + robots.txt (website.ts). Email tìm được thì hỏi DNS
+ * xem tên miền có nhận thư không (MX / A — lib/wholesale/email-discovery.ts); KHÔNG gửi thư, KHÔNG dò SMTP.
+ */
 export function websiteEnrichmentProvider(deps: WebsiteDeps = {}): EnrichmentProvider {
   return {
     key: "WEBSITE",
@@ -94,8 +104,12 @@ export function websiteEnrichmentProvider(deps: WebsiteDeps = {}): EnrichmentPro
     role: "ENRICHMENT",
     googleSourced: false,
     billable: false,
-    enrich(website, opts) {
-      return enrichFromWebsite(website, opts, deps);
+    async enrich(website, opts) {
+      const r = await enrichFromWebsite(website, opts, deps);
+      const emails = r.findings.filter((f) => f.kind === "EMAIL").map((f) => f.value);
+      if (!emails.length) return r;
+      const emailDomains = await checkEmailDomains(emails, deps.dns ?? systemEmailDns(), { siteDomain: websiteDomain(website), maxDomains: EMAIL_MX_MAX_DOMAINS });
+      return { ...r, emailDomains };
     },
   };
 }

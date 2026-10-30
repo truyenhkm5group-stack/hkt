@@ -7,8 +7,10 @@ import { openActiveConnection } from "@/lib/connectors/service";
 import { formatDate, formatNumber } from "@/lib/format";
 import { apiUsageSummary, campaignProgressList, coverageByProvince } from "@/lib/queries/wholesale";
 import { provinceScanTier, SEARCH_PROVINCES, scanTier } from "@/lib/wholesale/areas";
+import { INTL_SEARCH_PROVINCES } from "@/lib/wholesale/areas-intl";
+import { ALL_KEYWORD_GROUPS } from "@/lib/wholesale/keywords-intl";
 import { ensureTemplateCampaign, hslcTemplateValues } from "@/lib/wholesale/campaigns";
-import { DEFAULT_KEYWORD_GROUPS, microsToVnd } from "@/lib/wholesale/config";
+import { microsToVnd } from "@/lib/wholesale/config";
 import { getLeadHunterConfig } from "@/lib/wholesale/store";
 import { WholesaleNav } from "@/app/(dashboard)/wholesale/wholesale-nav";
 import { AutoRefresh } from "@/app/(dashboard)/wholesale/lead-hunter/auto-refresh";
@@ -28,7 +30,7 @@ export default async function LeadHunterPage() {
   // Dựng mẫu HSLC nếu chưa có (idempotent). CSDL chỉ đọc / lỗi ghi không được làm hỏng trang.
   await ensureTemplateCampaign().catch(() => undefined);
   const cfg = await getLeadHunterConfig();
-  const [campaigns, coverage, usage, conn] = await Promise.all([campaignProgressList(), coverageByProvince(cfg), apiUsageSummary(), openActiveConnection("google-places")]);
+  const [campaigns, coverage, usage, conn] = await Promise.all([campaignProgressList(cfg), coverageByProvince(cfg), apiUsageSummary(), openActiveConnection("google-places")]);
   const running = campaigns.some((c) => c.status === "RUNNING");
   const template = hslcTemplateValues();
   const vnd = (m: number) => {
@@ -40,7 +42,7 @@ export default async function LeadHunterPage() {
       <PageHeader
         eyebrow="Săn khách sỉ"
         title="Săn khách sỉ — chiến dịch quét"
-        description="Tìm nhà hàng / quán / khách sạn / cửa hàng thực phẩm trên Google Places theo từ khoá × tỉnh × khu vực. Quét chạy nền, tự dừng khi chạm trần chi phí; lead mới chỉ vào hàng đợi khi người duyệt."
+        description="Tìm nhà hàng / quán / khách sạn / cửa hàng thực phẩm — và khách sỉ nước ngoài (nhà nhập khẩu, bán sỉ, HORECA) — trên Google Places theo từ khoá × tỉnh (hoặc nước) × khu vực. Quét chạy nền, tự dừng khi chạm trần chi phí; lead mới chỉ vào hàng đợi khi người duyệt."
         hint="Quy trình: Tìm (Text Search, trường gọn) → khử trùng Place ID → lọc đóng cửa / sai nhóm / từ khoá loại trừ → lấy SĐT & website (Place Details) chỉ cho địa điểm qua lọc → chấm điểm → «Đủ điều kiện» → hàng đợi liên hệ."
         actions={<AutoRefresh active={running} seconds={10} />}
       />
@@ -63,7 +65,7 @@ export default async function LeadHunterPage() {
         ]}
       />
 
-      <SectionCard title="Chiến dịch" description="Ba mẫu «HSLC – Wholesale F&B Prospects» theo thứ tự quét: ① Hà Nội + TP.HCM → ② vùng không có biển → ③ ven biển. Mẫu KHÔNG tự chạy — bấm «Dùng mẫu» để tạo bản nháp, xem trước rồi mới «Bắt đầu quét».">
+      <SectionCard title="Chiến dịch" description="Ba mẫu «HSLC – Wholesale F&B Prospects» theo thứ tự quét: ① Hà Nội + TP.HCM → ② vùng không có biển → ③ ven biển; và mẫu thử «HSLC – International Seafood Importers (pilot)» cho khách sỉ nước ngoài. Mẫu KHÔNG tự chạy — bấm «Dùng mẫu» để tạo bản nháp, xem ước tính chi phí rồi mới «Bắt đầu quét».">
         <div className="grid gap-3 lg:grid-cols-2">
           {campaigns.map((c) => (
             <CampaignCard key={c.id} c={c} usdToVnd={cfg.usdToVnd} />
@@ -74,7 +76,8 @@ export default async function LeadHunterPage() {
       <SectionCard title="Tạo chiến dịch mới" description="Bấm «Xem trước truy vấn» để thấy số truy vấn, truy vấn mẫu và chi phí ước tính trước khi lưu.">
         <CampaignForm
           provinces={SEARCH_PROVINCES.map((p) => ({ key: p.key, label: p.label, tier: provinceScanTier(p, cfg.scanPriority), areas: p.areas.map((a) => ({ code: a.code, name: a.name, tier: scanTier(p.key, a, cfg.scanPriority) })) }))}
-          keywordGroups={DEFAULT_KEYWORD_GROUPS.map((g) => ({ key: g.key, label: g.label, keywords: [...g.keywords], enabled: g.enabled }))}
+          intlCountries={INTL_SEARCH_PROVINCES.map((p) => ({ key: p.key, label: p.label, areas: p.areas.map((a) => ({ code: a.code, name: a.name })) }))}
+          keywordGroups={ALL_KEYWORD_GROUPS.map((g) => ({ key: g.key, label: g.label, keywords: [...g.keywords], enabled: g.enabled, lang: g.lang ?? null }))}
           defaults={{ name: `${template.name} · ${formatDate(new Date())}`, productFocus: template.productFocus, excludeKeywords: template.excludeKeywords.join(", "), targetSegments: [...template.targetSegments], maxLeads: template.maxLeads, discoveryTier: cfg.discoveryTier }}
         />
       </SectionCard>

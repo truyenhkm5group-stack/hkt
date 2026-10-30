@@ -419,6 +419,7 @@ import { testOrgCatalogDb, testOrgCatalogPure } from "./org-catalog.test";
 import { testVnAddress } from "./vn-address.test";
 import { testAddressNormalizePure, testAddressNormalizeTools } from "./address-normalize.test";
 import { testAddressWardExplicitPure, testAddressWardExplicitTools } from "./address-ward-explicit.test";
+import { testBotPhoneCheckPure, testBotPhoneCheckTools } from "./bot-phone-check.test";
 import { testAddressReaskAudit } from "./address-reask-audit.test";
 import { testOrderDupScan } from "./order-dup-scan.test";
 import { testCartUnitProbe } from "./cart-unit-probe.test";
@@ -621,6 +622,8 @@ import { testChatOrder } from "./chat-order.test";
 import { testCarrierGhtk } from "./carrier-ghtk.test";
 import { testFashionCodF3 } from "./fashion-cod-f3.test";
 import { testWholesaleLeadHunter } from "./wholesale-lead-hunter.test";
+import { testWholesaleEmailDiscovery } from "./wholesale-email-discovery.test";
+import { testWholesaleIntlDiscovery } from "./wholesale-intl-discovery.test";
 import { testWholesaleConsent } from "./wholesale-consent.test";
 import { testWholesaleCatalogReadiness } from "./wholesale-catalog-readiness.test";
 import { testWholesaleQuotation } from "./wholesale-quotation.test";
@@ -2561,6 +2564,9 @@ async function main() {
     // một câu ngắn, không danh sách 6 phường · phần đã hỏi không hỏi lại · hàng rào chữ gửi khách; ops address-reask-audit đo phạm vi.
     testAddressWardExplicitPure();
     await testAddressWardExplicitTools();
+    // P0 HSLC 30/10/2026 (ca «Tài Tâm»): SĐT 9 số không được lưu khách / lên đơn / tô OK — một luật `orderPhoneProblem`.
+    testBotPhoneCheckPure();
+    await testBotPhoneCheckTools();
     await testAddressReaskAudit();
     // P0 HSLC 24/10/2026: ops order-dup-scan — quét cặp đơn nghi trùng (form nhân viên → bot tự chốt).
     await testOrderDupScan();
@@ -3318,6 +3324,8 @@ async function main() {
     await testShippingRouting();
     await testFashionCodF3();
     await testWholesaleLeadHunter();
+    await testWholesaleEmailDiscovery();
+    await testWholesaleIntlDiscovery();
     await testWholesaleConsent();
     // P1c AI B2B: cổng sẵn sàng danh mục bán sỉ + xuất khẩu — hàm thuần (lib/wholesale/catalog-readiness.ts).
     testWholesaleCatalogReadiness();

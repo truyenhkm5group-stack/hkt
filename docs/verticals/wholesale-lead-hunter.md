@@ -13,9 +13,11 @@ Chiến dịch → kế hoạch ô (từ khoá × tỉnh × khu vực) → Text 
 → Place Details CHỈ cho địa điểm qua lọc (SĐT · website · sao · số đánh giá)
 → chuẩn hoá SĐT → lọc theo chiến dịch (bắt buộc SĐT / website, sao / đánh giá tối thiểu)
 → khử trùng SĐT → tên miền → chấm điểm → tự lên «Đủ điều kiện» (≥ ngưỡng, có SĐT)
-→ (tuỳ chọn) đọc trang liên hệ công khai của website
+→ (tuỳ chọn) đọc trang liên hệ công khai của website + thu thập email B2B có bằng chứng (mục 4c)
 → Hàng đợi liên hệ (người duyệt, người gửi) → pipeline → «Chốt được» → chuyển thành khách hàng ERP → doanh thu
 ```
+
+Từ 27/10/2026 cùng luồng này quét cả **khách sỉ nước ngoài**: «tỉnh» là nước, «khu vực» là thành phố (mục 4d).
 
 Hệ thống không bao giờ tự gửi tin. Lead chỉ vào hàng đợi khi người bấm «Xếp hàng liên hệ» hoặc khi cấu hình đặt
 `AUTO_PREPARE`. Ở mức `AUTO_PREPARE`, hệ thống chỉ soạn sẵn lời chào theo mẫu, và người vẫn phải duyệt rồi gửi.
@@ -29,8 +31,8 @@ Hệ thống không bao giờ tự gửi tin. Lead chỉ vào hàng đợi khi n
 | Client Places API (New) | `lib/integrations/google-places/client.ts` |
 | Nguồn lead (abstraction) | `lib/wholesale/providers.ts`: `DiscoveryProvider` (Google Places) · `EnrichmentProvider` (website) · `ImportProvider` (CSV) |
 | Lõi quét nền | `lib/wholesale/engine.ts` (`runLeadHunterTick`) · job `wholesale-leads` (`lib/wholesale/job.ts`, `lib/sync/jobs.ts`) |
-| Hàm thuần | `phone.ts` · `segments.ts` · `scoring.ts` · `query-plan.ts` · `areas.ts` · `dedupe.ts` · `website-parse.ts` · `opener.ts` · `config.ts` · `contactability.ts` · `temperature.ts` |
-| Lõi ghi (quyền → zod → ghi → audit) | `campaigns.ts` · `leads.ts` · `outreach.ts` · `consents.ts` · `config-core.ts`; vỏ server action `lib/actions/wholesale.ts` |
+| Hàm thuần | `phone.ts` · `segments.ts` · `scoring.ts` · `query-plan.ts` · `areas.ts` · `dedupe.ts` · `website-parse.ts` · `email-discovery.ts` · `opener.ts` · `config.ts` · `contactability.ts` · `temperature.ts` |
+| Lõi ghi (quyền → zod → ghi → audit) | `campaigns.ts` · `leads.ts` · `outreach.ts` · `consents.ts` · `config-core.ts` · `email-store.ts`; vỏ server action `lib/actions/wholesale.ts` |
 | Truy vấn | `lib/queries/wholesale.ts` · `lib/queries/wholesale-export.ts` |
 | Trang | `/wholesale/leads` · `/wholesale/leads/[id]` · `/wholesale/outreach` · `/wholesale/lead-hunter` · `/wholesale/dashboard` · `/wholesale/settings` · `GET /api/wholesale/export` |
 
@@ -51,7 +53,7 @@ cộng `REVENUE_RECOGNIZED_ON_DELIVERY`).
 | `wholesale_campaigns` · `wholesale_search_cells` · `wholesale_campaign_cells` | HSLC | Chiến dịch, ô phủ toàn cục, hàng đợi ô của từng chiến dịch (khoá thuê `locked_until`, `page_token`). |
 | `wholesale_place_hits` | HSLC | Mỗi (chiến dịch, Place ID) một dòng, kèm kết cục (`NEW_LEAD` · `EXISTING_LEAD` · `FILTERED` · `SUPPRESSED` · `DUPLICATE`). |
 | `wholesale_lead_activities` | HSLC | Lịch sử: tìm thấy, gọi, ghi chú, trạng thái, giao việc, liên hệ, chuyển đổi. Người làm lưu bằng khoá tài khoản (luật 34). |
-| `wholesale_lead_enrichments` | HSLC | Phát hiện từ website, mỗi dòng kèm `source_url`. |
+| `wholesale_lead_enrichments` | HSLC | Phát hiện từ website, mỗi dòng kèm `source_url`. Email = kind `EMAIL` (một dòng mỗi email). Vai trò, trạng thái MX và ngày xác minh của email nằm ở `meta.emailChecks` của dòng nhật ký `ENRICHED` (mục 4c). |
 | `wholesale_outreach_items` | HSLC | Hàng đợi liên hệ. Chỉ mục duy nhất bảo đảm mỗi lead chỉ có một lời chào đang mở trên mỗi kênh. |
 | `wholesale_suppressions` | HSLC | Danh sách KHÔNG LIÊN HỆ, khoá theo SĐT, tên miền, Place ID và email (email từ 0261, lưu dạng chuẩn hoá). |
 | `wholesale_contact_consents` | HSLC | Nhật ký ĐỒNG Ý LIÊN HỆ (0261): bằng chứng khách cho phép liên hệ một kênh, chỉ thêm. Mục 4b. |
@@ -127,6 +129,65 @@ Hôm nay chưa có kênh tự gửi nào (mức `AUTO_SEND` vẫn khoá). Kênh 
 "AUTOMATED")` trước mỗi lượt gửi. Trang lead có khối «Đồng ý liên hệ»: kết luận của từng kênh, nhật ký (kể cả dòng đã thu
 hồi), form ghi và nút thu hồi. Quyền ghi / thu hồi là `wholesale:work` cộng phạm vi dữ liệu của lead; không có khoá quyền mới.
 
+## 4c. Làm giàu website & thu thập email B2B (chủ shop chốt 27/10/2026)
+
+> **Email thu thập công khai ≠ đồng ý nhận tiếp thị — chưa được gửi tự động.** ERP chỉ THU THẬP và KIỂM KỸ THUẬT. Không
+> có đường nào gửi email tới các địa chỉ này; kênh Email trong hàng đợi liên hệ vẫn do người duyệt và người tự gửi. Bộ
+> thu thập KHÔNG ghi dòng đồng ý nào (mục 4b); email máy điền vẫn qua danh sách chặn và khử trùng email như mọi email.
+
+**Đọc gì.** Trang chủ + tối đa `maxPages − 1` trang CÙNG website (Cấu hình › Đọc website, 1–5 trang). Trang kế tiếp chọn
+theo đường dẫn và chữ trên liên kết (`rankContactPages`): liên hệ (`contact`, `lien-he`…) › đại lý / bán sỉ / mua hàng
+(`wholesale`, `distributor`, `b2b`, `purchasing`, `procurement`, `dai-ly`, `ban-si`…) › giới thiệu (`about`,
+`gioi-thieu`, `ve-chung-toi`) › `impressum`. Liên kết ở `<footer>` được cộng điểm. Trang không khớp mẫu nào thì không
+đọc — bộ đọc không bò khắp website. Bỏ trang đăng nhập / giỏ hàng / tệp.
+
+**Không theo sang tên miền khác.** Mọi request (kể cả bước chuyển hướng mà rào SSRF tự đi) qua một bộ gác chỉ cho phép
+CÙNG website (khác `www.` vẫn là cùng). Rào SSRF vẫn là MỘT bản — `fetchPublicUrl`; bộ gác chỉ thay hàm `fetch` nó gọi,
+nên request tới website khác không bao giờ rời máy. Trang chủ chuyển hẳn sang tên miền khác ⇒ `FAILED`, ghi rõ tên miền.
+`robots.txt` (nhóm `*`, hoặc nhóm mang tên bot) cấm đường nào thì không tải đường đó.
+
+**Trích email** (`extractEmailCandidates`): `mailto:` (nhiều địa chỉ, bỏ `?subject`), chữ trên trang, dạng che
+(`name [at] domain [dot] com`, `name(at)domain.com`, `name at domain dot com` — chữ «at» trần không kèm «dot» thì KHÔNG
+dịch), thực thể HTML (`&#64;`, `&#x40;`, `&commat;`), email Cloudflare che (`data-cfemail`), JSON-LD (`email` ở
+Organization / contactPoint). Loại: email trong `<script>` thường / chú thích HTML, tên tệp ảnh (`logo@2x.png`), tên
+miền mẫu (example.*, domain.com…), dịch vụ ghi lỗi (sentry, wixpress), hộp thư hệ thống (`noreply`…), mã băm, hộp thư
+dùng một lần (mailinator, yopmail…). Trần 20 email / trang, 20 / website.
+
+**Vai trò** (`classifyEmailRole`, theo phần trước @): `PURCHASING` (purchasing · procurement · buyer · thumua ·
+mua-hang · nhap-hang) › `SALES` (sales · kinhdoanh · b2b · wholesale · export · dai-ly · ban-si…) › `GENERAL` (info ·
+contact · hello · lienhe · admin · hotro · datban…; hộp thư mang tên thương hiệu như `haisanxanh@gmail.com` của
+haisanxanh.vn cũng là liên hệ chung) › `PERSONAL` (dạng họ tên: `lan.nguyen`, `nguyenvana` — «có thể», là phỏng đoán) ›
+`OTHER` (kế toán, tuyển dụng, marketing, chuỗi không đọc được).
+
+**Kiểm kỹ thuật — KHÔNG gửi thư** (`checkEmailDomain`): chỉ hỏi DNS. Có MX ⇒ `VALID_MX`; không MX nhưng có A/AAAA ⇒
+`VALID_MX` (MX ngầm định, RFC 5321 §5.1); tên miền không tồn tại, không MX lẫn A, hoặc «null MX» (RFC 7505) ⇒ `NO_MX`;
+DNS lỗi / quá giờ ⇒ `UNKNOWN` (CHƯA BIẾT, không phải hỏng). Tối đa 5 tên miền / website (tên miền website trước), mỗi
+tên miền hỏi một lần, trần 2,5 giây. **Tuyệt đối không mở kết nối SMTP, không dò RCPT / VRFY** — đó là hành vi của kẻ
+gửi thư rác và làm IP máy chủ vào danh sách đen.
+
+**Email tốt nhất** (`pickBestEmail`): vai trò (mua hàng › kinh doanh › liên hệ chung › cá nhân) › cùng tên miền website ›
+`VALID_MX` › nguồn chắc hơn (mailto / JSON-LD / Cloudflare › chữ › dạng che). `OTHER` và `NO_MX` không bao giờ được chọn.
+Ghi vào `wholesale_leads.email` CHỈ khi ô trống, hoặc giá trị đang có do CHÍNH MÁY điền ở lượt trước
+(`meta.emailFilled`; lead nguồn Google thì giá trị trùng một phát hiện cũ cũng là của máy). Ô nhân viên đã sửa
+(`staff_edited_fields`) không bao giờ bị đè; email từ tệp nhập không bị thay.
+
+**Chỗ lưu (không migration).** Mỗi email một dòng `wholesale_lead_enrichments` (kind `EMAIL`, `source_url`). Bảng này
+không có cột jsonb nên vai trò + MX + nguồn + `emailVerifiedAt` của MỖI LƯỢT QUÉT nằm ở `meta` dòng nhật ký `ENRICHED`
+(`emailChecks`, `emailBest`, `emailFilled`, `emailDiscoveryVersion`). Màn hình đọc lượt MỚI NHẤT; email nhân viên tự gõ
+chưa qua lượt quét nào thì trạng thái là CHƯA BIẾT, không được đếm là hợp lệ.
+
+**Chạy hàng loạt.** Nút «✉ Thu thập email» ở `/wholesale/leads` (quyền `wholesale:scan`) xếp tối đa 200 lead / lần
+(trần 500) có website, chưa có email, chưa quét trong `EMAIL_RESCAN_DAYS` = 30 ngày, không phải «Không liên hệ» / «Đã
+chốt», website không phải Facebook / Zalo / host dùng chung. Xếp hàng = `website_status = 'PENDING'`; job
+`wholesale-leads` đọc dần vài lead mỗi lượt và chỉ chạy khi cờ «Đọc website» đang bật. Lead đang chờ không bị xếp lại;
+«quét lại sau» = `website_checked_at + 30 ngày` (không có cột riêng). Thuần quy tắc — không tốn token AI, không tốn
+tiền API. Lead mới có website vẫn tự vào hàng như trước (`finalizeLead`).
+
+**Màn hình.** `/wholesale/leads`: email + vai trò + trạng thái tên miền dưới cột Liên hệ; bộ lọc «Email» (có / chưa /
+tên miền nhận thư / không nhận thư / theo vai trò). `/wholesale/leads/[id]`: bảng «Email tìm được trên website» (vai trò ·
+tên miền · trang nguồn · cách lấy · ngày xác minh; email không còn ở lượt mới nhất vẫn hiện, MX = chưa biết).
+`/wholesale/dashboard`: «Lead có email hợp lệ / có website / tổng lead sẵn sàng» (ảnh chụp hiện tại, không theo kỳ).
+
 ## 4a. Khách hợp với HSLC lúc này (chủ shop chốt 05/10/2026)
 
 **Hàng hoá.** Danh mục HSLC đọc ngày 05/10/2026 gồm: chả mực giã tay, chả cá thu, nem hải sản tôm bề bề, ruốc bông tôm,
@@ -173,6 +234,94 @@ loại» với lý do `COMPETITOR`, không xoá. Chủ shop sửa mặt hàng / 
 - gần 0 khi có từ 3 điểm bán cùng thương hiệu trở lên.
 
 Hai điểm bán (một chi nhánh) vẫn được coi là cơ sở vừa.
+
+## 4d. Khách sỉ nước ngoài và phân khúc B2B (chủ shop chốt 27/10/2026)
+
+Chủ shop ưu tiên **tìm khách tiềm năng** — cả trong nước lẫn nước ngoài — bằng đúng bộ quét Google Places đang chạy.
+Phần này **chưa gửi gì**: lead quốc tế đi Tìm thấy → Đủ điều kiện (người duyệt) như lead trong nước.
+
+**Vùng quét quốc tế** (`lib/wholesale/areas-intl.ts`). Cùng cấu trúc `SearchProvince` với `areas.ts`, nên kế hoạch ô,
+hàng đợi, trần chi tiêu, khử trùng và chấm điểm đi nguyên một đường, không có lõi thứ hai.
+
+| Nước | Khoá | Thành phố | Từ khoá áp được |
+|---|---|---|---|
+| Singapore | `intl sg` | Singapore | `en` |
+| Malaysia | `intl my` | Kuala Lumpur · Klang · George Town Penang · Johor Bahru | `en` |
+| Thái Lan | `intl th` | Bangkok · Samut Sakhon · Chiang Mai · Pattaya | `en` |
+| Nhật Bản | `intl jp` | Tokyo · Osaka · Yokohama · Nagoya · Fukuoka | `en` · `ja` |
+| Hàn Quốc | `intl kr` | Seoul · Busan · Incheon · Daegu | `en` · `ko` |
+| Đài Loan | `intl tw` | Taipei · New Taipei · Taichung · Kaohsiung · Tainan | `en` · `zh-Hant` |
+| Hồng Kông | `intl hk` | Hong Kong Island · Kowloon · New Territories | `en` · `zh-Hant` |
+| Úc | `intl au` | Sydney · Melbourne · Brisbane · Perth · Adelaide | `en` |
+| Mỹ | `intl us` | Los Angeles · Westminster California · San Jose California · Houston · Dallas · Seattle · New York · Chicago · Atlanta | `en` |
+| Canada | `intl ca` | Toronto · Vancouver · Montreal · Calgary | `en` |
+| Anh | `intl gb` | London · Birmingham · Manchester · Leeds | `en` |
+| Đức | `intl de` | Berlin · Hamburg · Frankfurt · Munich · Leipzig | `en` · `de` |
+| Pháp | `intl fr` | Paris · Rungis · Marseille · Lyon | `en` · `fr` |
+| Hà Lan | `intl nl` | Amsterdam · Rotterdam · The Hague | `en` |
+| UAE | `intl ae` | Dubai · Abu Dhabi · Sharjah | `en` |
+
+- **Ô quốc tế không đụng ô trong nước.** Khoá ô là `TEXT|<từ khoá>|<khoá tỉnh>|<mã khu vực>`. Khoá nước là `intl <mã
+  ISO>`, không tỉnh VN nào bắt đầu bằng `intl `, nên «seafood importer × Tokyo» không bao giờ trùng một ô trong nước,
+  kể cả khi trùng từ khoá. Khoá ô trong nước không đổi một ký tự (có bài kiểm cho mọi từ khoá mặc định).
+- **Chữ CJK.** Khoá từ khoá cũ bỏ mọi ký tự ngoài a–z, nên «水産卸» và «食品卸» đều thành chuỗi rỗng — chung một ô.
+  `keywordFold` giữ chữ ngoài Latin; với chữ Việt / Latin nó cho ra đúng chuỗi cũ.
+- **Ngôn ngữ / vùng gửi tới Google.** Ô quốc tế gửi `regionCode` = mã nước, `languageCode = en` (ngôn ngữ của KẾT QUẢ —
+  nhân viên đọc được tiếng Anh, không đọc được tiếng Nhật / Thái), và `locationBias` hình tròn quanh tâm thành phố (chỉ
+  thiên vị, không giới hạn cứng). Ô trong nước gửi đúng như trước: `vi` / `VN`, không thiên vị toạ độ.
+- **Từ khoá theo ngôn ngữ.** Nhóm từ khoá mang `lang`: nhóm `vi` chỉ sinh ô trong nước, `en` mọi nước ngoài, bản địa chỉ
+  nước dùng tiếng ấy. Từ khoá tự khai (không có `lang`) áp mọi nơi như trước.
+- **Khu vực tự khai** nhận tên nước: «Nhật Bản: Kobe» ⇒ ô `intl jp` mang ngôn ngữ / vùng Nhật (Kobe không có tâm thiên vị).
+- **Địa chỉ lead quốc tế** không được đọc thành tỉnh VN: lead nhận nước của ô.
+
+**Phân khúc B2B mới** (`LEAD_SEGMENTS`, thêm vào cuối — 17 khoá cũ giữ nguyên tên vì `wholesale_leads.segment` đã lưu):
+
+| Khoá | Nhận ra từ | Phù hợp / ý định |
+|---|---|---|
+| `SEAFOOD_IMPORTER` | «seafood importer / wholesaler / trading / distributor», «frozen seafood», «水産卸», «수산물 도매», «海鮮批發», «Fischgroßhandel», «grossiste produits de la mer»… | 28 / 11 |
+| `ASIAN_FOOD_WHOLESALE` | «Asian food importer», «Asian grocery wholesale», «Asia Großhandel», «grossiste asiatique»… | 27 / 11 |
+| `FOODSERVICE_DISTRIBUTOR` | «foodservice», «HORECA», «restaurant supply», «food wholesaler», «食品卸», «식자재», «grossiste alimentaire»…; loại hình Google `wholesaler` (chỉ ô quốc tế) | 20 / 8 |
+| `PRIVATE_LABEL_OEM` | «private label», «OEM», «co-packer»… | 18 / 7 |
+
+- Luật B2B **chỉ áp cho ô / lead quốc tế** (`classifySegment(…, { b2b: true })`), và ở đó đứng trước mọi luật khác. Chỉ cụm
+  chữ nói rõ việc buôn mới khớp — «Ocean Seafood Restaurant» vẫn là nhà hàng hải sản; «磯丸水産» (chuỗi quán nhậu) không phải
+  nhà buôn.
+- Ô trong nước và nhập tệp phân nhóm đúng như trước: bốn khoá B2B không nằm trong mục tiêu mặc định trong nước, nên nếu áp
+  luật B2B ở đây thì một nhà phân phối VN tên «… Food Distributor» (khách HSLC muốn) bị lọc `SEGMENT` — trước đây nó
+  `UNCLASSIFIED` và đi qua. Có bài kiểm khoá điều này.
+- Chữ CJK / từ ghép tiếng Đức khớp CHUỖI CON (không có khoảng trắng để khớp ranh giới từ). Loại hình Google `wholesaler`
+  ⇒ `FOODSERVICE_DISTRIBUTOR` cũng chỉ ở ô quốc tế.
+- «Chuỗi nhà hàng Việt / châu Á» và «chuỗi siêu thị» không có khoá riêng: chúng vào `RESTAURANT` / `SUPERMARKET` sẵn có;
+  chuỗi nhận ra bằng số điểm cùng thương hiệu như trong nước.
+- `DEFAULT_TARGET_SEGMENTS` trong nước không đổi.
+
+**Nhóm từ khoá quốc tế** (`lib/wholesale/keywords-intl.ts`, mọi nhóm TẮT sẵn): nhập khẩu / bán sỉ hải sản · bán sỉ /
+nhập khẩu thực phẩm châu Á · HORECA / phân phối thực phẩm · chuỗi nhà hàng Việt / châu Á · chuỗi siêu thị châu Á · nhãn
+riêng / OEM (tiếng Anh); và năm nhóm bản địa chỉ khai khi chắc nghĩa: Nhật, Hàn, Trung phồn thể (Đài Loan + Hồng Kông),
+Đức, Pháp. Không có tiếng Thái / Hà Lan / Mã Lai — tiếng Anh vẫn quét được các nước ấy.
+
+**Mẫu «HSLC – International Seafood Importers (pilot)»** (`hslc-intl-seafood-importers-pilot`):
+
+- 3 nước, 4 thành phố: Singapore · Kuala Lumpur · Sydney · Melbourne;
+- chỉ nhóm «nhập khẩu / bán sỉ hải sản» (3 từ: seafood importer · seafood wholesaler · frozen seafood distributor);
+- mức `ENTERPRISE` (website có ngay trong lượt tìm), tối đa 50 lead;
+- **bắt buộc website** (email của nhà nhập khẩu nằm trên website của họ), **không bắt buộc SĐT** (xem giới hạn dưới);
+- trạng thái `DRAFT`, là mẫu — không tự chạy; «Dùng mẫu» ra một nháp, chủ shop tự bấm «Bắt đầu quét».
+
+**Ước tính chi phí** — thẻ mẫu và thẻ nháp in ngay số truy vấn × đơn giá SKU (`campaignCostEstimate`, cùng phép tính với
+«Xem trước truy vấn»). Với đơn giá mặc định Text Search Enterprise 35 US$ / 1.000 lượt, tỷ giá 26.000:
+
+| | Lượt | US$ | ≈ VND |
+|---|---|---|---|
+| Ít nhất (12 ô × 1 trang) | 12 | 0,42 | 10.920 |
+| Điển hình (1,5 trang / ô) | 18 | 0,63 | 16.380 |
+| Nhiều nhất (12 ô × 3 trang) | 36 | 1,26 | 32.760 |
+
+Đây là giá niêm yết, chưa trừ ô vừa quét và chưa trừ 1.000 lượt Enterprise miễn phí mỗi tháng — còn lượt miễn phí thì số
+tiền thật là 0. Trần ngày / tháng vẫn chặn bất kể ước tính.
+
+**Trạm chuyển tiếp** (`deploy/places-relay`) chuyển nguyên thân yêu cầu POST và nguyên chuỗi truy vấn GET, nên
+`languageCode` / `regionCode` / `locationBias` của ô quốc tế tới Google mà không cần sửa trạm (có bài kiểm).
 
 ## 5. Tiết kiệm chi phí API
 
@@ -276,10 +425,10 @@ Lượt quét an toàn khi chạy lại, tạm dừng hay chết giữa chừng,
 | Thành phần | Tối đa | Đọc từ |
 |---|---|---|
 | Phù hợp ngành | 30 | Nhóm khách (từ khoá trong tên, rồi `primaryType`, rồi `types`) |
-| Ý định mua | 15 | Nhóm ưu tiên của HSLC: hải sản, buffet, lẩu, tiệc, nướng |
+| Ý định mua | 15 | Nhóm ưu tiên của HSLC: hải sản, buffet, lẩu, tiệc, nướng. Lead QUỐC TẾ tự nhận là nhà buôn (tên có «importer», «distributor», «wholesale», «卸», «도매», «批發», «Großhandel», «grossiste»…, hoặc loại hình `wholesaler`) được cộng `B2B_INTENT_BONUS` = 3, vẫn trần 15 |
 | Quy mô | 20 | Số đánh giá; nhiều chi nhánh (trùng SĐT / website, chữ «chi nhánh»); loại hình phục vụ số lượng lớn |
 | Liên hệ được | 15 | SĐT di động > cố định > tổng đài; website; email / Facebook / Zalo công khai |
-| Vị trí | 10 | Tỉnh trong vùng phục vụ (ưu tiên / giao được) |
+| Vị trí | 10 | Tỉnh trong vùng phục vụ (ưu tiên / giao được). Nước ngoài: 0 điểm với lý do «thị trường nước ngoài, chưa khai vùng xuất khẩu» |
 | Chất lượng | 10 | Đang hoạt động; sao (tối đa 2 điểm, nên sao không bao giờ quyết điểm); dữ liệu đủ |
 | Học từ kết quả | ±5 | Tỷ lệ chốt của nhóm so với tỷ lệ chung, làm trơn Bayes. Chỉ áp khi nhóm có ≥ 20 lead đã đi tới kết cục |
 
@@ -578,6 +727,12 @@ Phần chạy trên tổ chức thật `wl-hslc` kiểm:
 - xoá dữ liệu Google hết hạn;
 - tổ chức nhà tắt module.
 
+`tests/wholesale-email-discovery.test.ts` (thu thập email, mục 4c) kiểm: trích từng dạng che / thực thể / Cloudflare /
+JSON-LD; loại email rác; vai trò; chọn trang cùng website theo ưu tiên; robots.txt cấm ⇒ không tải; chuyển hướng sang
+tên miền khác ⇒ không một request nào tới đó; DNS GIẢ (không gọi mạng thật — AGENTS 65) cho MX / A / NXDOMAIN / null MX
+/ lỗi / quá giờ; chọn email tốt nhất; không đè ô nhân viên sửa, không thay email từ tệp; bộ lọc danh sách + độ phủ; nút
+«Thu thập email» xếp hàng không trùng và tôn trọng hạn quét lại.
+
 ## 16. Giới hạn đã biết / Phase 2
 
 - **Kênh tự gửi** (Zalo OA, SMS brandname, email) chưa có. Mức `AUTO_SEND` đã khai nhưng đang khoá.
@@ -586,6 +741,12 @@ Phần chạy trên tổ chức thật `wl-hslc` kiểm:
 - **Khu vực là tên quận / huyện cũ dùng để tìm.** Cấp huyện không còn từ 07/2025 nhưng Google và người dùng vẫn gọi tên
   cũ. Địa chỉ của lead không bị suy ra từ tên khu vực.
 - **«Học từ kết quả»** chỉ có tác dụng sau khi có đủ lead đi tới kết cục (≥ 20 mỗi nhóm).
+- **SĐT nước ngoài chưa chuẩn hoá** (`phone.ts` chỉ hiểu số Việt Nam): lead quốc tế có «chưa có SĐT» ở điểm liên hệ,
+  không khử trùng theo SĐT, và không tự lên «Đủ điều kiện» (luật đó đòi SĐT) — người duyệt tay. Vì thế mẫu quốc tế bắt
+  buộc website thay vì SĐT. Chuẩn hoá E.164 nhiều nước là việc riêng.
+- **Vùng xuất khẩu chưa khai**: cấu hình `serviceAreas` chỉ liệt kê 34 tỉnh, nên mọi nước ngoài 0 điểm vị trí. Khi HSLC
+  có chứng từ xuất khẩu, cần thêm nước vào `serviceAreas` (khoá `intl xx`) — trang cấu hình hiện chưa liệt kê nước.
+- **Bảng độ phủ** (`coverageByProvince`) và trang cấu hình vẫn chỉ hiện 34 tỉnh.
 - **Phase 2 đề xuất:**
   - bộ chuyển kênh Zalo OA / SMS có dedupe và danh sách không liên hệ;
   - Nearby Search theo lưới toạ độ cho thành phố lớn;
