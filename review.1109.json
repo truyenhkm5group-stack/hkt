@@ -1,0 +1,8 @@
+{
+  "pr": 1109,
+  "sha": "84d3d09fca130035967fedc963a9741dc69005d3",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-30T20:16:31.561Z",
+  "note": "review lead: MỘT luật nước leadCountryOf (người xác nhận › khoá tỉnh intl/VN chuẩn › mã nước SĐT, +1/+7 không kết luận vì CAN-SPAM≠CASL › ccTLD website/email, .com không kết luận › null) dùng chung cho cổng nước, làn kênh, ngôn ngữ AI; bỏ hai luật cũ (có bài quét); CHƯA BIẾT ⇒ HOLD + làn người xác nhận + AI từ chối trước khi gọi; xác nhận nước append-only + audit; lead đồng ý ba quyết định của wor"
+}
