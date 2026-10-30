@@ -118,6 +118,8 @@ function testRoles() {
     ["hello@x.vn", "GENERAL"],
     ["lienhe@x.vn", "GENERAL"],
     ["admin@x.vn", "GENERAL"],
+    ["chu@quana.vn", "GENERAL"],
+    ["giamdoc@x.vn", "GENERAL"],
     ["haisanxanh@gmail.com", "GENERAL"],
     ["lan.nguyen@gmail.com", "PERSONAL"],
     ["nguyenvana@gmail.com", "PERSONAL"],

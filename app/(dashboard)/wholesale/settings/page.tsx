@@ -9,7 +9,7 @@ import { LEAD_PROVIDER_CATALOG } from "@/lib/wholesale/providers";
 import { getLeadHunterConfig } from "@/lib/wholesale/store";
 import { WholesaleNav } from "@/app/(dashboard)/wholesale/wholesale-nav";
 import { ConfigForm } from "@/app/(dashboard)/wholesale/settings/config-form";
-import { SuppressionTable } from "@/app/(dashboard)/wholesale/settings/suppression-table";
+import { EmailSuppressionForm, SuppressionTable } from "@/app/(dashboard)/wholesale/settings/suppression-table";
 
 export const metadata = { title: "Cấu hình săn khách sỉ" };
 
@@ -76,7 +76,8 @@ export default async function WholesaleSettingsPage() {
         )}
       </SectionCard>
 
-      <SectionCard title="Danh sách không liên hệ" description="Khách từ chối liên hệ ⇒ SĐT, tên miền, địa điểm vào đây; không chiến dịch / hàng đợi nào đưa lại. Gỡ cần lý do và ghi nhật ký.">
+      <SectionCard title="Danh sách không liên hệ" description="Khách từ chối liên hệ ⇒ SĐT, tên miền, địa điểm, email vào đây; không chiến dịch / hàng đợi nào đưa lại. Gỡ cần lý do và ghi nhật ký.">
+        <EmailSuppressionForm />
         <SuppressionTable rows={suppressions.map((s) => ({ id: s.id, kind: s.kind, value: s.value, reason: s.reason, by: s.createdByName, at: s.createdAt.toISOString(), leadId: s.leadId }))} />
       </SectionCard>
 

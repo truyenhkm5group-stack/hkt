@@ -16,6 +16,8 @@ import { verifiedCallPatch } from "@/lib/wholesale/field-handoff";
 import { formatVnPhone, normalizeVnPhone } from "@/lib/wholesale/phone";
 import { manualImportProvider } from "@/lib/wholesale/providers";
 import { classifySegment, isLeadSegmentKey } from "@/lib/wholesale/segments";
+import { isCheckViolation } from "@/lib/wholesale/consents";
+import { normalizeEmail } from "@/lib/wholesale/contactability";
 import { getLeadHunterConfig, segmentOutcomeStats, suppressionHit } from "@/lib/wholesale/store";
 
 /**
@@ -74,7 +76,7 @@ function statusStamps(lead: Lead, to: LeadStatus, now: Date): Partial<typeof sch
   return patch;
 }
 
-/** Danh sách KHÔNG LIÊN HỆ: chặn theo Place ID, SĐT, tên miền của lead — cả nguồn Google lẫn dữ liệu của tổ chức. */
+/** Danh sách KHÔNG LIÊN HỆ: chặn theo Place ID, SĐT, tên miền, email của lead — cả nguồn Google lẫn dữ liệu của tổ chức. */
 export async function suppressLead(user: SessionUser, lead: Lead, reason: string, now: Date): Promise<void> {
   const db = await getDb();
   const snap = lead.placeId ? await db.query.wholesalePlaceSnapshots.findFirst({ where: eq(schema.wholesalePlaceSnapshots.placeId, lead.placeId) }) : null;
@@ -84,8 +86,17 @@ export async function suppressLead(user: SessionUser, lead: Lead, reason: string
   if (v.phone) keys.push({ kind: "PHONE", value: v.phone });
   const domain = lead.websiteDomain ?? websiteDomain(v.website);
   if (domain) keys.push({ kind: "DOMAIN", value: domain });
+  const email = normalizeEmail(lead.email);
+  if (email) keys.push({ kind: "EMAIL", value: email });
   for (const k of keys) {
-    await db.insert(schema.wholesaleSuppressions).values({ ...k, reason: reason.slice(0, 300), leadId: lead.id, createdByUserId: user.id, createdByName: user.name, createdAt: now }).onConflictDoNothing();
+    try {
+      await db.insert(schema.wholesaleSuppressions).values({ ...k, reason: reason.slice(0, 300), leadId: lead.id, createdByUserId: user.id, createdByName: user.name, createdAt: now }).onConflictDoNothing();
+    } catch (e) {
+      // CSDL chưa áp 0261 (CHECK kind cũ không nhận EMAIL): bỏ RIÊNG dòng email; SĐT / tên miền / địa điểm vẫn vào danh sách
+      // và lead vẫn ở trạng thái KHÔNG LIÊN HỆ — một migration chậm không được làm hỏng nút «Không liên hệ».
+      if (k.kind === "EMAIL" && isCheckViolation(e, "wholesale_suppressions_kind_check")) continue;
+      throw e;
+    }
   }
   await db
     .update(schema.wholesaleOutreachItems)
@@ -502,8 +513,9 @@ export async function editLeadCore(user: SessionUser, leadId: string, raw: unkno
   if (d.businessName !== undefined) set("businessName", d.businessName || null, "businessName");
   if (d.address !== undefined) set("address", d.address || null, "address");
   if (d.email !== undefined) {
-    if (d.email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(d.email)) return { error: "Email không hợp lệ." };
-    set("email", d.email.toLowerCase() || null, "email");
+    const email = d.email ? normalizeEmail(d.email) : null;
+    if (d.email && !email) return { error: "Email không hợp lệ." };
+    set("email", email, "email");
   }
   if (d.website !== undefined) {
     const site = d.website ? safeWebUrl(d.website) : null;
@@ -553,6 +565,49 @@ export async function removeSuppressionCore(user: SessionUser, id: string, reaso
   return { ok: true };
 }
 
+const emailSuppressionSchema = z.object({
+  email: z.string().trim().min(3, "Nhập email").max(254),
+  reason: z.string().trim().min(5, "Cần lý do (ít nhất 5 ký tự) — vd «khách trả lời xin ngừng gửi mail».").max(300),
+});
+
+/**
+ * Thêm một EMAIL vào danh sách không liên hệ (form ở /wholesale/settings). Email được chuẩn hoá (`normalizeEmail`) nên
+ * «  Chu@Quan.VN » và «chu@quan.vn» là MỘT dòng. Lead đang mang email đó (so trên dạng chuẩn hoá) được gắn vào dòng chặn để
+ * người xem lần ra, và mọi lời chào đang chờ của chúng bị huỷ — cùng hệ quả với nút «Không liên hệ» trên lead. Quyền: người
+ * đánh dấu được «Không liên hệ» trên lead (wholesale:work) thì thêm được; GỠ vẫn chỉ người cấu hình (`removeSuppressionCore`).
+ */
+export async function addEmailSuppressionCore(user: SessionUser, raw: unknown, now = new Date()): Promise<CoreResult<{ email: string; existed: boolean; leads: number }>> {
+  if (!can(user, "wholesale:work")) return { error: FORBIDDEN_WORK };
+  const parsed = emailSuppressionSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const email = normalizeEmail(parsed.data.email);
+  if (!email) return { error: "Email không hợp lệ." };
+  const db = await getDb();
+  const l = schema.wholesaleLeads;
+  const matched = await db.select({ id: l.id }).from(l).where(sql`lower(btrim(${l.email})) = ${email}`).limit(50);
+  let inserted: { id: string }[];
+  try {
+    inserted = await db
+      .insert(schema.wholesaleSuppressions)
+      .values({ kind: "EMAIL", value: email, reason: parsed.data.reason, leadId: matched[0]?.id ?? null, createdByUserId: user.id, createdByName: user.name, createdAt: now })
+      .onConflictDoNothing()
+      .returning({ id: schema.wholesaleSuppressions.id });
+  } catch (e) {
+    if (isCheckViolation(e, "wholesale_suppressions_kind_check")) return { error: "CSDL của tổ chức chưa áp migration 0261 — chưa chặn được theo email. Nút «Không liên hệ» trên lead vẫn chặn SĐT / website / địa điểm." };
+    throw e;
+  }
+  if (matched.length) {
+    await db
+      .update(schema.wholesaleOutreachItems)
+      .set({ status: "CANCELLED", updatedAt: now })
+      .where(and(inArray(schema.wholesaleOutreachItems.leadId, matched.map((m) => m.id)), inArray(schema.wholesaleOutreachItems.status, ["DRAFT", "APPROVED"])));
+  }
+  if (inserted.length) {
+    await audit({ userId: user.id, userEmail: user.email, action: "WHOLESALE_SUPPRESSION_ADD", entity: "WHOLESALE_LEAD", entityId: matched[0]?.id ?? inserted[0]!.id, after: { kind: "EMAIL", value: email, leads: matched.length }, reason: parsed.data.reason });
+  }
+  return { ok: true, email, existed: !inserted.length, leads: matched.length };
+}
+
 export type ImportReport = { created: number; duplicates: number; suppressed: number; invalid: number; errors: string[] };
 
 /**
@@ -574,11 +629,12 @@ export async function importLeadsCore(user: SessionUser, text: string, now = new
     if (row.phone && !phone?.normalized) report.errors.push(`Dòng ${row.line}: SĐT «${row.phone.slice(0, 20)}» không nhận ra được — nhập lead KHÔNG có SĐT.`);
     const domain = websiteDomain(row.website);
     const nameKey = nameAddressKey(row.name, row.address);
-    if (await suppressionHit({ phone: phone?.normalized, domain })) {
+    const email = normalizeEmail(row.email);
+    if (await suppressionHit({ phone: phone?.normalized, domain, email })) {
       report.suppressed++;
       continue;
     }
-    if (await findMasterLead(null, { phone: phone?.normalized ?? null, domain, nameKey })) {
+    if (await findMasterLead(null, { phone: phone?.normalized ?? null, domain, email, nameKey })) {
       report.duplicates++;
       continue;
     }
@@ -600,7 +656,7 @@ export async function importLeadsCore(user: SessionUser, text: string, now = new
         websiteDomain: domain,
         facebookUrl: social === "FACEBOOK" ? row.website : null,
         zaloUrl: social === "ZALO" ? row.website : null,
-        email: row.email && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(row.email) ? row.email.toLowerCase() : null,
+        email,
         nameKey,
         provinceKey: provKey,
         provinceLabel: provKey ? (searchProvince(provKey)?.label ?? row.province) : null,

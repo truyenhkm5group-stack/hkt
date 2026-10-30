@@ -10,7 +10,9 @@ import type { OutreachChannel } from "@/lib/wholesale/constants";
 import { sendLeadsToFieldCore, type HandoffReport } from "@/lib/wholesale/field-handoff";
 import { queueEmailDiscoveryCore, type EmailQueueReport } from "@/lib/wholesale/email-store";
 import { runWholesaleLeadsJob } from "@/lib/wholesale/job";
+import { recordConsentCore, revokeConsentCore } from "@/lib/wholesale/consents";
 import {
+  addEmailSuppressionCore,
   addLeadNoteCore,
   addLeadsToCampaignCore,
   assignLeadsCore,
@@ -241,6 +243,33 @@ export async function removeSuppressionAction(id: string, reason: string): Promi
   const user = await requireUser();
   const r = await removeSuppressionCore(user, id, reason);
   if ("ok" in r) revalidatePath("/wholesale/settings");
+  return r;
+}
+
+/** Thêm EMAIL vào danh sách không liên hệ (form ở /wholesale/settings). */
+export async function addEmailSuppressionAction(input: unknown): Promise<CoreResult<{ email: string; existed: boolean; leads: number }>> {
+  const user = await requireUser();
+  const r = await addEmailSuppressionCore(user, input);
+  if ("ok" in r) {
+    revalidatePath("/wholesale/settings");
+    refreshLead();
+  }
+  return r;
+}
+
+/** Ghi một bằng chứng đồng ý liên hệ (requireUser → can(wholesale:work) + phạm vi → zod → ghi → audit — trong lõi). */
+export async function recordConsentAction(leadId: string, input: unknown): Promise<CoreResult<{ id: string }>> {
+  const user = await requireUser();
+  const r = await recordConsentCore(user, leadId, input);
+  if ("ok" in r) refreshLead(leadId);
+  return r;
+}
+
+/** Thu hồi một đồng ý (điền revoked_at một lần, không xoá dòng). */
+export async function revokeConsentAction(consentId: string, input: unknown): Promise<CoreResult<{ leadId: string }>> {
+  const user = await requireUser();
+  const r = await revokeConsentCore(user, consentId, input);
+  if ("ok" in r) refreshLead(r.leadId);
   return r;
 }
 

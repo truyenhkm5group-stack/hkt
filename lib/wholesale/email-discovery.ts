@@ -225,7 +225,8 @@ export function extractEmailCandidates(html: string, pageUrl: string): EmailCand
 const PURCHASING_SUB = /(purchas|procure|buyer|buying|thumua|thu-mua|muahang|mua-hang|nhaphang|nhap-hang)/;
 const SALES_TOKENS = new Set(["sale", "sales", "order", "orders", "trade", "kd"]);
 const SALES_SUB = /(kinhdoanh|kinh-doanh|b2b|wholesale|export|banhang|ban-hang|dathang|dat-hang|distribut|dealer|partner|doitac|doi-tac|dai-?ly|bansi|ban-si|giasi|gia-si)/;
-const GENERAL_TOKENS = new Set(["info", "infos", "contact", "contacts", "hello", "hi", "lienhe", "admin", "office", "support", "cskh", "hotro", "mail", "enquiry", "enquiries", "inquiry", "inquiries", "hotline", "service", "services", "cs", "customerservice", "care", "team", "booking", "datban", "reservation", "reservations"]);
+/** Liên hệ chung — gồm cả hộp thư CHỦ / giám đốc / quản lý (`chu@quan.vn`): ở quán nhỏ đó chính là người quyết mua. */
+const GENERAL_TOKENS = new Set(["info", "infos", "contact", "contacts", "hello", "hi", "lienhe", "admin", "office", "support", "cskh", "hotro", "mail", "enquiry", "enquiries", "inquiry", "inquiries", "hotline", "service", "services", "cs", "customerservice", "care", "team", "booking", "datban", "reservation", "reservations", "chu", "chuquan", "chunhahang", "owner", "boss", "giamdoc", "director", "ceo", "founder", "manager", "quanly"]);
 const GENERAL_SUB = /(lienhe|lien-he|contact|hotro|ho-tro|cskh|support|customerservice|info)/;
 const OTHER_TOKENS = new Set(["hr", "tuyendung", "jobs", "job", "career", "careers", "recruit", "recruitment", "ketoan", "accounting", "accountant", "billing", "invoice", "invoices", "hoadon", "finance", "marketing", "media", "press", "pr", "web", "webmaster", "it", "tech", "dev", "legal", "privacy", "abuse", "postmaster", "security", "newsletter", "shop", "store", "cuahang"]);
 /** Họ người Việt phổ biến — một chuỗi đơn bắt đầu bằng họ (`nguyenvana`, `tranlan`) gần như chắc là tên người. */
