@@ -636,6 +636,7 @@ import { testWholesaleEmailSequence } from "./wholesale-email-sequence.test";
 import { testWholesaleEmail } from "./wholesale-email.test";
 import { testWholesaleChannelRouting } from "./wholesale-channel-routing.test";
 import { testWholesaleLeadCountry } from "./wholesale-lead-country.test";
+import { testWholesaleEmailGws } from "./wholesale-email-gws.test";
 import { testRestaurantTemplate } from "./restaurant.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testTriggerProposals } from "./trigger-proposals.test";
@@ -3350,6 +3351,8 @@ async function main() {
     await testWholesaleEmail();
     testWholesaleLeadCountry();
     await testWholesaleChannelRouting();
+    // E2: gửi email thật qua Google Workspace SMTP (connector gws-smtp) — SMTP giả, không mạng; tổ chức THẬT `wg-a`.
+    await testWholesaleEmailGws();
     await testRestaurantTemplate();
     testTriggerProposals();
     await testSelfServiceJourney();

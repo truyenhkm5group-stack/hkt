@@ -4,11 +4,13 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { decideScope, rowInScope } from "@/lib/auth/scope-guard";
 import { can, type SessionUser } from "@/lib/auth/session";
+import { openActiveConnection } from "@/lib/connectors/service";
 import { env } from "@/lib/env";
 import { vnDateKey, vnStartOfDay } from "@/lib/format";
 import { resolveEmailProvider } from "@/lib/email-provider";
 import { buildOutgoingEmail, emailContentHash } from "@/lib/email-provider/message";
 import { EmailSendError, type EmailProvider } from "@/lib/email-provider/types";
+import type { SmtpTransportFactory } from "@/lib/integrations/gws-smtp/client";
 import { currentOrganization } from "@/lib/platform/context";
 import { organizationBaseUrl } from "@/lib/platform/org-links";
 import type { SyncTrigger } from "@/lib/sync/runner";
@@ -108,9 +110,19 @@ const settingsInputSchema = z.object({
 
 /**
  * Lưu chế độ + danh tính người gửi + hạn mức. `wholesale:config`. LIVE: chỉ chủ shop (vai trò quản trị), và bị TỪ CHỐI khi chưa
- * có bộ chuyển nhà cung cấp thật nào (`LIVE_EMAIL_ADAPTERS` rỗng) — không lưu một chế độ mà máy không làm được.
+ * có bộ chuyển nhà cung cấp thật nào (`LIVE_EMAIL_ADAPTERS` rỗng) hoặc kết nối «Google Workspace — gửi email» chưa kiểm tra đạt
+ * + bật — không lưu một chế độ mà máy không làm được.
  */
-export async function saveEmailSettingsCore(user: SessionUser, raw: unknown, now = new Date(), liveAdapters: readonly string[] = LIVE_EMAIL_ADAPTERS): Promise<CoreResult> {
+export async function saveEmailSettingsCore(
+  user: SessionUser,
+  raw: unknown,
+  now = new Date(),
+  liveAdapters: readonly string[] = LIVE_EMAIL_ADAPTERS,
+  liveReady: () => Promise<{ ok: true } | { ok: false; reason: string }> = async () => {
+    const c = await openActiveConnection("gws-smtp");
+    return c.ok ? { ok: true } : { ok: false, reason: c.reason };
+  },
+): Promise<CoreResult> {
   if (!can(user, "wholesale:config")) return { error: FORBIDDEN_CONFIG };
   const parsed = settingsInputSchema.safeParse(raw);
   if (!parsed.success) {
@@ -122,6 +134,10 @@ export async function saveEmailSettingsCore(user: SessionUser, raw: unknown, now
   if (d.mode === "LIVE") {
     if (user.role !== "ADMIN") return { error: "Chỉ chủ shop (quản trị) bật được chế độ GỬI THẬT." };
     if (!liveAdapters.length) return { error: "Chưa có nhà cung cấp email nào được kết nối (SES / Resend / Gmail) — chưa bật được GỬI THẬT. Dùng «Chạy thử» trong lúc chờ chủ shop chọn nhà cung cấp và tên miền." };
+    if (before.mode !== "LIVE") {
+      const ready = await liveReady();
+      if (!ready.ok) return { error: `Kết nối «Google Workspace — gửi email» chưa sẵn sàng (${ready.reason}) — vào Cài đặt → Kết nối dữ liệu: nhập hộp thư + App Password, Kiểm tra, Bật; rồi mới bật GỬI THẬT.` };
+    }
   }
   const next: EmailSettings = {
     ...before,
@@ -468,7 +484,7 @@ export async function previewEmailPolicies(ids: readonly string[], now = new Dat
 
 // ─────────────────────────── VÒNG GỬI ───────────────────────────
 
-export type EmailTickResult = { mode: string; considered: number; sent: number; held: number; blocked: number; failed: number; retried: number; skipped?: string };
+export type EmailTickResult = { mode: string; considered: number; sent: number; held: number; blocked: number; failed: number; retried: number; skipped?: string; stopped?: string };
 
 /** Có thư nào tới hạn không — câu hỏi rẻ, trước khi mở khoá / ghi sổ. Bảng chưa có (chưa áp 0264) ⇒ `false`, không làm hỏng job. */
 export async function emailOutboxHasWork(now = new Date()): Promise<boolean> {
@@ -494,14 +510,17 @@ function errText(e: unknown): string {
 
 /**
  * MỘT lượt xử lý hàng đợi: lấy thư QUEUED tới hạn ⇒ cổng ⇒ nhà cung cấp ⇒ cập nhật. Tuần tự (hạn mức đếm lại sau mỗi thư).
- * `provider` chỉ để bài kiểm tiêm nhà cung cấp giả có lỗi; mặc định chọn theo chế độ (LIVE chưa có ⇒ `null`).
+ * `provider` chỉ để bài kiểm tiêm nhà cung cấp giả có lỗi; mặc định chọn theo chế độ (LIVE = kết nối Google Workspace SMTP của
+ * tổ chức; chưa bật ⇒ `null`, thư nằm chờ kèm lý do). `smtpTransport`: bài kiểm tiêm SMTP giả cho đường LIVE thật.
+ * Lỗi đăng nhập SMTP ⇒ DỪNG lượt (mọi thư sau cũng sẽ hỏng như nhau — không đốt cả lô).
  */
-export async function runEmailOutboxTick(opts: { now?: Date; provider?: EmailProvider | null; limit?: number } = {}): Promise<EmailTickResult> {
+export async function runEmailOutboxTick(opts: { now?: Date; provider?: EmailProvider | null; limit?: number; smtpTransport?: SmtpTransportFactory } = {}): Promise<EmailTickResult> {
   const now = opts.now ?? new Date();
   const settings = await getEmailSettings();
   const out: EmailTickResult = { mode: settings.mode, considered: 0, sent: 0, held: 0, blocked: 0, failed: 0, retried: 0 };
   if (settings.mode === "OFF") return { ...out, skipped: "MODE_OFF" };
-  const provider = opts.provider === undefined ? resolveEmailProvider(settings.mode) : opts.provider;
+  const resolved = opts.provider === undefined ? await resolveEmailProvider(settings.mode, { smtpTransport: opts.smtpTransport }) : { provider: opts.provider, reason: opts.provider ? null : "Chưa có nhà cung cấp cho chế độ này" };
+  const provider = resolved.provider;
   if (provider && provider.mode !== prospectiveMode(settings)) throw new Error(`Nhà cung cấp ${provider.name} (${provider.mode}) không khớp chế độ ${settings.mode}.`);
   const db = await getDb();
   const o = schema.wholesaleEmailOutbox;
@@ -511,7 +530,11 @@ export async function runEmailOutboxTick(opts: { now?: Date; provider?: EmailPro
     .where(and(eq(o.status, "QUEUED"), or(isNull(o.nextAttemptAt), lte(o.nextAttemptAt, now))))
     .orderBy(asc(sql`coalesce(${o.nextAttemptAt}, ${o.createdAt})`), asc(o.createdAt))
     .limit(Math.max(1, Math.min(opts.limit ?? EMAIL_BATCH_PER_TICK, 200)));
-  if (!due.length) return out;
+  const closeProvider = () => (provider as { close?: () => void } | null)?.close?.();
+  if (!due.length) {
+    closeProvider();
+    return out;
+  }
   const org = await currentOrganization();
   const baseUrl = await organizationBaseUrl(org.code).catch(() => env.appUrl);
 
@@ -523,7 +546,7 @@ export async function runEmailOutboxTick(opts: { now?: Date; provider?: EmailPro
       if (decision.allowed || decision.hold) {
         await db
           .update(o)
-          .set({ nextAttemptAt: new Date(now.getTime() + EMAIL_HOLD_RETRY_MS), lastError: (decision.details.join(" · ") || "Chưa có nhà cung cấp cho chế độ này").slice(0, 500), updatedAt: now })
+          .set({ nextAttemptAt: new Date(now.getTime() + EMAIL_HOLD_RETRY_MS), lastError: (decision.details.join(" · ") || `Chưa gửi được ở chế độ ${settings.mode}: ${resolved.reason ?? "chưa có nhà cung cấp"}`).slice(0, 500), updatedAt: now })
           .where(and(eq(o.id, row.id), eq(o.status, "QUEUED")));
         out.held++;
         continue;
@@ -573,6 +596,10 @@ export async function runEmailOutboxTick(opts: { now?: Date; provider?: EmailPro
           .set({ status: "QUEUED", nextAttemptAt: new Date(now.getTime() + emailBackoffMs(attempts)), lastError: `Lần ${attempts}: ${errText(e)}`, updatedAt: now })
           .where(and(eq(o.id, row.id), eq(o.status, "SENDING")));
         out.retried++;
+        if ((e as { stopBatch?: boolean })?.stopBatch) {
+          out.stopped = errText(e);
+          break;
+        }
       } else {
         await db
           .update(o)
@@ -583,6 +610,7 @@ export async function runEmailOutboxTick(opts: { now?: Date; provider?: EmailPro
       }
     }
   }
+  closeProvider();
   return out;
 }
 

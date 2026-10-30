@@ -283,6 +283,17 @@ danh tính, MỞ lại nút dừng, duyệt hàng loạt. `LIVE` chỉ chủ sho
 **Cấu hình** ở `settings` khoá `wholesale.email` (object; đọc thô rồi trộn từng trường, chế độ lạ ⇒ `OFF`). Hạn mức mặc định 20 thư
 / giờ · 100 / ngày · 5 / tên miền nhận / ngày, trần cứng 200 · 1.000 · 50.
 
+**Gửi thật — Google Workspace SMTP (E2, chủ shop chốt 30/10/2026).** Adapter thật đầu tiên là connector `gws-smtp`
+(`lib/integrations/gws-smtp/client.ts`, thư viện `nodemailer`): `smtp.gmail.com:587`, STARTTLS bắt buộc, đăng nhập bằng App
+Password của hộp thư (vd `truyenhk@vnxcommerce.com`). Chủ shop nhập hộp thư + App Password ở Cài đặt → Kết nối dữ liệu; App
+Password mã hoá AES-256-GCM trong `org_connections`, màn hình chỉ hiện dạng che, câu lỗi không bao giờ chứa nó. «Kiểm tra» chỉ
+đăng nhập SMTP (EHLO → STARTTLS → AUTH), không gửi thư. Bật kết nối KHÔNG đổi chế độ: email vẫn TẮT / CHẠY THỬ cho tới khi quản trị
+chọn «Gửi thật» — và lựa chọn đó bị từ chối khi kết nối chưa kiểm tra đạt + bật. Lúc chạy, kết nối tắt ⇒ thư nằm chờ kèm lý do
+(không rơi về chạy thử). From luôn là hộp thư đã đăng nhập; Message-ID ổn định, List-Unsubscribe + One-Click từ `buildOutgoingEmail`.
+Lỗi đăng nhập SMTP dừng cả lượt (không đốt hết lô); 4xx thử lại có lùi dần; 5xx ⇒ FAILED. Trước khi bật gửi thật, chủ shop thêm
+DKIM (`google._domainkey`) + DMARC cho tên miền — đo 30/10: SPF có, DKIM / DMARC chưa. Đọc thư trả lời qua IMAP / Gmail API: CHƯA
+làm (sổ việc E3).
+
 ## 4f. Kế hoạch kênh: nước ngoài — Email · trong nước — Zalo (chủ shop chốt 30/10/2026)
 
 > «Tách phần tìm khách nước ngoài để gửi email với luồng khách trong nước để nhắn Zalo. Bổ sung gửi email cho cả khách trong
