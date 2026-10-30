@@ -13,14 +13,19 @@
   "base_sha": "74a6225c013587969ca221b158c2fbce52b906c0",
   "domains": [],
   "owned_paths": [
+    "lib/wholesale/email-constants.ts",
     "lib/wholesale/email-policy.ts",
+    "lib/wholesale/email-store.ts",
     "lib/wholesale/email-outbox.ts",
     "lib/wholesale/email-inbound.ts",
     "lib/wholesale/email-unsubscribe.ts",
-    "lib/integrations/email/",
-    "app/u/",
+    "lib/email-provider/",
+    "lib/constants/email-unsubscribe.ts",
+    "lib/queries/wholesale-email.ts",
+    "lib/actions/wholesale-email.ts",
+    "app/api/wholesale/unsubscribe/",
     "app/(dashboard)/wholesale/outbox/",
-    "drizzle/0263_wholesale_email_outbox.sql",
+    "drizzle/0264_wholesale_email_outbox.sql",
     "tests/wholesale-email.test.ts"
   ],
   "dependencies": [],
@@ -33,7 +38,7 @@
     "0264": "2026-10-27T07:04:58.822Z"
   },
   "created_at": "2026-10-27T07:00:19.535Z",
-  "updated_at": "2026-10-27T07:04:58.822Z",
-  "last_heartbeat": "2026-10-27T07:00:19.535Z",
+  "updated_at": "2026-10-30T01:49:14.577Z",
+  "last_heartbeat": "2026-10-30T01:49:14.577Z",
   "definition_of_done": []
 }
