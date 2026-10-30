@@ -1,0 +1,8 @@
+{
+  "pr": 1103,
+  "sha": "ab7594b4a4a42571571cc1dea5ba768819ff20c8",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-30T14:05:05.522Z",
+  "note": "review lead: chuỗi thư theo dõi — N/K không mặc định (chưa khai ⇒ không nhắc), dừng khi trả lời/huỷ/khiếu nại/bounce cứng/chặn/WON-LOST/đủ N, không soạn chồng, chỉ đếm thư đúng chế độ; phép chiếu một chỗ (Hộp thư đi), người bấm soạn qua AI-draft + hàng rào hoặc mẫu tĩnh qua cùng hàng rào, ra thư DRAFT FOLLOWUP vẫn qua duyệt E1 + cổng; bài quét emailLaneRefusal của #1102 vẫn xanh; không migration."
+}
