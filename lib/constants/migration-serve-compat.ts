@@ -197,6 +197,17 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/wholesale-consent.test.ts",
   },
+  {
+    tag: "0262_customer_fb_connections",
+    why:
+      "Chỉ TẠO hai bảng mới ở CSDL tổ chức (customer_fb_connections · customer_fb_connection_events) kèm chỉ mục / khoá ngoại — không " +
+      "thêm / đổi / xoá cột nào của bảng đang có. Đường ĐỌC (`listFbCrm`, `fbCrmViewCounts` — lib/queries/fb-crm.ts) bắt 42P01 ⇒ trang " +
+      "/customers/facebook-crm in «CSDL chưa áp 0262», không in danh sách rỗng. Đường GHI (`fbCrmApplyCore`, `fbCrmCreateTaskCore` — " +
+      "lib/fb-crm/service.ts) bắt cùng lỗi ⇒ trả lỗi, không ghi gì (đọc trạng thái đứng trước mọi lượt ghi, ghi trong một giao dịch). " +
+      "Cờ fbCrm.enabled mặc định tắt nên tổ chức chưa bật không chạm tới hai bảng.",
+    addedColumns: {},
+    proof: "tests/fb-crm.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */

@@ -17,6 +17,7 @@ import { CUSTOMER_LIST_REF_COLUMNS } from "@/lib/constants/metadata-list-columns
 import { getListMetadata, listCustomValuesFor, listMetadataFilterSql } from "@/lib/queries/metadata-lists";
 import { customerCreateGate } from "@/lib/records/customer-create";
 import { getBrandCopy } from "@/lib/branding/service";
+import { fbCrmEnabled } from "@/lib/queries/fb-crm";
 
 /** Tham số URL tắt bộ lọc mặc định của danh sách đã xuất bản (người xem phải bỏ được lọc mình không chọn). */
 const META_FILTER_OFF = "mf";
@@ -29,7 +30,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   if (decision.allow === "NONE") return <ScopeDenied title="Khách hàng" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   // Danh sách đã xuất bản (M9): thứ tự/ẩn cột, cột custom, sắp xếp + bộ lọc mặc định. `null` ⇒ y như trước.
-  const [meta, createGate, copy] = await Promise.all([getListMetadata("customer", "default", user), customerCreateGate(user), getBrandCopy(user)]);
+  const [meta, createGate, copy, fbCrmOn] = await Promise.all([getListMetadata("customer", "default", user), customerCreateGate(user), getBrandCopy(user), fbCrmEnabled()]);
   const metaSort = listViewDefaultSort(meta?.schema, CUSTOMER_LIST_REF_COLUMNS, CUSTOMER_SORTABLE);
   const params = parseListParams(raw, { defaultSort: metaSort?.sort ?? "lastOrderAt", defaultDir: metaSort?.dir, filterKeys: ["province", "tier"], sortable: CUSTOMER_SORTABLE, defaultPeriod: "all" });
   const filtersOff = raw[META_FILTER_OFF] === "off";
@@ -59,6 +60,12 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
             {shellAllows(user, "/customers/retention") ? (
               <Button asChild variant="outline" size="sm">
                 <Link href="/customers/retention"><HeartHandshake className="size-4" /> Giữ chân khách</Link>
+              </Button>
+            ) : null}
+            {/* Facebook Friend CRM: chỉ hiện khi tổ chức bật cờ `fbCrm.enabled` (mặc định tắt). */}
+            {fbCrmOn ? (
+              <Button asChild variant="outline" size="sm">
+                <Link href="/customers/facebook-crm"><UserPlus className="size-4" /> Facebook CRM</Link>
               </Button>
             ) : null}
             <ModuleSyncButton viewer={user} job="pancake-customers" label="Đồng bộ khách hàng" />
