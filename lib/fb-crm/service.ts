@@ -6,11 +6,13 @@ import { can, type SessionUser } from "@/lib/auth/session";
 import {
   FB_CONNECTION_DEFAULT,
   FB_CONNECTION_STATUSES,
+  FB_CRM_SCHEMA_MISSING,
   FB_CRM_TASK_TAG,
   FB_URL_REJECT_LABEL,
   FB_URL_SET_SOURCES,
   FB_URL_SOURCES,
   careTaskBlockedReason,
+  isUndefinedTableError,
   normalizeFacebookProfileUrl,
   planFbCrmOp,
   type FbConnectionState,
@@ -105,8 +107,25 @@ const MESSAGES: Record<FbCrmOp["op"], string> = {
   SET_NEXT_CARE: "Đã đặt ngày chăm sóc tiếp.",
 };
 
+/**
+ * CSDL chưa áp 0262 (bảng chưa có — tổ chức đang `DEGRADED_MIGRATION`) ⇒ trả lỗi nói rõ, KHÔNG ghi gì: lượt đọc trạng thái đứng
+ * TRƯỚC mọi lượt ghi và lượt ghi nằm trong một giao dịch, nên 42P01 không bao giờ để lại nửa thay đổi.
+ */
+async function guardSchema(fn: () => Promise<FbCrmResult>): Promise<FbCrmResult> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (isUndefinedTableError(e)) return { ok: false, error: FB_CRM_SCHEMA_MISSING };
+    throw e;
+  }
+}
+
 /** MỘT thao tác của người trên MỘT khách. Lõi tự kiểm quyền — vỏ Next chỉ gọi `requireUser`. */
 export async function fbCrmApplyCore(user: SessionUser, customerId: string, raw: unknown, today: string = todayVN()): Promise<FbCrmResult> {
+  return guardSchema(() => applyInner(user, customerId, raw, today));
+}
+
+async function applyInner(user: SessionUser, customerId: string, raw: unknown, today: string): Promise<FbCrmResult> {
   if (!can(user, "customers:write")) return { ok: false, error: "Bạn không có quyền sửa thông tin khách (customers:write)." };
   const parsed = opZ.safeParse(raw);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
@@ -158,6 +177,10 @@ export async function fbCrmApplyCore(user: SessionUser, customerId: string, raw:
  * TRÙNG: khách đã có một nhiệm vụ của trang này còn MỞ tạo trong ngày (giờ VN) ⇒ trả lại nhiệm vụ đó, không tạo cái thứ hai.
  */
 export async function fbCrmCreateTaskCore(user: SessionUser, customerId: string, raw: unknown, today: string = todayVN()): Promise<FbCrmResult> {
+  return guardSchema(() => createTaskInner(user, customerId, raw, today));
+}
+
+async function createTaskInner(user: SessionUser, customerId: string, raw: unknown, today: string): Promise<FbCrmResult> {
   if (!can(user, "customers:write")) return { ok: false, error: "Bạn không có quyền sửa thông tin khách (customers:write)." };
   const parsed = taskZ.safeParse(raw ?? {});
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };

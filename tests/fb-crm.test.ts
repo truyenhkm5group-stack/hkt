@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";
 import path from "node:path";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
 import { CRM_RULE } from "@/lib/constants/crm";
@@ -220,7 +220,9 @@ export async function testFbCrm() {
       assert.deepEqual(await names("lapsed"), ["Bà Tư"], "lần giao gần nhất 200 ngày > activeDays");
       assert.deepEqual(await names("messaged"), ["Anh Hùng", "Chị Lan", "Cô Mai"]);
       const counts = await fbCrmViewCounts("");
+      assert.ok(counts);
       assert.deepEqual([counts.all, counts.bought, counts.repeat, counts.friends, counts.dnc], [4, 2, 1, 0, 0]);
+      assert.equal(all.unavailable, false);
 
       // ── Ghi: quyền · chuẩn hoá · idempotent · nhật ký có khoá tài khoản ──
       const forbidden = await fbCrmApplyCore(viewer, a.id, { op: "SET_STATUS", to: "CONSENTED" }, TODAY);
@@ -265,6 +267,28 @@ export async function testFbCrm() {
       const dept = await db.query.departments.findFirst({ where: eq(schema.departments.id, tasks[0].departmentId!) });
       assert.equal(dept?.code, "SALES", "phòng Kinh doanh & CSKH");
       assert.ok(!(await fbCrmCreateTaskCore(viewer, a.id, {}, today)).ok, "thiếu customers:write ⇒ không tạo nhiệm vụ");
+
+      // ── SERVE-COMPAT 0262 (lib/constants/migration-serve-compat.ts): CSDL như TRƯỚC 0262 — hai bảng chưa có. ──
+      const [connBefore] = await db.select({ status: schema.customerFbConnections.connectionStatus }).from(schema.customerFbConnections).where(eq(schema.customerFbConnections.customerId, a.id));
+      await db.execute(sql.raw(`ALTER TABLE customer_fb_connection_events RENAME TO customer_fb_connection_events_tam`));
+      await db.execute(sql.raw(`ALTER TABLE customer_fb_connections RENAME TO customer_fb_connections_tam`));
+      try {
+        const degraded = await listFbCrm(params(), "all");
+        assert.deepEqual([degraded.unavailable, degraded.rows.length], [true, 0], "chưa áp 0262 ⇒ báo KHÔNG DÙNG ĐƯỢC, không phải danh sách rỗng");
+        assert.equal(await fbCrmViewCounts(""), null, "chưa áp 0262 ⇒ bộ đếm CHƯA BIẾT (null), không phải 0");
+        const w1 = await fbCrmApplyCore(admin, a.id, { op: "SET_STATUS", to: "FRIENDS" }, TODAY);
+        assert.ok(!w1.ok && /0262/.test(w1.error), JSON.stringify(w1));
+        const w2 = await fbCrmCreateTaskCore(admin, b.id, {}, today);
+        assert.ok(!w2.ok && /0262/.test(w2.error), JSON.stringify(w2));
+        assert.equal(await fbCrmEnabled(), true, "cờ đọc từ settings — không phụ thuộc bảng mới");
+      } finally {
+        await db.execute(sql.raw(`ALTER TABLE customer_fb_connections_tam RENAME TO customer_fb_connections`));
+        await db.execute(sql.raw(`ALTER TABLE customer_fb_connection_events_tam RENAME TO customer_fb_connection_events`));
+      }
+      const [connAfter] = await db.select({ status: schema.customerFbConnections.connectionStatus }).from(schema.customerFbConnections).where(eq(schema.customerFbConnections.customerId, a.id));
+      assert.equal(connAfter.status, connBefore.status, "lượt ghi lúc chưa áp 0262 KHÔNG để lại thay đổi nào");
+      const tasksB = await db.select({ id: schema.workItems.id }).from(schema.workItems).where(and(eq(schema.workItems.businessEntity, "CUSTOMER"), eq(schema.workItems.businessEntityId, b.id)));
+      assert.equal(tasksB.length, 0, "nhiệm vụ không được tạo khi chưa áp 0262");
     });
 
     // ── Cách ly tổ chức: dòng nằm ở CSDL của tổ chức `fbc-si`; tổ chức nhà không thấy gì ──
@@ -280,5 +304,5 @@ export async function testFbCrm() {
   } finally {
     await cleanupOrg();
   }
-  console.log("✓ Facebook CRM (CSDL tổ chức): danh sách = khách nhắn / có đơn · đã mua theo ORDER_OUTCOME (hoàn / huỷ không tính) · doanh thu thực chưa chứng từ ⇒ null · quyền customers:write · bấm lặp không ghi · nhiệm vụ không trùng và bị chặn khi không liên hệ · tổ chức nhà không thấy dòng nào");
+  console.log("✓ Facebook CRM (CSDL tổ chức): danh sách = khách nhắn / có đơn · đã mua theo ORDER_OUTCOME (hoàn / huỷ không tính) · doanh thu thực chưa chứng từ ⇒ null · quyền customers:write · bấm lặp không ghi · nhiệm vụ không trùng và bị chặn khi không liên hệ · tổ chức nhà không thấy dòng nào · chưa áp 0262 ⇒ đọc báo «chưa áp», ghi trả lỗi không để lại gì");
 }

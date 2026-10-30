@@ -256,5 +256,18 @@ export function careTaskBlockedReason(cur: FbConnectionState): string | null {
   return cur.doNotContact ? FB_DNC_BLOCK_MESSAGE : null;
 }
 
+/**
+ * CSDL của tổ chức CHƯA áp 0262 (đang phục vụ bằng lược đồ cũ — `DEGRADED_MIGRATION`, lib/constants/migration-serve-compat.ts):
+ * SQLSTATE 42P01 «bảng chưa tồn tại». drizzle bọc lỗi pg trong `cause`. HÀM THUẦN.
+ */
+export function isUndefinedTableError(error: unknown): boolean {
+  for (let e: unknown = error, depth = 0; e && depth < 4; e = (e as { cause?: unknown }).cause, depth++) {
+    if ((e as { code?: unknown }).code === "42P01") return true;
+  }
+  return false;
+}
+
+export const FB_CRM_SCHEMA_MISSING = "CSDL của tổ chức chưa áp migration 0262 (Facebook CRM) — chờ lượt cập nhật lược đồ xong rồi thử lại. Chưa ghi gì.";
+
 /** Nhãn của nhiệm vụ CSKH sinh từ trang này — dùng để chống trùng (một việc mở / khách / ngày). */
 export const FB_CRM_TASK_TAG = "fb-crm";

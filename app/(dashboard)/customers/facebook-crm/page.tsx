@@ -38,8 +38,18 @@ export default async function FacebookCrmPage({ searchParams }: { searchParams: 
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "lastInteractionAt", filterKeys: ["view"], sortable: [...FB_CRM_SORTABLE], defaultPeriod: "all" });
   const view = fbCrmViewOf(params.filters.view?.[0]);
-  const [{ rows, total, pageCount }, counts, users] = await Promise.all([listFbCrm(params, view), fbCrmViewCounts(params.q), fbCrmAssignableUsers()]);
+  const [{ rows, total, pageCount, unavailable }, counts, users] = await Promise.all([listFbCrm(params, view), fbCrmViewCounts(params.q), fbCrmAssignableUsers()]);
   const canWrite = can(user, "customers:write");
+
+  // CSDL của tổ chức chưa áp 0262 (đang phục vụ bằng lược đồ cũ) ⇒ nói thẳng, không in một danh sách rỗng trông như «không có khách».
+  if (unavailable || !counts) {
+    return (
+      <div className="space-y-5">
+        <PageHeader eyebrow="Khách hàng" title="Facebook Friend CRM" />
+        <EmptyState title="CSDL chưa áp 0262" description="Lược đồ của tổ chức chưa cập nhật xong (migration 0262 — Facebook CRM). Trang sẽ hiện khi lượt cập nhật hoàn tất; chưa có gì bị ghi." />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

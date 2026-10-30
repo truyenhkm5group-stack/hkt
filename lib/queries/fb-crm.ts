@@ -8,6 +8,7 @@ import {
   FB_URL_SOURCES,
   REPEAT_BUYER_MIN_DELIVERED,
   fbCrmEnabledOf,
+  isUndefinedTableError,
   type FbConnectionStatus,
   type FbCrmView,
   type FbUrlSource,
@@ -264,38 +265,58 @@ async function avatarsOf(convs: { id: string; channel: string | null; pageId: st
   return out;
 }
 
-export async function listFbCrm(params: ListParams, view: FbCrmView): Promise<{ rows: FbCrmRow[]; total: number; pageCount: number }> {
+/**
+ * Kết quả danh sách. `unavailable = true` ⇒ CSDL của tổ chức CHƯA áp 0262 (bảng `customer_fb_connections` chưa có — tổ chức đang
+ * phục vụ bằng lược đồ cũ, `DEGRADED_MIGRATION`, lib/constants/migration-serve-compat.ts): trang in «CSDL chưa áp 0262», KHÔNG in
+ * một danh sách rỗng trông như «không có khách nào».
+ */
+export type FbCrmList = { rows: FbCrmRow[]; total: number; pageCount: number; unavailable: boolean };
+
+export async function listFbCrm(params: ListParams, view: FbCrmView): Promise<FbCrmList> {
   const db = await getDb();
   const sortCol = SORT_EXPR[params.sort] ?? "last_interaction_at";
   const dir = params.dir === "asc" ? "asc nulls first" : "desc nulls last";
-  const [raw, inboxOn] = await Promise.all([
-    // TẮT JIT: `facts` tính ORDER_OUTCOME_FAST cho mọi đơn có khách — cùng họ câu `listCustomers` đã đo JIT bật 7,4 s ↔ tắt 0,1 s.
-    chayKhongJit(db, (tx) =>
-      tx.execute(sql`${baseCte(params.q)}
-        select *, count(*) over() as total from base
-        where ${VIEW_COND[view]}
-        order by ${sql.raw(sortCol)} ${sql.raw(dir)}, name asc, customer_id asc
-        limit ${params.pageSize} offset ${(params.page - 1) * params.pageSize}`),
-    ),
-    salesInboxEnabled(),
-  ]);
+  let raw: unknown;
+  let inboxOn: boolean;
+  try {
+    [raw, inboxOn] = await Promise.all([
+      // TẮT JIT: `facts` tính ORDER_OUTCOME_FAST cho mọi đơn có khách — cùng họ câu `listCustomers` đã đo JIT bật 7,4 s ↔ tắt 0,1 s.
+      chayKhongJit(db, (tx) =>
+        tx.execute(sql`${baseCte(params.q)}
+          select *, count(*) over() as total from base
+          where ${VIEW_COND[view]}
+          order by ${sql.raw(sortCol)} ${sql.raw(dir)}, name asc, customer_id asc
+          limit ${params.pageSize} offset ${(params.page - 1) * params.pageSize}`),
+      ),
+      salesInboxEnabled(),
+    ]);
+  } catch (e) {
+    if (isUndefinedTableError(e)) return { rows: [], total: 0, pageCount: 1, unavailable: true };
+    throw e;
+  }
   const rows = rowsOf<RawRow>(raw);
   const avatars = await avatarsOf(
     rows.filter((r) => r.conv_id).map((r) => ({ id: r.conv_id as string, channel: r.channel, pageId: r.page_id, threadId: r.thread_id })),
     inboxOn,
   );
   const total = rows.length ? Number(rows[0].total ?? 0) : 0;
-  return { rows: rows.map((r) => mapRow(r, inboxOn, avatars)), total, pageCount: Math.max(1, Math.ceil(total / params.pageSize)) };
+  return { rows: rows.map((r) => mapRow(r, inboxOn, avatars)), total, pageCount: Math.max(1, Math.ceil(total / params.pageSize)), unavailable: false };
 }
 
-/** Số khách mỗi bộ lọc (cùng ô tìm kiếm) — cho thanh lọc. */
-export async function fbCrmViewCounts(q: string): Promise<Record<FbCrmView, number>> {
+/** Số khách mỗi bộ lọc (cùng ô tìm kiếm) — cho thanh lọc. `null` = CSDL chưa áp 0262 (CHƯA BIẾT, không phải 0 khách). */
+export async function fbCrmViewCounts(q: string): Promise<Record<FbCrmView, number> | null> {
   const db = await getDb();
   const cols = sql.join(
     FB_CRM_VIEWS.map((v) => sql`count(*) filter (where ${VIEW_COND[v]})::int as ${sql.raw(`"${v}"`)}`),
     sql`, `,
   );
-  const raw = await chayKhongJit(db, (tx) => tx.execute(sql`${baseCte(q)} select ${cols} from base`));
+  let raw: unknown;
+  try {
+    raw = await chayKhongJit(db, (tx) => tx.execute(sql`${baseCte(q)} select ${cols} from base`));
+  } catch (e) {
+    if (isUndefinedTableError(e)) return null;
+    throw e;
+  }
   const [r] = rowsOf<Record<string, number | string>>(raw);
   return Object.fromEntries(FB_CRM_VIEWS.map((v) => [v, Number(r?.[v] ?? 0)])) as Record<FbCrmView, number>;
 }
