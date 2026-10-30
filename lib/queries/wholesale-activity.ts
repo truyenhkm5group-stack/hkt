@@ -129,7 +129,7 @@ const OK_OUTCOMES = new Set(["SENT", "INTERESTED", "REPLIED", "ANSWERED", "DONE"
 const FAIL_OUTCOMES = new Set(["WRONG_NUMBER", "FAILED", "NOT_FOUND", "BOUNCE_HARD", "COMPLAINT"]);
 const SKIP_OUTCOMES = new Set(["CANCELLED", "NO_ANSWER", "NOT_INTERESTED", "DO_NOT_CONTACT", "BLOCKED", "SKIPPED"]);
 
-function statusOf(outcome: string | null, kind: string): ActivityLogRow["status"] {
+function activityStatusOf(outcome: string | null, kind: string): ActivityLogRow["status"] {
   if (outcome && OK_OUTCOMES.has(outcome)) return "OK";
   if (outcome && FAIL_OUTCOMES.has(outcome)) return "FAIL";
   if (outcome && SKIP_OUTCOMES.has(outcome)) return "SKIP";
@@ -159,7 +159,7 @@ export async function activityLog(decision: ScopeDecision, kinds: readonly strin
     leadId: r.leadId,
     contact: maskContact({ phone: r.phone, email: r.email, channel: r.channel }),
     text: shortText(maskInlineContacts(r.note)),
-    status: statusOf(r.outcome, r.kind),
+    status: activityStatusOf(r.outcome, r.kind),
     actor: r.actor || "Máy",
   }));
 }
