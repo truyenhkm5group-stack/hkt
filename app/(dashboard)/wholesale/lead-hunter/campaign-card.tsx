@@ -45,6 +45,7 @@ export function CampaignCard({ c, usdToVnd }: { c: CampaignProgress; usdToVnd: n
     ["Địa điểm khác nhau", formatNumber(c.uniquePlaces)],
     ["Có SĐT", formatNumber(c.phoneFound)],
     ["Đủ điều kiện", formatNumber(c.qualified)],
+    ["Có email / có website / không website", `${formatNumber(c.withEmail)} / ${formatNumber(c.withWebsite)} / ${formatNumber(c.noWebsite)}`],
     ["Trùng đã loại", formatNumber(c.duplicatesRemoved)],
     ["Lượt gọi API", formatNumber(c.apiCalls)],
     ["Chi phí ước tính", `${(c.costMicros / 1e6).toLocaleString("vi-VN", { maximumFractionDigits: 2 })} US$ ≈ ${formatNumber(Math.round((c.costMicros / 1e6) * usdToVnd))} ₫`],

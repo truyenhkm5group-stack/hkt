@@ -16,14 +16,15 @@ import assert from "node:assert/strict";
 import { normalizeProvince, provinceRegion } from "@/lib/constants/vn-regions";
 import { placeDetails, placesLocale, textSearch } from "@/lib/integrations/google-places/client";
 import { parseCustomAreas, SEARCH_PROVINCES } from "@/lib/wholesale/areas";
-import { INTL_SEARCH_PROVINCES, intlCellContext, intlCountryByName, intlSearchProvince, isIntlProvinceKey } from "@/lib/wholesale/areas-intl";
-import { campaignCostEstimate, HSLC_INTL_TEMPLATE_KEY, HSLC_INTL_TEMPLATE_NAME, HSLC_TEMPLATES, hslcTemplateValues, intlPilotTemplateValues, resolveKeywordGroups } from "@/lib/wholesale/campaigns";
+import { INTL_SEARCH_PROVINCES, intlCellContext, intlCountryByName, intlSearchProvince, isIntlProvinceKey, VIET_DIASPORA_COUNTRIES, VIET_DIASPORA_UNSUPPORTED, VIET_KIEU_LANG } from "@/lib/wholesale/areas-intl";
+import { campaignCostEstimate, HSLC_INTL_TEMPLATE_KEY, HSLC_INTL_TEMPLATE_NAME, HSLC_TEMPLATES, HSLC_VIET_KIEU_TEMPLATE_KEY, hslcTemplateValues, intlPilotTemplateValues, resolveKeywordGroups, VIET_KIEU_SCOPE, vietKieuTemplateValues } from "@/lib/wholesale/campaigns";
+import { websiteEnrichRank } from "@/lib/wholesale/engine";
 import { DEFAULT_KEYWORD_GROUPS, DEFAULT_LEAD_HUNTER_CONFIG, DEFAULT_TARGET_SEGMENTS, skuCostMicros } from "@/lib/wholesale/config";
 import { ALL_KEYWORD_GROUPS, INTL_KEYWORD_GROUPS } from "@/lib/wholesale/keywords-intl";
 import { googlePlacesProvider } from "@/lib/wholesale/providers";
 import { cellKeyOf, enabledKeywordEntries, keywordFold, planTextCells, queryTextOf } from "@/lib/wholesale/query-plan";
 import { B2B_INTENT_BONUS, DEFAULT_GRADE_THRESHOLDS, scoreLead, type ScoreInput } from "@/lib/wholesale/scoring";
-import { b2bSignal, classifySegment, foldVietnamese, LEAD_SEGMENT_LABEL, LEAD_SEGMENTS, passesTargetSegments, SEGMENT_POINTS } from "@/lib/wholesale/segments";
+import { b2bSignal, classifySegment, foldVietnamese, LEAD_SEGMENT_LABEL, LEAD_SEGMENTS, passesTargetSegments, SEGMENT_POINTS, vietDiasporaSegment } from "@/lib/wholesale/segments";
 import { handle as relayHandle } from "../deploy/places-relay/relay.js";
 
 const API_KEY = "AIzaFAKE_intl_discovery_key_0123456789abcd";
@@ -213,7 +214,7 @@ function intlInput(over: Partial<ScoreInput> = {}): ScoreInput {
 function testSegmentsAndScoring() {
   // Khoá cũ giữ nguyên tên + thứ tự; khoá mới chỉ THÊM vào cuối.
   assert.deepEqual(LEAD_SEGMENTS.slice(0, LEGACY_SEGMENTS.length), LEGACY_SEGMENTS);
-  assert.deepEqual(LEAD_SEGMENTS.slice(LEGACY_SEGMENTS.length), ["SEAFOOD_IMPORTER", "ASIAN_FOOD_WHOLESALE", "FOODSERVICE_DISTRIBUTOR", "PRIVATE_LABEL_OEM"]);
+  assert.deepEqual(LEAD_SEGMENTS.slice(LEGACY_SEGMENTS.length), ["SEAFOOD_IMPORTER", "ASIAN_FOOD_WHOLESALE", "FOODSERVICE_DISTRIBUTOR", "PRIVATE_LABEL_OEM", "VIET_DIASPORA_GROCERY", "VIET_FOOD_DISTRIBUTOR"]);
   for (const s of LEAD_SEGMENTS) {
     assert.ok(LEAD_SEGMENT_LABEL[s], `${s}: có nhãn`);
     assert.ok(SEGMENT_POINTS[s].fit >= 0 && SEGMENT_POINTS[s].fit <= 30 && SEGMENT_POINTS[s].intent >= 0 && SEGMENT_POINTS[s].intent <= 15, `${s}: trong trần`);
@@ -228,7 +229,8 @@ function testSegmentsAndScoring() {
   assert.equal(seg("大成海鮮批發"), "SEAFOOD_IMPORTER");
   assert.equal(seg("Hamburger Fischgroßhandel GmbH"), "SEAFOOD_IMPORTER", "từ ghép tiếng Đức");
   assert.equal(seg("Asia-Großhandel Berlin"), "ASIAN_FOOD_WHOLESALE");
-  assert.equal(seg("Saigon Asian Food Importers"), "ASIAN_FOOD_WHOLESALE");
+  assert.equal(seg("Golden Lotus Asian Food Importers"), "ASIAN_FOOD_WHOLESALE");
+  assert.equal(seg("Saigon Asian Food Importers"), "VIET_FOOD_DISTRIBUTOR", "có dấu hiệu Việt (30/10/2026) ⇒ nhóm Việt Kiều đứng trước nhóm châu Á chung");
   assert.equal(seg("Metro Foodservice"), "FOODSERVICE_DISTRIBUTOR");
   assert.equal(seg("Grossiste Alimentaire Paris 13"), "FOODSERVICE_DISTRIBUTOR");
   assert.equal(seg("Lim Brothers Pty", ["wholesaler", "establishment"]), "FOODSERVICE_DISTRIBUTOR", "loại hình wholesaler ⇒ nhóm phân phối chung, không nâng thành nhập khẩu hải sản");
@@ -242,7 +244,7 @@ function testSegmentsAndScoring() {
   const vnTargets = [...DEFAULT_TARGET_SEGMENTS];
   for (const [name, types] of [["Minh Phát Food Distributor", ["wholesaler"]], ["Thực phẩm Minh Phát Foodservice", []], ["Hải Sản Minh Phát Food Distributor", ["wholesaler"]], ["Ocean Seafood Trading Hải Phòng", []]] as const) {
     const s = vnSeg(name, [...types]);
-    assert.ok(!["SEAFOOD_IMPORTER", "ASIAN_FOOD_WHOLESALE", "FOODSERVICE_DISTRIBUTOR", "PRIVATE_LABEL_OEM"].includes(s), `${name}: ô trong nước không ra phân khúc B2B (${s})`);
+    assert.ok(!["SEAFOOD_IMPORTER", "ASIAN_FOOD_WHOLESALE", "FOODSERVICE_DISTRIBUTOR", "PRIVATE_LABEL_OEM", "VIET_DIASPORA_GROCERY", "VIET_FOOD_DISTRIBUTOR"].includes(s), `${name}: ô trong nước không ra phân khúc B2B (${s})`);
     assert.ok(passesTargetSegments(vnTargets, s), `${name}: qua bộ lọc nhóm khách mặc định trong nước (${s})`);
     for (const t of [1, 2, 3] as const) assert.ok(passesTargetSegments(hslcTemplateValues(t).targetSegments, s), `${name}: qua bộ lọc của mẫu VN ${t}`);
   }
@@ -277,11 +279,86 @@ function testSegmentsAndScoring() {
   assert.deepEqual(scoreLead(vnBase, opts), scoreLead({ ...vnBase, b2bSignal: null }, opts));
 }
 
+/** Việt Kiều (chủ shop 30/10/2026): phân khúc chỉ ô quốc tế, từ khoá đa ngữ đúng nước, mẫu DRAFT, ước tính, thứ tự đọc web. */
+function testVietKieu() {
+  // ── Phân khúc: cần CẢ dấu hiệu Việt trong tên LẪN loại hình cửa hàng / bán sỉ; bằng chứng ghi cả hai ──
+  const intl = (name: string, types: string[] = []) => classifySegment({ name, types }, { b2b: true });
+  const g = intl("Saigon Market", ["grocery_store"]);
+  assert.equal(g.segment, "VIET_DIASPORA_GROCERY");
+  assert.match(g.evidence, /saigon/i);
+  assert.match(g.evidence, /market/);
+  assert.equal(intl("Pho Hoa Asian Grocery").segment, "VIET_DIASPORA_GROCERY");
+  assert.equal(intl("Chợ Việt Houston").segment, "VIET_DIASPORA_GROCERY", "chữ Việt có dấu");
+  assert.equal(intl("Hà Nội Supermarket").segment, "VIET_DIASPORA_GROCERY");
+  assert.equal(intl("Dong Xuan Vietnam Markt Berlin").segment, "VIET_DIASPORA_GROCERY");
+  assert.equal(intl("Épicerie Vietnamienne Paris 13").segment, "VIET_DIASPORA_GROCERY", "tiếng Pháp: «vietnam» là chuỗi con");
+  assert.equal(intl("ベトナム食材店 東京").segment, "VIET_DIASPORA_GROCERY");
+  assert.equal(intl("베트남 식품 마트").segment, "VIET_DIASPORA_GROCERY");
+  assert.equal(intl("越南超市 台北").segment, "VIET_DIASPORA_GROCERY");
+  const vt = intl("Viet Trading Sydney", ["food_store"]);
+  assert.equal(vt.segment, "VIET_FOOD_DISTRIBUTOR", "bán sỉ thắng cửa hàng");
+  assert.equal(intl("Mekong Foods Pty", ["wholesaler"]).segment, "VIET_FOOD_DISTRIBUTOR");
+  assert.match(intl("Mekong Foods Pty", ["wholesaler"]).evidence, /wholesaler/);
+  // Thiếu một trong hai chứng cứ ⇒ KHÔNG gắn nhóm Việt Kiều (không đoán).
+  assert.equal(vietDiasporaSegment({ name: "Pho Saigon", types: ["restaurant", "vietnamese_restaurant"] }), null, "quán phở là nhà hàng, không phải chợ");
+  assert.equal(intl("Pho Saigon", ["restaurant"]).segment, "RESTAURANT");
+  assert.equal(vietDiasporaSegment({ name: "Asia Markt Hamburg", types: ["grocery_store"] }), null, "chợ châu Á bất kỳ — không đoán chủ là người Việt");
+  assert.equal(intl("Asia Markt Hamburg", ["grocery_store"]).segment, "GROCERY");
+  // ── Ô TRONG NƯỚC không đổi: cùng tên, mặc định không `b2b` ⇒ đúng luật cũ, không ra nhóm Việt Kiều ──
+  // Kết quả ghi cứng = đúng luật trong nước trước 30/10 (luật trong nước không đọc luật Việt Kiều / B2B).
+  for (const [name, types, legacy] of [
+    ["Saigon Market", ["grocery_store"], "GROCERY"],
+    ["Chợ Việt Hà Đông", [], "UNCLASSIFIED"],
+    ["Siêu thị Hà Nội", ["supermarket"], "SUPERMARKET"],
+    ["Viet Trading Hải Phòng", ["wholesaler"], "UNCLASSIFIED"],
+  ] as const) {
+    assert.equal(classifySegment({ name, types: [...types] }).segment, legacy, `${name}: ô trong nước giữ nguyên phân nhóm cũ`);
+  }
+  assert.ok(SEGMENT_POINTS.VIET_DIASPORA_GROCERY.fit <= 30 && SEGMENT_POINTS.VIET_DIASPORA_GROCERY.intent <= 15 && SEGMENT_POINTS.VIET_FOOD_DISTRIBUTOR.intent <= 15);
+
+  // ── Nước: chỉ nước #1091 hỗ trợ; Séc / Ba Lan khai «chưa hỗ trợ», không có khoá quét ──
+  for (const iso of VIET_DIASPORA_COUNTRIES) assert.ok(intlSearchProvince(`intl ${iso.toLowerCase()}`)?.locale?.keywordLangs.includes(VIET_KIEU_LANG), `${iso}: có từ khoá chữ Việt ở nước ngoài`);
+  assert.deepEqual(VIET_DIASPORA_UNSUPPORTED.map((u) => u.iso2), ["CZ", "PL"]);
+  for (const u of VIET_DIASPORA_UNSUPPORTED) assert.equal(intlSearchProvince(`intl ${u.iso2.toLowerCase()}`), null, `${u.country}: chưa có vùng quét — không đoán`);
+  assert.ok(!intlSearchProvince("intl sg")!.locale!.keywordLangs.includes(VIET_KIEU_LANG), "nước ngoài danh sách cộng đồng không quét chữ Việt");
+  assert.ok(!SEARCH_PROVINCES.some((p) => (p.locale?.keywordLangs ?? ["vi"]).includes(VIET_KIEU_LANG)), "tỉnh trong nước không bao giờ quét nhóm vi-kieu");
+
+  // ── Mẫu: DRAFT ở tầng ghi (ensureTemplateCampaign, kiểm ở wholesale-lead-hunter), ở đây kiểm giá trị + ước tính ──
+  const t = vietKieuTemplateValues();
+  assert.equal(HSLC_VIET_KIEU_TEMPLATE_KEY, "hslc-intl-viet-kieu");
+  assert.ok(![HSLC_INTL_TEMPLATE_KEY, ...HSLC_TEMPLATES.map((x): string => x.key)].includes(HSLC_VIET_KIEU_TEMPLATE_KEY));
+  assert.deepEqual([t.discoveryTier, t.requirePhone, t.requireWebsite, t.searchMode], ["ENTERPRISE", false, false, "TEXT"]);
+  assert.ok(t.targetSegments.includes("VIET_DIASPORA_GROCERY") && t.targetSegments.includes("VIET_FOOD_DISTRIBUTOR"));
+  assert.ok(t.provinces.every((p) => isIntlProvinceKey(p.key) && VIET_DIASPORA_COUNTRIES.includes(p.locale!.regionCode)));
+  assert.equal(t.provinces.reduce((n, p) => n + p.areas.length, 0), 18, "mọi mã thành phố trong VIET_KIEU_SCOPE có thật (mã sai bị bỏ ⇒ số này lệch)");
+  assert.equal(t.provinces.length, VIET_KIEU_SCOPE.length);
+  const plan = planTextCells(enabledKeywordEntries(t.keywordGroups), t.provinces);
+  const at = (prov: string) => plan.cells.filter((c) => c.provinceKey === prov);
+  assert.equal(at("intl us").filter((c) => c.areaCode === "houston").length, 6, "Mỹ: 4 từ tiếng Anh + 2 chữ Việt");
+  assert.equal(at("intl de").filter((c) => c.areaCode === "berlin").length, 8, "Đức: + 2 từ tiếng Đức");
+  assert.ok(at("intl jp").some((c) => c.keyword === "ベトナム食材") && !at("intl us").some((c) => c.keyword === "ベトナム食材"));
+  assert.ok(at("intl au").some((c) => c.queryText === "chợ Việt Sydney Australia"));
+  const cfg = DEFAULT_LEAD_HUNTER_CONFIG;
+  const e = campaignCostEstimate({ ...t, nearbyLat: null, nearbyLng: null, radiusM: null }, cfg);
+  assert.equal(e.cells, plan.cells.length);
+  assert.equal(e.cells, 119, "18 thành phố × 6 + Đức 4 + Pháp 2 + Nhật 2 + Hàn 1 + Đài Loan 2");
+  assert.equal(e.searchSku, "TEXT_SEARCH_ENTERPRISE");
+  assert.equal(e.minMicros, 119 * skuCostMicros("TEXT_SEARCH_ENTERPRISE", cfg));
+  assert.equal(e.maxMicros, 119 * cfg.maxPagesPerCell * skuCostMicros("TEXT_SEARCH_ENTERPRISE", cfg));
+
+  // ── Đọc website: nhóm Việt Kiều trước, rồi lead quốc tế khác, rồi trong nước ──
+  assert.equal(websiteEnrichRank({ segment: "VIET_DIASPORA_GROCERY", provinceKey: "intl de" }), 0);
+  assert.equal(websiteEnrichRank({ segment: "VIET_FOOD_DISTRIBUTOR", provinceKey: "intl us" }), 0);
+  assert.equal(websiteEnrichRank({ segment: "SEAFOOD_IMPORTER", provinceKey: "intl sg" }), 1);
+  assert.equal(websiteEnrichRank({ segment: "SEAFOOD_RESTAURANT", provinceKey: "da nang" }), 2);
+}
+
 export async function testWholesaleIntlDiscovery() {
   testIntlAreas();
   testCellKeysAndKeywords();
   await testLocaleOnTheWire();
   testPilotTemplate();
   testSegmentsAndScoring();
-  console.log("✓ Săn khách sỉ quốc tế: 15 nước · ô quốc tế không đụng ô VN · từ khoá theo ngôn ngữ · vi/VN giữ nguyên, en/SG + thiên vị toạ độ · trạm chuyển tiếp nguyên vẹn · mẫu pilot DRAFT + website · ước tính = truy vấn × giá SKU · phân khúc B2B tất định");
+  testVietKieu();
+  console.log("✓ Săn khách sỉ quốc tế: 15 nước · ô quốc tế không đụng ô VN · từ khoá theo ngôn ngữ · vi/VN giữ nguyên, en/SG + thiên vị toạ độ · trạm chuyển tiếp nguyên vẹn · mẫu pilot DRAFT + website · ước tính = truy vấn × giá SKU · phân khúc B2B tất định · Việt Kiều chỉ ô quốc tế + đọc website trước");
 }

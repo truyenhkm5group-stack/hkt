@@ -31,10 +31,10 @@ import { callOutcomeEffect, PRICE_REQUEST_ACTION, zaloResultEffect } from "@/lib
 import { areaCode, cellScanPriority, parseCustomAreas, provinceScanTier, SEARCH_PROVINCES, scanTier } from "@/lib/wholesale/areas";
 import { provinceRegion } from "@/lib/constants/vn-regions";
 import { fieldHandoffMessage, mapsLinkOf, sendLeadsToFieldCore, verifiedCallPatch } from "@/lib/wholesale/field-handoff";
-import { changeCampaignStateCore, cloneCampaignCore, createCampaignCore, ensureTemplateCampaign, HSLC_INTL_TEMPLATE_KEY, hslcTemplateValues, previewCampaignCore, provincesOfTier, startCampaignCore } from "@/lib/wholesale/campaigns";
+import { changeCampaignStateCore, cloneCampaignCore, createCampaignCore, ensureTemplateCampaign, HSLC_INTL_TEMPLATE_KEY, HSLC_VIET_KIEU_TEMPLATE_KEY, hslcTemplateValues, previewCampaignCore, provincesOfTier, startCampaignCore } from "@/lib/wholesale/campaigns";
 import { DEFAULT_KEYWORD_GROUPS, DEFAULT_LEAD_HUNTER_CONFIG, DEFAULT_TARGET_SEGMENTS, freeTierLeft, mergeLeadHunterConfig, nextCallCostMicros, paidCostMicros, quotaRetryAt, skuCostMicros } from "@/lib/wholesale/config";
 import { branchHint, brandKey, chainBrandHit, nameAddressKey, socialKind, websiteDomain } from "@/lib/wholesale/dedupe";
-import { COMPETITOR_SWEEP_SETTING_KEY, purgeExpiredSnapshots, runLeadHunterTick, sweepCompetitors } from "@/lib/wholesale/engine";
+import { COMPETITOR_SWEEP_SETTING_KEY, enrichLeadWebsite, finalizeLead, purgeExpiredSnapshots, runLeadHunterTick, sweepCompetitors, websiteEnrichQueue } from "@/lib/wholesale/engine";
 import { competitorHit } from "@/lib/wholesale/competitor";
 import { getSettingJson } from "@/lib/settings";
 import { addLeadsToCampaignCore, assignLeadsCore, convertLeadCore, followupAt, importLeadsCore, logCallCore, logCallInitiatedCore, logZaloOpenedCore, logZaloResultCore, updateLeadStatusCore, zaloDraftCore } from "@/lib/wholesale/leads";
@@ -1194,6 +1194,36 @@ async function testDb() {
       assert.equal(intlProg.length, 2);
       for (const x of intlProg) assert.equal(x.estimate?.cellsToScan, 12, "thẻ mẫu / nháp in ước tính 12 truy vấn trước khi bấm");
       assert.equal(seen.length, intlCallsBefore, "dựng mẫu / nhân bản / ước tính không gọi Google");
+
+      // ── Việt Kiều (30/10/2026): mẫu DRAFT không tự chạy; lead quốc tế đi qua bước đọc website, nhóm Việt Kiều được đọc
+      //    TRƯỚC lead trong nước điểm cao hơn; thẻ chiến dịch đếm có email / có website / không website ──
+      const vkTpl = (await db.query.wholesaleCampaigns.findMany({ where: eq(schema.wholesaleCampaigns.templateKey, HSLC_VIET_KIEU_TEMPLATE_KEY) }))!;
+      assert.equal(vkTpl.length, 1);
+      assert.deepEqual([vkTpl[0]!.status, vkTpl[0]!.isTemplate, vkTpl[0]!.requirePhone], ["DRAFT", true, false]);
+      assert.ok("error" in (await startCampaignCore(admin, vkTpl[0]!.id)), "mẫu Việt Kiều không tự chạy");
+      const vkClone = await cloneCampaignCore(admin, vkTpl[0]!.id);
+      assert.ok("ok" in vkClone);
+      const vkCamp = (await db.query.wholesaleCampaigns.findFirst({ where: eq(schema.wholesaleCampaigns.id, vkClone.id) }))!;
+      const webCfg = { ...(await getLeadHunterConfig()), websiteEnrichment: { enabled: true, maxPages: 2 } };
+      const webCtx = { cfg: webCfg, now: () => new Date(), stats: [] };
+      const mkLead = async (over: Partial<typeof schema.wholesaleLeads.$inferInsert>) =>
+        (await db.insert(schema.wholesaleLeads).values({ source: "GOOGLE_PLACES", enrichmentStatus: "READY", sourceCampaignId: vkCamp.id, ...over }).returning())[0]!;
+      const vkShop = await mkLead({ businessName: "Saigon Market Berlin", provinceKey: "intl de", provinceLabel: "Đức", segment: "VIET_DIASPORA_GROCERY", segmentEvidence: "tên có «saigon» + «market»", website: "https://saigonmarket-berlin.example", websiteDomain: "saigonmarket-berlin.example" });
+      const vkNoWeb = await mkLead({ businessName: "Chợ Việt Houston", provinceKey: "intl us", provinceLabel: "Mỹ", segment: "VIET_DIASPORA_GROCERY" });
+      const vnHigh = await mkLead({ businessName: "Quán Hải Sản Điểm Cao", provinceKey: "da nang", provinceLabel: "Đà Nẵng", segment: "SEAFOOD_RESTAURANT", website: "https://haisandiemcao.example", websiteDomain: "haisandiemcao.example", websiteStatus: "PENDING", leadScore: 99, sourceCampaignId: null });
+      assert.equal(await finalizeLead(webCtx, vkShop.id, vkCamp), "READY", "lead quốc tế không SĐT vẫn READY (mẫu không bắt buộc SĐT), không tự lên Đủ điều kiện");
+      assert.equal((await db.query.wholesaleLeads.findFirst({ where: eq(schema.wholesaleLeads.id, vkShop.id) }))!.websiteStatus, "PENDING", "lead quốc tế CÓ website ⇒ xếp hàng đọc website để tìm email");
+      const webQ = (await websiteEnrichQueue(50)).map((x) => x.id);
+      assert.ok(webQ.includes(vkShop.id) && webQ.includes(vnHigh.id));
+      assert.ok(webQ.indexOf(vkShop.id) < webQ.indexOf(vnHigh.id), "nhóm Việt Kiều được đọc trước lead trong nước điểm 99");
+      const vkEnricher: EnrichmentProvider = { key: "WEBSITE", label: "giả", role: "ENRICHMENT", googleSourced: false, billable: false, enrich: async (site) => ({ status: "DONE", pagesRead: 1, note: "Đọc 1 trang", findings: [{ kind: "EMAIL", value: "einkauf@saigonmarket-berlin.example", sourceUrl: `${site}/impressum`, via: "MAILTO" }], emailDomains: { "saigonmarket-berlin.example": { mx: "VALID_MX", mxVia: "MX" } } }) };
+      await enrichLeadWebsite({ ...webCtx, enricher: vkEnricher }, (await db.query.wholesaleLeads.findFirst({ where: eq(schema.wholesaleLeads.id, vkShop.id) }))!);
+      assert.equal((await db.query.wholesaleLeads.findFirst({ where: eq(schema.wholesaleLeads.id, vkShop.id) }))!.email, "einkauf@saigonmarket-berlin.example");
+      const vkProg = (await campaignProgressList(await getLeadHunterConfig())).find((x) => x.id === vkCamp.id)!;
+      assert.deepEqual([vkProg.withEmail, vkProg.withWebsite, vkProg.noWebsite], [1, 1, 1], `có email / có website / không website: ${vkNoWeb.id}`);
+      assert.ok((vkProg.estimate?.cellsToScan ?? 0) > 0, "nháp Việt Kiều in ước tính trước khi bấm");
+      await db.update(schema.wholesaleLeads).set({ websiteStatus: "DONE" }).where(eq(schema.wholesaleLeads.id, vnHigh.id));
+      assert.equal(seen.length, intlCallsBefore, "không lượt gọi Google nào");
     });
   } finally {
     globalThis.fetch = savedFetch;
