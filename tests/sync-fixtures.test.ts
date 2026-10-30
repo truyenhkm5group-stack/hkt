@@ -559,6 +559,7 @@ import { testPriceListsReceivables } from "./price-lists-receivables.test";
 import { testReorderReminders } from "./reorder-reminders.test";
 import { testFbCrm } from "./fb-crm.test";
 import { testFbCrmToggle } from "./fb-crm-toggle.test";
+import { testFbCrmS2 } from "./fb-crm-s2.test";
 import { testSeafoodOs } from "./seafood-os.test";
 import { testAppointments } from "./appointments.test";
 import { testWarranty } from "./warranty.test";
@@ -3674,6 +3675,8 @@ async function main() {
     await testFbCrm();
     // Công tắc tổ chức bật / tắt Facebook CRM (chủ shop 30/10): chỉ settings:manage · bấm lặp không ghi · audit · cờ đọc lại đúng.
     await testFbCrmToggle();
+    // Facebook CRM lát 2: nguồn việc FB_CRM_CARE (phép chiếu) · khối Customer 360 · thẻ số + tương quan kết bạn rồi mua.
+    await testFbCrmS2();
     testPgliteTestDirs();
     // ERP a11y + bố cục hẹp (Commercial Sweep PR G): h1 màn không tìm thấy, công tắc / ô số có tên, /payroll không tràn 390 px.
     testErpA11y();

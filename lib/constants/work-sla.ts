@@ -326,6 +326,18 @@ const SOURCE_RULES: SlaRule[] = [
     alsoShownOn: "Tìm hàng nguồn · Mua thử",
   })),
 
+  /* ───── Facebook CRM — hẹn chăm sóc khách (lát 2) ───── */
+  {
+    key: "FB_CRM_CARE",
+    label: "Hẹn chăm sóc khách (Facebook CRM)",
+    hours: WORK_SOURCE_SPEC.FB_CRM_CARE.slaHours,
+    why:
+      "CỐ Ý bỏ trống: ngày hẹn do nhân viên tự đặt cho từng khách đã là mốc, và không có hằng số đang chạy nào nói được trễ bao nhiêu giờ " +
+      "thì là quá hạn (luật 22). Việc hiện từ đầu ngày hẹn (giờ VN); chủ shop đặt số giờ ở đây nếu muốn đo «hẹn đã quá bao lâu».",
+    department: WORK_SOURCE_SPEC.FB_CRM_CARE.department,
+    alsoShownOn: "Khách hàng · Facebook CRM",
+  },
+
   /* ───── Việc tay & định kỳ ───── */
   {
     key: "MANUAL_TASK",
