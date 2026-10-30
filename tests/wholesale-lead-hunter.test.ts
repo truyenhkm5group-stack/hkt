@@ -1208,7 +1208,7 @@ async function testDb() {
       const webCtx = { cfg: webCfg, now: () => new Date(), stats: [] };
       const mkLead = async (over: Partial<typeof schema.wholesaleLeads.$inferInsert>) =>
         (await db.insert(schema.wholesaleLeads).values({ source: "GOOGLE_PLACES", enrichmentStatus: "READY", sourceCampaignId: vkCamp.id, ...over }).returning())[0]!;
-      const vkShop = await mkLead({ businessName: "Saigon Market Berlin", provinceKey: "intl de", provinceLabel: "Đức", segment: "VIET_DIASPORA_GROCERY", segmentEvidence: "tên có «saigon» + «market»", website: "https://saigonmarket-berlin.example", websiteDomain: "saigonmarket-berlin.example" });
+      const vkShop = await mkLead({ businessName: "Saigon Market Berlin", provinceKey: "intl de", provinceLabel: "Đức", segment: "VIET_DIASPORA_GROCERY", segmentEvidence: "tên có «saigon» + «market»", website: "https://saigonmarket-berlin.de", websiteDomain: "saigonmarket-berlin.de" });
       const vkNoWeb = await mkLead({ businessName: "Chợ Việt Houston", provinceKey: "intl us", provinceLabel: "Mỹ", segment: "VIET_DIASPORA_GROCERY" });
       const vnHigh = await mkLead({ businessName: "Quán Hải Sản Điểm Cao", provinceKey: "da nang", provinceLabel: "Đà Nẵng", segment: "SEAFOOD_RESTAURANT", website: "https://haisandiemcao.example", websiteDomain: "haisandiemcao.example", websiteStatus: "PENDING", leadScore: 99, sourceCampaignId: null });
       assert.equal(await finalizeLead(webCtx, vkShop.id, vkCamp), "READY", "lead quốc tế không SĐT vẫn READY (mẫu không bắt buộc SĐT), không tự lên Đủ điều kiện");
@@ -1216,9 +1216,9 @@ async function testDb() {
       const webQ = (await websiteEnrichQueue(50)).map((x) => x.id);
       assert.ok(webQ.includes(vkShop.id) && webQ.includes(vnHigh.id));
       assert.ok(webQ.indexOf(vkShop.id) < webQ.indexOf(vnHigh.id), "nhóm Việt Kiều được đọc trước lead trong nước điểm 99");
-      const vkEnricher: EnrichmentProvider = { key: "WEBSITE", label: "giả", role: "ENRICHMENT", googleSourced: false, billable: false, enrich: async (site) => ({ status: "DONE", pagesRead: 1, note: "Đọc 1 trang", findings: [{ kind: "EMAIL", value: "einkauf@saigonmarket-berlin.example", sourceUrl: `${site}/impressum`, via: "MAILTO" }], emailDomains: { "saigonmarket-berlin.example": { mx: "VALID_MX", mxVia: "MX" } } }) };
+      const vkEnricher: EnrichmentProvider = { key: "WEBSITE", label: "giả", role: "ENRICHMENT", googleSourced: false, billable: false, enrich: async (site) => ({ status: "DONE", pagesRead: 1, note: "Đọc 1 trang", findings: [{ kind: "EMAIL", value: "info@saigonmarket-berlin.de", sourceUrl: `${site}/impressum`, via: "MAILTO" }], emailDomains: { "saigonmarket-berlin.de": { mx: "VALID_MX", mxVia: "MX" } } }) };
       await enrichLeadWebsite({ ...webCtx, enricher: vkEnricher }, (await db.query.wholesaleLeads.findFirst({ where: eq(schema.wholesaleLeads.id, vkShop.id) }))!);
-      assert.equal((await db.query.wholesaleLeads.findFirst({ where: eq(schema.wholesaleLeads.id, vkShop.id) }))!.email, "einkauf@saigonmarket-berlin.example");
+      assert.equal((await db.query.wholesaleLeads.findFirst({ where: eq(schema.wholesaleLeads.id, vkShop.id) }))!.email, "info@saigonmarket-berlin.de");
       const vkProg = (await campaignProgressList(await getLeadHunterConfig())).find((x) => x.id === vkCamp.id)!;
       assert.deepEqual([vkProg.withEmail, vkProg.withWebsite, vkProg.noWebsite], [1, 1, 1], `có email / có website / không website: ${vkNoWeb.id}`);
       assert.ok((vkProg.estimate?.cellsToScan ?? 0) > 0, "nháp Việt Kiều in ước tính trước khi bấm");
