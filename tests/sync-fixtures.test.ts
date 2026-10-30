@@ -559,6 +559,7 @@ import { testPriceListsReceivables } from "./price-lists-receivables.test";
 import { testReorderReminders } from "./reorder-reminders.test";
 import { testFbCrm } from "./fb-crm.test";
 import { testFbCrmToggle } from "./fb-crm-toggle.test";
+import { testMissionControl } from "./mission-control.test";
 import { testSeafoodOs } from "./seafood-os.test";
 import { testAppointments } from "./appointments.test";
 import { testWarranty } from "./warranty.test";
@@ -3667,6 +3668,8 @@ async function main() {
     await testShippingCost(db);
     // Chủ shop tự duyệt lương theo khai báo org.owner (chủ shop 21/10/2026) — lib/constants/org-owner.ts.
     await testOrgOwner(db);
+    // Mission Control (chủ shop 30/10): đo AI agent theo sổ department-ai · chưa đo = null · tốt nghiệp không mặc định · cách ly.
+    await testMissionControl();
     // Facebook Friend CRM lát 1 (0262): link do người dán · đã mua theo ORDER_OUTCOME · doanh thu thực chưa chứng từ ⇒ null · cách ly tổ chức.
     await testFbCrm();
     // Công tắc tổ chức bật / tắt Facebook CRM (chủ shop 30/10): chỉ settings:manage · bấm lặp không ghi · audit · cờ đọc lại đúng.
