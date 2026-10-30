@@ -96,7 +96,11 @@ export const TRUTH_DOMAIN_SPEC: Record<TruthDomain, TruthDomainSpec> = {
  *    B là HAI dòng sao kê của cùng MỘT sự kiện; không ghép được hai chân thì dòng tiền công ty vừa
  *    cộng tiền ra vừa cộng tiền vào cho một đồng không hề rời khỏi shop.
  */
-export const LINK_TARGET_TYPES = ["EXPENSE", "COD_BATCH", "STOCK_RECEIPT", "AD_SPEND", "PAYROLL_PERIOD", "BANK_TRANSACTION", "SUPPLIER_PAYMENT"] as const;
+/*
+ * `ORDER` (0267 · chốt đơn sỉ): tiền KHÁCH chuyển cho một đơn TẠO TAY. Nối = đối chiếu «khoản tiền này là của đơn nào»; KHÔNG tạo
+ * phiếu thu `order_payments`, KHÔNG đổi công nợ hay doanh thu — phiếu thu vẫn do người ghi ở trang đơn (ORDER_OUTCOME.md 11.1).
+ */
+export const LINK_TARGET_TYPES = ["EXPENSE", "COD_BATCH", "STOCK_RECEIPT", "AD_SPEND", "PAYROLL_PERIOD", "BANK_TRANSACTION", "SUPPLIER_PAYMENT", "ORDER"] as const;
 export type LinkTargetType = (typeof LINK_TARGET_TYPES)[number];
 
 export const LINK_TARGET_LABEL: Record<LinkTargetType, string> = {
@@ -107,6 +111,7 @@ export const LINK_TARGET_LABEL: Record<LinkTargetType, string> = {
   PAYROLL_PERIOD: "Kỳ lương",
   BANK_TRANSACTION: "Chân kia của lần chuyển nội bộ",
   SUPPLIER_PAYMENT: "Thanh toán xưởng may / nhà vải",
+  ORDER: "Đơn tạo tay (tiền khách chuyển)",
 };
 
 /** Sổ mà chứng từ đích thuộc về — để không ai nối một dòng tiền vào chính sổ tiền rồi cộng hai lần. */
@@ -119,6 +124,8 @@ export const LINK_TARGET_DOMAIN: Record<LinkTargetType, TruthDomain> = {
   BANK_TRANSACTION: "CASH",
   // Sổ đặt xưởng là CÔNG NỢ nhà cung cấp — cùng miền với phiếu nhập kho, không phải một sổ tiền.
   SUPPLIER_PAYMENT: "EXPENSE",
+  // Đơn tạo tay: công nợ phải thu đọc từ phiếu thu của đơn (ORDER_OUTCOME.md 11.1) — không phải một sổ tiền, không phải chi phí.
+  ORDER: "ORDER_OUTCOME",
 };
 
 /** Khoá tự nhiên của một kỳ lương: `YYYY-MM`. */

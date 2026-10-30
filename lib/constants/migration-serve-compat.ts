@@ -248,6 +248,15 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     addedColumns: {},
     proof: "tests/daily-report.test.ts",
   },
+  {
+    tag: "0267_bank_link_order",
+    why:
+      "Chỉ NỚI hai CHECK danh sách loại chứng từ đích của sổ ngân hàng (bank_transaction_links.target_type · bank_transactions.linked_type) " +
+      "thêm 'ORDER' — không thêm / đổi / xoá cột nào. Mã đang chạy trên lược đồ cũ: mọi đường đọc chạy như cũ; lượt bấm «Nối» với một đơn " +
+      "vi phạm CHECK cũ, `createLink` ném trong giao dịch và người bấm nhận lỗi — không ghi nửa vời, không đụng phiếu thu hay công nợ.",
+    addedColumns: {},
+    proof: "tests/wholesale-order-close.test.ts",
+  },
 ];
 
 /** Bộ cột phải tránh của MỘT bảng (tên CSDL) — hợp của mọi mục trong sổ. HÀM THUẦN. */
