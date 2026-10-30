@@ -8,13 +8,17 @@ import { can } from "@/lib/auth/session";
 import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { assignableUsers, getWholesaleLead } from "@/lib/queries/wholesale";
 import { ACTIVITY_KIND_LABEL, BUSINESS_STATUS_LABEL, CALL_OUTCOME_LABEL, ENRICHMENT_KIND_LABEL, ENRICHMENT_STATUS_LABEL, LEAD_FIELD_LABEL, FILTER_REASON_LABEL, LEAD_SOURCE_LABEL, LEAD_STATUS_LABEL, OUTREACH_CHANNEL_LABEL, OUTREACH_RESULT_LABEL, OUTREACH_STATUS_LABEL, isLeadStatus, type CallOutcome, type LeadSourceKey, type OutreachChannel, type OutreachResult } from "@/lib/wholesale/constants";
+import { leadContactability } from "@/lib/wholesale/consents";
+import { CONSENT_CHANNELS } from "@/lib/wholesale/contactability";
 import { leadView } from "@/lib/wholesale/engine";
 import { fieldHandoffOptions } from "@/lib/wholesale/field-handoff";
 import { formatVnPhone, PHONE_KIND_LABEL } from "@/lib/wholesale/phone";
 import type { ScoreComponent } from "@/lib/wholesale/scoring";
 import { LEAD_SEGMENT_LABEL, isLeadSegmentKey } from "@/lib/wholesale/segments";
+import { leadTemperature } from "@/lib/wholesale/temperature";
 import { GoogleAttribution, WholesaleNav } from "@/app/(dashboard)/wholesale/wholesale-nav";
-import { GradeBadge, LeadStatusBadge } from "@/app/(dashboard)/wholesale/leads/leads-table";
+import { GradeBadge, LeadStatusBadge, TemperatureBadge } from "@/app/(dashboard)/wholesale/leads/leads-table";
+import { ConsentPanel } from "@/app/(dashboard)/wholesale/leads/[id]/consent-panel";
 import { LeadActions } from "@/app/(dashboard)/wholesale/leads/[id]/lead-actions";
 
 export const metadata = { title: "Lead khách sỉ" };
@@ -33,7 +37,9 @@ export default async function WholesaleLeadPage({ params }: { params: Promise<{ 
   const reasons = (lead.scoreReasons ?? null) as { summary?: string; components?: ScoreComponent[] } | null;
   const googleExpired = Boolean(lead.placeId && (!snap || snap.purgedAt));
   const canWork = can(user, "wholesale:work");
-  const [users, handoff] = await Promise.all([can(user, "wholesale:assign") ? assignableUsers() : Promise.resolve([]), fieldHandoffOptions()]);
+  const [users, handoff, contact] = await Promise.all([can(user, "wholesale:assign") ? assignableUsers() : Promise.resolve([]), fieldHandoffOptions(), leadContactability(lead, snap, "AUTOMATED")]);
+  const lastNote = data.activities.find((a) => (a.kind === "NOTE" || a.kind === "CALL") && a.note);
+  const temp = leadTemperature({ grade: lead.leadGrade, status, lastContactAt: lead.lastContactAt, firstResponseAt: lead.firstResponseAt, lastActivityAt: lastNote?.createdAt ?? null, nextFollowupAt: lead.nextFollowupAt, contactAttemptCount: lead.contactAttemptCount });
   const phoneNational = v.phone?.startsWith("+84") ? `0${v.phone.slice(3)}` : v.phone;
   return (
     <div className="space-y-4">
@@ -86,6 +92,10 @@ export default async function WholesaleLeadPage({ params }: { params: Promise<{ 
             <div className="flex items-center gap-3">
               <GradeBadge grade={lead.leadGrade} score={lead.leadScore} />
               <p className="text-sm">{reasons?.summary ?? "Chưa chấm (đang lấy chi tiết)."}</p>
+            </div>
+            <div className="mt-2 text-sm">
+              <span className="mr-2 text-xs text-muted-foreground">Nhiệt độ lúc này:</span>
+              <TemperatureBadge temperature={temp.temperature} reasons={temp.reasons} showReasons />
             </div>
             {reasons?.components?.length ? (
               <table className="mt-3 w-full text-sm">
@@ -185,6 +195,16 @@ export default async function WholesaleLeadPage({ params }: { params: Promise<{ 
               canWork={canWork}
               users={users}
               handoff={handoff}
+            />
+          </SectionCard>
+
+          <SectionCard title="Đồng ý liên hệ" hint="Bằng chứng khách cho phép liên hệ, chỉ thêm — thu hồi để lại vết. Máy chỉ được TỰ liên hệ một kênh khi có đồng ý còn hiệu lực cho đúng địa chỉ đó.">
+            <ConsentPanel
+              leadId={lead.id}
+              canWork={canWork}
+              schemaReady={contact.schemaReady}
+              verdicts={CONSENT_CHANNELS.map((ch) => ({ channel: ch, allowed: contact.byChannel[ch].allowed, detail: contact.byChannel[ch].detail }))}
+              rows={contact.consents.map((c) => ({ id: c.id, channel: c.channel, contactValue: c.contactValue, basis: c.basis, evidenceText: c.evidenceText, evidenceUrl: c.evidenceUrl, recordedByName: c.recordedByName, recordedAt: c.recordedAt.toISOString(), revokedAt: c.revokedAt ? c.revokedAt.toISOString() : null, revokeReason: c.revokeReason, revokedByName: c.revokedByName }))}
             />
           </SectionCard>
 

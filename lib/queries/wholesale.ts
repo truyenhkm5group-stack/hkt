@@ -11,6 +11,7 @@ import { DEFAULT_KEYWORD_GROUPS, paidCostMicros, type LeadHunterConfig } from "@
 import { CONTACTED_STATUSES, INTERESTED_STATUSES, LEAD_SOURCE_LABEL, LEAD_STATUS_LABEL, NEGOTIATING_STATUSES, RESPONDED_STATUSES, type LeadSourceKey, type LeadStatus, isLeadStatus } from "@/lib/wholesale/constants";
 import { formatVnPhone, PHONE_KIND_LABEL, type PhoneKind } from "@/lib/wholesale/phone";
 import { enabledKeywords } from "@/lib/wholesale/query-plan";
+import { leadTemperature, type LeadTemperature } from "@/lib/wholesale/temperature";
 import { LEAD_SEGMENT_LABEL, isLeadSegmentKey, type LeadSegment } from "@/lib/wholesale/segments";
 import { billableCallsBySku, getLeadHunterConfig, vnStartOfMonth } from "@/lib/wholesale/store";
 
@@ -67,6 +68,9 @@ export type LeadListRow = {
   lastNote: string | null;
   lastNoteOutcome: string | null;
   lastNoteAt: string | null;
+  /** Nhiệt độ ĐỌC RA LÚC XEM (`leadTemperature`) — `null` = không áp dụng (đã thành khách). */
+  temperature: LeadTemperature | null;
+  temperatureReasons: string[];
 };
 
 /** Dòng hoạt động có chữ mới nhất của lead — câu con tương quan, khoá lead viết TƯỜNG MINH (drizzle in `id` trần thành cột của bảng con). */
@@ -145,6 +149,8 @@ export async function listWholesaleLeads(params: ListParams, decision: ScopeDeci
         status: l.contactStatus,
         assignee: l.assignedToName,
         lastContactAt: l.lastContactAt,
+        firstResponseAt: l.firstResponseAt,
+        contactAttemptCount: l.contactAttemptCount,
         nextFollowupAt: l.nextFollowupAt,
         nextAction: l.nextAction,
         enrichment: l.enrichmentStatus,
@@ -164,9 +170,11 @@ export async function listWholesaleLeads(params: ListParams, decision: ScopeDeci
       .offset((params.page - 1) * params.pageSize),
     db.select({ total: count() }).from(l).leftJoin(ps, eq(ps.placeId, l.placeId)).where(where),
   ]);
+  const now = new Date();
   const out: LeadListRow[] = rows.map((r) => {
     const seg: LeadSegment = isLeadSegmentKey(r.segment) ? r.segment : "UNCLASSIFIED";
     const status: LeadStatus = isLeadStatus(r.status) ? r.status : "NEW";
+    const temp = leadTemperature({ grade: r.grade, status, lastContactAt: r.lastContactAt, firstResponseAt: r.firstResponseAt, lastActivityAt: r.lastNoteAt, nextFollowupAt: r.nextFollowupAt, contactAttemptCount: r.contactAttemptCount }, now);
     return {
       id: r.id,
       name: r.name,
@@ -196,6 +204,8 @@ export async function listWholesaleLeads(params: ListParams, decision: ScopeDeci
       lastNote: r.lastNote,
       lastNoteOutcome: r.lastNoteOutcome,
       lastNoteAt: r.lastNoteAt ? new Date(r.lastNoteAt).toISOString() : null,
+      temperature: temp.temperature,
+      temperatureReasons: temp.reasons,
     };
   });
   return { rows: out, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };

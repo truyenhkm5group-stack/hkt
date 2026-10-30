@@ -186,6 +186,18 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     proof: "tests/sourcing-capture.test.ts",
   },
   {
+    tag: "0261_wholesale_contact_consent",
+    why:
+      "Chỉ TẠO một bảng mới ở CSDL tổ chức (wholesale_contact_consents), NỚI hai CHECK (wholesale_suppressions.kind thêm 'EMAIL', " +
+      "wholesale_lead_activities.kind thêm 'CONSENT') và thêm một chỉ mục biểu thức lower(btrim(email)) — không thêm / đổi / xoá cột nào. " +
+      "Đường ĐỌC nhật ký đồng ý (`consentsOfLead`) bắt 42P01 ⇒ không có đồng ý, kết luận rơi về phía HẸP (máy không tự liên hệ) và trang " +
+      "lead in «CSDL chưa áp 0261». Đường GHI đồng ý / thu hồi bắt 42P01 ⇒ trả lỗi, không ghi gì. Thêm email chặn tay bắt vi phạm CHECK " +
+      "kind cũ ⇒ trả lỗi; nút «Không liên hệ» bỏ RIÊNG dòng email, SĐT / website / địa điểm vẫn vào danh sách. Thiếu chỉ mục ⇒ khử trùng " +
+      "email quét chậm hơn, cùng kết quả.",
+    addedColumns: {},
+    proof: "tests/wholesale-consent.test.ts",
+  },
+  {
     tag: "0263_wholesale_quotations",
     why:
       "Chỉ TẠO hai bảng mới ở CSDL tổ chức (wholesale_quotations · wholesale_quotation_lines) + hai trigger bất biến của chính chúng — " +
