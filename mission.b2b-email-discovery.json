@@ -3,7 +3,7 @@
   "mission_id": "b2b-email-discovery",
   "title": "Thu thập email B2B có bằng chứng từ website công khai",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-email",
@@ -36,11 +36,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-27T05:05:32.066Z",
-  "updated_at": "2026-10-30T06:25:37.067Z",
+  "updated_at": "2026-10-30T08:47:57.119Z",
   "last_heartbeat": "2026-10-30T06:09:25.793Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1088 → 1435ebcf1ec4e46869e35ef0631a69af54a573c4"
+    "merged": "#1088 → 1435ebcf1ec4e46869e35ef0631a69af54a573c4",
+    "verify": "PASS f3074a608902bb1d3f7631c9fe49f8117e50a1a5 2026-10-30T08:47:20.982Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/41026930352"
   },
   "handoff": {
     "branch": "claude/b2b-email-discovery",
