@@ -1,0 +1,8 @@
+{
+  "pr": 1097,
+  "sha": "6f722994da4b9d134bf22a4d091bc9fccf3b6427",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-30T09:11:43.991Z",
+  "note": "review lead: khung Cài đặt báo giá — gợi ý trần CK / biên LN tính từ bảng giá sỉ đang bật + giá vốn sống (luật 13), thiếu giá vốn = chưa biết; gợi ý chỉ là chữ, chỉ wholesale:config lưu, bắt buộc lý do, audit trước/sau; thuế không gợi ý số; xem không ghi."
+}
