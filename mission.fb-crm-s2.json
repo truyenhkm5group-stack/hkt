@@ -3,7 +3,7 @@
   "mission_id": "fb-crm-s2",
   "title": "Facebook CRM lát 2: nguồn việc /work, khối Customer 360, thẻ số + tương quan",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-fbcrm-s2",
@@ -30,7 +30,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-30T10:07:42.625Z",
-  "updated_at": "2026-10-30T10:07:42.625Z",
-  "last_heartbeat": "2026-10-30T10:07:42.625Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-30T10:31:10.343Z",
+  "last_heartbeat": "2026-10-30T10:31:10.343Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/fb-crm-s2",
+    "sha": "007add1db2d133e6fadbe3a90c77b1fa82bf0b16",
+    "at": "2026-10-30T10:31:10.343Z",
+    "actor": "DESKTOP-56TH98Y:wt-fbcrm-s2",
+    "title": "Facebook CRM lát 2: nguồn việc /work, khối Customer 360, thẻ số + tương quan",
+    "summary": "Nguồn việc FB_CRM_CARE (phép chiếu SOURCE, phòng SALES, chỉ nút MỞ, giao qua miền, không đếm hai lần với việc tay fb-crm); khối Facebook CRM trên Customer 360; thẻ số theo trạng thái + «kết bạn rồi mua» (ORDER_OUTCOME + VERIFIED_CASH, nhãn tương quan + độ phủ). Không migration, không AI.",
+    "tests": [
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "TEST_KHOI=K13,K24 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K13,K24 ĐẠT (K13 = work-os, K24 = fb-crm-s2 + fb-crm + toggle)",
+      "npm run build: ĐẠT",
+      "main đi trước 1 commit (wholesale outbox) — merge-tree sạch, không chạm tệp của việc này",
+      "4 shard đầy đủ: để gates CI"
+    ]
+  }
 }
