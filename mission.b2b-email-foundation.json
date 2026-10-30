@@ -3,7 +3,7 @@
   "mission_id": "b2b-email-foundation",
   "title": "Nền tảng email bán sỉ ở chế độ chạy thử (E1)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-b2b-mail",
@@ -40,11 +40,13 @@
     "0264": "2026-10-27T07:04:58.822Z"
   },
   "created_at": "2026-10-27T07:00:19.535Z",
-  "updated_at": "2026-10-30T10:31:55.041Z",
+  "updated_at": "2026-10-30T10:50:55.521Z",
   "last_heartbeat": "2026-10-30T10:04:12.679Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1098 → 7310cde367feadb386f295fc56d426014177d9af"
+    "merged": "#1098 → 7310cde367feadb386f295fc56d426014177d9af",
+    "verify": "PASS 7310cde367feadb386f295fc56d426014177d9af 2026-10-30T10:50:03.380Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/41041443710"
   },
   "handoff": {
     "branch": "claude/b2b-email-foundation",
