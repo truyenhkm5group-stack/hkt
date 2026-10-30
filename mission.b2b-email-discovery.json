@@ -36,24 +36,22 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-27T05:05:32.066Z",
-  "updated_at": "2026-10-27T09:19:34.501Z",
-  "last_heartbeat": "2026-10-27T09:15:13.529Z",
+  "updated_at": "2026-10-30T03:12:42.826Z",
+  "last_heartbeat": "2026-10-30T03:12:42.826Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/b2b-email-discovery",
-    "sha": "9825d19d85ba62a201cd90b579b68048bb62343e",
-    "at": "2026-10-27T09:15:13.529Z",
+    "sha": "614529818642c004215e15056a2cf4c0ff88e5bb",
+    "at": "2026-10-30T03:12:42.826Z",
     "actor": "DESKTOP-56TH98Y:wt-b2b-email",
     "title": "Thu thập email B2B có bằng chứng từ website công khai",
     "summary": "",
     "tests": [
-      "Sửa đỏ gates shard 2/4 (testLoiGoiMangChanCredential): khai lib/wholesale/website.ts vào GOI_MANG_KHONG_CREDENTIAL — tệp không đọc process.env/secret, chỉ đọc web công khai qua fetchPublicUrl",
-      "npx tsx tests/platform-isolation-static.test.ts: ĐẠT",
-      "TEST_KHOI=K17 npm test (khối chứa platform-isolation-static): TẤT CẢ KIỂM THỬ CỦA chỉ K17 ĐẠT",
-      "TEST_KHOI=K21 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K21 ĐẠT",
-      "npx tsc --noEmit: sạch (exit 0)",
-      "npm run lint: sạch (lượt trước) + eslint tệp mới sửa: sạch",
-      "npm run build: ĐẠT ở SHA 6da15eb9 (commit sửa chỉ thêm 1 dòng vào tệp test)",
+      "Merge origin/main 2c5a83ae (gồm consent #1090) giữ cả hai phía: engine dùng applyEmailDiscovery + dedupeByNewEmail/findMasterLead email của consent; hộp thư chu@/giamdoc@/owner@ xếp GENERAL (ca chu@quana.vn của bài consent)",
+      "TEST_KHOI=K17 npm test: ĐẠT",
+      "TEST_KHOI=K21 npm test: lượt 1 ĐỎ ở tests/self-service-journey.test.ts:2184 (catchUpFanpage: t-cu3 «quá mới» thành đủ tuổi giữa hai lượt quét khi máy bận — bài kiểm phụ thuộc đồng hồ, không liên quan wholesale; mọi bài wholesale gồm email-discovery + consent ĐẠT trong lượt đó), lượt 2 ĐẠT toàn khối",
+      "npx tsc --noEmit: sạch",
+      "npm run lint: sạch",
       "4 shard đầy đủ: để gates CI"
     ]
   }
