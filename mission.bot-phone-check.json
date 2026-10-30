@@ -26,18 +26,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-30T03:05:33.480Z",
-  "updated_at": "2026-10-30T03:09:12.638Z",
-  "last_heartbeat": "2026-10-30T03:06:33.881Z",
+  "updated_at": "2026-10-30T04:22:26.343Z",
+  "last_heartbeat": "2026-10-30T04:22:26.343Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/bot-phone-check",
-    "sha": "8e8c8d5b6d292fc6aead47efe52614af9396228d",
-    "at": "2026-10-30T03:06:33.881Z",
+    "sha": "93de3330f2e20eb2e2c4c9e7716a6ef17a610407",
+    "at": "2026-10-30T04:22:26.343Z",
     "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
     "title": "P0 HSLC: bot không lên đơn khi SĐT sai hình dạng",
     "summary": "",
     "tests": [
-      "tsc sạch; eslint tệp chạm sạch; TEST_KHOI=K09 ĐẠT (bài mới bot-phone-check); 4 shard để gates CI"
+      "tsc sạch; eslint sạch; TEST_KHOI=K09,K21 ĐẠT (bài bot-phone-check + ca một-tin-đủ-đơn); 4 shard để gates CI"
     ]
   }
 }
