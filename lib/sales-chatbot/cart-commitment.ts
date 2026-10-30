@@ -23,6 +23,7 @@
 import { foldVnText, isAdminName, resolveRecipientPlace } from "@/lib/address/vn-address";
 import { manualOrderGaps } from "@/lib/constants/manual-orders";
 import { formatVND } from "@/lib/format";
+import { phonesInText } from "@/lib/sales-chatbot/known-contact";
 import { foldVi, sentencesOf } from "@/lib/sales-chatbot/text";
 
 export type CartUnit = "g" | "pack";
@@ -1555,7 +1556,6 @@ export function declinesAddOnOnly(text: string): boolean {
 
 export type OrderReadiness = "CONFIRMED" | "ORDER_READY" | "NEED_ITEMS" | "NEED_PHONE" | "NEED_ADDRESS" | "ON_HOLD" | "BROWSING";
 
-const PHONE_IN_TEXT_RE = /(?:\+?84|0)(?:[\s.-]?\d){8,10}(?!\d)/;
 
 type ReadinessInput = {
   /** Khách ĐÃ gửi chữ địa chỉ trong lượt mua (address-memory.ts `addressTextGiven`) ⇒ không bao giờ NEED_ADDRESS (AGENTS 3.12b, 22/10/2026). */
@@ -1596,7 +1596,7 @@ export function orderReadiness(s: ReadinessInput): { level: OrderReadiness; miss
   if (s.hesitating) return { level: "ON_HOLD", missing: "Khách chưa quyết mua (đang hoãn / cân nhắc)" };
   // Còn MỘT món không tên (dù món khác đã rõ — review #855) ⇒ vẫn kèm chỉ dẫn xác định món, không ORDER_READY trần.
   if (explicit.some((x) => !x.match && !x.productId)) return { level: "NEED_ITEMS", missing: "Câu khách nêu số lượng mà không nêu tên món — xác định món theo lịch sử hội thoại (chỉ hỏi lại khi thật sự chưa rõ), KHÔNG hỏi lại số lượng" };
-  const phone = s.customer?.phone ?? (s.lastUserText.match(PHONE_IN_TEXT_RE)?.[0] ?? s.knownPhone ?? "");
+  const phone = s.customer?.phone ?? (phonesInText(s.lastUserText)[0] ?? s.knownPhone ?? "");
   const address = s.customer?.address ?? s.knownAddress?.address ?? s.lastUserText;
   const province = s.customer?.province || (s.customer ? "" : s.knownAddress?.province) || resolveRecipientPlace({ address, province: "", ward: "" }).province;
   const gaps = manualOrderGaps({ phone, address, province }, explicit.length);
