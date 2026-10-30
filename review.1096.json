@@ -1,0 +1,8 @@
+{
+  "pr": 1096,
+  "sha": "1b28b50ab2b97bf5f7a3f7aedd18a9d639a3620d",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-30T08:08:12.105Z",
+  "note": "review lead: công tắc fbCrm.enabled cho quản trị tổ chức (settings:manage có sẵn, không quyền mới) — zod boolean, bấm lặp không ghi, audit FB_CRM_TOGGLE mang users.id, revalidate /customers; người không quyền thấy câu nhờ quản trị; bài kiểm trên tổ chức PGlite riêng."
+}
