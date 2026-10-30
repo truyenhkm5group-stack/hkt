@@ -38,18 +38,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-27T04:40:36.652Z",
-  "updated_at": "2026-10-27T08:12:14.357Z",
-  "last_heartbeat": "2026-10-27T08:09:25.120Z",
+  "updated_at": "2026-10-30T03:32:18.963Z",
+  "last_heartbeat": "2026-10-30T03:32:18.963Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/b2b-intl-discovery",
-    "sha": "f13ea0d740cab8e395fdeafdceaaf4b52bd17049",
-    "at": "2026-10-27T08:09:25.120Z",
+    "sha": "32d99ba3d27242fd262272e5677eaae07a67dd02",
+    "at": "2026-10-30T03:32:18.963Z",
     "actor": "DESKTOP-56TH98Y:wt-b2b-intl",
     "title": "Săn khách sỉ quốc tế: 15 nước, phân khúc B2B, mẫu pilot nhà nhập khẩu hải sản",
     "summary": "",
     "tests": [
-      "f13ea0d7 (sửa theo lead review: luật B2B chỉ áp ô quốc tế): npm run typecheck sạch · npm run lint sạch · TEST_KHOI=K21 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K21 ĐẠT (testWholesaleLeadHunter + testWholesaleIntlDiscovery, gồm bài «Food Distributor VN qua bộ lọc mục tiêu mặc định + 3 mẫu VN») · npm run build exit 0 ở 3af074a3 (commit sửa không chạm client/server) · 4 shard đầy đủ: để gates CI"
+      "32d99ba3 (gộp origin/main 2c5a83ae, giữ cả hai phía: lib/queries/wholesale.ts import + tests/sync-fixtures.test.ts K21 có cả testWholesaleIntlDiscovery lẫn testWholesaleConsent / testWholesaleCatalogReadiness): npm run typecheck sạch · npm run lint sạch · TEST_KHOI=K21 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K21 ĐẠT · build exit 0 ở 3af074a3 (các commit sau không chạm client component) · 4 shard đầy đủ: để gates CI"
     ]
   }
 }
