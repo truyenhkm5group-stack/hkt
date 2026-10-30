@@ -1,0 +1,8 @@
+{
+  "pr": 1111,
+  "sha": "b5cc0e6530e8c6331fd4300fbd808643e77c4815",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-30T23:35:58.516Z",
+  "note": "review lead: marketing VÀO VIỆC bổ sung — nguồn CREATIVE_APPROVAL là phép chiếu SOURCE phòng MARKETING trên ảnh AI vẽ chờ duyệt (luồng lô LOOP đã bỏ 26/09 nên chiếu lên creative_manual_gen_images — lệch kế hoạch có lý do), chỉ nút mở trang duyệt; Mission Control thêm chỉ số ảnh AI duyệt/bác, chưa xét ngoài mẫu; department-ai chỉ thêm bằng chứng, BÀN TAY giữ PARTIAL, COPILOT, không AUTO, không đổi "
+}
