@@ -12,6 +12,8 @@ import { cn } from "@/lib/utils";
 import { WholesaleNav } from "@/app/(dashboard)/wholesale/wholesale-nav";
 import { EmailCandidates, OutboxBoard } from "@/app/(dashboard)/wholesale/outbox/outbox-board";
 import { EmailSettingsPanel } from "@/app/(dashboard)/wholesale/outbox/email-settings-panel";
+import { EmailCountriesPanel } from "@/app/(dashboard)/wholesale/outbox/email-countries-panel";
+import { EMAIL_COUNTRY_CHOICES } from "@/lib/wholesale/email-countries";
 
 export const metadata = { title: "Hộp thư đi sỉ" };
 
@@ -80,6 +82,9 @@ export default async function WholesaleOutboxPage({ searchParams }: { searchPara
           )}
           <SectionCard title="Cấu hình & nút dừng" description="Chế độ gửi, danh tính người gửi in ở chân thư, hạn mức, và nút dừng khẩn. Ai chăm lead cũng bấm DỪNG được; chỉ người cấu hình mở lại.">
             <EmailSettingsPanel settings={settings} campaigns={campaigns} canConfigure={isConfig} isOwner={user.role === "ADMIN"} liveAvailable={LIVE_EMAIL_ADAPTERS.length > 0} />
+          </SectionCard>
+          <SectionCard title="Nước đã rà luật thư chào hàng" description={`${settings.allowedCountries.length ? `Đã rà: ${settings.allowedCountries.join(", ")}.` : "Chưa nước nào — mọi thư chỉ chạy thử."} Nước chưa rà ⇒ gửi thật nằm chờ «chưa rà luật nước X».`}>
+            <EmailCountriesPanel allowed={settings.allowedCountries} choices={EMAIL_COUNTRY_CHOICES} canEdit={isConfig && user.role === "ADMIN"} />
           </SectionCard>
         </>
       )}

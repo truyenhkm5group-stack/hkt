@@ -42,7 +42,8 @@ const NOW = new Date("2026-10-27T03:00:00Z");
 // ─────────────────────────── 1. CỔNG CHÍNH SÁCH (THUẦN) ───────────────────────────
 
 const SENDER = { name: "Hải sản Hà My", email: "banhang@hamy.vn", companyName: "Hộ kinh doanh Hà My", address: "12 Lê Lợi, Hải Châu, Đà Nẵng" };
-const SETTINGS: EmailSettings = { ...DEFAULT_EMAIL_SETTINGS, mode: "DRY_RUN", sender: SENDER };
+// Nước người nhận đã rà luật (cổng nước — tests/wholesale-channel-routing.test.ts đo riêng): bộ ca dưới đây đo các lý do KHÁC.
+const SETTINGS: EmailSettings = { ...DEFAULT_EMAIL_SETTINGS, mode: "DRY_RUN", sender: SENDER, allowedCountries: ["VN"] };
 const HASH = emailContentHash("lan@nhahang.vn", "Bảng giá", "Chào anh chị");
 
 function baseInput(over: Partial<EmailPolicyInput> = {}, msg: Partial<EmailPolicyInput["message"]> = {}): EmailPolicyInput {
@@ -56,6 +57,7 @@ function baseInput(over: Partial<EmailPolicyInput> = {}, msg: Partial<EmailPolic
     leadEventKinds: [],
     duplicateSent: false,
     counts: { lastHour: 0, today: 0, domainToday: 0 },
+    recipientCountry: "VN",
     ...over,
   };
 }
