@@ -3,7 +3,7 @@
   "mission_id": "mission-control",
   "title": "Mission Control: đo AI agent theo sổ department-ai + điều kiện tốt nghiệp",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "FAILED",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-mission",
@@ -31,11 +31,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-30T10:44:00.508Z",
-  "updated_at": "2026-10-30T12:04:43.975Z",
+  "updated_at": "2026-10-30T12:49:32.122Z",
   "last_heartbeat": "2026-10-30T11:40:32.039Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1101 → db5715ef98771c5ace478ac4481dcf2630a03d00"
+    "merged": "#1101 → db5715ef98771c5ace478ac4481dcf2630a03d00",
+    "verify": "FAIL 99f2d58274793308ae7ab32c04c946c070f59701 2026-10-30T12:48:34.243Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/41052869736"
   },
   "handoff": {
     "branch": "claude/mission-control",

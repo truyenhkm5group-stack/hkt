@@ -1,4 +1,3 @@
-{"at":"2026-10-24T05:15:09.905Z","actor":"DESKTOP-56TH98Y:wt-ssprobe","kind":"HANDOFF","mission":"shipment-state-probe","detail":"claude/shipment-state-probe @ 6e4558add966 · 1 lệnh kiểm thử"}
 {"at":"2026-10-24T05:16:13.572Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#1028 @ 6e4558add966 · review lead (lại): tách primaryShipmentsQuery dùng chung route + probe (không bản PRIMARY_ATTEMPT thứ hai); probe EXPLAIN qua getDb trong giao dịch read only + rollback, không pg.Pool riêng (ISO-17 xanh). Chạm lib ⇒ probe chỉ chạy được SAU deploy."}
 {"at":"2026-10-24T05:18:54.065Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_PASS","mission":"order-dup-guard","detail":"PASS caea634ce6d683e2fb371d4c68066ffbb13a3c42 2026-10-24T05:18:22.517Z"}
 {"at":"2026-10-24T06:04:02.609Z","actor":"DESKTOP-56TH98Y:wt-settings","kind":"CLAIM","mission":"od-ux-05-settings-dedupe","detail":"PLANNING · 6 mẫu phạm vi · MEDIUM"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-30T12:04:44.021Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"mission-control","detail":"#1101 @ f1ef6908e27a → db5715ef9877 (MERGE_NOW · MEDIUM · gates success)"}
 {"at":"2026-10-30T12:05:53.896Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"b2b-email-ai-draft","detail":"#1100 @ 8d64504ddf65 → 99f2d5827479 (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-30T12:25:29.319Z","actor":"DESKTOP-56TH98Y:wt-b2b-routing","kind":"HANDOFF","mission":"b2b-channel-routing","detail":"claude/b2b-channel-routing @ 7ca5eda831e6 · 6 lệnh kiểm thử"}
+{"at":"2026-10-30T12:49:32.174Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_FAIL","mission":"mission-control","detail":"FAIL 99f2d58274793308ae7ab32c04c946c070f59701 2026-10-30T12:48:34.243Z"}
