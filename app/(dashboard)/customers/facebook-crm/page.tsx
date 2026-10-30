@@ -3,9 +3,10 @@ import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/ui-bits";
 import { FbCrmTable } from "@/app/(dashboard)/customers/facebook-crm/fb-crm-table";
+import { FbCrmToggle } from "@/app/(dashboard)/customers/facebook-crm/fb-crm-toggle";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { can } from "@/lib/auth/session";
-import { FB_CRM_SETTING_KEY, FB_CRM_SORTABLE, FB_CRM_VIEWS, FB_CRM_VIEW_LABEL, fbCrmViewOf } from "@/lib/constants/fb-crm";
+import { FB_CRM_SORTABLE, FB_CRM_VIEWS, FB_CRM_VIEW_LABEL, fbCrmViewOf } from "@/lib/constants/fb-crm";
 import { formatNumber } from "@/lib/format";
 import { fbCrmAssignableUsers, fbCrmEnabled, fbCrmViewCounts, listFbCrm } from "@/lib/queries/fb-crm";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
@@ -23,13 +24,15 @@ export default async function FacebookCrmPage({ searchParams }: { searchParams: 
   const { user, decision } = await requireResource("CUSTOMERS", "customers:view");
   if (decision.allow === "NONE") return <ScopeDenied title="Facebook Friend CRM" reason={decision.reason} fix={decision.fix} />;
 
+  // Công tắc của tổ chức: chỉ quản trị cài đặt (settings:manage — quyền các trang /settings đang dùng). Hiện ở CẢ hai trạng thái.
+  const canManage = can(user, "settings:manage");
   if (!(await fbCrmEnabled())) {
     return (
       <div className="space-y-5">
-        <PageHeader eyebrow="Khách hàng" title="Facebook Friend CRM" />
+        <PageHeader eyebrow="Khách hàng" title="Facebook Friend CRM" actions={canManage ? <FbCrmToggle on={false} canManage /> : undefined} />
         <EmptyState
           title="Chưa bật Facebook Friend CRM cho tổ chức này"
-          description={`Tính năng mặc định TẮT. Chủ shop bật bằng cài đặt «${FB_CRM_SETTING_KEY}» = {"on": true}.`}
+          description={canManage ? "Tính năng mặc định TẮT. Bật công tắc phía trên để nhân viên bắt đầu ghi link Facebook, đồng ý kết bạn và nhiệm vụ chăm sóc." : <FbCrmToggle on={false} canManage={false} />}
         />
       </div>
     );
@@ -56,6 +59,7 @@ export default async function FacebookCrmPage({ searchParams }: { searchParams: 
       <PageHeader
         eyebrow="Khách hàng"
         title="Facebook Friend CRM"
+        actions={canManage ? <FbCrmToggle on canManage /> : undefined}
         description={`${formatNumber(counts.all)} khách từng nhắn fanpage hoặc có đơn · ${formatNumber(counts.friends)} đã kết bạn · ${formatNumber(counts.consented)} đồng ý, chờ kết bạn · ${formatNumber(counts.dnc)} không liên hệ`}
         hint="Giao thành công theo kết quả đơn của ERP (ORDER_OUTCOME — đơn hoàn / huỷ không tính). Doanh thu thực = tiền CÓ CHỨNG TỪ (COD thực thu, chuyển khoản) của đơn giao thành công; «—» = chưa có chứng từ, không phải 0đ. Link Facebook chỉ có khi NGƯỜI dán (khách gửi, hoặc nhân viên bấm avatar trên Pancake) — mã trong hộp thư là mã THEO PAGE, không mở được trang cá nhân."
       />

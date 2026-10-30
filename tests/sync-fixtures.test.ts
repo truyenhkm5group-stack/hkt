@@ -558,6 +558,7 @@ import { testManualOrderOutcome } from "./manual-order-outcome.test";
 import { testPriceListsReceivables } from "./price-lists-receivables.test";
 import { testReorderReminders } from "./reorder-reminders.test";
 import { testFbCrm } from "./fb-crm.test";
+import { testFbCrmToggle } from "./fb-crm-toggle.test";
 import { testSeafoodOs } from "./seafood-os.test";
 import { testAppointments } from "./appointments.test";
 import { testWarranty } from "./warranty.test";
@@ -3659,6 +3660,8 @@ async function main() {
     await testOrgOwner(db);
     // Facebook Friend CRM lát 1 (0262): link do người dán · đã mua theo ORDER_OUTCOME · doanh thu thực chưa chứng từ ⇒ null · cách ly tổ chức.
     await testFbCrm();
+    // Công tắc tổ chức bật / tắt Facebook CRM (chủ shop 30/10): chỉ settings:manage · bấm lặp không ghi · audit · cờ đọc lại đúng.
+    await testFbCrmToggle();
     testPgliteTestDirs();
     // ERP a11y + bố cục hẹp (Commercial Sweep PR G): h1 màn không tìm thấy, công tắc / ô số có tên, /payroll không tràn 390 px.
     testErpA11y();
