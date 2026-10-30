@@ -12800,3 +12800,111 @@ export const customerFbConnectionEvents = pgTable(
     ),
   ],
 );
+
+/**
+ * BÁO GIÁ SỈ (0263 · docs/tech/hslc-b2b-sales-agent.md P1b). Số trên báo giá do bộ tính TẤT ĐỊNH `computeQuotation`
+ * (lib/wholesale/quotation-engine.ts) tính MỘT LẦN lúc lập phiên bản — LLM không tính tiền. Mỗi lần sửa là một PHIÊN BẢN MỚI
+ * (cùng `code`, `version` + 1, `parent_quotation_id` trỏ bản trước; mỗi bản có tối đa MỘT bản kế — chỉ mục duy nhất), bản cũ
+ * BẤT BIẾN: trigger CSDL từ chối đổi tiền / dòng / ảnh chụp, chỉ cột trạng thái + mốc được đổi. `snapshot` là toàn bộ đầu vào +
+ * kết quả lúc lập — trang in đọc từ đây, không tính lại khi bảng giá đổi (giống kỳ đã chốt, luật 21). Hết hạn TÍNH LÚC ĐỌC
+ * (`effectiveQuotationStatus`), không ghi đè lịch sử. Tiền là số nguyên VND; tiền tệ khác chưa có nguồn tỷ giá ⇒ CHECK chỉ 'VND'.
+ */
+export const wholesaleQuotations = pgTable(
+  "wholesale_quotations",
+  {
+    id: id(),
+    code: text("code").notNull(),
+    version: integer("version").notNull().default(1),
+    parentQuotationId: text("parent_quotation_id").references((): AnyPgColumn => wholesaleQuotations.id, { onDelete: "restrict" }),
+    requestKey: text("request_key").notNull(),
+    leadId: text("lead_id").references(() => wholesaleLeads.id, { onDelete: "restrict" }),
+    customerId: text("customer_id").references(() => customers.id, { onDelete: "restrict" }),
+    status: text("status").notNull().default("DRAFT"),
+    currency: text("currency").notNull().default("VND"),
+    priceListId: text("price_list_id"),
+    priceVersion: text("price_version").notNull(),
+    subtotal: bigint("subtotal", { mode: "number" }).notNull(),
+    discount: bigint("discount", { mode: "number" }).notNull().default(0),
+    shipping: bigint("shipping", { mode: "number" }),
+    shippingSource: text("shipping_source").notNull().default(""),
+    tax: bigint("tax", { mode: "number" }),
+    taxSource: text("tax_source").notNull().default(""),
+    total: bigint("total", { mode: "number" }).notNull(),
+    validUntil: date("valid_until", { mode: "string" }).notNull(),
+    incoterm: text("incoterm"),
+    notes: text("notes").notNull().default(""),
+    requiresApproval: boolean("requires_approval").notNull().default(false),
+    blockerCount: integer("blocker_count").notNull().default(0),
+    snapshot: jsonb("snapshot").notNull(),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    approvedByUserId: text("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: ts("approved_at"),
+    sentByUserId: text("sent_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    sentAt: ts("sent_at"),
+    acceptedAt: ts("accepted_at"),
+    rejectedAt: ts("rejected_at"),
+    decidedByUserId: text("decided_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    decisionNote: text("decision_note").notNull().default(""),
+    supersededAt: ts("superseded_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("wholesale_quotations_code_version_uq").on(t.code, t.version),
+    uniqueIndex("wholesale_quotations_request_key_uq").on(t.requestKey),
+    uniqueIndex("wholesale_quotations_parent_uq").on(t.parentQuotationId),
+    index("wholesale_quotations_status_idx").on(t.status, t.createdAt),
+    index("wholesale_quotations_lead_idx").on(t.leadId),
+    index("wholesale_quotations_customer_idx").on(t.customerId),
+    check("wholesale_quotations_party_check", sql`${t.leadId} IS NOT NULL OR ${t.customerId} IS NOT NULL`),
+    check("wholesale_quotations_status_check", sql`${t.status} IN ('DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED', 'SUPERSEDED')`),
+    check("wholesale_quotations_currency_check", sql`${t.currency} = 'VND'`),
+    check("wholesale_quotations_version_check", sql`${t.version} >= 1 AND (${t.version} = 1) = (${t.parentQuotationId} IS NULL)`),
+    check("wholesale_quotations_amounts_check", sql`${t.subtotal} >= 0 AND ${t.discount} >= 0 AND (${t.shipping} IS NULL OR ${t.shipping} >= 0) AND (${t.tax} IS NULL OR ${t.tax} >= 0) AND ${t.total} >= 0`),
+    check("wholesale_quotations_shipping_source_check", sql`${t.shipping} IS NULL OR length(trim(${t.shippingSource})) >= 1`),
+    check("wholesale_quotations_tax_source_check", sql`${t.tax} IS NULL OR length(trim(${t.taxSource})) >= 1`),
+    check("wholesale_quotations_incoterm_check", sql`${t.incoterm} IS NULL OR ${t.incoterm} IN ('EXW', 'FCA', 'CPT', 'CIP', 'DAP', 'DPU', 'DDP', 'FAS', 'FOB', 'CFR', 'CIF')`),
+    check("wholesale_quotations_snapshot_check", sql`jsonb_typeof(${t.snapshot}) = 'object'`),
+    check("wholesale_quotations_self_approval_check", sql`${t.approvedByUserId} IS NULL OR ${t.createdByUserId} IS NULL OR ${t.approvedByUserId} <> ${t.createdByUserId}`),
+    check("wholesale_quotations_approved_check", sql`${t.status} <> 'APPROVED' OR ${t.approvedAt} IS NOT NULL`),
+    check("wholesale_quotations_sent_check", sql`${t.status} NOT IN ('SENT', 'ACCEPTED', 'REJECTED') OR ${t.sentAt} IS NOT NULL`),
+    check("wholesale_quotations_accepted_check", sql`${t.status} <> 'ACCEPTED' OR ${t.acceptedAt} IS NOT NULL`),
+    check("wholesale_quotations_rejected_check", sql`${t.status} <> 'REJECTED' OR ${t.rejectedAt} IS NOT NULL`),
+    check("wholesale_quotations_superseded_check", sql`${t.status} <> 'SUPERSEDED' OR ${t.supersededAt} IS NOT NULL`),
+  ],
+);
+
+/** Một dòng của báo giá sỉ — BẤT BIẾN sau khi ghi (trigger). `unit_price` NULL = không có giá sỉ (báo giá mang chặn). */
+export const wholesaleQuotationLines = pgTable(
+  "wholesale_quotation_lines",
+  {
+    id: id(),
+    quotationId: text("quotation_id")
+      .notNull()
+      .references(() => wholesaleQuotations.id, { onDelete: "cascade" }),
+    lineNo: integer("line_no").notNull(),
+    variantId: text("variant_id").notNull(),
+    productName: text("product_name").notNull().default(""),
+    sku: text("sku").notNull().default(""),
+    quantity: integer("quantity").notNull(),
+    unitPrice: bigint("unit_price", { mode: "number" }),
+    priceSource: text("price_source"),
+    priceListId: text("price_list_id"),
+    tierMinQty: integer("tier_min_qty"),
+    lineDiscount: bigint("line_discount", { mode: "number" }).notNull().default(0),
+    lineTotal: bigint("line_total", { mode: "number" }),
+    stockAvailableAtQuote: integer("stock_available_at_quote"),
+    warnings: jsonb("warnings").notNull().default(sql`'[]'::jsonb`),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("wholesale_quotation_lines_no_uq").on(t.quotationId, t.lineNo),
+    index("wholesale_quotation_lines_variant_idx").on(t.variantId),
+    check("wholesale_quotation_lines_qty_check", sql`${t.quantity} BETWEEN 1 AND 100000`),
+    check("wholesale_quotation_lines_price_check", sql`${t.unitPrice} IS NULL OR ${t.unitPrice} > 0`),
+    check("wholesale_quotation_lines_source_check", sql`${t.priceSource} IS NULL OR ${t.priceSource} IN ('CUSTOMER_LIST', 'DEFAULT_LIST')`),
+    check("wholesale_quotation_lines_discount_check", sql`${t.lineDiscount} >= 0 AND (${t.lineTotal} IS NULL OR ${t.lineTotal} >= 0)`),
+    check("wholesale_quotation_lines_warnings_check", sql`jsonb_typeof(${t.warnings}) = 'array'`),
+  ],
+);

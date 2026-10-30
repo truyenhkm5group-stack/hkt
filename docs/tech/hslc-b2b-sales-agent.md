@@ -82,7 +82,7 @@ Tệp:dòng đo trên `origin/main` 0b3bd5605 (27/10/2026) — dòng trôi theo 
 | 7 | Email gửi thật | BUILD NEW (P2) | `lib/wholesale/config.ts:78` (`AUTO_SEND` đang khoá) | **BLOCKER** chủ shop (mục 8) |
 | 8 | Reply agent | BUILD NEW (P3) | — | chỉ đề nghị; dữ kiện từ `openerLooksInvented` (`opener.ts:60`) làm mẫu chặn bịa |
 | 9 | Bảng giá sỉ / bậc / MOQ | REUSE | `lib/constants/price-lists.ts:33` `quoteUnitPrice` · `lib/queries/price-lists.ts:38` `priceBooksFor` · `lib/commerce/pricing.ts:34` `agentUnitQuote` · `:75` `agentPriceProblems` | bậc nhỏ nhất = MOQ |
-| 10 | Báo giá văn bản (quotation) | BUILD NEW (P1b) | mẫu kiểm giá: `lib/sales-chatbot/quote.ts:436` `verifyAgentQuote` | bảng `quotations` — **migration**, sau P1a |
+| 10 | Báo giá văn bản (quotation) | BUILD NEW — **làm ở nhánh `claude/b2b-quotation` (P1b)** | `lib/wholesale/quotation-engine.ts` `computeQuotation` · `lib/wholesale/quotation.ts` · `/wholesale/quotations` | bảng `wholesale_quotations` + `wholesale_quotation_lines` — migration `0263` (mục 11) |
 | 11 | Catalog readiness | BUILD NEW — **xong ở PR này (P1c)** | `lib/wholesale/catalog-readiness.ts` · `lib/queries/wholesale-readiness.ts` · `/wholesale/readiness` | chỉ đọc, không bảng mới |
 | 12 | Tồn kho | REUSE (HIGH — chỉ đọc qua hàm có sẵn) | `lib/queries/stock.ts:381` `stockKnownExpr` · `:389` `erpStockExpr` · `:394` `availableStockExpr` | chưa phiếu nhập = CHƯA BIẾT |
 | 13 | Tạo đơn | REUSE | `lib/records/order-create.ts:599` `createOrderAsAgent` (idempotency `raw.agentKey`, `:677`) | giá do máy chủ tính lại |
@@ -125,7 +125,7 @@ Tệp:dòng đo trên `origin/main` 0b3bd5605 (27/10/2026) — dòng trôi theo 
 | b2b-p1a-consent | `claude/b2b-p1a-consent` | `db/schema.ts` · `drizzle/` · `lib/wholesale/*` (suppression, consent, nhiệt độ) | đang làm (phiên khác) | — |
 | b2b-p1-readiness | `claude/b2b-p1-readiness` | `docs/tech/hslc-b2b-sales-agent.md` · `lib/wholesale/catalog-readiness.ts` · `lib/queries/wholesale-readiness.ts` · `app/(dashboard)/wholesale/readiness/*` · `app/(dashboard)/wholesale/wholesale-nav.tsx` · `tests/wholesale-catalog-readiness.test.ts` · `tests/sync-fixtures.test.ts` (đăng ký) · `tests/ui-consistency.test.ts` (miễn menu) | xong, chờ gộp | — |
 | b2b-p1d-probe | `claude/b2b-p1d-probe` | script ops chỉ đọc | đang làm (phiên khác) | — |
-| b2b-p1b-quotation | — | `db/schema.ts` · `drizzle/` · `lib/wholesale/quotation*` | chưa nhận (sau P1a) | — |
+| b2b-quotation (P1b) | `claude/b2b-quotation` | `db/schema.ts` · `drizzle/0263_wholesale_quotations.sql` · `lib/wholesale/quotation-engine.ts` · `lib/wholesale/quotation.ts` · `lib/queries/wholesale-quotations.ts` · `lib/actions/wholesale-quotations.ts` · `app/(dashboard)/wholesale/quotations/*` · `app/wholesale/quotations/[id]/print` · nút trên trang lead / khách · `tests/wholesale-quotation.test.ts` | xong, chờ gộp (0261 · 0262 đã vào main) | — |
 | b2b-p2-email | — | kết nối email | **chặn** — chờ chủ shop (mục 8) | — |
 
 ## 7. P1c — cổng sẵn sàng (đã làm ở PR này)
@@ -160,6 +160,7 @@ Trang `/wholesale/readiness` (tab «Sẵn sàng bán sỉ», quyền `wholesale:
 | B3 | Bảng giá **mặc định** cho khách sỉ mới + bậc/MOQ từng mẫu (xem `/wholesale/readiness`) | P1b |
 | B4 | Có bán xuất khẩu không; có thì chứng nhận / HS / điều kiện xuất khẩu | hạng mục xuất khẩu |
 | B5 | Ngày mở từng cờ: gửi thật · tự mặc cả · tự chốt đơn | P2 · P3 · P5 |
+| B6 | Chính sách báo giá `settings["wholesale.quotation"]`: trần chiết khấu % (`maxDiscountPercent`) · biên lợi nhuận gộp tối thiểu % (`minMarginPercent`) · thuế suất + căn cứ (`taxRatePercent` + `taxSource`). Không có số mặc định (luật 38) | P1b (chưa khai ⇒ chiết khấu nào cũng phải duyệt; giá chưa gồm thuế) |
 
 ## 9. Acceptance tests
 
@@ -167,7 +168,7 @@ Trang `/wholesale/readiness` (tab «Sẵn sàng bán sỉ», quyền `wholesale:
 |---|---|---|
 | P1c | `tests/wholesale-catalog-readiness.test.ts` (K21): đủ ⇒ READY · thiếu từng trường · bậc chỉ ở bảng riêng vẫn thiếu · tồn chưa biết ≠ 0 · xuất khẩu `UNAVAILABLE` kèm `missingWhat` · null đứng cuối khi xếp | ĐẠT |
 | P1a | email bị chặn ⇒ không vào hàng đợi; email công khai không tự thành consent | chưa |
-| P1b | báo giá = `quoteUnitPrice` từng dòng; LLM không đổi được số; bậc/MOQ đúng ranh giới | chưa |
+| P1b | `tests/wholesale-quotation.test.ts` (K21): bậc theo SL (= `quoteUnitPrice`) · dưới MOQ / không giá sỉ chặn · tồn biết < SL chặn, chưa biết chỉ cảnh báo · chiết khấu chưa khai trần ⇒ cần duyệt, vượt trần ⇒ chặn · không tự duyệt (lõi + CHECK) · sửa ⇒ phiên bản mới, bản cũ bất biến (trigger) · ảnh chụp không đổi khi bảng giá đổi · hết hạn lúc đọc · tiền nguyên VND · phạm vi · cách ly tổ chức · chưa áp 0263 không sập | ĐẠT (cục bộ) |
 | P2–P4 | cờ gửi thật OFF ⇒ không một lượt gửi nào ra ngoài; idempotent khi chạy lại | chưa |
 | P5 | đối soát ORDER không nhân đôi tiền khi nhập lại sao kê (luật 17) | chưa |
 | E2E | một đơn sỉ thật đi đủ 8 bước mục 1 trên production | chưa |
@@ -176,5 +177,44 @@ Trang `/wholesale/readiness` (tab «Sẵn sàng bán sỉ», quyền `wholesale:
 
 - **P1c xong** (nhánh `claude/b2b-p1-readiness`). Việc tiếp: P1d dùng `wholesaleReadinessBoard()` (hoặc cùng câu hỏi) để đo danh
   mục HSLC thật — bao nhiêu mẫu READY, bao nhiêu thiếu bậc giá ở bảng mặc định — rồi ghi số vào mục này.
-- P1b nối sau P1a (số migration theo thứ tự gộp); báo giá phải gọi cổng P1c trước khi cho máy báo giá một mẫu mã.
+- **P1b xong** (nhánh `claude/b2b-quotation`, migration `0263`, nối sau 0261 consent và 0262 fb-crm đã vào main). Bộ tính tự làm phần cổng P1c liên quan tới TIỀN (bậc giá sỉ · MOQ · tồn); khối lượng thiếu chỉ là cảnh báo. Việc tiếp: P5 nối báo giá ACCEPTED → `createOrderAsAgent` (giá khớp `agentPriceProblems`); gửi email báo giá chờ P2.
+- Chủ shop cần khai `settings["wholesale.quotation"]` (B6 mục 8) — chưa khai thì mọi chiết khấu > 0 đều cần duyệt, báo giá chưa gồm thuế.
 - Không phase nào bật gửi thật / tự mặc cả / tự chốt đơn khi B5 chưa có ngày quyết.
+
+## 11. P1b — báo giá sỉ tất định
+
+**Một bộ tính.** `computeQuotation` (`lib/wholesale/quotation-engine.ts`) là hàm THUẦN, client-safe: không đọc CSDL, cấu hình hay
+đồng hồ. Đơn giá chọn bằng ĐÚNG `quoteUnitPrice` (bảng riêng của khách → bảng mặc định). Dòng rơi về giá lẻ thì bị chặn, vì giá
+lẻ không phải giá sỉ. Lõi ghi (`lib/wholesale/quotation.ts`) đọc dữ kiện qua hàm có sẵn: `priceBooksFor`, sổ kho
+`stockKnownExpr` / `availableStockExpr`, giá vốn sống `liveLineUnitCost` (luật 3.13). Sau đó gọi bộ tính rồi ghi kèm ẢNH CHỤP
+(đầu vào + kết quả). LLM không tính một con số nào.
+
+| Chặn (không gửi / duyệt được) | Cảnh báo (không chặn) | Cần duyệt |
+|---|---|---|
+| không có giá sỉ ở bảng hiệu lực · dưới MOQ (bậc nhỏ nhất) · tồn ĐÃ BIẾT < SL · tổng / dòng âm · chiết khấu vượt trần đã khai · ship có số mà thiếu căn cứ · mẫu mã không còn · dòng trùng | tồn CHƯA BIẾT (chưa phiếu nhập — không phải 0) · chưa có ship · chưa có thuế · chưa biết giá vốn · chưa có khối lượng | chiết khấu > 0 khi: chưa khai trần · chưa khai sàn biên LN · biên LN chưa biết (thiếu giá vốn) · biên LN dưới sàn |
+
+**Vòng đời.** `DRAFT` → (cần duyệt) `PENDING_APPROVAL` → `APPROVED` → `SENT` → `ACCEPTED` / `REJECTED`. Nháp không cần duyệt thì
+gửi thẳng được.
+- Quyền: lập / sửa / gửi / ghi kết quả dùng `wholesale:work`; duyệt và trả lại dùng `wholesale:config`. Không thêm khoá quyền mới.
+- Người lập KHÔNG tự duyệt: lõi kiểm, và CHECK `wholesale_quotations_self_approval_check` chặn ở CSDL.
+- Sửa nghĩa là tạo PHIÊN BẢN MỚI: cùng mã, `version + 1`. Bản trước chuyển sang `SUPERSEDED` và giữ nguyên số. Trigger CSDL từ chối
+  mọi lượt đổi tiền, dòng hay ảnh chụp.
+- Bấm hai lần không tạo hai bản: `request_key` là khoá duy nhất, và mỗi bản chỉ có tối đa một bản kế (chỉ mục duy nhất trên
+  `parent_quotation_id`).
+- `EXPIRED` tính lúc đọc từ `valid_until` (ngày VN, hết ngày đó mới hết hạn), không ghi đè cột trạng thái.
+- «Đã gửi» là lời khai của người gửi. Bước này CHƯA gửi email (chờ P2).
+
+**Màn hình.**
+- `/wholesale/quotations`: danh sách và lọc trạng thái.
+- `/wholesale/quotations/[id]`: dòng, tổng, chặn / cảnh báo / lý do duyệt, lịch sử phiên bản, nút theo trạng thái.
+- `/wholesale/quotations/[id]/edit`: tạo phiên bản mới.
+- `/wholesale/quotations/new?lead=…|customer=…`: mở từ nút «Tạo báo giá» trên trang lead và trang khách.
+- `/wholesale/quotations/[id]/print`: bản in gửi khách. Chỉ đọc ẢNH CHỤP, không in giá vốn hay biên lợi nhuận.
+
+**Chưa làm / cố ý không làm.**
+- Tiền tệ khác VND: ERP chưa có nguồn tỷ giá có hiệu lực kèm căn cứ, nên CHECK chỉ cho `VND`.
+- Incoterms chỉ ghi khi người lập khai; máy không suy.
+- PDF: dùng «In / Lưu PDF» của trình duyệt.
+- Ảnh chụp chỉ chép dữ kiện của tổ chức về bên nhận (cột lead do nhân viên nhập / hồ sơ khách). Không chép dữ liệu Google Places,
+  vì dữ liệu đó có hạn lưu.
+

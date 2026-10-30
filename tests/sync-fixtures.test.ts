@@ -627,6 +627,7 @@ import { testWholesaleEmailDiscovery } from "./wholesale-email-discovery.test";
 import { testWholesaleIntlDiscovery } from "./wholesale-intl-discovery.test";
 import { testWholesaleConsent } from "./wholesale-consent.test";
 import { testWholesaleCatalogReadiness } from "./wholesale-catalog-readiness.test";
+import { testWholesaleQuotation } from "./wholesale-quotation.test";
 import { testRestaurantTemplate } from "./restaurant.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testTriggerProposals } from "./trigger-proposals.test";
@@ -3329,6 +3330,8 @@ async function main() {
     await testWholesaleConsent();
     // P1c AI B2B: cổng sẵn sàng danh mục bán sỉ + xuất khẩu — hàm thuần (lib/wholesale/catalog-readiness.ts).
     testWholesaleCatalogReadiness();
+    // P1b AI B2B: báo giá sỉ tất định — bộ tính thuần + lõi ghi trên tổ chức THẬT `bg-si` (lib/wholesale/quotation*.ts, 0263).
+    await testWholesaleQuotation();
     await testRestaurantTemplate();
     testTriggerProposals();
     await testSelfServiceJourney();

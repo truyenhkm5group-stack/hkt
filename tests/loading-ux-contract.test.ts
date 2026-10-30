@@ -171,6 +171,7 @@ export function testLoadingUxContract() {
     ["app/(dashboard)/ai/sales-chatbot/replay/start-form.tsx", "transition bọc thao tác TẠO lượt phát lại (server action ghi sales_replay_runs); router.push chỉ chạy SAU khi tạo xong để mở trang của lượt vừa tạo — cùng mẫu với form sản phẩm"],
     ["components/sourcing/offer-forms.tsx", "transition bọc thao tác LƯU mẫu nguồn (server action ghi sourcing_offers); router.push chỉ chạy SAU khi tạo xong để mở trang của mẫu vừa lưu — cùng mẫu với form sản phẩm"],
     ["components/field-jobs/field-job-forms.tsx", "transition bọc thao tác LẬP PHIẾU / MỞ LƯỢT BẢO HÀNH (0200); router.push chỉ chạy SAU khi máy chủ tạo xong để mở trang của phiếu vừa tạo — cùng mẫu với form sản phẩm"],
+    ["app/(dashboard)/wholesale/quotations/quotation-form.tsx", "transition bọc thao tác XEM TRƯỚC / LƯU báo giá sỉ (server action ghi wholesale_quotations, 0263); router.push chỉ chạy SAU khi máy chủ lưu xong để mở trang của phiên bản vừa tạo — cùng mẫu với form sản phẩm"],
   ]);
   const clientFiles = [...walk("app/(dashboard)", ".tsx"), ...walk("components", ".tsx")];
   const viPham: string[] = [];

@@ -161,9 +161,19 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   AI_BLUEPRINT_DRAFT_APPLY: "Áp dụng bản nháp gói cấu hình do AI soạn",
   AI_BLUEPRINT_DRAFT_APPLY_FAILED: "Áp dụng bản nháp AI không thành",
   AI_BLUEPRINT_DRAFT_DISCARD: "Bỏ bản nháp gói cấu hình do AI soạn",
+  // Báo giá sỉ (P1b · 0263 · lib/wholesale/quotation.ts) — số do bộ tính tất định tính, sửa = phiên bản mới.
+  WHOLESALE_QUOTATION_CREATE: "Lập báo giá sỉ",
+  WHOLESALE_QUOTATION_REVISE: "Sửa báo giá sỉ (phiên bản mới)",
+  WHOLESALE_QUOTATION_SUBMIT: "Gửi duyệt báo giá sỉ",
+  WHOLESALE_QUOTATION_APPROVE: "Duyệt báo giá sỉ",
+  WHOLESALE_QUOTATION_RETURN: "Trả lại báo giá sỉ về nháp",
+  WHOLESALE_QUOTATION_SENT: "Đánh dấu đã gửi báo giá sỉ cho khách",
+  WHOLESALE_QUOTATION_ACCEPTED: "Khách chấp nhận báo giá sỉ",
+  WHOLESALE_QUOTATION_REJECTED: "Khách từ chối báo giá sỉ",
 };
 
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {
+  WHOLESALE_QUOTATION: "Báo giá sỉ",
   SOURCING_OFFER: "Mẫu nguồn (tìm hàng)",
   SOURCING_SUPPLIER: "Nhà cung cấp nguồn",
   SOURCING_TRIAL: "Yêu cầu mua thử (tìm hàng)",
