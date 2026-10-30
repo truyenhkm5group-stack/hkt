@@ -3,7 +3,7 @@
   "mission_id": "b2b-email-inbound",
   "title": "Đọc & phân loại thư trả lời khách sỉ (E3)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-inbound",
@@ -24,7 +24,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-30T18:34:39.493Z",
-  "updated_at": "2026-10-30T18:34:39.493Z",
-  "last_heartbeat": "2026-10-30T18:34:39.493Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-30T20:06:07.448Z",
+  "last_heartbeat": "2026-10-30T20:06:07.448Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/b2b-email-inbound",
+    "sha": "2b7d71bf57bb20274c98a2a8486b7949b75bffe7",
+    "at": "2026-10-30T20:06:07.448Z",
+    "actor": "DESKTOP-56TH98Y:wt-b2b-inbound",
+    "title": "Đọc & phân loại thư trả lời khách sỉ (E3)",
+    "summary": "E3 đọc & phân loại thư trả lời qua IMAP (cùng credential gws-smtp, chỉ đọc, mặc định TẮT): chỉ thư nối luồng / khớp một lead, xin huỷ bằng chữ ⇒ đường huỷ E1, AI phân loại có trích dẫn + trần, hỏi giá ⇒ nháp báo giá máy lập",
+    "tests": [
+      "Nhánh trên origin/main e245eb2e (#1104), không đứng sau main",
+      "typecheck toàn kho (8192): sạch",
+      "npm run lint toàn kho: sạch",
+      "TEST_KHOI=K01,K07,K10,K15,K19,K21: TẤT CẢ KIỂM THỬ CỦA chỉ K01,K07,K10,K15,K19,K21 ĐẠT (gồm E1/E2/E3, sổ connector, sổ bên xử lý phụ + quét hostname, ai-systems, access-control, platform-modules, test-hygiene)",
+      "npm run build: ĐẠT",
+      "CHƯA chạy 24 khối đủ / 4 shard CI / lượt token giả"
+    ]
+  }
 }
