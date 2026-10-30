@@ -669,10 +669,10 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
   */
   {
     key: "gws-smtp",
-    label: "Google Workspace — gửi email (SMTP)",
+    label: "Google Workspace — gửi & đọc email (SMTP + IMAP)",
     vendor: "Google",
     kind: "MESSAGING",
-    capabilities: ["send_customer_message"],
+    capabilities: ["send_customer_message", "read_conversations"],
     auth: "USERNAME_PASSWORD",
     settings: [
       {
@@ -703,8 +703,8 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     healthRef: "lib/connectors/testers.ts::testGwsSmtp",
     module: "wholesale_leads",
     code: ["lib/integrations/gws-smtp/"],
-    consumers: ["lib/email-provider/live.ts::resolveLiveEmailProvider"],
-    why: "Hộp thư đi email bán sỉ gửi thật qua smtp.gmail.com:587 (STARTTLS bắt buộc) bằng hộp thư Google Workspace của shop. Kiểm tra chỉ đăng nhập SMTP, không gửi thư. Bật kết nối không đổi chế độ email: thư chỉ đi khi quản trị chuyển chế độ «Gửi thật», từng thư đã được NGƯỜI duyệt và qua cổng chính sách (đồng ý · danh sách chặn · hạn mức 20/giờ · 100/ngày · 5/tên miền nhận). Lượt gửi ghi sync_runs (job wholesale-email).",
+    consumers: ["lib/email-provider/live.ts::resolveLiveEmailProvider", "lib/wholesale/email-reply.ts::runEmailInboundTick"],
+    why: "Hộp thư đi email bán sỉ gửi thật qua smtp.gmail.com:587 (STARTTLS bắt buộc) bằng hộp thư Google Workspace của shop. Kiểm tra chỉ đăng nhập SMTP, không gửi thư. Bật kết nối không đổi chế độ email: thư chỉ đi khi quản trị chuyển chế độ «Gửi thật», từng thư đã được NGƯỜI duyệt và qua cổng chính sách (đồng ý · danh sách chặn · hạn mức 20/giờ · 100/ngày · 5/tên miền nhận). Lượt gửi ghi sync_runs (job wholesale-email). E3 (31/10/2026): CÙNG hộp thư + App Password đọc thư trả lời qua imap.gmail.com:993 (TLS, INBOX chỉ đọc) khi người cấu hình bật «đọc thư trả lời» — chỉ tiêu đề trước, chỉ thư nối luồng / khớp đúng một lead mới được tải phần chữ, không tải đính kèm; ghi sync_runs (job wholesale-email-inbound).",
   },
   // ─────────────── GỬI TIN ───────────────
   {

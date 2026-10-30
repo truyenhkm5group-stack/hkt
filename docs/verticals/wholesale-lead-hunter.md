@@ -294,6 +294,21 @@ Lỗi đăng nhập SMTP dừng cả lượt (không đốt hết lô); 4xx th�
 DKIM (`google._domainkey`) + DMARC cho tên miền — đo 30/10: SPF có, DKIM / DMARC chưa. Đọc thư trả lời qua IMAP / Gmail API: CHƯA
 làm (sổ việc E3).
 
+**Đọc & phân loại thư trả lời (E3, 31/10/2026 — `lib/wholesale/email-reply.ts`).** Mặc định TẮT; người cấu hình bật ở Hộp thư đi.
+Mỗi lượt job `wholesale-leads` (không đổi lịch chung; khoá riêng, ghi `sync_runs` job `wholesale-email-inbound`) mở INBOX của
+CHÍNH hộp thư Google Workspace qua `imap.gmail.com:993` (TLS) bằng CÙNG hộp thư + App Password của kết nối `gws-smtp` — không thêm
+credential; thư viện `imapflow`; hộp thư mở CHỈ ĐỌC, không log. Chỉ thư MỚI sau mốc UID đã lưu (`wholesale.emailInbound.cursor`;
+lượt đầu không đọc lùi quá 14 ngày và không trước thư thật đầu tiên). Bước 1 chỉ đọc TIÊU ĐỀ: thư tự động (Auto-Submitted,
+Precedence, «vắng mặt») bỏ; thư không nối luồng (In-Reply-To / References) với thư ERP đã gửi VÀ không khớp đúng một lead ⇒ bỏ,
+KHÔNG tải nội dung. Thư khớp ⇒ tải phần chữ (không đính kèm, chỉ đếm), cắt phần trích thư cũ, che dãy ≥ 12 chữ số, giữ ≤ 2.000 ký
+tự ⇒ `ingestInboundEmail` của E1 (REPLY · dừng thư chờ + chuỗi nhắc · việc «trả lời khách» phòng Kinh doanh). Xin ngừng bằng chữ
+(«unsubscribe», «huỷ đăng ký», «ngừng gửi», hoặc cả dòng đầu là «stop» / «huỷ») ⇒ ĐÚNG đường huỷ E1 (`applyEmailUnsubscribe`), không
+tốn lượt AI. Phân loại AI (feature `b2b_email_reply_classify`, chỉ bật được khi khai ĐỦ trần thư / ngày + USD / ngày): Quan tâm ·
+Hỏi giá · Từ chối · Huỷ đăng ký · Khác, BẮT BUỘC kèm câu trích NGUYÊN VĂN có trong thư — không có ⇒ hạ về «Khác». Hỏi giá ⇒ máy ghép
+mẫu mã khách nhắc (chỉ khi DUY NHẤT và mã / tên có trong chính thư; tên có nhiều quy cách thì phải có SKU / quy cách), số lượng chỉ
+nhận khi có trong thư (không có ⇒ MOQ của bảng giá sỉ, ghi rõ) ⇒ NHÁP báo giá qua bộ tính #1095 (`createQuotationDraftByMachine`,
+người lập = máy, DRAFT, không tự gửi); không ghép được ⇒ không có nháp, lịch sử lead nói rõ. Lead không tự đổi trạng thái trừ huỷ.
+
 ## 4f. Kế hoạch kênh: nước ngoài — Email · trong nước — Zalo (chủ shop chốt 30/10/2026)
 
 > «Tách phần tìm khách nước ngoài để gửi email với luồng khách trong nước để nhắn Zalo. Bổ sung gửi email cho cả khách trong

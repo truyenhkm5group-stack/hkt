@@ -397,6 +397,58 @@ export async function createQuotationCore(user: SessionUser, raw: unknown, now =
   }
 }
 
+/**
+ * NHÁP báo giá do MÁY lập từ một thư khách HỎI GIÁ (E3 · lib/wholesale/email-reply.ts). CÙNG bộ tính, CÙNG ngữ cảnh (bảng giá
+ * sỉ đang bật, sổ kho, giá vốn sống) và CÙNG hình dạng ghi với `createQuotationCore` — chỉ khác người lập: không có tài khoản nào
+ * bấm, nên `created_by_user_id = NULL` và tên là «Máy (thư hỏi giá)» (luật 34: `null` = máy làm, khác «chưa biết ai»). Luôn ở
+ * trạng thái DRAFT: không gửi, không duyệt — người phụ trách mở ra sửa / gửi. Lead KHÔNG LIÊN HỆ ⇒ không lập.
+ */
+export async function createQuotationDraftByMachine(raw: unknown, orgName: string, now = new Date()): Promise<CoreResult<SaveResult>> {
+  const p = parse(raw);
+  if ("error" in p) return p;
+  const v = p.v;
+  if (!v.leadId) return { error: "Nháp máy chỉ lập cho lead." };
+  try {
+    const prior = await byRequestKey(v.requestKey);
+    if (prior) return { ok: true, id: prior.id, code: prior.code, version: prior.version, replayed: true, blockers: prior.blockerCount, requiresApproval: prior.requiresApproval };
+    const bad = validityError(v, now);
+    if (bad) return { error: bad };
+    const db = await getDb();
+    const lead = await db.query.wholesaleLeads.findFirst({ where: eq(schema.wholesaleLeads.id, v.leadId) });
+    if (!lead) return { error: "Không tìm thấy lead." };
+    if (lead.contactStatus === "DO_NOT_CONTACT") return { error: "Lead ở danh sách KHÔNG LIÊN HỆ — không lập báo giá." };
+    const party: QuotationParty = { leadId: lead.id, customerId: lead.customerId ?? null, name: lead.businessName ?? "", phone: lead.normalizedPhone ?? "", address: lead.address ?? "" };
+    const ctx = await loadQuotationContext(party.customerId, v.lines.map((l) => l.variantId));
+    const result = runEngine(party, v, ctx);
+    const stop = saveBlocker(result);
+    if (stop) return { error: stop };
+    const machine = { id: "", email: "job:wholesale-email-inbound", name: "Máy (thư hỏi giá)", organization: { code: "", name: orgName, isHome: false } } as unknown as SessionUser;
+    const snapshot = snapshotOf(machine, party, v, ctx, result, now);
+    const id = crypto.randomUUID();
+    let code = "";
+    for (let attempt = 0; attempt < 4; attempt++) {
+      code = newCode(now);
+      try {
+        await db.transaction(async (tx) => {
+          await tx.insert(schema.wholesaleQuotations).values({ ...rowValues(machine, party, v, result, snapshot, { id, code, version: 1, parentQuotationId: null }), createdByUserId: null });
+          await tx.insert(schema.wholesaleQuotationLines).values(lineValues(id, result));
+        });
+        break;
+      } catch (e) {
+        if (!isUniqueViolation(e)) throw e;
+        const raced = await byRequestKey(v.requestKey);
+        if (raced) return { ok: true, id: raced.id, code: raced.code, version: raced.version, replayed: true, blockers: raced.blockerCount, requiresApproval: raced.requiresApproval };
+        if (attempt === 3) throw e;
+      }
+    }
+    await audit({ userId: null, userEmail: "job:wholesale-email-inbound", action: "WHOLESALE_QUOTATION_CREATE", entity: "WHOLESALE_QUOTATION", entityId: id, before: null, after: { code, version: 1, leadId: party.leadId, total: result.totals.total, blockers: result.blockers.length, requiresApproval: result.requiresApproval, by: "MACHINE" }, reason: "Máy lập NHÁP báo giá từ thư khách hỏi giá — số do bộ tính tất định tính, người phụ trách duyệt / gửi" });
+    return { ok: true, id, code, version: 1, replayed: false, blockers: result.blockers.length, requiresApproval: result.requiresApproval };
+  } catch (e) {
+    if (isMissingQuotationTable(e)) return { error: QUOTATION_TABLES_MISSING };
+    throw e;
+  }
+}
+
 async function gate(user: SessionUser, id: string, permission: "wholesale:work" | "wholesale:config"): Promise<{ row: Row; decision: ScopeDecision } | { error: string }> {
   if (!can(user, permission)) return { error: permission === "wholesale:work" ? FORBIDDEN_WORK : FORBIDDEN_APPROVE };
   const decision = await scopeDecision(user);
