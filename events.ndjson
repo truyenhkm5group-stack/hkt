@@ -1,4 +1,3 @@
-{"at":"2026-10-24T02:19:22.157Z","actor":"DESKTOP-56TH98Y:wt-ssprobe","kind":"HANDOFF","mission":"shipment-state-probe","detail":"claude/shipment-state-probe @ da4bec3f524c · 1 lệnh kiểm thử"}
 {"at":"2026-10-24T02:21:30.473Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"shipment-state-probe","detail":"#1028 cho claude/shipment-state-probe @ da4bec3f524c"}
 {"at":"2026-10-24T02:22:11.235Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#1028 @ da4bec3f524c · review lead: ops chỉ đọc đo route nội bộ nguội/ấm + EXPLAIN đúng câu bắt từ Pool.query trong giao dịch chỉ đọc có rollback; khoá đọc trong máy không in; mã/kế hoạch mã hoá."}
 {"at":"2026-10-24T03:13:55.837Z","actor":"DESKTOP-56TH98Y:wt-payroll-gate","kind":"CLAIM","mission":"order-dup-scan","detail":"PLANNING · 5 mẫu phạm vi · HIGH"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-30T11:40:32.096Z","actor":"DESKTOP-56TH98Y:wt-mission","kind":"HANDOFF","mission":"mission-control","detail":"claude/mission-control @ f1ef6908e27a · 6 lệnh kiểm thử"}
 {"at":"2026-10-30T11:42:35.743Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"b2b-email-ai-draft","detail":"#1100 cho claude/b2b-email-ai-draft @ 8d64504ddf65"}
 {"at":"2026-10-30T11:43:49.932Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#1100 @ 8d64504ddf65 · review lead: AI soạn nháp email chào hàng — dữ kiện thật (lead, bảng giá sỉ, báo giá đã duyệt, lời khai shop), qua resolveAi + checkAiQuota sẵn có, ghi platform_ai_usage feature b2b_email_draft; hàng rào thuần chặn số tiền/tiền tệ/chứng nhận/xuất khẩu/tồn kho/giao hàng/%/link/SĐT bịa + sai ngôn ngữ, chạy lại ở bản cuối; nháp không tự vào hộp thư đi, người duyệt + edit_ratio; mặc định TẮT, wholesal"}
+{"at":"2026-10-30T11:44:51.888Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"PR_OPENED","mission":"mission-control","detail":"#1101 cho claude/mission-control @ f1ef6908e27a"}
