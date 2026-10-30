@@ -45,21 +45,20 @@
     "0266": "2026-10-30T11:48:17.642Z"
   },
   "created_at": "2026-10-30T11:47:18.745Z",
-  "updated_at": "2026-10-30T17:26:38.714Z",
-  "last_heartbeat": "2026-10-30T17:24:11.408Z",
+  "updated_at": "2026-10-30T21:59:16.586Z",
+  "last_heartbeat": "2026-10-30T21:59:16.586Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/ai-daily-report",
-    "sha": "8e83851d2691937dcac9e1045532608a972e8c3c",
-    "at": "2026-10-30T17:24:11.408Z",
+    "sha": "1ae12e88a7720d9be0e47621818f461f77c00369",
+    "at": "2026-10-30T21:59:16.586Z",
     "actor": "DESKTOP-56TH98Y:wt-daily",
     "title": "Báo cáo CEO hằng ngày (AI viết lời, máy gom số, hàng rào số)",
-    "summary": "Sửa theo review: bỏ người đọc máy vai ADMIN; số báo giá chưa chốt qua quotationOpenCount() (lib/queries/wholesale-quotations.ts — không nhận phiên, không trả dòng, dùng effectiveStatusSql). Trang /daily-report vẫn gác approvals:decide.",
+    "summary": "Sửa gates shard 2/4 (#1106): recordAiUsage của báo cáo ngày ghi workload «copilot» (có sẵn trong AI_USAGE_WORKLOADS + CHECK, không migration) thay vì null; AI-10 khai workload copilot. Đã merge origin/main (giải xung đột AI_USAGE_FEATURES: thêm daily_report cạnh b2b_email_reply_classify).",
     "tests": [
       "npm run typecheck: sạch",
       "npm run lint: sạch",
-      "TEST_KHOI=K24 npm test: ĐẠT (daily-report + quét nguồn không còn role ADMIN/scope ALL/listQuotations)",
-      "các lượt trước: K15,K20,K23 + build ĐẠT ở cb247dd9",
+      "TEST_KHOI=K15,K23,K24: ĐẠT sau merge main (ai-usage-ledger-complete ở K23, sổ AI-10, daily-report)",
       "4 shard đầy đủ: để gates CI"
     ]
   }
