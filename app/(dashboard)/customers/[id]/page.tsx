@@ -40,6 +40,7 @@ import { CustomerTradeSection } from "@/components/trade/customer-trade-section"
 import { CustomerReorderSection } from "@/components/reorder/customer-reorder-section";
 import { CustomerAppointmentsSection } from "@/components/appointments/customer-appointments-section";
 import { CustomerWarrantySection } from "@/components/warranty/customer-warranty-section";
+import { CustomerFbCrmSection } from "@/components/fb-crm/customer-fb-crm-section";
 
 export const metadata = { title: "Hồ sơ khách hàng" };
 
@@ -158,6 +159,8 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
       {showTrade ? <CustomerReorderSection user={user} customerId={customer.id} /> : null}
       {moduleOn(user, "appointments") && can(user, "appointments:view") ? <CustomerAppointmentsSection user={user} customerId={customer.id} /> : null}
       {moduleOn(user, "warranty") && can(user, "warranty:view") ? <CustomerWarrantySection user={user} customerId={customer.id} /> : null}
+      {/* Facebook CRM (lát 2): khối tự ẩn khi cờ tổ chức fbCrm.enabled tắt. */}
+      <CustomerFbCrmSection customerId={customer.id} />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.9fr)]">
         <div className="space-y-5">

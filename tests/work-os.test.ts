@@ -258,12 +258,13 @@ export async function testWorkOs(db: Db) {
       · `cs_cases.assignee_user_id`     — người CSKH đang cầm case;
       · `shipment_care.owner_id`        — người đang care kiện hàng;
       · `tech_tasks.agent_id`           — AGENT đang làm việc Tech (Phase 2A).
+      · `customer_fb_connections.care_owner_user_id` — NV phụ trách khách Facebook CRM (hẹn chăm sóc, 30/10/2026).
 
     Cái thứ ba khác hai cái đầu ở một điểm đáng nói: nó KHÔNG trỏ tới `users`. Một agent không phải
     một con người (AGENTS.md mục 36), nên phép chiếu lên `/work` để ô người phụ trách RỖNG và gắn
     nhãn "máy đang cầm" — nếu không, mọi thẻ điểm nhân sự sẽ đếm việc của máy thành việc của người.
   */
-  assert.deepEqual([...ASSIGNEE_OWNED_BY_SOURCE].sort(), ["CS_CASE", "SALES_CHAT_HANDOFF", "SHIPMENT_CARE", "TECH_TASK"], "bốn nguồn có cột người/agent phụ trách trong bảng nghiệp vụ (hội thoại chatbot: sales_chat_conversations.assignee_user_id — P0 11/10/2026)");
+  assert.deepEqual([...ASSIGNEE_OWNED_BY_SOURCE].sort(), ["CS_CASE", "FB_CRM_CARE", "SALES_CHAT_HANDOFF", "SHIPMENT_CARE", "TECH_TASK"], "năm nguồn có cột người/agent phụ trách trong bảng nghiệp vụ (hội thoại chatbot: sales_chat_conversations.assignee_user_id — P0 11/10/2026; hẹn chăm sóc Facebook CRM: customer_fb_connections.care_owner_user_id — 30/10/2026)");
   const giaoOverlay = await assignWork(csKey, `${P}u-linh`, mai);
   assert.ok("error" in giaoOverlay, "lớp công việc KHÔNG được ghi người phụ trách cho case CSKH — đó là sự thật thứ hai");
   assert.match(giaoOverlay.error, /miền nghiệp vụ/, "lời từ chối phải chỉ sang đúng nơi giữ người phụ trách");

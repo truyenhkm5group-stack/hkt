@@ -61,10 +61,25 @@ không liên hệ.
 
 Quyền: xem cần `customers:view`; mọi thao tác ghi cần `customers:write` (không thêm khoá quyền mới).
 
-## 5. Việc còn lại
+Bật / tắt: quản trị cài đặt tổ chức (`settings:manage`) bấm công tắc ngay trên `/customers/facebook-crm` (lát 1b).
 
-- **S2:** AI **đề xuất** khách nên chăm (không tự làm) · nguồn việc riêng trên `/work` thay cho việc tay · dashboard tỷ lệ đồng ý /
-  kết bạn theo NV · quy kết đơn sau khi kết bạn (attribution) — đo, không đoán.
-- **S3:** đo `page_customer.global_id` (hoặc nguồn khác) có thật sự là mã trang công khai không, trên dữ liệu thật, **có chủ shop
-  duyệt** trước khi dựng bất kỳ link nào từ nó.
-- Bảng `customer_fb_connections` chưa hiện trên trang Customer 360 — sẽ thêm khối nhỏ ở S2.
+## 5. Lát 2 — hàng đợi việc, Customer 360, thẻ số
+
+- **Nguồn việc `FB_CRM_CARE` trên `/work`** (phép chiếu, luật 19): khách có ngày hẹn chăm sóc ≤ hôm nay (giờ VN), không «không liên
+  hệ», cờ tổ chức bật. MỘT dòng / khách, phòng Kinh doanh & CSKH (`work.ownership`), hạn cố ý bỏ trống (`work.sla`, ngày hẹn đã là
+  mốc). Người phụ trách = NV phụ trách khách ở miền; «Giao cho» trên /work ghi vào miền (`fbCrmApplyCore` SET_OWNER). Không có nút
+  «xong»: nút MỞ `/customers/facebook-crm?c=<mã>`, việc rời hàng đợi khi người đặt ngày mới / bỏ hẹn / đánh dấu không liên hệ.
+  **Không đếm hai lần:** khách đã có nhiệm vụ CSKH tay của lát 1 (nhãn `fb-crm`) còn mở thì không sinh dòng chiếu. Không cảnh báo
+  `notifications` nào nói về hẹn chăm sóc khách, nên `ALERT_KINDS_OWNED_ELSEWHERE` không đổi.
+- **Khối «Facebook CRM» trên Customer 360** (`components/fb-crm/customer-fb-crm-section.tsx`): trạng thái, link + nguồn, phụ trách,
+  ngày hẹn, 5 dòng nhật ký gần nhất (người làm đọc từ `users`), nút sang trang Facebook CRM. Ẩn khi cờ tắt.
+- **Thẻ số đầu trang:** số khách theo trạng thái kết bạn (cùng tập khách của trang) và **«Kết bạn rồi mua»**: khách ĐANG «Đã kết
+  bạn» có đơn GIAO THÀNH CÔNG (ORDER_OUTCOME) đặt SAU mốc kết bạn (dòng nhật ký đầu tiên `STATUS_CHANGED → FRIENDS`), kèm tiền có
+  chứng từ (VERIFIED_CASH; chưa chứng từ ⇒ «—»). Luôn in nhãn **«Tương quan, KHÔNG phải doanh thu do CRM mang lại»** và **độ phủ**
+  (bao nhiêu khách đã kết bạn có mốc). Đây không phải quy kết nhân quả.
+
+## 6. Việc còn lại
+
+- **Lát 3:** AI **gợi ý** câu chăm sóc (người duyệt rồi tự gửi) — cần chủ shop duyệt chi phí AI trước; dashboard theo NV.
+- Cách lấy link profile đã chốt với chủ shop (30/10): **bấm avatar khách trên Pancake** (nguồn «NV xác nhận từ Pancake»). Không thử
+  `page_customer.global_id`.

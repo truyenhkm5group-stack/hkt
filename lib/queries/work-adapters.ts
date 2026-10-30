@@ -38,7 +38,9 @@ import { WORK_ALERTS_KEY, WORK_FULFILLMENT_KEY, WORK_PAYROLL_RECON_PREFIX, WORK_
 import { approvalStillValid } from "@/lib/approvals/service";
 import { SOURCING_TRIAL_WORK_LABEL, type SourcingTrialWorkKind } from "@/lib/constants/sourcing";
 import { getSettingJson, withSettingsScope } from "@/lib/settings";
-import { vnStartOfDay } from "@/lib/format";
+import { vnDateKey, vnStartOfDay } from "@/lib/format";
+import { FB_CONNECTION_STATUS_LABEL } from "@/lib/constants/fb-crm";
+import { fbCrmDueCare } from "@/lib/queries/fb-crm";
 
 /**
  * ═══════════════ PHÉP CHIẾU: SÁU HÀNG ĐỢI THÀNH MỘT DANH SÁCH ═══════════════
@@ -1150,6 +1152,53 @@ export async function adaptSourcingTrials(now: Date): Promise<WorkItem[]> {
   return items;
 }
 
+/* ═══════════════════ HẸN CHĂM SÓC KHÁCH — FACEBOOK CRM (lát 2) ═══════════════════
+ *
+ * PHÉP CHIẾU lên `customer_fb_connections` (luật 19): khách có `next_care_on` ≤ hôm nay (giờ VN), không «không liên hệ», chưa có nhiệm
+ * vụ CSKH tay `fb-crm` còn mở (`fbCrmDueCare` lọc — một khách không thành hai việc). MỘT dòng / khách (`sourceKey` = mã khách): việc
+ * rời hàng đợi khi người đặt ngày mới / bỏ hẹn / đánh dấu không liên hệ ở /customers/facebook-crm?c=<mã> — nút trên /work chỉ MỞ chỗ đó.
+ * Người phụ trách là NV phụ trách khách ở miền (`care_owner_user_id`) — giao việc đi qua `fbCrmApplyCore` (lib/work/assign.ts).
+ */
+export async function adaptFbCrmCare(now: Date): Promise<WorkItem[]> {
+  const today = vnDateKey(now);
+  const rows = await fbCrmDueCare(today);
+  const ms = now.getTime();
+  return rows.map((r) => {
+    const from = vnStartOfDay(r.nextCareOn);
+    const overdue = r.nextCareOn < today;
+    return {
+      key: workKey("FB_CRM_CARE", r.customerId),
+      sourceType: "FB_CRM_CARE",
+      sourceKey: r.customerId,
+      kind: null,
+      title: `${r.name || "Khách"} · hẹn chăm sóc ${overdue ? `từ ${r.nextCareOn}` : "hôm nay"}`,
+      summary: `Facebook CRM: ${FB_CONNECTION_STATUS_LABEL[r.connectionStatus]}${r.phone ? ` · ${r.phone}` : ""}. Chăm xong thì đặt ngày hẹn mới (hoặc bỏ hẹn) ngay trên dòng của khách.`,
+      department: WORK_SOURCE_SPEC.FB_CRM_CARE.department!,
+      assignee: r.ownerId ? { id: r.ownerId, email: "", name: r.ownerName ?? "" } : null,
+      status: r.ownerId ? "ASSIGNED" : "NEW",
+      statusAuthority: "SOURCE" as const,
+      priority: overdue ? "HIGH" : "NORMAL",
+      score: caseScore({ severity: overdue ? "warning" : "info", ageHours: hoursSince(from, ms), amount: 0, type: "OTHER" }),
+      createdAt: from,
+      startedAt: null,
+      dueAt: null,
+      slaAt: slaDueAt("FB_CRM_CARE", null, from, null),
+      completedAt: null,
+      snoozedUntil: null,
+      businessEntity: "CUSTOMER",
+      businessEntityId: r.customerId,
+      sourceUrl: `/customers/facebook-crm?c=${encodeURIComponent(r.customerId)}`,
+      money: MONEY_UNKNOWN,
+      tags: ["Facebook CRM"],
+      evidence: { source: "Khách hàng · Facebook CRM", detail: `hẹn ngày ${r.nextCareOn}` },
+      blockedReason: "",
+      creationSource: "AUTO" as WorkItem["creationSource"],
+      actions: actionsOf("FB_CRM_CARE"),
+      recommendedAction: "Mở khách trên Facebook CRM, chăm sóc bằng tay rồi đặt ngày hẹn mới",
+    };
+  });
+}
+
 /* ═══════════════════ 7b · DỮ LIỆU LƯƠNG CHỜ BỔ SUNG (Trung tâm đối soát) ═══════════════════ */
 
 /**
@@ -1457,6 +1506,7 @@ async function collectWorkItemsInScope(opts: CollectOptions): Promise<{ items: W
     want("PRODUCTION_TOPIC") ? guard("PRODUCTION_TOPIC", () => adaptProductionTopics(now)) : [],
     want("SAMPLE_REVIEW") ? guard("SAMPLE_REVIEW", () => adaptSampleReviews(now)) : [],
     want("SOURCING_TRIAL") ? guard("SOURCING_TRIAL", () => adaptSourcingTrials(now)) : [],
+    want("FB_CRM_CARE") ? guard("FB_CRM_CARE", () => adaptFbCrmCare(now)) : [],
     want("PAYROLL_RECON") ? guard("PAYROLL_RECON", () => peekPayrollRecon(now)) : [],
     want("MANUAL_TASK") || want("RECURRING_TASK") || want("WORKFLOW_TASK") ? guard("MANUAL_TASK", () => adaptOwnedWork(now, opts.includeClosed ?? false, closedSince)) : [],
   ]);
