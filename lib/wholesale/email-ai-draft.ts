@@ -19,6 +19,7 @@ import { emailDomain, emailIdempotencyKey } from "@/lib/wholesale/email-constant
 import { draftLanguageFor, draftViolations, editRatio, type DraftGuardFacts, type DraftLanguage, type DraftViolation } from "@/lib/wholesale/email-ai-draft-guard";
 import { getEmailSettings } from "@/lib/wholesale/email-outbox-store";
 import { leadView } from "@/lib/wholesale/engine";
+import { emailLaneRefusal } from "@/lib/wholesale/contact-plan-store";
 import { openerVariables } from "@/lib/wholesale/opener";
 import { resolveAi } from "@/lib/wholesale/outreach";
 import { parseQuotationPolicy, QUOTATION_SETTING_KEY } from "@/lib/wholesale/quotation-engine";
@@ -232,6 +233,9 @@ export async function aiDraftEmailCore(user: SessionUser, leadId: string, now = 
     if (!settings.enabled) return { error: "AI soạn email đang TẮT — người cấu hình bật ở Hộp thư đi (kèm trần số nháp và chi phí / ngày)." };
     if (g.lead.contactStatus === "DO_NOT_CONTACT") return { error: "Lead ở danh sách KHÔNG LIÊN HỆ." };
     if (!normalizeEmail(g.lead.email)) return { error: "Lead chưa có email hợp lệ — AI soạn email chỉ dành cho luồng email." };
+    // Kế hoạch kênh (chủ shop 30/10): khách trong nước còn nhắn Zalo được thì không soạn email — kiểm TRƯỚC khi tốn lượt AI.
+    const refusal = await emailLaneRefusal(g.lead.id);
+    if (refusal) return { error: refusal };
     // Kiểm bảng + trần TRƯỚC khi gọi AI: chưa áp 0265 hoặc chạm trần ⇒ không tốn một lượt gọi nào.
     const spend = await todaySpend(now);
     if (spend.drafts >= (settings.dailyMaxDrafts as number)) return { error: `Đã chạm trần ${settings.dailyMaxDrafts} nháp AI hôm nay.` };
@@ -312,6 +316,8 @@ export async function promoteAiDraftCore(user: SessionUser, id: string, raw: unk
     if (g.lead.contactStatus === "DO_NOT_CONTACT") return { error: "Lead ở danh sách KHÔNG LIÊN HỆ." };
     const to = normalizeEmail(g.lead.email);
     if (!to) return { error: "Lead chưa có email hợp lệ." };
+    const refusal = await emailLaneRefusal(g.lead.id);
+    if (refusal) return { error: refusal };
     const snap = g.row.facts as DraftFactsSnapshot;
     const step = typeof snap.sequenceStep === "number" && snap.sequenceStep > 0 ? snap.sequenceStep : 0;
     const templateKey = step > 0 ? "FOLLOWUP" : "OPENER_D0";

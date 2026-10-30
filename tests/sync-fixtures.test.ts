@@ -634,6 +634,7 @@ import { testWholesaleQuotationSettings } from "./wholesale-quotation-settings.t
 import { testWholesaleEmailAiDraft } from "./wholesale-email-ai-draft.test";
 import { testWholesaleEmailSequence } from "./wholesale-email-sequence.test";
 import { testWholesaleEmail } from "./wholesale-email.test";
+import { testWholesaleChannelRouting } from "./wholesale-channel-routing.test";
 import { testRestaurantTemplate } from "./restaurant.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testTriggerProposals } from "./trigger-proposals.test";
@@ -3346,6 +3347,7 @@ async function main() {
     await testWholesaleEmailSequence();
     // E1 AI B2B: hộp thư đi email ở chế độ chạy thử — cổng chính sách, huỷ đăng ký, nhận phản hồi; tổ chức THẬT `we-a` / `we-b`.
     await testWholesaleEmail();
+    await testWholesaleChannelRouting();
     await testRestaurantTemplate();
     testTriggerProposals();
     await testSelfServiceJourney();

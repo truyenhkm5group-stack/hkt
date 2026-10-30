@@ -12,6 +12,8 @@ import { cn } from "@/lib/utils";
 import { WholesaleNav } from "@/app/(dashboard)/wholesale/wholesale-nav";
 import { EmailCandidates, OutboxBoard } from "@/app/(dashboard)/wholesale/outbox/outbox-board";
 import { EmailSettingsPanel } from "@/app/(dashboard)/wholesale/outbox/email-settings-panel";
+import { EmailCountriesPanel } from "@/app/(dashboard)/wholesale/outbox/email-countries-panel";
+import { EMAIL_COUNTRY_CHOICES } from "@/lib/wholesale/email-countries";
 import { AiDraftSettings, AiDraftsPanel } from "@/app/(dashboard)/wholesale/outbox/ai-drafts-panel";
 import { listAiDrafts } from "@/lib/queries/wholesale-email-ai-drafts";
 import { getEmailAiSettings } from "@/lib/wholesale/email-ai-draft";
@@ -113,6 +115,9 @@ export default async function WholesaleOutboxPage({ searchParams }: { searchPara
                 <SequenceSettingsForm settings={sequence.settings} />
               </div>
             ) : null}
+          </SectionCard>
+          <SectionCard title="Nước đã rà luật thư chào hàng" description={`${settings.allowedCountries.length ? `Đã rà: ${settings.allowedCountries.join(", ")}.` : "Chưa nước nào — mọi thư chỉ chạy thử."} Nước chưa rà ⇒ gửi thật nằm chờ «chưa rà luật nước X».`}>
+            <EmailCountriesPanel allowed={settings.allowedCountries} choices={EMAIL_COUNTRY_CHOICES} canEdit={isConfig && user.role === "ADMIN"} />
           </SectionCard>
         </>
       )}
