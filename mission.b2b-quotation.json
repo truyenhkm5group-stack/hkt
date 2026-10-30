@@ -3,7 +3,7 @@
   "mission_id": "b2b-quotation",
   "title": "Engine báo giá sỉ tất định (P1b)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-b2b-quote",
@@ -46,11 +46,13 @@
     "0263": "2026-10-27T07:01:43.325Z"
   },
   "created_at": "2026-10-27T06:58:57.050Z",
-  "updated_at": "2026-10-30T08:36:30.969Z",
+  "updated_at": "2026-10-30T09:20:33.699Z",
   "last_heartbeat": "2026-10-30T07:52:04.266Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1095 → 1a8ce586d69e3289fafbccaa61a9a7b67283894f"
+    "merged": "#1095 → 1a8ce586d69e3289fafbccaa61a9a7b67283894f",
+    "verify": "PASS 1a8ce586d69e3289fafbccaa61a9a7b67283894f 2026-10-30T09:19:54.864Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/41028937487"
   },
   "handoff": {
     "branch": "claude/b2b-quotation",
