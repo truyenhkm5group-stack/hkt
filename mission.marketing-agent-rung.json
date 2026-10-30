@@ -3,7 +3,7 @@
   "mission_id": "marketing-agent-rung",
   "title": "Marketing: ảnh AI chờ duyệt lên /work + đo duyệt/bác ở Mission Control",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-mkt",
@@ -29,7 +29,22 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-30T17:27:41.242Z",
-  "updated_at": "2026-10-30T17:42:10.458Z",
-  "last_heartbeat": "2026-10-30T17:42:10.458Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-30T23:32:04.501Z",
+  "last_heartbeat": "2026-10-30T23:32:04.501Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/marketing-agent-rung",
+    "sha": "b5cc0e6530e8c6331fd4300fbd808643e77c4815",
+    "at": "2026-10-30T23:32:04.501Z",
+    "actor": "DESKTOP-56TH98Y:wt-mkt",
+    "title": "Marketing: ảnh AI chờ duyệt lên /work + đo duyệt/bác ở Mission Control",
+    "summary": "Nấc VÀO VIỆC của Marketing agent: nguồn /work CREATIVE_APPROVAL (phép chiếu ảnh AI vẽ chờ duyệt, phòng MARKETING, chỉ nút MỞ) + Mission Control đo duyệt/bác ảnh AI (ảnh chưa xét ngoài mẫu); BÀN TAY giữ PARTIAL, outcome NONE, không mở AUTO",
+    "tests": [
+      "typecheck sạch",
+      "lint sạch",
+      "TEST_KHOI=K13,K24 ĐẠT sau merge #1106",
+      "build ĐẠT (trước merge #1106)",
+      "4 shard đầy đủ: để gates CI"
+    ]
+  }
 }
