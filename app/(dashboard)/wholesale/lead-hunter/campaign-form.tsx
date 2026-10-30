@@ -15,7 +15,12 @@ import { LEAD_SEGMENT_LABEL, LEAD_SEGMENTS, type LeadSegment } from "@/lib/whole
 
 /** `tier`: hạng quét (1 = tỉnh quét trước · 2 = không có biển · 3 = ven biển) — tỉnh lấy hạng nhỏ nhất của khu vực. */
 type ProvinceOpt = { key: string; label: string; tier: 1 | 2 | 3; areas: { code: string; name: string; tier: 1 | 2 | 3 }[] };
-type GroupOpt = { key: string; label: string; keywords: string[]; enabled: boolean };
+/** `lang`: ngôn ngữ từ khoá — nhóm `vi` chỉ sinh ô ở tỉnh trong nước, nhóm `en` / bản địa chỉ ở nước ngoài (areas-intl.ts). */
+type GroupOpt = { key: string; label: string; keywords: string[]; enabled: boolean; lang: string | null };
+/** Nước quốc tế: «tỉnh» là nước, «khu vực» là thành phố — cùng ô chọn với tỉnh trong nước. */
+type CountryOpt = { key: string; label: string; areas: { code: string; name: string }[] };
+
+const LANG_LABEL: Record<string, string> = { vi: "VN", en: "EN", ja: "日本語", ko: "한국어", "zh-Hant": "繁中", de: "DE", fr: "FR" };
 
 const SELECTABLE_SEGMENTS = LEAD_SEGMENTS.filter((s) => s !== "NOT_FIT" && s !== "UNCLASSIFIED" && s !== "OTHER_FOOD");
 
@@ -23,7 +28,7 @@ function money(micros: number, rate: number) {
   return `${(micros / 1e6).toLocaleString("vi-VN", { maximumFractionDigits: 2 })} US$ (≈ ${formatNumber(Math.round((micros / 1e6) * rate))} ₫)`;
 }
 
-export function CampaignForm({ provinces, keywordGroups, defaults }: { provinces: ProvinceOpt[]; keywordGroups: GroupOpt[]; defaults: { name: string; productFocus: string; excludeKeywords: string; targetSegments: LeadSegment[]; maxLeads: number; discoveryTier: DiscoveryTier } }) {
+export function CampaignForm({ provinces, intlCountries = [], keywordGroups, defaults }: { provinces: ProvinceOpt[]; intlCountries?: CountryOpt[]; keywordGroups: GroupOpt[]; defaults: { name: string; productFocus: string; excludeKeywords: string; targetSegments: LeadSegment[]; maxLeads: number; discoveryTier: DiscoveryTier } }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [name, setName] = useState(defaults.name);
@@ -203,8 +208,41 @@ export function CampaignForm({ provinces, keywordGroups, defaults }: { provinces
               </div>
             );
           })}
+          {intlCountries.length ? (
+            <div className="space-y-1">
+              <div className="text-xs font-semibold">Nước ngoài — khách sỉ quốc tế</div>
+              <p className="text-xs text-muted-foreground">Chỉ nhóm từ khoá tiếng Anh / bản địa (nhãn «QT», «Nhật», «Hàn»…) sinh truy vấn ở nước ngoài; nhóm tiếng Việt chỉ quét trong nước. Kết quả trả về bằng tiếng Anh. SĐT nước ngoài chưa chuẩn hoá được ⇒ bỏ «Chỉ lấy lead có SĐT», bật «Chỉ lấy lead có website».</p>
+              <div className="grid gap-2 md:grid-cols-3">
+                {intlCountries.map((p) => {
+                  const on = selProv.includes(p.key);
+                  const picked = areas[p.key] ?? [];
+                  return (
+                    <div key={p.key} className="rounded-md border p-2">
+                      <label className="flex items-center gap-2 text-sm font-medium">
+                        <input type="checkbox" checked={on} onChange={() => setSelProv(toggle(selProv, p.key))} />
+                        {p.label} <span className="text-xs font-normal text-muted-foreground">({picked.length ? `${picked.length}/` : ""}{p.areas.length} thành phố)</span>
+                      </label>
+                      {on ? (
+                        <details className="mt-1">
+                          <summary className="cursor-pointer text-xs text-muted-foreground">Chọn thành phố (để trống = tất cả)</summary>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                            {p.areas.map((a) => (
+                              <label key={a.code} className="flex items-center gap-1 text-xs">
+                                <input type="checkbox" checked={picked.includes(a.code)} onChange={() => setAreas({ ...areas, [p.key]: toggle(picked, a.code) })} />
+                                {a.name}
+                              </label>
+                            ))}
+                          </div>
+                        </details>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
           <label className={lbl}>
-            Khu vực tự khai — mỗi dòng «Tỉnh: khu vực 1, khu vực 2» (vd «Nghệ An: Vinh, Cửa Lò»)
+            Khu vực tự khai — mỗi dòng «Tỉnh: khu vực 1, khu vực 2» (vd «Nghệ An: Vinh, Cửa Lò», «Nhật Bản: Kobe»)
             <Textarea rows={2} value={customAreas} onChange={(e) => setCustomAreas(e.target.value)} />
           </label>
         </fieldset>
@@ -232,7 +270,7 @@ export function CampaignForm({ provinces, keywordGroups, defaults }: { provinces
             {keywordGroups.map((g) => (
               <label key={g.key} className="flex items-center gap-1.5 rounded-md border px-2 py-1 text-sm" title={g.keywords.join(", ")}>
                 <input type="checkbox" checked={Boolean(groups[g.key])} onChange={() => setGroups({ ...groups, [g.key]: !groups[g.key] })} />
-                {g.label} <span className="text-[11px] text-muted-foreground">({g.keywords.length})</span>
+                {g.label} <span className="text-[11px] text-muted-foreground">({g.lang ? `${LANG_LABEL[g.lang] ?? g.lang} · ` : ""}{g.keywords.length})</span>
               </label>
             ))}
           </div>

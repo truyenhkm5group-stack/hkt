@@ -29,6 +29,11 @@ export const LEAD_SEGMENTS = [
   "OTHER_FOOD",
   "NOT_FIT",
   "UNCLASSIFIED",
+  // ── Khách sỉ B2B / quốc tế (27/10/2026) — THÊM vào cuối, khoá cũ giữ nguyên vì `wholesale_leads.segment` đã lưu chúng. ──
+  "SEAFOOD_IMPORTER",
+  "ASIAN_FOOD_WHOLESALE",
+  "FOODSERVICE_DISTRIBUTOR",
+  "PRIVATE_LABEL_OEM",
 ] as const;
 export type LeadSegment = (typeof LEAD_SEGMENTS)[number];
 
@@ -54,6 +59,10 @@ export const LEAD_SEGMENT_LABEL: Record<LeadSegment, string> = {
   OTHER_FOOD: "Ăn uống khác (cà phê, bánh, đồ ngọt…)",
   NOT_FIT: "Không phù hợp",
   UNCLASSIFIED: "Chưa phân loại",
+  SEAFOOD_IMPORTER: "Nhập khẩu / bán sỉ hải sản (B2B)",
+  ASIAN_FOOD_WHOLESALE: "Bán sỉ / nhập khẩu thực phẩm châu Á (B2B)",
+  FOODSERVICE_DISTRIBUTOR: "Nhà cung cấp HORECA / phân phối thực phẩm (B2B)",
+  PRIVATE_LABEL_OEM: "Nhãn riêng / OEM thực phẩm (B2B)",
 };
 
 /**
@@ -80,6 +89,14 @@ export const SEGMENT_POINTS: Record<LeadSegment, { fit: number; intent: number }
   OTHER_FOOD: { fit: 4, intent: 0 },
   NOT_FIT: { fit: 0, intent: 0 },
   UNCLASSIFIED: { fit: 6, intent: 2 },
+  // B2B / quốc tế: nhà nhập khẩu hải sản và nhà bán sỉ thực phẩm châu Á là người MUA LẠI đúng mặt hàng HSLC (đặc sản đóng
+  // gói) ⇒ phù hợp ngành gần trần. Ý định mua để dưới nhóm bán lẻ trong nước vì mua xuyên biên giới đòi chứng từ xuất khẩu
+  // HSLC chưa có sẵn. Phân phối HORECA / nhãn riêng mua theo hợp đồng ⇒ thấp hơn. Chuỗi nhà hàng / siêu thị nước ngoài
+  // KHÔNG có khoá riêng: đi vào RESTAURANT / SUPERMARKET sẵn có (chuỗi nhận ra bằng số điểm cùng thương hiệu, không bằng chữ).
+  SEAFOOD_IMPORTER: { fit: 28, intent: 11 },
+  ASIAN_FOOD_WHOLESALE: { fit: 27, intent: 11 },
+  FOODSERVICE_DISTRIBUTOR: { fit: 20, intent: 8 },
+  PRIVATE_LABEL_OEM: { fit: 18, intent: 7 },
 };
 
 /** Mã loại hình Google Places (Table A) ⇒ nhóm. Thứ tự ưu tiên xử lý ở `classifySegment`. */
@@ -139,12 +156,95 @@ const TYPE_SEGMENT: Record<string, LeadSegment> = {
   fast_food_restaurant: "OTHER_FOOD",
 };
 
+/**
+ * Loại hình chỉ đọc ở ô QUỐC TẾ (`classifySegment(…, { b2b: true })`). «wholesaler» của Google (Table A) không nói bán sỉ GÌ —
+ * chiến dịch tìm bằng từ khoá thực phẩm nên xếp vào nhóm phân phối thực phẩm chung (điểm vừa), không xếp vào nhập khẩu hải
+ * sản (điểm cao) khi tên không nói thế. Ô trong nước KHÔNG đọc bảng này: hành vi trong nước giữ y như trước 27/10/2026.
+ */
+const B2B_TYPE_SEGMENT: Record<string, LeadSegment> = {
+  wholesaler: "FOODSERVICE_DISTRIBUTOR",
+};
+
 /** Từ khoá trong TÊN (đã bỏ dấu, chữ thường) ⇒ nhóm. Tên nói rõ hơn mã loại hình chung chung. */
 /**
  * Từ khoá CÓ DẤU khớp trên tên CÓ DẤU — bỏ dấu thì «lẩu» trùng «lâu», «ốc» trùng «óc», «nhậu» trùng «nhau», nên chữ
  * mơ hồ khi bỏ dấu KHÔNG được khớp trên chuỗi đã bỏ dấu (tên viết không dấu «Lau De 404» thì không nhận — không đoán).
  * Từ khoá KHÔNG dấu (vd «hai san», «buffet») khớp trên chuỗi đã bỏ dấu, nên tên có / không dấu đều nhận.
  */
+/**
+ * Luật B2B / quốc tế — CHỈ áp cho ô quốc tế (`{ b2b: true }`), và ở đó ĐỨNG TRƯỚC mọi luật khác: «Ocean Seafood Trading» là nhà
+ * buôn, không phải nhà hàng hải sản; «Frozen Seafood Distributor» không phải cửa hàng đông lạnh. Chỉ cụm chữ nói rõ VIỆC BUÔN
+ * (import / wholesale / distributor…) mới khớp — chữ «seafood» trơn vẫn đi luật nhà hàng như cũ.
+ *
+ * Vì sao không áp trong nước (lead review 27/10/2026): bốn khoá B2B không nằm trong `DEFAULT_TARGET_SEGMENTS`, nên một nhà
+ * phân phối VN tên «… Food Distributor» — đúng khách sỉ HSLC muốn — sẽ bị lọc `SEGMENT` ở chiến dịch trong nước, trong khi
+ * trước đây nó `UNCLASSIFIED` và đi qua. Không đổi hành vi trong nước là cách ít rủi ro nhất.
+ *
+ * `words` khớp theo RANH GIỚI TỪ như luật trong nước (tiếng Anh, chữ Latin). `stems` khớp CHUỖI CON trên tên đã chữ thường
+ * (ß ⇒ ss, ký tự không phải chữ / số ⇒ khoảng trắng): tiếng Nhật / Hàn / Trung viết liền không có khoảng trắng, tiếng Đức ghép
+ * từ («Fischgroßhandel»), nên ranh giới từ không bắt được. Từ bản địa chỉ khai khi chắc nghĩa và đủ hẹp — «水産» trơn KHÔNG
+ * có mặt vì chuỗi quán nhậu Nhật cũng mang chữ ấy; chỉ «水産卸» (bán sỉ thuỷ sản).
+ */
+const B2B_RULES: { segment: LeadSegment; words: string[]; stems: string[] }[] = [
+  {
+    segment: "SEAFOOD_IMPORTER",
+    words: [
+      "seafood importer", "seafood importers", "seafood import", "seafood imports", "seafood wholesale", "seafood wholesaler", "seafood wholesalers",
+      "seafood trading", "seafood supply", "seafood supplies", "seafood supplier", "seafood suppliers", "seafood distributor", "seafood distributors",
+      "seafood distribution", "frozen seafood", "fish wholesale", "fish wholesaler", "fish wholesalers", "fish importer", "fish importers",
+    ],
+    stems: [
+      "水産卸", "水産物卸", "鮮魚卸", "수산물도매", "수산물 도매", "수산 도매", "냉동수산", "냉동 수산", "海鮮批發", "海產批發", "水產批發", "冷凍海鮮", "海鮮進口",
+      "fischgroßhandel", "fisch großhandel", "fischimport", "meeresfrüchte großhandel", "grossiste produits de la mer", "grossiste poisson", "grossiste en poisson", "grossiste fruits de mer", "mareyeur",
+    ],
+  },
+  {
+    segment: "PRIVATE_LABEL_OEM",
+    words: ["private label", "oem", "co packer", "co packing", "contract packing", "contract manufacturing"],
+    stems: [],
+  },
+  {
+    segment: "ASIAN_FOOD_WHOLESALE",
+    words: [
+      "asian food wholesale", "asian food wholesaler", "asian grocery wholesale", "asian grocery wholesaler", "asian wholesale", "asian wholesaler",
+      "asian food importer", "asian food importers", "asian food import", "oriental food wholesale", "oriental wholesale", "oriental food importer",
+      "vietnamese food wholesale", "vietnamese food importer", "vietnamese food import",
+    ],
+    stems: ["asia großhandel", "asiagroßhandel", "asiatischer großhandel", "grossiste asiatique", "grossiste alimentaire asiatique"],
+  },
+  {
+    segment: "FOODSERVICE_DISTRIBUTOR",
+    words: [
+      "foodservice", "food service distributor", "food service supplier", "food distributor", "food distributors", "food distribution", "horeca",
+      "restaurant supply", "restaurant supplies", "catering supplies", "food wholesale", "food wholesaler", "food wholesalers", "cash and carry", "cash carry",
+    ],
+    stems: ["食品卸", "食材卸", "식자재", "식품도매", "식품 도매", "食品批發", "食材批發", "gastro großhandel", "gastrogroßhandel", "lebensmittelgroßhandel", "grossiste alimentaire", "fournisseur restauration"],
+  },
+];
+
+/** Chữ thường, ß ⇒ ss, mọi ký tự không phải chữ / số ⇒ khoảng trắng. KHÔNG bỏ dấu, KHÔNG tách chữ CJK. */
+function stemFold(raw: string | null | undefined): string {
+  if (!raw) return "";
+  return ` ${raw
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/ß/g, "ss")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()} `;
+}
+
+/** Chuỗi con đầu tiên trong `stems` có mặt trong tên (xem `B2B_RULES`). HÀM THUẦN. */
+export function nameStemHit(name: string | null | undefined, stems: readonly string[]): string | null {
+  const hay = stemFold(name);
+  return (
+    stems.find((st) => {
+      const needle = stemFold(st).trim();
+      return needle.length > 0 && hay.includes(needle);
+    }) ?? null
+  );
+}
+
 const NAME_RULES: { segment: LeadSegment; words: string[] }[] = [
   // Món ăn mang tên mặt hàng («Bánh cuốn chả mực») là QUÁN dùng hàng, không phải cửa hàng đặc sản.
   { segment: "EATERY", words: ["bánh cuốn"] },
@@ -211,19 +311,55 @@ export function nameWordHit(name: string | null | undefined, words: readonly str
   return words.find((w) => (hasMarks(w) ? marked.includes(` ${lowerKeepMarks(w).trim()} `) : folded.includes(` ${foldVietnamese(w).trim()} `))) ?? null;
 }
 
-export function classifySegment(input: SegmentInput): SegmentResult {
+/**
+ * `opts.b2b` = ô / lead QUỐC TẾ: bật luật tên B2B (`B2B_RULES`) và loại hình `B2B_TYPE_SEGMENT`. Mặc định TẮT — mọi đường
+ * trong nước (quét tỉnh VN, nhập tệp) phân nhóm đúng như trước 27/10/2026.
+ */
+export function classifySegment(input: SegmentInput, opts: { b2b?: boolean } = {}): SegmentResult {
+  const b2b = opts.b2b === true;
+  if (b2b) {
+    for (const rule of B2B_RULES) {
+      const hit = nameWordHit(input.name, rule.words) ?? nameStemHit(input.name, rule.stems);
+      if (hit) return { segment: rule.segment, evidence: `tên có «${hit}»` };
+    }
+  }
+  const typeSeg = (t: string | null | undefined): LeadSegment | undefined => (t ? (TYPE_SEGMENT[t] ?? (b2b ? B2B_TYPE_SEGMENT[t] : undefined)) : undefined);
   for (const rule of NAME_RULES) {
     const hit = nameWordHit(input.name, rule.words);
     if (hit) return { segment: rule.segment, evidence: `tên có «${hit}»` };
   }
-  const primary = input.primaryType ? TYPE_SEGMENT[input.primaryType] : undefined;
+  const primary = typeSeg(input.primaryType);
   if (primary) return { segment: primary, evidence: `loại hình chính «${input.primaryType}»` };
   let best: { segment: LeadSegment; type: string } | null = null;
   for (const t of input.types ?? []) {
-    const seg = TYPE_SEGMENT[t];
+    const seg = typeSeg(t);
     if (!seg) continue;
     if (!best || SEGMENT_POINTS[seg].fit > SEGMENT_POINTS[best.segment].fit) best = { segment: seg, type: t };
   }
   if (best) return { segment: best.segment, evidence: `loại hình «${best.type}»` };
   return { segment: "UNCLASSIFIED", evidence: "không có loại hình / từ khoá nhận ra được" };
+}
+
+/**
+ * Bộ lọc «nhóm khách mục tiêu» của chiến dịch — MỘT chỗ cho cả bước tìm lẫn bước chi tiết (engine.ts). Chiến dịch không khai
+ * nhóm ⇒ nhận mọi nhóm; `UNCLASSIFIED` luôn qua (không có chứng cứ thì không loại). HÀM THUẦN.
+ */
+export function passesTargetSegments(targets: readonly string[], segment: LeadSegment): boolean {
+  return !targets.length || segment === "UNCLASSIFIED" || targets.includes(segment);
+}
+
+/**
+ * DẤU HIỆU BUÔN SỈ trong tên / loại hình Google: importer · distributor · wholesale… (và chữ bản địa cùng nghĩa). Đầu vào
+ * của hệ số «ý định mua» ở `scoring.ts` — nơi tự gọi mình là nhà nhập khẩu / nhà phân phối thì mua theo lô, không theo món.
+ * Trả CHÍNH chứng cứ đã khớp (để lý do chấm điểm in ra được), không khớp ⇒ `null`. Chỉ chữ nước ngoài, và engine chỉ áp
+ * cho lead QUỐC TẾ: tên quán trong nước mang «bán sỉ» thường là đối thủ / đầu mối, nên bảng chấm trong nước không đổi.
+ * HÀM THUẦN.
+ */
+const B2B_SIGNAL_WORDS = ["importer", "importers", "import", "imports", "distributor", "distributors", "distribution", "wholesale", "wholesaler", "wholesalers", "foodservice", "horeca"];
+const B2B_SIGNAL_STEMS = ["卸", "도매", "批發", "批发", "進口", "großhandel", "grossiste", "distributeur", "importeur", "groothandel"];
+
+export function b2bSignal(input: SegmentInput): string | null {
+  if (input.primaryType === "wholesaler" || (input.types ?? []).includes("wholesaler")) return "loại hình «wholesaler»";
+  const hit = nameWordHit(input.name, B2B_SIGNAL_WORDS) ?? nameStemHit(input.name, B2B_SIGNAL_STEMS);
+  return hit ? `tên có «${hit}»` : null;
 }

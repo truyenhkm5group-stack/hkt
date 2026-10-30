@@ -1,3 +1,4 @@
+import { isIntlProvinceKey } from "@/lib/wholesale/areas-intl";
 import { type LeadSegment, LEAD_SEGMENT_LABEL, SEGMENT_POINTS } from "@/lib/wholesale/segments";
 import type { PhoneKind } from "@/lib/wholesale/phone";
 
@@ -8,6 +9,7 @@ import type { PhoneKind } from "@/lib/wholesale/phone";
  *
  *   PHÙ HỢP NGÀNH   0–30  nhóm khách (segments.ts) — khả năng cần nhập hải sản / thực phẩm thường xuyên
  *   Ý ĐỊNH MUA      0–15  nhóm ưu tiên của HSLC (hải sản, lẩu, nướng, buffet, tiệc cao nhất)
+ *                         + `B2B_INTENT_BONUS` khi tên / loại hình tự nhận là importer · distributor · wholesale (vẫn trần 15)
  *   QUY MÔ          0–20  số đánh giá, dấu hiệu chuỗi / nhiều chi nhánh
  *   LIÊN HỆ ĐƯỢC    0–15  SĐT (di động > cố định > tổng đài), website, email / mạng xã hội công khai
  *   VỊ TRÍ          0–10  tỉnh nằm trong vùng HSLC phục vụ được (cấu hình)
@@ -56,7 +58,15 @@ export type ScoreInput = {
   branchHint: boolean;
   hasAddress: boolean;
   hasName: boolean;
+  /**
+   * Chứng cứ BUÔN SỈ trong tên / loại hình (`b2bSignal` ở segments.ts: «importer», «wholesaler», «卸»…); `null` / thiếu =
+   * không có. Cộng `B2B_INTENT_BONUS` vào «ý định mua», vẫn trong trần 15 — ngưỡng hạng A–D không đổi.
+   */
+  b2bSignal?: string | null;
 };
+
+/** Hệ số «tự nhận là nhà buôn»: cộng thẳng vào ý định mua (trần 15). Một hằng số, có bài kiểm khoá. */
+export const B2B_INTENT_BONUS = 3;
 
 export type ScoreComponentKey = "categoryFit" | "purchaseIntent" | "scale" | "contactability" | "location" | "quality" | "learned";
 export type ScoreComponent = { key: ScoreComponentKey; label: string; points: number; max: number; reason: string };
@@ -159,7 +169,16 @@ function locationPoints(input: ScoreInput, areas: ServiceAreas): { points: numbe
   const level = areas[input.provinceKey];
   if (level === "PRIORITY") return { points: 10, reason: `${label} — vùng ưu tiên phục vụ` };
   if (level === "SERVED") return { points: 6, reason: `${label} — trong vùng giao được` };
+  // Nước ngoài: cùng 0 điểm như tỉnh ngoài vùng (giao xuyên biên giới chưa khai), nhưng nói đúng lý do để người đọc biết đi
+  // khai ở đâu — không phải «ngoài vùng» kiểu tỉnh xa.
+  if (isIntlProvinceKey(input.provinceKey)) return { points: 0, reason: `${label} — thị trường nước ngoài, chưa khai vùng xuất khẩu` };
   return { points: 0, reason: `${label} — ngoài vùng phục vụ đã khai` };
+}
+
+function intentPoints(input: ScoreInput, base: number): { points: number; reason: string } {
+  const reason = base >= 13 ? "nhóm bán lại / dùng hàng đặc sản thường xuyên" : base >= 9 ? "nhóm có nhu cầu nhập đều" : "thường đòi hoá đơn hoặc nhu cầu không rõ";
+  if (!input.b2bSignal) return { points: base, reason };
+  return { points: clamp(base + B2B_INTENT_BONUS, 0, 15), reason: `${reason} · tự nhận là nhà buôn sỉ (${input.b2bSignal}, +${B2B_INTENT_BONUS})` };
 }
 
 function qualityPoints(input: ScoreInput): { points: number; reason: string } {
@@ -216,9 +235,10 @@ export function scoreLead(input: ScoreInput, opts: { areas: ServiceAreas; thresh
   const contact = contactPoints(input);
   const location = locationPoints(input, opts.areas);
   const quality = qualityPoints(input);
+  const intent = intentPoints(input, seg.intent);
   const components: ScoreComponent[] = [
     { key: "categoryFit", label: SCORE_COMPONENT_LABEL.categoryFit, points: seg.fit, max: 30, reason: `${segLabel}${evidence}` },
-    { key: "purchaseIntent", label: SCORE_COMPONENT_LABEL.purchaseIntent, points: seg.intent, max: 15, reason: seg.intent >= 13 ? "nhóm bán lại / dùng hàng đặc sản thường xuyên" : seg.intent >= 9 ? "nhóm có nhu cầu nhập đều" : "thường đòi hoá đơn hoặc nhu cầu không rõ" },
+    { key: "purchaseIntent", label: SCORE_COMPONENT_LABEL.purchaseIntent, points: intent.points, max: 15, reason: intent.reason },
     { key: "scale", label: SCORE_COMPONENT_LABEL.scale, points: scale.points, max: 20, reason: scale.reason },
     { key: "contactability", label: SCORE_COMPONENT_LABEL.contactability, points: contact.points, max: 15, reason: contact.reason },
     { key: "location", label: SCORE_COMPONENT_LABEL.location, points: location.points, max: 10, reason: location.reason },

@@ -4,9 +4,11 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { cellScanPriority, parseCustomAreas, SCAN_TIER_LABEL, SEARCH_PROVINCES, scanTier, type ScanPriority, type ScanTier, type SearchProvince } from "@/lib/wholesale/areas";
-import { DEFAULT_KEYWORD_GROUPS, DEFAULT_LEAD_HUNTER_CONFIG, DEFAULT_TARGET_SEGMENTS, DISCOVERY_TIERS, freeTierLeft, type KeywordGroup } from "@/lib/wholesale/config";
+import { intlSearchProvince } from "@/lib/wholesale/areas-intl";
+import { DEFAULT_KEYWORD_GROUPS, DEFAULT_LEAD_HUNTER_CONFIG, DEFAULT_TARGET_SEGMENTS, DISCOVERY_TIERS, freeTierLeft, type KeywordGroup, type LeadHunterConfig } from "@/lib/wholesale/config";
 import type { CampaignStatus } from "@/lib/wholesale/constants";
-import { type CostEstimate, enabledKeywords, estimateCost, planNearbyCell, planTextCells, type PlannedCell } from "@/lib/wholesale/query-plan";
+import { ALL_KEYWORD_GROUPS, INTL_KEYWORD_GROUPS } from "@/lib/wholesale/keywords-intl";
+import { type CostEstimate, enabledKeywordEntries, enabledKeywords, estimateCost, planNearbyCell, planTextCells, type PlannedCell } from "@/lib/wholesale/query-plan";
 import { LEAD_SEGMENTS, type LeadSegment } from "@/lib/wholesale/segments";
 import { currentSpend, getLeadHunterConfig } from "@/lib/wholesale/store";
 import { searchSku } from "@/lib/integrations/google-places/client";
@@ -68,7 +70,8 @@ function splitList(text: string): string[] {
 export function resolveProvinces(input: Pick<CampaignParsed, "provinces" | "areas" | "customAreas">): { provinces: SearchProvince[]; invalid: string[] } {
   const out = new Map<string, SearchProvince>();
   for (const key of input.provinces) {
-    const p = SEARCH_PROVINCES.find((x) => x.key === key);
+    // Tỉnh trong nước, rồi nước quốc tế (areas-intl.ts) — cùng cấu trúc, ảnh chụp mang theo `locale` + tâm thiên vị.
+    const p = SEARCH_PROVINCES.find((x) => x.key === key) ?? intlSearchProvince(key);
     if (!p) continue;
     const pick = input.areas[key];
     const areas = pick && pick.length ? p.areas.filter((a) => pick.includes(a.code)) : p.areas;
@@ -83,8 +86,9 @@ export function resolveProvinces(input: Pick<CampaignParsed, "provinces" | "area
   return { provinces: [...out.values()], invalid: custom.invalid };
 }
 
+/** Bộ trong nước + bộ quốc tế (keywords-intl.ts). Nhóm không có trong `picks` giữ mặc định — mọi nhóm quốc tế TẮT sẵn. */
 export function resolveKeywordGroups(picks: CampaignParsed["keywordGroups"]): KeywordGroup[] {
-  return DEFAULT_KEYWORD_GROUPS.map((g) => {
+  return ALL_KEYWORD_GROUPS.map((g) => {
     const pick = picks.find((p) => p.key === g.key);
     return { ...g, keywords: [...g.keywords], enabled: pick ? pick.enabled : g.enabled };
   });
@@ -99,9 +103,24 @@ export function planForCampaign(c: Pick<CampaignRow, "provinces" | "keywordGroup
     return { cells: [planNearbyCell({ lat: c.nearbyLat ?? 0, lng: c.nearbyLng ?? 0, radiusM: c.radiusM ?? 1000, includedTypes: types, label: c.name })], truncated: false };
   }
   const groups = (Array.isArray(c.keywordGroups) ? c.keywordGroups : []) as (KeywordGroup & { extra?: boolean })[];
-  const keywords = enabledKeywords(groups);
+  const keywords = enabledKeywordEntries(groups);
   const provinces = (Array.isArray(c.provinces) ? c.provinces : []) as SearchProvince[];
   return planTextCells(keywords, provinces);
+}
+
+/**
+ * Ước tính chi phí của một chiến dịch ĐÃ LƯU (mẫu / nháp) — để thẻ chiến dịch in số truy vấn × đơn giá SKU TRƯỚC khi người
+ * bấm «Dùng mẫu» / «Bắt đầu quét». Cùng `planForCampaign` + `estimateCost` với «Xem trước truy vấn», nên hai chỗ không lệch.
+ * KHÔNG trừ ô vừa quét (cần đọc CSDL) — đây là trần trên của số lượt; chưa trừ lượt miễn phí của Google. HÀM THUẦN.
+ */
+export function campaignCostEstimate(
+  c: Pick<CampaignRow, "provinces" | "keywordGroups" | "searchMode" | "nearbyLat" | "nearbyLng" | "radiusM" | "targetSegments" | "name" | "discoveryTier" | "maxLeads">,
+  cfg: Pick<LeadHunterConfig, "skuPriceUsdPer1000" | "maxPagesPerCell">,
+): CostEstimate {
+  const plan = planForCampaign(c);
+  const mode = c.searchMode === "NEARBY" ? "NEARBY" : "TEXT";
+  const tier = (DISCOVERY_TIERS as readonly string[]).includes(c.discoveryTier) ? (c.discoveryTier as (typeof DISCOVERY_TIERS)[number]) : "PRO";
+  return estimateCost({ cellCount: plan.cells.length, freshCount: 0, mode, tier, maxLeads: c.maxLeads }, cfg);
 }
 
 /** Nhóm khách ⇒ loại hình Google cho Nearby Search (Nearby không nhận từ khoá). */
@@ -384,6 +403,56 @@ export function hslcTemplateValues(tier: ScanTier = 1, prio: ScanPriority = DEFA
   };
 }
 
+export const HSLC_INTL_TEMPLATE_KEY = "hslc-intl-seafood-importers-pilot";
+export const HSLC_INTL_TEMPLATE_NAME = "HSLC – International Seafood Importers (pilot)";
+
+/**
+ * Phạm vi mẫu thử quốc tế: BA nước, bốn thành phố — Singapore, Kuala Lumpur, Sydney, Melbourne. Chọn nơi có cộng đồng
+ * người Việt / châu Á đông và tiếng Anh là ngôn ngữ kinh doanh (kết quả đọc được, website tiếng Anh để thu email). Mở rộng
+ * thì nhân bản chiến dịch rồi chọn thêm nước ở form — không sửa mẫu.
+ */
+export const INTL_PILOT_SCOPE: readonly { key: string; areas: readonly string[] | "ALL" }[] = [
+  { key: "intl sg", areas: "ALL" },
+  { key: "intl my", areas: ["kuala-lumpur"] },
+  { key: "intl au", areas: ["sydney", "melbourne"] },
+];
+
+/**
+ * Mẫu «HSLC – International Seafood Importers (pilot)» (chủ shop chốt 27/10/2026). Luật 23: mẫu KHÔNG tự chạy, trạng thái
+ * DRAFT, `startCampaignCore` từ chối mẫu — người bấm «Dùng mẫu» rồi tự bấm «Bắt đầu quét».
+ *  · CHỈ nhóm từ khoá «Nhập khẩu / bán sỉ hải sản» (tiếng Anh) bật — 3 từ × 4 thành phố = 12 ô.
+ *  · `requireWebsite = true`: email của nhà nhập khẩu nằm trên website của họ (bước đọc website thu sau).
+ *  · `requirePhone = false`: bộ chuẩn hoá SĐT chỉ hiểu số Việt Nam (phone.ts) — bắt buộc SĐT là lọc bỏ MỌI lead nước ngoài.
+ *    Hệ quả CỐ Ý: lead quốc tế không tự lên «Đủ điều kiện» (luật đó đòi SĐT) — người duyệt tay; không có gì được gửi đi.
+ *  · Mức ENTERPRISE: website + số đánh giá có ngay trong lượt tìm, không tốn lượt chi tiết.
+ *  · `maxLeads` nhỏ (50) — mẫu thử để đo tỉ lệ ra lead trước khi mở rộng.
+ */
+export function intlPilotTemplateValues() {
+  const provinces: SearchProvince[] = [];
+  for (const s of INTL_PILOT_SCOPE) {
+    const p = intlSearchProvince(s.key);
+    if (!p) continue;
+    const areas = s.areas === "ALL" ? p.areas : p.areas.filter((a) => s.areas.includes(a.code));
+    if (areas.length) provinces.push({ ...p, areas: areas.map((a) => ({ ...a })) });
+  }
+  return {
+    name: HSLC_INTL_TEMPLATE_NAME,
+    productFocus: "Hải sản chế biến đóng gói (chả mực, chả cá, ruốc, nước mắm) cho nhà nhập khẩu / bán sỉ thực phẩm châu Á",
+    provinces,
+    keywordGroups: INTL_KEYWORD_GROUPS.map((g) => ({ key: g.key, label: g.label, keywords: [...g.keywords], enabled: g.key === "intl-seafood-importer", lang: g.lang })),
+    excludeKeywords: [] as string[],
+    targetSegments: ["SEAFOOD_IMPORTER", "ASIAN_FOOD_WHOLESALE", "FOODSERVICE_DISTRIBUTOR", "PRIVATE_LABEL_OEM"] as LeadSegment[],
+    maxLeads: 50,
+    minRating: null,
+    minReviews: null,
+    requirePhone: false,
+    requireWebsite: true,
+    searchMode: "TEXT" as const,
+    discoveryTier: "ENTERPRISE" as const,
+    note: "Mẫu thử khách sỉ quốc tế: Singapore · Kuala Lumpur · Sydney · Melbourne. Chỉ lấy nơi có website (để thu email). SĐT nước ngoài chưa chuẩn hoá được ⇒ lead không tự lên «Đủ điều kiện», người duyệt tay. Không gửi gì ra ngoài.",
+  };
+}
+
 /**
  * Dựng / cập nhật ba mẫu (gọi khi mở trang Săn khách sỉ). Idempotent theo `template_key`; chỉ GHI khi phạm vi hoặc tên mẫu
  * thật sự khác — mở trang không sinh một lượt UPDATE mỗi lần. Mẫu không bao giờ chạy nên sửa nó không đụng tới việc gì.
@@ -404,6 +473,16 @@ export async function ensureTemplateCampaign(): Promise<void> {
         setWhere: sql`${c.isTemplate} and (${c.provinces} is distinct from excluded.provinces or ${c.name} is distinct from excluded.name or ${c.keywordGroups} is distinct from excluded.keyword_groups or ${c.targetSegments} is distinct from excluded.target_segments or ${c.discoveryTier} is distinct from excluded.discovery_tier or ${c.excludeKeywords} is distinct from excluded.exclude_keywords)`,
       });
   }
+  // Mẫu thử quốc tế — cùng luật: DRAFT, là mẫu, chỉ ghi khi giá trị thật sự khác.
+  const iv = intlPilotTemplateValues();
+  await db
+    .insert(c)
+    .values({ ...iv, status: "DRAFT", isTemplate: true, templateKey: HSLC_INTL_TEMPLATE_KEY, createdByName: "Mẫu hệ thống" })
+    .onConflictDoUpdate({
+      target: c.templateKey,
+      set: { name: iv.name, provinces: iv.provinces, note: iv.note, keywordGroups: iv.keywordGroups, targetSegments: iv.targetSegments, excludeKeywords: iv.excludeKeywords, discoveryTier: iv.discoveryTier, maxLeads: iv.maxLeads, requirePhone: iv.requirePhone, requireWebsite: iv.requireWebsite, updatedAt: new Date() },
+      setWhere: sql`${c.isTemplate} and (${c.provinces} is distinct from excluded.provinces or ${c.name} is distinct from excluded.name or ${c.keywordGroups} is distinct from excluded.keyword_groups or ${c.targetSegments} is distinct from excluded.target_segments or ${c.discoveryTier} is distinct from excluded.discovery_tier or ${c.excludeKeywords} is distinct from excluded.exclude_keywords or ${c.maxLeads} is distinct from excluded.max_leads or ${c.requirePhone} is distinct from excluded.require_phone or ${c.requireWebsite} is distinct from excluded.require_website)`,
+    });
 }
 
 /** «Dùng mẫu»: chép mẫu thành một chiến dịch NHÁP mới — người xem lại rồi mới bấm Bắt đầu. */

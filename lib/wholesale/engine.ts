@@ -6,6 +6,7 @@ import { normalizeProvince, provinceRegion } from "@/lib/constants/vn-regions";
 import { vnDateKey } from "@/lib/format";
 import { placesRelayOf, type PlaceRecord, type PlacesClientDeps } from "@/lib/integrations/google-places/client";
 import { searchProvince } from "@/lib/wholesale/areas";
+import { intlCellContext, intlSearchProvince, isIntlProvinceKey } from "@/lib/wholesale/areas-intl";
 import { freeTierLeft, nextCallCostMicros, quotaRetryAt, type LeadHunterConfig, type PlacesSku } from "@/lib/wholesale/config";
 import { ACTIVE_PIPELINE_STATUSES, type PauseReason, PAUSE_REASON_LABEL } from "@/lib/wholesale/constants";
 import { competitorHit } from "@/lib/wholesale/competitor";
@@ -14,7 +15,7 @@ import { branchHint, chainBrandHit, nameAddressKey, socialKind, websiteDomain } 
 import { normalizeVnPhone, type PhoneKind } from "@/lib/wholesale/phone";
 import { googlePlacesProvider, websiteEnrichmentProvider, type DiscoveryProvider, type EnrichmentProvider } from "@/lib/wholesale/providers";
 import { learnedAdjustment, scoreLead, type ScoreResult, type SegmentOutcomeStats } from "@/lib/wholesale/scoring";
-import { classifySegment, foldVietnamese, isLeadSegmentKey, type LeadSegment } from "@/lib/wholesale/segments";
+import { b2bSignal, classifySegment, foldVietnamese, isLeadSegmentKey, type LeadSegment, passesTargetSegments } from "@/lib/wholesale/segments";
 import { currentSpend, getLeadHunterConfig, notifyOwners, recordUsage, segmentOutcomeStats, suppressionHit } from "@/lib/wholesale/store";
 import type { WebsiteDeps } from "@/lib/wholesale/website";
 
@@ -175,6 +176,9 @@ export async function rescoreLead(leadId: string, ctx: { cfg: LeadHunterConfig; 
       branchHint: branchHint(v.name),
       hasAddress: Boolean(v.address),
       hasName: Boolean(v.name),
+      // Hệ số «tự nhận là nhà buôn» chỉ cho lead QUỐC TẾ: bảng chấm trong nước (chủ shop chốt 05/10/2026) giữ nguyên — ở
+      // trong nước loại hình «wholesaler» / chữ «bán sỉ» thường là đối thủ hoặc đầu mối, không phải người mua lại.
+      b2bSignal: isIntlProvinceKey(lead.provinceKey) ? b2bSignal({ name: v.name, primaryType: v.primaryType, types: v.types }) : null,
     },
     { areas: ctx.cfg.serviceAreas, thresholds: ctx.cfg.gradeThresholds, learned, sizeProfile: ctx.cfg.sizeProfile },
   );
@@ -471,7 +475,8 @@ async function handleDiscoveredPlace(ctx: Ctx, camp: Campaign, cell: typeof sche
     return "SUPPRESSED";
   }
 
-  const seg = classifySegment({ name: place.name, primaryType: place.primaryType, types: place.types });
+  // Luật nhận diện B2B chỉ cho ô QUỐC TẾ — ô trong nước phân nhóm đúng như trước (segments.ts::B2B_RULES).
+  const seg = classifySegment({ name: place.name, primaryType: place.primaryType, types: place.types }, { b2b: isIntlProvinceKey(cell.provinceKey) });
   if (tier !== "IDS_ONLY") {
     if (place.businessStatus === "CLOSED_PERMANENTLY" || place.businessStatus === "CLOSED_TEMPORARILY") {
       await setHit("FILTERED", place.businessStatus === "CLOSED_PERMANENTLY" ? "CLOSED" : "CLOSED_TEMPORARILY", null);
@@ -499,7 +504,7 @@ async function handleDiscoveredPlace(ctx: Ctx, camp: Campaign, cell: typeof sche
       await setHit("FILTERED", "COMPETITOR", null);
       return "FILTERED";
     }
-    if (camp.targetSegments.length && seg.segment !== "UNCLASSIFIED" && !camp.targetSegments.includes(seg.segment)) {
+    if (!passesTargetSegments(camp.targetSegments, seg.segment)) {
       await setHit("FILTERED", "SEGMENT", null);
       return "FILTERED";
     }
@@ -510,7 +515,8 @@ async function handleDiscoveredPlace(ctx: Ctx, camp: Campaign, cell: typeof sche
     }
   }
 
-  const prov = provinceFromAddress(place.address) ?? { key: cell.provinceKey, label: cell.provinceLabel };
+  // Ô quốc tế: địa chỉ nước ngoài không có tỉnh VN nào để đọc (và không được khớp nhầm một tên tỉnh) ⇒ nước của ô.
+  const prov = (isIntlProvinceKey(cell.provinceKey) ? null : provinceFromAddress(place.address)) ?? { key: cell.provinceKey, label: cell.provinceLabel };
   const inCell = normalizeProvince(prov.key) === cell.provinceKey;
   await upsertSnapshot(place, tier, ctx.cfg, now);
   const inserted = await db
@@ -621,6 +627,16 @@ export async function finalizeLead(ctx: Pick<Ctx, "cfg" | "now" | "stats">, lead
   return "READY";
 }
 
+/**
+ * Một lượt Text Search cho một ô. Ô quốc tế mang ngôn ngữ / vùng của nước + tâm thiên vị (areas-intl.ts); ô trong nước gửi
+ * đúng như trước — KHÔNG có khoá `locale` / `bias` trong yêu cầu.
+ */
+function textPage(provider: DiscoveryProvider, cell: { queryText: string; provinceKey: string; areaCode: string }, tier: "IDS_ONLY" | "PRO" | "ENTERPRISE", pageToken: string | null) {
+  const intl = intlCellContext(cell.provinceKey, cell.areaCode);
+  if (!intl) return provider.search({ mode: "TEXT", textQuery: cell.queryText, tier, pageToken });
+  return provider.search({ mode: "TEXT", textQuery: cell.queryText, tier, pageToken, locale: { languageCode: intl.languageCode, regionCode: intl.regionCode }, bias: intl.bias });
+}
+
 /** Một trang tìm kiếm của một ô. Trả `false` khi lượt phải dừng (trần / khoá hỏng / hạn mức Google). */
 async function processCellPage(ctx: Ctx, camp: Campaign): Promise<"DID_WORK" | "NO_CELL" | "STOP"> {
   const db = await getDb();
@@ -647,7 +663,7 @@ async function processCellPage(ctx: Ctx, camp: Campaign): Promise<"DID_WORK" | "
   const page =
     mode === "NEARBY"
       ? await ctx.provider.search({ mode: "NEARBY", tier, includedTypes: claimed.cell.keyword.split("+").filter(Boolean), center: { lat: camp.nearbyLat ?? 0, lng: camp.nearbyLng ?? 0 }, radiusM: camp.radiusM ?? 1000 })
-      : await ctx.provider.search({ mode: "TEXT", textQuery: claimed.cell.queryText, tier, pageToken: claimed.pageToken });
+      : await textPage(ctx.provider, claimed.cell, tier, claimed.pageToken);
   const cost = page.meta.billable ? nextCallCostMicros(ctx.cfg, sku, ctx.spend.monthBySku[sku] ?? 0) : 0;
   charge(ctx, cost, sku, page.meta.billable);
 
@@ -739,7 +755,8 @@ async function processDetails(ctx: Ctx, lead: Lead): Promise<"DID_WORK" | "STOP"
   }
   const snap = await db.query.wholesalePlaceSnapshots.findFirst({ where: eq(schema.wholesalePlaceSnapshots.placeId, lead.placeId) });
   const full = !snap || snap.fieldsTier === "IDS_ONLY" || Boolean(snap.purgedAt);
-  const r = await ctx.provider.details(lead.placeId, full);
+  const intlLocale = intlSearchProvince(lead.provinceKey)?.locale;
+  const r = intlLocale ? await ctx.provider.details(lead.placeId, full, { languageCode: intlLocale.languageCode, regionCode: intlLocale.regionCode }) : await ctx.provider.details(lead.placeId, full);
   const cost = r.meta.billable ? nextCallCostMicros(ctx.cfg, "DETAILS_ENTERPRISE", ctx.spend.monthBySku.DETAILS_ENTERPRISE ?? 0) : 0;
   charge(ctx, cost, "DETAILS_ENTERPRISE", r.meta.billable);
   await recordUsage({ provider: "GOOGLE_PLACES", method: "PLACE_DETAILS", sku: "DETAILS_ENTERPRISE", campaignId: lead.sourceCampaignId, leadId: lead.id, query: lead.placeId, httpStatus: r.meta.httpStatus, ok: r.ok, billable: r.meta.billable, attempts: r.meta.attempts, resultCount: r.ok ? 1 : 0, durationMs: r.meta.durationMs, costMicros: cost, error: r.ok ? null : r.message, at: ctx.now() });
@@ -770,11 +787,11 @@ async function processDetails(ctx: Ctx, lead: Lead): Promise<"DID_WORK" | "STOP"
   if (lead.enrichmentStatus === "PENDING_DETAILS") {
     // Lượt tìm chỉ-ID không có tên ⇒ phân nhóm bây giờ mới làm được.
     if (!lead.segmentEvidence) {
-      const seg = classifySegment({ name: r.place.name, primaryType: r.place.primaryType, types: r.place.types });
-      const prov = provinceFromAddress(r.place.address);
+      const seg = classifySegment({ name: r.place.name, primaryType: r.place.primaryType, types: r.place.types }, { b2b: isIntlProvinceKey(lead.provinceKey) });
+      const prov = isIntlProvinceKey(lead.provinceKey) ? null : provinceFromAddress(r.place.address);
       await db.update(l).set({ segment: seg.segment, segmentEvidence: seg.evidence, ...(prov ? { provinceKey: prov.key, provinceLabel: prov.label } : {}) }).where(eq(l.id, lead.id));
       const camp = lead.sourceCampaignId ? await db.query.wholesaleCampaigns.findFirst({ where: eq(schema.wholesaleCampaigns.id, lead.sourceCampaignId) }) : null;
-      if (camp?.targetSegments.length && seg.segment !== "UNCLASSIFIED" && !camp.targetSegments.includes(seg.segment)) {
+      if (camp && !passesTargetSegments(camp.targetSegments, seg.segment)) {
         await db.update(l).set({ enrichmentStatus: "FILTERED", filterReason: "SEGMENT", detailsNextAt: null, updatedAt: ctx.now() }).where(eq(l.id, lead.id));
         return "DID_WORK";
       }

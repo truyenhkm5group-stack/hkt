@@ -17,6 +17,8 @@ Chiến dịch → kế hoạch ô (từ khoá × tỉnh × khu vực) → Text 
 → Hàng đợi liên hệ (người duyệt, người gửi) → pipeline → «Chốt được» → chuyển thành khách hàng ERP → doanh thu
 ```
 
+Từ 27/10/2026 cùng luồng này quét cả **khách sỉ nước ngoài**: «tỉnh» là nước, «khu vực» là thành phố (mục 4b).
+
 Hệ thống không bao giờ tự gửi tin. Lead chỉ vào hàng đợi khi người bấm «Xếp hàng liên hệ» hoặc khi cấu hình đặt
 `AUTO_PREPARE`. Ở mức `AUTO_PREPARE`, hệ thống chỉ soạn sẵn lời chào theo mẫu, và người vẫn phải duyệt rồi gửi.
 
@@ -174,6 +176,94 @@ loại» với lý do `COMPETITOR`, không xoá. Chủ shop sửa mặt hàng / 
 
 Hai điểm bán (một chi nhánh) vẫn được coi là cơ sở vừa.
 
+## 4b. Khách sỉ nước ngoài và phân khúc B2B (chủ shop chốt 27/10/2026)
+
+Chủ shop ưu tiên **tìm khách tiềm năng** — cả trong nước lẫn nước ngoài — bằng đúng bộ quét Google Places đang chạy.
+Phần này **chưa gửi gì**: lead quốc tế đi Tìm thấy → Đủ điều kiện (người duyệt) như lead trong nước.
+
+**Vùng quét quốc tế** (`lib/wholesale/areas-intl.ts`). Cùng cấu trúc `SearchProvince` với `areas.ts`, nên kế hoạch ô,
+hàng đợi, trần chi tiêu, khử trùng và chấm điểm đi nguyên một đường, không có lõi thứ hai.
+
+| Nước | Khoá | Thành phố | Từ khoá áp được |
+|---|---|---|---|
+| Singapore | `intl sg` | Singapore | `en` |
+| Malaysia | `intl my` | Kuala Lumpur · Klang · George Town Penang · Johor Bahru | `en` |
+| Thái Lan | `intl th` | Bangkok · Samut Sakhon · Chiang Mai · Pattaya | `en` |
+| Nhật Bản | `intl jp` | Tokyo · Osaka · Yokohama · Nagoya · Fukuoka | `en` · `ja` |
+| Hàn Quốc | `intl kr` | Seoul · Busan · Incheon · Daegu | `en` · `ko` |
+| Đài Loan | `intl tw` | Taipei · New Taipei · Taichung · Kaohsiung · Tainan | `en` · `zh-Hant` |
+| Hồng Kông | `intl hk` | Hong Kong Island · Kowloon · New Territories | `en` · `zh-Hant` |
+| Úc | `intl au` | Sydney · Melbourne · Brisbane · Perth · Adelaide | `en` |
+| Mỹ | `intl us` | Los Angeles · Westminster California · San Jose California · Houston · Dallas · Seattle · New York · Chicago · Atlanta | `en` |
+| Canada | `intl ca` | Toronto · Vancouver · Montreal · Calgary | `en` |
+| Anh | `intl gb` | London · Birmingham · Manchester · Leeds | `en` |
+| Đức | `intl de` | Berlin · Hamburg · Frankfurt · Munich · Leipzig | `en` · `de` |
+| Pháp | `intl fr` | Paris · Rungis · Marseille · Lyon | `en` · `fr` |
+| Hà Lan | `intl nl` | Amsterdam · Rotterdam · The Hague | `en` |
+| UAE | `intl ae` | Dubai · Abu Dhabi · Sharjah | `en` |
+
+- **Ô quốc tế không đụng ô trong nước.** Khoá ô là `TEXT|<từ khoá>|<khoá tỉnh>|<mã khu vực>`. Khoá nước là `intl <mã
+  ISO>`, không tỉnh VN nào bắt đầu bằng `intl `, nên «seafood importer × Tokyo» không bao giờ trùng một ô trong nước,
+  kể cả khi trùng từ khoá. Khoá ô trong nước không đổi một ký tự (có bài kiểm cho mọi từ khoá mặc định).
+- **Chữ CJK.** Khoá từ khoá cũ bỏ mọi ký tự ngoài a–z, nên «水産卸» và «食品卸» đều thành chuỗi rỗng — chung một ô.
+  `keywordFold` giữ chữ ngoài Latin; với chữ Việt / Latin nó cho ra đúng chuỗi cũ.
+- **Ngôn ngữ / vùng gửi tới Google.** Ô quốc tế gửi `regionCode` = mã nước, `languageCode = en` (ngôn ngữ của KẾT QUẢ —
+  nhân viên đọc được tiếng Anh, không đọc được tiếng Nhật / Thái), và `locationBias` hình tròn quanh tâm thành phố (chỉ
+  thiên vị, không giới hạn cứng). Ô trong nước gửi đúng như trước: `vi` / `VN`, không thiên vị toạ độ.
+- **Từ khoá theo ngôn ngữ.** Nhóm từ khoá mang `lang`: nhóm `vi` chỉ sinh ô trong nước, `en` mọi nước ngoài, bản địa chỉ
+  nước dùng tiếng ấy. Từ khoá tự khai (không có `lang`) áp mọi nơi như trước.
+- **Khu vực tự khai** nhận tên nước: «Nhật Bản: Kobe» ⇒ ô `intl jp` mang ngôn ngữ / vùng Nhật (Kobe không có tâm thiên vị).
+- **Địa chỉ lead quốc tế** không được đọc thành tỉnh VN: lead nhận nước của ô.
+
+**Phân khúc B2B mới** (`LEAD_SEGMENTS`, thêm vào cuối — 17 khoá cũ giữ nguyên tên vì `wholesale_leads.segment` đã lưu):
+
+| Khoá | Nhận ra từ | Phù hợp / ý định |
+|---|---|---|
+| `SEAFOOD_IMPORTER` | «seafood importer / wholesaler / trading / distributor», «frozen seafood», «水産卸», «수산물 도매», «海鮮批發», «Fischgroßhandel», «grossiste produits de la mer»… | 28 / 11 |
+| `ASIAN_FOOD_WHOLESALE` | «Asian food importer», «Asian grocery wholesale», «Asia Großhandel», «grossiste asiatique»… | 27 / 11 |
+| `FOODSERVICE_DISTRIBUTOR` | «foodservice», «HORECA», «restaurant supply», «food wholesaler», «食品卸», «식자재», «grossiste alimentaire»…; loại hình Google `wholesaler` (chỉ ô quốc tế) | 20 / 8 |
+| `PRIVATE_LABEL_OEM` | «private label», «OEM», «co-packer»… | 18 / 7 |
+
+- Luật B2B **chỉ áp cho ô / lead quốc tế** (`classifySegment(…, { b2b: true })`), và ở đó đứng trước mọi luật khác. Chỉ cụm
+  chữ nói rõ việc buôn mới khớp — «Ocean Seafood Restaurant» vẫn là nhà hàng hải sản; «磯丸水産» (chuỗi quán nhậu) không phải
+  nhà buôn.
+- Ô trong nước và nhập tệp phân nhóm đúng như trước: bốn khoá B2B không nằm trong mục tiêu mặc định trong nước, nên nếu áp
+  luật B2B ở đây thì một nhà phân phối VN tên «… Food Distributor» (khách HSLC muốn) bị lọc `SEGMENT` — trước đây nó
+  `UNCLASSIFIED` và đi qua. Có bài kiểm khoá điều này.
+- Chữ CJK / từ ghép tiếng Đức khớp CHUỖI CON (không có khoảng trắng để khớp ranh giới từ). Loại hình Google `wholesaler`
+  ⇒ `FOODSERVICE_DISTRIBUTOR` cũng chỉ ở ô quốc tế.
+- «Chuỗi nhà hàng Việt / châu Á» và «chuỗi siêu thị» không có khoá riêng: chúng vào `RESTAURANT` / `SUPERMARKET` sẵn có;
+  chuỗi nhận ra bằng số điểm cùng thương hiệu như trong nước.
+- `DEFAULT_TARGET_SEGMENTS` trong nước không đổi.
+
+**Nhóm từ khoá quốc tế** (`lib/wholesale/keywords-intl.ts`, mọi nhóm TẮT sẵn): nhập khẩu / bán sỉ hải sản · bán sỉ /
+nhập khẩu thực phẩm châu Á · HORECA / phân phối thực phẩm · chuỗi nhà hàng Việt / châu Á · chuỗi siêu thị châu Á · nhãn
+riêng / OEM (tiếng Anh); và năm nhóm bản địa chỉ khai khi chắc nghĩa: Nhật, Hàn, Trung phồn thể (Đài Loan + Hồng Kông),
+Đức, Pháp. Không có tiếng Thái / Hà Lan / Mã Lai — tiếng Anh vẫn quét được các nước ấy.
+
+**Mẫu «HSLC – International Seafood Importers (pilot)»** (`hslc-intl-seafood-importers-pilot`):
+
+- 3 nước, 4 thành phố: Singapore · Kuala Lumpur · Sydney · Melbourne;
+- chỉ nhóm «nhập khẩu / bán sỉ hải sản» (3 từ: seafood importer · seafood wholesaler · frozen seafood distributor);
+- mức `ENTERPRISE` (website có ngay trong lượt tìm), tối đa 50 lead;
+- **bắt buộc website** (email của nhà nhập khẩu nằm trên website của họ), **không bắt buộc SĐT** (xem giới hạn dưới);
+- trạng thái `DRAFT`, là mẫu — không tự chạy; «Dùng mẫu» ra một nháp, chủ shop tự bấm «Bắt đầu quét».
+
+**Ước tính chi phí** — thẻ mẫu và thẻ nháp in ngay số truy vấn × đơn giá SKU (`campaignCostEstimate`, cùng phép tính với
+«Xem trước truy vấn»). Với đơn giá mặc định Text Search Enterprise 35 US$ / 1.000 lượt, tỷ giá 26.000:
+
+| | Lượt | US$ | ≈ VND |
+|---|---|---|---|
+| Ít nhất (12 ô × 1 trang) | 12 | 0,42 | 10.920 |
+| Điển hình (1,5 trang / ô) | 18 | 0,63 | 16.380 |
+| Nhiều nhất (12 ô × 3 trang) | 36 | 1,26 | 32.760 |
+
+Đây là giá niêm yết, chưa trừ ô vừa quét và chưa trừ 1.000 lượt Enterprise miễn phí mỗi tháng — còn lượt miễn phí thì số
+tiền thật là 0. Trần ngày / tháng vẫn chặn bất kể ước tính.
+
+**Trạm chuyển tiếp** (`deploy/places-relay`) chuyển nguyên thân yêu cầu POST và nguyên chuỗi truy vấn GET, nên
+`languageCode` / `regionCode` / `locationBias` của ô quốc tế tới Google mà không cần sửa trạm (có bài kiểm).
+
 ## 5. Tiết kiệm chi phí API
 
 **Chế độ chỉ dùng miễn phí** (`freeTier`, bật sẵn). Google miễn phí mỗi tháng, tính theo từng SKU trên mỗi tài khoản thanh
@@ -276,10 +366,10 @@ Lượt quét an toàn khi chạy lại, tạm dừng hay chết giữa chừng,
 | Thành phần | Tối đa | Đọc từ |
 |---|---|---|
 | Phù hợp ngành | 30 | Nhóm khách (từ khoá trong tên, rồi `primaryType`, rồi `types`) |
-| Ý định mua | 15 | Nhóm ưu tiên của HSLC: hải sản, buffet, lẩu, tiệc, nướng |
+| Ý định mua | 15 | Nhóm ưu tiên của HSLC: hải sản, buffet, lẩu, tiệc, nướng. Lead QUỐC TẾ tự nhận là nhà buôn (tên có «importer», «distributor», «wholesale», «卸», «도매», «批發», «Großhandel», «grossiste»…, hoặc loại hình `wholesaler`) được cộng `B2B_INTENT_BONUS` = 3, vẫn trần 15 |
 | Quy mô | 20 | Số đánh giá; nhiều chi nhánh (trùng SĐT / website, chữ «chi nhánh»); loại hình phục vụ số lượng lớn |
 | Liên hệ được | 15 | SĐT di động > cố định > tổng đài; website; email / Facebook / Zalo công khai |
-| Vị trí | 10 | Tỉnh trong vùng phục vụ (ưu tiên / giao được) |
+| Vị trí | 10 | Tỉnh trong vùng phục vụ (ưu tiên / giao được). Nước ngoài: 0 điểm với lý do «thị trường nước ngoài, chưa khai vùng xuất khẩu» |
 | Chất lượng | 10 | Đang hoạt động; sao (tối đa 2 điểm, nên sao không bao giờ quyết điểm); dữ liệu đủ |
 | Học từ kết quả | ±5 | Tỷ lệ chốt của nhóm so với tỷ lệ chung, làm trơn Bayes. Chỉ áp khi nhóm có ≥ 20 lead đã đi tới kết cục |
 
@@ -586,6 +676,12 @@ Phần chạy trên tổ chức thật `wl-hslc` kiểm:
 - **Khu vực là tên quận / huyện cũ dùng để tìm.** Cấp huyện không còn từ 07/2025 nhưng Google và người dùng vẫn gọi tên
   cũ. Địa chỉ của lead không bị suy ra từ tên khu vực.
 - **«Học từ kết quả»** chỉ có tác dụng sau khi có đủ lead đi tới kết cục (≥ 20 mỗi nhóm).
+- **SĐT nước ngoài chưa chuẩn hoá** (`phone.ts` chỉ hiểu số Việt Nam): lead quốc tế có «chưa có SĐT» ở điểm liên hệ,
+  không khử trùng theo SĐT, và không tự lên «Đủ điều kiện» (luật đó đòi SĐT) — người duyệt tay. Vì thế mẫu quốc tế bắt
+  buộc website thay vì SĐT. Chuẩn hoá E.164 nhiều nước là việc riêng.
+- **Vùng xuất khẩu chưa khai**: cấu hình `serviceAreas` chỉ liệt kê 34 tỉnh, nên mọi nước ngoài 0 điểm vị trí. Khi HSLC
+  có chứng từ xuất khẩu, cần thêm nước vào `serviceAreas` (khoá `intl xx`) — trang cấu hình hiện chưa liệt kê nước.
+- **Bảng độ phủ** (`coverageByProvince`) và trang cấu hình vẫn chỉ hiện 34 tỉnh.
 - **Phase 2 đề xuất:**
   - bộ chuyển kênh Zalo OA / SMS có dedupe và danh sách không liên hệ;
   - Nearby Search theo lưới toạ độ cho thành phố lớn;
