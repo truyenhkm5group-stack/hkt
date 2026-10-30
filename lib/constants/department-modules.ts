@@ -572,6 +572,13 @@ export const NAV_MODULES = [
     why: "Duyệt, chốt phương án, cắt quảng cáo, đặt / xả hàng là quyết định BỎ VỐN — của người điều hành, không của phòng nào làm một khâu. Trang gom chúng từ màn hình chủ của từng phòng (mỗi dòng mở về đó) và lưu phản ứng của người quyết để đo đề xuất nào đúng.",
   },
   {
+    href: "/daily-report",
+    label: "Báo cáo ngày",
+    zone: "MANAGEMENT",
+    permission: "approvals:decide",
+    why: "Bản tóm tắt mỗi sáng cho người điều hành: máy gom số của cả shop bằng các hàm báo cáo sẵn có, AI chỉ viết lời và bị chặn nếu bịa số. Câu hỏi của người điều hành, không của phòng làm một khâu.",
+  },
+  {
     href: "/departments",
     label: "Bản đồ phòng ban & AI",
     zone: "MANAGEMENT",

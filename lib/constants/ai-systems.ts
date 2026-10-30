@@ -22,7 +22,7 @@ import type { AiUsageFeature, AiUsageWorkload } from "@/lib/ai-usage/types";
 import { MODEL_BY_TIER } from "@/lib/ai/router";
 import { SALES_BOT_CONNECTORS } from "@/lib/sales-chatbot/config";
 
-export const AI_SYSTEM_IDS = ["AI-01", "AI-02", "AI-03", "AI-04", "AI-05", "AI-06", "AI-07", "AI-08", "AI-09"] as const;
+export const AI_SYSTEM_IDS = ["AI-01", "AI-02", "AI-03", "AI-04", "AI-05", "AI-06", "AI-07", "AI-08", "AI-09", "AI-10"] as const;
 export type AiSystemId = (typeof AI_SYSTEM_IDS)[number];
 
 export const AI_RISK_LEVELS = ["HIGH", "MEDIUM", "LOW", "UNCLASSIFIED"] as const;
@@ -228,6 +228,24 @@ export const AI_SYSTEMS: readonly AiSystem[] = [
     humanOversight: ["components/sourcing/sourcing-query-box.tsx"],
     incidentHandling: ["lib/ai-usage/ledger.ts"],
     changeHistory: "SRC-2 (23/10/2026) — bộ sinh từ khoá tìm hàng nguồn",
+  },
+  {
+    id: "AI-10",
+    name: "Báo cáo CEO hằng ngày (lời tóm tắt)",
+    origin: "CODE_INVENTORY",
+    purpose: "Viết lời tóm tắt + 3 điểm cần chú ý từ khối SỐ do máy gom bằng các hàm báo cáo sẵn có; hàng rào chặn mọi con số không có trong khối số",
+    facesEndCustomer: false,
+    features: ["daily_report"],
+    workloads: [],
+    callSites: ["lib/daily-report/service.ts"],
+    providers: ["anthropic-byok", "openai-byok", ...PLATFORM_AI_PROVIDERS.map((p) => `platform:${p}`)],
+    model: { defaults: SALES_DEFAULT_MODELS, runtimeSource: "lib/daily-report/service.ts → getBuilderAi — kết nối của tổ chức / AI nhà / khoá nền tảng, đọc lúc chạy" },
+    risk: "UNCLASSIFIED",
+    riskEvidence: null,
+    riskNote: `Lời gọi chỉ mang số TỔNG của shop (không tên / SĐT khách); đầu ra chỉ cho người điều hành đọc, số trong lời bị đối chiếu với khối số trước khi lưu. ${UNCLASSIFIED_NOTE}`,
+    humanOversight: ["app/(dashboard)/daily-report/page.tsx"],
+    incidentHandling: ["lib/ai-usage/ledger.ts"],
+    changeHistory: "ai-daily-report (30/10/2026) — báo cáo CEO hằng ngày, mặc định TẮT",
   },
 ];
 
