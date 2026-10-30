@@ -107,7 +107,7 @@ function testPolicy() {
   assert.equal(many.hold, false, "có lý do chặn hẳn ⇒ không giữ ở hàng đợi");
 
   // LIVE: chưa có adapter ⇒ chặn (giữ lại); chủ shop chưa bật ⇒ chặn; có adapter + chủ shop bật ⇒ gửi THẬT.
-  const live = one(baseInput({ settings: { ...SETTINGS, mode: "LIVE", liveEnabledByUserId: "owner" } }));
+  const live = one(baseInput({ settings: { ...SETTINGS, mode: "LIVE", liveEnabledByUserId: "owner" }, liveAdapters: [] }));
   assert.deepEqual([live.reasons, live.hold], [["LIVE_NO_ADAPTER"], true], "LIVE không adapter ⇒ chặn, thư nằm chờ");
   assert.deepEqual(one(baseInput({ settings: { ...SETTINGS, mode: "LIVE" }, liveAdapters: ["ses"] })).reasons, ["LIVE_NOT_OWNER_ENABLED"]);
   const liveOk = one(baseInput({ settings: { ...SETTINGS, mode: "LIVE", liveEnabledByUserId: "owner" }, liveAdapters: ["ses"] }));
@@ -280,7 +280,7 @@ async function testDb() {
       assert.equal(off.skipped, "MODE_OFF");
       assert.equal((await outboxOf(idOff))?.status, "QUEUED", "TẮT ⇒ thư nằm chờ, không bị chặn hẳn");
       const settingsIn = { mode: "DRY_RUN", sender: SENDER, limits: { perHour: 20, perDay: 100, perRecipientDomainPerDay: 5 } };
-      assert.match(JSON.stringify(await saveEmailSettingsCore(admin, { ...settingsIn, mode: "LIVE" }, NOW)), /Chưa có nhà cung cấp email/, "LIVE không adapter ⇒ từ chối");
+      assert.match(JSON.stringify(await saveEmailSettingsCore(admin, { ...settingsIn, mode: "LIVE" }, NOW, [])), /Chưa có nhà cung cấp email/, "LIVE không adapter ⇒ từ chối");
       assert.ok("error" in (await saveEmailSettingsCore(sale, settingsIn, NOW)), "người không có wholesale:config không đổi chế độ");
       assert.match(JSON.stringify(await saveEmailSettingsCore({ ...admin, role: "MANAGER", permissions: ["wholesale:view", "wholesale:work", "wholesale:config"] }, { ...settingsIn, mode: "LIVE" }, NOW, ["ses"])), /Chỉ chủ shop/);
       assert.ok("ok" in (await saveEmailSettingsCore(admin, settingsIn, NOW)));
@@ -386,7 +386,7 @@ async function testDb() {
       await db.update(schema.settings).set({ value: JSON.stringify({ ...mergeEmailSettings(JSON.parse((await db.query.settings.findFirst({ where: eq(schema.settings.key, "wholesale.email") }))!.value)), mode: "LIVE", liveEnabledByUserId: u.id }) }).where(eq(schema.settings.key, "wholesale.email"));
       const tv = await runEmailOutboxTick({ now: new Date(later.getTime() + 60 * 60_000) });
       assert.deepEqual([tv.sent, tv.held], [0, 1], "LIVE mà chưa có nhà cung cấp ⇒ không gửi, thư nằm chờ");
-      assert.match((await outboxOf(idV))?.lastError ?? "", /CHƯA có nhà cung cấp/);
+      assert.match((await outboxOf(idV))?.lastError ?? "", /Chưa gửi được ở chế độ LIVE: Chưa có kết nối/, "LIVE mà kết nối Google Workspace chưa bật ⇒ thư nằm chờ, nói rõ lý do");
       assert.ok("ok" in (await saveEmailSettingsCore(admin, settingsIn, NOW)));
       assert.ok("ok" in (await cancelEmailCore(admin, idV, NOW)));
 

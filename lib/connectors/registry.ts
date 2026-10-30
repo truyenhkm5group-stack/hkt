@@ -661,6 +661,51 @@ export const CONNECTORS: readonly ConnectorSpec[] = [
     consumers: ["lib/wholesale/engine.ts::runLeadHunterTick", "lib/address/resolve-job.ts::resolvePendingAddresses"],
     why: "Săn khách sỉ (0197): tìm nhà hàng / quán / khách sạn / cửa hàng thực phẩm bằng Places API (New) với khoá của CHÍNH tổ chức. Kiểm tra = một lượt Text Search chỉ xin Place ID (SKU miễn phí), khoá đi trong tiêu đề X-Goog-Api-Key, chỉ tới places.googleapis.com, không theo chuyển hướng. Job «wholesale-leads» mỗi 3 phút chạy chiến dịch đang bật, có trần ngân sách ngày / tháng tự dừng.",
   },
+  /*
+    GOOGLE WORKSPACE SMTP (E2 · chủ shop chốt 30/10/2026): adapter gửi thật đầu tiên của hộp thư đi email bán sỉ
+    (lib/wholesale/email-outbox.ts). Hộp thư + App Password do CHỦ SHOP nhập; App Password mã hoá AES-256-GCM trong
+    org_connections. Kiểm tra = SMTP verify (EHLO → STARTTLS → AUTH), KHÔNG gửi thư. Bật kết nối KHÔNG tự gửi: chế độ email
+    của tổ chức vẫn TẮT / CHẠY THỬ tới khi quản trị chuyển sang «Gửi thật»; mọi thư vẫn qua cổng chính sách.
+  */
+  {
+    key: "gws-smtp",
+    label: "Google Workspace — gửi email (SMTP)",
+    vendor: "Google",
+    kind: "MESSAGING",
+    capabilities: ["send_customer_message"],
+    auth: "USERNAME_PASSWORD",
+    settings: [
+      {
+        key: "mailbox",
+        label: "Hộp thư gửi (Google Workspace)",
+        type: "text",
+        secret: false,
+        required: true,
+        hint: "Hộp thư thật của tên miền, vd truyenhk@vnxcommerce.com. Thư đi ra mang đúng địa chỉ này ở dòng From.",
+        pattern: "^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$",
+        maxLength: 254,
+      },
+      {
+        key: "appPassword",
+        label: "App Password của hộp thư (16 chữ)",
+        type: "text",
+        secret: true,
+        required: true,
+        hint: "myaccount.google.com (đăng nhập bằng chính hộp thư) → Bảo mật → bật Xác minh 2 bước → Mật khẩu ứng dụng → tạo «ERP». Dán 16 chữ (có hay không khoảng trắng đều được). KHÔNG dùng mật khẩu đăng nhập.",
+        pattern: "^[a-zA-Z ]{16,19}$",
+        maxLength: 19,
+      },
+    ],
+    config: { store: "ORG_CONNECTIONS", where: "/settings/connections — App Password mã hoá AES-256-GCM trong CSDL của tổ chức" },
+    webhook: null,
+    tenancy: "PER_ORG",
+    health: "testConnection",
+    healthRef: "lib/connectors/testers.ts::testGwsSmtp",
+    module: "wholesale_leads",
+    code: ["lib/integrations/gws-smtp/"],
+    consumers: ["lib/email-provider/live.ts::resolveLiveEmailProvider"],
+    why: "Hộp thư đi email bán sỉ gửi thật qua smtp.gmail.com:587 (STARTTLS bắt buộc) bằng hộp thư Google Workspace của shop. Kiểm tra chỉ đăng nhập SMTP, không gửi thư. Bật kết nối không đổi chế độ email: thư chỉ đi khi quản trị chuyển chế độ «Gửi thật», từng thư đã được NGƯỜI duyệt và qua cổng chính sách (đồng ý · danh sách chặn · hạn mức 20/giờ · 100/ngày · 5/tên miền nhận). Lượt gửi ghi sync_runs (job wholesale-email).",
+  },
   // ─────────────── GỬI TIN ───────────────
   {
     key: "pancake-pages",

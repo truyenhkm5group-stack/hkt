@@ -62,6 +62,7 @@ Không có: DeepSeek, Groq, Mistral, OpenRouter, Together, Fireworks, Cohere (gr
 | S28 | Google Sheets CSV (công khai), Google Apps Script trong Gmail của shop | Google LLC | Đơn landing, sổ xưởng, bảng kê VTP từ Gmail | Đơn landing (tên, SĐT, địa chỉ) — chiều VÀO | UNKNOWN | CÓ (dữ liệu nằm ở Google trước) | KHÔNG | `lib/constants/landing.ts:421-427`; `docs/GMAIL-BANG-KE-VTP.md` |
 | S29 | Google Places API (New) | Google LLC | Tìm doanh nghiệp (sỉ) · ánh xạ địa chỉ giao của đơn (22/10/2026) | Từ khoá đi ra; dữ liệu doanh nghiệp công khai về · phần địa chỉ giao (không tên / SĐT) đi ra, chỉ lưu tên xã / tỉnh danh mục ERP | UNKNOWN / Singapore (relay) | CÓ | KHÔNG | `lib/integrations/google-places/client.ts:14,26,42` |
 | S30 | Google OAuth (đăng nhập) | Google LLC | `openid email profile` | sub, email đã xác minh, name | UNKNOWN | CÓ | CÓ | `lib/auth/oauth.ts:110-111,140,153-157` |
+| S31 | Google Workspace — Gmail SMTP (`smtp.gmail.com:587`, STARTTLS) | Google LLC | Gửi email bán sỉ từ hộp thư Google Workspace của shop (E2, 30/10/2026); chỉ khi kết nối «Google Workspace — gửi email» bật VÀ quản trị bật chế độ «Gửi thật» | Email người nhận, tiêu đề, nội dung thư; App Password (đăng nhập, lưu mã hoá) | UNKNOWN | CÓ | KHÔNG | `lib/integrations/gws-smtp/client.ts` (nodemailer) |
 
 Không có: Casso, VNPay, MoMo, ZaloPay, PayOS, OnePay, Stripe, PayPal, API ngân hàng trực tiếp (`lib/billing/provider.ts:4-5` ghi các cổng là «dịch vụ ngoài mới, phải hỏi chủ nền tảng»).
 
@@ -69,7 +70,7 @@ Không có: Casso, VNPay, MoMo, ZaloPay, PayOS, OnePay, Stripe, PayPal, API ngâ
 
 | Loại | Kết quả |
 |---|---|
-| Email (SMTP, Resend, SendGrid, Gmail API, nodemailer) | KHÔNG — `docs/saas/PROVISIONING.md:16` «chưa có kênh thư» |
+| Email khác Gmail SMTP (Resend, SendGrid, Postmark, Mailgun, Brevo, Gmail API) | KHÔNG — kênh thư duy nhất là Google Workspace SMTP (S31, có điều kiện) |
 | SMS (eSMS, Twilio, SpeedSMS, Stringee, Firebase) | KHÔNG — OTP chỉ Zalo ZNS |
 | Theo dõi lỗi / monitoring (Sentry, Datadog, New Relic, Grafana, Uptime) | KHÔNG (trừ healthchecks.io tuỳ chọn) |
 | Analytics (GA / gtag, GTM, Meta Pixel, PostHog, Plausible, Hotjar, Clarity) | KHÔNG — chỉ bộ đếm first-party `app/api/usage/visit/route.ts`; font `next/font/local` |
