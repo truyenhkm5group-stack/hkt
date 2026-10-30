@@ -1,0 +1,8 @@
+{
+  "pr": 1099,
+  "sha": "007add1db2d133e6fadbe3a90c77b1fa82bf0b16",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-30T10:34:18.215Z",
+  "note": "review lead: FB CRM lát 2 — nguồn việc FB_CRM_CARE là phép chiếu (luật 19) thẩm quyền SOURCE, phòng SALES, chỉ nút mở miền, rời hàng đợi khi thao tác thật; không đếm hai lần với việc tay fb-crm; khối Customer 360 ẩn khi cờ tắt; thẻ «Kết bạn rồi mua» theo ORDER_OUTCOME + VERIFIED_CASH, nhãn TƯƠNG QUAN + độ phủ; không migration, không AI, không tự nhắn."
+}
