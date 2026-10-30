@@ -409,7 +409,7 @@ tiền thật là 0. Trần ngày / tháng vẫn chặn bất kể ước tính.
 **Trạm chuyển tiếp** (`deploy/places-relay`) chuyển nguyên thân yêu cầu POST và nguyên chuỗi truy vấn GET, nên
 `languageCode` / `regionCode` / `locationBias` của ô quốc tế tới Google mà không cần sửa trạm (có bài kiểm).
 
-## 4f. Khách sỉ Việt Kiều (chủ shop chốt 30/10/2026)
+## 4g. Khách sỉ Việt Kiều (chủ shop chốt 30/10/2026)
 
 «Tìm email của khách sỉ là Việt Kiều ở nước ngoài» — chạy trên đúng bộ máy quốc tế ở mục 4d, không module mới, **chưa
 gửi gì** (luồng kênh nước ngoài ⇒ email là việc của bảng liên hệ, không ở đây).
