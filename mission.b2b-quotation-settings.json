@@ -3,7 +3,7 @@
   "mission_id": "b2b-quotation-settings",
   "title": "Cài đặt báo giá sỉ có gợi ý từ bảng giá sỉ",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-quote-settings",
@@ -32,9 +32,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-30T07:53:39.572Z",
-  "updated_at": "2026-10-30T09:11:18.733Z",
+  "updated_at": "2026-10-30T09:32:51.669Z",
   "last_heartbeat": "2026-10-30T09:09:15.400Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1097 → 8faeeb3037c524cb851f0cae1d8a75317fc4743b"
+  },
   "handoff": {
     "branch": "claude/b2b-quotation-settings",
     "sha": "6f722994da4b9d134bf22a4d091bc9fccf3b6427",
