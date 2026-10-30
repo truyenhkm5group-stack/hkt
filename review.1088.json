@@ -1,8 +1,8 @@
 {
   "pr": 1088,
-  "sha": "8e31424bce1d1a2ee6197fe9cdcab86bbb6375aa",
+  "sha": "f8286198512a1986db0ea7cd474c544828adaa80",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-30T04:43:35.218Z",
-  "note": "review lead (lượt 4: merge main có #1091 intl + #1093 — engine tự gộp, sync-fixtures giữ cả hai, docs 4b/4c/4d; lượt 3: merge main có consent — email máy điền qua emailFillDecision tôn trọng staffEdited, khử trùng email của consent chạy ngay sau; lượt 2: khai website.ts vào GOI_MANG_KHONG_CREDENTIAL — chỉ đọc website công khai qua fetchPublicUrl, không secret): tìm email chỉ trên website CÔNG KHAI"
+  "at": "2026-10-30T06:11:44.839Z",
+  "note": "review lead (lượt 5: đổi chữ process.env trong câu lý do GOI_MANG_KHONG_CREDENTIAL — hết đỏ test-hygiene; lượt 4: merge main có #1091 intl + #1093 — engine tự gộp, sync-fixtures giữ cả hai, docs 4b/4c/4d; lượt 3: merge main có consent — email máy điền qua emailFillDecision tôn trọng staffEdited, khử trùng email của consent chạy ngay sau; lượt 2: khai website.ts vào GOI_MANG_KHONG_CREDENTIAL — chỉ "
 }
