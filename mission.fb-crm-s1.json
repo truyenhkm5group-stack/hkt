@@ -3,7 +3,7 @@
   "mission_id": "fb-crm-s1",
   "title": "Facebook Friend CRM lát 1",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-fbcrm",
@@ -38,11 +38,13 @@
     "0262": "2026-10-27T04:02:18.142Z"
   },
   "created_at": "2026-10-27T04:01:08.956Z",
-  "updated_at": "2026-10-30T03:11:08.729Z",
+  "updated_at": "2026-10-30T03:27:58.003Z",
   "last_heartbeat": "2026-10-30T02:47:20.778Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1093 → 2f539578018ee9a4591ffe0682953cd1194a46c1"
+    "merged": "#1093 → 2f539578018ee9a4591ffe0682953cd1194a46c1",
+    "verify": "PASS 2f539578018ee9a4591ffe0682953cd1194a46c1 2026-10-30T03:27:06.572Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40995992217"
   },
   "handoff": {
     "branch": "claude/fb-crm-s1",
