@@ -9,7 +9,8 @@ import type { CoreResult } from "@/lib/wholesale/campaigns";
 import { normalizeEmail } from "@/lib/wholesale/contactability";
 import { emailDomain, emailIdempotencyKey } from "@/lib/wholesale/email-constants";
 import { aiDraftEmailCore, buildDraftFacts, isMissingAiDraftTable, type AiDeps, type DraftResult } from "@/lib/wholesale/email-ai-draft";
-import { draftViolations } from "@/lib/wholesale/email-ai-draft-guard";
+import { draftLanguageForCountry, draftViolations } from "@/lib/wholesale/email-ai-draft-guard";
+import { emailLaneRefusal, leadCountryForLead } from "@/lib/wholesale/contact-plan-store";
 import { getEmailSettings, isMissingEmailTable } from "@/lib/wholesale/email-outbox-store";
 import { EMAIL_SEQUENCE_LIMITS, EMAIL_SEQUENCE_SETTING_KEY, OPEN_OUTBOX_STATUSES, parseEmailSequenceSettings, renderSequenceTemplate, SEQUENCE_STOP_LABEL, sequenceState, type EmailSequenceSettings, type SequenceState } from "@/lib/wholesale/email-sequence";
 import { getLeadHunterConfig, suppressionHit } from "@/lib/wholesale/store";
@@ -166,7 +167,12 @@ export async function createFollowupDraftCore(user: SessionUser, leadId: string,
       return "error" in r ? r : { ok: true, kind: "AI_DRAFT", draft: r };
     }
     // Mẫu tĩnh shop khai: cùng dữ kiện + cùng hàng rào với AI. Vi phạm ⇒ không tạo thư.
-    const facts = await buildDraftFacts(chain.lead);
+    // Cùng làn kênh và cùng thang nước với mọi đường tạo thư khác (AI đã tự hỏi trong aiDraftEmailCore).
+    const refusal = await emailLaneRefusal(leadId);
+    if (refusal) return { error: refusal };
+    const country = await leadCountryForLead(chain.lead);
+    if (!country.country) return { error: `Chưa biết khách ở nước nào (${country.detail}) — xác nhận nước ở Hàng đợi liên hệ rồi soạn thư nhắc.` };
+    const facts = await buildDraftFacts(chain.lead, draftLanguageForCountry(country.country));
     const template = facts.language === "vi" ? settings.templates.vi : settings.templates.en;
     if (!template) return { error: `Shop chưa khai mẫu thư nhắc ${facts.language === "vi" ? "tiếng Việt" : "tiếng Anh"} — khai ở Hộp thư đi, hoặc dùng AI.` };
     const cfg = await getLeadHunterConfig();

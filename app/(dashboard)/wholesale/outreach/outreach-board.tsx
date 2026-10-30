@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { approveOutreachAction, cancelOutreachAction, markOutreachSentAction, recordOutreachResultAction } from "@/lib/actions/wholesale";
 import { emailDraftFromOutreachAction } from "@/lib/actions/wholesale-email";
-import { emailDraftForLeadAction, markZaloUndeliverableAction, undoZaloUndeliverableAction } from "@/lib/actions/wholesale-routing";
+import { confirmLeadCountryAction, emailDraftForLeadAction, markZaloUndeliverableAction, undoZaloUndeliverableAction } from "@/lib/actions/wholesale-routing";
+import { COUNTRY_LABEL } from "@/lib/wholesale/lead-country";
 import { CONTACT_TRACK_LABEL, CONTACT_TRACKS, EMAIL_TRACKS, ZALO_UNDELIVERABLE_LABEL, ZALO_UNDELIVERABLE_REASONS, type ContactPlan, type ContactTrack, type ZaloUndeliverableReason } from "@/lib/wholesale/contact-plan";
 import { formatTimeAgo } from "@/lib/format";
 import type { OutreachRow } from "@/lib/queries/wholesale";
@@ -21,6 +22,7 @@ const LANE_HINT: Record<ContactTrack, string> = {
   INTL_EMAIL: "Khách nước ngoài — đưa lời chào vào Hộp thư đi (cổng chính sách · chạy thử).",
   DOMESTIC_ZALO: "Khách trong nước — nhắn Zalo trước. Khách im lặng KHÔNG chuyển kênh; chỉ bấm «Zalo không gửi được» khi Zalo thật sự không đi.",
   DOMESTIC_EMAIL_FALLBACK: "Zalo không gửi được và lead có email — gửi email qua Hộp thư đi (chạy thử).",
+  COUNTRY_UNKNOWN: "Không có chứng cứ nước (ô quét · SĐT · tên miền) — người xác nhận nước thì lead mới vào làn Zalo hoặc Email. Máy không mặc định «trong nước».",
   NO_CHANNEL: "Không có kênh dùng được — thường là thiếu email.",
   STOPPED: "Không liên hệ / khớp danh sách chặn — không gửi trên kênh nào.",
 };
@@ -58,6 +60,7 @@ export function OutreachBoard({ rows, plans, readOnly, callScript }: { rows: Out
 
 function OutreachCard({ row, plan, readOnly, callScript }: { row: OutreachRow; plan: ContactPlan | null; readOnly: boolean; callScript: string }) {
   const [zaloReason, setZaloReason] = useState<ZaloUndeliverableReason | "">("");
+  const [countryPick, setCountryPick] = useState("");
   const emailLane = plan ? EMAIL_TRACKS.includes(plan.track) : false;
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -146,6 +149,21 @@ function OutreachCard({ row, plan, readOnly, callScript }: { row: OutreachRow; p
         <Button size="sm" variant="secondary" disabled={pending} title="Soạn thư email theo mẫu rồi đưa vào Hộp thư đi (chạy thử) — Zalo của khách này không gửi được" onClick={() => run(() => emailDraftForLeadAction(row.leadId), "Đã soạn email dự phòng — duyệt ở Hộp thư đi")}>
           Soạn email dự phòng
         </Button>
+      ) : null}
+      {!readOnly && plan?.track === "COUNTRY_UNKNOWN" ? (
+        <div className="flex flex-wrap items-center gap-1.5 border-t pt-2">
+          <select className="h-8 rounded-md border bg-background px-2 text-xs" value={countryPick} onChange={(e) => setCountryPick(e.target.value)} aria-label="Nước của khách">
+            <option value="">Khách ở nước…</option>
+            {Object.entries(COUNTRY_LABEL).map(([code, label]) => (
+              <option key={code} value={code}>
+                {label} ({code})
+              </option>
+            ))}
+          </select>
+          <Button size="sm" variant="outline" disabled={pending || !countryPick} title="Ghi lượt xác nhận (dòng lịch sử mới) — đè mọi suy luận từ SĐT / tên miền" onClick={() => run(() => confirmLeadCountryAction(row.leadId, { country: countryPick }), "Đã xác nhận nước")}>
+            Xác nhận nước
+          </Button>
+        </div>
       ) : null}
       {!readOnly && plan?.track === "DOMESTIC_ZALO" ? (
         <div className="flex flex-wrap items-center gap-1.5 border-t pt-2">

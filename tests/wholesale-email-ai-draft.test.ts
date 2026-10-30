@@ -19,7 +19,7 @@ import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { savePriceListCore } from "@/lib/records/trade";
 import { AI_DRAFT_TABLE_MISSING, aiDraftEmailCore, discardAiDraftCore, parseDraftOutput, promoteAiDraftCore, saveEmailAiSettingsCore } from "@/lib/wholesale/email-ai-draft";
-import { draftLanguageFor, draftViolations, editRatio, type DraftGuardFacts } from "@/lib/wholesale/email-ai-draft-guard";
+import { draftLanguageForCountry, draftViolations, editRatio, type DraftGuardFacts } from "@/lib/wholesale/email-ai-draft-guard";
 
 const ORG = "em-ai";
 const codes = (xs: { code: string }[]) => xs.map((x) => x.code);
@@ -46,11 +46,11 @@ function testPure() {
   assert.deepEqual(codes(draftViolations("Price list", "Dear Sir, we are a Vietnamese seafood supplier. Our fish cake 1kg is 250.000 VND from 10 packs. Please reply for a detailed quotation.", facts)), ["WRONG_LANGUAGE"], "lead trong nước mà thư tiếng Anh ⇒ chặn");
   assert.deepEqual(draftViolations("Price list", "Dear Sir, we are a Vietnamese seafood supplier. Our fish cake 1kg is 250.000 VND from 10 packs and 230.000 VND from 50 packs. Please reply for a detailed quotation.", { ...facts, language: "en" }), [], "tiếng Anh, giá VND đúng ⇒ qua");
   assert.deepEqual(codes(draftViolations("x", "", facts)), ["EMPTY"]);
-  assert.equal(draftLanguageFor({ phoneCountryCode: "84", websiteDomain: "quan.vn" }), "vi");
-  assert.equal(draftLanguageFor({ phoneCountryCode: null, websiteDomain: null }), "vi", "không dấu hiệu nước ngoài ⇒ trong nước");
-  assert.equal(draftLanguageFor({ phoneCountryCode: "1", websiteDomain: "shop.com" }), "en");
-  assert.equal(draftLanguageFor({ phoneCountryCode: null, websiteDomain: "fisch.de" }), "en");
-  assert.equal(draftLanguageFor({ phoneCountryCode: "1", websiteDomain: null, diaspora: true }), "vi", "Việt Kiều ⇒ tiếng Việt");
+  // Ngôn ngữ theo NƯỚC ĐÃ BIẾT (thang leadCountryOf — tests/wholesale-lead-country.test.ts); không còn luật suy nước riêng ở đây.
+  assert.equal(draftLanguageForCountry("VN"), "vi");
+  assert.equal(draftLanguageForCountry("US"), "en");
+  assert.equal(draftLanguageForCountry("DE"), "en");
+  assert.equal(draftLanguageForCountry("US", { diaspora: true }), "vi", "Việt Kiều ⇒ tiếng Việt");
   assert.deepEqual(parseDraftOutput("SUBJECT: Chào anh chị\n---\nNội dung", "mặc định"), { subject: "Chào anh chị", body: "Nội dung" });
   assert.deepEqual(parseDraftOutput("Không đúng định dạng", "mặc định"), { subject: "mặc định", body: "Không đúng định dạng" });
   assert.equal(editRatio("a b c d", "a b c d"), 0);
@@ -106,7 +106,7 @@ async function testOrg() {
       const list = await savePriceListCore(admin, null, { name: "Sỉ chung", isDefault: true, tiers: [{ variantId: "ea-va", minQuantity: 10, unitPrice: 250_000 }, { variantId: "ea-va", minQuantity: 50, unitPrice: 230_000 }] });
       assert.ok(list.ok);
       const [vn] = await db.insert(schema.wholesaleLeads).values({ source: "STAFF", businessName: "Nhà hàng Biển Đông", email: "mua@biendong.vn", phoneCountryCode: "84", enrichmentStatus: "READY", contactStatus: "QUALIFIED" }).returning({ id: schema.wholesaleLeads.id });
-      const [us] = await db.insert(schema.wholesaleLeads).values({ source: "STAFF", businessName: "Pacific Seafood Market", email: "buyer@pacificseafood.com", phoneCountryCode: "1", websiteDomain: "pacificseafood.com", enrichmentStatus: "READY", contactStatus: "QUALIFIED" }).returning({ id: schema.wholesaleLeads.id });
+      const [us] = await db.insert(schema.wholesaleLeads).values({ source: "STAFF", businessName: "Pacific Seafood Market", email: "buyer@pacificseafood.com", phoneCountryCode: "1", websiteDomain: "pacificseafood.com", provinceKey: "intl us", enrichmentStatus: "READY", contactStatus: "QUALIFIED" }).returning({ id: schema.wholesaleLeads.id });
 
       const goodVi = "SUBJECT: Bảng giá sỉ chả cá thu\n---\nKính gửi Quý anh/chị Nhà hàng Biển Đông, bên em chuyên hải sản đóng gói. Chả cá thu gói 1kg có giá sỉ 250.000 ₫ khi lấy từ 10 gói và 230.000 ₫ từ 50 gói. Anh/chị vui lòng trả lời email này để nhận báo giá chi tiết ạ.";
       const fake = new FakeAi(goodVi);
@@ -150,6 +150,11 @@ async function testOrg() {
       const e2 = await aiDraftEmailCore(sale, us.id, new Date(), deps);
       assert.ok("ok" in e2 && e2.status === "DRAFT" && e2.language === "en", errOf(e2));
       assert.match(fake.lastSystem, /^You write/, "lead nước ngoài ⇒ lời nhắc tiếng Anh");
+      // Bất đồng cũ: «+1 · .com» không khoá tỉnh từng bị cổng nước xếp VN còn AI viết tiếng Anh. Nay CHƯA BIẾT ⇒ từ chối, không gọi AI.
+      const [nanp] = await db.insert(schema.wholesaleLeads).values({ source: "STAFF", businessName: "Seafood Hub", email: "buy@seafoodhub.com", phoneRaw: "+1 604 555 0100", websiteDomain: "seafoodhub.com", enrichmentStatus: "READY", contactStatus: "QUALIFIED" }).returning({ id: schema.wholesaleLeads.id });
+      const callsBefore = fake.calls;
+      assert.match(errOf(await aiDraftEmailCore(sale, nanp.id, new Date(), deps)), /nước/, "chưa biết nước ⇒ từ chối, không đoán ngôn ngữ");
+      assert.equal(fake.calls, callsBefore, "từ chối TRƯỚC khi gọi AI");
 
       // ── Người duyệt: bản cuối vi phạm ⇒ từ chối; hợp lệ ⇒ thư DRAFT của E1 + tỷ lệ sửa + người duyệt.
       const body = goodVi.split("---\n")[1];

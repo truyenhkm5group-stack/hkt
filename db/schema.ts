@@ -13086,3 +13086,30 @@ export const wholesaleEmailAiDrafts = pgTable(
     check("wholesale_email_ai_drafts_cost_check", sql`${t.costUsd} IS NULL OR ${t.costUsd} >= 0`),
   ],
 );
+
+/**
+ * BÁO CÁO CEO HẰNG NGÀY (0266 · docs/tech/ai-daily-report.md) — MỘT bản mỗi ngày báo cáo: khối số máy gom bằng các hàm báo cáo sẵn
+ * có (`facts`), lời tóm tắt AI đã qua hàng rào số (`summary` chỉ có khi `ai_status = 'OK'`), model, chi phí USD. BẤT BIẾN: trigger
+ * `daily_reports_no_update` chặn mọi UPDATE — sửa công thức ngày mai không đổi số của bản hôm qua (luật 21).
+ */
+export const dailyReports = pgTable(
+  "daily_reports",
+  {
+    id: id(),
+    reportDate: date("report_date", { mode: "string" }).notNull(),
+    facts: jsonb("facts").$type<Record<string, unknown>>().notNull(),
+    summary: text("summary"),
+    highlights: jsonb("highlights").$type<string[]>().notNull().default([]),
+    aiStatus: text("ai_status").notNull(),
+    aiNote: text("ai_note").notNull().default(""),
+    blockedNumbers: jsonb("blocked_numbers").$type<string[]>().notNull().default([]),
+    model: text("model"),
+    costUsd: doublePrecision("cost_usd"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("daily_reports_date_uq").on(t.reportDate),
+    check("daily_reports_ai_status_check", sql`${t.aiStatus} IN ('OK', 'BLOCKED', 'SKIPPED', 'ERROR')`),
+    check("daily_reports_summary_check", sql`(${t.aiStatus} = 'OK') = (${t.summary} IS NOT NULL)`),
+  ],
+);

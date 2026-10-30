@@ -79,6 +79,7 @@ import { backfillMessengerProfiles, PROFILE_BACKFILL_LIMITS, sweepStaleMessenger
 import { runSalesFollowups } from "@/lib/sales-chatbot/followup";
 import { resumeInboxHistory } from "@/lib/sales-chatbot/history";
 import { sendReorderDigest } from "@/lib/reorder/digest";
+import { runDailyReport } from "@/lib/daily-report/service";
 import { runSalesQualityDaily, salesQualitySummary } from "@/lib/sales-quality/daily";
 import { learnLessons } from "@/lib/sales-chatbot/lessons";
 import { autoLearnQuickReplies } from "@/lib/sales-chatbot/quick-replies-learn";
@@ -796,13 +797,17 @@ export const JOB_DEFINITIONS: Record<string, JobDefinition> = {
     module: "work",
     fanOut: true,
     description:
-      "Sinh việc của kỳ hiện tại cho mọi định nghĩa việc lặp đang bật (đối soát hằng ngày, review quảng cáo, kiểm kê, chốt công). Chạy lại bao nhiêu lần cũng chỉ ra một việc cho mỗi kỳ — khoá tự nhiên (recurrence_id, occurrence_key) chặn ở CSDL.",
+      "Sinh việc của kỳ hiện tại cho mọi định nghĩa việc lặp đang bật (đối soát hằng ngày, review quảng cáo, kiểm kê, chốt công). Chạy lại bao nhiêu lần cũng chỉ ra một việc cho mỗi kỳ — khoá tự nhiên (recurrence_id, occurrence_key) chặn ở CSDL. " +
+      "Cùng lượt: BÁO CÁO NGÀY của tổ chức (mặc định tắt; giờ chạy là cài đặt `dailyReport.config`; một bản bất biến mỗi ngày — lib/daily-report/service.ts).",
     run: (o) =>
       runSyncJob({ source: "ERP", job: "work-recurrence", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
         const r = await generateRecurringTasks();
+        // Báo cáo CEO hằng ngày (lib/daily-report/service.ts) — cùng nhịp job này, KHÔNG đổi lịch chung; mặc định TẮT, giờ chạy là
+        // cài đặt của tổ chức, một bản mỗi ngày (bất biến). Không ném.
+        const dr = await runDailyReport();
         ctx.summary.imported = r.created;
         ctx.summary.skipped = r.skipped;
-        ctx.summary.detail = `sinh ${r.created} việc · ${r.skipped} định nghĩa chưa tới kỳ / đã có việc kỳ này`;
+        ctx.summary.detail = `sinh ${r.created} việc · ${r.skipped} định nghĩa chưa tới kỳ / đã có việc kỳ này · báo cáo ngày: ${dr.ran ? `tạo bản ${dr.reportDate} (${dr.aiStatus}) — ${dr.reason}` : dr.reason}`.slice(0, 900);
         return r;
       }),
   },

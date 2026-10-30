@@ -198,6 +198,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu khoá AI BỊA của kết nối «openai-byok» / «gemini-byok» trong hai tổ chức thử và để Thư viện Media đọc lại nó (cùng cách wholesale-lead-hunter); fetch là bản giả đóng vai OpenAI / Gemini. Đó là ĐẦU VÀO của phép kiểm, trả lại nguyên trạng trong finally; kết luận không phụ thuộc máy có khoá thật hay không.",
   "tests/meta-capi.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = giá trị BỊA để lưu token BỊA của kết nối «meta-capi-org» trong tổ chức thử và để job «meta-capi-org» đọc lại nó (cùng cách meta-ads-org); fetch là bản giả của Graph API — không gọi mạng thật. Trả lại nguyên trạng trong finally.",
+  "tests/wholesale-email-inbound.test.ts":
+    "ĐẶT PLATFORM_SECRETS_KEY = chuỗi BỊA (rồi khôi phục) để lưu / giải mã App Password của kết nối gws-smtp mà bộ đọc IMAP dùng lại — đo đường mở kết nối của tổ chức; hộp thư là bản giả, không đọc khoá thật nào của máy.",
   "tests/wholesale-email-gws.test.ts":
     "ĐẶT PLATFORM_SECRETS_KEY = chuỗi BỊA (rồi khôi phục) để lưu / giải mã App Password của kết nối gws-smtp trong tổ chức thử — đo đường mã hoá AES-256-GCM của org_connections và việc bí mật không nằm thô trong CSDL; không đọc khoá thật nào của máy, SMTP là bản giả.",
   "tests/wholesale-lead-hunter.test.ts":
