@@ -36,7 +36,9 @@
   ],
   "dependencies": [],
   "blocked_by": [],
-  "related_prs": [],
+  "related_prs": [
+    1095
+  ],
   "migration_reservations": [
     "0263"
   ],
@@ -44,7 +46,7 @@
     "0263": "2026-10-27T07:01:43.325Z"
   },
   "created_at": "2026-10-27T06:58:57.050Z",
-  "updated_at": "2026-10-30T04:07:49.207Z",
+  "updated_at": "2026-10-30T06:03:29.383Z",
   "last_heartbeat": "2026-10-30T04:07:49.207Z",
   "definition_of_done": [],
   "handoff": {
