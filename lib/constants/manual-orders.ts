@@ -29,6 +29,7 @@
  */
 import type { OrderStage } from "@/db/schema";
 import { ORDER_STAGE_LABEL } from "@/lib/constants/pancake";
+import { phoneWellFormed } from "@/lib/constants/preship-validation";
 
 export const MANUAL_ORDER_ID_PREFIX = "erp-";
 export const MANUAL_ORDER_ORIGIN = "ERP_MANUAL" as const;
@@ -210,14 +211,30 @@ export const ERP_NATIVE_SETTING_KEY = "orders.erpNative";
  * (`resolveRecipientPlace`) hoặc người đã chọn — nên «có xã» = «đã ghép được», đẩy sang hãng vận chuyển được. HÀM THUẦN.
  */
 export function manualOrderGaps(recipient: { phone: string; address: string; province?: string; ward?: string }, lineCount: number): string[] {
-  const digits = recipient.phone.replace(/\D/g, "");
   const out: string[] = [];
-  if (digits.length < 8 || digits.length > 15) out.push("SĐT");
+  if (orderPhoneProblem(recipient.phone)) out.push("SĐT");
   if (recipient.address.trim().length < 5) out.push("địa chỉ");
   else if (!(recipient.province ?? "").trim()) out.push("tỉnh / thành");
   else if (!(recipient.ward ?? "").trim()) out.push("xã / phường");
   if (lineCount < 1) out.push("hàng");
   return out;
+}
+
+/**
+ * SĐT người nhận dùng được không — `null` = được, ngược lại là câu nói rõ sai ở đâu. HÀM THUẦN.
+ *
+ * Số có dáng Việt Nam (bắt đầu bằng 0 hoặc 84) phải đúng hình dạng `phoneWellFormed` — 10 số bắt đầu 0, hoặc 84 + 9 số. Luật cũ chỉ
+ * đòi 8–15 chữ số nên «094655545» (9 số, thiếu một) lọt qua: bot lưu khách, lên đơn, và đơn tự «Đã xác nhận» với ô SĐT tô OK
+ * (P0 HSLC 30/10/2026, hội thoại «Tài Tâm»). Số không mang dáng Việt Nam (khách nước ngoài) vẫn giữ luật 8–15 chữ số.
+ */
+export function orderPhoneProblem(phone: string): string | null {
+  const raw = phone.trim();
+  const digits = raw.replace(/\D/g, "");
+  if (!digits) return "Chưa có SĐT";
+  if (/^(0|84)/.test(digits)) {
+    return phoneWellFormed(digits) ? null : `SĐT «${raw}» có ${digits.length} chữ số — SĐT Việt Nam phải đủ 10 số bắt đầu bằng 0`;
+  }
+  return digits.length >= 8 && digits.length <= 15 ? null : "SĐT không hợp lệ (cần 8–15 chữ số)";
 }
 
 /** Đơn ĐỦ & ĐÚNG THÔNG TIN (`manualOrderGaps` rỗng). HÀM THUẦN. */
