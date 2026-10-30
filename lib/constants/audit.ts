@@ -4,6 +4,9 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   LOGOUT: "Đăng xuất",
   // Mission Control (chủ shop 30/10/2026): khai / xoá điều kiện tốt nghiệp của một agent — KHÔNG đổi nấc tự chủ.
   MISSION_CONTROL_GRADUATION: "Mission Control: điều kiện tốt nghiệp agent",
+  // Báo cáo CEO hằng ngày (lib/daily-report/service.ts): tạo bản ngày (bất biến) · đổi cấu hình bật / giờ / trần chi phí.
+  DAILY_REPORT_CREATE: "Báo cáo ngày: tạo bản",
+  DAILY_REPORT_CONFIG: "Báo cáo ngày: cấu hình",
   // Facebook Friend CRM (0262 · lib/fb-crm/service.ts): sổ ghi việc NGƯỜI làm bằng tay — ERP không tự kết bạn / nhắn.
   FB_CRM_UPDATE: "Facebook CRM: cập nhật kết nối khách",
   FB_CRM_TASK_CREATE: "Facebook CRM: tạo nhiệm vụ CSKH",
@@ -202,6 +205,7 @@ export const AUDIT_ENTITY_LABEL: Record<string, string> = {
   COD_BATCH: "Bảng kê COD",
   PRODUCT: "Sản phẩm",
   CUSTOMER: "Khách hàng",
+  DAILY_REPORT: "Báo cáo ngày",
   SETTINGS: "Cấu hình",
   SYNC: "Đồng bộ",
   NOTIFICATION: "Việc cần xử lý",

@@ -403,8 +403,8 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
     rungs: {
       MEASURE: {
         status: "BUILT",
-        what: "Bản tin chủ shop: tiền, đơn, tỷ lệ giao, việc đang tắc — đọc lại chính các KPI chính thức, không tự tính.",
-        evidence: ["lib/queries/business-brief.ts", "lib/queries/control-tower.ts"],
+        what: "Bản tin chủ shop: tiền, đơn, tỷ lệ giao, việc đang tắc — đọc lại chính các KPI chính thức, không tự tính. Báo cáo ngày (30/10/2026, mặc định tắt): máy gom số bằng cùng các hàm báo cáo, AI chỉ viết lời và bị chặn nếu có số không nằm trong khối số; bản lưu bất biến.",
+        evidence: ["lib/queries/business-brief.ts", "lib/queries/control-tower.ts", "lib/daily-report/service.ts", "lib/constants/daily-report.ts"],
       },
       DIAGNOSE: {
         status: "BUILT",

@@ -213,6 +213,7 @@ const MOI = [
   "0263_wholesale_quotations",
   "0264_wholesale_email_outbox",
   "0265_wholesale_email_ai_drafts",
+  "0266_daily_reports",
 ] as const;
 
 /*

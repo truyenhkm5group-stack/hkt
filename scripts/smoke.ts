@@ -121,6 +121,7 @@ const ROUTES = [
   "/sourcing",
   "/sourcing/compare",
   "/cockpit",
+  "/daily-report",
   "/inventory/purchasing",
   "/customers",
   "/products/price-lists",
