@@ -11,6 +11,8 @@ import { parseListParams, type SearchParams } from "@/lib/search-params";
 import { GoogleAttribution, WholesaleNav } from "@/app/(dashboard)/wholesale/wholesale-nav";
 import { LeadsTable } from "@/app/(dashboard)/wholesale/leads/leads-table";
 import { fieldHandoffOptions } from "@/lib/wholesale/field-handoff";
+import { EMAIL_FILTER_OPTIONS } from "@/lib/constants/wholesale-email";
+import { EmailDiscoveryButton } from "@/app/(dashboard)/wholesale/leads/email-discovery-button";
 
 export const metadata = { title: "Khách sỉ tiềm năng" };
 
@@ -33,6 +35,7 @@ export default async function WholesaleLeadsPage({ searchParams }: { searchParam
       <Link href="/wholesale/mobile" className="flex min-h-12 items-center justify-center rounded-xl bg-primary text-base font-semibold text-primary-foreground md:hidden">
         📱 Mở giao diện gọi khách trên điện thoại
       </Link>
+      {can(user, "wholesale:scan") ? <EmailDiscoveryButton /> : null}
       <DataTableToolbar
         searchPlaceholder="Tên, địa chỉ, SĐT…"
         period={false}
@@ -48,6 +51,7 @@ export default async function WholesaleLeadsPage({ searchParams }: { searchParam
               { value: "due", label: "Đến hạn gọi lại" },
             ],
           },
+          { key: "email", label: "Email", options: EMAIL_FILTER_OPTIONS },
           { key: "status", label: "Trạng thái", options: facets.status },
           { key: "province", label: "Tỉnh / thành", options: facets.province },
           { key: "segment", label: "Nhóm khách", options: facets.segment },

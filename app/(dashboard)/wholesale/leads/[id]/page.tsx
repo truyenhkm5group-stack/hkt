@@ -11,6 +11,9 @@ import { ACTIVITY_KIND_LABEL, BUSINESS_STATUS_LABEL, CALL_OUTCOME_LABEL, ENRICHM
 import { leadContactability } from "@/lib/wholesale/consents";
 import { CONSENT_CHANNELS } from "@/lib/wholesale/contactability";
 import { leadView } from "@/lib/wholesale/engine";
+import { EMAIL_CONSENT_NOTICE, EMAIL_MX_LABEL, EMAIL_RESCAN_DAYS, EMAIL_ROLE_LABEL, EMAIL_VIA_LABEL } from "@/lib/constants/wholesale-email";
+import { websiteDomain } from "@/lib/wholesale/dedupe";
+import { emailScanOf, leadEmailRows } from "@/lib/wholesale/email-discovery";
 import { fieldHandoffOptions } from "@/lib/wholesale/field-handoff";
 import { formatVnPhone, PHONE_KIND_LABEL } from "@/lib/wholesale/phone";
 import type { ScoreComponent } from "@/lib/wholesale/scoring";
@@ -41,6 +44,16 @@ export default async function WholesaleLeadPage({ params }: { params: Promise<{ 
   const lastNote = data.activities.find((a) => (a.kind === "NOTE" || a.kind === "CALL") && a.note);
   const temp = leadTemperature({ grade: lead.leadGrade, status, lastContactAt: lead.lastContactAt, firstResponseAt: lead.firstResponseAt, lastActivityAt: lastNote?.createdAt ?? null, nextFollowupAt: lead.nextFollowupAt, contactAttemptCount: lead.contactAttemptCount });
   const phoneNational = v.phone?.startsWith("+84") ? `0${v.phone.slice(3)}` : v.phone;
+  const emailScan = data.activities.map((a) => (a.kind === "ENRICHED" ? emailScanOf(a.meta) : null)).find((x) => x != null) ?? null;
+  const emailRows = leadEmailRows(
+    data.enrichments.filter((e) => e.kind === "EMAIL"),
+    emailScan,
+    lead.email,
+    lead.websiteDomain ?? websiteDomain(v.website),
+  );
+  const profileEmailRow = emailRows.find((r) => r.inProfile && r.inLatestScan) ?? null;
+  const rescanAt = lead.websiteCheckedAt ? new Date(lead.websiteCheckedAt.getTime() + EMAIL_RESCAN_DAYS * 86_400_000) : null;
+  const otherEnrichments = data.enrichments.filter((e) => e.kind !== "EMAIL");
   return (
     <div className="space-y-4">
       <PageHeader
@@ -66,7 +79,7 @@ export default async function WholesaleLeadPage({ params }: { params: Promise<{ 
                 { label: "SĐT", value: v.phone ? <span className="font-medium tabular-nums">{formatVnPhone(v.phone)} <span className="text-xs text-muted-foreground">({PHONE_KIND_LABEL[v.phoneKind ?? "UNKNOWN"]}{lead.normalizedPhone ? ` · ${lead.phoneSource === "WEBSITE" ? "từ website" : lead.phoneSource === "IMPORT" ? "từ tệp" : lead.phoneSource === "VERIFIED_CALL" ? "đã gọi xác nhận" : "nhân viên nhập"}` : " · Google"})</span></span> : "Chưa có" },
                 { label: "Website", value: v.website && /^https?:\/\//i.test(v.website) ? <a className="text-primary hover:underline" href={v.website} target="_blank" rel="noopener noreferrer nofollow">{v.website}</a> : "—" },
                 { label: "Địa chỉ", value: v.address ?? "—", span: true },
-                { label: "Email", value: lead.email ?? "—" },
+                { label: "Email", value: lead.email ? <span>{lead.email}{profileEmailRow ? <span className="text-xs text-muted-foreground"> ({EMAIL_ROLE_LABEL[profileEmailRow.role]} · {EMAIL_MX_LABEL[profileEmailRow.mx]})</span> : null}</span> : "—" },
                 { label: "Facebook / Zalo", value: lead.facebookUrl || lead.zaloUrl ? [lead.facebookUrl, lead.zaloUrl].filter((u): u is string => Boolean(u)).map((u) => <a key={u} className="mr-2 text-primary hover:underline" href={u} target="_blank" rel="noopener noreferrer nofollow">{u.includes("zalo") ? "Zalo" : "Facebook"}</a>) : "—" },
                 { label: "Đánh giá Google", value: v.rating != null ? `${v.rating.toFixed(1)}★${v.reviewCount != null ? ` · ${formatNumber(v.reviewCount)} đánh giá` : ""}` : v.ratingsRequested ? "Chưa có đánh giá" : "—" },
                 { label: "Hoạt động", value: v.businessStatus ? (BUSINESS_STATUS_LABEL[v.businessStatus] ?? "Chưa rõ") : "—" },
@@ -143,10 +156,63 @@ export default async function WholesaleLeadPage({ params }: { params: Promise<{ 
             )}
           </SectionCard>
 
-          {data.enrichments.length ? (
+          {emailRows.length || lead.websiteCheckedAt ? (
+            <SectionCard
+              title="Email tìm được trên website"
+              hint="Chỉ đọc trang công khai CÙNG website, tôn trọng robots.txt. «Tên miền nhận thư» = tên miền có bản ghi MX (hoặc A) — kiểm bằng DNS, KHÔNG gửi thư, KHÔNG dò hộp thư."
+            >
+              <p className="mb-2 rounded-md bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-200">{EMAIL_CONSENT_NOTICE}</p>
+              {emailRows.length ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="text-xs text-muted-foreground">
+                      <tr className="border-b">
+                        <th className="py-1.5 pr-3 text-left font-medium">Email</th>
+                        <th className="py-1.5 pr-3 text-left font-medium">Vai trò</th>
+                        <th className="py-1.5 pr-3 text-left font-medium">Tên miền</th>
+                        <th className="py-1.5 pr-3 text-left font-medium">Nguồn</th>
+                        <th className="py-1.5 text-left font-medium">Xác minh</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {emailRows.map((r) => (
+                        <tr key={r.email} className="border-b last:border-0 align-top">
+                          <td className="py-1.5 pr-3 break-all">
+                            {r.email}
+                            {r.inProfile ? <span className="ml-1 text-[11px] font-medium text-primary">(đang dùng)</span> : null}
+                            {r.sameDomain ? <div className="text-[11px] text-muted-foreground">cùng tên miền website</div> : null}
+                          </td>
+                          <td className="py-1.5 pr-3 whitespace-nowrap">{EMAIL_ROLE_LABEL[r.role]}</td>
+                          <td className={r.mx === "VALID_MX" ? "py-1.5 pr-3 text-emerald-700 dark:text-emerald-300" : r.mx === "NO_MX" ? "py-1.5 pr-3 text-rose-700 dark:text-rose-300" : "py-1.5 pr-3 text-muted-foreground"}>
+                            {EMAIL_MX_LABEL[r.mx]}
+                            {r.mxVia === "A" ? <div className="text-[11px] text-muted-foreground">không có MX, nhận qua bản ghi A</div> : null}
+                          </td>
+                          <td className="py-1.5 pr-3">
+                            <a className="text-[11px] text-primary hover:underline" href={r.sourceUrl} target="_blank" rel="noopener noreferrer nofollow">
+                              trang nguồn
+                            </a>
+                            {r.inLatestScan ? <div className="text-[11px] text-muted-foreground">{EMAIL_VIA_LABEL[r.via]}</div> : null}
+                          </td>
+                          <td className="py-1.5 text-[11px] text-muted-foreground">{r.verifiedAt ? formatDateTime(r.verifiedAt) : `không thấy ở lượt quét gần nhất · tìm thấy ${formatDateTime(r.firstSeenAt)}`}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Đã đọc website nhưng không thấy email doanh nghiệp công bố.</p>
+              )}
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                {lead.websiteCheckedAt ? `Đọc website lần gần nhất ${formatDateTime(lead.websiteCheckedAt)}` : "Chưa đọc website"}
+                {rescanAt && !lead.email ? ` · nút «Thu thập email» quét lại được từ ${formatDateTime(rescanAt)}` : ""}
+              </p>
+            </SectionCard>
+          ) : null}
+
+          {otherEnrichments.length ? (
             <SectionCard title="Tìm thấy trên website của doanh nghiệp" hint="Chỉ đọc trang công khai; mỗi dòng ghi URL nguồn để kiểm lại.">
               <ul className="space-y-1 text-sm">
-                {data.enrichments.map((e) => (
+                {otherEnrichments.map((e) => (
                   <li key={e.id} className="flex flex-wrap gap-2">
                     <span className="w-28 shrink-0 text-muted-foreground">{ENRICHMENT_KIND_LABEL[e.kind] ?? "Khác"}</span>
                     <span className="break-all">{e.kind === "PHONE" ? formatVnPhone(e.value) : e.value}</span>

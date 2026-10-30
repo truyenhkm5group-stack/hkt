@@ -12,6 +12,7 @@ import { ACTIVE_PIPELINE_STATUSES, type PauseReason, PAUSE_REASON_LABEL } from "
 import { competitorHit } from "@/lib/wholesale/competitor";
 import { normalizeEmail } from "@/lib/wholesale/contactability";
 import { branchHint, chainBrandHit, nameAddressKey, socialKind, websiteDomain } from "@/lib/wholesale/dedupe";
+import { applyEmailDiscovery } from "@/lib/wholesale/email-store";
 import { normalizeVnPhone, type PhoneKind } from "@/lib/wholesale/phone";
 import { googlePlacesProvider, websiteEnrichmentProvider, type DiscoveryProvider, type EnrichmentProvider } from "@/lib/wholesale/providers";
 import { learnedAdjustment, scoreLead, type ScoreResult, type SegmentOutcomeStats } from "@/lib/wholesale/scoring";
@@ -825,11 +826,11 @@ export async function enrichLeadWebsite(ctx: Pick<Ctx, "cfg" | "now" | "stats" |
   }
   const edited = new Set(lead.staffEditedFields);
   const first = (kind: string) => r.findings.find((f) => f.kind === kind)?.value ?? null;
+  const mail = await applyEmailDiscovery(lead, website, r, now);
   const phone = first("PHONE");
   const hasPhone = Boolean(lead.normalizedPhone || (snap && !snap.purgedAt && snap.normalizedPhone));
   const patch: Partial<typeof l.$inferInsert> = { websiteStatus: r.status, websiteCheckedAt: now, updatedAt: now };
-  const foundEmail = normalizeEmail(first("EMAIL"));
-  if (!lead.email && !edited.has("email") && foundEmail) patch.email = foundEmail;
+  if (mail.email) patch.email = mail.email;
   if (!lead.facebookUrl && !edited.has("facebookUrl") && first("FACEBOOK")) patch.facebookUrl = first("FACEBOOK");
   if (!lead.zaloUrl && !edited.has("zaloUrl") && first("ZALO")) patch.zaloUrl = first("ZALO");
   if (!hasPhone && !edited.has("phone") && phone) {
@@ -839,7 +840,7 @@ export async function enrichLeadWebsite(ctx: Pick<Ctx, "cfg" | "now" | "stats" |
   await db.update(l).set(patch).where(eq(l.id, lead.id));
   if (patch.email && (await dedupeByNewEmail(ctx, lead, patch.email, now))) return;
   if (r.findings.length) {
-    await addActivity({ leadId: lead.id, kind: "ENRICHED", note: `Đọc website (${r.note}): ${r.findings.filter((f) => f.kind !== "DESCRIPTION").map((f) => f.value).slice(0, 6).join(", ") || "không thấy liên hệ mới"}`, meta: { sources: [...new Set(r.findings.map((f) => f.sourceUrl))] }, actorId: null, actorName: "Máy" });
+    await addActivity({ leadId: lead.id, kind: "ENRICHED", note: `Đọc website (${r.note}): ${r.findings.filter((f) => f.kind !== "DESCRIPTION").map((f) => f.value).slice(0, 6).join(", ") || "không thấy liên hệ mới"}`, meta: { sources: [...new Set(r.findings.map((f) => f.sourceUrl))], ...mail.meta }, actorId: null, actorName: "Máy" });
   }
   await rescoreLead(lead.id, { cfg: ctx.cfg, stats: ctx.stats, now });
 }

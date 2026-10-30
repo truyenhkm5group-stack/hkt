@@ -13,11 +13,11 @@ Chiến dịch → kế hoạch ô (từ khoá × tỉnh × khu vực) → Text 
 → Place Details CHỈ cho địa điểm qua lọc (SĐT · website · sao · số đánh giá)
 → chuẩn hoá SĐT → lọc theo chiến dịch (bắt buộc SĐT / website, sao / đánh giá tối thiểu)
 → khử trùng SĐT → tên miền → chấm điểm → tự lên «Đủ điều kiện» (≥ ngưỡng, có SĐT)
-→ (tuỳ chọn) đọc trang liên hệ công khai của website
+→ (tuỳ chọn) đọc trang liên hệ công khai của website + thu thập email B2B có bằng chứng (mục 4c)
 → Hàng đợi liên hệ (người duyệt, người gửi) → pipeline → «Chốt được» → chuyển thành khách hàng ERP → doanh thu
 ```
 
-Từ 27/10/2026 cùng luồng này quét cả **khách sỉ nước ngoài**: «tỉnh» là nước, «khu vực» là thành phố (mục 4b).
+Từ 27/10/2026 cùng luồng này quét cả **khách sỉ nước ngoài**: «tỉnh» là nước, «khu vực» là thành phố (mục 4d).
 
 Hệ thống không bao giờ tự gửi tin. Lead chỉ vào hàng đợi khi người bấm «Xếp hàng liên hệ» hoặc khi cấu hình đặt
 `AUTO_PREPARE`. Ở mức `AUTO_PREPARE`, hệ thống chỉ soạn sẵn lời chào theo mẫu, và người vẫn phải duyệt rồi gửi.
@@ -31,8 +31,8 @@ Hệ thống không bao giờ tự gửi tin. Lead chỉ vào hàng đợi khi n
 | Client Places API (New) | `lib/integrations/google-places/client.ts` |
 | Nguồn lead (abstraction) | `lib/wholesale/providers.ts`: `DiscoveryProvider` (Google Places) · `EnrichmentProvider` (website) · `ImportProvider` (CSV) |
 | Lõi quét nền | `lib/wholesale/engine.ts` (`runLeadHunterTick`) · job `wholesale-leads` (`lib/wholesale/job.ts`, `lib/sync/jobs.ts`) |
-| Hàm thuần | `phone.ts` · `segments.ts` · `scoring.ts` · `query-plan.ts` · `areas.ts` · `dedupe.ts` · `website-parse.ts` · `opener.ts` · `config.ts` · `contactability.ts` · `temperature.ts` |
-| Lõi ghi (quyền → zod → ghi → audit) | `campaigns.ts` · `leads.ts` · `outreach.ts` · `consents.ts` · `config-core.ts`; vỏ server action `lib/actions/wholesale.ts` |
+| Hàm thuần | `phone.ts` · `segments.ts` · `scoring.ts` · `query-plan.ts` · `areas.ts` · `dedupe.ts` · `website-parse.ts` · `email-discovery.ts` · `opener.ts` · `config.ts` · `contactability.ts` · `temperature.ts` |
+| Lõi ghi (quyền → zod → ghi → audit) | `campaigns.ts` · `leads.ts` · `outreach.ts` · `consents.ts` · `config-core.ts` · `email-store.ts`; vỏ server action `lib/actions/wholesale.ts` |
 | Truy vấn | `lib/queries/wholesale.ts` · `lib/queries/wholesale-export.ts` |
 | Trang | `/wholesale/leads` · `/wholesale/leads/[id]` · `/wholesale/outreach` · `/wholesale/lead-hunter` · `/wholesale/dashboard` · `/wholesale/settings` · `GET /api/wholesale/export` |
 
@@ -53,7 +53,7 @@ cộng `REVENUE_RECOGNIZED_ON_DELIVERY`).
 | `wholesale_campaigns` · `wholesale_search_cells` · `wholesale_campaign_cells` | HSLC | Chiến dịch, ô phủ toàn cục, hàng đợi ô của từng chiến dịch (khoá thuê `locked_until`, `page_token`). |
 | `wholesale_place_hits` | HSLC | Mỗi (chiến dịch, Place ID) một dòng, kèm kết cục (`NEW_LEAD` · `EXISTING_LEAD` · `FILTERED` · `SUPPRESSED` · `DUPLICATE`). |
 | `wholesale_lead_activities` | HSLC | Lịch sử: tìm thấy, gọi, ghi chú, trạng thái, giao việc, liên hệ, chuyển đổi. Người làm lưu bằng khoá tài khoản (luật 34). |
-| `wholesale_lead_enrichments` | HSLC | Phát hiện từ website, mỗi dòng kèm `source_url`. |
+| `wholesale_lead_enrichments` | HSLC | Phát hiện từ website, mỗi dòng kèm `source_url`. Email = kind `EMAIL` (một dòng mỗi email). Vai trò, trạng thái MX và ngày xác minh của email nằm ở `meta.emailChecks` của dòng nhật ký `ENRICHED` (mục 4c). |
 | `wholesale_outreach_items` | HSLC | Hàng đợi liên hệ. Chỉ mục duy nhất bảo đảm mỗi lead chỉ có một lời chào đang mở trên mỗi kênh. |
 | `wholesale_suppressions` | HSLC | Danh sách KHÔNG LIÊN HỆ, khoá theo SĐT, tên miền, Place ID và email (email từ 0261, lưu dạng chuẩn hoá). |
 | `wholesale_contact_consents` | HSLC | Nhật ký ĐỒNG Ý LIÊN HỆ (0261): bằng chứng khách cho phép liên hệ một kênh, chỉ thêm. Mục 4b. |
@@ -129,6 +129,65 @@ Hôm nay chưa có kênh tự gửi nào (mức `AUTO_SEND` vẫn khoá). Kênh 
 "AUTOMATED")` trước mỗi lượt gửi. Trang lead có khối «Đồng ý liên hệ»: kết luận của từng kênh, nhật ký (kể cả dòng đã thu
 hồi), form ghi và nút thu hồi. Quyền ghi / thu hồi là `wholesale:work` cộng phạm vi dữ liệu của lead; không có khoá quyền mới.
 
+## 4c. Làm giàu website & thu thập email B2B (chủ shop chốt 27/10/2026)
+
+> **Email thu thập công khai ≠ đồng ý nhận tiếp thị — chưa được gửi tự động.** ERP chỉ THU THẬP và KIỂM KỸ THUẬT. Không
+> có đường nào gửi email tới các địa chỉ này; kênh Email trong hàng đợi liên hệ vẫn do người duyệt và người tự gửi. Bộ
+> thu thập KHÔNG ghi dòng đồng ý nào (mục 4b); email máy điền vẫn qua danh sách chặn và khử trùng email như mọi email.
+
+**Đọc gì.** Trang chủ + tối đa `maxPages − 1` trang CÙNG website (Cấu hình › Đọc website, 1–5 trang). Trang kế tiếp chọn
+theo đường dẫn và chữ trên liên kết (`rankContactPages`): liên hệ (`contact`, `lien-he`…) › đại lý / bán sỉ / mua hàng
+(`wholesale`, `distributor`, `b2b`, `purchasing`, `procurement`, `dai-ly`, `ban-si`…) › giới thiệu (`about`,
+`gioi-thieu`, `ve-chung-toi`) › `impressum`. Liên kết ở `<footer>` được cộng điểm. Trang không khớp mẫu nào thì không
+đọc — bộ đọc không bò khắp website. Bỏ trang đăng nhập / giỏ hàng / tệp.
+
+**Không theo sang tên miền khác.** Mọi request (kể cả bước chuyển hướng mà rào SSRF tự đi) qua một bộ gác chỉ cho phép
+CÙNG website (khác `www.` vẫn là cùng). Rào SSRF vẫn là MỘT bản — `fetchPublicUrl`; bộ gác chỉ thay hàm `fetch` nó gọi,
+nên request tới website khác không bao giờ rời máy. Trang chủ chuyển hẳn sang tên miền khác ⇒ `FAILED`, ghi rõ tên miền.
+`robots.txt` (nhóm `*`, hoặc nhóm mang tên bot) cấm đường nào thì không tải đường đó.
+
+**Trích email** (`extractEmailCandidates`): `mailto:` (nhiều địa chỉ, bỏ `?subject`), chữ trên trang, dạng che
+(`name [at] domain [dot] com`, `name(at)domain.com`, `name at domain dot com` — chữ «at» trần không kèm «dot» thì KHÔNG
+dịch), thực thể HTML (`&#64;`, `&#x40;`, `&commat;`), email Cloudflare che (`data-cfemail`), JSON-LD (`email` ở
+Organization / contactPoint). Loại: email trong `<script>` thường / chú thích HTML, tên tệp ảnh (`logo@2x.png`), tên
+miền mẫu (example.*, domain.com…), dịch vụ ghi lỗi (sentry, wixpress), hộp thư hệ thống (`noreply`…), mã băm, hộp thư
+dùng một lần (mailinator, yopmail…). Trần 20 email / trang, 20 / website.
+
+**Vai trò** (`classifyEmailRole`, theo phần trước @): `PURCHASING` (purchasing · procurement · buyer · thumua ·
+mua-hang · nhap-hang) › `SALES` (sales · kinhdoanh · b2b · wholesale · export · dai-ly · ban-si…) › `GENERAL` (info ·
+contact · hello · lienhe · admin · hotro · datban…; hộp thư mang tên thương hiệu như `haisanxanh@gmail.com` của
+haisanxanh.vn cũng là liên hệ chung) › `PERSONAL` (dạng họ tên: `lan.nguyen`, `nguyenvana` — «có thể», là phỏng đoán) ›
+`OTHER` (kế toán, tuyển dụng, marketing, chuỗi không đọc được).
+
+**Kiểm kỹ thuật — KHÔNG gửi thư** (`checkEmailDomain`): chỉ hỏi DNS. Có MX ⇒ `VALID_MX`; không MX nhưng có A/AAAA ⇒
+`VALID_MX` (MX ngầm định, RFC 5321 §5.1); tên miền không tồn tại, không MX lẫn A, hoặc «null MX» (RFC 7505) ⇒ `NO_MX`;
+DNS lỗi / quá giờ ⇒ `UNKNOWN` (CHƯA BIẾT, không phải hỏng). Tối đa 5 tên miền / website (tên miền website trước), mỗi
+tên miền hỏi một lần, trần 2,5 giây. **Tuyệt đối không mở kết nối SMTP, không dò RCPT / VRFY** — đó là hành vi của kẻ
+gửi thư rác và làm IP máy chủ vào danh sách đen.
+
+**Email tốt nhất** (`pickBestEmail`): vai trò (mua hàng › kinh doanh › liên hệ chung › cá nhân) › cùng tên miền website ›
+`VALID_MX` › nguồn chắc hơn (mailto / JSON-LD / Cloudflare › chữ › dạng che). `OTHER` và `NO_MX` không bao giờ được chọn.
+Ghi vào `wholesale_leads.email` CHỈ khi ô trống, hoặc giá trị đang có do CHÍNH MÁY điền ở lượt trước
+(`meta.emailFilled`; lead nguồn Google thì giá trị trùng một phát hiện cũ cũng là của máy). Ô nhân viên đã sửa
+(`staff_edited_fields`) không bao giờ bị đè; email từ tệp nhập không bị thay.
+
+**Chỗ lưu (không migration).** Mỗi email một dòng `wholesale_lead_enrichments` (kind `EMAIL`, `source_url`). Bảng này
+không có cột jsonb nên vai trò + MX + nguồn + `emailVerifiedAt` của MỖI LƯỢT QUÉT nằm ở `meta` dòng nhật ký `ENRICHED`
+(`emailChecks`, `emailBest`, `emailFilled`, `emailDiscoveryVersion`). Màn hình đọc lượt MỚI NHẤT; email nhân viên tự gõ
+chưa qua lượt quét nào thì trạng thái là CHƯA BIẾT, không được đếm là hợp lệ.
+
+**Chạy hàng loạt.** Nút «✉ Thu thập email» ở `/wholesale/leads` (quyền `wholesale:scan`) xếp tối đa 200 lead / lần
+(trần 500) có website, chưa có email, chưa quét trong `EMAIL_RESCAN_DAYS` = 30 ngày, không phải «Không liên hệ» / «Đã
+chốt», website không phải Facebook / Zalo / host dùng chung. Xếp hàng = `website_status = 'PENDING'`; job
+`wholesale-leads` đọc dần vài lead mỗi lượt và chỉ chạy khi cờ «Đọc website» đang bật. Lead đang chờ không bị xếp lại;
+«quét lại sau» = `website_checked_at + 30 ngày` (không có cột riêng). Thuần quy tắc — không tốn token AI, không tốn
+tiền API. Lead mới có website vẫn tự vào hàng như trước (`finalizeLead`).
+
+**Màn hình.** `/wholesale/leads`: email + vai trò + trạng thái tên miền dưới cột Liên hệ; bộ lọc «Email» (có / chưa /
+tên miền nhận thư / không nhận thư / theo vai trò). `/wholesale/leads/[id]`: bảng «Email tìm được trên website» (vai trò ·
+tên miền · trang nguồn · cách lấy · ngày xác minh; email không còn ở lượt mới nhất vẫn hiện, MX = chưa biết).
+`/wholesale/dashboard`: «Lead có email hợp lệ / có website / tổng lead sẵn sàng» (ảnh chụp hiện tại, không theo kỳ).
+
 ## 4a. Khách hợp với HSLC lúc này (chủ shop chốt 05/10/2026)
 
 **Hàng hoá.** Danh mục HSLC đọc ngày 05/10/2026 gồm: chả mực giã tay, chả cá thu, nem hải sản tôm bề bề, ruốc bông tôm,
@@ -176,7 +235,7 @@ loại» với lý do `COMPETITOR`, không xoá. Chủ shop sửa mặt hàng / 
 
 Hai điểm bán (một chi nhánh) vẫn được coi là cơ sở vừa.
 
-## 4b. Khách sỉ nước ngoài và phân khúc B2B (chủ shop chốt 27/10/2026)
+## 4d. Khách sỉ nước ngoài và phân khúc B2B (chủ shop chốt 27/10/2026)
 
 Chủ shop ưu tiên **tìm khách tiềm năng** — cả trong nước lẫn nước ngoài — bằng đúng bộ quét Google Places đang chạy.
 Phần này **chưa gửi gì**: lead quốc tế đi Tìm thấy → Đủ điều kiện (người duyệt) như lead trong nước.
@@ -667,6 +726,12 @@ Phần chạy trên tổ chức thật `wl-hslc` kiểm:
 - hàng đợi liên hệ, phạm vi «Được giao»;
 - xoá dữ liệu Google hết hạn;
 - tổ chức nhà tắt module.
+
+`tests/wholesale-email-discovery.test.ts` (thu thập email, mục 4c) kiểm: trích từng dạng che / thực thể / Cloudflare /
+JSON-LD; loại email rác; vai trò; chọn trang cùng website theo ưu tiên; robots.txt cấm ⇒ không tải; chuyển hướng sang
+tên miền khác ⇒ không một request nào tới đó; DNS GIẢ (không gọi mạng thật — AGENTS 65) cho MX / A / NXDOMAIN / null MX
+/ lỗi / quá giờ; chọn email tốt nhất; không đè ô nhân viên sửa, không thay email từ tệp; bộ lọc danh sách + độ phủ; nút
+«Thu thập email» xếp hàng không trùng và tôn trọng hạn quét lại.
 
 ## 16. Giới hạn đã biết / Phase 2
 

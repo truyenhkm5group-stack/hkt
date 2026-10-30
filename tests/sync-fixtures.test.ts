@@ -622,6 +622,7 @@ import { testChatOrder } from "./chat-order.test";
 import { testCarrierGhtk } from "./carrier-ghtk.test";
 import { testFashionCodF3 } from "./fashion-cod-f3.test";
 import { testWholesaleLeadHunter } from "./wholesale-lead-hunter.test";
+import { testWholesaleEmailDiscovery } from "./wholesale-email-discovery.test";
 import { testWholesaleIntlDiscovery } from "./wholesale-intl-discovery.test";
 import { testWholesaleConsent } from "./wholesale-consent.test";
 import { testWholesaleCatalogReadiness } from "./wholesale-catalog-readiness.test";
@@ -3322,6 +3323,7 @@ async function main() {
     await testShippingRouting();
     await testFashionCodF3();
     await testWholesaleLeadHunter();
+    await testWholesaleEmailDiscovery();
     await testWholesaleIntlDiscovery();
     await testWholesaleConsent();
     // P1c AI B2B: cổng sẵn sàng danh mục bán sỉ + xuất khẩu — hàm thuần (lib/wholesale/catalog-readiness.ts).
