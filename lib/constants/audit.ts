@@ -2,6 +2,8 @@
 export const AUDIT_ACTION_LABEL: Record<string, string> = {
   LOGIN: "Đăng nhập",
   LOGOUT: "Đăng xuất",
+  // Mission Control (chủ shop 30/10/2026): khai / xoá điều kiện tốt nghiệp của một agent — KHÔNG đổi nấc tự chủ.
+  MISSION_CONTROL_GRADUATION: "Mission Control: điều kiện tốt nghiệp agent",
   // Facebook Friend CRM (0262 · lib/fb-crm/service.ts): sổ ghi việc NGƯỜI làm bằng tay — ERP không tự kết bạn / nhắn.
   FB_CRM_UPDATE: "Facebook CRM: cập nhật kết nối khách",
   FB_CRM_TASK_CREATE: "Facebook CRM: tạo nhiệm vụ CSKH",

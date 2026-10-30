@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { requirePermission } from "@/lib/auth/session";
+import { can, requirePermission } from "@/lib/auth/session";
 import {
   AGENTS,
   AGENT_ZONES,
@@ -76,6 +76,13 @@ export default async function DepartmentMapPage() {
             <code>tests/department-map.test.ts</code> mở từng tệp bằng chứng, nên một ô xanh không khai khống được. Thanh menu bên trái đọc cùng sổ, nên bản đồ này
             và menu không bao giờ nói hai điều khác nhau.
           </>
+        }
+        actions={
+          can(user, "approvals:decide") ? (
+            <Link href="/departments/mission-control" className="text-sm font-semibold text-primary hover:underline">
+              Mission Control — đo AI agent
+            </Link>
+          ) : undefined
         }
       />
 
