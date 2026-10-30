@@ -1,4 +1,4 @@
-import { and, asc, type Column, count, eq, inArray, isNull, lt, lte, ne, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, type Column, count, eq, inArray, isNull, lt, lte, ne, notInArray, or, type SQL, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { openActiveConnection } from "@/lib/connectors/service";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
@@ -10,6 +10,7 @@ import { intlCellContext, intlSearchProvince, isIntlProvinceKey } from "@/lib/wh
 import { freeTierLeft, nextCallCostMicros, quotaRetryAt, type LeadHunterConfig, type PlacesSku } from "@/lib/wholesale/config";
 import { ACTIVE_PIPELINE_STATUSES, type PauseReason, PAUSE_REASON_LABEL } from "@/lib/wholesale/constants";
 import { competitorHit } from "@/lib/wholesale/competitor";
+import { normalizeEmail } from "@/lib/wholesale/contactability";
 import { branchHint, chainBrandHit, nameAddressKey, socialKind, websiteDomain } from "@/lib/wholesale/dedupe";
 import { normalizeVnPhone, type PhoneKind } from "@/lib/wholesale/phone";
 import { googlePlacesProvider, websiteEnrichmentProvider, type DiscoveryProvider, type EnrichmentProvider } from "@/lib/wholesale/providers";
@@ -257,7 +258,6 @@ async function upsertSnapshot(place: PlaceRecord, tier: Snapshot["fieldsTier"], 
     });
 }
 
-/** Lead khác (đang sống — không bị lọc / trùng) mang cùng SĐT / tên miền / khoá tên-địa chỉ. Lâu đời nhất thắng. */
 /**
  * Số địa điểm Google KHÁC NHAU đã thấy mang cùng phần TÊN (khoá tên của `nameAddressKey`, khác địa chỉ) — dấu hiệu chuỗi
  * nhiều chi nhánh. Chỉ đếm snapshot có số nhà (khoá tên + địa chỉ đủ cụ thể); không có khoá ⇒ 0, không đoán.
@@ -272,21 +272,36 @@ async function sameNamePlaces(name: string | null, address: string | null): Prom
   return Number(row?.n ?? 0);
 }
 
-export async function findMasterLead(selfId: string | null, key: { phone?: string | null; domain?: string | null; nameKey?: string | null }): Promise<{ id: string; by: "PHONE" | "DOMAIN" | "NAME" } | null> {
+/** Khoá khử trùng theo thứ tự ưu tiên: SĐT → tên miền → email → tên + địa chỉ. */
+export type MasterLeadKey = "PHONE" | "DOMAIN" | "EMAIL" | "NAME";
+
+/** Lý do lọc ghi vào lead trùng theo khoá đã khớp. */
+export const DUPLICATE_FILTER_REASON: Record<MasterLeadKey, string> = { PHONE: "DUPLICATE_PHONE", DOMAIN: "DUPLICATE_DOMAIN", EMAIL: "DUPLICATE_EMAIL", NAME: "DUPLICATE_NAME" };
+
+/**
+ * Lead khác (đang sống — không bị lọc / trùng) mang cùng SĐT / tên miền / email / khoá tên-địa chỉ. Lâu đời nhất thắng.
+ * EMAIL (0261) đứng SAU tên miền: hai cơ sở cùng website là chứng cứ mạnh hơn cùng một hộp thư (chuỗi hay dùng chung mail
+ * kế toán), và đứng TRƯỚC tên + địa chỉ vì email là định danh chính xác còn khoá tên là so gần đúng. Email so trên dạng
+ * chuẩn hoá (`normalizeEmail`) và chỉ có ở dữ liệu của tổ chức — snapshot Google không mang email.
+ */
+export async function findMasterLead(selfId: string | null, key: { phone?: string | null; domain?: string | null; email?: string | null; nameKey?: string | null }): Promise<{ id: string; by: MasterLeadKey } | null> {
   const db = await getDb();
   const l = schema.wholesaleLeads;
   const s = schema.wholesalePlaceSnapshots;
   const alive = and(notInArray(l.enrichmentStatus, ["FILTERED", "DUPLICATE"]), selfId ? ne(l.id, selfId) : undefined);
-  const probes: { by: "PHONE" | "DOMAIN" | "NAME"; leadCol: Column; snapCol: Column; value: string }[] = [];
-  if (key.phone) probes.push({ by: "PHONE", leadCol: l.normalizedPhone, snapCol: s.normalizedPhone, value: key.phone });
-  if (key.domain) probes.push({ by: "DOMAIN", leadCol: l.websiteDomain, snapCol: s.websiteDomain, value: key.domain });
-  if (key.nameKey) probes.push({ by: "NAME", leadCol: l.nameKey, snapCol: s.nameKey, value: key.nameKey });
+  const email = normalizeEmail(key.email);
+  const probes: { by: MasterLeadKey; match: SQL }[] = [];
+  const either = (leadCol: Column, snapCol: Column, value: string) => or(eq(leadCol, value), eq(snapCol, value))!;
+  if (key.phone) probes.push({ by: "PHONE", match: either(l.normalizedPhone, s.normalizedPhone, key.phone) });
+  if (key.domain) probes.push({ by: "DOMAIN", match: either(l.websiteDomain, s.websiteDomain, key.domain) });
+  if (email) probes.push({ by: "EMAIL", match: sql`lower(btrim(${l.email})) = ${email}` });
+  if (key.nameKey) probes.push({ by: "NAME", match: either(l.nameKey, s.nameKey, key.nameKey) });
   for (const p of probes) {
     const [row] = await db
       .select({ id: l.id })
       .from(l)
       .leftJoin(s, and(eq(s.placeId, l.placeId), isNull(s.purgedAt)))
-      .where(and(alive, or(eq(p.leadCol, p.value), eq(p.snapCol, p.value))))
+      .where(and(alive, p.match))
       .orderBy(asc(l.firstSeenAt), asc(l.id))
       .limit(1);
     if (row) return { id: row.id, by: p.by };
@@ -556,7 +571,7 @@ export async function finalizeLead(ctx: Pick<Ctx, "cfg" | "now" | "stats">, lead
     await db.update(l).set({ enrichmentStatus: "FILTERED", filterReason: reason, detailsNextAt: null, updatedAt: now }).where(eq(l.id, leadId));
     return "FILTERED";
   };
-  if (await suppressionHit({ placeId: lead.placeId, phone: v.phone, domain })) return filter("SUPPRESSED");
+  if (await suppressionHit({ placeId: lead.placeId, phone: v.phone, domain, email: lead.email })) return filter("SUPPRESSED");
   if (v.businessStatus === "CLOSED_PERMANENTLY") return filter("CLOSED");
   // Chỉ lead do MÁY tìm (Google) mới bị lọc chuỗi / quy mô; lead nhân viên nhập tay là quyết định của người.
   if (lead.source === "GOOGLE_PLACES") {
@@ -572,11 +587,11 @@ export async function finalizeLead(ctx: Pick<Ctx, "cfg" | "now" | "stats">, lead
     if (camp.minReviews != null && reviews != null && reviews < camp.minReviews) return filter("LOW_REVIEWS");
     if (camp.minRating != null && v.ratingsRequested && (v.rating == null || v.rating < camp.minRating)) return filter("LOW_RATING");
   }
-  const master = await findMasterLead(leadId, { phone: v.phone, domain });
+  const master = await findMasterLead(leadId, { phone: v.phone, domain, email: lead.email });
   if (master) {
     await db
       .update(l)
-      .set({ enrichmentStatus: "DUPLICATE", duplicateOfLeadId: master.id, filterReason: master.by === "PHONE" ? "DUPLICATE_PHONE" : master.by === "DOMAIN" ? "DUPLICATE_DOMAIN" : "DUPLICATE_NAME", detailsNextAt: null, updatedAt: now })
+      .set({ enrichmentStatus: "DUPLICATE", duplicateOfLeadId: master.id, filterReason: DUPLICATE_FILTER_REASON[master.by], detailsNextAt: null, updatedAt: now })
       .where(eq(l.id, leadId));
     await rescoreLead(master.id, { cfg: ctx.cfg, stats: ctx.stats, now });
     return "DUPLICATE";
@@ -813,7 +828,8 @@ export async function enrichLeadWebsite(ctx: Pick<Ctx, "cfg" | "now" | "stats" |
   const phone = first("PHONE");
   const hasPhone = Boolean(lead.normalizedPhone || (snap && !snap.purgedAt && snap.normalizedPhone));
   const patch: Partial<typeof l.$inferInsert> = { websiteStatus: r.status, websiteCheckedAt: now, updatedAt: now };
-  if (!lead.email && !edited.has("email") && first("EMAIL")) patch.email = first("EMAIL");
+  const foundEmail = normalizeEmail(first("EMAIL"));
+  if (!lead.email && !edited.has("email") && foundEmail) patch.email = foundEmail;
   if (!lead.facebookUrl && !edited.has("facebookUrl") && first("FACEBOOK")) patch.facebookUrl = first("FACEBOOK");
   if (!lead.zaloUrl && !edited.has("zaloUrl") && first("ZALO")) patch.zaloUrl = first("ZALO");
   if (!hasPhone && !edited.has("phone") && phone) {
@@ -821,10 +837,44 @@ export async function enrichLeadWebsite(ctx: Pick<Ctx, "cfg" | "now" | "stats" |
     if (p?.normalized) Object.assign(patch, { phoneRaw: phone, normalizedPhone: p.normalized, phoneKind: p.kind, phoneCountryCode: p.countryCode, phoneSource: "WEBSITE" });
   }
   await db.update(l).set(patch).where(eq(l.id, lead.id));
+  if (patch.email && (await dedupeByNewEmail(ctx, lead, patch.email, now))) return;
   if (r.findings.length) {
     await addActivity({ leadId: lead.id, kind: "ENRICHED", note: `Đọc website (${r.note}): ${r.findings.filter((f) => f.kind !== "DESCRIPTION").map((f) => f.value).slice(0, 6).join(", ") || "không thấy liên hệ mới"}`, meta: { sources: [...new Set(r.findings.map((f) => f.sourceUrl))] }, actorId: null, actorName: "Máy" });
   }
   await rescoreLead(lead.id, { cfg: ctx.cfg, stats: ctx.stats, now });
+}
+
+/**
+ * Website vừa cho lead một email (0261) mà email đó đã thuộc một lead khác đang sống ⇒ khử trùng như `finalizeLead`:
+ * lead MỚI HƠN trỏ về lead lâu đời hơn (`duplicate_of_lead_id`), không gỡ liên kết trùng nào đã có. Hai trường hợp máy
+ * KHÔNG tự gộp mà chỉ ghi một dòng lịch sử để người xem:
+ *  · lead này đã có người chăm (đã liên hệ / đã giao / nhân viên đã sửa / đã qua bước đầu) — máy không ghi đè lead người chăm;
+ *  · lead kia mới hơn lead này — gộp lead cũ vào lead mới là đảo chiều "lâu đời nhất thắng".
+ * Trả `true` khi đã đánh dấu trùng (người gọi dừng, lead không còn sống).
+ */
+async function dedupeByNewEmail(ctx: Pick<Ctx, "cfg" | "stats">, lead: Lead, email: string, now: Date): Promise<boolean> {
+  if (lead.enrichmentStatus !== "READY" || lead.duplicateOfLeadId) return false;
+  const master = await findMasterLead(lead.id, { email });
+  if (!master || master.by !== "EMAIL") return false;
+  const db = await getDb();
+  const l = schema.wholesaleLeads;
+  const other = await db.query.wholesaleLeads.findFirst({ where: eq(l.id, master.id), columns: { id: true, firstSeenAt: true } });
+  if (!other) return false;
+  const cared = Boolean(lead.firstContactAt || lead.assignedToUserId || lead.staffEditedFields.length || !["NEW", "QUALIFIED"].includes(lead.contactStatus));
+  const otherIsOlder = other.firstSeenAt.getTime() < lead.firstSeenAt.getTime() || (other.firstSeenAt.getTime() === lead.firstSeenAt.getTime() && other.id < lead.id);
+  if (cared || !otherIsOlder) {
+    await addActivity({ leadId: lead.id, kind: "ENRICHED", note: `Email ${email} trùng với một lead khác (${master.id}) — ${cared ? "lead đã có người chăm nên máy không tự gộp" : "lead kia mới hơn nên máy không gộp ngược"}; người xem lại.`, meta: { duplicateCandidate: master.id, by: "EMAIL" }, actorId: null, actorName: "Máy" });
+    return false;
+  }
+  const moved = await db
+    .update(l)
+    .set({ enrichmentStatus: "DUPLICATE", duplicateOfLeadId: master.id, filterReason: DUPLICATE_FILTER_REASON.EMAIL, detailsNextAt: null, updatedAt: now })
+    .where(and(eq(l.id, lead.id), eq(l.enrichmentStatus, "READY"), isNull(l.duplicateOfLeadId)))
+    .returning({ id: l.id });
+  if (!moved.length) return false;
+  await addActivity({ leadId: lead.id, kind: "ENRICHED", note: `Đọc website: email ${email} trùng lead đã có — đánh dấu trùng.`, meta: { duplicateOf: master.id, by: "EMAIL" }, actorId: null, actorName: "Máy" });
+  await rescoreLead(master.id, { cfg: ctx.cfg, stats: ctx.stats, now });
+  return true;
 }
 
 /**

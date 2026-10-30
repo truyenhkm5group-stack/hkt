@@ -37,7 +37,7 @@
 | D14 | **Hỗ trợ** — `platform_audit_log` `SUPPORT_VIEW`; liên hệ qua Zalo / điện thoại công ty (`lib/constants/company.ts:14`) — **không có hệ thống ticket, không email** | Quản trị khách thuê | Hỗ trợ kỹ thuật | Zalo cá nhân / số công ty | VNX | — | Zalo (VNG) | Hợp đồng | Không | Theo Zalo | Ngoài hệ thống | Zalo VN | Không có quy trình | n/a | S3 |
 | D15 | **Phân tích / đo dùng** — `platform_ai_usage` (`actor_id`, `conversation_id`, `ref`), `platform_usage_events` (`event_key` chứa page + **băm khách** — `lib/pricing/ai-customer.ts:8-10`), `platform_saas_daily`, `platform_tenant_usage_daily`, `app/api/usage/visit` (first-party) | Khách hàng cuối (băm), người dùng | Tính phí theo khách AI, sức khoẻ, báo cáo | Máy chủ | VNX | — | Drive | Hợp đồng (thu phí) | Không | Vô thời hạn | CSDL nhà | Drive | Khoá băm không đảo ngược — xác nhận bằng bài kiểm | n/a | S2 / S3 |
 | D16 | **Sao lưu** — `pg_dump` mọi CSDL + tar `chatbot_data` + WAL PITR (`scripts/erp-backup.sh`, `erp-pitr.sh`) | Mọi chủ thể | Khôi phục sự cố | Cron VPS | VNX (bản sao) | VNX | **Google Drive** (rclone crypt, tên tệp cũng mã hoá) | Lợi ích hợp pháp / hợp đồng (Điều khoản 5.3) | Không | daily 7 · weekly 4 · manual 3 · org hourly 48 · PITR 2 nền + WAL 4 ngày · thùng rác Drive 30 ngày (`SUBPROCESSOR_REGISTER.md` §3) | VPS + Drive | **CÓ (mã hoá)** — vùng UNKNOWN | Xoá theo xoay vòng; DSR không chạm bản sao (Chính sách §9 đã nói) | n/a | S4 (toàn bộ) |
-| D17 | **Khách tiềm năng sỉ** — `wholesale_*` (Google Places: tên, SĐT, địa chỉ cơ sở; `wholesale_suppressions` có opt-out — `lib/wholesale/store.ts:83`) | Chủ cơ sở kinh doanh khác | Tiếp thị B2B | Google Places (khoá của khách thuê) | Khách thuê (hoặc VNX khi tự dùng) | VNX | Google, Zalo (khi nhắn) | **Tiếp thị tới người chưa đồng ý** — NĐ 91 + Luật 91: rủi ro | **CẦN** đồng ý trước khi nhắn / gọi; có suppression | Snapshot có `expires_at` | CSDL tổ chức | Google (Singapore relay) | Có suppression; thiếu nhật ký đồng ý | n/a | S3 |
+| D17 | **Khách tiềm năng sỉ** — `wholesale_*` (Google Places: tên, SĐT, địa chỉ cơ sở; `wholesale_suppressions` có opt-out — `lib/wholesale/store.ts:83`) | Chủ cơ sở kinh doanh khác | Tiếp thị B2B | Google Places (khoá của khách thuê) | Khách thuê (hoặc VNX khi tự dùng) | VNX | Google, Zalo (khi nhắn) | **Tiếp thị tới người chưa đồng ý** — NĐ 91 + Luật 91: rủi ro | **CẦN** đồng ý trước khi nhắn / gọi; có suppression | Snapshot có `expires_at` | CSDL tổ chức | Google (Singapore relay) | Có suppression (SĐT · tên miền · Place ID · email từ 0261). Nhật ký đồng ý `wholesale_contact_consents` (0261, chỉ thêm, thu hồi để lại vết, người ghi = khoá tài khoản; căn cứ danh sách đóng, email công khai trên website không phải đồng ý). Đây là bằng chứng kỹ thuật, luật sư chưa thẩm định — xem `docs/verticals/wholesale-lead-hunter.md` §4b | n/a | S3 |
 
 ## 3. Bảng → tập dữ liệu (tra ngược nhanh)
 
@@ -62,7 +62,7 @@
 | `org_connections` / `org_channel_pages` | — | `secrets_enc` (AES-256-GCM), `connected_by_email` | CSDL / org_code | — | — |
 | `integration_tokens` | — | token Viettel Post **thô** (chỉ tổ chức nhà) | CSDL | — | — |
 | `outreach_targets` / `_broadcasts` / `_recipients` | D5 | tên, SĐT | CSDL | không | không |
-| `wholesale_*` | D17 | tên, SĐT, địa chỉ cơ sở | CSDL | suppression | `expires_at` |
+| `wholesale_*` | D17 | tên, SĐT, email, địa chỉ cơ sở; `wholesale_contact_consents` (bằng chứng đồng ý) | CSDL | suppression | `expires_at` (chỉ snapshot Google) |
 
 ## 4. Những chỗ trống đáng kể nhất (xếp theo hậu quả)
 

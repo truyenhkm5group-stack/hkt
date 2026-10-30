@@ -11868,6 +11868,8 @@ export const wholesaleLeads = pgTable(
     index("wholesale_leads_enrichment_idx").on(t.enrichmentStatus, t.detailsNextAt),
     index("wholesale_leads_campaign_idx").on(t.sourceCampaignId),
     index("wholesale_leads_customer_idx").on(t.customerId),
+    /** Khử trùng theo email (0261): so trên email đã chuẩn hoá — dòng cũ có thể còn chữ hoa / khoảng trắng. */
+    index("wholesale_leads_email_idx").on(sql`lower(btrim(${t.email}))`),
     check(
       "wholesale_leads_status_check",
       sql`${t.contactStatus} IN ('NEW','QUALIFIED','READY_TO_CONTACT','CONTACTED','NO_ANSWER','INTERESTED','CATALOG_SENT','PRICE_SENT','SAMPLE_REQUESTED','NEGOTIATING','WON','LOST','DO_NOT_CONTACT')`,
@@ -11928,7 +11930,14 @@ export const wholesaleLeadActivities = pgTable(
     actorName: text("actor_name").notNull().default(""),
     createdAt: createdAt(),
   },
-  (t) => [index("wholesale_lead_activities_lead_idx").on(t.leadId, t.createdAt)],
+  (t) => [
+    index("wholesale_lead_activities_lead_idx").on(t.leadId, t.createdAt),
+    // Khai ở 0197 / 0210 / 0218 mà lược đồ chưa ghi; 0261 thêm 'CONSENT' (nhật ký đồng ý liên hệ).
+    check(
+      "wholesale_lead_activities_kind_check",
+      sql`${t.kind} IN ('DISCOVERED','IMPORTED','ENRICHED','SCORED','NOTE','CALL','CALL_INITIATED','ZALO','ZALO_OPENED','STATUS','ASSIGN','OUTREACH','OPPORTUNITY','CONVERT','EDIT','CAMPAIGN','CONSENT')`,
+    ),
+  ],
 );
 
 export const wholesaleLeadEnrichments = pgTable(
@@ -11988,7 +11997,48 @@ export const wholesaleSuppressions = pgTable(
     createdByName: text("created_by_name").notNull().default(""),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("wholesale_suppressions_uq").on(t.kind, t.value), check("wholesale_suppressions_kind_check", sql`${t.kind} IN ('PHONE','DOMAIN','PLACE')`)],
+  // EMAIL (0261): giá trị là email đã chuẩn hoá (`normalizeEmail` — trim + chữ thường, KHÔNG bỏ dấu chấm Gmail).
+  (t) => [uniqueIndex("wholesale_suppressions_uq").on(t.kind, t.value), check("wholesale_suppressions_kind_check", sql`${t.kind} IN ('PHONE','DOMAIN','PLACE','EMAIL')`)],
+);
+
+/**
+ * NHẬT KÝ ĐỒNG Ý LIÊN HỆ (0261) — bằng chứng cho phép liên hệ một lead trên một kênh, CHỈ THÊM. Dòng không bao giờ bị xoá
+ * hay sửa nội dung; thu hồi = điền MỘT lần `revoked_at` + lý do + người thu hồi. Căn cứ là danh sách đóng
+ * (`lib/wholesale/contactability.ts::CONSENT_BASES` — chú thích từng giá trị); không có "NONE" và không có "email công khai
+ * trên website". Người ghi / người thu hồi lưu bằng KHOÁ TÀI KHOẢN (luật 34), tên chỉ là ảnh chụp do máy chủ đọc.
+ * Lead không xoá được khi còn bằng chứng (`restrict`) — bằng chứng không được biến mất theo một lượt dọn dữ liệu.
+ */
+export const wholesaleContactConsents = pgTable(
+  "wholesale_contact_consents",
+  {
+    id: id(),
+    leadId: text("lead_id")
+      .notNull()
+      .references(() => wholesaleLeads.id, { onDelete: "restrict" }),
+    channel: text("channel").notNull(),
+    contactValue: text("contact_value").notNull(),
+    basis: text("basis").notNull(),
+    evidenceText: text("evidence_text").notNull(),
+    evidenceUrl: text("evidence_url"),
+    source: text("source").notNull().default("STAFF"),
+    recordedByUserId: text("recorded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    recordedByName: text("recorded_by_name").notNull().default(""),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: ts("revoked_at"),
+    revokeReason: text("revoke_reason"),
+    revokedByUserId: text("revoked_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    revokedByName: text("revoked_by_name"),
+  },
+  (t) => [
+    index("wholesale_contact_consents_lead_idx").on(t.leadId, t.recordedAt),
+    index("wholesale_contact_consents_value_idx").on(t.channel, t.contactValue),
+    check("wholesale_contact_consents_channel_check", sql`${t.channel} IN ('EMAIL','PHONE','ZALO')`),
+    check("wholesale_contact_consents_basis_check", sql`${t.basis} IN ('OPT_IN_FORM','REPLIED_INBOUND','VERBAL_CONSENT','EXISTING_CUSTOMER','B2B_PUBLIC_PROCUREMENT','OWNER_ATTESTED')`),
+    check("wholesale_contact_consents_source_check", sql`${t.source} IN ('STAFF','IMPORT','SYSTEM')`),
+    check("wholesale_contact_consents_evidence_check", sql`length(btrim(${t.evidenceText})) >= 5`),
+    check("wholesale_contact_consents_value_check", sql`length(btrim(${t.contactValue})) >= 3`),
+    check("wholesale_contact_consents_revoke_check", sql`(${t.revokedAt} IS NULL AND ${t.revokeReason} IS NULL) OR (${t.revokedAt} IS NOT NULL AND length(btrim(coalesce(${t.revokeReason}, ''))) >= 3)`),
+  ],
 );
 
 export const wholesaleApiUsage = pgTable(
