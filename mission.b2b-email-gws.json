@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "mission_id": "b2b-email-gws",
+  "title": "Gửi email thật qua Google Workspace SMTP (E2)",
+  "business_goal": "",
+  "status": "PLANNING",
+  "priority": "P2",
+  "risk": "MEDIUM",
+  "owner": "DESKTOP-56TH98Y:wt-b2b-gws",
+  "worker": null,
+  "worktree": null,
+  "branch": "claude/b2b-email-gws",
+  "base_sha": "7310cde367feadb386f295fc56d426014177d9af",
+  "domains": [],
+  "owned_paths": [
+    "lib/integrations/gws-smtp/",
+    "lib/email-provider/live.ts",
+    "lib/email-provider/index.ts",
+    "tests/wholesale-email-gws.test.ts"
+  ],
+  "dependencies": [],
+  "blocked_by": [],
+  "related_prs": [],
+  "migration_reservations": [],
+  "created_at": "2026-10-30T10:46:01.706Z",
+  "updated_at": "2026-10-30T10:46:01.706Z",
+  "last_heartbeat": "2026-10-30T10:46:01.706Z",
+  "definition_of_done": []
+}
