@@ -3,7 +3,7 @@
   "mission_id": "wholesale-hunter-ux",
   "title": "Săn khách sỉ gọn lại theo thứ tự việc: 5 bước + bánh răng, 3 khối, tab Liên hệ có tiến độ / kết quả / nhật ký che SĐT",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-hunter-ux",
@@ -32,7 +32,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-30T21:28:17.169Z",
-  "updated_at": "2026-10-30T21:28:17.169Z",
-  "last_heartbeat": "2026-10-30T21:28:17.169Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-30T21:30:05.126Z",
+  "last_heartbeat": "2026-10-30T21:30:05.126Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/wholesale-hunter-ux",
+    "sha": "3d6a4e92318ba8c1421c59b87aa8d6fa407a0d8d",
+    "at": "2026-10-30T21:30:05.126Z",
+    "actor": "DESKTOP-56TH98Y:wt-hunter-ux",
+    "title": "Săn khách sỉ gọn lại theo thứ tự việc: 5 bước + bánh răng, 3 khối, tab Liên hệ có tiến độ / kết quả / nhật ký che SĐT",
+    "summary": "",
+    "tests": [
+      "3d6a4e92: npm run typecheck sạch · npm run lint sạch · quét nguồn UI chạy riêng ĐẠT (ui-consistency + navigation coverage, loading-ux-contract, action-wiring 831 action 0 treo, department-map) · TEST_KHOI=K21 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K21 ĐẠT (gồm testWholesaleHunterUx mới + khối CSDL giao diện trong testWholesaleLeadHunter) · npm run build exit 0 · 4 shard đầy đủ: để gates CI"
+    ]
+  }
 }
