@@ -3,7 +3,7 @@
   "mission_id": "bot-phone-check",
   "title": "P0 HSLC: bot không lên đơn khi SĐT sai hình dạng",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-tech-lead-v2",
@@ -24,7 +24,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-30T03:05:33.480Z",
-  "updated_at": "2026-10-30T03:05:33.480Z",
-  "last_heartbeat": "2026-10-30T03:05:33.480Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-30T03:06:33.881Z",
+  "last_heartbeat": "2026-10-30T03:06:33.881Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/bot-phone-check",
+    "sha": "8e8c8d5b6d292fc6aead47efe52614af9396228d",
+    "at": "2026-10-30T03:06:33.881Z",
+    "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+    "title": "P0 HSLC: bot không lên đơn khi SĐT sai hình dạng",
+    "summary": "",
+    "tests": [
+      "tsc sạch; eslint tệp chạm sạch; TEST_KHOI=K09 ĐẠT (bài mới bot-phone-check); 4 shard để gates CI"
+    ]
+  }
 }
