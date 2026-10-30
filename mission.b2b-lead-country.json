@@ -3,7 +3,7 @@
   "mission_id": "b2b-lead-country",
   "title": "Nước của lead: một thang chứng cứ cho cổng nước, làn kênh và ngôn ngữ AI soạn email",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-country",
@@ -33,7 +33,20 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-30T15:06:03.380Z",
-  "updated_at": "2026-10-30T15:06:03.380Z",
-  "last_heartbeat": "2026-10-30T15:06:03.380Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-30T20:13:02.195Z",
+  "last_heartbeat": "2026-10-30T20:13:02.195Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/b2b-lead-country",
+    "sha": "84d3d09fca130035967fedc963a9741dc69005d3",
+    "at": "2026-10-30T20:13:02.195Z",
+    "actor": "DESKTOP-56TH98Y:wt-b2b-country",
+    "title": "Nước của lead: một thang chứng cứ cho cổng nước, làn kênh và ngôn ngữ AI soạn email",
+    "summary": "",
+    "tests": [
+      "Ở bb68ab61 (trước merge E2): npx tsc --noEmit sạch · npm run lint sạch · TEST_KHOI=K21 npm test ĐẠT (✓ Nước của lead + ✓ Kế hoạch kênh + ✓ AI soạn email + ✓ thư nhắc + ✓ E1) · npm run build ĐẠT",
+      "Merge #1104 E2 (84d3d09f) chỉ thêm 1 dòng import/gọi testWholesaleEmailGws ở sync-fixtures: lượt tsc/K21 sau merge đỏ vì node_modules cục bộ thiếu gói nodemailer mới của E2 (môi trường, không phải mã) — đã đổi junction sang node_modules có nodemailer, lượt chạy lại bị máy bận chặn khoá quá lâu nên DỪNG, chưa có kết quả",
+      "4 shard đầy đủ: để gates CI"
+    ]
+  }
 }
