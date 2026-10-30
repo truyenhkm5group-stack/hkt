@@ -30,18 +30,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-30T11:00:56.464Z",
-  "updated_at": "2026-10-30T11:02:02.270Z",
-  "last_heartbeat": "2026-10-30T11:02:02.270Z",
+  "updated_at": "2026-10-30T17:14:24.254Z",
+  "last_heartbeat": "2026-10-30T17:14:24.254Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/b2b-viet-kieu",
-    "sha": "9a811040a35e35c450d905ffa1514170cfe3e9b0",
-    "at": "2026-10-30T11:02:02.270Z",
+    "sha": "e50d41607c7a6a6e23d0591ce65331e2b1fc35f7",
+    "at": "2026-10-30T17:14:24.254Z",
     "actor": "DESKTOP-56TH98Y:wt-b2b-vk",
     "title": "Săn khách sỉ Việt Kiều: phân khúc chợ / nhà phân phối thực phẩm Việt ở nước ngoài, mẫu 18 thành phố, đọc website tìm email trước",
     "summary": "",
     "tests": [
-      "9a811040: npm run typecheck sạch · npm run lint sạch · TEST_KHOI=K21 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K21 ĐẠT (testWholesaleIntlDiscovery có testVietKieu thuần + khối CSDL Việt Kiều trong testWholesaleLeadHunter) · npm run build exit 0 (ở e07fad6d; 9a811040 chỉ sửa một chuỗi trong bài kiểm) · 4 shard đầy đủ: để gates CI"
+      "e50d4160 (gộp origin/main 4a109710 + classifyEmailRole đa ngữ de/fr/es/it/nl/zh + bài kiểm «einkauf@» thật + docs §4g): npm run typecheck sạch · npm run lint sạch · TEST_KHOI=K21 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K21 ĐẠT (gồm testWholesaleEmailDiscovery 18 ca vai trò đa ngữ, testWholesaleIntlDiscovery Việt Kiều, khối CSDL Việt Kiều) · npm run build exit 0 · 4 shard đầy đủ: để gates CI"
     ]
   }
 }
