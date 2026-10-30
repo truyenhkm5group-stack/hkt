@@ -1,0 +1,8 @@
+{
+  "pr": 1100,
+  "sha": "8d64504ddf656781f11be59e19c7ca5e00e7cd10",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-30T11:43:01.258Z",
+  "note": "review lead: AI soạn nháp email chào hàng — dữ kiện thật (lead, bảng giá sỉ, báo giá đã duyệt, lời khai shop), qua resolveAi + checkAiQuota sẵn có, ghi platform_ai_usage feature b2b_email_draft; hàng rào thuần chặn số tiền/tiền tệ/chứng nhận/xuất khẩu/tồn kho/giao hàng/%/link/SĐT bịa + sai ngôn ngữ, chạy lại ở bản cuối; nháp không tự vào hộp thư đi, người duyệt + edit_ratio; mặc định TẮT, wholesal"
+}
