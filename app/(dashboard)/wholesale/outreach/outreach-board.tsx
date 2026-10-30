@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { approveOutreachAction, cancelOutreachAction, markOutreachSentAction, recordOutreachResultAction } from "@/lib/actions/wholesale";
+import { emailDraftFromOutreachAction } from "@/lib/actions/wholesale-email";
 import { formatTimeAgo } from "@/lib/format";
 import type { OutreachRow } from "@/lib/queries/wholesale";
 import { OUTREACH_CHANNEL_LABEL, OUTREACH_RESULT_LABEL, OUTREACH_RESULTS, OUTREACH_STATUS_LABEL, type OutreachChannel, type OutreachResult } from "@/lib/wholesale/constants";
@@ -95,6 +96,11 @@ function OutreachCard({ row, readOnly, callScript }: { row: OutreachRow; readOnl
               <Button size="sm" variant="secondary" disabled={pending} onClick={() => run(() => markOutreachSentAction(row.id), "Đã ghi «đã gửi»")}>
                 Đã gửi
               </Button>
+              {row.channel === "EMAIL" ? (
+                <Button size="sm" variant="secondary" disabled={pending} title="Máy gửi qua cổng chính sách (đồng ý · danh sách chặn · hạn mức) sau khi người duyệt — mở ở «Hộp thư đi»" onClick={() => run(() => emailDraftFromOutreachAction(row.id), "Đã đưa vào Hộp thư đi — duyệt ở đó")}>
+                  Đưa vào hộp thư đi
+                </Button>
+              ) : null}
               <Button size="sm" variant="ghost" disabled={pending} onClick={() => run(() => cancelOutreachAction(row.id), "Đã huỷ")}>
                 Huỷ
               </Button>

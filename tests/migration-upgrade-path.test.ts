@@ -211,6 +211,7 @@ const MOI = [
   "0261_wholesale_contact_consent",
   "0262_customer_fb_connections",
   "0263_wholesale_quotations",
+  "0264_wholesale_email_outbox",
 ] as const;
 
 /*
