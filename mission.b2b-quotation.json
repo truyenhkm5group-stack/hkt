@@ -3,7 +3,7 @@
   "mission_id": "b2b-quotation",
   "title": "Engine báo giá sỉ tất định (P1b)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-b2b-quote",
@@ -44,7 +44,24 @@
     "0263": "2026-10-27T07:01:43.325Z"
   },
   "created_at": "2026-10-27T06:58:57.050Z",
-  "updated_at": "2026-10-28T14:59:11.088Z",
-  "last_heartbeat": "2026-10-28T14:59:11.088Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-30T02:29:36.851Z",
+  "last_heartbeat": "2026-10-30T02:29:36.851Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/b2b-quotation",
+    "sha": "2bee8612f806d2710815952d5ccd63e8d217551a",
+    "at": "2026-10-30T02:29:36.851Z",
+    "actor": "DESKTOP-56TH98Y:wt-b2b-quote",
+    "title": "Báo giá sỉ tất định (P1b · 0263)",
+    "summary": "",
+    "tests": [
+      "npm run typecheck (sau merge main 2c5a83ae6): sạch",
+      "eslint các tệp chạm: sạch",
+      "tests/wholesale-quotation.test.ts (K21, thuần + tổ chức thật bg-si): ĐẠT",
+      "ui-consistency + nav, repo-integrity/append/unique, migration-serve-compat (có mục 0263), loading-ux-contract, saas-shell, migration-upgrade-path: ĐẠT (chạy riêng sau merge)",
+      "migration-journal: ĐỎ CHẤP NHẬN ĐƯỢC — idx nhảy 0261→0263 vì 0262 fb-crm chưa vào main; hết khi 0262 gộp (hoặc migration:renumber)",
+      "npm run build: ĐẠT ở d3cc1aa27 + sửa loading/shellAllows (trước merge main); sau merge chỉ chạy lại tsc",
+      "4 shard npm test: CHƯA chạy cục bộ — để gates CI"
+    ]
+  }
 }
