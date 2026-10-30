@@ -1,0 +1,8 @@
+{
+  "pr": 1108,
+  "sha": "2b7d71bf57bb20274c98a2a8486b7949b75bffe7",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-30T20:09:58.917Z",
+  "note": "review lead: E3 đọc thư trả lời — IMAP chỉ đọc (INBOX read-only, không đổi cờ/xoá/chuyển, có bài quét), dùng chính credential gws-smtp, chỉ tải nội dung thư nối luồng hoặc khớp đúng một lead, cắt trích + che dãy số dài, không tải đính kèm; huỷ bằng chữ ⇒ applyEmailUnsubscribe dùng chung; AI phân loại mặc định TẮT + trần, câu trích phải nguyên văn; hỏi giá ⇒ nháp báo giá DRAFT do máy lập chỉ khi gh"
+}
