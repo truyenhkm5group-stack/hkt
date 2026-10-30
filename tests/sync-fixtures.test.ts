@@ -556,6 +556,7 @@ import { testPilotOrders } from "./pilot-orders.test";
 import { testManualOrderOutcome } from "./manual-order-outcome.test";
 import { testPriceListsReceivables } from "./price-lists-receivables.test";
 import { testReorderReminders } from "./reorder-reminders.test";
+import { testFbCrm } from "./fb-crm.test";
 import { testSeafoodOs } from "./seafood-os.test";
 import { testAppointments } from "./appointments.test";
 import { testWarranty } from "./warranty.test";
@@ -621,6 +622,7 @@ import { testCarrierGhtk } from "./carrier-ghtk.test";
 import { testFashionCodF3 } from "./fashion-cod-f3.test";
 import { testWholesaleLeadHunter } from "./wholesale-lead-hunter.test";
 import { testWholesaleEmailDiscovery } from "./wholesale-email-discovery.test";
+import { testWholesaleIntlDiscovery } from "./wholesale-intl-discovery.test";
 import { testWholesaleConsent } from "./wholesale-consent.test";
 import { testWholesaleCatalogReadiness } from "./wholesale-catalog-readiness.test";
 import { testRestaurantTemplate } from "./restaurant.test";
@@ -3318,6 +3320,7 @@ async function main() {
     await testFashionCodF3();
     await testWholesaleLeadHunter();
     await testWholesaleEmailDiscovery();
+    await testWholesaleIntlDiscovery();
     await testWholesaleConsent();
     // P1c AI B2B: cổng sẵn sàng danh mục bán sỉ + xuất khẩu — hàm thuần (lib/wholesale/catalog-readiness.ts).
     testWholesaleCatalogReadiness();
@@ -3650,6 +3653,8 @@ async function main() {
     await testShippingCost(db);
     // Chủ shop tự duyệt lương theo khai báo org.owner (chủ shop 21/10/2026) — lib/constants/org-owner.ts.
     await testOrgOwner(db);
+    // Facebook Friend CRM lát 1 (0262): link do người dán · đã mua theo ORDER_OUTCOME · doanh thu thực chưa chứng từ ⇒ null · cách ly tổ chức.
+    await testFbCrm();
     testPgliteTestDirs();
     // ERP a11y + bố cục hẹp (Commercial Sweep PR G): h1 màn không tìm thấy, công tắc / ô số có tên, /payroll không tràn 390 px.
     testErpA11y();

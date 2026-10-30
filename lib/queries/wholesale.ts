@@ -12,7 +12,8 @@ import { SEARCH_PROVINCES } from "@/lib/wholesale/areas";
 import { DEFAULT_KEYWORD_GROUPS, paidCostMicros, type LeadHunterConfig } from "@/lib/wholesale/config";
 import { CONTACTED_STATUSES, INTERESTED_STATUSES, LEAD_SOURCE_LABEL, LEAD_STATUS_LABEL, NEGOTIATING_STATUSES, RESPONDED_STATUSES, type LeadSourceKey, type LeadStatus, isLeadStatus } from "@/lib/wholesale/constants";
 import { formatVnPhone, PHONE_KIND_LABEL, type PhoneKind } from "@/lib/wholesale/phone";
-import { enabledKeywords } from "@/lib/wholesale/query-plan";
+import { campaignCostEstimate } from "@/lib/wholesale/campaigns";
+import { type CostEstimate, enabledKeywords } from "@/lib/wholesale/query-plan";
 import { leadTemperature, type LeadTemperature } from "@/lib/wholesale/temperature";
 import { LEAD_SEGMENT_LABEL, isLeadSegmentKey, type LeadSegment } from "@/lib/wholesale/segments";
 import { billableCallsBySku, getLeadHunterConfig, vnStartOfMonth } from "@/lib/wholesale/store";
@@ -368,9 +369,14 @@ export type CampaignProgress = {
   qualified: number;
   apiCalls: number;
   costMicros: number;
+  /**
+   * Ước tính TRƯỚC khi quét (số truy vấn × đơn giá SKU) — chỉ cho mẫu và chiến dịch nháp, khi người gọi truyền cấu hình. Chưa
+   * trừ ô vừa quét lẫn lượt miễn phí của Google: đây là trần trên để quyết định có bấm hay không, không phải hoá đơn.
+   */
+  estimate: CostEstimate | null;
 };
 
-export async function campaignProgressList(): Promise<CampaignProgress[]> {
+export async function campaignProgressList(cfg?: Pick<LeadHunterConfig, "skuPriceUsdPer1000" | "maxPagesPerCell">): Promise<CampaignProgress[]> {
   const db = await getDb();
   const c = schema.wholesaleCampaigns;
   const camps = await db.select().from(c).orderBy(desc(c.isTemplate), desc(c.createdAt)).limit(60);
@@ -464,6 +470,7 @@ export async function campaignProgressList(): Promise<CampaignProgress[]> {
       qualified: Number(le?.qualified ?? 0),
       apiCalls: Number(us?.calls ?? 0),
       costMicros: Number(us?.micros ?? 0),
+      estimate: cfg && (x.isTemplate || x.status === "DRAFT") ? campaignCostEstimate(x, cfg) : null,
     };
   });
 }

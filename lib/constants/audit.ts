@@ -2,6 +2,9 @@
 export const AUDIT_ACTION_LABEL: Record<string, string> = {
   LOGIN: "Đăng nhập",
   LOGOUT: "Đăng xuất",
+  // Facebook Friend CRM (0262 · lib/fb-crm/service.ts): sổ ghi việc NGƯỜI làm bằng tay — ERP không tự kết bạn / nhắn.
+  FB_CRM_UPDATE: "Facebook CRM: cập nhật kết nối khách",
+  FB_CRM_TASK_CREATE: "Facebook CRM: tạo nhiệm vụ CSKH",
   // Sứ mệnh saas-ops-signals: bot ghi đơn KHÔNG thành (lib/sales-chatbot/order-signals.ts).
   "order.create_failed": "Bot ghi đơn hỏng (lõi đơn lỗi)",
   "order.validation_failed": "Bot ghi đơn bị từ chối (đơn không hợp lệ)",

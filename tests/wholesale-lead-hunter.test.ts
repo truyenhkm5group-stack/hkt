@@ -25,13 +25,13 @@ import { getHomeOrganization, invalidateOrganizations } from "@/lib/platform/org
 import { provisionOrganization } from "@/lib/platform/provision";
 import { parseListParams } from "@/lib/search-params";
 import { runJob } from "@/lib/sync/jobs";
-import { listWholesaleLeads, wholesaleDashboard } from "@/lib/queries/wholesale";
+import { campaignProgressList, listWholesaleLeads, wholesaleDashboard } from "@/lib/queries/wholesale";
 import { mobileHome, mobileQueue, nextLeadId } from "@/lib/queries/wholesale-mobile";
 import { callOutcomeEffect, PRICE_REQUEST_ACTION, zaloResultEffect } from "@/lib/wholesale/constants";
 import { areaCode, cellScanPriority, parseCustomAreas, provinceScanTier, SEARCH_PROVINCES, scanTier } from "@/lib/wholesale/areas";
 import { provinceRegion } from "@/lib/constants/vn-regions";
 import { fieldHandoffMessage, mapsLinkOf, sendLeadsToFieldCore, verifiedCallPatch } from "@/lib/wholesale/field-handoff";
-import { changeCampaignStateCore, createCampaignCore, hslcTemplateValues, previewCampaignCore, provincesOfTier, startCampaignCore } from "@/lib/wholesale/campaigns";
+import { changeCampaignStateCore, cloneCampaignCore, createCampaignCore, ensureTemplateCampaign, HSLC_INTL_TEMPLATE_KEY, hslcTemplateValues, previewCampaignCore, provincesOfTier, startCampaignCore } from "@/lib/wholesale/campaigns";
 import { DEFAULT_KEYWORD_GROUPS, DEFAULT_LEAD_HUNTER_CONFIG, DEFAULT_TARGET_SEGMENTS, freeTierLeft, mergeLeadHunterConfig, nextCallCostMicros, paidCostMicros, quotaRetryAt, skuCostMicros } from "@/lib/wholesale/config";
 import { branchHint, brandKey, chainBrandHit, nameAddressKey, socialKind, websiteDomain } from "@/lib/wholesale/dedupe";
 import { COMPETITOR_SWEEP_SETTING_KEY, purgeExpiredSnapshots, runLeadHunterTick, sweepCompetitors } from "@/lib/wholesale/engine";
@@ -1175,6 +1175,25 @@ async function testDb() {
       assert.equal(pubSnap?.nationalPhone, null);
       assert.ok(pubSnap?.purgedAt);
       assert.ok(await leadByPlace(P.pub.placeId), "lead (dữ liệu của tổ chức) vẫn còn");
+
+      // ── Mẫu thử quốc tế (27/10/2026): DRAFT, là mẫu, bắt buộc website; mở trang hai lần vẫn MỘT mẫu; không bắt đầu được;
+      //    «Dùng mẫu» ra một nháp — và không một lượt gọi Google nào (quét tốn tiền, chủ shop tự bấm) ──
+      const intlCallsBefore = seen.length;
+      await ensureTemplateCampaign();
+      await ensureTemplateCampaign();
+      const intlTpl = await db.query.wholesaleCampaigns.findMany({ where: eq(schema.wholesaleCampaigns.templateKey, HSLC_INTL_TEMPLATE_KEY) });
+      assert.equal(intlTpl.length, 1, "idempotent theo template_key");
+      const tpl = intlTpl[0]!;
+      assert.deepEqual([tpl.status, tpl.isTemplate, tpl.requireWebsite, tpl.requirePhone, tpl.discoveryTier], ["DRAFT", true, true, false, "ENTERPRISE"]);
+      assert.ok("error" in (await startCampaignCore(admin, tpl.id)), "mẫu không bao giờ tự chạy");
+      const intlClone = await cloneCampaignCore(admin, tpl.id);
+      assert.ok("ok" in intlClone);
+      const intlDraft = (await db.query.wholesaleCampaigns.findFirst({ where: eq(schema.wholesaleCampaigns.id, intlClone.id) }))!;
+      assert.deepEqual([intlDraft.status, intlDraft.isTemplate, intlDraft.requireWebsite], ["DRAFT", false, true]);
+      const intlProg = (await campaignProgressList(await getLeadHunterConfig())).filter((x) => x.id === tpl.id || x.id === intlDraft.id);
+      assert.equal(intlProg.length, 2);
+      for (const x of intlProg) assert.equal(x.estimate?.cellsToScan, 12, "thẻ mẫu / nháp in ước tính 12 truy vấn trước khi bấm");
+      assert.equal(seen.length, intlCallsBefore, "dựng mẫu / nhân bản / ước tính không gọi Google");
     });
   } finally {
     globalThis.fetch = savedFetch;
