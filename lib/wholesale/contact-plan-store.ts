@@ -22,6 +22,7 @@ import {
 } from "@/lib/wholesale/contact-plan";
 import { getEmailSettings } from "@/lib/wholesale/email-outbox-store";
 import { leadView } from "@/lib/wholesale/engine";
+import { COUNTRY_CONFIRM_OUTCOME, COUNTRY_LABEL, countryConfirmationOf, isKnownCountry, leadCountryOf, type LeadCountry, type LeadCountryInput } from "@/lib/wholesale/lead-country";
 
 /**
  * ═══════════ KẾ HOẠCH KÊNH — NẠP DỮ KIỆN + HÀNH ĐỘNG «ZALO KHÔNG GỬI ĐƯỢC» (CHỈ MÁY CHỦ) ═══════════
@@ -54,26 +55,62 @@ export async function contactPlansFor(leadIds: readonly string[]): Promise<Map<s
   }
   const s = schema.wholesaleSuppressions;
   const a = schema.wholesaleLeadActivities;
-  const [suppressions, consents, markers, settings] = await Promise.all([
+  const [suppressions, consents, markers, confirms, settings] = await Promise.all([
     values.size ? db.select({ kind: s.kind, value: s.value }).from(s).where(inArray(s.value, [...values])) : Promise.resolve([] as SuppressionRecord[]),
     consentRowsFor(ids),
     db
       .select({ leadId: a.leadId, outcome: a.outcome, meta: a.meta, createdAt: a.createdAt })
       .from(a)
       .where(and(inArray(a.leadId, ids), eq(a.kind, "ZALO"), inArray(a.outcome, [...ZALO_MARKER_OUTCOMES]))),
+    db
+      .select({ leadId: a.leadId, outcome: a.outcome, meta: a.meta, createdAt: a.createdAt })
+      .from(a)
+      .where(and(inArray(a.leadId, ids), eq(a.kind, "EDIT"), eq(a.outcome, COUNTRY_CONFIRM_OUTCOME))),
     getEmailSettings(),
   ]);
   const consentsBy = new Map<string, ConsentRecord[]>();
   for (const c of consents) consentsBy.set(c.leadId, [...(consentsBy.get(c.leadId) ?? []), c]);
   const markersBy = new Map<string, typeof markers>();
   for (const m of markers) markersBy.set(m.leadId, [...(markersBy.get(m.leadId) ?? []), m]);
-  for (const { lead, snap } of keys) out.set(lead.id, planFrom(lead, snap, consentsBy.get(lead.id) ?? [], suppressions, zaloMarkerOf(markersBy.get(lead.id) ?? []), settings.allowedCountries));
+  const confirmsBy = new Map<string, typeof confirms>();
+  for (const c of confirms) confirmsBy.set(c.leadId, [...(confirmsBy.get(c.leadId) ?? []), c]);
+  for (const { lead, snap } of keys) {
+    const country = leadCountryOf(countryInputOf(lead, snap, countryConfirmationOf(confirmsBy.get(lead.id) ?? [])));
+    out.set(lead.id, planFrom(lead, snap, country, consentsBy.get(lead.id) ?? [], suppressions, zaloMarkerOf(markersBy.get(lead.id) ?? []), settings.allowedCountries));
+  }
   return out;
 }
 
-function planFrom(lead: Lead, snap: Snap | null, consents: readonly ConsentRecord[], suppressions: readonly SuppressionRecord[], marker: ZaloMarker | null, allowedCountries: readonly string[]): ContactPlan {
+/** Dữ kiện có thật của lead cho thang nước — CHỈ chỗ này gom, mọi nơi hỏi nước đều đi qua đây. */
+export function countryInputOf(lead: Lead, snap: Snap | null, confirmedCountry: string | null): LeadCountryInput {
+  const live = snap && !snap.purgedAt ? snap : null;
+  return {
+    confirmedCountry,
+    provinceKey: lead.provinceKey,
+    phoneCountryCode: lead.phoneCountryCode,
+    phones: [lead.normalizedPhone, lead.phoneRaw, live?.internationalPhone ?? null],
+    websiteDomain: lead.websiteDomain ?? live?.websiteDomain ?? null,
+    email: lead.email,
+  };
+}
+
+/** Nước của MỘT lead (cổng nước của hộp thư đi, ngôn ngữ của AI soạn email) — cùng thang, cùng dữ kiện với kế hoạch kênh. */
+export async function leadCountryForLead(lead: Lead, snap?: Snap | null): Promise<LeadCountry> {
+  const db = await getDb();
+  const s = snap !== undefined ? snap : lead.placeId ? ((await db.query.wholesalePlaceSnapshots.findFirst({ where: eq(schema.wholesalePlaceSnapshots.placeId, lead.placeId) })) ?? null) : null;
+  const a = schema.wholesaleLeadActivities;
+  const rows = await db
+    .select({ outcome: a.outcome, meta: a.meta, createdAt: a.createdAt })
+    .from(a)
+    .where(and(eq(a.leadId, lead.id), eq(a.kind, "EDIT"), eq(a.outcome, COUNTRY_CONFIRM_OUTCOME)))
+    .orderBy(desc(a.createdAt))
+    .limit(5);
+  return leadCountryOf(countryInputOf(lead, s, countryConfirmationOf(rows)));
+}
+
+function planFrom(lead: Lead, snap: Snap | null, country: LeadCountry, consents: readonly ConsentRecord[], suppressions: readonly SuppressionRecord[], marker: ZaloMarker | null, allowedCountries: readonly string[]): ContactPlan {
   const v = leadView(lead, snap);
-  return contactPlanOf({ lead: { ...contactabilityLeadOf(lead, snap), provinceKey: lead.provinceKey, phoneKind: v.phoneKind, zaloStatus: lead.zaloStatus }, consents, suppressions, zaloMarker: marker, allowedCountries });
+  return contactPlanOf({ lead: { ...contactabilityLeadOf(lead, snap), phoneKind: v.phoneKind, zaloStatus: lead.zaloStatus }, country, consents, suppressions, zaloMarker: marker, allowedCountries });
 }
 
 /** Đồng ý của nhiều lead. CSDL chưa áp 0261 ⇒ rỗng (kết luận rơi về phía hẹp: máy không tự gửi). */
@@ -185,4 +222,36 @@ export async function undoZaloUndeliverableCore(user: SessionUser, leadId: strin
   });
   await audit({ userId: user.id, userEmail: user.email, action: "WHOLESALE_ZALO_UNDELIVERABLE_UNDO", entity: "WHOLESALE_LEAD", entityId: leadId, before: { marker: before.reason }, after: { marker: null }, reason: parsed.data.note || "Hoàn tác «Zalo không gửi được»" });
   return { ok: true };
+}
+
+const confirmSchema = z.object({
+  country: z.string().trim().toUpperCase().refine(isKnownCountry, "Chọn nước trong danh sách."),
+  note: z.string().trim().max(500).default(""),
+});
+
+/**
+ * NGƯỜI xác nhận nước của lead — chứng cứ mạnh nhất của thang (`leadCountryOf`). Ghi THÊM một dòng `EDIT` / `COUNTRY_CONFIRMED`
+ * (dòng mới nhất thắng; xác nhận lại là một dòng mới, không sửa / xoá dòng cũ). `wholesale:work` + phạm vi dữ liệu + audit.
+ */
+export async function confirmLeadCountryCore(user: SessionUser, leadId: string, raw: unknown, now = new Date()): Promise<CoreResult<{ country: string }>> {
+  const g = await gateLead(user, leadId);
+  if ("error" in g) return g;
+  const parsed = confirmSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const { country, note } = parsed.data;
+  const before = await leadCountryForLead(g.lead);
+  if (before.source === "CONFIRMED" && before.country === country) return { ok: true, country };
+  const db = await getDb();
+  await db.insert(schema.wholesaleLeadActivities).values({
+    leadId,
+    kind: "EDIT",
+    outcome: COUNTRY_CONFIRM_OUTCOME,
+    note: `Xác nhận nước: ${COUNTRY_LABEL[country]} (${country})${note ? ` — ${note}` : ""}`.slice(0, 2000),
+    meta: { country, before: before.country, beforeSource: before.source },
+    actorId: user.id,
+    actorName: user.name,
+    createdAt: now,
+  });
+  await audit({ userId: user.id, userEmail: user.email, action: "WHOLESALE_LEAD_COUNTRY", entity: "WHOLESALE_LEAD", entityId: leadId, before: { country: before.country, source: before.source }, after: { country, source: "CONFIRMED" }, reason: note || "Xác nhận nước của lead" });
+  return { ok: true, country };
 }

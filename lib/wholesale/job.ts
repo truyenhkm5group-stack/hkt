@@ -3,6 +3,7 @@ import { getDb, schema } from "@/db";
 import type { SyncTrigger } from "@/lib/sync/runner";
 import { runSyncJob } from "@/lib/sync/runner";
 import { runEmailOutboxJob } from "@/lib/wholesale/email-outbox";
+import { runEmailInboundJob } from "@/lib/wholesale/email-reply";
 import { runLeadHunterTick, type TickDeps, type TickResult } from "@/lib/wholesale/engine";
 import { autoPrepareForLead } from "@/lib/wholesale/outreach";
 import { getLeadHunterConfig } from "@/lib/wholesale/store";
@@ -36,7 +37,9 @@ export async function leadHunterHasWork(now = new Date()): Promise<boolean> {
 
 export async function runWholesaleLeadsJob(o: { trigger: SyncTrigger; actor: string; budgetMs?: number }, deps: TickDeps = {}): Promise<WholesaleJobOutcome> {
   const mail = await runEmailOutboxJob({ trigger: o.trigger, actor: o.actor });
-  const mailNote = "sent" in mail ? ` · ${mail.detail}` : "";
+  // E3: đọc thư trả lời (chỉ khi người cấu hình đã bật) — kèm lượt này, khoá riêng, lỗi hộp thư không làm hỏng phần quét.
+  const inbound = await runEmailInboundJob({ trigger: o.trigger, actor: o.actor }).catch((e: unknown) => ({ skipped: "ERROR", detail: `Đọc hộp thư lỗi: ${e instanceof Error ? e.message.slice(0, 160) : "không rõ"}` }));
+  const mailNote = `${"sent" in mail ? ` · ${mail.detail}` : ""}${"scanned" in inbound ? ` · ${inbound.detail}` : ""}`;
   if (!(await leadHunterHasWork())) return { skipped: "IDLE", detail: `Không chiến dịch nào đang chạy, không lead nào chờ bổ sung.${mailNote}` };
   const r = await runSyncJob({ source: "ERP", job: "wholesale-leads", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
     const tick = await runLeadHunterTick({ budgetMs: o.budgetMs ?? 50_000 }, deps);

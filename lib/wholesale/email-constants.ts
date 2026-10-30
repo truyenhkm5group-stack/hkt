@@ -22,10 +22,11 @@ export const EMAIL_SEND_MODES = ["DRY_RUN", "LIVE"] as const;
 export type EmailSendMode = (typeof EMAIL_SEND_MODES)[number];
 
 /**
- * Bộ chuyển nhà cung cấp THẬT đã có trong mã. RỖNG có chủ ý: chủ shop chưa chọn nhà cung cấp. Thêm một adapter là thêm một
- * tệp trong `lib/email-provider/` + một tên ở đây; cổng chính sách đọc danh sách này để từ chối LIVE khi chưa có gì.
+ * Bộ chuyển nhà cung cấp THẬT đã có trong mã — mỗi tên là một connector (`lib/connectors/registry.ts`). E2 (chủ shop chốt
+ * 30/10/2026): `gws-smtp` = Google Workspace SMTP. Có tên ở đây KHÔNG có nghĩa là gửi thật: chế độ mặc định vẫn TẮT, LIVE chỉ
+ * quản trị bật được và chỉ khi kết nối đã kiểm tra đạt + đang bật; kết nối tắt lúc chạy ⇒ thư nằm chờ kèm lý do.
  */
-export const LIVE_EMAIL_ADAPTERS: readonly string[] = [];
+export const LIVE_EMAIL_ADAPTERS: readonly string[] = ["gws-smtp"];
 
 /**
  * Trạng thái một thư trong hộp thư đi. DRAFT → (duyệt) APPROVED → (xếp gửi) QUEUED → (job nhận) SENDING → SENT · FAILED · BLOCKED.

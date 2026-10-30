@@ -19,21 +19,26 @@ import { getEnabledModules, invalidateCapabilities } from "@/lib/platform/capabi
 import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
-import { contactPlanOf, recipientCountryOf, zaloMarkerOf, ZALO_MARK_OUTCOME, ZALO_UNMARK_OUTCOME, type ContactPlanInput } from "@/lib/wholesale/contact-plan";
-import { contactPlansFor, markZaloUndeliverableCore, undoZaloUndeliverableCore } from "@/lib/wholesale/contact-plan-store";
+import { contactPlanOf, zaloMarkerOf, ZALO_MARK_OUTCOME, ZALO_UNMARK_OUTCOME, type ContactPlanInput } from "@/lib/wholesale/contact-plan";
+import { confirmLeadCountryCore, contactPlansFor, markZaloUndeliverableCore, undoZaloUndeliverableCore } from "@/lib/wholesale/contact-plan-store";
 import { DEFAULT_EMAIL_SETTINGS, type EmailSettings } from "@/lib/wholesale/email-constants";
 import { saveEmailAllowedCountriesCore } from "@/lib/wholesale/email-countries";
 import { emailDraftForLeadCore } from "@/lib/wholesale/email-outbox";
 import { getEmailSettings } from "@/lib/wholesale/email-outbox-store";
 import { evaluateEmailSend, type EmailPolicyInput } from "@/lib/wholesale/email-policy";
+import { leadCountryOf } from "@/lib/wholesale/lead-country";
 
 const ORG = "wr-a";
 
 // ─────────────────────────── 1. MA TRẬN KÊNH (THUẦN) ───────────────────────────
 
-function input(over: Partial<ContactPlanInput["lead"]> = {}, rest: Partial<Omit<ContactPlanInput, "lead">> = {}): ContactPlanInput {
+/** Nước đi qua ĐÚNG thang chứng cứ của máy chủ (`leadCountryOf`), không gõ tay — bài kiểm không có luật thứ hai. */
+function input(over: Partial<ContactPlanInput["lead"]> & { provinceKey?: string | null } = {}, rest: Partial<Omit<ContactPlanInput, "lead" | "country">> = {}): ContactPlanInput {
+  const { provinceKey = "da nang", ...rest0 } = over;
+  const lead = { contactStatus: "QUALIFIED", placeId: null, phone: "+84905123456", phoneKind: "MOBILE", email: null, websiteDomain: "quan.vn", zaloStatus: null, ...rest0 };
   return {
-    lead: { contactStatus: "QUALIFIED", placeId: null, phone: "+84905123456", phoneKind: "MOBILE", email: null, websiteDomain: "quan.vn", provinceKey: "da nang", zaloStatus: null, ...over },
+    lead,
+    country: leadCountryOf({ confirmedCountry: null, provinceKey, phoneCountryCode: null, phones: [lead.phone], websiteDomain: lead.websiteDomain, email: lead.email }),
     consents: [],
     suppressions: [],
     zaloMarker: null,
@@ -82,11 +87,12 @@ function testMatrix() {
   const consented = contactPlanOf(input({ provinceKey: "intl jp", email: "buyer@tokyo-foods.jp" }, { consents: [{ channel: "EMAIL", contactValue: "buyer@tokyo-foods.jp", basis: "OPT_IN_FORM", revokedAt: null }], allowedCountries: ["JP"] }));
   assert.deepEqual([consented.emailGate?.allowed, consented.countryReviewed], [true, true]);
 
-  // Nước người nhận.
-  assert.equal(recipientCountryOf("intl jp"), "JP");
-  assert.equal(recipientCountryOf("da nang"), "VN");
-  assert.equal(recipientCountryOf(null), "VN", "lead không khoá tỉnh là lead trong nước");
-  assert.equal(recipientCountryOf("intl xx"), null, "nước không nhận ra ⇒ null, không đoán");
+  // Chưa biết nước ⇒ làn «thiếu căn cứ nước», KHÔNG tự xếp vào «trong nước — Zalo» (bất đồng cũ: thiếu khoá tỉnh = VN).
+  const unknown = contactPlanOf(input({ provinceKey: null, phone: null, phoneKind: null, websiteDomain: null, email: "buyer@gmail.com" }));
+  assert.deepEqual([unknown.track, unknown.channel, unknown.country], ["COUNTRY_UNKNOWN", null, null]);
+  assert.equal(contactPlanOf(input({ provinceKey: null, phone: "+1 415 555 0100", phoneKind: null, websiteDomain: "pacificseafood.com", email: "b@pacificseafood.com" })).track, "COUNTRY_UNKNOWN", "+1 dùng chung Mỹ/Canada + .com ⇒ chưa biết");
+  assert.equal(contactPlanOf(input({ provinceKey: null, phone: null, phoneKind: null, websiteDomain: "fisch.de", email: "a@fisch.de" })).track, "INTL_EMAIL", "lead không khoá tỉnh nhưng tên miền .de ⇒ nước ngoài, đi email");
+  assert.equal(contactPlanOf(input({ contactStatus: "DO_NOT_CONTACT", provinceKey: null, phone: null, phoneKind: null, websiteDomain: null })).track, "STOPPED", "dừng thắng cả khi chưa biết nước");
 
   // Dấu Zalo: dòng mới nhất giữa đánh dấu / hoàn tác quyết định; dòng thiếu lý do bị bỏ.
   const t = (m: number) => new Date(Date.UTC(2026, 9, 30, 2, m));
@@ -209,6 +215,19 @@ async function testDb() {
       await db.insert(schema.wholesaleSuppressions).values({ kind: "EMAIL", value: "chu@quanzalo.vn", reason: "khách xin thôi" });
       assert.equal((await contactPlansFor([quan.id])).get(quan.id)?.track, "STOPPED");
 
+      // Chưa biết nước (không ô quét · SĐT +1 dùng chung · .com) ⇒ làn «thiếu căn cứ nước»; NGƯỜI xác nhận ⇒ vào đúng làn.
+      const hub = await mk({ businessName: "Seafood Hub", email: "buy@seafoodhub.com", phoneRaw: "+1 604 555 0100", websiteDomain: "seafoodhub.com" });
+      assert.equal((await contactPlansFor([hub.id])).get(hub.id)?.track, "COUNTRY_UNKNOWN");
+      assert.match(JSON.stringify(await emailDraftForLeadCore(sale, hub.id, { useAi: false })), /Thiếu căn cứ nước/, "chưa biết nước ⇒ không soạn email");
+      assert.ok("error" in (await confirmLeadCountryCore(viewer, hub.id, { country: "CA" })), "không có wholesale:work ⇒ từ chối");
+      assert.ok("error" in (await confirmLeadCountryCore(sale, hub.id, { country: "XX" })), "mã nước lạ ⇒ từ chối");
+      assert.ok("ok" in (await confirmLeadCountryCore(sale, hub.id, { country: "us", note: "khách nói ở Seattle" }, new Date(Date.now() - 5_000))));
+      assert.deepEqual([(await contactPlansFor([hub.id])).get(hub.id)?.track, (await contactPlansFor([hub.id])).get(hub.id)?.country], ["INTL_EMAIL", "US"]);
+      assert.ok("ok" in (await confirmLeadCountryCore(sale, hub.id, { country: "CA", note: "sửa lại: chi nhánh Vancouver" })));
+      const hubRows = await db.select().from(schema.wholesaleLeadActivities).where(and(eq(schema.wholesaleLeadActivities.leadId, hub.id), eq(schema.wholesaleLeadActivities.kind, "EDIT")));
+      assert.equal(hubRows.length, 2, "xác nhận lại là một dòng MỚI, không sửa dòng cũ");
+      assert.equal((await contactPlansFor([hub.id])).get(hub.id)?.country, "CA", "dòng mới nhất thắng");
+
       // Danh sách nước: chỉ quản trị, bắt buộc lý do, mã lạ bị chặn, có audit; kế hoạch đọc lại.
       assert.ok("error" in (await saveEmailAllowedCountriesCore(manager, { countries: ["JP"], reason: "Đã rà luật Nhật với luật sư 29/10" })), "MANAGER có wholesale:config vẫn không sửa được");
       assert.ok("error" in (await saveEmailAllowedCountriesCore(admin, { countries: ["JP"], reason: "ok" })), "lý do bắt buộc");
@@ -229,6 +248,7 @@ async function testDb() {
 function testEveryEmailPathAsksLane() {
   const outbox = readFileSync("lib/wholesale/email-outbox.ts", "utf8");
   const ai = readFileSync("lib/wholesale/email-ai-draft.ts", "utf8");
+  const sequence = readFileSync("lib/wholesale/email-sequence-core.ts", "utf8");
   // Thân hàm = từ dòng khai báo tới khai báo `export` kế tiếp (kho ghim LF ở tầng .gitattributes).
   const between = (src: string, fn: string) => {
     const start = src.indexOf(`export async function ${fn}`);
@@ -239,7 +259,8 @@ function testEveryEmailPathAsksLane() {
   assert.match(between(outbox, "emailDraftFromOutreachCore"), /emailLaneRefusal\(/, "soạn từ lời chào hỏi làn");
   assert.match(between(ai, "aiDraftEmailCore"), /emailLaneRefusal\(/, "AI soạn nháp hỏi làn (trước khi tốn lượt AI)");
   assert.match(between(ai, "promoteAiDraftCore"), /emailLaneRefusal\(/, "đưa nháp AI vào hộp thư đi hỏi làn");
-  for (const src of [outbox, ai]) {
+  assert.match(sequence.slice(sequence.indexOf("insert(schema.wholesaleEmailOutbox)") - 3000, sequence.indexOf("insert(schema.wholesaleEmailOutbox)")), /emailLaneRefusal\(/, "thư nhắc từ mẫu hỏi làn trước khi tạo thư");
+  for (const src of [outbox, ai, sequence]) {
     const inserts = (src.match(/\.insert\(schema\.wholesaleEmailOutbox\)/g) ?? []).length;
     assert.ok(inserts <= 1, "mỗi tệp chỉ một chỗ tạo thư — chỗ mới phải đi qua emailLaneRefusal");
   }

@@ -6,7 +6,7 @@ import { normalizeProvince, provinceRegion } from "@/lib/constants/vn-regions";
 import { vnDateKey } from "@/lib/format";
 import { placesRelayOf, type PlaceRecord, type PlacesClientDeps } from "@/lib/integrations/google-places/client";
 import { searchProvince } from "@/lib/wholesale/areas";
-import { intlCellContext, intlSearchProvince, isIntlProvinceKey } from "@/lib/wholesale/areas-intl";
+import { INTL_KEY_PREFIX, intlCellContext, intlSearchProvince, isIntlProvinceKey } from "@/lib/wholesale/areas-intl";
 import { freeTierLeft, nextCallCostMicros, quotaRetryAt, type LeadHunterConfig, type PlacesSku } from "@/lib/wholesale/config";
 import { ACTIVE_PIPELINE_STATUSES, type PauseReason, PAUSE_REASON_LABEL } from "@/lib/wholesale/constants";
 import { competitorHit } from "@/lib/wholesale/competitor";
@@ -808,6 +808,28 @@ async function processDetails(ctx: Ctx, lead: Lead): Promise<"DID_WORK" | "STOP"
   return "DID_WORK";
 }
 
+/**
+ * THỨ TỰ ĐỌC WEBSITE (chủ shop 30/10/2026 — «tìm email của khách sỉ Việt Kiều»). Ở nước ngoài email là kênh liên hệ DUY NHẤT
+ * ERP có (SĐT nước ngoài chưa chuẩn hoá), mà lead quốc tế điểm thấp hơn (0 điểm vị trí, không SĐT) nên xếp theo điểm thuần
+ * thì chúng luôn đứng cuối hàng 5 lead / lượt. Hạng: 0 = nhóm Việt Kiều · 1 = lead quốc tế khác · 2 = trong nước; TRONG
+ * cùng hạng vẫn theo điểm. Chỉ đổi THỨ TỰ, không đổi ai được đọc — lead trong nước vẫn được đọc, chỉ sau. HÀM THUẦN, và
+ * `websiteEnrichQueue` dựng câu SQL từ CHÍNH các hằng số này.
+ */
+export const WEBSITE_ENRICH_FIRST_SEGMENTS: readonly LeadSegment[] = ["VIET_DIASPORA_GROCERY", "VIET_FOOD_DISTRIBUTOR"];
+
+export function websiteEnrichRank(lead: { segment: string | null; provinceKey: string | null }): 0 | 1 | 2 {
+  if (lead.segment && (WEBSITE_ENRICH_FIRST_SEGMENTS as readonly string[]).includes(lead.segment)) return 0;
+  return isIntlProvinceKey(lead.provinceKey) ? 1 : 2;
+}
+
+/** Hàng đợi đọc website của một lượt: lead sẵn sàng, chờ đọc, xếp theo `websiteEnrichRank` rồi điểm. */
+export async function websiteEnrichQueue(limit: number): Promise<Lead[]> {
+  const db = await getDb();
+  const l = schema.wholesaleLeads;
+  const rank = sql`case when ${inArray(l.segment, [...WEBSITE_ENRICH_FIRST_SEGMENTS])} then 0 when ${l.provinceKey} like ${`${INTL_KEY_PREFIX}%`} then 1 else 2 end`;
+  return db.select().from(l).where(and(eq(l.websiteStatus, "PENDING"), eq(l.enrichmentStatus, "READY"))).orderBy(rank, sql`${l.leadScore} desc nulls last`, asc(l.id)).limit(limit);
+}
+
 /** Đọc website công khai của một lead; mỗi phát hiện lưu kèm URL nguồn. Dữ liệu tổ chức chỉ được điền vào Ô TRỐNG. */
 export async function enrichLeadWebsite(ctx: Pick<Ctx, "cfg" | "now" | "stats" | "enricher">, lead: Lead): Promise<void> {
   const db = await getDb();
@@ -1068,7 +1090,7 @@ export async function runLeadHunterTick(opts: TickOptions = {}, deps: TickDeps =
 
   // 3. Website (không tính tiền, chỉ tốn thời gian) — tối đa 5 lead / lượt.
   if (cfg.websiteEnrichment.enabled) {
-    const queue = await db.select().from(l).where(and(eq(l.websiteStatus, "PENDING"), eq(l.enrichmentStatus, "READY"))).orderBy(sql`${l.leadScore} desc nulls last`, asc(l.id)).limit(5);
+    const queue = await websiteEnrichQueue(5);
     for (const lead of queue) {
       if (!timeLeft()) break;
       await enrichLeadWebsite(ctx, lead);

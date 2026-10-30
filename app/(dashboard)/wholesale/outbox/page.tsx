@@ -17,6 +17,8 @@ import { EMAIL_COUNTRY_CHOICES } from "@/lib/wholesale/email-countries";
 import { AiDraftSettings, AiDraftsPanel } from "@/app/(dashboard)/wholesale/outbox/ai-drafts-panel";
 import { listAiDrafts } from "@/lib/queries/wholesale-email-ai-drafts";
 import { getEmailAiSettings } from "@/lib/wholesale/email-ai-draft";
+import { getEmailInboundSettings } from "@/lib/wholesale/email-reply";
+import { EmailInboundSettingsForm } from "@/app/(dashboard)/wholesale/outbox/email-inbound-panel";
 import { SequencePanel, SequenceSettingsForm } from "@/app/(dashboard)/wholesale/outbox/sequence-panel";
 import { loadSequenceBoard } from "@/lib/wholesale/email-sequence-core";
 
@@ -38,7 +40,7 @@ export default async function WholesaleOutboxPage({ searchParams }: { searchPara
   if (decision.allow === "NONE") return <ScopeDenied title="Hộp thư đi sỉ" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const view: OutboxView = (OUTBOX_VIEWS as readonly string[]).includes(String(raw.view)) ? (raw.view as OutboxView) : "open";
-  const [settings, rows, counts, candidates, campaigns, aiDrafts, aiSettings, sequence] = await Promise.all([
+  const [settings, rows, counts, candidates, campaigns, aiDrafts, aiSettings, sequence, inboundSettings] = await Promise.all([
     getEmailSettings(),
     listOutbox(decision, view),
     outboxCounts(decision),
@@ -47,6 +49,7 @@ export default async function WholesaleOutboxPage({ searchParams }: { searchPara
     listAiDrafts(decision),
     getEmailAiSettings(),
     loadSequenceBoard(decision),
+    getEmailInboundSettings(),
   ]);
   const unavailable = "unavailable" in rows;
   const list = unavailable ? [] : rows;
@@ -107,6 +110,12 @@ export default async function WholesaleOutboxPage({ searchParams }: { searchPara
               <div className="mt-4 border-t pt-3">
                 <div className="mb-2 text-sm font-semibold">AI soạn email (mặc định TẮT — bật phải khai trần nháp và chi phí / ngày)</div>
                 <AiDraftSettings settings={aiSettings} />
+              </div>
+            ) : null}
+            {isConfig ? (
+              <div className="mt-4 border-t pt-3">
+                <div className="mb-2 text-sm font-semibold">Thư trả lời của khách (mặc định TẮT — phân loại AI phải khai trần thư và chi phí / ngày)</div>
+                <EmailInboundSettingsForm settings={inboundSettings} />
               </div>
             ) : null}
             {isConfig && !("unavailable" in sequence) ? (

@@ -177,6 +177,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   WHOLESALE_EMAIL_AI_DRAFT: "AI soạn nháp email chào hàng sỉ",
   WHOLESALE_EMAIL_AI_PROMOTE: "Duyệt nháp email AI vào hộp thư đi",
   WHOLESALE_EMAIL_AI_CONFIG: "Sửa cấu hình AI soạn email (bật / trần / ngày)",
+  // E3 · đọc & phân loại thư trả lời (lib/wholesale/email-reply.ts) — bật đọc hộp thư / phân loại AI kèm trần.
+  WHOLESALE_EMAIL_INBOUND_CONFIG: "Sửa cấu hình đọc / phân loại thư trả lời khách sỉ",
   WHOLESALE_EMAIL_SEQUENCE_CONFIG: "Sửa chuỗi thư nhắc (số lần · số ngày chờ · mẫu)",
   WHOLESALE_EMAIL_FOLLOWUP_DRAFT: "Soạn thư nhắc của chuỗi theo dõi (mẫu)",
 };

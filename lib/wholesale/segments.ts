@@ -34,6 +34,9 @@ export const LEAD_SEGMENTS = [
   "ASIAN_FOOD_WHOLESALE",
   "FOODSERVICE_DISTRIBUTOR",
   "PRIVATE_LABEL_OEM",
+  // ── Khách sỉ Việt Kiều (30/10/2026) — chỉ ô quốc tế, xem `VIET_RULE`. ──
+  "VIET_DIASPORA_GROCERY",
+  "VIET_FOOD_DISTRIBUTOR",
 ] as const;
 export type LeadSegment = (typeof LEAD_SEGMENTS)[number];
 
@@ -63,6 +66,8 @@ export const LEAD_SEGMENT_LABEL: Record<LeadSegment, string> = {
   ASIAN_FOOD_WHOLESALE: "Bán sỉ / nhập khẩu thực phẩm châu Á (B2B)",
   FOODSERVICE_DISTRIBUTOR: "Nhà cung cấp HORECA / phân phối thực phẩm (B2B)",
   PRIVATE_LABEL_OEM: "Nhãn riêng / OEM thực phẩm (B2B)",
+  VIET_DIASPORA_GROCERY: "Cửa hàng / siêu thị / chợ Việt ở nước ngoài (Việt Kiều)",
+  VIET_FOOD_DISTRIBUTOR: "Nhà phân phối / bán sỉ thực phẩm Việt ở nước ngoài (Việt Kiều)",
 };
 
 /**
@@ -97,6 +102,11 @@ export const SEGMENT_POINTS: Record<LeadSegment, { fit: number; intent: number }
   ASIAN_FOOD_WHOLESALE: { fit: 27, intent: 11 },
   FOODSERVICE_DISTRIBUTOR: { fit: 20, intent: 8 },
   PRIVATE_LABEL_OEM: { fit: 18, intent: 7 },
+  // Việt Kiều (chủ shop 30/10/2026): cửa hàng / chợ Việt ở nước ngoài bán lại ĐÚNG đặc sản Việt đóng gói (chả mực, ruốc,
+  // nước mắm) cho cộng đồng người Việt — như cửa hàng đặc sản trong nước nhưng mua xuyên biên giới (cần chứng từ xuất
+  // khẩu) nên ý định mua để dưới trần. Nhà phân phối thực phẩm Việt mua theo lô lớn hơn, cùng mặt hàng.
+  VIET_DIASPORA_GROCERY: { fit: 30, intent: 12 },
+  VIET_FOOD_DISTRIBUTOR: { fit: 29, intent: 12 },
 };
 
 /** Mã loại hình Google Places (Table A) ⇒ nhóm. Thứ tự ưu tiên xử lý ở `classifySegment`. */
@@ -234,6 +244,40 @@ function stemFold(raw: string | null | undefined): string {
     .trim()} `;
 }
 
+/**
+ * ═══ VIỆT KIỀU (chủ shop 30/10/2026) — chỉ ô quốc tế ═══
+ *
+ * Cần HAI chứng cứ cùng lúc, cả hai đọc từ dữ liệu có thật:
+ *  (1) DẤU HIỆU VIỆT trong TÊN — «Viet», «Vietnamese», «Saigon», «Hà Nội», «Phở», «Mekong», hoặc chữ «Việt Nam» ở tiếng
+ *      Đức / Pháp / Séc / Ba Lan / Nhật / Hàn / Trung (khớp chuỗi con «vietnam», «wietnam», «ベトナム», «베트남», «越南»);
+ *  (2) LOẠI HÌNH KINH DOANH — bán sỉ / phân phối (chữ trong tên hoặc loại hình `wholesaler`) ⇒ `VIET_FOOD_DISTRIBUTOR`;
+ *      cửa hàng / siêu thị / chợ (chữ trong tên hoặc loại hình grocery / supermarket / market…) ⇒ `VIET_DIASPORA_GROCERY`.
+ * Có dấu hiệu Việt mà không rõ loại hình (vd quán phở chỉ mang loại hình `restaurant`) ⇒ KHÔNG gắn nhóm Việt Kiều, đi
+ * tiếp các luật khác — quán phở là nhà hàng, không phải chợ. Chỉ có loại hình mà không có dấu hiệu Việt (một «Asia
+ * Markt» bất kỳ) ⇒ cũng không: không đoán chủ là người Việt. `evidence` ghi CẢ HAI chứng cứ.
+ */
+const VIET_MARKER_WORDS = ["viet", "vietnamese", "vietnam", "viet nam", "saigon", "sai gon", "little saigon", "hanoi", "ha noi", "pho", "mekong", "danang", "da nang"];
+const VIET_MARKER_STEMS = ["vietnam", "wietnam", "ベトナム", "베트남", "越南"];
+const VIET_DISTRIBUTOR_WORDS = ["wholesale", "wholesaler", "wholesalers", "distributor", "distributors", "distribution", "import", "importer", "importers", "imports", "trading", "cash and carry", "velkoobchod", "hurtownia", "grossiste"];
+const VIET_DISTRIBUTOR_STEMS = ["großhandel", "卸", "도매", "批發"];
+const VIET_GROCERY_WORDS = ["grocery", "groceries", "supermarket", "supermarkets", "market", "markets", "mart", "minimart", "mini mart", "food store", "epicerie", "markt", "supermarkt", "supermarche", "potraviny", "sklep", "chợ", "siêu thị", "tạp hóa", "tạp hoá"];
+const VIET_GROCERY_STEMS = ["食材", "スーパー", "식품", "마트", "超市", "雜貨", "食品行"];
+const VIET_GROCERY_TYPES = ["grocery_store", "asian_grocery_store", "supermarket", "hypermarket", "food_store", "market", "convenience_store"];
+
+/** Nhóm Việt Kiều nếu đủ hai chứng cứ (xem trên), không thì `null`. HÀM THUẦN. */
+export function vietDiasporaSegment(input: SegmentInput): SegmentResult | null {
+  const marker = nameWordHit(input.name, VIET_MARKER_WORDS) ?? nameStemHit(input.name, VIET_MARKER_STEMS);
+  if (!marker) return null;
+  const types = [input.primaryType ?? "", ...(input.types ?? [])];
+  const dist = nameWordHit(input.name, VIET_DISTRIBUTOR_WORDS) ?? nameStemHit(input.name, VIET_DISTRIBUTOR_STEMS) ?? (types.includes("wholesaler") ? "loại hình wholesaler" : null);
+  if (dist) return { segment: "VIET_FOOD_DISTRIBUTOR", evidence: `tên có «${marker}» + ${dist.startsWith("loại hình") ? dist : `«${dist}»`}` };
+  const shopType = types.find((t) => VIET_GROCERY_TYPES.includes(t));
+  const shop = nameWordHit(input.name, VIET_GROCERY_WORDS) ?? nameStemHit(input.name, VIET_GROCERY_STEMS);
+  if (shop) return { segment: "VIET_DIASPORA_GROCERY", evidence: `tên có «${marker}» + «${shop}»` };
+  if (shopType) return { segment: "VIET_DIASPORA_GROCERY", evidence: `tên có «${marker}» + loại hình «${shopType}»` };
+  return null;
+}
+
 /** Chuỗi con đầu tiên trong `stems` có mặt trong tên (xem `B2B_RULES`). HÀM THUẦN. */
 export function nameStemHit(name: string | null | undefined, stems: readonly string[]): string | null {
   const hay = stemFold(name);
@@ -318,6 +362,8 @@ export function nameWordHit(name: string | null | undefined, words: readonly str
 export function classifySegment(input: SegmentInput, opts: { b2b?: boolean } = {}): SegmentResult {
   const b2b = opts.b2b === true;
   if (b2b) {
+    const viet = vietDiasporaSegment(input);
+    if (viet) return viet;
     for (const rule of B2B_RULES) {
       const hit = nameWordHit(input.name, rule.words) ?? nameStemHit(input.name, rule.stems);
       if (hit) return { segment: rule.segment, evidence: `tên có «${hit}»` };

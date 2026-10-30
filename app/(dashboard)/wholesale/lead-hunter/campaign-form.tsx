@@ -20,7 +20,7 @@ type GroupOpt = { key: string; label: string; keywords: string[]; enabled: boole
 /** Nước quốc tế: «tỉnh» là nước, «khu vực» là thành phố — cùng ô chọn với tỉnh trong nước. */
 type CountryOpt = { key: string; label: string; areas: { code: string; name: string }[] };
 
-const LANG_LABEL: Record<string, string> = { vi: "VN", en: "EN", ja: "日本語", ko: "한국어", "zh-Hant": "繁中", de: "DE", fr: "FR" };
+const LANG_LABEL: Record<string, string> = { vi: "VN", "vi-kieu": "Việt ở nước ngoài", en: "EN", ja: "日本語", ko: "한국어", "zh-Hant": "繁中", de: "DE", fr: "FR" };
 
 const SELECTABLE_SEGMENTS = LEAD_SEGMENTS.filter((s) => s !== "NOT_FIT" && s !== "UNCLASSIFIED" && s !== "OTHER_FOOD");
 
