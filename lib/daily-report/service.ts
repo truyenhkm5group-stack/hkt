@@ -175,7 +175,10 @@ export async function gatherDailyFacts(now: Date = new Date()): Promise<DailyFac
 
 type AiWrite = { status: AiStatus; summary: string | null; highlights: string[]; note: string; blocked: string[]; model: string | null; costUsd: number | null };
 
-/** AI viết lời trong trần chi phí; số bịa ⇒ chặn. Không ném. */
+/**
+ * AI viết lời trong trần chi phí; số bịa ⇒ chặn. Không ném. Loại việc ghi sổ = `copilot` (trợ lý điều hành đọc số của ERP — đã có trong
+ * AI_USAGE_WORKLOADS và CHECK của lược đồ, không cần migration); tính năng `daily_report` vẫn tách riêng để đếm trần / ngày.
+ */
 export async function writeWithAi(facts: DailyFacts, cfg: DailyReportConfig, now: Date): Promise<AiWrite> {
   const skip = (note: string): AiWrite => ({ status: "SKIPPED", summary: null, highlights: [], note, blocked: [], model: null, costUsd: null });
   if (cfg.maxCostUsdPerDay === null) return skip("chưa khai trần chi phí AI / ngày");
@@ -193,7 +196,7 @@ export async function writeWithAi(facts: DailyFacts, cfg: DailyReportConfig, now
     const res = await provider.complete({ system: DAILY_REPORT_SYSTEM, messages: [{ role: "user", content: [{ type: "text", text: `DỮ KIỆN (ngày ${facts.date}):\n${factsText(facts)}` }] }], tools: [], maxTokens: 700, reasoning: "low" });
     const model = res.model || provider.model;
     const costUsd = estimateCostUsd(model, res.usage);
-    await recordAiUsage({ orgCode: org.code, feature: "daily_report", workload: null, source, provider: provider.name, model, requests: 1, inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens, costUsd, status: "OK", actorId: null, ref: `daily-report:${facts.date}` }).catch(() => undefined);
+    await recordAiUsage({ orgCode: org.code, feature: "daily_report", workload: "copilot", source, provider: provider.name, model, requests: 1, inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens, costUsd, status: "OK", actorId: null, ref: `daily-report:${facts.date}` }).catch(() => undefined);
     const text = res.content
       .filter((x): x is Extract<typeof x, { type: "text" }> => x.type === "text")
       .map((x) => x.text)
@@ -205,7 +208,7 @@ export async function writeWithAi(facts: DailyFacts, cfg: DailyReportConfig, now
     if (blocked.length) return { status: "BLOCKED", summary: null, highlights: [], note: `số không có trong khối số: ${blocked.slice(0, 6).join(", ")}`, blocked, model, costUsd };
     return { status: "OK", summary: parsed.summary, highlights: parsed.highlights, note: "", blocked: [], model, costUsd };
   } catch (e) {
-    await recordAiUsage({ orgCode: org.code, feature: "daily_report", workload: null, source, provider: provider.name, model: provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: null, ref: `daily-report:${facts.date}` }).catch(() => undefined);
+    await recordAiUsage({ orgCode: org.code, feature: "daily_report", workload: "copilot", source, provider: provider.name, model: provider.model, requests: 1, inputTokens: null, outputTokens: null, costUsd: null, status: "ERROR", actorId: null, ref: `daily-report:${facts.date}` }).catch(() => undefined);
     return { status: "ERROR", summary: null, highlights: [], note: e instanceof Error ? e.message.slice(0, 160) : "lỗi không rõ", blocked: [], model: provider.model, costUsd: null };
   }
 }

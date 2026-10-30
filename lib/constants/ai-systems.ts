@@ -236,7 +236,7 @@ export const AI_SYSTEMS: readonly AiSystem[] = [
     purpose: "Viết lời tóm tắt + 3 điểm cần chú ý từ khối SỐ do máy gom bằng các hàm báo cáo sẵn có; hàng rào chặn mọi con số không có trong khối số",
     facesEndCustomer: false,
     features: ["daily_report"],
-    workloads: [],
+    workloads: ["copilot"],
     callSites: ["lib/daily-report/service.ts"],
     providers: ["anthropic-byok", "openai-byok", ...PLATFORM_AI_PROVIDERS.map((p) => `platform:${p}`)],
     model: { defaults: SALES_DEFAULT_MODELS, runtimeSource: "lib/daily-report/service.ts → getBuilderAi — kết nối của tổ chức / AI nhà / khoá nền tảng, đọc lúc chạy" },
