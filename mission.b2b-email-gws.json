@@ -3,7 +3,7 @@
   "mission_id": "b2b-email-gws",
   "title": "Gửi email thật qua Google Workspace SMTP (E2)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-gws",
@@ -23,7 +23,24 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-30T10:46:01.706Z",
-  "updated_at": "2026-10-30T10:46:01.706Z",
-  "last_heartbeat": "2026-10-30T10:46:01.706Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-30T16:22:03.988Z",
+  "last_heartbeat": "2026-10-30T16:22:03.988Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/b2b-email-gws",
+    "sha": "84654217c2510d0039f87903e2e06a1eda152a00",
+    "at": "2026-10-30T16:22:03.988Z",
+    "actor": "DESKTOP-56TH98Y:wt-b2b-gws",
+    "title": "Gửi email thật qua Google Workspace SMTP (E2)",
+    "summary": "E2 gửi email thật qua Google Workspace SMTP: connector gws-smtp (PER_ORG, App Password mã hoá, testConnection = SMTP verify), adapter nodemailer, LIVE_EMAIL_ADAPTERS=[gws-smtp], mặc định vẫn TẮT; S31 trong sổ bên xử lý phụ",
+    "tests": [
+      "Nhánh trên origin/main 4a109710 (#1103), không đứng sau main",
+      "typecheck (8192) trên 298987cc + eslint hai tệp kiểm sửa ở 84654217: sạch",
+      "lint toàn kho trên 298987cc: sạch",
+      "TEST_KHOI=K01,K07,K10,K15,K19 trên 298987cc: ĐẠT tới hết K19 (access-control, platform-modules, sổ bên xử lý phụ + quét hostname, test-hygiene, sổ connector) rồi đỏ ở K21 vì cổng nước #1102 — đã sửa bài kiểm ở 84654217",
+      "TEST_KHOI=K21 trên 84654217: TẤT CẢ KIỂM THỬ CỦA chỉ K21 ĐẠT (E1 + E2 SMTP giả)",
+      "npm run build trên 298987cc: ĐẠT",
+      "CHƯA chạy 24 khối đủ / 4 shard CI / lượt token giả"
+    ]
+  }
 }
