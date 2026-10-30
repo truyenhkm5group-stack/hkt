@@ -1,0 +1,8 @@
+{
+  "pr": 1101,
+  "sha": "f1ef6908e27aa015b4188f0785807e6559025ce7",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-30T11:45:18.073Z",
+  "note": "review lead: Mission Control /departments/mission-control — một sổ agent (department-ai AGENTS, đo khai Record<AgentZone>), token/USD lọc đúng tổ chức, chưa định giá đứng riêng, chưa đo được ≠ 0, kết quả tiền = ORDER_OUTCOME + VERIFIED_CASH; điều kiện tốt nghiệp không mặc định, settings:manage + audit, không đổi nấc; xem bằng approvals:decide; memo 90 s theo tổ chức; không migration, không AI."
+}
