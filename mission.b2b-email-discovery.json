@@ -36,22 +36,22 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-27T05:05:32.066Z",
-  "updated_at": "2026-10-30T04:43:09.176Z",
-  "last_heartbeat": "2026-10-30T04:41:10.749Z",
+  "updated_at": "2026-10-30T06:09:25.793Z",
+  "last_heartbeat": "2026-10-30T06:09:25.793Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/b2b-email-discovery",
-    "sha": "8e31424bce1d1a2ee6197fe9cdcab86bbb6375aa",
-    "at": "2026-10-30T04:41:10.749Z",
+    "sha": "f8286198512a1986db0ea7cd474c544828adaa80",
+    "at": "2026-10-30T06:09:25.793Z",
     "actor": "DESKTOP-56TH98Y:wt-b2b-email",
     "title": "Thu thập email B2B có bằng chứng từ website công khai",
     "summary": "",
     "tests": [
-      "Merge origin/main 4243ff56 (gồm #1091 intl, #1093 fb-crm) giữ cả hai phía: engine tự gộp (classifySegment b2b + passesTargetSegments + applyEmailDiscovery), sync-fixtures giữ cả email-discovery + intl-discovery, tài liệu 4b consent · 4c email · 4d quốc tế (đánh lại số trùng 4b)",
-      "npx tsc --noEmit: sạch",
-      "npm run lint: sạch",
-      "TEST_KHOI=K17 npm test: ĐẠT",
-      "TEST_KHOI=K21 npm test: ĐẠT (lượt đầu, cả khối)",
+      "Sửa đỏ gates shard 2/4 testKhongReNhanhTheoMoiTruong: lý do khai website.ts trong GOI_MANG_KHONG_CREDENTIAL viết lại không chứa chuỗi tên biến môi trường; KHÔNG khai miễn DOC_MOI_TRUONG_DA_KHAI",
+      "testTestHygiene chạy riêng: ĐẠT",
+      "TEST_KHOI=K15 npm test (khối chứa test-hygiene): ĐẠT",
+      "TEST_KHOI=K17 npm test (khối chứa platform-isolation-static): ĐẠT",
+      "tsc + lint + K21: ĐẠT ở 8e31424b (commit này chỉ đổi chữ trong một chuỗi của tệp test)",
       "4 shard đầy đủ: để gates CI"
     ]
   }
