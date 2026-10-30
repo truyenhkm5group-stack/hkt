@@ -31,6 +31,14 @@ export const INTL_KEYWORD_GROUPS: readonly IntlKeywordGroup[] = [
   { key: "intl-ko", label: "Hàn · 수산물 도매 / 식자재 도매 / 수입식품", keywords: ["수산물 도매", "식자재 도매", "수입식품 도매"], enabled: false, lang: "ko", segments: ["SEAFOOD_IMPORTER", "FOODSERVICE_DISTRIBUTOR", "ASIAN_FOOD_WHOLESALE"] },
   { key: "intl-zh-hant", label: "Đài Loan / Hồng Kông · 海鮮批發 / 食品進口商", keywords: ["海鮮批發", "冷凍海鮮批發", "食品進口商"], enabled: false, lang: "zh-Hant", segments: ["SEAFOOD_IMPORTER", "ASIAN_FOOD_WHOLESALE"] },
   { key: "intl-de", label: "Đức · Fischgroßhandel / Asia Großhandel", keywords: ["Fischgroßhandel", "Asia Großhandel", "Gastro Großhandel"], enabled: false, lang: "de", segments: ["SEAFOOD_IMPORTER", "ASIAN_FOOD_WHOLESALE", "FOODSERVICE_DISTRIBUTOR"] },
+  // ── Việt Kiều (chủ shop 30/10/2026): cửa hàng / siêu thị / chợ châu Á của người Việt + nhà phân phối thực phẩm Việt. ──
+  { key: "intl-viet-kieu", label: "Việt Kiều · Vietnamese grocery / supermarket", keywords: ["Vietnamese grocery", "Vietnamese supermarket", "Asian market Vietnamese", "Vietnamese food distributor"], enabled: false, lang: "en", segments: ["VIET_DIASPORA_GROCERY", "VIET_FOOD_DISTRIBUTOR"] },
+  { key: "intl-viet-kieu-vi", label: "Việt Kiều · chợ Việt / siêu thị Việt (chữ Việt)", keywords: ["chợ Việt", "siêu thị Việt"], enabled: false, lang: "vi-kieu", segments: ["VIET_DIASPORA_GROCERY"] },
+  { key: "intl-viet-kieu-de", label: "Việt Kiều · Đức — Asia Markt vietnamesisch", keywords: ["Asia Markt vietnamesisch", "vietnamesischer Supermarkt"], enabled: false, lang: "de", segments: ["VIET_DIASPORA_GROCERY"] },
+  { key: "intl-viet-kieu-fr", label: "Việt Kiều · Pháp — épicerie vietnamienne", keywords: ["épicerie vietnamienne", "épicerie asiatique"], enabled: false, lang: "fr", segments: ["VIET_DIASPORA_GROCERY"] },
+  { key: "intl-viet-kieu-ja", label: "Việt Kiều · Nhật — ベトナム食材", keywords: ["ベトナム食材"], enabled: false, lang: "ja", segments: ["VIET_DIASPORA_GROCERY"] },
+  { key: "intl-viet-kieu-ko", label: "Việt Kiều · Hàn — 베트남 식품", keywords: ["베트남 식품"], enabled: false, lang: "ko", segments: ["VIET_DIASPORA_GROCERY"] },
+  { key: "intl-viet-kieu-zh", label: "Việt Kiều · Đài Loan — 越南超市", keywords: ["越南超市"], enabled: false, lang: "zh-Hant", segments: ["VIET_DIASPORA_GROCERY"] },
   { key: "intl-fr", label: "Pháp · grossiste produits de la mer / asiatique", keywords: ["grossiste produits de la mer", "grossiste alimentaire asiatique", "fournisseur restauration"], enabled: false, lang: "fr", segments: ["SEAFOOD_IMPORTER", "ASIAN_FOOD_WHOLESALE", "FOODSERVICE_DISTRIBUTOR"] },
 ];
 

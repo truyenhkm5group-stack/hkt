@@ -420,6 +420,61 @@ tiền thật là 0. Trần ngày / tháng vẫn chặn bất kể ước tính.
 **Trạm chuyển tiếp** (`deploy/places-relay`) chuyển nguyên thân yêu cầu POST và nguyên chuỗi truy vấn GET, nên
 `languageCode` / `regionCode` / `locationBias` của ô quốc tế tới Google mà không cần sửa trạm (có bài kiểm).
 
+## 4g. Khách sỉ Việt Kiều (chủ shop chốt 30/10/2026)
+
+«Tìm email của khách sỉ là Việt Kiều ở nước ngoài» — chạy trên đúng bộ máy quốc tế ở mục 4d, không module mới, **chưa
+gửi gì** (luồng kênh nước ngoài ⇒ email là việc của bảng liên hệ, không ở đây).
+
+**Phân khúc** (chỉ ô / lead quốc tế, như luật B2B — ô trong nước phân nhóm y như cũ, có bài kiểm):
+
+| Khoá | Cần đủ HAI chứng cứ | Phù hợp / ý định |
+|---|---|---|
+| `VIET_DIASPORA_GROCERY` | Tên có dấu hiệu Việt («Viet», «Vietnamese», «Saigon», «Hà Nội», «Phở», «Mekong», «vietnam…» trong tiếng Đức / Pháp / Séc, «wietnam…», «ベトナム», «베트남», «越南») **và** loại hình cửa hàng: chữ «grocery / supermarket / market / mart / épicerie / Markt / chợ / siêu thị / 食材 / 식품 / 超市…» hoặc loại hình Google grocery / supermarket / market… | 30 / 12 |
+| `VIET_FOOD_DISTRIBUTOR` | Dấu hiệu Việt **và** chữ bán sỉ («wholesale / distributor / import / trading / Großhandel / grossiste / velkoobchod / hurtownia / 卸 / 도매 / 批發») hoặc loại hình `wholesaler` | 29 / 12 |
+
+- Thiếu một chứng cứ thì không gắn: quán phở (chỉ có loại hình `restaurant`) là nhà hàng; một «Asia Markt» không có dấu
+  hiệu Việt là cửa hàng châu Á — không đoán chủ là người Việt.
+- `segmentEvidence` ghi cả hai chứng cứ, ví dụ «tên có «saigon» + «market»».
+- Luật Việt Kiều đứng trước luật B2B khác: «Saigon Asian Food Importers» ⇒ `VIET_FOOD_DISTRIBUTOR`.
+
+**Nước** — chỉ 9 nước mục 4d đã hỗ trợ: Mỹ · Úc · Canada · Đức · Pháp · Anh · Nhật · Hàn · Đài Loan
+(`VIET_DIASPORA_COUNTRIES`). **Séc và Ba Lan: chưa hỗ trợ** (`VIET_DIASPORA_UNSUPPORTED`, kèm từ khoá dự kiến «potraviny
+vietnamské», «sklep wietnamski») — thêm nước + thành phố + toạ độ là việc riêng, không đoán trong việc này.
+
+**Từ khoá** (`keywords-intl.ts`, mọi nhóm TẮT sẵn): tiếng Anh «Vietnamese grocery», «Vietnamese supermarket», «Asian
+market Vietnamese», «Vietnamese food distributor»; chữ Việt ở nước ngoài «chợ Việt», «siêu thị Việt» (ngôn ngữ từ khoá
+`vi-kieu` — chỉ 9 nước trên, KHÔNG BAO GIỜ quét tỉnh trong nước như nhóm `vi`); Đức «Asia Markt vietnamesisch»,
+«vietnamesischer Supermarkt»; Pháp «épicerie vietnamienne», «épicerie asiatique»; Nhật «ベトナム食材»; Hàn «베트남 식품»;
+Đài Loan «越南超市».
+
+**Mẫu «HSLC – Việt Kiều (cửa hàng / chợ / nhà phân phối thực phẩm Việt ở nước ngoài)»** (`hslc-intl-viet-kieu`): 18 thành
+phố đông người Việt (Westminster · San Jose · Houston · Los Angeles · Sydney · Melbourne · Toronto · Vancouver · Montreal ·
+Berlin · Leipzig · Paris · London · Tokyo · Osaka · Seoul · Taipei · New Taipei), mọi nhóm Việt Kiều bật, ENTERPRISE, tối
+đa 300 lead, không bắt buộc SĐT, **không bắt buộc website** (nhiều chợ Việt chỉ có Facebook — giữ lại để đếm đủ), DRAFT,
+không tự chạy.
+
+**Ước tính chi phí** (thẻ mẫu / nháp in sẵn, `campaignCostEstimate`): 119 ô (18 × 6 + Đức 4 + Pháp 2 + Nhật 2 + Hàn 1 +
+Đài Loan 2) × Text Search Enterprise 35 US$ / 1.000:
+
+| | Lượt | US$ | ≈ VND (26.000) |
+|---|---|---|---|
+| Ít nhất | 119 | 4,17 | 108.290 |
+| Điển hình (1,5 trang / ô) | ~179 | 6,25 | 162.435 |
+| Nhiều nhất (3 trang / ô) | 357 | 12,50 | 324.870 |
+
+Giá niêm yết; chưa trừ ô vừa quét và 1.000 lượt Enterprise miễn phí mỗi tháng. Trần ngày / tháng vẫn chặn.
+
+**Tìm email.** Lead quốc tế có website đi qua bước đọc trang công khai như mọi lead (`finalizeLead` ⇒ `website_status =
+PENDING` ⇒ `enrichLeadWebsite` ⇒ email có bằng chứng, mục 4c). Hàng đọc website (5 lead / lượt) xếp
+theo `websiteEnrichRank`: **0 = nhóm Việt Kiều · 1 = lead quốc tế khác · 2 = trong nước**, trong cùng hạng theo điểm —
+trước đây xếp theo điểm thuần nên lead quốc tế (0 điểm vị trí, không SĐT) luôn đứng cuối. Thẻ chiến dịch đếm lead sẵn sàng
+theo **có email / có website / không website**.
+
+**Vai trò email đa ngữ** (`classifyEmailRole`, 30/10/2026): phần trước @ nhận thêm «mua hàng» einkauf · achat(s) ·
+compra(s) · acquisti · inkoop · caigou; «bán hàng» verkauf · vertrieb · vente(s) · commercial · ventas · comercial · vendite
+· commerciale · verkoop · xiaoshou; «liên hệ» kontakt · anfrage · contatti. Trước đó «einkauf@» ra `OTHER` và không bao
+giờ được điền vào hồ sơ. Chỉ là danh sách từ khoá — không đoán gì khác; không khai tiếng Nhật / Hàn dạng latin.
+
 ## 5. Tiết kiệm chi phí API
 
 **Chế độ chỉ dùng miễn phí** (`freeTier`, bật sẵn). Google miễn phí mỗi tháng, tính theo từng SKU trên mỗi tài khoản thanh
