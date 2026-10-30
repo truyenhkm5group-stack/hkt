@@ -3,7 +3,7 @@
   "mission_id": "b2b-viet-kieu",
   "title": "Săn khách sỉ Việt Kiều: phân khúc chợ / nhà phân phối thực phẩm Việt ở nước ngoài, mẫu 18 thành phố, đọc website tìm email trước",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-vk",
@@ -30,7 +30,18 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-30T11:00:56.464Z",
-  "updated_at": "2026-10-30T11:00:56.464Z",
-  "last_heartbeat": "2026-10-30T11:00:56.464Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-30T11:02:02.270Z",
+  "last_heartbeat": "2026-10-30T11:02:02.270Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/b2b-viet-kieu",
+    "sha": "9a811040a35e35c450d905ffa1514170cfe3e9b0",
+    "at": "2026-10-30T11:02:02.270Z",
+    "actor": "DESKTOP-56TH98Y:wt-b2b-vk",
+    "title": "Săn khách sỉ Việt Kiều: phân khúc chợ / nhà phân phối thực phẩm Việt ở nước ngoài, mẫu 18 thành phố, đọc website tìm email trước",
+    "summary": "",
+    "tests": [
+      "9a811040: npm run typecheck sạch · npm run lint sạch · TEST_KHOI=K21 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K21 ĐẠT (testWholesaleIntlDiscovery có testVietKieu thuần + khối CSDL Việt Kiều trong testWholesaleLeadHunter) · npm run build exit 0 (ở e07fad6d; 9a811040 chỉ sửa một chuỗi trong bài kiểm) · 4 shard đầy đủ: để gates CI"
+    ]
+  }
 }
