@@ -54,6 +54,19 @@ export const FB_CONNECTION_STATUS_TONE: Record<FbConnectionStatus, string> = {
 
 export const FB_EVENT_KINDS = ["URL_SET", "URL_CLEARED", "STATUS_CHANGED", "OWNER_CHANGED", "NEXT_CARE_SET", "DNC_SET", "DNC_CLEARED", "CONSENT_RECORDED"] as const;
 export type FbEventKind = (typeof FB_EVENT_KINDS)[number];
+export const FB_EVENT_KIND_LABEL: Record<FbEventKind, string> = {
+  URL_SET: "Lưu link Facebook",
+  URL_CLEARED: "Xoá link Facebook",
+  STATUS_CHANGED: "Đổi trạng thái kết bạn",
+  OWNER_CHANGED: "Đổi NV phụ trách",
+  NEXT_CARE_SET: "Đặt ngày chăm sóc",
+  DNC_SET: "Không liên hệ",
+  DNC_CLEARED: "Gỡ không liên hệ",
+  CONSENT_RECORDED: "Khách đồng ý kết nối",
+};
+
+/** Nhãn tương quan — in NGUYÊN câu này cạnh con số «đã kết bạn rồi mua» ở mọi màn hình (bài kiểm khoá chữ). */
+export const FB_CRM_CORRELATION_LABEL = "Tương quan, KHÔNG phải doanh thu do CRM mang lại";
 
 /** «Mua nhiều lần» = từ bấy nhiêu đơn GIAO THÀNH CÔNG (ORDER_OUTCOME) trở lên — không đếm đơn đã đặt / đơn hoàn. */
 export const REPEAT_BUYER_MIN_DELIVERED = 2;

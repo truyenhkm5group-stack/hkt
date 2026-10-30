@@ -55,6 +55,8 @@ export const WORK_SOURCES = [
   "PAYROLL_RECON",
   // SRC-5b 24/10/2026 — mua thử mẫu nguồn đã duyệt chưa đặt / đã đặt chưa về (lib/queries/work-adapters.ts::adaptSourcingTrials).
   "SOURCING_TRIAL",
+  // Facebook CRM lát 2 (30/10/2026) — khách tới ngày hẹn chăm sóc (`customer_fb_connections.next_care_on`) — lib/queries/fb-crm.ts.
+  "FB_CRM_CARE",
   "MANUAL_TASK",
   "RECURRING_TASK",
   // Phase 3 · W9 — việc do LUẬT TỰ ĐỘNG tạo (hành động `create_task`).
@@ -475,6 +477,32 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     // Hàng về sớm hay muộn do nhà cung cấp / vận chuyển quyết, không do người trong shop (mục 24).
     outcomeAttributable: false,
     // CHỈ NÚT MỞ: «đã đặt» / «đã về» là action thật của miền ở /sourcing/trials/[id] — không nhánh nào «đánh dấu xong» (luật 19).
+    actions: ["OPEN_SOURCE"],
+  },
+  /*
+    ═══ HẸN CHĂM SÓC KHÁCH — FACEBOOK CRM (lát 2 · docs/verticals/facebook-friend-crm.md) ═══
+
+    PHÉP CHIẾU lên `customer_fb_connections` (luật 19): khách có `next_care_on` ≤ hôm nay (giờ VN), không «không liên hệ», cờ tổ chức
+    `fbCrm.enabled` bật. Miền giữ CẢ trạng thái lẫn người phụ trách (`care_owner_user_id`) ⇒ giao việc đi qua `fbCrmApplyCore`
+    (SET_OWNER, quyền customers:write — lib/work/assign.ts). Việc rời hàng đợi khi người làm một thao tác THẬT của miền ở
+    /customers/facebook-crm (đặt ngày mới · bỏ hẹn · không liên hệ); không có nút «xong» nào ở đây.
+
+    KHÔNG ĐẾM HAI LẦN: khách đã có nhiệm vụ CSKH tay của lát 1 (MANUAL_TASK gắn nhãn `fb-crm`, còn MỞ) thì KHÔNG sinh dòng chiếu —
+    việc tay đã đứng cho cùng khách ấy. Không có cảnh báo `notifications` nào nói về hẹn chăm sóc khách ⇒ `ALERT_KINDS_OWNED_ELSEWHERE`
+    không cần thêm gì.
+  */
+  FB_CRM_CARE: {
+    key: "FB_CRM_CARE",
+    label: "Hẹn chăm sóc khách (Facebook CRM)",
+    why: "Nhân viên đã hẹn chăm lại khách vào ngày này: không ai nhớ thì lời hẹn trôi đi và khách quen nguội dần.",
+    statusAuthority: "SOURCE",
+    assigneeAuthority: "SOURCE",
+    department: "SALES",
+    businessEntity: "CUSTOMER",
+    // Không có hằng số đang chạy nào cho hạn này (luật 22): NGÀY HẸN chính là mốc; chủ shop đặt giờ ở `work.sla` nếu muốn.
+    slaHours: null,
+    // Khách có quay lại mua hay không do khách quyết (mục 24) — người được ghi nhận ở trục SLA / năng suất.
+    outcomeAttributable: false,
     actions: ["OPEN_SOURCE"],
   },
   MANUAL_TASK: {

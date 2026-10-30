@@ -11,7 +11,7 @@
  *     chỉ quản trị sửa, bắt buộc lý do, có audit.
  */
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { and, eq } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import type { SessionUser } from "@/lib/auth/session";
@@ -225,8 +225,29 @@ async function testDb() {
   }
 }
 
+/** Mọi đường TẠO thư email đều hỏi làn ở máy chủ — một đường mới quên hỏi là cửa sau cho email tới khách còn nhắn Zalo được. */
+function testEveryEmailPathAsksLane() {
+  const outbox = readFileSync("lib/wholesale/email-outbox.ts", "utf8");
+  const ai = readFileSync("lib/wholesale/email-ai-draft.ts", "utf8");
+  // Thân hàm = từ dòng khai báo tới khai báo `export` kế tiếp (kho ghim LF ở tầng .gitattributes).
+  const between = (src: string, fn: string) => {
+    const start = src.indexOf(`export async function ${fn}`);
+    assert.ok(start >= 0, `không thấy ${fn}`);
+    const next = src.indexOf("\nexport ", start + 10);
+    return src.slice(start, next < 0 ? undefined : next);
+  };
+  assert.match(between(outbox, "emailDraftFromOutreachCore"), /emailLaneRefusal\(/, "soạn từ lời chào hỏi làn");
+  assert.match(between(ai, "aiDraftEmailCore"), /emailLaneRefusal\(/, "AI soạn nháp hỏi làn (trước khi tốn lượt AI)");
+  assert.match(between(ai, "promoteAiDraftCore"), /emailLaneRefusal\(/, "đưa nháp AI vào hộp thư đi hỏi làn");
+  for (const src of [outbox, ai]) {
+    const inserts = (src.match(/\.insert\(schema\.wholesaleEmailOutbox\)/g) ?? []).length;
+    assert.ok(inserts <= 1, "mỗi tệp chỉ một chỗ tạo thư — chỗ mới phải đi qua emailLaneRefusal");
+  }
+}
+
 export async function testWholesaleChannelRouting() {
   testMatrix();
+  testEveryEmailPathAsksLane();
   testCountryGate();
   await testDb();
   console.log("✓ Kế hoạch kênh: nước ngoài → email · trong nước → Zalo · Zalo hỏng + có email → email dự phòng · im lặng không đổi kênh · chặn / KHÔNG LIÊN HỆ dừng mọi kênh · «Zalo không gửi được» chỉ thêm dòng, hoàn tác là dòng mới · cổng nước: gửi thật chờ khi chưa rà luật, chạy thử in lý do");

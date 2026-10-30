@@ -34,8 +34,8 @@ import {
   type EmailSettings,
 } from "@/lib/wholesale/email-constants";
 import { evaluateEmailSend, type EmailPolicyDecision, type EmailPolicyInput } from "@/lib/wholesale/email-policy";
-import { CONTACT_TRACK_LABEL, EMAIL_TRACKS, recipientCountryOf } from "@/lib/wholesale/contact-plan";
-import { contactPlanForLead } from "@/lib/wholesale/contact-plan-store";
+import { recipientCountryOf } from "@/lib/wholesale/contact-plan";
+import { emailLaneRefusal } from "@/lib/wholesale/contact-plan-store";
 import { getEmailSettings, isMissingEmailTable, leadEmailEventKinds, recordEmailEvent } from "@/lib/wholesale/email-outbox-store";
 import { issueUnsubscribeToken, unsubscribeUrl } from "@/lib/wholesale/email-unsubscribe";
 import { leadView } from "@/lib/wholesale/engine";
@@ -199,8 +199,8 @@ export async function emailDraftFromOutreachCore(user: SessionUser, outreachId: 
     const to = normalizeEmail(g.lead.email);
     if (!to) return { error: "Lead chưa có email hợp lệ." };
     // Kế hoạch kênh (chủ shop 30/10): khách trong nước còn nhắn Zalo được thì KHÔNG đi email — email là dự phòng khi Zalo hỏng.
-    const plan = await contactPlanForLead(g.lead.id);
-    if (plan && !EMAIL_TRACKS.includes(plan.track)) return { error: `Lead đang ở làn «${CONTACT_TRACK_LABEL[plan.track]}» — ${plan.notes[0] ?? "chưa đi kênh email"}` };
+    const refusal = await emailLaneRefusal(g.lead.id);
+    if (refusal) return { error: refusal };
     const parsed = fromOutreachSchema.safeParse(raw);
     if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
     const cfg = await getLeadHunterConfig();

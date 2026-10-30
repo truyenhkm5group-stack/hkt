@@ -559,6 +559,8 @@ import { testPriceListsReceivables } from "./price-lists-receivables.test";
 import { testReorderReminders } from "./reorder-reminders.test";
 import { testFbCrm } from "./fb-crm.test";
 import { testFbCrmToggle } from "./fb-crm-toggle.test";
+import { testMissionControl } from "./mission-control.test";
+import { testFbCrmS2 } from "./fb-crm-s2.test";
 import { testSeafoodOs } from "./seafood-os.test";
 import { testAppointments } from "./appointments.test";
 import { testWarranty } from "./warranty.test";
@@ -629,6 +631,7 @@ import { testWholesaleConsent } from "./wholesale-consent.test";
 import { testWholesaleCatalogReadiness } from "./wholesale-catalog-readiness.test";
 import { testWholesaleQuotation } from "./wholesale-quotation.test";
 import { testWholesaleQuotationSettings } from "./wholesale-quotation-settings.test";
+import { testWholesaleEmailAiDraft } from "./wholesale-email-ai-draft.test";
 import { testWholesaleEmail } from "./wholesale-email.test";
 import { testWholesaleChannelRouting } from "./wholesale-channel-routing.test";
 import { testRestaurantTemplate } from "./restaurant.test";
@@ -3337,6 +3340,8 @@ async function main() {
     await testWholesaleQuotation();
     // Cài đặt báo giá sỉ: gợi ý trần CK / biên LN từ bảng giá sỉ đang bật, chỉ ghi khi người có wholesale:config bấm Lưu (tổ chức THẬT `bg-cd`).
     await testWholesaleQuotationSettings();
+    // P2b AI B2B: AI soạn email chào hàng — AI GIẢ, hàng rào bịa đặt, người duyệt, trần / ngày (tổ chức THẬT `em-ai`, 0265).
+    await testWholesaleEmailAiDraft();
     // E1 AI B2B: hộp thư đi email ở chế độ chạy thử — cổng chính sách, huỷ đăng ký, nhận phản hồi; tổ chức THẬT `we-a` / `we-b`.
     await testWholesaleEmail();
     await testWholesaleChannelRouting();
@@ -3669,10 +3674,14 @@ async function main() {
     await testShippingCost(db);
     // Chủ shop tự duyệt lương theo khai báo org.owner (chủ shop 21/10/2026) — lib/constants/org-owner.ts.
     await testOrgOwner(db);
+    // Mission Control (chủ shop 30/10): đo AI agent theo sổ department-ai · chưa đo = null · tốt nghiệp không mặc định · cách ly.
+    await testMissionControl();
     // Facebook Friend CRM lát 1 (0262): link do người dán · đã mua theo ORDER_OUTCOME · doanh thu thực chưa chứng từ ⇒ null · cách ly tổ chức.
     await testFbCrm();
     // Công tắc tổ chức bật / tắt Facebook CRM (chủ shop 30/10): chỉ settings:manage · bấm lặp không ghi · audit · cờ đọc lại đúng.
     await testFbCrmToggle();
+    // Facebook CRM lát 2: nguồn việc FB_CRM_CARE (phép chiếu) · khối Customer 360 · thẻ số + tương quan kết bạn rồi mua.
+    await testFbCrmS2();
     testPgliteTestDirs();
     // ERP a11y + bố cục hẹp (Commercial Sweep PR G): h1 màn không tìm thấy, công tắc / ô số có tên, /payroll không tràn 390 px.
     testErpA11y();

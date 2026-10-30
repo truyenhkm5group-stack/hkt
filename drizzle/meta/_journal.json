@@ -1849,6 +1849,13 @@
       "when": 1792488130942,
       "tag": "0264_wholesale_email_outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 265,
+      "version": "7",
+      "when": 1792488385053,
+      "tag": "0265_wholesale_email_ai_drafts",
+      "breakpoints": true
     }
   ]
 }

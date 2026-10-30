@@ -8,7 +8,9 @@ import type { CoreResult } from "@/lib/wholesale/campaigns";
 import { contactabilityLeadOf, isMissingTable } from "@/lib/wholesale/consents";
 import { normalizeEmail, type ConsentRecord, type SuppressionRecord } from "@/lib/wholesale/contactability";
 import {
+  CONTACT_TRACK_LABEL,
   contactPlanOf,
+  EMAIL_TRACKS,
   ZALO_MARK_OUTCOME,
   ZALO_MARKER_OUTCOMES,
   ZALO_UNDELIVERABLE_LABEL,
@@ -89,6 +91,16 @@ async function consentRowsFor(ids: readonly string[]): Promise<(ConsentRecord & 
 /** Kế hoạch kênh của MỘT lead (lõi soạn email dùng để chặn đường email cho lead trong nước còn nhắn Zalo được). */
 export async function contactPlanForLead(leadId: string): Promise<ContactPlan | null> {
   return (await contactPlansFor([leadId])).get(leadId) ?? null;
+}
+
+/**
+ * MỌI đường tạo thư email (soạn từ lời chào · AI soạn nháp · đưa nháp AI vào hộp thư đi) hỏi câu này: lead có đang ở làn email
+ * không. Khách trong nước còn nhắn Zalo được ⇒ câu từ chối; ở làn email ⇒ `null`. Luật nằm ở máy chủ, không chỉ ở nút.
+ */
+export async function emailLaneRefusal(leadId: string): Promise<string | null> {
+  const plan = await contactPlanForLead(leadId);
+  if (!plan || EMAIL_TRACKS.includes(plan.track)) return null;
+  return `Lead đang ở làn «${CONTACT_TRACK_LABEL[plan.track]}» — ${plan.notes[0] ?? "chưa đi kênh email"}`;
 }
 
 async function gateLead(user: SessionUser, leadId: string): Promise<{ lead: Lead } | { error: string }> {

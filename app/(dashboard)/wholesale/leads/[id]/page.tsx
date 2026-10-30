@@ -24,6 +24,7 @@ import { GoogleAttribution, WholesaleNav } from "@/app/(dashboard)/wholesale/who
 import { GradeBadge, LeadStatusBadge, TemperatureBadge } from "@/app/(dashboard)/wholesale/leads/leads-table";
 import { ConsentPanel } from "@/app/(dashboard)/wholesale/leads/[id]/consent-panel";
 import { LeadActions } from "@/app/(dashboard)/wholesale/leads/[id]/lead-actions";
+import { AiDraftButton } from "@/app/(dashboard)/wholesale/leads/[id]/ai-draft-button";
 
 export const metadata = { title: "Lead khách sỉ" };
 
@@ -63,6 +64,7 @@ export default async function WholesaleLeadPage({ params }: { params: Promise<{ 
         description={`${LEAD_SEGMENT_LABEL[segment]}${lead.areaName || lead.provinceLabel ? ` · ${[lead.areaName, lead.provinceLabel].filter(Boolean).join(", ")}` : ""}`}
         actions={
           <span className="flex items-center gap-3">
+            {canWork && status !== "DO_NOT_CONTACT" && lead.email ? <AiDraftButton leadId={lead.id} /> : null}
             {canWork && status !== "DO_NOT_CONTACT" ? (
               <Link href={`/wholesale/quotations/new?lead=${encodeURIComponent(lead.id)}`} className="rounded-md border px-2.5 py-1 text-sm font-medium hover:bg-muted">
                 Tạo báo giá
