@@ -383,7 +383,7 @@ async function testDb() {
       // ── LIVE không adapter: cổng giữ lại (cài thẳng setting như thể ai đó sửa tay CSDL). ──
       const leadV = await addLead("Nhà hàng Gửi Thật", "live@guithat.vn", true);
       const idV = await draftAndApprove(admin, leadV);
-      await db.update(schema.settings).set({ value: JSON.stringify({ ...mergeEmailSettings(JSON.parse((await db.query.settings.findFirst({ where: eq(schema.settings.key, "wholesale.email") }))!.value)), mode: "LIVE", liveEnabledByUserId: u.id }) }).where(eq(schema.settings.key, "wholesale.email"));
+      await db.update(schema.settings).set({ value: JSON.stringify({ ...mergeEmailSettings(JSON.parse((await db.query.settings.findFirst({ where: eq(schema.settings.key, "wholesale.email") }))!.value)), mode: "LIVE", liveEnabledByUserId: u.id, allowedCountries: ["VN"] }) }).where(eq(schema.settings.key, "wholesale.email"));
       const tv = await runEmailOutboxTick({ now: new Date(later.getTime() + 60 * 60_000) });
       assert.deepEqual([tv.sent, tv.held], [0, 1], "LIVE mà chưa có nhà cung cấp ⇒ không gửi, thư nằm chờ");
       assert.match((await outboxOf(idV))?.lastError ?? "", /Chưa gửi được ở chế độ LIVE: Chưa có kết nối/, "LIVE mà kết nối Google Workspace chưa bật ⇒ thư nằm chờ, nói rõ lý do");

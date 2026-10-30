@@ -28,6 +28,7 @@ import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { DEFAULT_EMAIL_SETTINGS, LIVE_EMAIL_ADAPTERS } from "@/lib/wholesale/email-constants";
+import { saveEmailAllowedCountriesCore } from "@/lib/wholesale/email-countries";
 import { approveEmailCore, emailDraftForLeadCore, runEmailOutboxTick, saveEmailSettingsCore } from "@/lib/wholesale/email-outbox";
 
 const ORG = "wg-a";
@@ -187,8 +188,9 @@ async function testDb() {
       const logs = await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.entityId, "gws-smtp"));
       assert.ok(logs.length > 0 && !JSON.stringify(logs).includes(PASS), "nhật ký không chứa App Password");
 
-      // ── Bật LIVE (quản trị) ⇒ thư đã duyệt đi qua SMTP giả; lead thành «Đã liên hệ». ──
+      // ── Bật LIVE (quản trị) + nước VN đã rà luật (cổng nước của #1102) ⇒ thư đã duyệt đi qua SMTP giả; lead «Đã liên hệ». ──
       assert.ok("ok" in (await saveEmailSettingsCore(admin, settingsIn, NOW)));
+      assert.ok("ok" in (await saveEmailAllowedCountriesCore(admin, { countries: ["VN"], reason: "Bài kiểm: giả định đã rà luật thư chào hàng VN" })));
       const leadA = await addLead("Nhà hàng Gửi Thật", "chu@guithat.vn");
       const idA = await queued(admin, leadA);
       const sent: Call[] = [];
