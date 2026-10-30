@@ -1,0 +1,8 @@
+{
+  "pr": 1098,
+  "sha": "3fc16804ab4f7bcc9c7b6f745ed534daf78974f1",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-30T10:07:01.902Z",
+  "note": "review lead: nền email E1 CHỈ CHẠY THỬ — LIVE bị chặn hai lớp (cổng chính sách + resolveEmailProvider trả null khi LIVE_EMAIL_ADAPTERS rỗng), chỉ quản trị bật; route huỷ công khai duy nhất /api/wholesale/unsubscribe/[token] (token 32 byte băm theo tổ chức, sai = cùng 404, GET chỉ hiện xác nhận, POST một chạm RFC 8058); hạn mức 20/giờ·100/ngày·5/tên miền; migration 0264 chỉ thêm bảng + khai serve-c"
+}
