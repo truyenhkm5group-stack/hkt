@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/session";
 import type { CoreResult } from "@/lib/wholesale/campaigns";
-import { markZaloUndeliverableCore, undoZaloUndeliverableCore } from "@/lib/wholesale/contact-plan-store";
+import { confirmLeadCountryCore, markZaloUndeliverableCore, undoZaloUndeliverableCore } from "@/lib/wholesale/contact-plan-store";
 import { saveEmailAllowedCountriesCore } from "@/lib/wholesale/email-countries";
 import { emailDraftForLeadCore } from "@/lib/wholesale/email-outbox";
 
@@ -28,6 +28,14 @@ export async function markZaloUndeliverableAction(leadId: string, input: { reaso
 export async function undoZaloUndeliverableAction(leadId: string, input: { note?: string } = {}): Promise<CoreResult> {
   const user = await requireUser();
   const r = await undoZaloUndeliverableCore(user, leadId, input);
+  if ("ok" in r) refresh(leadId);
+  return r;
+}
+
+/** Làn «Thiếu căn cứ nước»: người xác nhận nước của lead (chứng cứ mạnh nhất của thang nước). */
+export async function confirmLeadCountryAction(leadId: string, input: { country: string; note?: string }): Promise<CoreResult<{ country: string }>> {
+  const user = await requireUser();
+  const r = await confirmLeadCountryCore(user, leadId, input);
   if ("ok" in r) refresh(leadId);
   return r;
 }
