@@ -9,6 +9,7 @@ import { getWholesaleLead } from "@/lib/queries/wholesale";
 import { isMobileChip } from "@/lib/queries/wholesale-mobile";
 import type { SearchParams } from "@/lib/search-params";
 import { CALL_OUTCOME_LABEL, isLeadStatus, LEAD_SOURCE_LABEL, LEAD_STATUS_LABEL, type LeadSourceKey, ZALO_RESULT_LABEL } from "@/lib/wholesale/constants";
+import { ZALO_MARKER_OUTCOME_LABEL } from "@/lib/wholesale/contact-plan";
 import { leadView } from "@/lib/wholesale/engine";
 import { zaloDraftCore } from "@/lib/wholesale/leads";
 import { mapsLinkOf } from "@/lib/wholesale/field-handoff";
@@ -90,7 +91,7 @@ export default async function WholesaleMobileLead({ params, searchParams }: { pa
               <div className="flex justify-between gap-2 text-xs text-muted-foreground">
                 <span>
                   {a.kind === "ZALO"
-                    ? `Zalo: ${(ZALO_RESULT_LABEL as Record<string, string>)[a.outcome ?? ""] ?? a.outcome}`
+                    ? `Zalo: ${(ZALO_RESULT_LABEL as Record<string, string>)[a.outcome ?? ""] ?? ZALO_MARKER_OUTCOME_LABEL[a.outcome ?? ""] ?? a.outcome}`
                     : a.kind === "CALL"
                       ? `${a.channel === "ZALO" ? "Zalo: " : ""}${(CALL_OUTCOME_LABEL as Record<string, string>)[a.outcome ?? ""] ?? a.outcome}`
                       : "Ghi chú"}

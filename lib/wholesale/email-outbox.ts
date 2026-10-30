@@ -34,6 +34,8 @@ import {
   type EmailSettings,
 } from "@/lib/wholesale/email-constants";
 import { evaluateEmailSend, type EmailPolicyDecision, type EmailPolicyInput } from "@/lib/wholesale/email-policy";
+import { recipientCountryOf } from "@/lib/wholesale/contact-plan";
+import { emailLaneRefusal } from "@/lib/wholesale/contact-plan-store";
 import { getEmailSettings, isMissingEmailTable, leadEmailEventKinds, recordEmailEvent } from "@/lib/wholesale/email-outbox-store";
 import { issueUnsubscribeToken, unsubscribeUrl } from "@/lib/wholesale/email-unsubscribe";
 import { leadView } from "@/lib/wholesale/engine";
@@ -196,6 +198,9 @@ export async function emailDraftFromOutreachCore(user: SessionUser, outreachId: 
     if (g.lead.contactStatus === "DO_NOT_CONTACT") return { error: "Lead ở danh sách KHÔNG LIÊN HỆ." };
     const to = normalizeEmail(g.lead.email);
     if (!to) return { error: "Lead chưa có email hợp lệ." };
+    // Kế hoạch kênh (chủ shop 30/10): khách trong nước còn nhắn Zalo được thì KHÔNG đi email — email là dự phòng khi Zalo hỏng.
+    const refusal = await emailLaneRefusal(g.lead.id);
+    if (refusal) return { error: refusal };
     const parsed = fromOutreachSchema.safeParse(raw);
     if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
     const cfg = await getLeadHunterConfig();
@@ -426,6 +431,7 @@ export async function emailPolicyInputFor(row: Row, settings: EmailSettings, now
     contactability: ct.byChannel.EMAIL,
     suppressionHit: hit,
     leadEventKinds: kinds,
+    recipientCountry: recipientCountryOf(lead.provinceKey),
     duplicateSent: Number(dup?.n ?? 0) > 0,
     counts: { lastHour: Number(counts?.hour ?? 0), today: Number(counts?.today ?? 0), domainToday: Number(counts?.domain ?? 0) },
   };
@@ -453,7 +459,10 @@ export async function previewEmailPolicies(ids: readonly string[], now = new Dat
   const rows = await db.select().from(o).where(inArray(o.id, ids.slice(0, 40)));
   const settings = await getEmailSettings();
   const out: Record<string, string[]> = {};
-  for (const r of rows) out[r.id] = (await previewEmailPolicy(r, now, settings)).details;
+  for (const r of rows) {
+    const d = await previewEmailPolicy(r, now, settings);
+    out[r.id] = [...d.details, ...d.warnings];
+  }
   return out;
 }
 
@@ -552,7 +561,7 @@ export async function runEmailOutboxTick(opts: { now?: Date; provider?: EmailPro
         .update(o)
         .set({ status: "SENT", mode: provider.mode, sentAt: now, approvalUsedAt: now, providerMessageId: res.providerMessageId, messageIdHeader: res.messageIdHeader || msg.headers["Message-ID"], threadId, inReplyTo: msg.headers["In-Reply-To"] ?? null, lastError: null, nextAttemptAt: null, updatedAt: now })
         .where(and(eq(o.id, row.id), eq(o.status, "SENDING")));
-      await recordEmailEvent({ leadId: row.leadId, outboxId: row.id, kind: "SENT", meta: { mode: provider.mode, provider: provider.name, providerMessageId: res.providerMessageId }, at: now });
+      await recordEmailEvent({ leadId: row.leadId, outboxId: row.id, kind: "SENT", meta: { mode: provider.mode, provider: provider.name, providerMessageId: res.providerMessageId, ...(decision.warnings.length ? { warnings: decision.warnings } : {}) }, at: now });
       await afterSent(row, provider.mode, now);
       out.sent++;
     } catch (e) {

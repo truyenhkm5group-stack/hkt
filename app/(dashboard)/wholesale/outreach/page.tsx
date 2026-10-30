@@ -4,6 +4,7 @@ import { EmptyState } from "@/components/ui-bits";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { can } from "@/lib/auth/session";
 import { outreachQueue } from "@/lib/queries/wholesale";
+import { contactPlansFor } from "@/lib/wholesale/contact-plan-store";
 import { getLeadHunterConfig } from "@/lib/wholesale/store";
 import { OUTREACH_AUTOMATION_LABEL } from "@/lib/wholesale/config";
 import type { SearchParams } from "@/lib/search-params";
@@ -18,12 +19,13 @@ export default async function WholesaleOutreachPage({ searchParams }: { searchPa
   const raw = await searchParams;
   const view = raw.view === "done" ? "done" : "open";
   const [rows, cfg] = await Promise.all([outreachQueue(decision, view === "done" ? ["DONE", "CANCELLED"] : ["DRAFT", "APPROVED", "SENT"]), getLeadHunterConfig()]);
+  const plans = Object.fromEntries(await contactPlansFor(rows.map((r) => r.leadId)));
   return (
     <div className="space-y-4">
       <PageHeader
         eyebrow="Săn khách sỉ"
         title="Hàng đợi liên hệ sỉ"
-        description="Lời chào đã soạn chờ người duyệt → mở kênh (gọi / Zalo / SMS / email) và gửi bằng tay → bấm «Đã gửi» → ghi kết quả. ERP không tự gửi tin hàng loạt."
+        description="Hai luồng: khách NƯỚC NGOÀI đi email, khách TRONG NƯỚC nhắn Zalo — chuyển sang email chỉ khi Zalo không gửi được. Duyệt → mở kênh và gửi bằng tay (email: đưa vào Hộp thư đi, vẫn chạy thử) → ghi kết quả. ERP không tự gửi tin hàng loạt."
         hint={`Mức tự động hoá hiện tại: ${OUTREACH_AUTOMATION_LABEL[cfg.outreach.automationLevel]}. Đổi ở «Cấu hình & chi phí API».`}
       />
       <WholesaleNav user={user} active="outreach" />
@@ -36,7 +38,7 @@ export default async function WholesaleOutreachPage({ searchParams }: { searchPa
         </a>
       </div>
       {rows.length ? (
-        <OutreachBoard rows={rows} readOnly={view === "done" || !can(user, "wholesale:work")} callScript={cfg.outreach.callScript.replace(/\{\{\s*ten_shop\s*\}\}/g, cfg.outreach.shopName)} />
+        <OutreachBoard rows={rows} plans={plans} readOnly={view === "done" || !can(user, "wholesale:work")} callScript={cfg.outreach.callScript.replace(/\{\{\s*ten_shop\s*\}\}/g, cfg.outreach.shopName)} />
       ) : (
         <EmptyState title={view === "done" ? "Chưa có liên hệ nào hoàn tất" : "Không có lời chào nào đang chờ"} description="Mở danh sách «Khách sỉ tiềm năng», chọn lead hạng A/B rồi bấm «Xếp hàng liên hệ»." />
       )}

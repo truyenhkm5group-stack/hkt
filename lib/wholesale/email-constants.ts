@@ -144,6 +144,12 @@ export const emailSettingsSchema = z.object({
   /** Ai bật LIVE, lúc nào — chỉ chủ shop (ADMIN có `wholesale:config`). `null` = LIVE chưa từng được bật. */
   liveEnabledByUserId: z.string().max(64).nullable(),
   liveEnabledAt: z.string().max(40).nullable(),
+  /**
+   * Nước đã RÀ LUẬT thư chào hàng (ISO-3166 alpha-2, `VN` = khách trong nước — issue #1085). Mặc định RỖNG và không có nước
+   * mặc định: nước chưa có trong danh sách ⇒ thư chỉ chạy thử, ở chế độ gửi thật thì nằm chờ (`COUNTRY_NOT_REVIEWED`).
+   * Chỉ quản trị sửa, kèm lý do + audit (`lib/wholesale/email-countries.ts`).
+   */
+  allowedCountries: z.array(z.string().regex(/^[A-Z]{2}$/)).max(60),
 });
 export type EmailSettings = z.infer<typeof emailSettingsSchema>;
 
@@ -157,6 +163,7 @@ export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
   sender: { name: "", email: "", companyName: "", address: "" },
   liveEnabledByUserId: null,
   liveEnabledAt: null,
+  allowedCountries: [],
 };
 
 /**
@@ -191,6 +198,7 @@ export function mergeEmailSettings(raw: unknown): EmailSettings {
     sender: { name: snd("name"), email: snd("email"), companyName: snd("companyName"), address: snd("address") },
     liveEnabledByUserId: pick("liveEnabledByUserId"),
     liveEnabledAt: pick("liveEnabledAt"),
+    allowedCountries: pick("allowedCountries"),
   };
 }
 
@@ -230,6 +238,7 @@ export const EMAIL_BLOCK_REASONS = [
   "KILL_CAMPAIGN",
   "KILL_DOMAIN",
   "SENDER_INCOMPLETE",
+  "COUNTRY_NOT_REVIEWED",
   "LEAD_STOPPED",
   "NOT_CONTACTABLE",
   "SUPPRESSED",
@@ -253,6 +262,7 @@ export const EMAIL_BLOCK_REASON_LABEL: Record<EmailBlockReason, string> = {
   KILL_CAMPAIGN: "Chiến dịch của lead đang bị dừng gửi email",
   KILL_DOMAIN: "Tên miền nhận đang bị dừng gửi",
   SENDER_INCOMPLETE: "Thiếu danh tính người gửi (tên · email · doanh nghiệp · địa chỉ) để in chân thư",
+  COUNTRY_NOT_REVIEWED: "Chưa rà luật thư chào hàng của nước người nhận — chỉ chạy thử, chưa gửi thật",
   LEAD_STOPPED: "Lead đã trả lời / huỷ đăng ký / thư trả về / báo rác / KHÔNG LIÊN HỆ — dừng mọi thư tự động",
   NOT_CONTACTABLE: "Chưa đủ căn cứ để MÁY tự gửi email cho địa chỉ này",
   SUPPRESSED: "Khớp danh sách không liên hệ",
@@ -270,4 +280,4 @@ export const EMAIL_BLOCK_REASON_LABEL: Record<EmailBlockReason, string> = {
  * Lý do TỰ HẾT: thư nằm lại QUEUED, hẹn lượt sau. Mọi lý do khác là chặn hẳn (BLOCKED) — cần người sửa căn cứ rồi mở lại.
  * LIVE_NO_ADAPTER tự hết khi có adapter; nút dừng tự hết khi người gỡ; hạn mức tự hết theo giờ.
  */
-export const EMAIL_HOLD_REASONS: readonly EmailBlockReason[] = ["MODE_OFF", "LIVE_NO_ADAPTER", "LIVE_NOT_OWNER_ENABLED", "KILL_ORG", "KILL_CAMPAIGN", "KILL_DOMAIN", "SENDER_INCOMPLETE", "LIMIT_HOUR", "LIMIT_DAY", "LIMIT_DOMAIN"];
+export const EMAIL_HOLD_REASONS: readonly EmailBlockReason[] = ["MODE_OFF", "LIVE_NO_ADAPTER", "LIVE_NOT_OWNER_ENABLED", "KILL_ORG", "KILL_CAMPAIGN", "KILL_DOMAIN", "SENDER_INCOMPLETE", "COUNTRY_NOT_REVIEWED", "LIMIT_HOUR", "LIMIT_DAY", "LIMIT_DOMAIN"];
