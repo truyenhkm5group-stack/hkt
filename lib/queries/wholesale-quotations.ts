@@ -38,6 +38,27 @@ function effectiveStatusSql(today: string): SQL<string> {
   return sql<string>`case when ${q.status} in ('DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'SENT') and ${q.validUntil} < ${today}::date then 'EXPIRED' else ${q.status} end`;
 }
 
+/** Trạng thái báo giá còn CHƯA CHỐT (trạng thái hiệu lực, sau khi xét hết hạn). */
+export const QUOTATION_OPEN_STATUSES = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "SENT"] as const satisfies readonly QuotationStatus[];
+
+/**
+ * SỐ báo giá chưa chốt của CẢ tổ chức ngữ cảnh — cho báo cáo ngày (lib/daily-report/service.ts). Không nhận phiên, không trả dòng
+ * nào, chỉ một con số: nơi gọi tự gác quyền ở màn hình của nó (trang /daily-report: approvals:decide). Dùng ĐÚNG `effectiveStatusSql`
+ * của danh sách (báo giá quá hạn hiệu lực không còn «chưa chốt»). CSDL chưa áp bảng báo giá ⇒ `null` (chưa biết, không phải 0).
+ */
+export async function quotationOpenCount(now = new Date()): Promise<number | null> {
+  const r = await guard(async () => {
+    const db = await getDb();
+    const eff = effectiveStatusSql(vnDateKey(now));
+    const [row] = await db
+      .select({ n: sql<number>`count(*)`.mapWith(Number) })
+      .from(q)
+      .where(sql`${eff} in (${sql.join(QUOTATION_OPEN_STATUSES.map((st) => sql`${st}`), sql`, `)})`);
+    return row?.n ?? 0;
+  });
+  return typeof r === "number" ? r : null;
+}
+
 /** Mệnh đề phạm vi cho bảng báo giá. `null` = không thấy gì. */
 async function scopeWhere(user: SessionUser): Promise<SQL | undefined | null> {
   const decision = await decideScope("WHOLESALE_LEADS", user);

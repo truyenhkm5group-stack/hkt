@@ -35,10 +35,10 @@ import { getManagerDay } from "@/lib/queries/manager-day";
 import { adSpendTotal } from "@/lib/queries/marketing-daily";
 import { wholesaleDashboard, wholesaleEmailCoverage } from "@/lib/queries/wholesale";
 import { outboxCounts } from "@/lib/queries/wholesale-email-outbox";
-import { listQuotations } from "@/lib/queries/wholesale-quotations";
+import { quotationOpenCount } from "@/lib/queries/wholesale-quotations";
 import { extractVndAmounts, unverifiedAmounts } from "@/lib/sales-chatbot/claim-guard";
 import { operationsGroupChannel } from "@/lib/sales-chatbot/alerts";
-import type { ListParams, Period } from "@/lib/search-params";
+import type { Period } from "@/lib/search-params";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 
 /**
@@ -55,19 +55,6 @@ import { getSettingJson, setSettingJson } from "@/lib/settings";
 
 export type DailyReportDeps = { now?: Date };
 export type DailyReportRun = { ran: boolean; reason: string; reportDate?: string; aiStatus?: AiStatus; sent?: boolean };
-
-/** Người đọc MÁY phạm vi ALL — CHỈ để gọi hàm đếm báo giá sẵn có (hàm ấy hỏi phạm vi theo phiên). Không ghi gì. */
-const REPORT_READER = (orgCode: string, isHome: boolean): SessionUser => ({
-  id: "",
-  email: "job:daily-report",
-  name: "Báo cáo ngày (máy)",
-  role: "ADMIN",
-  permissions: [],
-  scope: "ALL",
-  departmentCodes: [],
-  positionId: null,
-  organization: { code: orgCode, name: orgCode, isHome },
-});
 
 const ALL_SCOPE = { allow: "ALL" as const, explain: "báo cáo ngày đọc toàn tổ chức" };
 
@@ -93,7 +80,6 @@ export async function gatherDailyFacts(now: Date = new Date()): Promise<DailyFac
   const yesterday: Period = { key: "custom", from: vnStartOfDay(day), to: vnEndOfDay(day), label: day, fromKey: day, toKey: day };
   const weekFrom = addDays(day, -6);
   const week: Period = { key: "custom", from: vnStartOfDay(weekFrom), to: vnEndOfDay(day), label: `${weekFrom} → ${day}`, fromKey: weekFrom, toKey: day };
-  const org = await currentOrganization();
   const sections: FactSection[] = [];
 
   sections.push(
@@ -157,15 +143,13 @@ export async function gatherDailyFacts(now: Date = new Date()): Promise<DailyFac
           { key: "quotes", label: "Báo giá chưa chốt (nháp · chờ duyệt · đã duyệt · đã gửi)", unit: "count" },
         ],
         async () => {
-          const params: ListParams = { page: 1, pageSize: 1, sort: "createdAt", dir: "desc", q: "", filters: {}, period: yesterday };
           const [dash, cover, box, quotes] = await Promise.all([
             wholesaleDashboard({ from: yesterday.from, to: yesterday.to, dimension: "source", decision: ALL_SCOPE, now }),
             wholesaleEmailCoverage(ALL_SCOPE),
             outboxCounts(ALL_SCOPE),
-            listQuotations(REPORT_READER(org.code, org.isHome), params, now),
+            quotationOpenCount(now),
           ]);
-          const qc = "counts" in quotes ? Object.entries(quotes.counts).filter(([k]) => ["DRAFT", "PENDING_APPROVAL", "APPROVED", "SENT"].includes(k)).reduce((a, [, n]) => a + (n ?? 0), 0) : null;
-          return { newLeads: dash.kpi.total, withEmail: cover.withEmail, drafts: box ? box.open : null, quotes: qc };
+          return { newLeads: dash.kpi.total, withEmail: cover.withEmail, drafts: box ? box.open : null, quotes };
         },
       ),
     );

@@ -8,7 +8,8 @@
  *     (UPDATE bị trigger chặn); một bản mỗi ngày; CSDL chưa áp 0266 ⇒ bỏ qua trước khi tốn tiền; tổ chức nhà không thấy bản nào.
  */
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
+import path from "node:path";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb, getPlatformDb, organizationDatabaseUrl, schema } from "@/db";
 import { FakeProvider } from "@/lib/ai/provider";
@@ -21,6 +22,7 @@ import { withOrganization } from "@/lib/platform/context";
 import { invalidateOrganizations } from "@/lib/platform/organizations";
 import { provisionOrganization } from "@/lib/platform/provision";
 import { listDailyReports } from "@/lib/queries/daily-report";
+import { quotationOpenCount } from "@/lib/queries/wholesale-quotations";
 import { extractVndAmounts, unverifiedAmounts } from "@/lib/sales-chatbot/claim-guard";
 
 const ORG = "dr-si";
@@ -78,6 +80,10 @@ function testPure() {
   assert.equal(parseAiReport("không phải JSON"), null);
   const msg = dailyReportMessage(SAMPLE, { status: "SKIPPED", summary: null, highlights: [], note: "chưa khai trần" }, null);
   assert.ok(msg.includes("Chi quảng cáo: —") && !msg.includes("Chi quảng cáo: 0"), "ô chưa đo in «—», không 0");
+  // Không dựng danh tính quản trị giả để gọi hàm theo phiên (luật 28–31): số báo giá đi qua hàm đếm không nhận phiên.
+  const svc = readFileSync(path.join(path.resolve(__dirname, ".."), "lib/daily-report/service.ts"), "utf8");
+  assert.ok(!/role:\s*"ADMIN"|scope:\s*"ALL"|listQuotations\(/.test(svc), "dịch vụ báo cáo không tự dựng phiên ADMIN / phạm vi ALL");
+  assert.ok(svc.includes("quotationOpenCount("), "số báo giá qua hàm đếm riêng");
   console.log("✓ Báo cáo ngày (thuần): mặc định tắt · hàng rào chặn số đếm / tiền / % bịa và «0» cho ô chưa đo · JSON AI đúng hình · tin in «—»");
 }
 
@@ -98,6 +104,9 @@ export async function testDailyReport() {
       const admin: SessionUser = { id: u.id, email: u.email, name: "QT báo cáo", role: "ADMIN", permissions: [], scope: "ALL", departmentCodes: [], positionId: null, organization: org };
       const manager: SessionUser = { ...admin, role: "MANAGER", permissions: ["approvals:decide"] };
       const count = async () => (await db.select({ n: sql<number>`count(*)::int` }).from(schema.dailyReports))[0].n;
+
+      // Hàm đếm báo giá không nhận phiên: tổ chức chưa có báo giá nào ⇒ 0 THẬT (bảng có, không dòng nào).
+      assert.equal(await quotationOpenCount(now), 0);
 
       // ── Mặc định TẮT ──
       assert.equal((await runDailyReport({ now })).ran, false);

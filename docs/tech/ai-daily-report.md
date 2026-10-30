@@ -18,7 +18,7 @@
    | Chi quảng cáo | `adSpendTotal` |
    | Care vận đơn (quá hạn · chưa ai nhận · tiền treo) | `getCareQueue` |
    | Việc trên /work (mở · quá hạn · chưa ai nhận) | `getManagerDay` |
-   | Bán sỉ (module bật): lead mới · có email · thư chờ gửi · báo giá chưa chốt | `wholesaleDashboard` · `wholesaleEmailCoverage` · `outboxCounts` · `listQuotations` |
+   | Bán sỉ (module bật): lead mới · có email · thư chờ gửi · báo giá chưa chốt | `wholesaleDashboard` · `wholesaleEmailCoverage` · `outboxCounts` · `quotationOpenCount` (hàm đếm không nhận phiên) |
    | Facebook CRM (cờ bật): đã kết bạn · tới hẹn | `fbCrmOverview` · `fbCrmDueCare` |
 
    Khối nào lỗi thì số của khối đó là `null` (in «—», kèm lý do). Không in 0, và không làm hỏng cả bản.
