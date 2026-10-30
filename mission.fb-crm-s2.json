@@ -3,7 +3,7 @@
   "mission_id": "fb-crm-s2",
   "title": "Facebook CRM lát 2: nguồn việc /work, khối Customer 360, thẻ số + tương quan",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-fbcrm-s2",
@@ -32,9 +32,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-30T10:07:42.625Z",
-  "updated_at": "2026-10-30T10:33:52.224Z",
+  "updated_at": "2026-10-30T10:57:41.174Z",
   "last_heartbeat": "2026-10-30T10:31:10.343Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1099 → 3c3d69858c704f268271953e2acfb7ed9469d2eb"
+  },
   "handoff": {
     "branch": "claude/fb-crm-s2",
     "sha": "007add1db2d133e6fadbe3a90c77b1fa82bf0b16",
