@@ -3,7 +3,7 @@
   "mission_id": "b2b-p1a-consent",
   "title": "Săn khách sỉ P1a: chặn EMAIL, nhật ký đồng ý liên hệ, khử trùng email, nhiệt độ lead",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-b2b-consent",
@@ -38,11 +38,13 @@
     "0261": "2026-10-27T02:31:44.290Z"
   },
   "created_at": "2026-10-27T02:30:56.048Z",
-  "updated_at": "2026-10-28T14:48:52.422Z",
+  "updated_at": "2026-10-30T03:26:56.791Z",
   "last_heartbeat": "2026-10-28T14:27:09.350Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1090 → 2c5a83ae6e39e716d8fbbf48ea4a970ac48005eb"
+    "merged": "#1090 → 2c5a83ae6e39e716d8fbbf48ea4a970ac48005eb",
+    "verify": "PASS 2f539578018ee9a4591ffe0682953cd1194a46c1 2026-10-30T03:26:04.533Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40995992217"
   },
   "handoff": {
     "branch": "claude/b2b-p1a-consent",
