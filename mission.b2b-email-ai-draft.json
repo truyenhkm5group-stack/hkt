@@ -3,7 +3,7 @@
   "mission_id": "b2b-email-ai-draft",
   "title": "AI soạn email chào hàng cá nhân hoá (nháp, có hàng rào bịa đặt)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-b2b-email-ai",
@@ -41,7 +41,23 @@
     "0265": "2026-10-30T10:38:30.292Z"
   },
   "created_at": "2026-10-30T10:37:31.404Z",
-  "updated_at": "2026-10-30T10:38:30.292Z",
-  "last_heartbeat": "2026-10-30T10:37:31.404Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-30T11:39:39.680Z",
+  "last_heartbeat": "2026-10-30T11:39:39.680Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/b2b-email-ai-draft",
+    "sha": "8d64504ddf656781f11be59e19c7ca5e00e7cd10",
+    "at": "2026-10-30T11:39:39.680Z",
+    "actor": "DESKTOP-56TH98Y:wt-b2b-email-ai",
+    "title": "AI soạn email chào hàng sỉ (nháp + hàng rào bịa đặt) · 0265",
+    "summary": "",
+    "tests": [
+      "npm run typecheck (sau merge main 3c3d69858): sạch",
+      "npm run lint: sạch",
+      "TEST_KHOI=K21 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K21 ĐẠT (gồm tests/wholesale-email-ai-draft.test.ts, AI giả)",
+      "chạy riêng ĐẠT: legal-registers (AI-07), duplicate-metrics, loading-ux-contract, ui-consistency/nav, saas-shell, repo-integrity, platform-isolation-static, access-control, migration-upgrade-path, migration-serve-compat, migration-journal",
+      "npm run build: ĐẠT",
+      "4 shard đủ: gates CI"
+    ]
+  }
 }
