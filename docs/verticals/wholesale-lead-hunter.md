@@ -293,9 +293,10 @@ danh tính, MỞ lại nút dừng, duyệt hàng loạt. `LIVE` chỉ chủ sho
 
 | Làn | Khi nào |
 |---|---|
-| Nước ngoài — Email | Lead quốc tế (`isIntlProvinceKey`) có email |
+| Nước ngoài — Email | Nước của lead (thang bên dưới) khác VN, và lead có email |
 | Trong nước — Zalo | Lead trong nước nhắn Zalo được — kể cả khi có email |
 | Trong nước — chuyển sang email | Zalo KHÔNG GỬI ĐƯỢC **và** lead có email |
+| Thiếu căn cứ nước — người xác nhận | Thang nước ra CHƯA BIẾT — nhân viên chọn nước («Xác nhận nước») rồi lead mới vào làn Zalo / Email |
 | Thiếu kênh | Không có kênh dùng được — kế hoạch in «Chưa có email — chạy Thu thập email», không đoán địa chỉ |
 | Dừng liên hệ | KHÔNG LIÊN HỆ hoặc khớp danh sách chặn (cùng luật P1a: chặn thắng mọi đồng ý) |
 
@@ -315,11 +316,29 @@ nước còn nhắn Zalo được — luật nằm ở máy chủ, không chỉ 
 · hạn mức) và vẫn CHẠY THỬ.
 
 **Cổng pháp lý theo nước** (issue #1085): `wholesale.email.allowedCountries` — mã ISO2 của nước ĐÃ RÀ LUẬT thư chào hàng,
-`VN` cho khách trong nước. Mặc định RỖNG, không có nước mặc định. Nước người nhận = `recipientCountryOf(lead.provinceKey)`
-(lead quốc tế ⇒ nước của khoá tỉnh; còn lại ⇒ `VN`; không nhận ra ⇒ chưa rà). Ở chế độ GỬI THẬT, nước chưa rà ⇒ thư nằm chờ
+`VN` cho khách trong nước. Mặc định RỖNG, không có nước mặc định. Nước người nhận đọc từ thang nước dưới đây; CHƯA BIẾT ⇒
+coi như chưa rà. Ở chế độ GỬI THẬT, nước chưa rà ⇒ thư nằm chờ
 với lý do `COUNTRY_NOT_REVIEWED`; ở CHẠY THỬ thư vẫn đi hết đường ống, cảnh báo in ở Hộp thư đi và ghi vào sự kiện `SENT`.
 Chỉ QUẢN TRỊ (vai trò ADMIN, có `wholesale:config`) sửa danh sách ở trang Hộp thư đi, bắt buộc lý do, có audit
 (`WHOLESALE_EMAIL_COUNTRIES`). Đây là ghi nhận kỹ thuật, không phải ý kiến pháp lý.
+
+**Nước của lead — MỘT thang chứng cứ** (`leadCountryOf`, `lib/wholesale/lead-country.ts`; dữ kiện gom DUY NHẤT ở
+`countryInputOf` trong `contact-plan-store.ts`). Cổng nước của hộp thư đi, làn kênh và ngôn ngữ AI soạn email cùng đọc hàm
+này — trước đây có hai luật (khoá tỉnh ở cổng / làn, SĐT + tên miền ở AI) và lead `+1 · .com` bị một bên xếp Việt Nam, bên kia
+viết tiếng Anh. Thứ tự:
+
+1. **Người xác nhận** — dòng `wholesale_lead_activities` kind `EDIT`, `outcome = COUNTRY_CONFIRMED`, `meta.country`; chỉ
+   thêm, dòng mới nhất thắng; `wholesale:work` + phạm vi dữ liệu + audit `WHOLESALE_LEAD_COUNTRY`.
+2. **Khoá tỉnh** — `intl …` ⇒ nước của ô quét; tỉnh Việt Nam có trong danh sách chuẩn ⇒ VN. Khoá không nhận ra ⇒ bỏ qua.
+3. **Mã nước SĐT** — `phone_country_code = 84` / `+84…` ⇒ VN; `+<mã>` / `00<mã>` ⇒ nước của mã. Mã dùng chung nhiều nước
+   (+1 Mỹ · Canada · Caribe, +7 Nga · Kazakhstan) KHÔNG kết luận — luật thư chào hàng của Mỹ (CAN-SPAM) và Canada (CASL) khác nhau.
+4. **Đuôi tên miền quốc gia** của website rồi email (.de, .fr, .com.vn, .co.uk ⇒ GB). Đuôi chung (.com, .net…) và đuôi quốc
+   gia hay bị dùng như đuôi chung (.io, .co, .ai, .me, .tv…; .eu không phải một nước) KHÔNG kết luận.
+5. Còn lại ⇒ **CHƯA BIẾT** (`null`). Không có mặc định «trong nước».
+
+CHƯA BIẾT ⇒ cổng nước coi như chưa rà (gửi thật nằm chờ), làn «Thiếu căn cứ nước — người xác nhận», và AI soạn email TỪ CHỐI
+(trước khi tốn lượt AI) thay vì đoán ngôn ngữ. Nước đã biết: VN / Việt Kiều ⇒ tiếng Việt, nước khác ⇒ tiếng Anh
+(`draftLanguageForCountry` — chỉ ánh xạ, không suy nước).
 
 ## 4d. Khách sỉ nước ngoài và phân khúc B2B (chủ shop chốt 27/10/2026)
 

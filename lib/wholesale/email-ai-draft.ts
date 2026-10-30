@@ -16,10 +16,10 @@ import { getSettingJson, setSettingJson } from "@/lib/settings";
 import type { CoreResult } from "@/lib/wholesale/campaigns";
 import { normalizeEmail } from "@/lib/wholesale/contactability";
 import { emailDomain, emailIdempotencyKey } from "@/lib/wholesale/email-constants";
-import { draftLanguageFor, draftViolations, editRatio, type DraftGuardFacts, type DraftLanguage, type DraftViolation } from "@/lib/wholesale/email-ai-draft-guard";
+import { draftLanguageForCountry, draftViolations, editRatio, type DraftGuardFacts, type DraftLanguage, type DraftViolation } from "@/lib/wholesale/email-ai-draft-guard";
 import { getEmailSettings } from "@/lib/wholesale/email-outbox-store";
 import { leadView } from "@/lib/wholesale/engine";
-import { emailLaneRefusal } from "@/lib/wholesale/contact-plan-store";
+import { emailLaneRefusal, leadCountryForLead } from "@/lib/wholesale/contact-plan-store";
 import { openerVariables } from "@/lib/wholesale/opener";
 import { resolveAi } from "@/lib/wholesale/outreach";
 import { parseQuotationPolicy, QUOTATION_SETTING_KEY } from "@/lib/wholesale/quotation-engine";
@@ -105,14 +105,13 @@ async function leadInScope(user: SessionUser, leadId: string): Promise<{ lead: L
 export type DraftFactsSnapshot = { language: DraftLanguage; factsText: string; allowedAmounts: number[]; deliveryNote: string; catalogLines: number; quotationCode: string | null };
 
 /** Dựng dữ kiện thật cho MỘT lead — chỉ đọc. */
-export async function buildDraftFacts(lead: Lead): Promise<DraftFactsSnapshot> {
+export async function buildDraftFacts(lead: Lead, language: DraftLanguage): Promise<DraftFactsSnapshot> {
   const db = await getDb();
   const [cfg, sender, rawPolicy, books] = await Promise.all([getLeadHunterConfig(), getEmailSettings(), getSettingJson<Record<string, unknown>>(QUOTATION_SETTING_KEY, {}), priceBooksFor(lead.customerId ?? null, db)]);
   const snap = lead.placeId ? await db.query.wholesalePlaceSnapshots.findFirst({ where: eq(schema.wholesalePlaceSnapshots.placeId, lead.placeId) }) : null;
   const v = leadView(lead, snap);
   const segment = isLeadSegmentKey(lead.segment) ? lead.segment : "UNCLASSIFIED";
   const vars = openerVariables(cfg, { businessName: lead.businessName || v.name || "", segment, areaName: lead.areaName, provinceLabel: lead.provinceLabel });
-  const language = draftLanguageFor({ phoneCountryCode: lead.phoneCountryCode, websiteDomain: lead.websiteDomain });
   const allowed = new Set<number>();
 
   // Bảng giá đang áp: khách đã nối ⇒ bảng riêng → mặc định; lead chưa là khách ⇒ bảng mặc định (D6).
@@ -228,13 +227,16 @@ export async function aiDraftEmailCore(user: SessionUser, leadId: string, now = 
     // Kế hoạch kênh (chủ shop 30/10): khách trong nước còn nhắn Zalo được thì không soạn email — kiểm TRƯỚC khi tốn lượt AI.
     const refusal = await emailLaneRefusal(g.lead.id);
     if (refusal) return { error: refusal };
+    // Ngôn ngữ theo nước ĐÃ BIẾT (một thang với cổng nước / làn); chưa biết ⇒ từ chối, không đoán.
+    const country = await leadCountryForLead(g.lead);
+    if (!country.country) return { error: `Chưa biết khách ở nước nào (${country.detail}) — xác nhận nước ở Hàng đợi liên hệ rồi soạn; AI không đoán ngôn ngữ.` };
     // Kiểm bảng + trần TRƯỚC khi gọi AI: chưa áp 0265 hoặc chạm trần ⇒ không tốn một lượt gọi nào.
     const spend = await todaySpend(now);
     if (spend.drafts >= (settings.dailyMaxDrafts as number)) return { error: `Đã chạm trần ${settings.dailyMaxDrafts} nháp AI hôm nay.` };
     if (spend.costUnknown) return { error: "Hôm nay có lượt AI chưa biết chi phí (model chưa có giá niêm yết) — không chứng minh được còn dưới trần chi phí, tạm dừng tới mai." };
     if (spend.costUsd >= (settings.dailyCostCapUsd as number)) return { error: `Đã chạm trần chi phí ${settings.dailyCostCapUsd} USD / ngày.` };
 
-    const facts = await buildDraftFacts(g.lead);
+    const facts = await buildDraftFacts(g.lead, draftLanguageForCountry(country.country));
     const org = await currentOrganization();
     const resolved = deps.ai ? ({ ok: true, ...deps.ai } as const) : await resolveAi();
     if (!resolved.ok) return { error: `Chưa có AI của tổ chức: ${resolved.reason}` };

@@ -34,8 +34,7 @@ import {
   type EmailSettings,
 } from "@/lib/wholesale/email-constants";
 import { evaluateEmailSend, type EmailPolicyDecision, type EmailPolicyInput } from "@/lib/wholesale/email-policy";
-import { recipientCountryOf } from "@/lib/wholesale/contact-plan";
-import { emailLaneRefusal } from "@/lib/wholesale/contact-plan-store";
+import { emailLaneRefusal, leadCountryForLead } from "@/lib/wholesale/contact-plan-store";
 import { getEmailSettings, isMissingEmailTable, leadEmailEventKinds, recordEmailEvent } from "@/lib/wholesale/email-outbox-store";
 import { issueUnsubscribeToken, unsubscribeUrl } from "@/lib/wholesale/email-unsubscribe";
 import { leadView } from "@/lib/wholesale/engine";
@@ -396,7 +395,7 @@ export async function emailPolicyInputFor(row: Row, settings: EmailSettings, now
   const mode = prospectiveMode(settings);
   const dayStart = vnStartOfDay(vnDateKey(now));
   const hourAgo = new Date(now.getTime() - 3_600_000);
-  const [ct, hit, kinds, [dup], [counts]] = await Promise.all([
+  const [ct, hit, kinds, [dup], [counts], country] = await Promise.all([
     leadContactability(lead, snap, "AUTOMATED"),
     suppressionHit({ placeId: lead.placeId, phone: view.phone, domain: lead.websiteDomain ?? snap?.websiteDomain ?? null, email: lead.email }),
     leadEmailEventKinds(lead.id),
@@ -412,6 +411,7 @@ export async function emailPolicyInputFor(row: Row, settings: EmailSettings, now
       })
       .from(o)
       .where(and(eq(o.status, "SENT"), eq(o.mode, mode), gte(o.sentAt, dayStart < hourAgo ? dayStart : hourAgo))),
+    leadCountryForLead(lead, snap),
   ]);
   return {
     settings,
@@ -431,7 +431,7 @@ export async function emailPolicyInputFor(row: Row, settings: EmailSettings, now
     contactability: ct.byChannel.EMAIL,
     suppressionHit: hit,
     leadEventKinds: kinds,
-    recipientCountry: recipientCountryOf(lead.provinceKey),
+    recipientCountry: country.country,
     duplicateSent: Number(dup?.n ?? 0) > 0,
     counts: { lastHour: Number(counts?.hour ?? 0), today: Number(counts?.today ?? 0), domainToday: Number(counts?.domain ?? 0) },
   };

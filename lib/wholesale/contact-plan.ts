@@ -1,5 +1,5 @@
-import { intlSearchProvince, isIntlProvinceKey } from "@/lib/wholesale/areas-intl";
 import { contactability, normalizeEmail, suppressionMatches, type Contactability, type ContactabilityLead, type ConsentRecord, type SuppressionRecord } from "@/lib/wholesale/contactability";
+import type { LeadCountry } from "@/lib/wholesale/lead-country";
 
 /**
  * ═══════════ KẾ HOẠCH KÊNH LIÊN HỆ — HÀM THUẦN (chủ shop chốt 30/10/2026) ═══════════
@@ -7,7 +7,9 @@ import { contactability, normalizeEmail, suppressionMatches, type Contactability
  * «Tách phần tìm khách nước ngoài để gửi email với luồng khách trong nước để nhắn Zalo. Bổ sung gửi email cho cả khách trong
  * nước (trong trường hợp không gửi được tin nhắn Zalo cho khách đó).»
  *
- *  · Lead QUỐC TẾ (`isIntlProvinceKey`) ⇒ kênh EMAIL.
+ *  · NƯỚC của lead đọc từ MỘT thang chứng cứ (`leadCountryOf`, lib/wholesale/lead-country.ts). Chưa biết nước ⇒ làn «Thiếu
+ *    căn cứ nước — người xác nhận», KHÔNG mặc định trong nước.
+ *  · Lead NƯỚC NGOÀI ⇒ kênh EMAIL.
  *  · Lead TRONG NƯỚC ⇒ ZALO là kênh chính; EMAIL dự phòng KHI VÀ CHỈ KHI Zalo KHÔNG GỬI ĐƯỢC: không có SĐT di động (Zalo đi
  *    theo số di động), hoặc `zalo_status = NOT_FOUND` (không có tài khoản — một sự thật, không nhân đôi), hoặc nhân viên đánh
  *    dấu «Zalo không gửi được» (chặn tin người lạ · số sai…) mà chưa hoàn tác.
@@ -57,18 +59,13 @@ export function zaloMarkerOf(rows: readonly { outcome: string | null; meta: unkn
   return { reason, at: typeof last.createdAt === "string" ? last.createdAt : last.createdAt.toISOString() };
 }
 
-/** Nước người nhận theo khoá tỉnh: lead quốc tế ⇒ ISO2 của nước (không nhận ra ⇒ `null`); còn lại ⇒ `VN`. */
-export function recipientCountryOf(provinceKey: string | null | undefined): string | null {
-  if (!isIntlProvinceKey(provinceKey)) return "VN";
-  return intlSearchProvince(provinceKey)?.locale?.regionCode ?? null;
-}
-
-export const CONTACT_TRACKS = ["INTL_EMAIL", "DOMESTIC_ZALO", "DOMESTIC_EMAIL_FALLBACK", "NO_CHANNEL", "STOPPED"] as const;
+export const CONTACT_TRACKS = ["INTL_EMAIL", "DOMESTIC_ZALO", "DOMESTIC_EMAIL_FALLBACK", "COUNTRY_UNKNOWN", "NO_CHANNEL", "STOPPED"] as const;
 export type ContactTrack = (typeof CONTACT_TRACKS)[number];
 export const CONTACT_TRACK_LABEL: Record<ContactTrack, string> = {
   INTL_EMAIL: "Nước ngoài — Email",
   DOMESTIC_ZALO: "Trong nước — Zalo",
   DOMESTIC_EMAIL_FALLBACK: "Trong nước — chuyển sang email",
+  COUNTRY_UNKNOWN: "Thiếu căn cứ nước — người xác nhận",
   NO_CHANNEL: "Thiếu kênh",
   STOPPED: "Dừng liên hệ",
 };
@@ -78,7 +75,9 @@ export const EMAIL_TRACKS: readonly ContactTrack[] = ["INTL_EMAIL", "DOMESTIC_EM
 export const NO_EMAIL_HINT = "Chưa có email — chạy «Thu thập email» (Khách sỉ tiềm năng) hoặc nhập email khách cho.";
 
 export type ContactPlanInput = {
-  lead: ContactabilityLead & { provinceKey: string | null; phoneKind: string | null; zaloStatus: string | null };
+  lead: ContactabilityLead & { phoneKind: string | null; zaloStatus: string | null };
+  /** Nước của lead theo thang chứng cứ duy nhất (`leadCountryOf`) — người gọi tính, hàm này không suy luận lại. */
+  country: LeadCountry;
   consents: readonly ConsentRecord[];
   suppressions: readonly SuppressionRecord[];
   /** Dấu «Zalo không gửi được» còn hiệu lực (`zaloMarkerOf`). */
@@ -113,8 +112,8 @@ function zaloBlockOf(lead: ContactPlanInput["lead"], marker: ZaloMarker | null):
 
 export function contactPlanOf(input: ContactPlanInput): ContactPlan {
   const { lead } = input;
-  const international = isIntlProvinceKey(lead.provinceKey);
-  const country = recipientCountryOf(lead.provinceKey);
+  const country = input.country.country;
+  const international = Boolean(country && country !== "VN");
   const countryReviewed = Boolean(country && input.allowedCountries.includes(country));
   const email = normalizeEmail(lead.email);
   const emailGate = email ? contactability(lead, input.consents, input.suppressions, "EMAIL", "AUTOMATED") : null;
@@ -124,7 +123,8 @@ export function contactPlanOf(input: ContactPlanInput): ContactPlan {
   const hit = suppressionMatches(lead, input.suppressions);
   if (hit) return { ...base, track: "STOPPED", channel: null, zaloBlock: null, notes: [`Khớp danh sách không liên hệ (${hit.kind}) — dừng mọi kênh.`] };
 
-  const countryNote = countryReviewed ? null : `Chưa rà luật thư chào hàng của nước ${country ?? "(không xác định)"} — email chỉ chạy thử.`;
+  if (!country) return { ...base, track: "COUNTRY_UNKNOWN", channel: null, zaloBlock: null, notes: [`Chưa biết khách ở nước nào (${input.country.detail}) — xác nhận nước trước khi chọn Zalo hay email.`] };
+  const countryNote = countryReviewed ? null : `Chưa rà luật thư chào hàng của nước ${country} — email chỉ chạy thử.`;
   const emailNotes = (head: string[]) => [...head, ...(countryNote ? [countryNote] : [])];
 
   if (international) {
