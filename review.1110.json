@@ -1,8 +1,8 @@
 {
   "pr": 1110,
-  "sha": "3d6a4e92318ba8c1421c59b87aa8d6fa407a0d8d",
+  "sha": "c2aa557e7e51cda9c09fc11cb8c5664f38794254",
   "verdict": "PASS",
   "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
-  "at": "2026-10-30T21:37:35.216Z",
-  "note": "review lead: sắp lại giao diện Săn khách + Liên hệ — không đổi luật/quyền/truy vấn nghiệp vụ; thanh tab 5 mục theo thứ tự việc (hàm thuần wholesale-nav), route cũ giữ; trang Săn khách ba khối + thẻ tiến độ/3 ô kết quả + bảng chiến dịch ≤1.150px + nhật ký che SĐT/email ở máy chủ; truy vấn mới chỉ đọc qua andScope; mẫu nội dung chỉ wholesale:config sửa, không ghi đè trần; không luân phiên tài khoản/"
+  "at": "2026-10-30T22:31:42.182Z",
+  "note": "review lead (lượt 2: merge main giữ đủ khối E3 / lead-country / AI-draft / nhắc / nước đã rà): sắp lại giao diện Săn khách + Liên hệ — không đổi luật/quyền/truy vấn nghiệp vụ; thanh tab 5 mục theo thứ tự việc (hàm thuần wholesale-nav), route cũ giữ; trang Săn khách ba khối + thẻ tiến độ/3 ô kết quả + bảng chiến dịch ≤1.150px + nhật ký che SĐT/email ở máy chủ; truy vấn mới chỉ đọc qua andScope; mẫu"
 }
