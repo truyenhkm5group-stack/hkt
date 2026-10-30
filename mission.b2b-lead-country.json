@@ -3,7 +3,7 @@
   "mission_id": "b2b-lead-country",
   "title": "Nước của lead: một thang chứng cứ cho cổng nước, làn kênh và ngôn ngữ AI soạn email",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-country",
@@ -35,9 +35,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-30T15:06:03.380Z",
-  "updated_at": "2026-10-30T20:16:04.679Z",
+  "updated_at": "2026-10-30T20:40:08.899Z",
   "last_heartbeat": "2026-10-30T20:13:02.195Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1109 → 6d7b7e3ffaa6928928b7e6be815ac812711dd92d"
+  },
   "handoff": {
     "branch": "claude/b2b-lead-country",
     "sha": "84d3d09fca130035967fedc963a9741dc69005d3",
