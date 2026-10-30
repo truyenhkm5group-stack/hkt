@@ -171,6 +171,10 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   WHOLESALE_QUOTATION_ACCEPTED: "Khách chấp nhận báo giá sỉ",
   WHOLESALE_QUOTATION_REJECTED: "Khách từ chối báo giá sỉ",
   WHOLESALE_QUOTATION_POLICY_SET: "Sửa cài đặt báo giá sỉ (trần chiết khấu · biên LN tối thiểu · thuế)",
+  // Nháp email AI (P2b · 0265 · lib/wholesale/email-ai-draft.ts) — AI soạn, máy chặn bịa, người duyệt mới vào hộp thư đi.
+  WHOLESALE_EMAIL_AI_DRAFT: "AI soạn nháp email chào hàng sỉ",
+  WHOLESALE_EMAIL_AI_PROMOTE: "Duyệt nháp email AI vào hộp thư đi",
+  WHOLESALE_EMAIL_AI_CONFIG: "Sửa cấu hình AI soạn email (bật / trần / ngày)",
 };
 
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {
