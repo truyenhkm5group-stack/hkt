@@ -1842,6 +1842,13 @@
       "when": 1792487950509,
       "tag": "0263_wholesale_quotations",
       "breakpoints": true
+    },
+    {
+      "idx": 264,
+      "version": "7",
+      "when": 1792488130942,
+      "tag": "0264_wholesale_email_outbox",
+      "breakpoints": true
     }
   ]
 }

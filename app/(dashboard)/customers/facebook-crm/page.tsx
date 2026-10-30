@@ -6,9 +6,11 @@ import { FbCrmTable } from "@/app/(dashboard)/customers/facebook-crm/fb-crm-tabl
 import { FbCrmToggle } from "@/app/(dashboard)/customers/facebook-crm/fb-crm-toggle";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { can } from "@/lib/auth/session";
-import { FB_CRM_SORTABLE, FB_CRM_VIEWS, FB_CRM_VIEW_LABEL, fbCrmViewOf } from "@/lib/constants/fb-crm";
-import { formatNumber } from "@/lib/format";
-import { fbCrmAssignableUsers, fbCrmEnabled, fbCrmViewCounts, listFbCrm } from "@/lib/queries/fb-crm";
+import Link from "next/link";
+import { StatStrip } from "@/components/stat-tile";
+import { FB_CONNECTION_STATUS_LABEL, FB_CRM_CORRELATION_LABEL, FB_CRM_SORTABLE, FB_CRM_VIEWS, FB_CRM_VIEW_LABEL, fbCrmViewOf } from "@/lib/constants/fb-crm";
+import { formatNumber, formatVND } from "@/lib/format";
+import { fbCrmAssignableUsers, fbCrmEnabled, fbCrmFriendCorrelation, fbCrmOverview, listFbCrm } from "@/lib/queries/fb-crm";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Facebook Friend CRM" };
@@ -41,11 +43,19 @@ export default async function FacebookCrmPage({ searchParams }: { searchParams: 
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "lastInteractionAt", filterKeys: ["view"], sortable: [...FB_CRM_SORTABLE], defaultPeriod: "all" });
   const view = fbCrmViewOf(params.filters.view?.[0]);
-  const [{ rows, total, pageCount, unavailable }, counts, users] = await Promise.all([listFbCrm(params, view), fbCrmViewCounts(params.q), fbCrmAssignableUsers()]);
+  // `?c=<mã khách>` — đích của dòng việc «Hẹn chăm sóc» trên /work: đúng một khách, để làm thao tác thật của miền.
+  const onlyCustomer = typeof raw.c === "string" && /^[\w-]{1,100}$/.test(raw.c) ? raw.c : null;
+  const [{ rows, total, pageCount, unavailable }, overview, correlation, users] = await Promise.all([
+    listFbCrm(params, view, onlyCustomer),
+    fbCrmOverview(params.q),
+    fbCrmFriendCorrelation(),
+    fbCrmAssignableUsers(),
+  ]);
+  const counts = overview?.views ?? null;
   const canWrite = can(user, "customers:write");
 
   // CSDL của tổ chức chưa áp 0262 (đang phục vụ bằng lược đồ cũ) ⇒ nói thẳng, không in một danh sách rỗng trông như «không có khách».
-  if (unavailable || !counts) {
+  if (unavailable || !overview || !counts || !correlation) {
     return (
       <div className="space-y-5">
         <PageHeader eyebrow="Khách hàng" title="Facebook Friend CRM" />
@@ -63,6 +73,31 @@ export default async function FacebookCrmPage({ searchParams }: { searchParams: 
         description={`${formatNumber(counts.all)} khách từng nhắn fanpage hoặc có đơn · ${formatNumber(counts.friends)} đã kết bạn · ${formatNumber(counts.consented)} đồng ý, chờ kết bạn · ${formatNumber(counts.dnc)} không liên hệ`}
         hint="Giao thành công theo kết quả đơn của ERP (ORDER_OUTCOME — đơn hoàn / huỷ không tính). Doanh thu thực = tiền CÓ CHỨNG TỪ (COD thực thu, chuyển khoản) của đơn giao thành công; «—» = chưa có chứng từ, không phải 0đ. Link Facebook chỉ có khi NGƯỜI dán (khách gửi, hoặc nhân viên bấm avatar trên Pancake) — mã trong hộp thư là mã THEO PAGE, không mở được trang cá nhân."
       />
+      <StatStrip
+        columns={4}
+        items={[
+          { label: FB_CONNECTION_STATUS_LABEL.FRIENDS, value: formatNumber(overview.statuses.FRIENDS), note: `${formatNumber(overview.statuses.INVITE_SENT)} đã gửi lời mời · ${formatNumber(overview.statuses.CONSENTED)} đồng ý chờ mời`, tone: "green" },
+          { label: FB_CONNECTION_STATUS_LABEL.NOT_ASKED, value: formatNumber(overview.statuses.NOT_ASKED), note: `${formatNumber(overview.statuses.DECLINED)} khách từ chối · ${formatNumber(counts.dnc)} không liên hệ` },
+          {
+            label: "Kết bạn rồi mua",
+            value: `${formatNumber(correlation.buyersAfter)} khách`,
+            note: `${FB_CRM_CORRELATION_LABEL} · ${formatNumber(correlation.deliveredOrdersAfter)} đơn giao thành công sau mốc kết bạn`,
+          },
+          {
+            label: "Tiền có chứng từ sau mốc kết bạn",
+            value: correlation.verifiedCashAfter === null ? "—" : formatVND(correlation.verifiedCashAfter, { compact: true }),
+            note: `${FB_CRM_CORRELATION_LABEL} · độ phủ: ${formatNumber(correlation.withMilestone)}/${formatNumber(correlation.friends)} khách đã kết bạn có mốc kết bạn${correlation.verifiedCashAfter === null ? " · «—» = chưa có chứng từ tiền, không phải 0đ" : ""}`,
+          },
+        ]}
+      />
+      {onlyCustomer ? (
+        <p className="text-xs text-muted-foreground">
+          Đang xem đúng một khách (mở từ hàng đợi công việc).{" "}
+          <Link href="/customers/facebook-crm" className="font-semibold text-primary hover:underline">
+            Xem tất cả khách
+          </Link>
+        </p>
+      ) : null}
       <p className="rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
         ERP <b>không</b> tự kết bạn, <b>không</b> tự nhắn tin từ nick cá nhân và <b>không</b> quét Facebook. Chỉ mời kết bạn khi khách đã đồng ý; khách «không liên hệ» thì không ai nhắn.
       </p>

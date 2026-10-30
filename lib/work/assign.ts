@@ -56,6 +56,12 @@ export async function assignByAuthority(key: string, assigneeId: string | null, 
       const r = assigneeId === null ? await inbox.releaseConversationCore(user, parsed.sourceKey) : assigneeId === user.id ? await inbox.claimConversationCore(user, parsed.sourceKey) : await inbox.assignConversationCore(user, parsed.sourceKey, assigneeId);
       return r.ok ? { ok: true } : { error: r.error };
     }
+    case "FB_CRM_CARE": {
+      // Người phụ trách khách ở MIỀN Facebook CRM (`care_owner_user_id`) — cùng lõi với menu «Đổi NV phụ trách», quyền customers:write.
+      const { fbCrmApplyCore } = await import("@/lib/fb-crm/service");
+      const r = await fbCrmApplyCore(user, parsed.sourceKey, { op: "SET_OWNER", userId: assigneeId });
+      return r.ok ? { ok: true } : { error: r.error };
+    }
     default:
       return { error: `${WORK_SOURCE_SPEC[source].label}: nguồn giữ người phụ trách nhưng chưa nối hành động giao việc` };
   }
