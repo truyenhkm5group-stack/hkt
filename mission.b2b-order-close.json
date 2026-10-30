@@ -44,22 +44,23 @@
     "0267": "2026-10-30T14:11:02.484Z"
   },
   "created_at": "2026-10-30T14:08:57.096Z",
-  "updated_at": "2026-10-30T22:10:17.513Z",
-  "last_heartbeat": "2026-10-30T20:37:33.863Z",
+  "updated_at": "2026-10-30T23:34:37.790Z",
+  "last_heartbeat": "2026-10-30T23:34:37.790Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/b2b-order-close",
-    "sha": "0613708cbac5c2fb9571dee7535bd599ddcf0833",
-    "at": "2026-10-30T20:37:33.863Z",
+    "sha": "dc177a4f3b08e0aa688c3a8f6950eefb334aed2b",
+    "at": "2026-10-30T23:34:37.790Z",
     "actor": "DESKTOP-56TH98Y:wt-b2b-order",
     "title": "Chốt đơn sỉ từ báo giá + đối chiếu chuyển khoản (nối ORDER, không ghi tiền) + nhắc mua lại sỉ /work · 0267",
     "summary": "",
     "tests": [
-      "merge origin/main beb5411a4 (#1104 E2 gws, #1105 Việt Kiều): 1 xung đột docs sổ việc, giữ hai phía; không push -f",
-      "trên cây cổng sạch (npm ci theo lockfile mới có nodemailer, commit tạm đổi số 0267→0266 KHÔNG đẩy): npm run typecheck sạch · npm run lint sạch · TEST_KHOI=K01,K05,K06,K07,K10,K13,K21 npm test TẤT CẢ ĐẠT",
-      "giữ số 0267: migration-journal xanh khi #1106 (0266) vào main trước",
-      "build ĐẠT ở 160eaea2c (trước merge; merge chỉ thêm tệp của main + 1 dòng docs)",
-      "4 shard đủ: gates CI"
+      "merge origin/main b7bcad916 (#1106 0266, #1108 E3, #1109 nước lead): journal 0265→0266→0267 (when 0267 muộn nhất), MOI + serve-compat giữ 0266 + 0267; không push -f",
+      "npm ci (lockfile main) + npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "TEST_KHOI=K01,K05,K06,K07,K10,K13,K21 npm test (số 0267 thật, migration-journal XANH): TẤT CẢ ĐẠT",
+      "npm run build: KHÔNG chạy xong — ENOSPC ổ C còn ~2,7 GB (máy đầy do nhiều phiên song song), không phải lỗi mã; build ĐẠT ở 160eaea2c, từ đó chỉ merge tệp của main + gỡ xung đột sổ/journal",
+      "4 shard đủ: gates CI (gồm build)"
     ]
   }
 }
