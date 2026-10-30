@@ -222,12 +222,22 @@ export function extractEmailCandidates(html: string, pageUrl: string): EmailCand
 
 // ─────────────────────────── vai trò ───────────────────────────
 
-const PURCHASING_SUB = /(purchas|procure|buyer|buying|thumua|thu-mua|muahang|mua-hang|nhaphang|nhap-hang)/;
-const SALES_TOKENS = new Set(["sale", "sales", "order", "orders", "trade", "kd"]);
-const SALES_SUB = /(kinhdoanh|kinh-doanh|b2b|wholesale|export|banhang|ban-hang|dathang|dat-hang|distribut|dealer|partner|doitac|doi-tac|dai-?ly|bansi|ban-si|giasi|gia-si)/;
+/*
+ * Đa ngữ (lead 30/10/2026 — khách sỉ nước ngoài / Việt Kiều): CHỈ danh sách từ ở phần trước @, cùng nghĩa với từ tiếng Anh /
+ * Việt đã có; không suy đoán gì khác. Từ dài, không mơ hồ ⇒ khớp chuỗi con (`*_SUB`); từ ngắn dễ trùng ⇒ khớp nguyên token.
+ *  · mua hàng: de einkauf · fr achat(s) · es compra(s) · it acquisti · nl inkoop · zh (pinyin) caigou
+ *  · bán hàng: de verkauf, vertrieb · fr vente(s), commercial · es ventas, comercial · it vendite, commerciale · nl verkoop
+ *              · zh (pinyin) xiaoshou
+ *  · liên hệ:  de kontakt, anfrage · fr / es «contact…» (đã có) · it contatti / contatto
+ * Không có tiếng Nhật / Hàn dạng latin: không có từ nào đủ phổ biến để khai mà không đoán.
+ */
+const PURCHASING_TOKENS = new Set(["achat", "achats", "compra", "compras", "caigou"]);
+const PURCHASING_SUB = /(purchas|procure|buyer|buying|thumua|thu-mua|muahang|mua-hang|nhaphang|nhap-hang|einkauf|acquist|inkoop)/;
+const SALES_TOKENS = new Set(["sale", "sales", "order", "orders", "trade", "kd", "vente", "ventes", "ventas", "commercial", "comercial", "commerciale", "xiaoshou"]);
+const SALES_SUB = /(kinhdoanh|kinh-doanh|b2b|wholesale|export|banhang|ban-hang|dathang|dat-hang|distribut|dealer|partner|doitac|doi-tac|dai-?ly|bansi|ban-si|giasi|gia-si|verkauf|vertrieb|vendite|verkoop)/;
 /** Liên hệ chung — gồm cả hộp thư CHỦ / giám đốc / quản lý (`chu@quan.vn`): ở quán nhỏ đó chính là người quyết mua. */
-const GENERAL_TOKENS = new Set(["info", "infos", "contact", "contacts", "hello", "hi", "lienhe", "admin", "office", "support", "cskh", "hotro", "mail", "enquiry", "enquiries", "inquiry", "inquiries", "hotline", "service", "services", "cs", "customerservice", "care", "team", "booking", "datban", "reservation", "reservations", "chu", "chuquan", "chunhahang", "owner", "boss", "giamdoc", "director", "ceo", "founder", "manager", "quanly"]);
-const GENERAL_SUB = /(lienhe|lien-he|contact|hotro|ho-tro|cskh|support|customerservice|info)/;
+const GENERAL_TOKENS = new Set(["info", "infos", "contact", "contacts", "anfrage", "hello", "hi", "lienhe", "admin", "office", "support", "cskh", "hotro", "mail", "enquiry", "enquiries", "inquiry", "inquiries", "hotline", "service", "services", "cs", "customerservice", "care", "team", "booking", "datban", "reservation", "reservations", "chu", "chuquan", "chunhahang", "owner", "boss", "giamdoc", "director", "ceo", "founder", "manager", "quanly"]);
+const GENERAL_SUB = /(lienhe|lien-he|contact|hotro|ho-tro|cskh|support|customerservice|info|kontakt|contatt)/;
 const OTHER_TOKENS = new Set(["hr", "tuyendung", "jobs", "job", "career", "careers", "recruit", "recruitment", "ketoan", "accounting", "accountant", "billing", "invoice", "invoices", "hoadon", "finance", "marketing", "media", "press", "pr", "web", "webmaster", "it", "tech", "dev", "legal", "privacy", "abuse", "postmaster", "security", "newsletter", "shop", "store", "cuahang"]);
 /** Họ người Việt phổ biến — một chuỗi đơn bắt đầu bằng họ (`nguyenvana`, `tranlan`) gần như chắc là tên người. */
 const VN_SURNAMES = ["nguyen", "tran", "le", "pham", "hoang", "huynh", "phan", "vu", "vo", "dang", "bui", "do", "ho", "ngo", "duong", "ly", "dinh", "truong", "lam", "mai", "trinh", "cao", "luong"];
@@ -240,7 +250,7 @@ export function classifyEmailRole(email: string, siteDomain?: string | null): Em
   const local = email.slice(0, email.lastIndexOf("@")).toLowerCase();
   const bare = local.replace(/\d+$/g, "");
   const tokens = bare.split(/[._+-]+/).filter(Boolean);
-  if (PURCHASING_SUB.test(local)) return "PURCHASING";
+  if (tokens.some((t) => PURCHASING_TOKENS.has(t)) || PURCHASING_SUB.test(local)) return "PURCHASING";
   if (tokens.some((t) => SALES_TOKENS.has(t)) || SALES_SUB.test(local)) return "SALES";
   if (tokens.some((t) => GENERAL_TOKENS.has(t)) || GENERAL_SUB.test(local)) return "GENERAL";
   if (tokens.some((t) => OTHER_TOKENS.has(t))) return "OTHER";

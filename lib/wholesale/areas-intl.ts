@@ -252,8 +252,24 @@ function cityCode(name: string): string {
   return foldVietnamese(name).trim().replace(/\s+/g, "-").slice(0, 60);
 }
 
+/**
+ * ═══ VIỆT KIỀU (chủ shop 30/10/2026) ═══
+ *
+ * Ngôn ngữ từ khoá `vi-kieu` = chữ Việt dùng Ở NƯỚC NGOÀI («chợ Việt», «siêu thị Việt»). Tách khỏi `vi` vì nhóm `vi` chỉ
+ * được quét 34 tỉnh trong nước; `vi-kieu` chỉ quét các nước có cộng đồng người Việt lớn dưới đây.
+ *
+ * Danh sách chủ shop đưa: Mỹ, Úc, Canada, Đức, Pháp, Séc, Ba Lan, Anh, Nhật, Hàn, Đài Loan. Séc và Ba Lan CHƯA có trong
+ * vùng quét quốc tế ⇒ khai `VIET_DIASPORA_UNSUPPORTED`, KHÔNG thêm nước bằng toạ độ đoán trong việc này.
+ */
+export const VIET_KIEU_LANG = "vi-kieu";
+export const VIET_DIASPORA_COUNTRIES: readonly string[] = ["US", "AU", "CA", "DE", "FR", "GB", "JP", "KR", "TW"];
+export const VIET_DIASPORA_UNSUPPORTED: readonly { country: string; iso2: string; keywords: readonly string[]; why: string }[] = [
+  { country: "Séc", iso2: "CZ", keywords: ["potraviny vietnamské", "vietnamská tržnice"], why: "chưa có trong vùng quét quốc tế (areas-intl.ts) — thêm nước + thành phố + toạ độ là một việc riêng" },
+  { country: "Ba Lan", iso2: "PL", keywords: ["sklep wietnamski", "hurtownia wietnamska"], why: "chưa có trong vùng quét quốc tế (areas-intl.ts) — thêm nước + thành phố + toạ độ là một việc riêng" },
+];
+
 function toProvince(c: Country): SearchProvince {
-  const locale: SearchLocale = { languageCode: "en", regionCode: c.iso2, keywordLangs: ["en", ...c.nativeLangs] };
+  const locale: SearchLocale = { languageCode: "en", regionCode: c.iso2, keywordLangs: ["en", ...c.nativeLangs, ...(VIET_DIASPORA_COUNTRIES.includes(c.iso2) ? [VIET_KIEU_LANG] : [])] };
   const areas: SearchArea[] = c.cities.map((x) => ({ code: cityCode(x.name), name: x.name, coastal: false, center: { lat: x.lat, lng: x.lng, radiusM: x.radiusM ?? DEFAULT_RADIUS_M } }));
   return { key: `${INTL_KEY_PREFIX}${c.iso2.toLowerCase()}`, label: c.label, queryName: c.queryName, areas, locale };
 }

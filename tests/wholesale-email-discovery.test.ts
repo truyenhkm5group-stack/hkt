@@ -126,6 +126,25 @@ function testRoles() {
     ["tuyendung@x.vn", "OTHER"],
     ["ketoan@x.vn", "OTHER"],
     ["zq81kk@x.vn", "OTHER"],
+    // Đa ngữ (30/10/2026 — khách sỉ nước ngoài / Việt Kiều): chỉ từ khoá ở phần trước @.
+    ["einkauf@asia-markt.de", "PURCHASING"],
+    ["verkauf@asia-markt.de", "SALES"],
+    ["vertrieb@asia-markt.de", "SALES"],
+    ["kontakt@asia-markt.de", "GENERAL"],
+    ["achats@epicerie.fr", "PURCHASING"],
+    ["service.achat@epicerie.fr", "PURCHASING"],
+    ["commercial@epicerie.fr", "SALES"],
+    ["ventes@epicerie.fr", "SALES"],
+    ["contact@epicerie.fr", "GENERAL"],
+    ["compras@mercado.es", "PURCHASING"],
+    ["ventas@mercado.es", "SALES"],
+    ["contacto@mercado.es", "GENERAL"],
+    ["acquisti@alimentari.it", "PURCHASING"],
+    ["vendite@alimentari.it", "SALES"],
+    ["contatti@alimentari.it", "GENERAL"],
+    ["inkoop@groothandel.nl", "PURCHASING"],
+    ["verkoop@groothandel.nl", "SALES"],
+    ["caigou@shipin.tw", "PURCHASING"],
   ];
   for (const [e, role] of cases) assert.equal(classifyEmailRole(e, site), role, e);
 }

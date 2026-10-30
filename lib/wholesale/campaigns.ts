@@ -4,7 +4,7 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { cellScanPriority, parseCustomAreas, SCAN_TIER_LABEL, SEARCH_PROVINCES, scanTier, type ScanPriority, type ScanTier, type SearchProvince } from "@/lib/wholesale/areas";
-import { intlSearchProvince } from "@/lib/wholesale/areas-intl";
+import { intlSearchProvince, VIET_DIASPORA_UNSUPPORTED } from "@/lib/wholesale/areas-intl";
 import { DEFAULT_KEYWORD_GROUPS, DEFAULT_LEAD_HUNTER_CONFIG, DEFAULT_TARGET_SEGMENTS, DISCOVERY_TIERS, freeTierLeft, type KeywordGroup, type LeadHunterConfig } from "@/lib/wholesale/config";
 import type { CampaignStatus } from "@/lib/wholesale/constants";
 import { ALL_KEYWORD_GROUPS, INTL_KEYWORD_GROUPS } from "@/lib/wholesale/keywords-intl";
@@ -427,14 +427,20 @@ export const INTL_PILOT_SCOPE: readonly { key: string; areas: readonly string[] 
  *  · Mức ENTERPRISE: website + số đánh giá có ngay trong lượt tìm, không tốn lượt chi tiết.
  *  · `maxLeads` nhỏ (50) — mẫu thử để đo tỉ lệ ra lead trước khi mở rộng.
  */
-export function intlPilotTemplateValues() {
+/** Phạm vi (nước + mã thành phố) ⇒ ảnh chụp tỉnh cho mẫu. Mã không có trong danh sách chuẩn bị bỏ — không đoán. HÀM THUẦN. */
+export function intlScopeProvinces(scope: readonly { key: string; areas: readonly string[] | "ALL" }[]): SearchProvince[] {
   const provinces: SearchProvince[] = [];
-  for (const s of INTL_PILOT_SCOPE) {
+  for (const s of scope) {
     const p = intlSearchProvince(s.key);
     if (!p) continue;
     const areas = s.areas === "ALL" ? p.areas : p.areas.filter((a) => s.areas.includes(a.code));
     if (areas.length) provinces.push({ ...p, areas: areas.map((a) => ({ ...a })) });
   }
+  return provinces;
+}
+
+export function intlPilotTemplateValues() {
+  const provinces = intlScopeProvinces(INTL_PILOT_SCOPE);
   return {
     name: HSLC_INTL_TEMPLATE_NAME,
     productFocus: "Hải sản chế biến đóng gói (chả mực, chả cá, ruốc, nước mắm) cho nhà nhập khẩu / bán sỉ thực phẩm châu Á",
@@ -450,6 +456,57 @@ export function intlPilotTemplateValues() {
     searchMode: "TEXT" as const,
     discoveryTier: "ENTERPRISE" as const,
     note: "Mẫu thử khách sỉ quốc tế: Singapore · Kuala Lumpur · Sydney · Melbourne. Chỉ lấy nơi có website (để thu email). SĐT nước ngoài chưa chuẩn hoá được ⇒ lead không tự lên «Đủ điều kiện», người duyệt tay. Không gửi gì ra ngoài.",
+  };
+}
+
+export const HSLC_VIET_KIEU_TEMPLATE_KEY = "hslc-intl-viet-kieu";
+export const HSLC_VIET_KIEU_TEMPLATE_NAME = "HSLC – Việt Kiều (cửa hàng / chợ / nhà phân phối thực phẩm Việt ở nước ngoài)";
+
+/**
+ * Phạm vi mẫu Việt Kiều (chủ shop 30/10/2026): các thành phố tập trung đông người Việt trong 9 nước ĐÃ hỗ trợ — Mỹ (Little
+ * Saigon Westminster, San Jose, Houston, Los Angeles) · Úc · Canada · Đức (Berlin, Leipzig — chợ Đồng Xuân / Dong Xuan
+ * Center) · Pháp · Anh · Nhật · Hàn · Đài Loan. Séc và Ba Lan chưa hỗ trợ (`VIET_DIASPORA_UNSUPPORTED`).
+ */
+export const VIET_KIEU_SCOPE: readonly { key: string; areas: readonly string[] | "ALL" }[] = [
+  { key: "intl us", areas: ["westminster-california", "san-jose-california", "houston", "los-angeles"] },
+  { key: "intl au", areas: ["sydney", "melbourne"] },
+  { key: "intl ca", areas: ["toronto", "vancouver", "montreal"] },
+  { key: "intl de", areas: ["berlin", "leipzig"] },
+  { key: "intl fr", areas: ["paris"] },
+  { key: "intl gb", areas: ["london"] },
+  { key: "intl jp", areas: ["tokyo", "osaka"] },
+  { key: "intl kr", areas: ["seoul"] },
+  { key: "intl tw", areas: ["taipei", "new-taipei"] },
+];
+
+/**
+ * Mẫu «HSLC – Việt Kiều» (chủ shop 30/10/2026: «tìm email của khách sỉ là Việt Kiều ở nước ngoài»). Luật 23: DRAFT, là mẫu,
+ * người bấm «Dùng mẫu» rồi tự bấm «Bắt đầu quét».
+ *  · Bật mọi nhóm từ khoá Việt Kiều (tiếng Anh, chữ Việt ở nước ngoài, Đức, Pháp, Nhật, Hàn, Trung phồn thể) — mỗi nhóm chỉ
+ *    sinh ô ở nước dùng ngôn ngữ ấy (`keywordLangs`).
+ *  · `requireWebsite = false`: nhiều chợ Việt chỉ có trang Facebook hoặc không có website; giữ lại để báo cáo đếm đủ «có
+ *    email / có website / không website» trên thẻ chiến dịch. Email chỉ thu được từ lead CÓ website (đọc trang công khai),
+ *    và lead nhóm Việt Kiều được đọc website TRƯỚC (`websiteEnrichRank`).
+ *  · `requirePhone = false`: SĐT nước ngoài chưa chuẩn hoá (phone.ts chỉ hiểu số VN).
+ *  · Mức ENTERPRISE: website có ngay trong lượt tìm, không tốn lượt chi tiết.
+ */
+export function vietKieuTemplateValues() {
+  const groups = new Set(["intl-viet-kieu", "intl-viet-kieu-vi", "intl-viet-kieu-de", "intl-viet-kieu-fr", "intl-viet-kieu-ja", "intl-viet-kieu-ko", "intl-viet-kieu-zh"]);
+  return {
+    name: HSLC_VIET_KIEU_TEMPLATE_NAME,
+    productFocus: "Đặc sản Việt đóng gói (chả mực, chả cá, ruốc, nước mắm) cho cửa hàng / chợ / nhà phân phối thực phẩm Việt ở nước ngoài",
+    provinces: intlScopeProvinces(VIET_KIEU_SCOPE),
+    keywordGroups: INTL_KEYWORD_GROUPS.map((g) => ({ key: g.key, label: g.label, keywords: [...g.keywords], enabled: groups.has(g.key), lang: g.lang })),
+    excludeKeywords: [] as string[],
+    targetSegments: ["VIET_DIASPORA_GROCERY", "VIET_FOOD_DISTRIBUTOR", "ASIAN_FOOD_WHOLESALE", "GROCERY", "SUPERMARKET"] as LeadSegment[],
+    maxLeads: 300,
+    minRating: null,
+    minReviews: null,
+    requirePhone: false,
+    requireWebsite: false,
+    searchMode: "TEXT" as const,
+    discoveryTier: "ENTERPRISE" as const,
+    note: `Khách sỉ Việt Kiều: ${VIET_KIEU_SCOPE.length} nước, ${VIET_KIEU_SCOPE.reduce((n, s) => n + (s.areas === "ALL" ? 1 : s.areas.length), 0)} thành phố đông người Việt. Email thu từ website công khai của chính cửa hàng (lead Việt Kiều được đọc trước). Chưa hỗ trợ: ${VIET_DIASPORA_UNSUPPORTED.map((u) => u.country).join(", ")}. SĐT nước ngoài chưa chuẩn hoá ⇒ người duyệt tay. Không gửi gì ra ngoài.`,
   };
 }
 
@@ -473,16 +530,20 @@ export async function ensureTemplateCampaign(): Promise<void> {
         setWhere: sql`${c.isTemplate} and (${c.provinces} is distinct from excluded.provinces or ${c.name} is distinct from excluded.name or ${c.keywordGroups} is distinct from excluded.keyword_groups or ${c.targetSegments} is distinct from excluded.target_segments or ${c.discoveryTier} is distinct from excluded.discovery_tier or ${c.excludeKeywords} is distinct from excluded.exclude_keywords)`,
       });
   }
-  // Mẫu thử quốc tế — cùng luật: DRAFT, là mẫu, chỉ ghi khi giá trị thật sự khác.
-  const iv = intlPilotTemplateValues();
-  await db
-    .insert(c)
-    .values({ ...iv, status: "DRAFT", isTemplate: true, templateKey: HSLC_INTL_TEMPLATE_KEY, createdByName: "Mẫu hệ thống" })
-    .onConflictDoUpdate({
-      target: c.templateKey,
-      set: { name: iv.name, provinces: iv.provinces, note: iv.note, keywordGroups: iv.keywordGroups, targetSegments: iv.targetSegments, excludeKeywords: iv.excludeKeywords, discoveryTier: iv.discoveryTier, maxLeads: iv.maxLeads, requirePhone: iv.requirePhone, requireWebsite: iv.requireWebsite, updatedAt: new Date() },
-      setWhere: sql`${c.isTemplate} and (${c.provinces} is distinct from excluded.provinces or ${c.name} is distinct from excluded.name or ${c.keywordGroups} is distinct from excluded.keyword_groups or ${c.targetSegments} is distinct from excluded.target_segments or ${c.discoveryTier} is distinct from excluded.discovery_tier or ${c.excludeKeywords} is distinct from excluded.exclude_keywords or ${c.maxLeads} is distinct from excluded.max_leads or ${c.requirePhone} is distinct from excluded.require_phone or ${c.requireWebsite} is distinct from excluded.require_website)`,
-    });
+  // Mẫu quốc tế (pilot nhà nhập khẩu + Việt Kiều) — cùng luật: DRAFT, là mẫu, chỉ ghi khi giá trị thật sự khác.
+  for (const [templateKey, iv] of [
+    [HSLC_INTL_TEMPLATE_KEY, intlPilotTemplateValues()],
+    [HSLC_VIET_KIEU_TEMPLATE_KEY, vietKieuTemplateValues()],
+  ] as const) {
+    await db
+      .insert(c)
+      .values({ ...iv, status: "DRAFT", isTemplate: true, templateKey, createdByName: "Mẫu hệ thống" })
+      .onConflictDoUpdate({
+        target: c.templateKey,
+        set: { name: iv.name, provinces: iv.provinces, note: iv.note, keywordGroups: iv.keywordGroups, targetSegments: iv.targetSegments, excludeKeywords: iv.excludeKeywords, discoveryTier: iv.discoveryTier, maxLeads: iv.maxLeads, requirePhone: iv.requirePhone, requireWebsite: iv.requireWebsite, updatedAt: new Date() },
+        setWhere: sql`${c.isTemplate} and (${c.provinces} is distinct from excluded.provinces or ${c.name} is distinct from excluded.name or ${c.keywordGroups} is distinct from excluded.keyword_groups or ${c.targetSegments} is distinct from excluded.target_segments or ${c.discoveryTier} is distinct from excluded.discovery_tier or ${c.excludeKeywords} is distinct from excluded.exclude_keywords or ${c.maxLeads} is distinct from excluded.max_leads or ${c.requirePhone} is distinct from excluded.require_phone or ${c.requireWebsite} is distinct from excluded.require_website)`,
+      });
+  }
 }
 
 /** «Dùng mẫu»: chép mẫu thành một chiến dịch NHÁP mới — người xem lại rồi mới bấm Bắt đầu. */
