@@ -636,7 +636,9 @@ import { testWholesaleEmailAiDraft } from "./wholesale-email-ai-draft.test";
 import { testWholesaleEmailSequence } from "./wholesale-email-sequence.test";
 import { testWholesaleEmail } from "./wholesale-email.test";
 import { testWholesaleChannelRouting } from "./wholesale-channel-routing.test";
+import { testWholesaleLeadCountry } from "./wholesale-lead-country.test";
 import { testWholesaleEmailGws } from "./wholesale-email-gws.test";
+import { testWholesaleEmailInbound } from "./wholesale-email-inbound.test";
 import { testRestaurantTemplate } from "./restaurant.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testTriggerProposals } from "./trigger-proposals.test";
@@ -3350,9 +3352,12 @@ async function main() {
     await testWholesaleEmailSequence();
     // E1 AI B2B: hộp thư đi email ở chế độ chạy thử — cổng chính sách, huỷ đăng ký, nhận phản hồi; tổ chức THẬT `we-a` / `we-b`.
     await testWholesaleEmail();
+    testWholesaleLeadCountry();
     await testWholesaleChannelRouting();
     // E2: gửi email thật qua Google Workspace SMTP (connector gws-smtp) — SMTP giả, không mạng; tổ chức THẬT `wg-a`.
     await testWholesaleEmailGws();
+    // E3: đọc & phân loại thư trả lời qua IMAP (cùng connector gws-smtp) — IMAP giả + AI giả; tổ chức THẬT `wi-a`.
+    await testWholesaleEmailInbound();
     await testRestaurantTemplate();
     testTriggerProposals();
     await testSelfServiceJourney();

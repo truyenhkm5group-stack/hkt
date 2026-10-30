@@ -62,7 +62,7 @@ export type EmailPolicyInput = {
   counts: { lastHour: number; today: number; domainToday: number };
   /** Bộ chuyển thật đang có (mặc định đọc `LIVE_EMAIL_ADAPTERS`) — bài kiểm truyền vào để đo nhánh LIVE. */
   liveAdapters?: readonly string[];
-  /** Nước người nhận (ISO2; `VN` = trong nước) — `recipientCountryOf(lead.provinceKey)`; `null` = không xác định được. */
+  /** Nước người nhận (ISO2; `VN` = trong nước) — thang chứng cứ `leadCountryOf`; `null` = CHƯA BIẾT ⇒ coi như chưa rà. */
   recipientCountry: string | null;
 };
 

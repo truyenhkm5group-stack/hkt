@@ -46,6 +46,32 @@ export function normalizeMessageId(raw: string | null | undefined): string | nul
 
 const SNIPPET_MAX = 2000;
 
+/**
+ * Thư này nối vào thư nào ERP đã gửi? `In-Reply-To` trước, rồi `References` từ MỚI về CŨ (khớp `message_id_header` của thư ĐÃ
+ * GỬI); không khớp luồng thì chỉ nhận khi địa chỉ gửi khớp ĐÚNG MỘT lead đã từng nhận thư. Chỉ đọc. E3 hỏi hàm này TRƯỚC khi tải
+ * thân thư — thư không nối được thì không bao giờ được đọc nội dung.
+ */
+export async function findInboundTarget(i: { inReplyTo: string | null; references: readonly string[]; from: string | null }): Promise<{ target: { id: string; leadId: string; toEmail: string }; matchedBy: "THREAD" | "FROM_ADDRESS" } | { reason: string }> {
+  const db = await getDb();
+  const o = schema.wholesaleEmailOutbox;
+  const chain = [i.inReplyTo, ...[...i.references].reverse()].map(normalizeMessageId).filter((x): x is string => !!x);
+  if (chain.length) {
+    const rows = await db.select({ id: o.id, leadId: o.leadId, toEmail: o.toEmail, mid: o.messageIdHeader }).from(o).where(and(inArray(o.messageIdHeader, chain), eq(o.status, "SENT")));
+    for (const mid of chain) {
+      const r = rows.find((x) => x.mid === mid);
+      if (r) return { target: { id: r.id, leadId: r.leadId, toEmail: r.toEmail }, matchedBy: "THREAD" };
+    }
+  }
+  const from = i.from ? normalizeEmail(i.from) : null;
+  if (from) {
+    const rows = await db.select({ id: o.id, leadId: o.leadId, toEmail: o.toEmail }).from(o).where(and(eq(o.toEmail, from), eq(o.status, "SENT"))).orderBy(desc(o.sentAt));
+    const leads = new Set(rows.map((r) => r.leadId));
+    if (leads.size === 1) return { target: rows[0]!, matchedBy: "FROM_ADDRESS" };
+    if (leads.size > 1) return { reason: `Địa chỉ ${from} khớp ${leads.size} lead — không đoán, người quyết.` };
+  }
+  return { reason: "Không nối được với thư nào ERP đã gửi." };
+}
+
 export async function ingestInboundEmail(parsed: ParsedInboundEmail, now = new Date()): Promise<InboundOutcome> {
   const messageId = normalizeMessageId(parsed.messageId);
   if (!messageId) return { status: "UNMATCHED", reason: "Thư không có Message-ID hợp lệ." };
@@ -54,30 +80,9 @@ export async function ingestInboundEmail(parsed: ParsedInboundEmail, now = new D
   const from = normalizeEmail(parsed.from.replace(/^.*<([^>]+)>.*$/, "$1"));
   try {
     const db = await getDb();
-    const o = schema.wholesaleEmailOutbox;
-    // Luồng: In-Reply-To trước, rồi References từ MỚI về CŨ.
-    const chain = [parsed.inReplyTo, ...[...(parsed.references ?? [])].reverse()].map(normalizeMessageId).filter((x): x is string => !!x);
-    let target: { id: string; leadId: string } | null = null;
-    let matchedBy: "THREAD" | "FROM_ADDRESS" = "THREAD";
-    if (chain.length) {
-      const rows = await db.select({ id: o.id, leadId: o.leadId, mid: o.messageIdHeader }).from(o).where(and(inArray(o.messageIdHeader, chain), eq(o.status, "SENT")));
-      for (const mid of chain) {
-        const r = rows.find((x) => x.mid === mid);
-        if (r) {
-          target = { id: r.id, leadId: r.leadId };
-          break;
-        }
-      }
-    }
-    if (!target && from) {
-      const rows = await db.select({ id: o.id, leadId: o.leadId }).from(o).where(and(eq(o.toEmail, from), eq(o.status, "SENT"))).orderBy(desc(o.sentAt));
-      const leads = new Set(rows.map((r) => r.leadId));
-      if (leads.size === 1) {
-        target = { id: rows[0]!.id, leadId: rows[0]!.leadId };
-        matchedBy = "FROM_ADDRESS";
-      } else if (leads.size > 1) return { status: "UNMATCHED", reason: `Địa chỉ ${from} khớp ${leads.size} lead — không đoán, người quyết.` };
-    }
-    if (!target) return { status: "UNMATCHED", reason: "Không nối được với thư nào ERP đã gửi." };
+    const found = await findInboundTarget({ inReplyTo: parsed.inReplyTo ?? null, references: parsed.references ?? [], from });
+    if ("reason" in found) return { status: "UNMATCHED", reason: found.reason };
+    const { target, matchedBy } = found;
 
     const snippet = parsed.text.replace(/\r\n/g, "\n").trim().slice(0, SNIPPET_MAX);
     const fresh = await recordEmailEvent({

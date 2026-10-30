@@ -82,22 +82,37 @@ export async function resolveUnsubscribe(rawToken: string, opts: { apply: boolea
       .where(and(eq(t.id, row.id), isNull(t.usedAt)))
       .returning({ id: t.id });
     if (!won.length) return { status: "OK", maskedEmail: masked, alreadyUsed: true, applied: false };
-    await db
-      .insert(schema.wholesaleSuppressions)
-      .values({ kind: "EMAIL", value: row.email, reason: "Khách tự huỷ đăng ký email (link trong thư)", leadId: row.leadId, createdByUserId: null, createdByName: "Khách tự huỷ đăng ký", createdAt: now })
-      .onConflictDoNothing();
-    await recordEmailEvent({ leadId: row.leadId, outboxId: row.outboxId, kind: "UNSUBSCRIBE", providerEventId: `unsub:${row.id}`, meta: { via: opts.via }, at: now });
-    const stopped = await stopPendingEmails(row.leadId, "Khách đã huỷ đăng ký email", now);
-    await db.insert(schema.wholesaleLeadActivities).values({
-      leadId: row.leadId,
-      kind: "OUTREACH",
-      channel: "EMAIL",
-      outcome: "DO_NOT_CONTACT",
-      note: `Khách tự huỷ đăng ký email (${opts.via === "ONE_CLICK" ? "nút một chạm của hộp thư" : "trang xác nhận"}) — đã chặn email ${row.email}${stopped ? `, dừng ${stopped} thư chưa gửi` : ""}.`,
-      actorId: null,
-      actorName: "Khách (link huỷ đăng ký)",
-      createdAt: now,
-    });
+    await applyEmailUnsubscribe({ leadId: row.leadId, email: row.email, outboxId: row.outboxId, providerEventId: `unsub:${row.id}`, via: opts.via, now });
     return { status: "OK", maskedEmail: masked, alreadyUsed: false, applied: true };
   });
+}
+
+export type UnsubscribeVia = "ONE_CLICK" | "PAGE" | "REPLY_TEXT";
+
+const VIA_NOTE: Record<UnsubscribeVia, string> = { ONE_CLICK: "nút một chạm của hộp thư", PAGE: "trang xác nhận", REPLY_TEXT: "thư trả lời xin huỷ" };
+
+/**
+ * ĐƯỜNG HUỶ DUY NHẤT (link một chạm, trang xác nhận, và từ E3: thư trả lời xin huỷ bằng chữ): dòng chặn EMAIL + sự kiện UNSUBSCRIBE
+ * (khoá chống trùng do người gọi đặt) + dừng mọi thư chưa gửi của lead + một dòng lịch sử. Sự kiện đã có ⇒ không ghi gì thêm.
+ */
+export async function applyEmailUnsubscribe(i: { leadId: string; email: string; outboxId: string | null; providerEventId: string; via: UnsubscribeVia; now: Date }): Promise<{ applied: boolean; stopped: number }> {
+  const db = await getDb();
+  await db
+    .insert(schema.wholesaleSuppressions)
+    .values({ kind: "EMAIL", value: i.email, reason: i.via === "REPLY_TEXT" ? "Khách trả lời email xin ngừng nhận thư" : "Khách tự huỷ đăng ký email (link trong thư)", leadId: i.leadId, createdByUserId: null, createdByName: "Khách tự huỷ đăng ký", createdAt: i.now })
+    .onConflictDoNothing();
+  const fresh = await recordEmailEvent({ leadId: i.leadId, outboxId: i.outboxId, kind: "UNSUBSCRIBE", providerEventId: i.providerEventId, meta: { via: i.via }, at: i.now });
+  if (!fresh) return { applied: false, stopped: 0 };
+  const stopped = await stopPendingEmails(i.leadId, "Khách đã huỷ đăng ký email", i.now);
+  await db.insert(schema.wholesaleLeadActivities).values({
+    leadId: i.leadId,
+    kind: "OUTREACH",
+    channel: "EMAIL",
+    outcome: "DO_NOT_CONTACT",
+    note: `Khách tự huỷ đăng ký email (${VIA_NOTE[i.via]}) — đã chặn email ${i.email}${stopped ? `, dừng ${stopped} thư chưa gửi` : ""}.`,
+    actorId: null,
+    actorName: i.via === "REPLY_TEXT" ? "Khách (thư trả lời)" : "Khách (link huỷ đăng ký)",
+    createdAt: i.now,
+  });
+  return { applied: true, stopped };
 }
