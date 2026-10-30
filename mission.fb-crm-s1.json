@@ -38,22 +38,20 @@
     "0262": "2026-10-27T04:02:18.142Z"
   },
   "created_at": "2026-10-27T04:01:08.956Z",
-  "updated_at": "2026-10-28T15:09:36.371Z",
-  "last_heartbeat": "2026-10-28T15:06:48.313Z",
+  "updated_at": "2026-10-30T02:47:20.778Z",
+  "last_heartbeat": "2026-10-30T02:47:20.778Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/fb-crm-s1",
-    "sha": "93aae795095d4f8f434355f1d0ecf21cf2963e3a",
-    "at": "2026-10-28T15:06:48.313Z",
+    "sha": "b644f77d9afef33e6adc0b66196368413d1ab169",
+    "at": "2026-10-30T02:47:20.778Z",
     "actor": "DESKTOP-56TH98Y:wt-fbcrm",
     "title": "Facebook Friend CRM lát 1",
-    "summary": "Đã merge origin/main @ 2c5a83ae (#1090, 0261): journal 0261 rồi 0262 (when 0262 muộn hơn), MOI giữ cả hai, sync-fixtures giữ cả hai khối.",
+    "summary": "Sửa đỏ shard 4/4 #1093: khai 0262 vào MIGRATION_SERVE_COMPAT; đọc/ghi bảng mới bắt 42P01 (trang «CSDL chưa áp 0262», ghi trả lỗi); bài chứng minh trong tests/fb-crm.test.ts.",
     "tests": [
       "npm run typecheck: sạch",
       "npm run lint: sạch",
-      "migration-journal + repo-integrity + append-only + number-unique: ĐẠT",
-      "TEST_KHOI=K24 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K24 ĐẠT (gồm tests/fb-crm.test.ts)",
-      "npm run build: ĐẠT ở SHA trước merge 6dcbd63b (chưa chạy lại sau merge)",
+      "TEST_KHOI=K20,K24 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K20,K24 ĐẠT (K20 chứa khối DEGRADED_MIGRATION, K24 chứa tests/fb-crm.test.ts gồm serve-compat 0262)",
       "4 shard đầy đủ: để gates CI"
     ]
   }
