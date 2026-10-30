@@ -3,7 +3,7 @@
   "mission_id": "b2b-p1d-probe",
   "title": "Ops wholesale-b2b-probe: đo nền Săn khách sỉ + giá sỉ (chỉ đọc)",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-b2b-probe",
@@ -27,11 +27,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-27T08:28:49.658Z",
-  "updated_at": "2026-10-27T08:57:40.170Z",
+  "updated_at": "2026-10-30T03:28:56.386Z",
   "last_heartbeat": "2026-10-27T08:31:32.528Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1092 → 4dce707a25ef09af03aee368266a9a0364aec6c3"
+    "merged": "#1092 → 4dce707a25ef09af03aee368266a9a0364aec6c3",
+    "verify": "PASS 2f539578018ee9a4591ffe0682953cd1194a46c1 2026-10-30T03:28:07.367Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/40995992217"
   },
   "handoff": {
     "branch": "claude/b2b-p1d-probe",
