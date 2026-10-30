@@ -12,6 +12,13 @@ import { cn } from "@/lib/utils";
 import { WholesaleNav } from "@/app/(dashboard)/wholesale/wholesale-nav";
 import { EmailCandidates, OutboxBoard } from "@/app/(dashboard)/wholesale/outbox/outbox-board";
 import { EmailSettingsPanel } from "@/app/(dashboard)/wholesale/outbox/email-settings-panel";
+import { EmailCountriesPanel } from "@/app/(dashboard)/wholesale/outbox/email-countries-panel";
+import { EMAIL_COUNTRY_CHOICES } from "@/lib/wholesale/email-countries";
+import { AiDraftSettings, AiDraftsPanel } from "@/app/(dashboard)/wholesale/outbox/ai-drafts-panel";
+import { listAiDrafts } from "@/lib/queries/wholesale-email-ai-drafts";
+import { getEmailAiSettings } from "@/lib/wholesale/email-ai-draft";
+import { SequencePanel, SequenceSettingsForm } from "@/app/(dashboard)/wholesale/outbox/sequence-panel";
+import { loadSequenceBoard } from "@/lib/wholesale/email-sequence-core";
 
 export const metadata = { title: "Hộp thư đi sỉ" };
 
@@ -31,12 +38,15 @@ export default async function WholesaleOutboxPage({ searchParams }: { searchPara
   if (decision.allow === "NONE") return <ScopeDenied title="Hộp thư đi sỉ" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const view: OutboxView = (OUTBOX_VIEWS as readonly string[]).includes(String(raw.view)) ? (raw.view as OutboxView) : "open";
-  const [settings, rows, counts, candidates, campaigns] = await Promise.all([
+  const [settings, rows, counts, candidates, campaigns, aiDrafts, aiSettings, sequence] = await Promise.all([
     getEmailSettings(),
     listOutbox(decision, view),
     outboxCounts(decision),
     view === "open" ? emailOutreachCandidates(decision) : Promise.resolve([]),
     campaignOptions(),
+    listAiDrafts(decision),
+    getEmailAiSettings(),
+    loadSequenceBoard(decision),
   ]);
   const unavailable = "unavailable" in rows;
   const list = unavailable ? [] : rows;
@@ -73,6 +83,19 @@ export default async function WholesaleOutboxPage({ searchParams }: { searchPara
             ))}
           </div>
           {view === "open" && candidates.length ? <EmailCandidates rows={candidates} /> : null}
+          {view === "open" && !("unavailable" in sequence) ? (
+            <SectionCard title="Lần nhắc đến hạn" description="Chuỗi thư theo dõi: thư nhắc khi khách chưa phản hồi sau số ngày đã khai. Dừng ngay khi khách trả lời, huỷ đăng ký, bounce cứng, bị chặn / không liên hệ, hoặc lead đã Thắng / Mất. Chỉ soạn NHÁP — không tự gửi.">
+              <SequencePanel due={sequence.due} waiting={sequence.waiting} stopped={sequence.stopped} configured={sequence.configured} settings={sequence.settings} />
+            </SectionCard>
+          ) : null}
+          {view === "open" ? (
+            <SectionCard
+              title="Nháp AI (chưa ở hộp thư đi)"
+              description={`AI soạn từ dữ kiện thật (hồ sơ lead · bảng giá sỉ đang áp · báo giá đã gửi · lời khai của shop). Máy chặn số tiền lệch bảng giá, khẳng định chứng nhận / xuất khẩu / tồn / thời gian giao không có nguồn, và sai ngôn ngữ. Người sửa rồi mới đưa vào hộp thư đi. AI soạn email: ${aiSettings.enabled ? `BẬT (trần ${aiSettings.dailyMaxDrafts} nháp · ${aiSettings.dailyCostCapUsd} USD / ngày)` : "TẮT"}.`}
+            >
+              {"unavailable" in aiDrafts ? <p className="text-sm text-muted-foreground">CSDL chưa áp migration 0265 (nháp email AI).</p> : <AiDraftsPanel rows={aiDrafts.rows} stats={aiDrafts.stats} />}
+            </SectionCard>
+          ) : null}
           {list.length ? (
             <OutboxBoard rows={list} previews={previews} canBulk={isConfig} readOnly={view !== "open" && view !== "problem"} />
           ) : (
@@ -80,6 +103,21 @@ export default async function WholesaleOutboxPage({ searchParams }: { searchPara
           )}
           <SectionCard title="Cấu hình & nút dừng" description="Chế độ gửi, danh tính người gửi in ở chân thư, hạn mức, và nút dừng khẩn. Ai chăm lead cũng bấm DỪNG được; chỉ người cấu hình mở lại.">
             <EmailSettingsPanel settings={settings} campaigns={campaigns} canConfigure={isConfig} isOwner={user.role === "ADMIN"} liveAvailable={LIVE_EMAIL_ADAPTERS.length > 0} />
+            {isConfig ? (
+              <div className="mt-4 border-t pt-3">
+                <div className="mb-2 text-sm font-semibold">AI soạn email (mặc định TẮT — bật phải khai trần nháp và chi phí / ngày)</div>
+                <AiDraftSettings settings={aiSettings} />
+              </div>
+            ) : null}
+            {isConfig && !("unavailable" in sequence) ? (
+              <div className="mt-4 border-t pt-3">
+                <div className="mb-2 text-sm font-semibold">Chuỗi thư nhắc (không có số mặc định — trống = không nhắc)</div>
+                <SequenceSettingsForm settings={sequence.settings} />
+              </div>
+            ) : null}
+          </SectionCard>
+          <SectionCard title="Nước đã rà luật thư chào hàng" description={`${settings.allowedCountries.length ? `Đã rà: ${settings.allowedCountries.join(", ")}.` : "Chưa nước nào — mọi thư chỉ chạy thử."} Nước chưa rà ⇒ gửi thật nằm chờ «chưa rà luật nước X».`}>
+            <EmailCountriesPanel allowed={settings.allowedCountries} choices={EMAIL_COUNTRY_CHOICES} canEdit={isConfig && user.role === "ADMIN"} />
           </SectionCard>
         </>
       )}

@@ -11,6 +11,7 @@ import { ACTIVITY_KIND_LABEL, BUSINESS_STATUS_LABEL, CALL_OUTCOME_LABEL, ENRICHM
 import { leadContactability } from "@/lib/wholesale/consents";
 import { CONSENT_CHANNELS } from "@/lib/wholesale/contactability";
 import { leadView } from "@/lib/wholesale/engine";
+import { ZALO_MARKER_OUTCOME_LABEL } from "@/lib/wholesale/contact-plan";
 import { EMAIL_CONSENT_NOTICE, EMAIL_MX_LABEL, EMAIL_RESCAN_DAYS, EMAIL_ROLE_LABEL, EMAIL_VIA_LABEL } from "@/lib/constants/wholesale-email";
 import { websiteDomain } from "@/lib/wholesale/dedupe";
 import { emailScanOf, leadEmailRows } from "@/lib/wholesale/email-discovery";
@@ -23,6 +24,7 @@ import { GoogleAttribution, WholesaleNav } from "@/app/(dashboard)/wholesale/who
 import { GradeBadge, LeadStatusBadge, TemperatureBadge } from "@/app/(dashboard)/wholesale/leads/leads-table";
 import { ConsentPanel } from "@/app/(dashboard)/wholesale/leads/[id]/consent-panel";
 import { LeadActions } from "@/app/(dashboard)/wholesale/leads/[id]/lead-actions";
+import { AiDraftButton } from "@/app/(dashboard)/wholesale/leads/[id]/ai-draft-button";
 
 export const metadata = { title: "Lead khách sỉ" };
 
@@ -62,6 +64,7 @@ export default async function WholesaleLeadPage({ params }: { params: Promise<{ 
         description={`${LEAD_SEGMENT_LABEL[segment]}${lead.areaName || lead.provinceLabel ? ` · ${[lead.areaName, lead.provinceLabel].filter(Boolean).join(", ")}` : ""}`}
         actions={
           <span className="flex items-center gap-3">
+            {canWork && status !== "DO_NOT_CONTACT" && lead.email ? <AiDraftButton leadId={lead.id} /> : null}
             {canWork && status !== "DO_NOT_CONTACT" ? (
               <Link href={`/wholesale/quotations/new?lead=${encodeURIComponent(lead.id)}`} className="rounded-md border px-2.5 py-1 text-sm font-medium hover:bg-muted">
                 Tạo báo giá
@@ -135,7 +138,7 @@ export default async function WholesaleLeadPage({ params }: { params: Promise<{ 
                     <div className="text-[11px] text-muted-foreground">
                       {formatDateTime(a.createdAt)} · {a.actorName || "Máy"} · {ACTIVITY_KIND_LABEL[a.kind] ?? a.kind}
                       {a.channel ? ` · ${OUTREACH_CHANNEL_LABEL[a.channel as OutreachChannel] ?? a.channel}` : ""}
-                      {a.outcome ? ` · ${CALL_OUTCOME_LABEL[a.outcome as CallOutcome] ?? OUTREACH_RESULT_LABEL[a.outcome as OutreachResult] ?? a.outcome}` : ""}
+                      {a.outcome ? ` · ${CALL_OUTCOME_LABEL[a.outcome as CallOutcome] ?? OUTREACH_RESULT_LABEL[a.outcome as OutreachResult] ?? ZALO_MARKER_OUTCOME_LABEL[a.outcome] ?? a.outcome}` : ""}
                       {a.toStatus ? ` · → ${LEAD_STATUS_LABEL[a.toStatus as keyof typeof LEAD_STATUS_LABEL] ?? a.toStatus}` : ""}
                     </div>
                     {a.note ? <div className="whitespace-pre-wrap">{a.note}</div> : null}

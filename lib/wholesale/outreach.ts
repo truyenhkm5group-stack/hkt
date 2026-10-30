@@ -76,7 +76,7 @@ function factsOf(lead: Lead, name: string): OpenerFacts {
 }
 
 /** AI của tổ chức: AI Builder (Anthropic / OpenAI của tổ chức, hoặc credit nền tảng) → khoá Gemini của tổ chức. */
-async function resolveAi(): Promise<{ ok: true; provider: AiProvider; source: AiBillingSource } | { ok: false; reason: string }> {
+export async function resolveAi(): Promise<{ ok: true; provider: AiProvider; source: AiBillingSource } | { ok: false; reason: string }> {
   const b = await getBuilderAi();
   if (b.ok) return { ok: true, provider: b.ai.provider, source: b.ai.source === "ORG_CONNECTION" ? "BYOK" : b.ai.source === "PLATFORM" ? "PLATFORM" : "HOME" };
   const g = await openActiveConnection("gemini-byok");

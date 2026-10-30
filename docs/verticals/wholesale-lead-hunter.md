@@ -283,6 +283,44 @@ danh tính, MỞ lại nút dừng, duyệt hàng loạt. `LIVE` chỉ chủ sho
 **Cấu hình** ở `settings` khoá `wholesale.email` (object; đọc thô rồi trộn từng trường, chế độ lạ ⇒ `OFF`). Hạn mức mặc định 20 thư
 / giờ · 100 / ngày · 5 / tên miền nhận / ngày, trần cứng 200 · 1.000 · 50.
 
+## 4f. Kế hoạch kênh: nước ngoài — Email · trong nước — Zalo (chủ shop chốt 30/10/2026)
+
+> «Tách phần tìm khách nước ngoài để gửi email với luồng khách trong nước để nhắn Zalo. Bổ sung gửi email cho cả khách trong
+> nước (trong trường hợp không gửi được tin nhắn Zalo cho khách đó).»
+
+**Một hàm thuần quyết làn** — `contactPlanOf` (`lib/wholesale/contact-plan.ts`), nạp dữ kiện theo lô ở
+`lib/wholesale/contact-plan-store.ts`:
+
+| Làn | Khi nào |
+|---|---|
+| Nước ngoài — Email | Lead quốc tế (`isIntlProvinceKey`) có email |
+| Trong nước — Zalo | Lead trong nước nhắn Zalo được — kể cả khi có email |
+| Trong nước — chuyển sang email | Zalo KHÔNG GỬI ĐƯỢC **và** lead có email |
+| Thiếu kênh | Không có kênh dùng được — kế hoạch in «Chưa có email — chạy Thu thập email», không đoán địa chỉ |
+| Dừng liên hệ | KHÔNG LIÊN HỆ hoặc khớp danh sách chặn (cùng luật P1a: chặn thắng mọi đồng ý) |
+
+«Zalo không gửi được» chỉ có ba đường: không có SĐT di động (Zalo đi theo số di động); `zalo_status = NOT_FOUND` (không có
+tài khoản — một sự thật duy nhất, nút «Không có Zalo» sẵn có và lý do `NO_ACCOUNT` cùng ghi vào đây); hoặc nhân viên bấm
+«Zalo không gửi được» với lý do trong danh sách đóng (không có tài khoản · chặn tin người lạ · số sai). **Khách chưa trả
+lời KHÔNG phải «không gửi được»**: hàm không nhận đầu vào nào về phản hồi hay hẹn gọi lại, nên im lặng không đổi được kênh.
+
+Dấu «Zalo không gửi được» là dòng `wholesale_lead_activities` kind `ZALO`, `outcome = UNDELIVERABLE` (`meta.reason`), người
+làm lưu bằng `users.id`, có audit. Hoàn tác THÊM một dòng `UNDELIVERABLE_UNDONE` — không dòng nào bị xoá; dòng mới nhất giữa
+hai loại quyết định. Hai loại dòng này không được đếm là «tin Zalo đã nhắn» (màn điện thoại), và lead đã đánh dấu rời hàng
+«Zalo trước» sang hàng gọi.
+
+**Hàng đợi liên hệ** chia đúng các làn trên. Nút «Đưa vào hộp thư đi» (E1) chỉ hiện ở hai làn email; làn chuyển sang email có
+thêm «Soạn email dự phòng» cho lời chào kênh Zalo. Lõi soạn email (`emailDraftFromOutreachCore`) cũng TỪ CHỐI lead trong
+nước còn nhắn Zalo được — luật nằm ở máy chủ, không chỉ ở nút. Mọi thư vẫn qua cổng chính sách E1 (đồng ý · danh sách chặn
+· hạn mức) và vẫn CHẠY THỬ.
+
+**Cổng pháp lý theo nước** (issue #1085): `wholesale.email.allowedCountries` — mã ISO2 của nước ĐÃ RÀ LUẬT thư chào hàng,
+`VN` cho khách trong nước. Mặc định RỖNG, không có nước mặc định. Nước người nhận = `recipientCountryOf(lead.provinceKey)`
+(lead quốc tế ⇒ nước của khoá tỉnh; còn lại ⇒ `VN`; không nhận ra ⇒ chưa rà). Ở chế độ GỬI THẬT, nước chưa rà ⇒ thư nằm chờ
+với lý do `COUNTRY_NOT_REVIEWED`; ở CHẠY THỬ thư vẫn đi hết đường ống, cảnh báo in ở Hộp thư đi và ghi vào sự kiện `SENT`.
+Chỉ QUẢN TRỊ (vai trò ADMIN, có `wholesale:config`) sửa danh sách ở trang Hộp thư đi, bắt buộc lý do, có audit
+(`WHOLESALE_EMAIL_COUNTRIES`). Đây là ghi nhận kỹ thuật, không phải ý kiến pháp lý.
+
 ## 4d. Khách sỉ nước ngoài và phân khúc B2B (chủ shop chốt 27/10/2026)
 
 Chủ shop ưu tiên **tìm khách tiềm năng** — cả trong nước lẫn nước ngoài — bằng đúng bộ quét Google Places đang chạy.
