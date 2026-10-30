@@ -11,6 +11,8 @@ import { WholesaleNav } from "@/app/(dashboard)/wholesale/wholesale-nav";
 import { QuotationsTable } from "@/app/(dashboard)/wholesale/quotations/quotations-table";
 import { QuotationPolicyPanel } from "@/app/(dashboard)/wholesale/quotations/policy-panel";
 import { loadQuotationPolicyView } from "@/lib/wholesale/quotation-policy";
+import { ReorderSettingsForm } from "@/app/(dashboard)/wholesale/quotations/reorder-settings-form";
+import { getWholesaleReorderSettings } from "@/lib/wholesale/reorder";
 
 export const metadata = { title: "Báo giá sỉ" };
 
@@ -24,7 +26,7 @@ export default async function WholesaleQuotationsPage({ searchParams }: { search
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "createdAt", defaultDir: "desc", filterKeys: QUOTATION_FILTERS, sortable: [...QUOTATION_SORTABLE], defaultPageSize: 50 });
   // Cài đặt báo giá (trần CK · biên LN tối thiểu · thuế) chỉ cho người có quyền cấu hình Săn khách sỉ; lượt đọc không ghi gì.
-  const [data, policyView] = await Promise.all([listQuotations(user, params), can(user, "wholesale:config") ? loadQuotationPolicyView() : Promise.resolve(null)]);
+  const [data, policyView, reorder] = await Promise.all([listQuotations(user, params), can(user, "wholesale:config") ? loadQuotationPolicyView() : Promise.resolve(null), can(user, "wholesale:config") ? getWholesaleReorderSettings() : Promise.resolve(null)]);
   return (
     <div className="space-y-4">
       <PageHeader
@@ -34,6 +36,7 @@ export default async function WholesaleQuotationsPage({ searchParams }: { search
         hint="Số trên báo giá do máy tính tất định từ bảng giá sỉ (bảng riêng của khách → bảng mặc định), không do AI. Giá lẻ không phải giá sỉ: mẫu mã không có bậc sỉ hoặc dưới MOQ thì báo giá bị chặn. Tồn chưa có phiếu nhập là «chưa xác minh», không phải hết hàng. Ship / thuế chưa khai thì tổng ghi rõ «chưa gồm». Sửa một báo giá là tạo phiên bản mới — bản đã gửi không bao giờ đổi số."
       />
       <WholesaleNav user={user} active="quotations" />
+      {reorder ? <ReorderSettingsForm afterDays={reorder.afterDays} /> : null}
       {policyView ? <QuotationPolicyPanel policy={policyView.policy} declared={policyView.declared} suggestion={policyView.suggestion} activeLists={policyView.activeLists} /> : null}
       {"unavailable" in data ? (
         <EmptyState title="Chưa dùng được báo giá sỉ" description="CSDL của tổ chức chưa áp migration 0263 (báo giá sỉ). Phần còn lại của Săn khách sỉ chạy bình thường." />

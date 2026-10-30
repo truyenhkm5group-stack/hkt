@@ -350,6 +350,18 @@ const SOURCE_RULES: SlaRule[] = [
     alsoShownOn: "Khách hàng · Facebook CRM",
   },
 
+  /* ───── Nhắc mua lại khách sỉ (AI B2B P6) ───── */
+  {
+    key: "WHOLESALE_REORDER",
+    label: "Nhắc mua lại khách sỉ",
+    hours: WORK_SOURCE_SPEC.WHOLESALE_REORDER.slaHours,
+    why:
+      "CỐ Ý bỏ trống: ngày hết X ngày (chủ shop khai ở wholesale.reorder) đã là mốc, và không có hằng số đang chạy nào nói trễ bao nhiêu giờ " +
+      "thì là quá hạn (luật 22). Chủ shop đặt số giờ ở đây nếu muốn đo «đã để khách chờ bao lâu».",
+    department: WORK_SOURCE_SPEC.WHOLESALE_REORDER.department,
+    alsoShownOn: "Khách hàng · trang khách",
+  },
+
   /* ───── Việc tay & định kỳ ───── */
   {
     key: "MANUAL_TASK",

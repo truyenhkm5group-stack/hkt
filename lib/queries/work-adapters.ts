@@ -41,6 +41,7 @@ import { getSettingJson, withSettingsScope } from "@/lib/settings";
 import { vnDateKey, vnStartOfDay } from "@/lib/format";
 import { FB_CONNECTION_STATUS_LABEL } from "@/lib/constants/fb-crm";
 import { fbCrmDueCare } from "@/lib/queries/fb-crm";
+import { wholesaleReorderDue } from "@/lib/wholesale/reorder";
 
 /**
  * ═══════════════ PHÉP CHIẾU: SÁU HÀNG ĐỢI THÀNH MỘT DANH SÁCH ═══════════════
@@ -1262,6 +1263,51 @@ export async function adaptFbCrmCare(now: Date): Promise<WorkItem[]> {
   });
 }
 
+/* ═══════════════════ NHẮC MUA LẠI KHÁCH SỈ (AI B2B P6) ═══════════════════
+ *
+ * PHÉP CHIẾU (luật 19): khách sỉ có đơn giao thành công (ORDER_OUTCOME) mà đơn gần nhất đã quá X ngày, chưa có báo giá mới, chưa hẹn
+ * liên hệ (`wholesaleReorderDue`). MỘT dòng / khách (`sourceKey` = mã khách). Việc rời hàng đợi khi người lập báo giá / đơn mới hoặc ghi
+ * lần liên hệ kèm ngày hẹn ở /customers/<mã> — nút trên /work chỉ MỞ chỗ đó.
+ */
+export async function adaptWholesaleReorder(now: Date): Promise<WorkItem[]> {
+  const today = vnDateKey(now);
+  const rows = await wholesaleReorderDue(today);
+  const ms = now.getTime();
+  return rows.map((r) => {
+    const from = vnStartOfDay(r.dueFrom);
+    return {
+      key: workKey("WHOLESALE_REORDER", r.customerId),
+      sourceType: "WHOLESALE_REORDER",
+      sourceKey: r.customerId,
+      kind: null,
+      title: `${r.name || "Khách sỉ"} · chưa đặt lại từ ${r.lastOrderDay}`,
+      summary: `Khách sỉ đã nhận ${r.deliveredOrders} đơn giao thành công${r.phone ? ` · ${r.phone}` : ""}. Gọi hỏi nhu cầu rồi lập báo giá / đơn mới, hoặc ghi lần liên hệ kèm ngày hẹn.`,
+      department: WORK_SOURCE_SPEC.WHOLESALE_REORDER.department!,
+      assignee: null,
+      status: "NEW",
+      statusAuthority: "SOURCE" as const,
+      priority: "NORMAL",
+      score: caseScore({ severity: "info", ageHours: hoursSince(from, ms), amount: 0, type: "OTHER" }),
+      createdAt: from,
+      startedAt: null,
+      dueAt: null,
+      slaAt: slaDueAt("WHOLESALE_REORDER", null, from, null),
+      completedAt: null,
+      snoozedUntil: null,
+      businessEntity: "CUSTOMER",
+      businessEntityId: r.customerId,
+      sourceUrl: `/customers/${encodeURIComponent(r.customerId)}`,
+      money: MONEY_UNKNOWN,
+      tags: ["Khách sỉ"],
+      evidence: { source: "Đơn hàng · báo giá sỉ · sổ liên hệ", detail: `đơn gần nhất ${r.lastOrderDay}, đến hạn từ ${r.dueFrom}` },
+      blockedReason: "",
+      creationSource: "AUTO" as WorkItem["creationSource"],
+      actions: actionsOf("WHOLESALE_REORDER"),
+      recommendedAction: "Gọi khách sỉ hỏi nhu cầu, rồi lập báo giá / đơn mới hoặc ghi lần liên hệ kèm ngày hẹn",
+    };
+  });
+}
+
 /* ═══════════════════ 7b · DỮ LIỆU LƯƠNG CHỜ BỔ SUNG (Trung tâm đối soát) ═══════════════════ */
 
 /**
@@ -1571,6 +1617,7 @@ async function collectWorkItemsInScope(opts: CollectOptions): Promise<{ items: W
     want("SOURCING_TRIAL") ? guard("SOURCING_TRIAL", () => adaptSourcingTrials(now)) : [],
     want("FB_CRM_CARE") ? guard("FB_CRM_CARE", () => adaptFbCrmCare(now)) : [],
     want("CREATIVE_APPROVAL") ? guard("CREATIVE_APPROVAL", () => adaptCreativeApprovals(now)) : [],
+    want("WHOLESALE_REORDER") ? guard("WHOLESALE_REORDER", () => adaptWholesaleReorder(now)) : [],
     want("PAYROLL_RECON") ? guard("PAYROLL_RECON", () => peekPayrollRecon(now)) : [],
     want("MANUAL_TASK") || want("RECURRING_TASK") || want("WORKFLOW_TASK") ? guard("MANUAL_TASK", () => adaptOwnedWork(now, opts.includeClosed ?? false, closedSince)) : [],
   ]);

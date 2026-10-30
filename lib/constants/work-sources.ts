@@ -59,6 +59,8 @@ export const WORK_SOURCES = [
   "FB_CRM_CARE",
   // Marketing (31/10/2026) — ảnh quảng cáo AI vẽ đang chờ người duyệt ở «② Duyệt ảnh» (lib/queries/work-adapters.ts::adaptCreativeApprovals).
   "CREATIVE_APPROVAL",
+  // AI B2B P6 (30/10/2026) — khách sỉ quá X ngày chưa đặt lại sau đơn giao thành công (lib/wholesale/reorder.ts).
+  "WHOLESALE_REORDER",
   "MANUAL_TASK",
   "RECURRING_TASK",
   // Phase 3 · W9 — việc do LUẬT TỰ ĐỘNG tạo (hành động `create_task`).
@@ -529,6 +531,29 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     // Không có hằng số đang chạy nào cho hạn duyệt ảnh (luật 22) — chủ shop đặt ở `work.sla` nếu muốn.
     slaHours: null,
     outcomeAttributable: true,
+    actions: ["OPEN_SOURCE"],
+  },
+  /*
+    ═══ NHẮC MUA LẠI KHÁCH SỈ (AI B2B P6 · docs/tech/hslc-b2b-sales-agent.md) ═══
+
+    PHÉP CHIẾU (luật 19) lên đơn + báo giá + sổ liên hệ: khách sỉ có ít nhất một đơn giao thành công theo ORDER_OUTCOME, đơn gần nhất
+    đã quá X ngày (`wholesale.reorder.afterDays`, KHÔNG mặc định — chưa khai ⇒ không việc nào), chưa có báo giá lập sau đơn đó, không
+    có hẹn liên hệ từ hôm nay. Việc rời hàng đợi khi người lập báo giá / tạo đơn mới / ghi lần liên hệ kèm ngày hẹn ở trang khách —
+    không có nút «xong». Khối «Nhắc mua lại» của CRM (`crm.reorder`) không chiếu lên /work và không có cảnh báo `notifications` nào
+    nói cùng điều ⇒ không đếm hai lần, `ALERT_KINDS_OWNED_ELSEWHERE` không cần thêm gì.
+  */
+  WHOLESALE_REORDER: {
+    key: "WHOLESALE_REORDER",
+    label: "Nhắc mua lại khách sỉ",
+    why: "Khách sỉ đã nhận hàng mà lâu không đặt lại: không ai gọi thì khách lặng lẽ mua chỗ khác.",
+    statusAuthority: "SOURCE",
+    assigneeAuthority: "WORK",
+    department: "SALES",
+    businessEntity: "CUSTOMER",
+    // Không có hằng số đang chạy nào cho hạn này (luật 22): mốc là ngày hết X ngày; chủ shop đặt giờ ở `work.sla` nếu muốn.
+    slaHours: null,
+    // Khách có đặt lại hay không do khách quyết (mục 24).
+    outcomeAttributable: false,
     actions: ["OPEN_SOURCE"],
   },
   MANUAL_TASK: {

@@ -68,6 +68,7 @@ const SOURCE_OWNERSHIP_WHY: Record<WorkSource, string> = {
   SOURCING_TRIAL: "Đặt mua thử và theo dõi hàng về là việc của nhóm Sản xuất (người quyết mẫu nào đáng nhập) — cùng lý do route về Kho như topic sản xuất cho tới khi phòng Sản xuất có người; chuyển bằng ghi đè work.ownership.",
   CREATIVE_APPROVAL: "Duyệt ảnh quảng cáo trước khi đăng là quyết định của người tiêu tiền quảng cáo — phòng Marketing; luật chỉ trỏ tới PHÒNG.",
   FB_CRM_CARE: "Chăm khách quen trên nick Facebook của shop là việc của người bán / CSKH — cùng phòng với case CSKH; luật chỉ trỏ tới PHÒNG, người cụ thể là NV phụ trách khách ở miền.",
+  WHOLESALE_REORDER: "Gọi lại khách sỉ để chốt đơn mới là việc của người bán — phòng Kinh doanh; luật chỉ trỏ tới PHÒNG, người cụ thể do trưởng phòng giao trên /work.",
   PAYROLL_RECON: "Mỗi mục thiếu của kỳ lương đi về phòng GIỮ chứng từ ấy — xem bảng theo từng mục bên dưới, không phải một phòng cố định.",
   MANUAL_TASK: "Việc giao tay đi theo phòng mà người giao chọn; không có phòng mặc định nào đúng cho mọi việc.",
   RECURRING_TASK: "Việc định kỳ khai phòng ngay trong định nghĩa của nó.",
