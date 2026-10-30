@@ -1,0 +1,8 @@
+{
+  "pr": 1102,
+  "sha": "9891f1fcf8dc9e0f0821fab4dfa080ba4928570f",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-30T13:23:54.138Z",
+  "note": "review lead: tách kênh — contactPlanOf thuần (quốc tế ⇒ email; trong nước ⇒ Zalo, email dự phòng chỉ khi Zalo không gửi được: không SĐT di động / NOT_FOUND / NV đánh dấu; im lặng không đổi kênh), dấu Zalo append-only + hoàn tác + audit users.id, emailLaneRefusal chặn ở cả 3 đường tạo thư (có bài quét nguồn), cổng nước allowedCountries mặc định rỗng ⇒ HOLD COUNTRY_NOT_REVIEWED khi LIVE, quản trị sử"
+}
