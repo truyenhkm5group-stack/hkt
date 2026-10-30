@@ -3,7 +3,7 @@
   "mission_id": "b2b-quotation-settings",
   "title": "Cài đặt báo giá sỉ có gợi ý từ bảng giá sỉ",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-quote-settings",
@@ -30,7 +30,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-30T07:53:39.572Z",
-  "updated_at": "2026-10-30T07:53:39.572Z",
-  "last_heartbeat": "2026-10-30T07:53:39.572Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-30T08:31:34.099Z",
+  "last_heartbeat": "2026-10-30T08:31:34.099Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/b2b-quotation-settings",
+    "sha": "841c088e9b4aabb416ca17ff5a26cbd26dcfa8dc",
+    "at": "2026-10-30T08:31:34.099Z",
+    "actor": "DESKTOP-56TH98Y:wt-b2b-quote-settings",
+    "title": "Cài đặt báo giá sỉ có gợi ý từ bảng giá sỉ",
+    "summary": "",
+    "tests": [
+      "nền: xếp chồng trên claude/b2b-quotation @ e33154361 (#1095 chưa vào main) — 1 commit riêng 841c088e9",
+      "npm run typecheck: sạch",
+      "eslint các tệp chạm: sạch",
+      "TEST_KHOI=K21 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K21 ĐẠT (gồm tests/wholesale-quotation-settings.test.ts + wholesale-quotation.test.ts)",
+      "npm run build: ĐẠT",
+      "4 shard đủ: gates CI"
+    ]
+  }
 }
