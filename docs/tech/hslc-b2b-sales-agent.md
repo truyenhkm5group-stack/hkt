@@ -125,7 +125,7 @@ Tệp:dòng đo trên `origin/main` 0b3bd5605 (27/10/2026) — dòng trôi theo 
 | b2b-p1a-consent | `claude/b2b-p1a-consent` | `db/schema.ts` · `drizzle/` · `lib/wholesale/*` (suppression, consent, nhiệt độ) | đang làm (phiên khác) | — |
 | b2b-p1-readiness | `claude/b2b-p1-readiness` | `docs/tech/hslc-b2b-sales-agent.md` · `lib/wholesale/catalog-readiness.ts` · `lib/queries/wholesale-readiness.ts` · `app/(dashboard)/wholesale/readiness/*` · `app/(dashboard)/wholesale/wholesale-nav.tsx` · `tests/wholesale-catalog-readiness.test.ts` · `tests/sync-fixtures.test.ts` (đăng ký) · `tests/ui-consistency.test.ts` (miễn menu) | xong, chờ gộp | — |
 | b2b-p1d-probe | `claude/b2b-p1d-probe` | script ops chỉ đọc | đang làm (phiên khác) | — |
-| b2b-quotation (P1b) | `claude/b2b-quotation` | `db/schema.ts` · `drizzle/0263_wholesale_quotations.sql` · `lib/wholesale/quotation-engine.ts` · `lib/wholesale/quotation.ts` · `lib/queries/wholesale-quotations.ts` · `lib/actions/wholesale-quotations.ts` · `app/(dashboard)/wholesale/quotations/*` · `app/wholesale/quotations/[id]/print` · nút trên trang lead / khách · `tests/wholesale-quotation.test.ts` | xong, chờ gộp (sau 0261 · 0262) | — |
+| b2b-quotation (P1b) | `claude/b2b-quotation` | `db/schema.ts` · `drizzle/0263_wholesale_quotations.sql` · `lib/wholesale/quotation-engine.ts` · `lib/wholesale/quotation.ts` · `lib/queries/wholesale-quotations.ts` · `lib/actions/wholesale-quotations.ts` · `app/(dashboard)/wholesale/quotations/*` · `app/wholesale/quotations/[id]/print` · nút trên trang lead / khách · `tests/wholesale-quotation.test.ts` | xong, chờ gộp (0261 · 0262 đã vào main) | — |
 | b2b-p2-email | — | kết nối email | **chặn** — chờ chủ shop (mục 8) | — |
 
 ## 7. P1c — cổng sẵn sàng (đã làm ở PR này)
@@ -177,7 +177,7 @@ Trang `/wholesale/readiness` (tab «Sẵn sàng bán sỉ», quyền `wholesale:
 
 - **P1c xong** (nhánh `claude/b2b-p1-readiness`). Việc tiếp: P1d dùng `wholesaleReadinessBoard()` (hoặc cùng câu hỏi) để đo danh
   mục HSLC thật — bao nhiêu mẫu READY, bao nhiêu thiếu bậc giá ở bảng mặc định — rồi ghi số vào mục này.
-- **P1b xong** (nhánh `claude/b2b-quotation`, migration `0263` — sổ giữ chỗ cấp 0263; nếu 0261/0262 chưa gộp thì `migration:renumber` lúc tích hợp). Bộ tính tự làm phần cổng P1c liên quan tới TIỀN (bậc giá sỉ · MOQ · tồn); khối lượng thiếu chỉ là cảnh báo. Việc tiếp: P5 nối báo giá ACCEPTED → `createOrderAsAgent` (giá khớp `agentPriceProblems`); gửi email báo giá chờ P2.
+- **P1b xong** (nhánh `claude/b2b-quotation`, migration `0263`, nối sau 0261 consent và 0262 fb-crm đã vào main). Bộ tính tự làm phần cổng P1c liên quan tới TIỀN (bậc giá sỉ · MOQ · tồn); khối lượng thiếu chỉ là cảnh báo. Việc tiếp: P5 nối báo giá ACCEPTED → `createOrderAsAgent` (giá khớp `agentPriceProblems`); gửi email báo giá chờ P2.
 - Chủ shop cần khai `settings["wholesale.quotation"]` (B6 mục 8) — chưa khai thì mọi chiết khấu > 0 đều cần duyệt, báo giá chưa gồm thuế.
 - Không phase nào bật gửi thật / tự mặc cả / tự chốt đơn khi B5 chưa có ngày quyết.
 
@@ -217,5 +217,4 @@ gửi thẳng được.
 - PDF: dùng «In / Lưu PDF» của trình duyệt.
 - Ảnh chụp chỉ chép dữ kiện của tổ chức về bên nhận (cột lead do nhân viên nhập / hồ sơ khách). Không chép dữ liệu Google Places,
   vì dữ liệu đó có hạn lưu.
-- Nhãn hành động `WHOLESALE_QUOTATION_*` chưa có trong `lib/constants/audit.ts`: trang `/audit` sẽ in mã thô.
 

@@ -1830,6 +1830,13 @@
       "breakpoints": true
     },
     {
+      "idx": 262,
+      "version": "7",
+      "when": 1792487707372,
+      "tag": "0262_customer_fb_connections",
+      "breakpoints": true
+    },
+    {
       "idx": 263,
       "version": "7",
       "when": 1792487950509,
