@@ -1,0 +1,8 @@
+{
+  "pr": 1105,
+  "sha": "e50d41607c7a6a6e23d0591ce65331e2b1fc35f7",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-30T17:19:48.172Z",
+  "note": "review lead: Việt Kiều — 2 phân khúc chỉ áp ô quốc tế, cần ĐỦ dấu hiệu Việt + loại hình (không đoán Asia Markt / quán phở), mẫu DRAFT 18 thành phố 9 nước (Séc/Ba Lan khai chưa hỗ trợ), ước tính chi phí; ưu tiên đọc website cho Việt Kiều; vai trò email đa ngữ de/fr/es/it/nl/zh chỉ là danh sách từ khoá local-part; không chạy chiến dịch, không migration."
+}
