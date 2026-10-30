@@ -3,7 +3,7 @@
   "mission_id": "ai-daily-report",
   "title": "Báo cáo CEO hằng ngày (AI viết lời, máy gom số, hàng rào số)",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-daily",
@@ -43,7 +43,24 @@
     "0266": "2026-10-30T11:48:17.642Z"
   },
   "created_at": "2026-10-30T11:47:18.745Z",
-  "updated_at": "2026-10-30T11:48:17.642Z",
-  "last_heartbeat": "2026-10-30T11:47:18.745Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-30T16:44:39.309Z",
+  "last_heartbeat": "2026-10-30T16:44:39.309Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/ai-daily-report",
+    "sha": "cb247dd9a9f36203290d7dac41bca369d8598c8c",
+    "at": "2026-10-30T16:44:39.309Z",
+    "actor": "DESKTOP-56TH98Y:wt-daily",
+    "title": "Báo cáo CEO hằng ngày (AI viết lời, máy gom số, hàng rào số)",
+    "summary": "Migration 0266 daily_reports (bất biến, trigger chặn UPDATE, serve-compat). Máy gom số bằng dataQualitySummary/adSpendTotal/getCareQueue/getManagerDay/hàm bán sỉ/fbCrmOverview; AI (getBuilderAi) chỉ viết JSON tóm tắt + 3 điểm trong trần USD/ngày; hàng rào numbersNotInFacts (extractVndAmounts + unverifiedAmounts + số đếm/%) — số bịa ⇒ BLOCKED. platform_ai_usage feature daily_report (AI-10). Chạy ké work-recurrence, giờ là setting, mặc định TẮT. Gửi nhóm báo vận hành sẵn có. Trang /daily-report (MANAGEMENT).",
+    "tests": [
+      "npm run typecheck: sạch",
+      "npm run lint: sạch",
+      "migration-journal + repo-integrity: ĐẠT (sau khi nhận 0265 từ main)",
+      "TEST_KHOI=K15,K20,K24: ĐẠT sau merge main (sổ AI-10, DEGRADED_MIGRATION, daily-report)",
+      "TEST_KHOI=K23: ĐẠT (platform-ui, trước merge)",
+      "npm run build: ĐẠT (/daily-report 3.43 kB)",
+      "4 shard đầy đủ: để gates CI"
+    ]
+  }
 }
