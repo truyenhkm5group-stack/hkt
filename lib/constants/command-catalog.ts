@@ -53,6 +53,7 @@ export const PAGE_ALIASES: Record<string, readonly string[]> = {
   "/reports/cashflow": ["dòng tiền"],
   "/payroll": ["lương", "bảng lương", "hoa hồng", "phiếu lương"],
   "/cockpit": ["quyết định", "cần anh quyết"],
+  "/daily-report": ["báo cáo ngày", "báo cáo ceo", "tóm tắt hôm qua"],
   "/integrations": ["kết nối", "kết nối page", "kết nối facebook", "pancake", "viettel post", "tích hợp"],
   "/settings/users": ["nhân viên", "thêm nhân viên", "tài khoản", "người dùng", "phân quyền"],
   "/settings/notifications": ["thông báo nhóm", "lark", "telegram"],

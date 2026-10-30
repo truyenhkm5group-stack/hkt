@@ -3353,7 +3353,7 @@ export const bankTransactions = pgTable(
     // ẢNH CHỤP MỐI NỐI CHÍNH, KHÔNG PHẢI NGUỒN SỰ THẬT. Nguồn là `bank_transaction_links` (nhiều–nhiều,
     // có số tiền). Hai cột này giữ mối nối LỚN NHẤT để màn hình cũ và bộ lọc cũ chạy y nguyên; chúng
     // được một hàm duy nhất ghi lại (`syncPrimaryLink`) và một bài kiểm khoá chúng luôn khớp bảng nối.
-    check("bank_txn_linked_check", sql`${t.linkedType} IN ('', 'EXPENSE', 'COD_BATCH', 'STOCK_RECEIPT', 'AD_SPEND', 'PAYROLL_PERIOD', 'BANK_TRANSACTION', 'SUPPLIER_PAYMENT')`),
+    check("bank_txn_linked_check", sql`${t.linkedType} IN ('', 'EXPENSE', 'COD_BATCH', 'STOCK_RECEIPT', 'AD_SPEND', 'PAYROLL_PERIOD', 'BANK_TRANSACTION', 'SUPPLIER_PAYMENT', 'ORDER')`),
     // Có loại thì phải có mã, và ngược lại — nửa vời thì đối chiếu không lần ra được gì.
     check("bank_txn_linked_pair_check", sql`(${t.linkedType} = '' AND ${t.linkedId} = '') OR (${t.linkedType} <> '' AND length(${t.linkedId}) > 0)`),
     // Số tiền 0 không phải giao dịch; chiều tiền phải rõ ràng.
@@ -3433,7 +3433,7 @@ export const bankTransactionLinks = pgTable(
   {
     id: id(),
     txnId: text("txn_id").notNull(),
-    /** EXPENSE · COD_BATCH · STOCK_RECEIPT · AD_SPEND · PAYROLL_PERIOD · BANK_TRANSACTION */
+    /** EXPENSE · COD_BATCH · STOCK_RECEIPT · AD_SPEND · PAYROLL_PERIOD · BANK_TRANSACTION · SUPPLIER_PAYMENT · ORDER (0267, đơn tạo tay — tiền khách chuyển) */
     targetType: text("target_type").notNull(),
     /**
      * Mã chứng từ đích. Với `PAYROLL_PERIOD` là tháng `YYYY-MM` — bảng Lương là cấu hình chứ không
@@ -3467,7 +3467,7 @@ export const bankTransactionLinks = pgTable(
     // "Khoản chi này đã trả bao nhiêu" phải tra được từ phía CHỨNG TỪ, không chỉ từ phía dòng tiền.
     index("bank_txn_links_target_idx").on(t.targetType, t.targetId),
     check("bank_txn_links_amount_check", sql`${t.amount} > 0`),
-    check("bank_txn_links_target_type_check", sql`${t.targetType} IN ('EXPENSE', 'COD_BATCH', 'STOCK_RECEIPT', 'AD_SPEND', 'PAYROLL_PERIOD', 'BANK_TRANSACTION', 'SUPPLIER_PAYMENT')`),
+    check("bank_txn_links_target_type_check", sql`${t.targetType} IN ('EXPENSE', 'COD_BATCH', 'STOCK_RECEIPT', 'AD_SPEND', 'PAYROLL_PERIOD', 'BANK_TRANSACTION', 'SUPPLIER_PAYMENT', 'ORDER')`),
     check("bank_txn_links_confidence_check", sql`${t.confidence} IN ('EXACT', 'HIGH_CONFIDENCE', 'MANUAL')`),
     check("bank_txn_links_method_check", sql`${t.method} IN ('IDENTIFIER_MATCH', 'AMOUNT_DATE_MATCH', 'MANUAL', 'TRANSFER_PAIR')`),
     // Khẳng định không có người chịu trách nhiệm thì không kiểm chứng được.
@@ -13084,5 +13084,32 @@ export const wholesaleEmailAiDrafts = pgTable(
     check("wholesale_email_ai_drafts_discarded_check", sql`${t.status} <> 'DISCARDED' OR (${t.discardedAt} IS NOT NULL AND length(btrim(coalesce(${t.discardReason}, ''))) >= 3)`),
     check("wholesale_email_ai_drafts_edit_ratio_check", sql`${t.editRatio} IS NULL OR (${t.editRatio} >= 0 AND ${t.editRatio} <= 1)`),
     check("wholesale_email_ai_drafts_cost_check", sql`${t.costUsd} IS NULL OR ${t.costUsd} >= 0`),
+  ],
+);
+
+/**
+ * BÁO CÁO CEO HẰNG NGÀY (0266 · docs/tech/ai-daily-report.md) — MỘT bản mỗi ngày báo cáo: khối số máy gom bằng các hàm báo cáo sẵn
+ * có (`facts`), lời tóm tắt AI đã qua hàng rào số (`summary` chỉ có khi `ai_status = 'OK'`), model, chi phí USD. BẤT BIẾN: trigger
+ * `daily_reports_no_update` chặn mọi UPDATE — sửa công thức ngày mai không đổi số của bản hôm qua (luật 21).
+ */
+export const dailyReports = pgTable(
+  "daily_reports",
+  {
+    id: id(),
+    reportDate: date("report_date", { mode: "string" }).notNull(),
+    facts: jsonb("facts").$type<Record<string, unknown>>().notNull(),
+    summary: text("summary"),
+    highlights: jsonb("highlights").$type<string[]>().notNull().default([]),
+    aiStatus: text("ai_status").notNull(),
+    aiNote: text("ai_note").notNull().default(""),
+    blockedNumbers: jsonb("blocked_numbers").$type<string[]>().notNull().default([]),
+    model: text("model"),
+    costUsd: doublePrecision("cost_usd"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("daily_reports_date_uq").on(t.reportDate),
+    check("daily_reports_ai_status_check", sql`${t.aiStatus} IN ('OK', 'BLOCKED', 'SKIPPED', 'ERROR')`),
+    check("daily_reports_summary_check", sql`(${t.aiStatus} = 'OK') = (${t.summary} IS NOT NULL)`),
   ],
 );

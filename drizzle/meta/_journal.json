@@ -1856,6 +1856,20 @@
       "when": 1792488385053,
       "tag": "0265_wholesale_email_ai_drafts",
       "breakpoints": true
+    },
+    {
+      "idx": 266,
+      "version": "7",
+      "when": 1792488445053,
+      "tag": "0266_daily_reports",
+      "breakpoints": true
+    },
+    {
+      "idx": 267,
+      "version": "7",
+      "when": 1792488750166,
+      "tag": "0267_bank_link_order",
+      "breakpoints": true
     }
   ]
 }

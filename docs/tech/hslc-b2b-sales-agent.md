@@ -130,6 +130,7 @@ Tệp:dòng đo trên `origin/main` 0b3bd5605 (27/10/2026) — dòng trôi theo 
 | b2b-email-foundation (E1) | `claude/b2b-email-foundation` | `drizzle/0264_wholesale_email_outbox.sql` · `db/schema.ts` (3 bảng) · `lib/wholesale/email-*.ts` · `lib/email-provider/*` · `lib/constants/email-unsubscribe.ts` · `lib/queries/wholesale-email.ts` · `lib/actions/wholesale-email.ts` · `app/api/wholesale/unsubscribe/[token]/route.ts` · `app/(dashboard)/wholesale/outbox/*` · `middleware.ts` (một mục) · `lib/wholesale/job.ts` · `tests/wholesale-email.test.ts` | xong, chờ gộp (sau P1a) | — |
 | b2b-email-ai-draft (P2b) | `claude/b2b-email-ai-draft` | `drizzle/0265_wholesale_email_ai_drafts.sql` · `db/schema.ts` (1 bảng) · `lib/wholesale/email-ai-draft.ts` · `lib/wholesale/email-ai-draft-guard.ts` · `lib/queries/wholesale-email-ai-drafts.ts` · `lib/actions/wholesale-email-ai.ts` · `app/(dashboard)/wholesale/outbox/ai-drafts-panel.tsx` · nút trên trang lead · `lib/constants/ai-systems.ts` (AI-07 thêm feature) · `tests/wholesale-email-ai-draft.test.ts` | xong, chờ gộp | — |
 | b2b-email-sequence (P4a) | `claude/b2b-email-sequence` | `lib/wholesale/email-sequence.ts` · `lib/wholesale/email-sequence-core.ts` · `lib/actions/wholesale-email-sequence.ts` · `app/(dashboard)/wholesale/outbox/sequence-panel.tsx` · `lib/wholesale/email-ai-draft.ts` (bước nhắc) · `tests/wholesale-email-sequence.test.ts` | xong, chờ gộp (sau P2b) | — |
+| b2b-order-close (P5 · P6) | `claude/b2b-order-close` | `drizzle/0267_bank_link_order.sql` · `db/schema.ts` (nới 2 CHECK) · `lib/constants/finance-truth.ts` + `lib/queries/finance-linkage.ts` (loại đích ORDER) · `lib/wholesale/order-close.ts` · `lib/wholesale/reorder.ts` · `lib/actions/wholesale-order-close.ts` · nguồn việc `WHOLESALE_REORDER` (work-sources / sla / ownership / adapters) · `app/(dashboard)/wholesale/quotations/*` · `tests/wholesale-order-close.test.ts` | xong, chờ gộp | — |
 | b2b-email-gws (E2) | `claude/b2b-email-gws` | `lib/integrations/gws-smtp/` · `lib/email-provider/{index,live}.ts` · `lib/connectors/{registry,testers}.ts` (mục `gws-smtp`) · `lib/wholesale/email-{constants,outbox}.ts` · `lib/constants/legal-registers.ts` (S31) · `package.json` (nodemailer) · `tests/wholesale-email-gws.test.ts` | xong, chờ gộp | — |
 | b2b-email-inbound (E3) | `claude/b2b-email-inbound` | `lib/integrations/gws-smtp/imap.ts` · `lib/wholesale/email-reply.ts` · `lib/actions/wholesale-email-inbound.ts` · `app/(dashboard)/wholesale/outbox/email-inbound-panel.tsx` · tách `findInboundTarget` / `applyEmailUnsubscribe` · `createQuotationDraftByMachine` (quotation.ts) · sổ connector / pháp lý (S31 + IMAP) / ai-systems · `package.json` (imapflow) · `tests/wholesale-email-inbound.test.ts` | xong, chờ gộp | — |
 
@@ -307,4 +308,39 @@ và không có job tự soạn.
   `DRAFT` (FOLLOWUP, nối luồng thư trước qua `thread_id` / `in_reply_to`).
 
 Không đường nào gửi: thư nhắc vẫn qua lượt duyệt E1 và cổng chính sách.
+
+## 14. P5 · P6 — chốt đơn sỉ, đối chiếu chuyển khoản, nhắc mua lại
+
+**Chốt đơn** (`lib/wholesale/order-close.ts`). Báo giá ở trạng thái KHÁCH CHẤP NHẬN có nút «Tạo đơn sỉ», cần thêm quyền
+`orders:write`.
+- Đường ghi là đúng lõi đơn tạo tay `createManualOrderCore`. Dòng hàng, đơn giá, chiết khấu và ship lấy từ ẢNH CHỤP báo giá, không
+  tính lại.
+- Đơn nối với báo giá bằng khoá chống trùng của lõi: `orders.raw.agentKey = "wholesale-quotation:<id>"`. Bấm hai lần vẫn ra một đơn.
+  Nhờ khoá này không cần migration để nối đơn với báo giá.
+- Lead chưa là khách ⇒ `convertLeadCore` (tạo / nối khách theo SĐT, lead WON + `converted_at`). Lead đã có khách ⇒ chuyển WON.
+- Đơn tạo ra ở trạng thái «Mới»; người kiểm rồi mới chốt.
+- Báo giá có thuế ⇒ từ chối, vì đơn tạo tay chưa có ô thuế và tổng sẽ lệch.
+- Báo giá chưa khai ship ⇒ đơn ghi ship 0 kèm ghi chú «phí vận chuyển CHƯA khai».
+
+**Đối chiếu chuyển khoản.** Máy KHÔNG ghi tiền. Nó chỉ ĐỀ NGHỊ (chỉ đọc) những giao dịch thoả cả ba điều kiện:
+- số tiền ĐÚNG BẰNG số phải trả của đơn;
+- nội dung có mã báo giá hoặc mã đơn;
+- chưa nối hết.
+
+Người bấm «Nối» đi qua hành động nối của sổ ngân hàng (`linkBankTransaction`, quyền `bank:write`) với loại đích mới `ORDER`
+(migration 0267 nới hai CHECK, y như 0131). `ORDER` chỉ nhận đơn TẠO TAY còn hiệu lực; trần phía chứng từ = số phải trả của đơn.
+Theo luật 17, nối chỉ là ĐỐI CHIẾU: không tạo phiếu thu `order_payments`, không đổi công nợ, không đổi doanh thu. Phiếu thu vẫn
+do người ghi ở trang đơn.
+
+**Nhắc mua lại** (`lib/wholesale/reorder.ts`). Nguồn việc `WHOLESALE_REORDER` trên /work, phòng SALES, là phép chiếu (luật 19).
+Một khách sỉ đến hạn khi:
+- là khách nối từ lead sỉ hoặc có báo giá sỉ;
+- có ít nhất một đơn giao thành công theo `ORDER_OUTCOME_FAST`, mỗi đơn đếm một lần (`PRIMARY_ATTEMPT`);
+- đơn gần nhất đã quá X ngày;
+- chưa có báo giá lập sau đơn đó;
+- không có hẹn liên hệ (`customer_touchpoints.next_contact_on`) từ hôm nay trở đi.
+
+X nằm ở `settings["wholesale.reorder"].afterDays` và **không có số mặc định**. Người cấu hình khai ở trang Báo giá sỉ. Việc rời
+hàng đợi khi người lập báo giá / đơn mới, hoặc ghi lần liên hệ kèm ngày hẹn ở trang khách; không có nút «xong». Khối «Nhắc mua
+lại» của CRM (`crm.reorder`) không chiếu lên /work, nên không đếm trùng.
 

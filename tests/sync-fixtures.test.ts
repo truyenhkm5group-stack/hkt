@@ -561,6 +561,7 @@ import { testFbCrm } from "./fb-crm.test";
 import { testFbCrmToggle } from "./fb-crm-toggle.test";
 import { testMissionControl } from "./mission-control.test";
 import { testFbCrmS2 } from "./fb-crm-s2.test";
+import { testDailyReport } from "./daily-report.test";
 import { testSeafoodOs } from "./seafood-os.test";
 import { testAppointments } from "./appointments.test";
 import { testWarranty } from "./warranty.test";
@@ -634,6 +635,7 @@ import { testWholesaleQuotation } from "./wholesale-quotation.test";
 import { testWholesaleQuotationSettings } from "./wholesale-quotation-settings.test";
 import { testWholesaleEmailAiDraft } from "./wholesale-email-ai-draft.test";
 import { testWholesaleEmailSequence } from "./wholesale-email-sequence.test";
+import { testWholesaleOrderClose } from "./wholesale-order-close.test";
 import { testWholesaleEmail } from "./wholesale-email.test";
 import { testWholesaleChannelRouting } from "./wholesale-channel-routing.test";
 import { testWholesaleLeadCountry } from "./wholesale-lead-country.test";
@@ -3350,6 +3352,8 @@ async function main() {
     await testWholesaleEmailAiDraft();
     // P4a: chuỗi thư theo dõi — không mặc định, điều kiện dừng, chỉ soạn nháp (tổ chức THẬT `em-seq`).
     await testWholesaleEmailSequence();
+    // P5 · P6 AI B2B: chốt đơn sỉ từ báo giá, đối chiếu chuyển khoản (nối ORDER, không ghi tiền), nhắc mua lại /work (tổ chức THẬT `bg-chot`, 0267).
+    await testWholesaleOrderClose();
     // E1 AI B2B: hộp thư đi email ở chế độ chạy thử — cổng chính sách, huỷ đăng ký, nhận phản hồi; tổ chức THẬT `we-a` / `we-b`.
     await testWholesaleEmail();
     testWholesaleLeadCountry();
@@ -3689,6 +3693,8 @@ async function main() {
     await testOrgOwner(db);
     // Mission Control (chủ shop 30/10): đo AI agent theo sổ department-ai · chưa đo = null · tốt nghiệp không mặc định · cách ly.
     await testMissionControl();
+    // Báo cáo CEO hằng ngày (0266): AI giả · hàng rào số bịa · bất biến · tắt mặc định · cách ly tổ chức.
+    await testDailyReport();
     // Facebook Friend CRM lát 1 (0262): link do người dán · đã mua theo ORDER_OUTCOME · doanh thu thực chưa chứng từ ⇒ null · cách ly tổ chức.
     await testFbCrm();
     // Công tắc tổ chức bật / tắt Facebook CRM (chủ shop 30/10): chỉ settings:manage · bấm lặp không ghi · audit · cờ đọc lại đúng.

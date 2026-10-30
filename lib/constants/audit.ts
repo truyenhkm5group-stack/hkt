@@ -4,6 +4,9 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   LOGOUT: "Đăng xuất",
   // Mission Control (chủ shop 30/10/2026): khai / xoá điều kiện tốt nghiệp của một agent — KHÔNG đổi nấc tự chủ.
   MISSION_CONTROL_GRADUATION: "Mission Control: điều kiện tốt nghiệp agent",
+  // Báo cáo CEO hằng ngày (lib/daily-report/service.ts): tạo bản ngày (bất biến) · đổi cấu hình bật / giờ / trần chi phí.
+  DAILY_REPORT_CREATE: "Báo cáo ngày: tạo bản",
+  DAILY_REPORT_CONFIG: "Báo cáo ngày: cấu hình",
   // Facebook Friend CRM (0262 · lib/fb-crm/service.ts): sổ ghi việc NGƯỜI làm bằng tay — ERP không tự kết bạn / nhắn.
   FB_CRM_UPDATE: "Facebook CRM: cập nhật kết nối khách",
   FB_CRM_TASK_CREATE: "Facebook CRM: tạo nhiệm vụ CSKH",
@@ -181,6 +184,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   WHOLESALE_EMAIL_INBOUND_CONFIG: "Sửa cấu hình đọc / phân loại thư trả lời khách sỉ",
   WHOLESALE_EMAIL_SEQUENCE_CONFIG: "Sửa chuỗi thư nhắc (số lần · số ngày chờ · mẫu)",
   WHOLESALE_EMAIL_FOLLOWUP_DRAFT: "Soạn thư nhắc của chuỗi theo dõi (mẫu)",
+  WHOLESALE_QUOTATION_ORDER: "Tạo đơn sỉ từ báo giá khách đã chấp nhận",
+  WHOLESALE_REORDER_CONFIG: "Sửa nhắc mua lại khách sỉ (số ngày)",
 };
 
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {
@@ -202,6 +207,7 @@ export const AUDIT_ENTITY_LABEL: Record<string, string> = {
   COD_BATCH: "Bảng kê COD",
   PRODUCT: "Sản phẩm",
   CUSTOMER: "Khách hàng",
+  DAILY_REPORT: "Báo cáo ngày",
   SETTINGS: "Cấu hình",
   SYNC: "Đồng bộ",
   NOTIFICATION: "Việc cần xử lý",
