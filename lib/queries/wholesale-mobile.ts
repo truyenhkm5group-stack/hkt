@@ -1,10 +1,11 @@
-import { and, desc, eq, gte, ilike, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, isNull, ne, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { andScope, type ScopeDecision } from "@/lib/auth/scope-guard";
 import { NAME, PHONE, PHONE_KIND } from "@/lib/queries/wholesale";
 import type { SearchParams } from "@/lib/search-params";
 import { vnDateKey, vnStartOfDay } from "@/lib/format";
 import { CALL_OUTCOME_LABEL, isLeadStatus, LEAD_SOURCE_LABEL, LEAD_STATUS_LABEL, PRICE_REQUEST_ACTION, type CallOutcome, type LeadSourceKey, type LeadStatus } from "@/lib/wholesale/constants";
+import { ZALO_MARK_OUTCOME, ZALO_UNMARK_OUTCOME } from "@/lib/wholesale/contact-plan";
 import { formatVnPhone } from "@/lib/wholesale/phone";
 import { isLeadSegmentKey, LEAD_SEGMENT_LABEL } from "@/lib/wholesale/segments";
 
@@ -49,7 +50,12 @@ export function isMobileChip(v: unknown): v is MobileChip {
 const list = (xs: readonly string[]) => sql.join(xs.map((x) => sql`${x}`), sql`, `);
 const NOT_TERMINAL = sql`${l.contactStatus} not in (${list(TERMINAL_STATUSES)})`;
 /** Khách mới nên NHẮN ZALO trước: số di động, chưa ai thử Zalo, chưa liên hệ lần nào. */
-const ZALO_FIRST = sql`(${l.firstContactAt} is null and ${l.zaloStatus} is null and (${PHONE_KIND}) = 'MOBILE')`;
+/**
+ * Lead nên nhắn Zalo trước. Lead đã bị đánh dấu «Zalo không gửi được» (dòng `ZALO`/`UNDELIVERABLE` mới nhất chưa hoàn tác —
+ * lib/wholesale/contact-plan.ts) rời hàng Zalo, sang hàng gọi.
+ */
+const ZALO_MARKED = sql`coalesce((select a.outcome from wholesale_lead_activities a where a.lead_id = "wholesale_leads"."id" and a.kind = 'ZALO' and a.outcome in (${ZALO_MARK_OUTCOME}, ${ZALO_UNMARK_OUTCOME}) order by a.created_at desc limit 1), '') = ${ZALO_MARK_OUTCOME}`;
+const ZALO_FIRST = sql`(${l.firstContactAt} is null and ${l.zaloStatus} is null and (${PHONE_KIND}) = 'MOBILE' and not ${ZALO_MARKED})`;
 
 function endOfTodayVn(now: Date): Date {
   return new Date(vnStartOfDay(vnDateKey(now)).getTime() + 86_400_000);
@@ -200,7 +206,8 @@ export async function mobileHome(decision: ScopeDecision, userId: string, now = 
   const [zalo] = await db
     .select({ n: sql<string>`count(*)` })
     .from(a)
-    .where(and(eq(a.kind, "ZALO"), eq(a.actorId, userId), gte(a.createdAt, dayStart), ne(a.outcome, "NOT_FOUND")));
+    // Tin Zalo ĐÃ GỬI: bỏ «không có Zalo» và dấu «Zalo không gửi được» / hoàn tác — đó không phải một tin đã nhắn.
+    .where(and(eq(a.kind, "ZALO"), eq(a.actorId, userId), gte(a.createdAt, dayStart), notInArray(a.outcome, ["NOT_FOUND", ZALO_MARK_OUTCOME, ZALO_UNMARK_OUTCOME])));
   return {
     toZalo: Number(row?.toZalo ?? 0),
     myZaloToday: Number(zalo?.n ?? 0),

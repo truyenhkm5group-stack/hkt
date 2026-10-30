@@ -128,6 +128,7 @@ Tệp:dòng đo trên `origin/main` 0b3bd5605 (27/10/2026) — dòng trôi theo 
 | b2b-p1d-probe | `claude/b2b-p1d-probe` | script ops chỉ đọc | đang làm (phiên khác) | — |
 | b2b-quotation (P1b) | `claude/b2b-quotation` | `db/schema.ts` · `drizzle/0263_wholesale_quotations.sql` · `lib/wholesale/quotation-engine.ts` · `lib/wholesale/quotation.ts` · `lib/queries/wholesale-quotations.ts` · `lib/actions/wholesale-quotations.ts` · `app/(dashboard)/wholesale/quotations/*` · `app/wholesale/quotations/[id]/print` · nút trên trang lead / khách · `tests/wholesale-quotation.test.ts` | xong, chờ gộp (0261 · 0262 đã vào main) | — |
 | b2b-email-foundation (E1) | `claude/b2b-email-foundation` | `drizzle/0264_wholesale_email_outbox.sql` · `db/schema.ts` (3 bảng) · `lib/wholesale/email-*.ts` · `lib/email-provider/*` · `lib/constants/email-unsubscribe.ts` · `lib/queries/wholesale-email.ts` · `lib/actions/wholesale-email.ts` · `app/api/wholesale/unsubscribe/[token]/route.ts` · `app/(dashboard)/wholesale/outbox/*` · `middleware.ts` (một mục) · `lib/wholesale/job.ts` · `tests/wholesale-email.test.ts` | xong, chờ gộp (sau P1a) | — |
+| b2b-email-ai-draft (P2b) | `claude/b2b-email-ai-draft` | `drizzle/0265_wholesale_email_ai_drafts.sql` · `db/schema.ts` (1 bảng) · `lib/wholesale/email-ai-draft.ts` · `lib/wholesale/email-ai-draft-guard.ts` · `lib/queries/wholesale-email-ai-drafts.ts` · `lib/actions/wholesale-email-ai.ts` · `app/(dashboard)/wholesale/outbox/ai-drafts-panel.tsx` · nút trên trang lead · `lib/constants/ai-systems.ts` (AI-07 thêm feature) · `tests/wholesale-email-ai-draft.test.ts` | xong, chờ gộp | — |
 | b2b-p2-email | — | adapter nhà cung cấp thật (SES / Resend / Gmail) cài `EmailProvider` + khai `LIVE_EMAIL_ADAPTERS` | **chặn** — chờ chủ shop (mục 8) | — |
 
 ## 7. P1c — cổng sẵn sàng (đã làm ở PR này)
@@ -232,4 +233,45 @@ gửi thẳng được.
 - PDF: dùng «In / Lưu PDF» của trình duyệt.
 - Ảnh chụp chỉ chép dữ kiện của tổ chức về bên nhận (cột lead do nhân viên nhập / hồ sơ khách). Không chép dữ liệu Google Places,
   vì dữ liệu đó có hạn lưu.
+
+## 12. P2b — AI soạn email chào hàng (nháp, có hàng rào bịa đặt)
+
+**Luồng.** Một lead có email, bấm «AI soạn nháp email» trên trang lead. Mỗi lần bấm là một lead, một lượt; không có đường chạy hàng
+loạt. Máy dựng DỮ KIỆN THẬT (`buildDraftFacts`) gồm:
+- hồ sơ lead: tên, phân khúc + căn cứ, khu vực, website;
+- bảng giá sỉ đang áp: khách đã nối thì bảng riêng → bảng mặc định; lead chưa là khách thì chỉ bảng mặc định; tối đa 15 mẫu mã còn
+  bán;
+- báo giá ĐÃ duyệt / đã gửi / đã chấp nhận của lead;
+- lời khai của shop: MOQ, giao hàng, khuyến mãi, catalog;
+- danh tính người gửi của E1;
+- thuế theo cài đặt báo giá (chưa khai thì ghi «giá chưa gồm thuế»).
+
+Sau đó gọi AI qua đúng đường AI của tổ chức (`resolveAi` của hàng đợi liên hệ; kiểm hạn mức `checkAiQuota`; ghi sổ
+`platform_ai_usage` với feature `b2b_email_draft`, workload `lead_hunter`; hệ thống AI-07). Rồi chạy hàng rào `draftViolations` và
+ghi một dòng `wholesale_email_ai_drafts`:
+- `DRAFT` nếu qua hàng rào;
+- `BLOCKED` nếu vi phạm, kèm lý do. Nháp loại này không bao giờ vào hộp thư đi.
+
+**Hàng rào (máy chặn).** Những gì bị chặn:
+- số tiền không thuộc đơn giá bậc / số báo giá / số trong lời khai (đọc bằng `extractVndAmounts` của chatbot);
+- tiền tệ khác VND;
+- chứng nhận / tiêu chuẩn;
+- xuất khẩu / Incoterms;
+- tồn kho / sẵn hàng;
+- thời gian giao khi shop chưa khai, hoặc khác lời khai;
+- % không có trong dữ kiện;
+- link / email / SĐT không có trong dữ kiện;
+- sai ngôn ngữ.
+
+**Ngôn ngữ.** Trong nước / Việt Kiều ⇒ tiếng Việt; còn lại ⇒ tiếng Anh. ERP chưa lưu nước của lead, nên đọc mã nước SĐT và đuôi tên
+miền 2 chữ. Khi nhánh khám phá quốc tế thêm cột nước thì nối vào `draftLanguageFor`. Chưa hỗ trợ ngôn ngữ bản địa.
+
+**Người duyệt.** Người sửa nháp rồi bấm «Đưa vào hộp thư đi». Bản cuối qua LẠI hàng rào (cùng dữ kiện đã chụp lúc soạn). Qua thì
+tạo thư `DRAFT` của E1 (`preparedBy = AI`), vẫn phải duyệt gửi ở E1 và qua cổng chính sách. Máy ghi người yêu cầu, người duyệt,
+model, chi phí và `edit_ratio` (khoảng cách theo từ / độ dài). Khối «Nháp AI» in tỷ lệ bị chặn, tỷ lệ sửa trung bình và chi phí
+30 ngày. E1 không có luật «người soạn không tự duyệt», nên bước này cũng không thêm.
+
+**Cấu hình.** `settings["wholesale.emailAiDraft"]`, mặc định TẮT. Người có `wholesale:config` bật, bắt buộc khai trần nháp / ngày
+và trần chi phí USD / ngày, kèm lý do; có audit. Hôm nay đã có một lượt chưa biết chi phí (model chưa có giá) ⇒ dừng tới mai,
+không coi chi phí đó là 0.
 

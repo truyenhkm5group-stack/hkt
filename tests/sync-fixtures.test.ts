@@ -559,6 +559,7 @@ import { testPriceListsReceivables } from "./price-lists-receivables.test";
 import { testReorderReminders } from "./reorder-reminders.test";
 import { testFbCrm } from "./fb-crm.test";
 import { testFbCrmToggle } from "./fb-crm-toggle.test";
+import { testMissionControl } from "./mission-control.test";
 import { testFbCrmS2 } from "./fb-crm-s2.test";
 import { testDailyReport } from "./daily-report.test";
 import { testSeafoodOs } from "./seafood-os.test";
@@ -631,7 +632,9 @@ import { testWholesaleConsent } from "./wholesale-consent.test";
 import { testWholesaleCatalogReadiness } from "./wholesale-catalog-readiness.test";
 import { testWholesaleQuotation } from "./wholesale-quotation.test";
 import { testWholesaleQuotationSettings } from "./wholesale-quotation-settings.test";
+import { testWholesaleEmailAiDraft } from "./wholesale-email-ai-draft.test";
 import { testWholesaleEmail } from "./wholesale-email.test";
+import { testWholesaleChannelRouting } from "./wholesale-channel-routing.test";
 import { testRestaurantTemplate } from "./restaurant.test";
 import { testSelfServiceJourney } from "./self-service-journey.test";
 import { testTriggerProposals } from "./trigger-proposals.test";
@@ -3338,8 +3341,11 @@ async function main() {
     await testWholesaleQuotation();
     // Cài đặt báo giá sỉ: gợi ý trần CK / biên LN từ bảng giá sỉ đang bật, chỉ ghi khi người có wholesale:config bấm Lưu (tổ chức THẬT `bg-cd`).
     await testWholesaleQuotationSettings();
+    // P2b AI B2B: AI soạn email chào hàng — AI GIẢ, hàng rào bịa đặt, người duyệt, trần / ngày (tổ chức THẬT `em-ai`, 0265).
+    await testWholesaleEmailAiDraft();
     // E1 AI B2B: hộp thư đi email ở chế độ chạy thử — cổng chính sách, huỷ đăng ký, nhận phản hồi; tổ chức THẬT `we-a` / `we-b`.
     await testWholesaleEmail();
+    await testWholesaleChannelRouting();
     await testRestaurantTemplate();
     testTriggerProposals();
     await testSelfServiceJourney();
@@ -3669,6 +3675,8 @@ async function main() {
     await testShippingCost(db);
     // Chủ shop tự duyệt lương theo khai báo org.owner (chủ shop 21/10/2026) — lib/constants/org-owner.ts.
     await testOrgOwner(db);
+    // Mission Control (chủ shop 30/10): đo AI agent theo sổ department-ai · chưa đo = null · tốt nghiệp không mặc định · cách ly.
+    await testMissionControl();
     // Báo cáo CEO hằng ngày (0266): AI giả · hàng rào số bịa · bất biến · tắt mặc định · cách ly tổ chức.
     await testDailyReport();
     // Facebook Friend CRM lát 1 (0262): link do người dán · đã mua theo ORDER_OUTCOME · doanh thu thực chưa chứng từ ⇒ null · cách ly tổ chức.

@@ -13029,6 +13029,61 @@ export const wholesaleQuotationLines = pgTable(
 );
 
 /**
+ * NHÁP EMAIL DO AI SOẠN (0265 · docs/tech/hslc-b2b-sales-agent.md P2b). Mỗi lượt «AI soạn nháp» là MỘT dòng. Dòng giữ: chữ GỐC
+ * AI trả về, dữ kiện thật đã đưa cho AI (`facts`), phán quyết của hàng rào bịa đặt (`violations`), model và chi phí.
+ *
+ *  · BLOCKED: máy chặn (số tiền lệch bảng giá / báo giá, khẳng định chứng nhận · tồn · xuất khẩu · thời gian giao không có
+ *    nguồn, sai ngôn ngữ…). Nháp loại này KHÔNG BAO GIỜ vào hộp thư đi.
+ *  · DRAFT: qua hàng rào, chờ NGƯỜI sửa / duyệt.
+ *  · PROMOTED: người đã «Đưa vào hộp thư đi» ⇒ thư DRAFT ở `wholesale_email_outbox` (vẫn qua duyệt của E1 + cổng chính sách).
+ *    Bản cuối người duyệt và tỷ lệ sửa so với chữ AI được lưu lại, để đo AI bị sửa bao nhiêu.
+ *  · DISCARDED: người bỏ, có lý do.
+ * Chi phí cũng ghi ở sổ dùng AI của nền tảng (feature `b2b_email_draft`); cột ở đây dùng cho trần chi phí / ngày của tổ chức.
+ * `cost_usd` NULL = model chưa có giá niêm yết = CHƯA BIẾT, không phải 0.
+ */
+export const wholesaleEmailAiDrafts = pgTable(
+  "wholesale_email_ai_drafts",
+  {
+    id: id(),
+    leadId: text("lead_id")
+      .notNull()
+      .references(() => wholesaleLeads.id, { onDelete: "restrict" }),
+    language: text("language").notNull(),
+    subject: text("subject").notNull(),
+    body: text("body").notNull(),
+    status: text("status").notNull(),
+    violations: jsonb("violations").notNull().default(sql`'[]'::jsonb`),
+    facts: jsonb("facts").notNull(),
+    model: text("model"),
+    provider: text("provider"),
+    billingSource: text("billing_source"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    costUsd: doublePrecision("cost_usd"),
+    requestedByUserId: text("requested_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    reviewedSubject: text("reviewed_subject"),
+    reviewedBody: text("reviewed_body"),
+    editRatio: doublePrecision("edit_ratio"),
+    reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    reviewedAt: ts("reviewed_at"),
+    outboxId: text("outbox_id").references(() => wholesaleEmailOutbox.id, { onDelete: "restrict" }),
+    discardedByUserId: text("discarded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    discardedAt: ts("discarded_at"),
+    discardReason: text("discard_reason"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("wholesale_email_ai_drafts_lead_idx").on(t.leadId, t.createdAt),
+    index("wholesale_email_ai_drafts_created_idx").on(t.createdAt),
+    check("wholesale_email_ai_drafts_status_check", sql`${t.status} IN ('DRAFT','BLOCKED','PROMOTED','DISCARDED')`),
+    check("wholesale_email_ai_drafts_language_check", sql`${t.language} IN ('vi','en')`),
+    check("wholesale_email_ai_drafts_violations_check", sql`jsonb_typeof(${t.violations}) = 'array' AND (${t.status} <> 'BLOCKED' OR jsonb_array_length(${t.violations}) > 0)`),
+    check("wholesale_email_ai_drafts_facts_check", sql`jsonb_typeof(${t.facts}) = 'object'`),
+    check("wholesale_email_ai_drafts_promoted_check", sql`${t.status} <> 'PROMOTED' OR (${t.outboxId} IS NOT NULL AND ${t.reviewedAt} IS NOT NULL AND ${t.reviewedBody} IS NOT NULL)`),
+    check("wholesale_email_ai_drafts_discarded_check", sql`${t.status} <> 'DISCARDED' OR (${t.discardedAt} IS NOT NULL AND length(btrim(coalesce(${t.discardReason}, ''))) >= 3)`),
+    check("wholesale_email_ai_drafts_edit_ratio_check", sql`${t.editRatio} IS NULL OR (${t.editRatio} >= 0 AND ${t.editRatio} <= 1)`),
+    check("wholesale_email_ai_drafts_cost_check", sql`${t.costUsd} IS NULL OR ${t.costUsd} >= 0`),
  * BÁO CÁO CEO HẰNG NGÀY (0266 · docs/tech/ai-daily-report.md) — MỘT bản mỗi ngày báo cáo: khối số máy gom bằng các hàm báo cáo sẵn
  * có (`facts`), lời tóm tắt AI đã qua hàng rào số (`summary` chỉ có khi `ai_status = 'OK'`), model, chi phí USD. BẤT BIẾN: trigger
  * `daily_reports_no_update` chặn mọi UPDATE — sửa công thức ngày mai không đổi số của bản hôm qua (luật 21).

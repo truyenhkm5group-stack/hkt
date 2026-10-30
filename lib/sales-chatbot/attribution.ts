@@ -219,6 +219,15 @@ export async function loadOrderAttribution(opts: AttributionWindow): Promise<Ord
   return { table: attributionTable(attributed, unattributed), followup, ...overlayTable(orders) };
 }
 
+/**
+ * Tập đơn quy kết của kỳ ở dạng THÔ (mã đơn · nhãn · kết cục) — cho Mission Control (lib/queries/mission-control.ts) đo bot bán hàng
+ * bằng CHÍNH tập và luật của màn «Hiệu quả» (đọc chung `collectAttribution`, không câu truy vấn thứ hai). Không tên / SĐT khách.
+ */
+export async function attributedOrderFacts(opts: AttributionWindow): Promise<{ orderId: string; attribution: OrderAttribution | null; outcome: OrderOutcome; delivered: boolean; settled: boolean; cancelled: boolean }[]> {
+  const { orders } = await collectAttribution(opts);
+  return orders.map((x) => ({ orderId: x.orderId, attribution: x.attribution, outcome: x.outcome, delivered: x.delivered, settled: x.settled, cancelled: x.cancelled }));
+}
+
 // ─────────────────────────── Drill-down: đơn ↔ hội thoại ───────────────────────────
 
 /**

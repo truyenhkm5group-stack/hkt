@@ -229,6 +229,14 @@ export const MIGRATION_SERVE_COMPAT: readonly ServeCompatEntry[] = [
     proof: "tests/wholesale-email.test.ts",
   },
   {
+    tag: "0265_wholesale_email_ai_drafts",
+    why:
+      "Chỉ TẠO một bảng mới ở CSDL tổ chức (wholesale_email_ai_drafts) — không thêm / đổi / xoá cột nào mã đang đọc. Đường ĐỌC " +
+      "(`lib/queries/wholesale-email-ai-drafts.ts`) bắt lỗi bảng chưa có (42P01) ⇒ khối «Nháp AI» ở Hộp thư đi in «CSDL chưa áp 0265», " +
+      "phần còn lại của Hộp thư đi chạy như cũ. Đường GHI (`lib/wholesale/email-ai-draft.ts`) kiểm bảng TRƯỚC khi gọi AI ⇒ chưa áp thì " +
+      "trả câu lỗi, không tốn một lượt gọi AI nào và không ghi gì.",
+    addedColumns: {},
+    proof: "tests/wholesale-email-ai-draft.test.ts",
     tag: "0266_daily_reports",
     why:
       "Chỉ TẠO một bảng mới ở CSDL tổ chức (daily_reports) + trigger chặn sửa — không thêm / đổi / xoá cột nào của bảng đang có. " +

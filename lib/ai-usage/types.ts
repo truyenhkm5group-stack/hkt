@@ -25,7 +25,7 @@ export const AI_BILLING_SOURCE_LABEL: Record<AiBillingSource, string> = {
   HOME: "AI của tổ chức nhà",
 };
 
-export const AI_USAGE_FEATURES = ["ai_builder", "copilot", "sales_chatbot", "sales_playbook", "lead_hunter", "creative_image", "creative_copy", "sourcing", "daily_report"] as const;
+export const AI_USAGE_FEATURES = ["ai_builder", "copilot", "sales_chatbot", "sales_playbook", "lead_hunter", "creative_image", "creative_copy", "sourcing", "b2b_email_draft", "daily_report"] as const;
 export type AiUsageFeature = (typeof AI_USAGE_FEATURES)[number];
 
 /**
@@ -46,7 +46,7 @@ export const PLATFORM_WORKLOAD_LABEL: Record<PlatformWorkload, string> = { sales
 export const AI_USAGE_WORKLOADS = [...PLATFORM_WORKLOADS, "followup", "lessons", "quick_reply_learn", "inbox_feedback", "playbook", "ai_builder", "copilot", "creative", "lead_hunter", "sourcing"] as const;
 export type AiUsageWorkload = (typeof AI_USAGE_WORKLOADS)[number];
 
-export const AI_USAGE_FEATURE_LABEL: Record<AiUsageFeature, string> = { ai_builder: "AI Builder", copilot: "AI Copilot", sales_chatbot: "Chatbot bán hàng", sales_playbook: "Học từ hội thoại cũ", lead_hunter: "Lời chào khách sỉ", creative_image: "Vẽ ảnh quảng cáo", creative_copy: "Câu chữ quảng cáo", sourcing: "Tìm hàng nguồn", daily_report: "Báo cáo CEO hằng ngày" };
+export const AI_USAGE_FEATURE_LABEL: Record<AiUsageFeature, string> = { ai_builder: "AI Builder", copilot: "AI Copilot", sales_chatbot: "Chatbot bán hàng", sales_playbook: "Học từ hội thoại cũ", lead_hunter: "Lời chào khách sỉ", creative_image: "Vẽ ảnh quảng cáo", creative_copy: "Câu chữ quảng cáo", sourcing: "Tìm hàng nguồn", b2b_email_draft: "Email chào hàng sỉ (AI soạn nháp)", daily_report: "Báo cáo CEO hằng ngày" };
 
 /** Loại lượt (0222): chữ · đọc ảnh khách gửi · vẽ ảnh. `NULL` trong sổ = nơi gọi chưa khai. */
 export const AI_USAGE_MODALITIES = ["TEXT", "VISION", "IMAGE"] as const;

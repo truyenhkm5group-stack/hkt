@@ -25,6 +25,9 @@ import {
  *     ở chế độ AUTOMATED và không tự suy diễn lại.
  *  4. Lý do TỰ HẾT (chế độ tắt, nút dừng, hạn mức, thiếu danh tính người gửi) ⇒ `hold = true`: thư nằm lại hàng đợi. Còn lại ⇒
  *     chặn hẳn, cần người sửa căn cứ.
+ *  5. CỔNG NƯỚC (issue #1085): nước người nhận chưa có trong `allowedCountries` ⇒ ở chế độ GỬI THẬT thư nằm chờ với lý do
+ *     `COUNTRY_NOT_REVIEWED`; ở CHẠY THỬ thư vẫn đi hết đường ống nhưng mang cảnh báo (`warnings`). Không xác định được nước
+ *     ⇒ coi như CHƯA RÀ (rơi về phía hẹp).
  */
 
 export type EmailPolicyMessage = {
@@ -59,6 +62,8 @@ export type EmailPolicyInput = {
   counts: { lastHour: number; today: number; domainToday: number };
   /** Bộ chuyển thật đang có (mặc định đọc `LIVE_EMAIL_ADAPTERS`) — bài kiểm truyền vào để đo nhánh LIVE. */
   liveAdapters?: readonly string[];
+  /** Nước người nhận (ISO2; `VN` = trong nước) — `recipientCountryOf(lead.provinceKey)`; `null` = không xác định được. */
+  recipientCountry: string | null;
 };
 
 export type EmailPolicyDecision = {
@@ -71,6 +76,8 @@ export type EmailPolicyDecision = {
   details: string[];
   /** Chế độ gửi nếu được phép. */
   sendMode: "DRY_RUN" | "LIVE" | null;
+  /** Điều không chặn ở chế độ hiện tại nhưng SẼ chặn khi gửi thật (hôm nay: nước chưa rà luật ở CHẠY THỬ). */
+  warnings: string[];
 };
 
 function stopEventsOf(kinds: readonly string[]): EmailEventKind[] {
@@ -102,6 +109,15 @@ export function evaluateEmailSend(input: EmailPolicyInput): EmailPolicyDecision 
   const missing = senderIdentityMissing(s.sender);
   if (missing.length) add("SENDER_INCOMPLETE", `thiếu ${missing.join(", ")}`);
 
+  // ── Cổng nước: gửi thật chỉ tới nước đã rà luật; chạy thử vẫn đi nhưng nói rõ ──
+  const warnings: string[] = [];
+  const country = input.recipientCountry;
+  if (!country || !s.allowedCountries.includes(country)) {
+    const detail = country ? `chưa rà luật nước ${country}` : "không xác định được nước người nhận";
+    if (s.mode === "LIVE") add("COUNTRY_NOT_REVIEWED", detail);
+    else warnings.push(`${EMAIL_BLOCK_REASON_LABEL.COUNTRY_NOT_REVIEWED}: ${detail}`);
+  }
+
   // ── Lead ──
   const stops = stopEventsOf(input.leadEventKinds);
   if (input.leadContactStatus === "DO_NOT_CONTACT") add("LEAD_STOPPED", "KHÔNG LIÊN HỆ");
@@ -130,5 +146,6 @@ export function evaluateEmailSend(input: EmailPolicyInput): EmailPolicyDecision 
     hold: !allowed && reasons.every((r) => EMAIL_HOLD_REASONS.includes(r)),
     details: reasons.map((r) => hit.get(r)!),
     sendMode: allowed ? (s.mode === "LIVE" ? "LIVE" : "DRY_RUN") : null,
+    warnings,
   };
 }
