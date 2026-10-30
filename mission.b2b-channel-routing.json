@@ -3,7 +3,7 @@
   "mission_id": "b2b-channel-routing",
   "title": "Nước ngoài — Email · Trong nước — Zalo, email dự phòng khi Zalo không gửi được + cổng nước",
   "business_goal": "",
-  "status": "PLANNING",
+  "status": "PR_READY",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-routing",
@@ -35,7 +35,23 @@
   "related_prs": [],
   "migration_reservations": [],
   "created_at": "2026-10-30T12:03:36.277Z",
-  "updated_at": "2026-10-30T12:03:36.277Z",
-  "last_heartbeat": "2026-10-30T12:03:36.277Z",
-  "definition_of_done": []
+  "updated_at": "2026-10-30T12:25:29.251Z",
+  "last_heartbeat": "2026-10-30T12:25:29.251Z",
+  "definition_of_done": [],
+  "handoff": {
+    "branch": "claude/b2b-channel-routing",
+    "sha": "7ca5eda831e68b80652df41cb289d74189d18583",
+    "at": "2026-10-30T12:25:29.251Z",
+    "actor": "DESKTOP-56TH98Y:wt-b2b-routing",
+    "title": "Nước ngoài — Email · Trong nước — Zalo, email dự phòng khi Zalo không gửi được + cổng nước",
+    "summary": "contactPlanOf (thuần): quốc tế→email, trong nước→Zalo, email dự phòng chỉ khi Zalo không gửi được (không số di động / zalo_status NOT_FOUND / nhân viên đánh dấu); im lặng không đổi kênh; chặn/KHÔNG LIÊN HỆ dừng. «Zalo không gửi được» = dòng ZALO/UNDELIVERABLE, hoàn tác thêm dòng. Hàng đợi liên hệ chia làn, lõi soạn email chặn lead trong nước còn Zalo. Cổng nước wholesale.email.allowedCountries (rỗng mặc định): LIVE→HOLD COUNTRY_NOT_REVIEWED, DRY_RUN in cảnh báo; chỉ quản trị sửa + lý do + audit.",
+    "tests": [
+      "npx tsc --noEmit: sạch",
+      "npm run lint: sạch",
+      "TEST_KHOI=K21 npm test: ĐẠT (gồm ✓ Kế hoạch kênh mới + ✓ E1 email giữ nguyên kỳ vọng — chỉ thêm recipientCountry/allowedCountries [VN] vào fixture)",
+      "TEST_KHOI=K17 npm test: ĐẠT",
+      "NODE_OPTIONS=--max-old-space-size=6144 npm run build: ĐẠT",
+      "4 shard đầy đủ: để gates CI"
+    ]
+  }
 }
