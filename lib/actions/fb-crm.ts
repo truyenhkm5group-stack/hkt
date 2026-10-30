@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/session";
 import { fbCrmApplyCore, fbCrmCreateTaskCore, type FbCrmOpInput, type FbCrmResult, type FbCrmTaskInput } from "@/lib/fb-crm/service";
+import { fbCrmSetEnabledCore, type FbCrmToggleResult } from "@/lib/fb-crm/settings";
 import { fbCrmEnabled } from "@/lib/queries/fb-crm";
 
 /**
@@ -32,6 +33,17 @@ export async function fbCrmCreateTaskAction(customerId: string, input: FbCrmTask
   if (r.ok && r.changed) {
     refresh(customerId);
     revalidatePath("/work");
+  }
+  return r;
+}
+
+/** Công tắc tổ chức (`settings:manage`, lõi tự kiểm quyền). Đổi thật ⇒ làm mới /customers (nút vào trang) và trang Facebook CRM. */
+export async function fbCrmSetEnabledAction(on: boolean): Promise<FbCrmToggleResult> {
+  const user = await requireUser();
+  const r = await fbCrmSetEnabledCore(user, { on });
+  if (r.ok && r.changed) {
+    revalidatePath("/customers");
+    revalidatePath("/customers/facebook-crm");
   }
   return r;
 }
