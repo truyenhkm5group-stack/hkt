@@ -11,6 +11,8 @@ import { WholesaleNav } from "@/app/(dashboard)/wholesale/wholesale-nav";
 import { QuotationStatusBadge } from "@/app/(dashboard)/wholesale/quotations/quotations-table";
 import { IssueList, TotalsBlock } from "@/app/(dashboard)/wholesale/quotations/quotation-form";
 import { QuotationActions } from "@/app/(dashboard)/wholesale/quotations/[id]/quotation-actions";
+import { OrderClosePanel } from "@/app/(dashboard)/wholesale/quotations/[id]/order-close-panel";
+import { bankMatchesForQuotation, orderForQuotation } from "@/lib/wholesale/order-close";
 
 export const metadata = { title: "Báo giá sỉ" };
 
@@ -24,6 +26,8 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
   const { row, snapshot, lines, versions, people, status } = data;
   const result = snapshot.result;
   const partyHref = row.leadId ? `/wholesale/leads/${row.leadId}` : row.customerId ? `/customers/${row.customerId}` : null;
+  // Chốt đơn sỉ (P5): đơn tạo từ báo giá (khoá chống trùng của lõi đơn) + đề nghị đối chiếu chuyển khoản — chỉ đọc.
+  const [order, bank] = await Promise.all([orderForQuotation(row.id), bankMatchesForQuotation(user, row.id, row.code)]);
   const listName = [snapshot.books.customerList, snapshot.books.defaultList].find((b) => b?.id === row.priceListId)?.name ?? null;
   return (
     <div className="space-y-4">
@@ -50,6 +54,8 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
         isCreator={row.createdByUserId === user.id}
         revisable={REVISABLE_STATUSES.includes(status)}
       />
+
+      <OrderClosePanel quotationId={row.id} accepted={status === "ACCEPTED"} canOrder={can(user, "orders:write") && can(user, "wholesale:work")} order={order} bank={bank} canLink={can(user, "bank:write")} />
 
       <IssueList result={result} />
 
