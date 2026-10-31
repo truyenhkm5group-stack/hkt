@@ -11,6 +11,15 @@
   wholesale_suppressions · orders (qua customer_id của lead) · price_lists · price_list_items · product_variants ·
   customer_trade_terms ở CSDL TỔ CHỨC; `platform_ai_usage` (feature `lead_hunter`, lọc ĐÚNG org_code) và cấu hình module ở CSDL NHÀ.
 
+  Mục «email» (chủ shop bật gửi thật 31/10/2026 — người vận hành kiểm cấu hình mà KHÔNG mở được CSDL tổ chức khách): các khoá
+  `wholesale.email` · `wholesale.emailInbound` (+ `.cursor`) · `wholesale.emailAiDraft` · `wholesale.emailSequence` · `wholesale.reorder` ·
+  `wholesale.quotation` đọc qua ĐÚNG luật của đường chạy — `mergeSettingJson(value, <mặc định của getter>)` rồi hàm parse / merge của
+  từng module (không JSON.parse tay); kết nối `gws-smtp` ở `org_connections` (chỉ trạng thái · mốc kiểm · khớp mã tổ chức — KHÔNG đọc
+  `secrets_enc`, `secret_hints`, `settings`, `last_test_message`); `wholesale_email_outbox` · `wholesale_email_events` 7 ngày. Lý do
+  chờ / chặn ghi ở CSDL là CÂU CHỮ (có thể mang tên miền / địa chỉ thư) ⇒ quy về MÃ ở `EMAIL_BLOCK_REASONS` trước khi in, chữ gốc
+  không bao giờ ra tóm tắt. Tóm tắt chỉ chế độ · cờ · trần · mã nước · số đếm — không địa chỉ thư, không tên miền, không danh tính
+  người gửi (chỉ nói THIẾU trường nào).
+
   · Doanh thu lead → đơn là DOANH THU THEO ĐƠN (tổng tiền hàng sau giảm của đơn chưa huỷ / xoá), CHƯA đối chiếu tiền thật — chỉ để
     tham khảo, không phải kết quả đơn (ORDER_OUTCOME) và không phải tiền thu được.
   · Bảng / cột chưa có ở CSDL tổ chức (chưa áp migration) ⇒ mục đó in «chưa có bảng», KHÔNG sập, KHÔNG in 0.
@@ -29,7 +38,14 @@ import { canUseFeature, canUseModule } from "@/lib/platform/capabilities";
 import { findOrganization } from "@/lib/platform/organizations";
 import { packSummaryLines } from "@/lib/ops/summary-lines";
 import { rowsOf } from "@/lib/sql-rows";
+import { mergeSettingJson } from "@/lib/settings";
 import { mergeLeadHunterConfig, LEAD_HUNTER_SETTING_KEY } from "@/lib/wholesale/config";
+import { EMAIL_AI_SETTING_KEY, parseEmailAiSettings } from "@/lib/wholesale/email-ai-draft";
+import { EMAIL_BLOCK_REASON_LABEL, EMAIL_BLOCK_REASONS, mergeEmailSettings, senderIdentityMissing, WHOLESALE_EMAIL_SETTING_KEY, type EmailMode } from "@/lib/wholesale/email-constants";
+import { EMAIL_INBOUND_CURSOR_KEY, EMAIL_INBOUND_SETTING_KEY, parseEmailInboundSettings, parseInboundCursor } from "@/lib/wholesale/email-reply";
+import { EMAIL_SEQUENCE_SETTING_KEY, parseEmailSequenceSettings } from "@/lib/wholesale/email-sequence";
+import { parseQuotationPolicy, QUOTATION_SETTING_KEY } from "@/lib/wholesale/quotation-engine";
+import { parseWholesaleReorderSettings, WHOLESALE_REORDER_SETTING_KEY } from "@/lib/wholesale/reorder";
 
 export const B2B_PROBE_DEFAULT_ORG = "hslc-hmt-shop";
 /** Số tuần gần nhất của bảng «lead tạo theo tuần». */
@@ -38,6 +54,12 @@ export const B2B_PROBE_WEEKS = 8;
 export const B2B_PROBE_DAYS = 30;
 /** Mẫu dòng mỗi nhóm in vào phần mã hoá. */
 export const B2B_PROBE_SAMPLES = 10;
+/** Cửa sổ của hộp thư đi / sự kiện thư / thư bị chặn. */
+export const B2B_PROBE_MAIL_DAYS = 7;
+/** Connector gửi + đọc thư thật duy nhất hôm nay (`LIVE_EMAIL_ADAPTERS`, E2/E3). */
+export const B2B_PROBE_MAIL_CONNECTOR = "gws-smtp";
+/** Trần số dòng lý do chờ / chặn kéo về để quy mã (đủ xa trần gửi cứng 1.000 thư / ngày). */
+const MAIL_REASON_ROWS = 5000;
 const USAGE = "[--org=<mã tổ chức>]";
 const TAG = "wholesale-b2b-probe";
 
@@ -100,6 +122,31 @@ export async function section<T>(fn: () => Promise<T>): Promise<Section<T>> {
   }
 }
 
+/**
+ * Câu lý do chờ (`last_error` của thư QUEUED) / chặn (`blocked_reason`) ⇒ MÃ lý do. Đường ghi (`lib/wholesale/email-outbox.ts`) nối
+ * `decision.details` bằng « · », mỗi mảnh BẮT ĐẦU bằng `EMAIL_BLOCK_REASON_LABEL[mã]` rồi tới chi tiết (có thể là tên miền / địa chỉ
+ * thư) ⇒ khớp TIỀN TỐ từng mảnh, chi tiết bị bỏ. Hai câu không thuộc cổng: «Chưa gửi được ở chế độ …» (cổng cho qua nhưng chưa có nhà
+ * cung cấp) ⇒ `NO_PROVIDER`; «Lần n: …» (nhà cung cấp lỗi tạm, đang lùi dần) ⇒ `PROVIDER_RETRY`. Không nhận ra ⇒ `OTHER` (đếm, không
+ * đoán). HÀM THUẦN.
+ */
+export function mailReasonCodes(text: string | null | undefined): string[] {
+  const t = String(text ?? "").trim();
+  if (!t) return [];
+  const segs = t.split(" · ");
+  const codes: string[] = EMAIL_BLOCK_REASONS.filter((r) => segs.some((seg) => seg.startsWith(EMAIL_BLOCK_REASON_LABEL[r])));
+  if (codes.length) return codes;
+  if (t.startsWith("Chưa gửi được ở chế độ")) return ["NO_PROVIDER"];
+  if (/^Lần \d+:/.test(t)) return ["PROVIDER_RETRY"];
+  return ["OTHER"];
+}
+
+/** Đếm mã lý do trên nhiều câu (một thư nhiều lý do ⇒ mỗi mã đếm một lần). HÀM THUẦN. */
+export function mailReasonCounts(texts: readonly (string | null)[]): { k: string; n: number }[] {
+  const m = new Map<string, number>();
+  for (const t of texts) for (const c of new Set(mailReasonCodes(t))) m.set(c, (m.get(c) ?? 0) + 1);
+  return [...m].map(([k, n]) => ({ k, n }));
+}
+
 // ─────────────────────────── ĐỌC CSDL ───────────────────────────
 
 type KN = { k: string | null; n: number };
@@ -123,6 +170,31 @@ export type B2bProbeSummary = {
   pricing: Section<{ activeLists: number; defaultLists: number; items: number; tieredVariants: number; sellingVariants: number }>;
   tradeTerms: Section<{ rows: number; withPriceList: number; withCreditLimit: number; withPaymentTerms: number }>;
   ai: Section<{ rows: number; requests: number; costUsd: number | null; unknownCost: number; byStatus: KN[] }>;
+  mailConfig: Section<B2bMailConfig>;
+  /** `null` = chưa có dòng kết nối. */
+  mailConnection: Section<{ status: string; lastTestAt: string | null; lastTestOk: boolean | null; orgMatch: boolean } | null>;
+  mailOutbox: Section<KN[]>;
+  mailEvents: Section<KN[]>;
+  mailQueue: Section<{ queued: number; withReason: number; reasons: KN[] }>;
+  mailBlocked: Section<KN[]>;
+};
+
+/** Cấu hình email — CHỈ cờ / trần / mã nước / có-không. Không địa chỉ, không tên miền, không mẫu thư, không danh tính người gửi. */
+export type B2bMailConfig = {
+  saved: boolean;
+  mode: EmailMode;
+  paused: boolean;
+  liveOwnerEnabled: boolean;
+  limits: { perHour: number; perDay: number; perRecipientDomainPerDay: number };
+  countries: string[];
+  senderMissing: string[];
+  blockedDomains: number;
+  pausedCampaigns: number;
+  inbound: { enabled: boolean; cursor: boolean; aiClassify: boolean; maxClassify: number | null; classifyCapUsd: number | null };
+  aiDraft: { enabled: boolean; maxDrafts: number | null; capUsd: number | null };
+  sequence: { maxFollowups: number | null; gapDays: number | null; templateVi: boolean; templateEn: boolean };
+  reorderAfterDays: number | null;
+  quote: { saved: boolean; maxDiscount: boolean; minMargin: boolean; tax: boolean };
 };
 
 export async function runWholesaleB2bProbe(opts: { db: Db; platformDb: Db; orgCode: string; now: Date; label: string; moduleEnabled: boolean | null; features: Record<string, boolean | null> }): Promise<B2bProbeSummary> {
@@ -258,7 +330,76 @@ export async function runWholesaleB2bProbe(opts: { db: Db; platformDb: Db; orgCo
     return { rows: num(r?.n), requests: num(r?.requests), costUsd: cost, unknownCost: num(r?.unknown_cost), byStatus };
   });
 
-  const s: B2bProbeSummary = { config, campaigns, cells, apiUsage, leads, leadGrades, leadStatuses, leadWeeks, outreach, activities, suppressions, leadOrders, pricing, tradeTerms, ai };
+  // ── EMAIL ── settings đọc qua ĐÚNG luật của getter (mergeSettingJson + mặc định của getter + parse của module), không JSON.parse tay.
+  const mailSince = new Date(now.getTime() - B2B_PROBE_MAIL_DAYS * 86_400_000).toISOString();
+  const mailConfig = await section(async () => {
+    const keys = [WHOLESALE_EMAIL_SETTING_KEY, EMAIL_INBOUND_SETTING_KEY, EMAIL_INBOUND_CURSOR_KEY, EMAIL_AI_SETTING_KEY, EMAIL_SEQUENCE_SETTING_KEY, WHOLESALE_REORDER_SETTING_KEY, QUOTATION_SETTING_KEY];
+    const rows = await q<{ key: string; value: string }>(db, sql`select key, value from settings where key in (${sql.join(keys.map((k) => sql`${k}`), sql`, `)})`);
+    const raw = new Map(rows.map((r) => [r.key, r.value]));
+    // Giống `getSettingJson(key, fallback)`: không có dòng ⇒ fallback; có ⇒ mergeSettingJson(value, fallback).
+    const read = <T>(key: string, fallback: T): T => {
+      const v = raw.get(key);
+      return v === undefined ? fallback : mergeSettingJson(v, fallback);
+    };
+    const m = mergeEmailSettings(read<unknown>(WHOLESALE_EMAIL_SETTING_KEY, null)); // = getEmailSettings
+    const inbound = parseEmailInboundSettings(read<unknown>(EMAIL_INBOUND_SETTING_KEY, null)); // = getEmailInboundSettings
+    const cursor = parseInboundCursor(read<unknown>(EMAIL_INBOUND_CURSOR_KEY, null)); // = readCursor của job đọc thư
+    // getEmailAiSettings trộn với mặc định {enabled:false, null, null}; parse chỉ đọc ba ô ấy và ô thiếu ⇒ đúng giá trị mặc định đó, nên {} cho cùng kết quả.
+    const aiDraft = parseEmailAiSettings(read<Record<string, unknown>>(EMAIL_AI_SETTING_KEY, {}));
+    const seq = parseEmailSequenceSettings(read<Record<string, unknown>>(EMAIL_SEQUENCE_SETTING_KEY, {})); // = getEmailSequenceSettings
+    const reorder = parseWholesaleReorderSettings(read<Record<string, unknown>>(WHOLESALE_REORDER_SETTING_KEY, {})); // = getWholesaleReorderSettings
+    const quote = parseQuotationPolicy(read<Record<string, unknown>>(QUOTATION_SETTING_KEY, {})); // = loadQuotationPolicyView
+    const cfg: B2bMailConfig = {
+      saved: raw.has(WHOLESALE_EMAIL_SETTING_KEY),
+      mode: m.mode,
+      paused: m.paused,
+      liveOwnerEnabled: Boolean(m.liveEnabledByUserId),
+      limits: { ...m.limits },
+      countries: [...m.allowedCountries],
+      senderMissing: senderIdentityMissing(m.sender),
+      blockedDomains: m.blockedDomains.length,
+      pausedCampaigns: m.pausedCampaignIds.length,
+      inbound: { enabled: inbound.enabled, cursor: cursor !== null, aiClassify: inbound.aiClassify, maxClassify: inbound.dailyMaxClassify, classifyCapUsd: inbound.dailyCostCapUsd },
+      aiDraft: { enabled: aiDraft.enabled, maxDrafts: aiDraft.dailyMaxDrafts, capUsd: aiDraft.dailyCostCapUsd },
+      sequence: { maxFollowups: seq.maxFollowups, gapDays: seq.gapDays, templateVi: seq.templates.vi.length > 0, templateEn: seq.templates.en.length > 0 },
+      reorderAfterDays: reorder.afterDays,
+      quote: { saved: raw.has(QUOTATION_SETTING_KEY), maxDiscount: quote.maxDiscountPercent !== null, minMargin: quote.minMarginPercent !== null, tax: quote.taxRatePercent !== null },
+    };
+    return cfg;
+  });
+  // Kết nối: CHỈ trạng thái + mốc kiểm + khớp mã tổ chức (điều kiện `openActiveConnection`, trừ bước giải bí mật). Không đọc cột bí mật / câu kiểm.
+  const mailConnection = await section(async () => {
+    const [r] = await q<{ status: string; last_test_at: Date | string | null; last_test_ok: boolean | null; org_match: boolean }>(
+      db,
+      sql`select status, last_test_at, last_test_ok, (org_code = ${orgCode}) as org_match from org_connections where connector_key = ${B2B_PROBE_MAIL_CONNECTOR}`,
+    );
+    if (!r) return null;
+    const at = r.last_test_at === null ? null : `${new Date(r.last_test_at).toISOString().slice(0, 16)}Z`;
+    return { status: r.status, lastTestAt: at, lastTestOk: r.last_test_ok, orgMatch: r.org_match === true };
+  });
+  const mailOutbox = await section(() =>
+    counts(db, sql`select status || coalesce('/' || mode, '') as k, count(*)::int as n from wholesale_email_outbox where created_at >= ${mailSince}::timestamptz group by 1`),
+  );
+  const mailEvents = await section(() =>
+    counts(
+      db,
+      sql`select e.kind || coalesce('/' || o.mode, '') as k, count(*)::int as n
+            from wholesale_email_events e left join wholesale_email_outbox o on o.id = e.outbox_id
+           where e.created_at >= ${mailSince}::timestamptz group by 1`,
+    ),
+  );
+  // Lý do là CÂU CHỮ ⇒ kéo về rồi quy MÃ ở đây; chữ gốc không rời hàm này.
+  const mailQueue = await section(async () => {
+    const [c] = await q<{ n: number }>(db, sql`select count(*)::int as n from wholesale_email_outbox where status = 'QUEUED'`);
+    const texts = await q<{ t: string }>(db, sql`select last_error as t from wholesale_email_outbox where status = 'QUEUED' and coalesce(last_error, '') <> '' limit ${MAIL_REASON_ROWS}`);
+    return { queued: num(c?.n), withReason: texts.length, reasons: mailReasonCounts(texts.map((r) => r.t)) };
+  });
+  const mailBlocked = await section(async () => {
+    const texts = await q<{ t: string | null }>(db, sql`select blocked_reason as t from wholesale_email_outbox where status = 'BLOCKED' and updated_at >= ${mailSince}::timestamptz limit ${MAIL_REASON_ROWS}`);
+    return mailReasonCounts(texts.map((r) => r.t));
+  });
+
+  const s: B2bProbeSummary = { config, campaigns, cells, apiUsage, leads, leadGrades, leadStatuses, leadWeeks, outreach, activities, suppressions, leadOrders, pricing, tradeTerms, ai, mailConfig, mailConnection, mailOutbox, mailEvents, mailQueue, mailBlocked };
   for (const line of summaryLines(s, opts)) console.log(`[ops:tom-tat] ${line}`);
 
   // ── PHẦN MÃ HOÁ (console.log thường): mẫu dòng, đã che số dài / thư / URL. ──
@@ -324,6 +465,53 @@ export function summaryLines(s: B2bProbeSummary, opts: { label: string; moduleEn
     ...(a.unknownCost ? [`${a.unknownCost} dòng chưa biết giá`] : []),
     ...(a.byStatus.length ? countsParts(a.byStatus) : []),
   ]));
+
+  // ── EMAIL ── chỉ chế độ / cờ / trần / mã nước / số đếm / mã lý do.
+  const dash = (v: number | null) => (v === null ? "—" : String(v));
+  const usd = (v: number | null) => (v === null ? "—" : `US$${String(v).replace(".", ",")}`);
+  add("email cấu hình", sec(s.mailConfig, (m) => [
+    `chế độ ${m.mode}`,
+    m.saved ? "đã lưu" : "chưa lưu (mặc định OFF)",
+    `dừng khẩn ${m.paused ? "BẬT" : "tắt"}`,
+    `LIVE chủ shop bật ${m.liveOwnerEnabled ? "có" : "chưa"}`,
+    `trần ${m.limits.perHour}/giờ`,
+    `${m.limits.perDay}/ngày`,
+    `${m.limits.perRecipientDomainPerDay}/tên miền nhận/ngày`,
+    `nước đã rà ${m.countries.length ? m.countries.join(",") : "(chưa nước nào)"}`,
+    m.senderMissing.length ? `người gửi thiếu ${m.senderMissing.join(", ")}` : "danh tính người gửi đủ",
+    `tên miền bị dừng ${m.blockedDomains}`,
+    `chiến dịch bị dừng ${m.pausedCampaigns}`,
+  ]));
+  add(`email kết nối ${B2B_PROBE_MAIL_CONNECTOR}`, sec(s.mailConnection, (c) =>
+    c === null
+      ? ["chưa có kết nối"]
+      : [
+          `trạng thái ${c.status}`,
+          `kiểm lần cuối ${c.lastTestAt ?? "chưa kiểm"}${c.lastTestOk === null ? "" : c.lastTestOk ? " ĐẠT" : " KHÔNG ĐẠT"}`,
+          c.orgMatch ? "mã tổ chức khớp" : "mã tổ chức LỆCH (máy không dùng)",
+          `máy dùng được ${c.status === "ACTIVE" && c.lastTestOk === true && c.orgMatch ? "có" : "không"} (chưa xét giải mã bí mật)`,
+        ]));
+  add("email AI", sec(s.mailConfig, (m) => [
+    `đọc thư trả lời ${m.inbound.enabled ? "BẬT" : "TẮT"}`,
+    `mốc UID ${m.inbound.cursor ? "có" : "chưa có"}`,
+    `AI phân loại ${m.inbound.aiClassify ? "BẬT" : "TẮT"} trần ${dash(m.inbound.maxClassify)} thư/ngày ${usd(m.inbound.classifyCapUsd)}/ngày`,
+    `AI soạn nháp ${m.aiDraft.enabled ? "BẬT" : "TẮT"} trần ${dash(m.aiDraft.maxDrafts)} nháp/ngày ${usd(m.aiDraft.capUsd)}/ngày`,
+  ]));
+  add("email chuỗi nhắc · mua lại · báo giá", sec(s.mailConfig, (m) => [
+    m.sequence.maxFollowups === null || m.sequence.gapDays === null
+      ? `chuỗi nhắc chưa khai (${dash(m.sequence.maxFollowups)} lần / ${dash(m.sequence.gapDays)} ngày) ⇒ không nhắc`
+      : `chuỗi nhắc ${m.sequence.maxFollowups} lần cách ${m.sequence.gapDays} ngày`,
+    `mẫu tĩnh vi ${m.sequence.templateVi ? "có" : "không"} · en ${m.sequence.templateEn ? "có" : "không"}`,
+    m.reorderAfterDays === null ? "mua lại sỉ chưa khai ⇒ không nhắc" : `mua lại sỉ sau ${m.reorderAfterDays} ngày`,
+    `chính sách báo giá ${m.quote.saved ? "đã lưu" : "chưa lưu"}`,
+    `chiết khấu tối đa ${m.quote.maxDiscount ? "có" : "chưa khai"}`,
+    `biên tối thiểu ${m.quote.minMargin ? "có" : "chưa khai"}`,
+    `thuế + căn cứ ${m.quote.tax ? "có" : "chưa khai"}`,
+  ]));
+  add(`hộp thư đi tạo trong ${B2B_PROBE_MAIL_DAYS} ngày (trạng thái/chế độ)`, sec(s.mailOutbox, countsParts));
+  add(`sự kiện thư ${B2B_PROBE_MAIL_DAYS} ngày (loại/chế độ)`, sec(s.mailEvents, countsParts));
+  add("thư đang chờ gửi (QUEUED)", sec(s.mailQueue, (w) => [`tổng ${w.queued}`, `có lý do chờ ${w.withReason}`, ...(w.reasons.length ? countsParts(w.reasons) : [])]));
+  add(`thư bị chặn ${B2B_PROBE_MAIL_DAYS} ngày theo mã`, sec(s.mailBlocked, countsParts));
   return out;
 }
 
