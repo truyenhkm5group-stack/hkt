@@ -3,7 +3,7 @@
   "mission_id": "marketing-agent-rung",
   "title": "Marketing: ảnh AI chờ duyệt lên /work + đo duyệt/bác ở Mission Control",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-mkt",
@@ -31,9 +31,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-30T17:27:41.242Z",
-  "updated_at": "2026-10-31T00:35:52.787Z",
+  "updated_at": "2026-10-31T00:54:01.968Z",
   "last_heartbeat": "2026-10-31T00:30:55.556Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1111 → 56c580051a0672b7ec4699d65ba0bd2ded164b8c"
+  },
   "handoff": {
     "branch": "claude/marketing-agent-rung",
     "sha": "30aad5bd66888a05cc7c4d699368ccd888539ae1",
