@@ -1,0 +1,8 @@
+{
+  "pr": 1112,
+  "sha": "4789c6acf2cd0d714d2d9a3999f3d04c4c35e516",
+  "verdict": "PASS",
+  "actor": "DESKTOP-56TH98Y:wt-tech-lead-v2",
+  "at": "2026-10-31T08:00:21.989Z",
+  "note": "review lead: nút Email từng dòng + bulk — email đi đúng đường E1 (emailDraftForLeadCore → edit → approveEmailCore từng thư, chỉ thư đã mở xem; nháp AI qua promoteAiDraftCore; cổng chính sách/consent/nước/emailLaneRefusal giữ nguyên), trần AI dừng đúng; phiên Zalo tuần tự chỉ đọc, nhân viên bấm gửi, ghi logZaloResultCore + users.id, không gọi mạng Zalo; phạm vi dữ liệu lọc trước khi vào lô; audit t"
+}
