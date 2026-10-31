@@ -3,7 +3,7 @@
   "mission_id": "b2b-order-close",
   "title": "Chốt đơn sỉ từ báo giá + đối chiếu chuyển khoản + nhắc mua lại sỉ",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "FAILED",
   "priority": "P2",
   "risk": "HIGH",
   "owner": "DESKTOP-56TH98Y:wt-b2b-order",
@@ -44,11 +44,13 @@
     "0267": "2026-10-30T14:11:02.484Z"
   },
   "created_at": "2026-10-30T14:08:57.096Z",
-  "updated_at": "2026-10-30T23:42:25.811Z",
+  "updated_at": "2026-10-31T00:13:07.219Z",
   "last_heartbeat": "2026-10-30T23:34:37.790Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1107 → 741d09ef904a719af184e40ff21771eec6fd64b1"
+    "merged": "#1107 → 741d09ef904a719af184e40ff21771eec6fd64b1",
+    "verify": "FAIL 741d09ef904a719af184e40ff21771eec6fd64b1 2026-10-31T00:12:18.615Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/41146832662"
   },
   "handoff": {
     "branch": "claude/b2b-order-close",
