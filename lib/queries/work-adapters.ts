@@ -1153,6 +1153,69 @@ export async function adaptSourcingTrials(now: Date): Promise<WorkItem[]> {
   return items;
 }
 
+/* ═══════════════════ ẢNH QUẢNG CÁO AI VẼ CHỜ DUYỆT (marketing-agent-rung) ═══════════════════
+ *
+ * PHÉP CHIẾU lên `creative_manual_gen_images` (luật 19): MỘT dòng / lượt tạo ảnh còn ảnh `GENERATED` (bỏ lượt tải tay `UPLOAD` — ảnh
+ * người tải lên đã ở trạng thái duyệt). Mốc bắt đầu = ảnh đầu tiên vẽ xong. Việc rời hàng đợi khi người duyệt / bác hết ảnh ở «② Duyệt
+ * ảnh»; nút trên /work chỉ MỞ đúng tab đó.
+ */
+export async function adaptCreativeApprovals(now: Date): Promise<WorkItem[]> {
+  const db = await getDb();
+  const g = schema.creativeManualGens;
+  const i = schema.creativeManualGenImages;
+  const rows = await db
+    .select({
+      id: g.id,
+      kind: g.kind,
+      idea: g.idea,
+      productName: schema.products.name,
+      pending: sql<number>`count(*)::int`,
+      firstAt: sql<Date | string | null>`min(coalesce(${i.drawnAt}, ${g.createdAt}))`,
+    })
+    .from(g)
+    .innerJoin(i, eq(i.genId, g.id))
+    .leftJoin(schema.products, eq(schema.products.id, g.productId))
+    .where(and(sql`${g.kind} <> 'UPLOAD'`, eq(i.status, "GENERATED")))
+    .groupBy(g.id, g.kind, g.idea, schema.products.name)
+    .limit(500);
+  const ms = now.getTime();
+  return rows.map((r) => {
+    const from = r.firstAt instanceof Date ? r.firstAt : new Date(r.firstAt ?? now);
+    const what = r.productName?.trim() || r.idea.trim().slice(0, 60) || "lượt tạo ảnh";
+    return {
+      key: workKey("CREATIVE_APPROVAL", r.id),
+      sourceType: "CREATIVE_APPROVAL",
+      sourceKey: r.id,
+      kind: null,
+      title: `${r.pending} ảnh AI chờ duyệt · ${what}`,
+      summary: "Ảnh quảng cáo máy đã vẽ xong. Duyệt (hoặc bác kèm lý do) ở «② Duyệt ảnh»; ảnh đã duyệt vẫn qua «③ Hàng đợi & Đăng» với lượt bấm của người.",
+      department: WORK_SOURCE_SPEC.CREATIVE_APPROVAL.department!,
+      assignee: null,
+      status: "NEW",
+      statusAuthority: "SOURCE" as const,
+      priority: "NORMAL",
+      score: caseScore({ severity: "info", ageHours: hoursSince(from, ms), amount: 0, type: "OTHER" }),
+      createdAt: from,
+      startedAt: null,
+      dueAt: null,
+      slaAt: slaDueAt("CREATIVE_APPROVAL", null, from, null),
+      completedAt: null,
+      snoozedUntil: null,
+      businessEntity: "CREATIVE",
+      businessEntityId: r.id,
+      sourceUrl: "/marketing/creatives?tab=duyet",
+      // Tiền vẽ ảnh đã tiêu, không phải tiền đang mắc — không đưa vào cột tiền của hàng đợi.
+      money: MONEY_UNKNOWN,
+      tags: ["Ảnh AI"],
+      evidence: { source: "Thư viện Media · ② Duyệt ảnh", detail: `${r.pending} ảnh · vẽ xong từ ${formatDateTime(from)}` },
+      blockedReason: "",
+      creationSource: "AUTO" as WorkItem["creationSource"],
+      actions: actionsOf("CREATIVE_APPROVAL"),
+      recommendedAction: "Mở «② Duyệt ảnh», duyệt ảnh dùng được, bác ảnh hỏng kèm lý do",
+    };
+  });
+}
+
 /* ═══════════════════ HẸN CHĂM SÓC KHÁCH — FACEBOOK CRM (lát 2) ═══════════════════
  *
  * PHÉP CHIẾU lên `customer_fb_connections` (luật 19): khách có `next_care_on` ≤ hôm nay (giờ VN), không «không liên hệ», chưa có nhiệm
@@ -1553,6 +1616,7 @@ async function collectWorkItemsInScope(opts: CollectOptions): Promise<{ items: W
     want("SAMPLE_REVIEW") ? guard("SAMPLE_REVIEW", () => adaptSampleReviews(now)) : [],
     want("SOURCING_TRIAL") ? guard("SOURCING_TRIAL", () => adaptSourcingTrials(now)) : [],
     want("FB_CRM_CARE") ? guard("FB_CRM_CARE", () => adaptFbCrmCare(now)) : [],
+    want("CREATIVE_APPROVAL") ? guard("CREATIVE_APPROVAL", () => adaptCreativeApprovals(now)) : [],
     want("WHOLESALE_REORDER") ? guard("WHOLESALE_REORDER", () => adaptWholesaleReorder(now)) : [],
     want("PAYROLL_RECON") ? guard("PAYROLL_RECON", () => peekPayrollRecon(now)) : [],
     want("MANUAL_TASK") || want("RECURRING_TASK") || want("WORKFLOW_TASK") ? guard("MANUAL_TASK", () => adaptOwnedWork(now, opts.includeClosed ?? false, closedSince)) : [],

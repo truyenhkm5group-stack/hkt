@@ -560,6 +560,7 @@ import { testReorderReminders } from "./reorder-reminders.test";
 import { testFbCrm } from "./fb-crm.test";
 import { testFbCrmToggle } from "./fb-crm-toggle.test";
 import { testMissionControl } from "./mission-control.test";
+import { testMarketingAgentRung } from "./marketing-agent-rung.test";
 import { testFbCrmS2 } from "./fb-crm-s2.test";
 import { testDailyReport } from "./daily-report.test";
 import { testSeafoodOs } from "./seafood-os.test";
@@ -3695,6 +3696,8 @@ async function main() {
     await testMissionControl();
     // Báo cáo CEO hằng ngày (0266): AI giả · hàng rào số bịa · bất biến · tắt mặc định · cách ly tổ chức.
     await testDailyReport();
+    // Marketing agent (31/10): ảnh AI chờ duyệt lên /work (CREATIVE_APPROVAL) · Mission Control đo duyệt / bác · BÀN TAY không khai khống.
+    await testMarketingAgentRung();
     // Facebook Friend CRM lát 1 (0262): link do người dán · đã mua theo ORDER_OUTCOME · doanh thu thực chưa chứng từ ⇒ null · cách ly tổ chức.
     await testFbCrm();
     // Công tắc tổ chức bật / tắt Facebook CRM (chủ shop 30/10): chỉ settings:manage · bấm lặp không ghi · audit · cờ đọc lại đúng.

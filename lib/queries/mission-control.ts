@@ -54,6 +54,8 @@ export type ZoneRow = {
   volume: Record<(typeof MC_WINDOWS)[number], { count: number; unknown: number }> | null;
   /** `null` = CHƯA ĐO ĐƯỢC (`measure.review.kind === "NONE"`). */
   review: Record<(typeof MC_WINDOWS)[number], ReviewSample> | null;
+  /** Chỉ số duyệt / bác phụ (`measure.extraReviews`), cùng cửa sổ; `pending` = chưa ai xét (ngoài mẫu). */
+  extra: { label: string; definition: string; windows: Record<(typeof MC_WINDOWS)[number], ReviewSample & { pending: number }> }[];
   outcome: Record<(typeof MC_WINDOWS)[number], OutcomeCell> | null;
   rule: GraduationRule | null;
   verdict: GraduationVerdict;
@@ -132,6 +134,25 @@ async function careMachineWindow(since: Date): Promise<{ count: number; unknown:
   return { count: Number(r?.machine ?? 0), unknown: Number(r?.unknown ?? 0) };
 }
 
+/** Ảnh quảng cáo AI vẽ (bỏ ảnh tải tay `UPLOAD`) người đã xét trong kỳ: duyệt / đã đăng = đúng, bác = bác. Ảnh chưa xét đếm riêng. */
+async function aiImageWindow(since: Date): Promise<ReviewSample & { pending: number }> {
+  const db = await getDb();
+  const g = schema.creativeManualGens;
+  const i = schema.creativeManualGenImages;
+  const [r] = await db
+    .select({
+      ok: sql<number>`count(*) filter (where ${i.status} in ('APPROVED', 'PROMOTED') and ${i.reviewedAt} >= ${since})::int`,
+      bad: sql<number>`count(*) filter (where ${i.status} = 'REJECTED' and ${i.reviewedAt} >= ${since})::int`,
+      pending: sql<number>`count(*) filter (where ${i.status} = 'GENERATED')::int`,
+    })
+    .from(i)
+    .innerJoin(g, eq(g.id, i.genId))
+    .where(sql`${g.kind} <> 'UPLOAD'`);
+  const correct = Number(r?.ok ?? 0);
+  const rejected = Number(r?.bad ?? 0);
+  return { correct, rejected, sample: correct + rejected, pending: Number(r?.pending ?? 0) };
+}
+
 async function reviewFor(m: ZoneMeasure, days: number, now: Date): Promise<{ review: ReviewSample | null; outcome: OutcomeCell | null }> {
   const since = sinceOf(now, days);
   if (m.review.kind === "BOT_ORDERS") return botWindow(days, now);
@@ -186,7 +207,13 @@ async function compute(now: Date, rules: Partial<Record<AgentZone, GraduationRul
     else if (m.review.kind === "NONE") verdict = graduationVerdict(rule, null, m.review.missing);
     else verdict = graduationVerdict(rule, (await reviewFor(m, rule.windowDays, now)).review);
 
-    zones.push({ zone, label: agentLabel(zone), name: spec.name, home: spec.home, autonomy: spec.autonomy, autonomyLabel: AI_AUTONOMY_LABEL[spec.autonomy], measure: m, usage, workOpen, volume, review, outcome, rule, verdict });
+    const extra: ZoneRow["extra"] = [];
+    for (const x of m.extraReviews ?? []) {
+      const [w7, w30] = await Promise.all([aiImageWindow(sinceOf(now, 7)), aiImageWindow(sinceOf(now, 30))]);
+      extra.push({ label: x.label, definition: x.definition, windows: { 7: w7, 30: w30 } });
+    }
+
+    zones.push({ zone, label: agentLabel(zone), name: spec.name, home: spec.home, autonomy: spec.autonomy, autonomyLabel: AI_AUTONOMY_LABEL[spec.autonomy], measure: m, usage, workOpen, volume, review, extra, outcome, rule, verdict });
   }
   return { orgCode: org.code, generatedAt: now, zones, workFailed: work ? work.failed.map((f) => f.source) : ["(không đọc được hàng đợi)"] };
 }
