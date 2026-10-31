@@ -3,7 +3,7 @@
   "mission_id": "b2b-probe-email",
   "title": "Ops wholesale-b2b-probe: mục email (chế độ · trần · nước · gws-smtp · AI · chuỗi nhắc · hộp thư đi 7 ngày · mã lý do chờ/chặn)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-b2b-probe-email",
@@ -24,9 +24,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-31T09:13:13.777Z",
-  "updated_at": "2026-10-31T14:44:35.386Z",
+  "updated_at": "2026-10-31T15:09:35.675Z",
   "last_heartbeat": "2026-10-31T09:36:35.821Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1113 → 744279128bfd789d065e4a88f3de362f1406ed0d"
+  },
   "handoff": {
     "branch": "claude/b2b-probe-email",
     "sha": "b256b1566d2deb7bbfe2209891f922f17b9a57da",
