@@ -216,7 +216,11 @@ export function matchQuoteLines(items: readonly { product: string; quantity: num
 type Cursor = { uidValidity: string; lastUid: number };
 
 async function readCursor(): Promise<Cursor | null> {
-  const raw = await getSettingJson<unknown>(EMAIL_INBOUND_CURSOR_KEY, null);
+  return parseInboundCursor(await getSettingJson<unknown>(EMAIL_INBOUND_CURSOR_KEY, null));
+}
+
+/** Mốc UID đã lưu hợp lệ chưa — MỘT luật cho job đọc thư và ops `wholesale-b2b-probe` (đọc CSDL tổ chức bằng handle chỉ đọc). HÀM THUẦN. */
+export function parseInboundCursor(raw: unknown): Cursor | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
   return typeof o.uidValidity === "string" && typeof o.lastUid === "number" && Number.isInteger(o.lastUid) && o.lastUid >= 0 ? { uidValidity: o.uidValidity, lastUid: o.lastUid } : null;
