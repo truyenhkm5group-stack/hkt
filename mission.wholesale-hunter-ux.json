@@ -34,18 +34,18 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-30T21:28:17.169Z",
-  "updated_at": "2026-10-30T22:31:14.146Z",
-  "last_heartbeat": "2026-10-30T22:27:46.236Z",
+  "updated_at": "2026-10-31T00:24:09.962Z",
+  "last_heartbeat": "2026-10-31T00:24:09.962Z",
   "definition_of_done": [],
   "handoff": {
     "branch": "claude/wholesale-hunter-ux",
-    "sha": "c2aa557e7e51cda9c09fc11cb8c5664f38794254",
-    "at": "2026-10-30T22:27:46.236Z",
+    "sha": "1ea8c839ebe03d9fde5d642eb33ba25b3396e397",
+    "at": "2026-10-31T00:24:09.962Z",
     "actor": "DESKTOP-56TH98Y:wt-hunter-ux",
     "title": "Săn khách sỉ gọn lại theo thứ tự việc: 5 bước + bánh răng, 3 khối, tab Liên hệ có tiến độ / kết quả / nhật ký che SĐT",
     "summary": "",
     "tests": [
-      "c2aa557e (gộp origin/main 6d7b7e3f, giữ cả hai phía — đủ làn xác nhận nước, Thư trả lời của khách, Nháp AI, Lần nhắc đến hạn, Nước đã rà luật): npm run typecheck sạch · npm run lint sạch · quét nguồn UI chạy riêng ĐẠT (ui-consistency + navigation, loading-ux, department-map, action-wiring 834 action 0 treo, wholesale-hunter-ux) · TEST_KHOI=K21 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K21 ĐẠT · npm run build exit 0 · 4 shard đầy đủ: để gates CI"
+      "1ea8c839 (statusOf → activityStatusOf; gộp origin/main có #1106 daily-report, #1107 order-close, giữ hai phía): npm run typecheck sạch · npm run lint sạch · TEST_KHOI=K18,K21 npm test: TẤT CẢ KIỂM THỬ CỦA chỉ K18,K21 ĐẠT (duplicate-metrics: 2110 định nghĩa, 20 trùng đã biết, 0 trùng mới) · build exit 0 ở c2aa557e (commit sau không chạm client/server) · 4 shard đầy đủ: để gates CI"
     ]
   }
 }
