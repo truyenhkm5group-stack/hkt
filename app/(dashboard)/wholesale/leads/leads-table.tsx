@@ -2,7 +2,7 @@
 
 import type { ColumnDef } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { DataTable, RowLink } from "@/components/data-table/data-table";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,8 @@ import { cn } from "@/lib/utils";
 import { LeadQuickLog } from "@/app/(dashboard)/wholesale/leads/lead-quick-log";
 import type { FieldHandoffOptions } from "@/lib/wholesale/field-handoff";
 import { HandoffPanel } from "@/app/(dashboard)/wholesale/leads/handoff-panel";
+import { BulkEmailDialog, type TemplateOption } from "@/app/(dashboard)/wholesale/leads/bulk-email";
+import { ZaloSessionDialog } from "@/app/(dashboard)/wholesale/leads/zalo-session";
 
 const GRADE_TONE: Record<string, string> = {
   A: "bg-emerald-600 text-white",
@@ -170,20 +172,60 @@ const columns: ColumnDef<LeadListRow, unknown>[] = [
   },
 ];
 
-/** Cột thao tác: ghi kết quả cuộc gọi / ghi chú ngay trên dòng (chỉ người có wholesale:work). */
-const actionColumn: ColumnDef<LeadListRow, unknown> = {
-  id: "actions",
-  header: "",
-  cell: ({ row }) => {
-    const r = row.original;
-    return <LeadQuickLog lead={{ id: r.id, name: r.name, status: r.status, phone: r.phone, phoneDisplay: r.phoneDisplay }} />;
-  },
-};
+/**
+ * Nút «Email» trên dòng (chủ shop 31/10/2026): lead có email ⇒ mở khung soạn thư cá nhân hoá (cùng khung với hành động hàng
+ * loạt, một khách); chưa có email ⇒ nút mờ + lối «Thu thập email» trên trang lead.
+ */
+function EmailRowButton({ lead, templates, aiEnabled }: { lead: Pick<LeadListRow, "id" | "email" | "name">; templates: TemplateOption[]; aiEnabled: boolean }) {
+  const [open, setOpen] = useState(false);
+  if (!lead.email) {
+    return (
+      <span className="inline-flex flex-col items-start" onClick={(e) => e.stopPropagation()}>
+        <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled title="Lead chưa có email">
+          Email
+        </Button>
+        <a href={`/wholesale/leads/${lead.id}`} className="text-[10px] text-muted-foreground underline">
+          Thu thập email
+        </a>
+      </span>
+    );
+  }
+  return (
+    <span onClick={(e) => e.stopPropagation()}>
+      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setOpen(true)} title={`Soạn email cho ${lead.name ?? "khách"}`}>
+        Email
+      </Button>
+      {open ? <BulkEmailDialog leadIds={[lead.id]} templates={templates} aiEnabled={aiEnabled} open={open} onOpenChange={setOpen} /> : null}
+    </span>
+  );
+}
 
 const SORTABLE = ["leadScore", "status", "lastContactAt", "rating"];
-const columnsWithActions = [...columns, actionColumn];
 
-export function LeadsTable(props: { rows: LeadListRow[]; pageCount: number; total: number; users: { id: string; name: string }[]; campaigns: { value: string; label: string }[]; canAssign: boolean; canWork: boolean; handoff: FieldHandoffOptions }) {
+type LeadsTableProps = { rows: LeadListRow[]; pageCount: number; total: number; users: { id: string; name: string }[]; campaigns: { value: string; label: string }[]; canAssign: boolean; canWork: boolean; handoff: FieldHandoffOptions; emailTemplates: TemplateOption[]; aiEmailEnabled: boolean };
+
+export function LeadsTable(props: LeadsTableProps) {
+  const { emailTemplates, aiEmailEnabled } = props;
+  // Cột thao tác: Email · Zalo · Gọi · ghi kết quả / ghi chú ngay trên dòng (chỉ người có wholesale:work).
+  const columnsWithActions = useMemo<ColumnDef<LeadListRow, unknown>[]>(
+    () => [
+      ...columns,
+      {
+        id: "actions",
+        header: "",
+        cell: ({ row }) => {
+          const r = row.original;
+          return (
+            <div className="flex items-start gap-1">
+              <EmailRowButton lead={r} templates={emailTemplates} aiEnabled={aiEmailEnabled} />
+              <LeadQuickLog lead={{ id: r.id, name: r.name, status: r.status, phone: r.phone, phoneDisplay: r.phoneDisplay }} />
+            </div>
+          );
+        },
+      },
+    ],
+    [emailTemplates, aiEmailEnabled],
+  );
   return (
     <DataTable
       columns={props.canWork ? columnsWithActions : columns}
@@ -204,10 +246,12 @@ export function LeadsTable(props: { rows: LeadListRow[]; pageCount: number; tota
   );
 }
 
-function BulkBar({ ids, clear, users, campaigns, canAssign, canWork, handoff }: { ids: string[]; clear: () => void; users: { id: string; name: string }[]; campaigns: { value: string; label: string }[]; canAssign: boolean; canWork: boolean; handoff: FieldHandoffOptions }) {
+function BulkBar({ ids, clear, users, campaigns, canAssign, canWork, handoff, emailTemplates, aiEmailEnabled }: { ids: string[]; clear: () => void } & Omit<LeadsTableProps, "rows" | "pageCount" | "total">) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [showHandoff, setShowHandoff] = useState(false);
+  const [bulkEmail, setBulkEmail] = useState(false);
+  const [zaloSession, setZaloSession] = useState(false);
   const [assignee, setAssignee] = useState("");
   const [campaign, setCampaign] = useState("");
   const [channel, setChannel] = useState<OutreachChannel>("PHONE_CALL");
@@ -272,6 +316,15 @@ function BulkBar({ ids, clear, users, campaigns, canAssign, canWork, handoff }: 
           <Button size="sm" variant="outline" onClick={() => setShowHandoff((v) => !v)}>
             Gửi NV thị trường
           </Button>
+          {/* Liên hệ hàng loạt (31/10/2026): email = soạn + duyệt từng thư → Hộp thư đi; Zalo = phiên nhắn tuần tự, KHÔNG tự gửi. */}
+          <Button size="sm" onClick={() => setBulkEmail(true)}>
+            Soạn email cho {ids.length} khách
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => setZaloSession(true)}>
+            Nhắn Zalo cho {ids.length} khách
+          </Button>
+          {bulkEmail ? <BulkEmailDialog leadIds={ids} templates={emailTemplates} aiEnabled={aiEmailEnabled} open={bulkEmail} onOpenChange={setBulkEmail} onDone={clear} /> : null}
+          {zaloSession ? <ZaloSessionDialog leadIds={ids} open={zaloSession} onOpenChange={setZaloSession} /> : null}
           {showHandoff ? (
             <div className="w-full max-w-md rounded-md border bg-background p-2">
               <HandoffPanel

@@ -635,6 +635,7 @@ import { testWholesaleCatalogReadiness } from "./wholesale-catalog-readiness.tes
 import { testWholesaleQuotation } from "./wholesale-quotation.test";
 import { testWholesaleQuotationSettings } from "./wholesale-quotation-settings.test";
 import { testWholesaleEmailAiDraft } from "./wholesale-email-ai-draft.test";
+import { testWholesaleBulkOutreach } from "./wholesale-bulk-outreach.test";
 import { testWholesaleEmailSequence } from "./wholesale-email-sequence.test";
 import { testWholesaleOrderClose } from "./wholesale-order-close.test";
 import { testWholesaleEmail } from "./wholesale-email.test";
@@ -3351,6 +3352,7 @@ async function main() {
     await testWholesaleQuotationSettings();
     // P2b AI B2B: AI soạn email chào hàng — AI GIẢ, hàng rào bịa đặt, người duyệt, trần / ngày (tổ chức THẬT `em-ai`, 0265).
     await testWholesaleEmailAiDraft();
+    await testWholesaleBulkOutreach();
     // P4a: chuỗi thư theo dõi — không mặc định, điều kiện dừng, chỉ soạn nháp (tổ chức THẬT `em-seq`).
     await testWholesaleEmailSequence();
     // P5 · P6 AI B2B: chốt đơn sỉ từ báo giá, đối chiếu chuyển khoản (nối ORDER, không ghi tiền), nhắc mua lại /work (tổ chức THẬT `bg-chot`, 0267).
