@@ -13,7 +13,7 @@ import { CAMPAIGN_STATUS_LABEL, PAUSE_REASON_LABEL, type CampaignStatus, type Pa
 import { DISCOVERY_TIER_LABEL, type DiscoveryTier } from "@/lib/wholesale/config";
 import { cn } from "@/lib/utils";
 
-const STATUS_TONE: Record<string, string> = {
+export const STATUS_TONE: Record<string, string> = {
   DRAFT: "bg-muted text-foreground",
   RUNNING: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
   PAUSED: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
@@ -137,5 +137,47 @@ export function CampaignCard({ c, usdToVnd }: { c: CampaignProgress; usdToVnd: n
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * Nút điều khiển của một chiến dịch ĐANG QUÉT (khối «Đang quét» của trang Săn khách) — cùng action với thẻ chi tiết:
+ * Tạm dừng · Chạy ngay một lượt (đang chạy) · Tiếp tục (tạm dừng) · Dừng hẳn.
+ */
+export function CampaignStateButtons({ c }: { c: Pick<CampaignProgress, "id" | "status"> }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const run = (fn: () => Promise<{ error: string } | ({ ok: true } & object)>, ok: string) =>
+    start(async () => {
+      const r = await fn();
+      if ("error" in r) toast.error(r.error);
+      else {
+        toast.success(ok);
+        router.refresh();
+      }
+    });
+  return (
+    <>
+      {c.status === "RUNNING" ? (
+        <>
+          <Button size="sm" variant="secondary" disabled={pending} onClick={() => run(() => changeCampaignStateAction(c.id, "pause"), "Đã tạm dừng — tiến độ được giữ")}>
+            Tạm dừng
+          </Button>
+          <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => runLeadHunterNowAction(), "Đã chạy một lượt quét nền")}>
+            Chạy ngay
+          </Button>
+        </>
+      ) : null}
+      {c.status === "PAUSED" ? (
+        <Button size="sm" disabled={pending} onClick={() => run(() => changeCampaignStateAction(c.id, "resume"), "Đã tiếp tục từ đúng chỗ dừng")}>
+          Tiếp tục
+        </Button>
+      ) : null}
+      {c.status === "RUNNING" || c.status === "PAUSED" ? (
+        <Button size="sm" variant="ghost" className="text-destructive" disabled={pending} onClick={() => run(() => changeCampaignStateAction(c.id, "stop"), "Đã dừng hẳn — lead đã có vẫn giữ")}>
+          Dừng
+        </Button>
+      ) : null}
+    </>
   );
 }

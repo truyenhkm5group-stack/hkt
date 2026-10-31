@@ -6,9 +6,10 @@ import { ScopeDenied } from "@/components/scope-denied";
 import { StatStrip } from "@/components/stat-tile";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { decideScope } from "@/lib/auth/scope-guard";
-import { requirePermission } from "@/lib/auth/session";
+import { can, requirePermission } from "@/lib/auth/session";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
-import { COMPARE_DIMENSION_LABEL, COMPARE_DIMENSIONS, wholesaleDashboard, wholesaleEmailCoverage, type CompareDimension } from "@/lib/queries/wholesale";
+import { COMPARE_DIMENSION_LABEL, COMPARE_DIMENSIONS, coverageByProvince, wholesaleDashboard, wholesaleEmailCoverage, type CompareDimension } from "@/lib/queries/wholesale";
+import { CoverageTable } from "@/app/(dashboard)/wholesale/dashboard/coverage-table";
 import { EMAIL_CONSENT_NOTICE } from "@/lib/constants/wholesale-email";
 import { resolvePeriod, type SearchParams } from "@/lib/search-params";
 import { microsToVnd } from "@/lib/wholesale/config";
@@ -35,7 +36,8 @@ export default async function WholesaleDashboardPage({ searchParams }: { searchP
   const raw = await searchParams;
   const period = resolvePeriod(raw, "all");
   const dim: CompareDimension = (COMPARE_DIMENSIONS as readonly string[]).includes(String(raw.by)) ? (raw.by as CompareDimension) : "keyword";
-  const [d, cfg, mail] = await Promise.all([wholesaleDashboard({ from: period.from, to: period.to, dimension: dim, decision }), getLeadHunterConfig(), wholesaleEmailCoverage(decision)]);
+  const cfg = await getLeadHunterConfig();
+  const [d, mail, coverage] = await Promise.all([wholesaleDashboard({ from: period.from, to: period.to, dimension: dim, decision }), wholesaleEmailCoverage(decision), can(user, "wholesale:scan") ? coverageByProvince(cfg) : Promise.resolve(null)]);
   const k = d.kpi;
   const vnd = (micros: number | null) => (micros == null ? null : microsToVnd(micros, cfg.usdToVnd));
   const max = Math.max(1, d.funnel.discovered);
@@ -155,6 +157,15 @@ export default async function WholesaleDashboardPage({ searchParams }: { searchP
           <EmptyState title="Chưa có dữ liệu để so sánh" />
         )}
       </SectionCard>
+      {coverage ? (
+        <details className="rounded-2xl bg-card p-4 shadow-[var(--shadow-card)]">
+          <summary className="cursor-pointer text-sm font-semibold">Độ phủ quét theo tỉnh / khu vực</summary>
+          <p className="mt-1 text-xs text-muted-foreground">Tỉ lệ ô (từ khoá × khu vực) đã quét trong {cfg.cellFreshDays} ngày gần nhất, trên bộ {coverage.keywordCount} từ khoá mặc định. Ô còn mới không bị quét lại. (Dời từ trang Săn khách, 30/10/2026.)</p>
+          <div className="mt-2">
+            <CoverageTable provinces={coverage.provinces} />
+          </div>
+        </details>
+      ) : null}
     </div>
   );
 }

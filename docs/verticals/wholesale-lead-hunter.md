@@ -509,6 +509,52 @@ compra(s) · acquisti · inkoop · caigou; «bán hàng» verkauf · vertrieb ·
 · commerciale · verkoop · xiaoshou; «liên hệ» kontakt · anfrage · contatti. Trước đó «einkauf@» ra `OTHER` và không bao
 giờ được điền vào hồ sơ. Chỉ là danh sách từ khoá — không đoán gì khác; không khai tiếng Nhật / Hàn dạng latin.
 
+## 4h. Bố cục giao diện Săn khách + Liên hệ (chủ shop chốt 30/10/2026)
+
+«Rối rắm quá, khó dùng» ⇒ sắp lại GIAO DIỆN, không bỏ chức năng, không đổi luật / truy vấn nghiệp vụ / quyền.
+
+**Thanh tab bán sỉ** (`lib/constants/wholesale-nav.ts`) — năm bước theo thứ tự công việc + nút bánh răng:
+1. Săn khách (`/wholesale/lead-hunter`, `wholesale:scan`)
+2. Khách tiềm năng (`/wholesale/leads`, `wholesale:view`)
+3. Liên hệ — tab con «Hàng đợi liên hệ (Zalo · gọi)» (`/wholesale/outreach`) và «Hộp thư đi (Email)» (`/wholesale/outbox`), `wholesale:work`
+4. Báo giá (`/wholesale/quotations`, `wholesale:view`)
+5. Hiệu quả — tab con «Hiệu quả» (`/wholesale/dashboard`) và «Sẵn sàng bán sỉ» (`/wholesale/readiness`), `wholesale:view`
+- ⚙ Cấu hình & chi phí (`/wholesale/settings`, `wholesale:config`) ở bên phải.
+
+Route cũ giữ nguyên (không 404); quyền từng tab như trước — tab mẹ hiện khi người xem mở được ít nhất một tab con.
+
+**Trang Săn khách** — ba khối theo thứ tự việc:
+1. **Đang quét**: chỉ chiến dịch đang chạy / tạm dừng. Mỗi chiến dịch một thẻ tiến độ (vòng % · ô đã quét / tổng ô · thanh ·
+   đã chạy · dự kiến xong theo tốc độ trung bình), ba ô kết quả (lead nhận · ô lỗi API · lọc bỏ / trùng, kèm %) và nút Tạm
+   dừng / Chạy ngay / Tiếp tục / Dừng. Chi phí API hôm nay / tháng gói thành một dòng nhỏ; trần ở Cấu hình. Không có chiến
+   dịch chạy ⇒ một câu + nút sang khối 2.
+2. **Bắt đầu quét mới**: ba thẻ mẫu — «Khách sỉ trong nước», «Việt Kiều ở nước ngoài», «Nhà nhập khẩu / phân phối nước
+   ngoài» — mỗi thẻ in ước tính của phạm vi mẫu. Bấm ⇒ form ba bước: ① chọn khu vực (tỉnh theo đợt hoặc nước / thành phố,
+   khối còn lại gập) ② xem trước (số truy vấn · chi phí ước tính · truy vấn mẫu) ③ lưu nháp / bắt đầu. Từ khoá, loại trừ,
+   nhóm khách, trần lead, yêu cầu SĐT / website gập trong «Tuỳ chỉnh nâng cao» với giá trị của mẫu.
+3. **Chiến dịch**: bảng gọn sáu cột (≤ 1.150px, ô hai tầng): tên · thị trường · trạng thái · tiến độ · lead / email /
+   website · chi phí (nháp / mẫu: khoảng ước tính). Lọc Tất cả / Nháp & mẫu / Đang chạy / Xong. Bấm dòng ⇒ thẻ chi tiết cũ
+   mở ngay dưới dòng (Dùng mẫu · Bắt đầu quét · Nhân bản · Xem lead).
+- **Nhật ký quét** (lead vừa tìm thấy / vừa đọc website) ở cuối, kèm ghi công Google Maps.
+- Dời đi: «Độ phủ theo tỉnh» ⇒ khối gập cuối tab Hiệu quả (vẫn chỉ người có `wholesale:scan` thấy); «Nhập lead từ tệp
+  CSV» ⇒ nút «Nhập từ tệp» trên trang Khách tiềm năng. Gợi ý quy trình dài trong tiêu đề ⇒ một câu + link tài liệu này.
+
+**Tab Liên hệ** (Hàng đợi liên hệ và Hộp thư đi) — cùng bộ khối (`app/(dashboard)/wholesale/run-widgets.tsx`):
+- **Thẻ tiến độ hôm nay**: hàng đợi — tin đã xử lý / tin trong lượt; hộp thư đi — thư đã xử lý / thư trong lượt.
+- **Ba ô kết quả**: hàng đợi — đã gửi · sai số / không gửi được · đã huỷ; hộp thư đi — đã gửi (hoặc «chạy thử») · lỗi gửi ·
+  chặn / giữ lại (kèm lý do của cổng).
+- **Nhật ký hoạt động**: giờ · kênh · đối tượng · nội dung rút gọn · trạng thái có biểu tượng, mới nhất trên cùng; đọc từ
+  `wholesale_lead_activities` / `wholesale_email_events` (không bảng mới). SĐT và email luôn CHE ở máy chủ («0965 34 ****»,
+  «ei***@…»), kể cả số / email lẫn trong ghi chú tự do (`maskInlineContacts`).
+- **Mẫu nội dung**: danh sách có ô chọn · sao chép · sửa · xoá · thêm · lưu. Hai mẫu gốc (câu mở Zalo, lời chào) sửa được,
+  không xoá được; mẫu thêm lưu ở `outreach.extraTemplates` của cấu hình (bản lưu cũ đọc ra danh sách rỗng). Lưu chỉ đổi ba
+  trường chữ, đọc lại cấu hình trên máy chủ — không ghi đè trần chi tiêu. Chỉ `wholesale:config` sửa; mọi người sao chép.
+- **Cài đặt gửi** một hàng: hàng đợi — mức tự động · AI soạn · «Zalo: nhân viên bấm mở từng khách»; hộp thư đi — chế độ ·
+  giới hạn giờ / ngày / tên miền · khung giờ (cài đặt chưa có — in rõ «chưa có») · gửi thật chỉ quản trị; nút «Sửa» mở đúng
+  khung cài đặt hiện có.
+- **KHÔNG làm** (trái ràng buộc dự án): luân phiên nhiều tài khoản gửi, «spin» nội dung, tự gửi Zalo hàng loạt từ nick cá
+  nhân, chèn trễ ngẫu nhiên để né bộ lọc thư rác.
+
 ## 5. Tiết kiệm chi phí API
 
 **Chế độ chỉ dùng miễn phí** (`freeTier`, bật sẵn). Google miễn phí mỗi tháng, tính theo từng SKU trên mỗi tài khoản thanh

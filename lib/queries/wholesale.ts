@@ -13,6 +13,7 @@ import { DEFAULT_KEYWORD_GROUPS, paidCostMicros, type LeadHunterConfig } from "@
 import { CONTACTED_STATUSES, INTERESTED_STATUSES, LEAD_SOURCE_LABEL, LEAD_STATUS_LABEL, NEGOTIATING_STATUSES, RESPONDED_STATUSES, type LeadSourceKey, type LeadStatus, isLeadStatus } from "@/lib/wholesale/constants";
 import { formatVnPhone, PHONE_KIND_LABEL, type PhoneKind } from "@/lib/wholesale/phone";
 import { campaignCostEstimate } from "@/lib/wholesale/campaigns";
+import { campaignMarket } from "@/lib/wholesale/run-progress";
 import { type CostEstimate, enabledKeywords } from "@/lib/wholesale/query-plan";
 import { leadTemperature, type LeadTemperature } from "@/lib/wholesale/temperature";
 import { LEAD_SEGMENT_LABEL, isLeadSegmentKey, type LeadSegment } from "@/lib/wholesale/segments";
@@ -349,6 +350,8 @@ export type CampaignProgress = {
   isTemplate: boolean;
   discoveryTier: string;
   searchMode: string;
+  /** Nước / tỉnh của chiến dịch (tối đa 3 tên + «+n») — cột «Thị trường» của bảng chiến dịch. */
+  market: string;
   maxLeads: number;
   createdAt: string;
   startedAt: string | null;
@@ -460,6 +463,7 @@ export async function campaignProgressList(cfg?: Pick<LeadHunterConfig, "skuPric
       isTemplate: x.isTemplate,
       discoveryTier: x.discoveryTier,
       searchMode: x.searchMode,
+      market: x.searchMode === "NEARBY" ? "Quanh một điểm" : campaignMarket(Array.isArray(x.provinces) ? (x.provinces as { label?: string | null }[]) : []),
       maxLeads: x.maxLeads,
       createdAt: x.createdAt.toISOString(),
       startedAt: x.startedAt ? x.startedAt.toISOString() : null,

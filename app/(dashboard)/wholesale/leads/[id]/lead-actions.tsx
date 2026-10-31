@@ -153,7 +153,7 @@ export function LeadActions({ lead, canWork, users, handoff }: { lead: LeadInfo;
           </Button>
         </div>
       ) : null}
-      {terminal ? <p className="rounded-md bg-rose-50 p-2 text-sm text-rose-900 dark:bg-rose-950 dark:text-rose-200">Lead ở danh sách KHÔNG LIÊN HỆ — không chiến dịch nào được đưa lại vào hàng đợi. Gỡ ở «Cấu hình & chi phí API» nếu khách đổi ý.</p> : null}
+      {terminal ? <p className="rounded-md bg-rose-50 p-2 text-sm text-rose-900 dark:bg-rose-950 dark:text-rose-200">Lead ở danh sách KHÔNG LIÊN HỆ — không chiến dịch nào được đưa lại vào hàng đợi. Gỡ ở «Cấu hình & chi phí» (nút bánh răng) nếu khách đổi ý.</p> : null}
 
       {panel === "call" ? (
         <div className="space-y-2 rounded-md border p-2">

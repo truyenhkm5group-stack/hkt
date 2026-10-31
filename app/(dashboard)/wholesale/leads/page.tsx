@@ -13,6 +13,7 @@ import { LeadsTable } from "@/app/(dashboard)/wholesale/leads/leads-table";
 import { fieldHandoffOptions } from "@/lib/wholesale/field-handoff";
 import { EMAIL_FILTER_OPTIONS } from "@/lib/constants/wholesale-email";
 import { EmailDiscoveryButton } from "@/app/(dashboard)/wholesale/leads/email-discovery-button";
+import { ImportForm } from "@/app/(dashboard)/wholesale/leads/import-form";
 
 export const metadata = { title: "Khách sỉ tiềm năng" };
 
@@ -35,7 +36,19 @@ export default async function WholesaleLeadsPage({ searchParams }: { searchParam
       <Link href="/wholesale/mobile" className="flex min-h-12 items-center justify-center rounded-xl bg-primary text-base font-semibold text-primary-foreground md:hidden">
         📱 Mở giao diện gọi khách trên điện thoại
       </Link>
-      {can(user, "wholesale:scan") ? <EmailDiscoveryButton /> : null}
+      {can(user, "wholesale:scan") ? (
+        <div className="flex flex-wrap items-start gap-2">
+          <EmailDiscoveryButton />
+          {/* Dời từ trang Săn khách (30/10/2026): nhập lead là việc của danh sách lead, không phải của chiến dịch quét. */}
+          <details className="group rounded-md border px-3 py-1.5 text-sm open:w-full open:p-3">
+            <summary className="cursor-pointer font-medium">Nhập từ tệp</summary>
+            <p className="mt-2 text-xs text-muted-foreground">Danh bạ tự có, hội chợ, đối tác giới thiệu. Cột: Tên, SĐT, Địa chỉ, Tỉnh, Khu vực, Website, Email, Loại hình, Ghi chú (chỉ cột Tên là bắt buộc). Trùng SĐT / website / tên + địa chỉ với lead đã có ⇒ bỏ qua.</p>
+            <div className="mt-2">
+              <ImportForm />
+            </div>
+          </details>
+        </div>
+      ) : null}
       <DataTableToolbar
         searchPlaceholder="Tên, địa chỉ, SĐT…"
         period={false}
