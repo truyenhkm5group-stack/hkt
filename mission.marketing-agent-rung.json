@@ -3,7 +3,7 @@
   "mission_id": "marketing-agent-rung",
   "title": "Marketing: ảnh AI chờ duyệt lên /work + đo duyệt/bác ở Mission Control",
   "business_goal": "",
-  "status": "INTEGRATING",
+  "status": "VERIFYING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-mkt",
@@ -31,11 +31,13 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-30T17:27:41.242Z",
-  "updated_at": "2026-10-31T00:54:01.968Z",
+  "updated_at": "2026-10-31T01:29:43.240Z",
   "last_heartbeat": "2026-10-31T00:30:55.556Z",
   "definition_of_done": [],
   "evidence": {
-    "merged": "#1111 → 56c580051a0672b7ec4699d65ba0bd2ded164b8c"
+    "merged": "#1111 → 56c580051a0672b7ec4699d65ba0bd2ded164b8c",
+    "verify": "PASS 56c580051a0672b7ec4699d65ba0bd2ded164b8c 2026-10-31T01:28:48.450Z",
+    "deploy": "https://github.com/truyenhkm5group-stack/hkt/actions/runs/41153068773"
   },
   "handoff": {
     "branch": "claude/marketing-agent-rung",
