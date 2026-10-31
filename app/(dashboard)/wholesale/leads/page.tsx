@@ -14,6 +14,8 @@ import { fieldHandoffOptions } from "@/lib/wholesale/field-handoff";
 import { EMAIL_FILTER_OPTIONS } from "@/lib/constants/wholesale-email";
 import { EmailDiscoveryButton } from "@/app/(dashboard)/wholesale/leads/email-discovery-button";
 import { ImportForm } from "@/app/(dashboard)/wholesale/leads/import-form";
+import { getLeadHunterConfig } from "@/lib/wholesale/store";
+import { getEmailAiSettings } from "@/lib/wholesale/email-ai-draft";
 
 export const metadata = { title: "Khách sỉ tiềm năng" };
 
@@ -23,7 +25,9 @@ export default async function WholesaleLeadsPage({ searchParams }: { searchParam
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "leadScore", filterKeys: WHOLESALE_LEAD_FILTERS, sortable: WHOLESALE_LEAD_SORTABLE, defaultPeriod: "all", defaultPageSize: 50 });
   const canAssign = can(user, "wholesale:assign");
-  const [{ rows, total, pageCount }, facets, users, handoff] = await Promise.all([listWholesaleLeads(params, decision, user.id), wholesaleLeadFacets(decision), canAssign ? assignableUsers() : Promise.resolve([]), fieldHandoffOptions()]);
+  const [{ rows, total, pageCount }, facets, users, handoff, cfg, aiEmail] = await Promise.all([listWholesaleLeads(params, decision, user.id), wholesaleLeadFacets(decision), canAssign ? assignableUsers() : Promise.resolve([]), fieldHandoffOptions(), getLeadHunterConfig(), getEmailAiSettings()]);
+  // Mẫu thân thư cho «Email» / «Soạn email cho N khách»: lời chào gốc + mẫu thêm kênh Email / mọi kênh (khung Mẫu nội dung).
+  const emailTemplates = [{ id: "__opener", label: "Lời chào (mẫu gốc)" }, ...cfg.outreach.extraTemplates.filter((t) => t.channel !== "ZALO").map((t) => ({ id: t.id, label: t.label }))];
   return (
     <div className="space-y-4">
       <PageHeader
@@ -87,7 +91,7 @@ export default async function WholesaleLeadsPage({ searchParams }: { searchParam
       >
         <GoogleAttribution />
       </DataTableToolbar>
-      <LeadsTable rows={rows} pageCount={pageCount} total={total} users={users} campaigns={facets.campaign} canAssign={canAssign} canWork={can(user, "wholesale:work")} handoff={handoff} />
+      <LeadsTable rows={rows} pageCount={pageCount} total={total} users={users} campaigns={facets.campaign} canAssign={canAssign} canWork={can(user, "wholesale:work")} handoff={handoff} emailTemplates={emailTemplates} aiEmailEnabled={aiEmail.enabled} />
     </div>
   );
 }

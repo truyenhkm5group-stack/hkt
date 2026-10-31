@@ -555,6 +555,37 @@ Route cũ giữ nguyên (không 404); quyền từng tab như trước — tab m
 - **KHÔNG làm** (trái ràng buộc dự án): luân phiên nhiều tài khoản gửi, «spin» nội dung, tự gửi Zalo hàng loạt từ nick cá
   nhân, chèn trễ ngẫu nhiên để né bộ lọc thư rác.
 
+## 4i. Email từng dòng + liên hệ hàng loạt (chủ shop chốt 31/10/2026)
+
+«Thêm nút gửi email … nội dung soạn sẵn cá nhân hoá từng khách … bulk action gửi Zalo / email hàng loạt cho khách được tích
+chọn». Dùng lại máy có sẵn (`lib/wholesale/bulk-outreach.ts`), không đường gửi mới.
+
+**Nút «Email» trên dòng** (trang Khách tiềm năng, cột thao tác cạnh Zalo · Gọi): lead có email ⇒ mở khung soạn thư cho một
+khách; chưa có email ⇒ nút mờ + lối «Thu thập email».
+
+**Hành động hàng loạt** (tích lead trên bảng):
+- **Soạn email cho N khách** — ba bước trong một khung:
+  1. Nguồn nội dung: mẫu thân thư (lời chào gốc hoặc mẫu thêm kênh Email / mọi kênh ở khung Mẫu nội dung) + tiêu đề có biến;
+     hoặc «AI soạn nháp» (#1100) nếu đã bật — chạm trần nháp / chi phí ngày thì máy DỪNG và báo còn bao nhiêu khách chưa soạn.
+     Biến: `{{ten_doanh_nghiep}} {{thanh_pho}} {{loai_hinh}} {{khu_vuc}} {{san_pham}} {{ten_shop}} {{moq}} {{giao_hang}}
+     {{khuyen_mai}}`; dòng chỉ có biến rỗng bị bỏ.
+  2. Duyệt: danh sách thư từng khách — phải MỞ XEM thư rồi mới tích duyệt được; sửa tiêu đề / nội dung; bỏ chọn thư không
+     muốn. Khách không đi được email hiện lý do (KHÔNG LIÊN HỆ · thiếu email · làn Zalo trong nước · thiếu căn cứ nước); khách
+     ngoài phạm vi dữ liệu không vào lô và được đếm riêng.
+  3. «Đưa N thư đã duyệt vào hộp thư đi» (hoặc «Chỉ đưa vào hộp thư đi (duyệt sau)»): MỖI thư đi đường E1 —
+     `emailDraftForLeadCore` → `editEmailDraftCore` → `approveEmailCore` (nháp AI qua `promoteAiDraftCore`). Màn kết quả in thư
+     nào xếp gửi / chờ duyệt / lỗi, lý do cổng chính sách SẼ chặn (đồng ý · nước đã rà · nút dừng · chế độ), và dự kiến bao
+     lâu gửi hết theo nhịp hộp thư đi (thư / giờ, thư / ngày, thư / tên miền / ngày). Một dòng audit tổng cho lô.
+- **Nhắn Zalo cho N khách** — PHIÊN NHẮN TUẦN TỰ, ERP KHÔNG tự gửi (Zalo cá nhân không có API; gửi tự động bị khoá nick và
+  trái ràng buộc dự án). Chỉ lead làn «Trong nước — Zalo»; lead nước ngoài được gợi ý «Soạn email». Mỗi khách: tin cá nhân hoá
+  (câu mở Zalo của cấu hình) → «Chép tin & mở Zalo» (zalo.me/<số>) → nhân viên bấm Gửi trong Zalo → «Đã gửi / Không có Zalo /
+  Bỏ qua» (ghi qua `logZaloResultCore` sẵn có) → khách kế. Thanh tiến độ «đã xử lý / N»; tiến độ nhớ trong trình duyệt và khách
+  đã có kết quả Zalo hôm nay tự được bỏ qua, nên dừng giữa chừng vẫn tiếp tục được. Máy không gọi mạng Zalo.
+- Giữ nguyên: Giao việc · Thêm vào chiến dịch · Xuất CSV · Đủ điều kiện · Xếp hàng liên hệ · Gửi NV thị trường.
+
+Quyền `wholesale:work`; mọi lần ghi đi qua lõi đã có audit + khoá tài khoản người thao tác. Không luân phiên tài khoản, không
+«spin» nội dung, không trễ ngẫu nhiên.
+
 ## 5. Tiết kiệm chi phí API
 
 **Chế độ chỉ dùng miễn phí** (`freeTier`, bật sẵn). Google miễn phí mỗi tháng, tính theo từng SKU trên mỗi tài khoản thanh
