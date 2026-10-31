@@ -3,7 +3,7 @@
   "mission_id": "wholesale-bulk-outreach",
   "title": "Khách sỉ tiềm năng: nút Email từng dòng + soạn email / nhắn Zalo hàng loạt cho khách được tích (đường E1, Zalo người bấm)",
   "business_goal": "",
-  "status": "PR_READY",
+  "status": "INTEGRATING",
   "priority": "P2",
   "risk": "MEDIUM",
   "owner": "DESKTOP-56TH98Y:wt-bulk",
@@ -30,9 +30,12 @@
   ],
   "migration_reservations": [],
   "created_at": "2026-10-31T07:55:35.118Z",
-  "updated_at": "2026-10-31T07:59:55.577Z",
+  "updated_at": "2026-10-31T08:26:43.370Z",
   "last_heartbeat": "2026-10-31T07:56:54.634Z",
   "definition_of_done": [],
+  "evidence": {
+    "merged": "#1112 → 6583f6f7481f97aef2e453aa0eb903afd704b666"
+  },
   "handoff": {
     "branch": "claude/wholesale-bulk-outreach",
     "sha": "4789c6acf2cd0d714d2d9a3999f3d04c4c35e516",
