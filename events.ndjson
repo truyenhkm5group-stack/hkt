@@ -1,4 +1,3 @@
-{"at":"2026-10-24T08:47:30.530Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"REVIEW_PASS","detail":"#1036 @ 8871f034ec69 · review lead (lại): khai báo holder __erpMemo một dòng cho máy quét isolation, orgVersion bắt buộc; không nới bài, không đổi hành vi."}
 {"at":"2026-10-24T08:49:17.904Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"comment-inbox-link-probe","detail":"#1040 @ 901c22c55727 → d4969d9bb95b (MERGE_ISOLATED · HIGH · gates success)"}
 {"at":"2026-10-24T08:55:04.471Z","actor":"DESKTOP-56TH98Y:wt-ssprobe","kind":"HANDOFF","mission":"shipment-state-probe","detail":"claude/shipment-state-probe @ afb9cff331bc · 1 lệnh kiểm thử"}
 {"at":"2026-10-24T09:03:22.995Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"MERGED","mission":"memo-theo-to-chuc","detail":"#1036 @ 8871f034ec69 → 6ca3af26be65 (MERGE_ISOLATED · HIGH · gates success)"}
@@ -2998,3 +2997,4 @@
 {"at":"2026-10-31T00:12:06.558Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_FAIL","mission":"ai-daily-report","detail":"FAIL 741d09ef904a719af184e40ff21771eec6fd64b1 2026-10-31T00:10:11.513Z"}
 {"at":"2026-10-31T00:13:07.272Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_FAIL","mission":"b2b-order-close","detail":"FAIL 741d09ef904a719af184e40ff21771eec6fd64b1 2026-10-31T00:12:18.615Z"}
 {"at":"2026-10-31T00:19:19.400Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_FAIL","mission":"ai-daily-report","detail":"FAIL 741d09ef904a719af184e40ff21771eec6fd64b1 2026-10-31T00:18:16.585Z"}
+{"at":"2026-10-31T00:20:27.618Z","actor":"DESKTOP-56TH98Y:wt-tech-lead-v2","kind":"VERIFY_FAIL","mission":"b2b-order-close","detail":"FAIL 741d09ef904a719af184e40ff21771eec6fd64b1 2026-10-31T00:19:30.740Z"}
